@@ -13,7 +13,7 @@ The plugin talks only to Platter on this computer. Nothing goes over your networ
 
 The plugin comes with Platter.
 
-1. Open Settings and find the Stream Deck section.
+1. Open Settings, Integrations, Stream Deck.
 2. Next to **Platter plugin**, choose **Install for Stream Deck**. This turns on **Allow Stream Deck** and hands the plugin to the Stream Deck app, which installs it.
 3. When it's done, the row says Installed.
 

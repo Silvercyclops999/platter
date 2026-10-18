@@ -22,8 +22,8 @@ Click the dot for details, like how fast the server answers and whether your mus
 
 You can pick a different quality for each.
 
-- Settings, Audio quality, Streaming quality at home is Original to begin with, which plays each file as it is.
-- Settings, Audio quality, Streaming quality away from home is 320 kbps to begin with. Your server makes an MP3 at that rate.
+- Settings, Sound, Streaming quality at home is Original to begin with, which plays each file as it is.
+- Settings, Sound, Streaming quality away from home is 320 kbps to begin with. Your server makes an MP3 at that rate.
 
 A file that's already smaller than the chosen rate plays as it is. Changes apply from the next song.
 
@@ -35,7 +35,7 @@ When your server can't be reached directly, Plex passes the music through its re
 
 To get full quality away from home, turn on Remote Access in your Plex server's settings. Platter moves to the better connection by itself once it can.
 
-Downloads wait while you're away from home, unless you turn off Settings, Downloads and offline, Download only on your home network. See [Downloads and offline](downloads-and-offline.md).
+Downloads wait while you're away from home, unless you turn off Settings, Downloads and devices, Download only on your home network. See [Downloads and offline](downloads-and-offline.md).
 
 ## On a Mac
 
@@ -43,28 +43,28 @@ macOS can keep apps off your home network. If it does, Platter shows "macOS is b
 
 ## Switching servers
 
-Settings, Library, Music servers lists every server Platter uses.
+Settings, Account and servers, Music servers lists every server Platter uses.
 
 - Press **Add a server** to add another Plex, Jellyfin or Subsonic server.
 - Press **Make primary** on a server to make its library your main one.
 - Press **Remove** to take a Jellyfin or Subsonic server out.
 
-Settings, Library, Servers and libraries adds music libraries from your other Plex servers and from servers shared with you. With more than one server in, the sidebar has a Show music from menu: pick All servers to see everything together, or one server to see only its music.
+Settings, Account and servers, Servers and libraries adds music libraries from your other Plex servers and from servers shared with you. With more than one server in, the sidebar has a Show music from menu: pick All servers to see everything together, or one server to see only its music.
 
 ### Plex Home users
 
-If your Plex account is a Plex Home, switch users from the app menu. Each user keeps their own library, likes, history, queue, downloads and settings. Settings, Account, Remember the last Home user decides whether Platter starts as whoever used it last.
+If your Plex account is a Plex Home, switch users from the app menu. Each user keeps their own library, likes, history, queue, downloads and settings. Settings, Account and servers, Remember the last Home user decides whether Platter starts as whoever used it last.
 
 ## Jellyfin and Subsonic servers
 
 Platter also plays from Jellyfin, and from Navidrome and other Subsonic servers. Both are in beta. You type your server's address, so these servers have no relay: your computer has to be able to reach that address.
 
-1. Open Settings, Library, Music servers and press **Add a server**, or choose one on the welcome screen.
+1. Open Settings, Account and servers, Music servers and press **Add a server**, or choose one on the welcome screen.
 2. Pick Jellyfin, or Navidrome or another Subsonic server, and type its address.
 3. For Jellyfin, approve Platter with a Quick Connect code or sign in with your password. For a Subsonic server, use an API key (the safer choice) or your password.
 
-Subsonic servers can't tell Platter when their music changes, so Platter asks every 5 minutes. You can change that in Settings, Library, Check Subsonic servers for changes every.
+Subsonic servers can't tell Platter when their music changes, so Platter asks every 5 minutes. You can change that in Settings, Account and servers, Check Subsonic servers for changes every.
 
-Settings, Library, Keep my queue on the server saves your queue on servers that can hold one, so another app signed in to the same account can pick it up. It writes to your server, so it's off until you turn it on.
+Settings, Account and servers, Keep my queue on the server saves your queue on servers that can hold one, so another app signed in to the same account can pick it up. It writes to your server, so it's off until you turn it on.
 
 When something goes wrong, see [Troubleshooting](troubleshooting.md).

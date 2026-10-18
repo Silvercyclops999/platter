@@ -12,7 +12,7 @@ Your top artists and tracks are only visible to you. Your playlists and friends 
 
 ## Opening Stats
 
-Open Stats from the app menu, the Stats row in Your Library, or Your profile. Everything is counted on this computer, from what you've played in Platter and any history you brought in. Skips don't count. To hide the page, turn off Settings, Library, Stats, Stats page.
+Open Stats from the app menu, the Stats row in Your Library, or Your profile. Everything is counted on this computer, from what you've played in Platter and any history you brought in. Skips don't count. To hide the page, turn off Settings, Library, Show the Stats page.
 
 ## Picking a range
 
@@ -42,7 +42,7 @@ Moments are small stories from the range: your first song, On repeat (the day yo
 
 ## Monthly recaps
 
-Recaps shows a card for each month in the range (up to 12, newest first), then Wrapped and your Top Songs lists. With Settings, Library, Stats, Show monthly recaps on, each month gets a card with its minutes, the change on the month before, and its top artist and song. Choose Share to make an image in Story or Square shape, then Copy image or Save image. Unreleased songs are left off the card and nothing is uploaded.
+Recaps shows a card for each month in the range (up to 12, newest first), then Wrapped and your Top Songs lists. With Monthly recaps ticked under Settings, Library, Show the Stats page, each month gets a card with its minutes, the change on the month before, and its top artist and song. Choose Share to make an image in Story or Square shape, then Copy image or Save image. Unreleased songs are left off the card and nothing is uploaded.
 
 ## A whole year
 
@@ -52,21 +52,21 @@ To look back on a year, pick This year or A year. The page then shows the whole 
 
 ## Stats on other pages
 
-Settings, Library, Stats, Stats strip on song, artist and album pages shows your plays, minutes, first and last listen and all-time rank under an artist's or album's buttons. Songs get Your stats in their menu.
+A stats strip on song, artist and album pages (ticked under Settings, Library, Show the Stats page) shows your plays, minutes, first and last listen and all-time rank under an artist's or album's buttons. Songs get Your stats in their menu.
 
 ## Compare with a friend
 
-Turn on Settings, Library, Stats, Compare stats with friends (it starts off). When a Platter friend shares their stats with you, the Compare tab shows your taste overlap, artists in common, and their songs you haven't played. Only a summary is shared: up to 50 top artists and songs from about the last six months, never your history. Unreleased songs stay out unless you both agree.
+Tick Compare stats with friends under Settings, Library, Show the Stats page (it starts off). When a Platter friend shares their stats with you, the Compare tab shows your taste overlap, artists in common, and their songs you haven't played. Only a summary is shared: up to 50 top artists and songs from about the last six months, never your history. Unreleased songs stay out unless you both agree.
 
 <!-- TODO: how a friend's summary reaches this computer is unclear; the code stores and compares summaries but nothing in the app sends or receives them yet. -->
 
 ## Plays from before Platter
 
-Stats, mixes, On Repeat and recaps can also count plays from elsewhere. Each source has an Include switch under Settings, Library, Stats, and a play reported by more than one source counts once.
+Stats, mixes, On Repeat and recaps can also count plays from elsewhere. Each source has an Include switch, and a play reported by more than one source counts once.
 
-- Include my Plex listening history: what you played on your Plex server before Platter and in other Plex apps. Only your own plays count, never other people's on the server.
-- Include Tautulli history: shows once you set Settings, Integrations, Tautulli, Tautulli address and Tautulli key. The key is kept in this computer's keychain. Plays too short to count are left out.
-- Include Last.fm scrobbles: shows once you connect Last.fm under Settings, Integrations, Scrobbling. Scrobbles are matched to your library by artist, song and album. Songs you don't have still count for their artists.
+- Settings, Library, Include my Plex listening history: what you played on your Plex server before Platter and in other Plex apps. Only your own plays count, never other people's on the server.
+- Include Tautulli history, on Settings, Integrations, Tautulli: shows once you set Tautulli address and Tautulli key. The key is kept in this computer's keychain. Plays too short to count are left out.
+- Include Last.fm scrobbles, on Settings, Integrations, Last.fm and ListenBrainz: shows once you connect Last.fm there. Scrobbles are matched to your library by artist, song and album. Songs you don't have still count for their artists.
 
 The first read brings in the whole history in the background; new plays follow every 6 hours. Remove imported plays from a source deletes only what came from there; your own plays in Platter stay.
 

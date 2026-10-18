@@ -13,7 +13,7 @@ While you type, suggestions show under the box: ways to finish your words, then 
 - `Shift+Enter` adds the highlighted song to your queue.
 - `Esc` closes the list.
 
-If you'd rather not see suggestions, turn off Settings, Search, Show suggestions as you type.
+If you'd rather not see suggestions, turn off Settings, Library, Show suggestions as you type.
 
 ## Results and filters
 
@@ -35,25 +35,25 @@ You don't need to type names exactly.
 - Words can be in any order, and small words like "the" or "and" can be left out.
 - The start of a word is enough: "radi" finds "Radio".
 
-When the words as you typed them find very little, Platter also shows close spellings below the exact matches, and offers the corrected spelling at the top of the suggestions. This works for words of five letters or more. Turn it off in Settings, Search, Forgive typos in search.
+When the words as you typed them find very little, Platter also shows close spellings below the exact matches, and offers the corrected spelling at the top of the suggestions. This works for words of five letters or more. Turn it off in Settings, Library, Forgive typos in search.
 
 ## Recent searches
 
 Things you open from search are remembered. Click the empty search box to see them under Recent searches. Each one has a button to remove it from the list.
 
-Recent searches are kept on this computer only. To stop remembering them, turn off Settings, Search, Remember recent searches. To empty the list, press **Clear recent searches** there.
+Recent searches are kept on this computer only. To stop remembering them, turn off Settings, Library, Remember recent searches. To empty the list, press **Clear recent searches** there.
 
 ## Music that isn't in your library
 
 Search can also show artists, albums and songs you don't have, in with your own results. They look like your other results, and an artist you don't have can even be the top result. When something is in your library and the wider catalogue too, your copy comes first with a small "In your library" note. Each kind shows as soon as it arrives.
 
-When Lidarr is set up, artists and albums come from Lidarr's own search, which is quick and has pictures. Otherwise, and for songs, they come from MusicBrainz, which answers one question a second. Platter only asks once you stop typing, and only sends what you typed. You can pick the source in Settings, Search, Where music you don't have comes from.
+When Lidarr is set up, artists and albums come from Lidarr's own search, which is quick and has pictures. Otherwise, and for songs, they come from MusicBrainz, which answers one question a second. Platter only asks once you stop typing, and only sends what you typed. You can pick the source in Settings, Library, Where music you don't have comes from.
 
 Get on an album sends it to Lidarr in one click, with all of Platter's checks, and you have a few seconds to undo it. The button then follows it: Looking on your indexers, Downloading, Importing, and In your library. If nothing turns up, Platter asks Lidarr to search again after an hour, six hours and a day, then once a day for a week, before it says Not found yet with Search again and Try another edition. Your very first request asks you to type the album's name, and an album a check won't allow says Needs you with the reason. Turn on Ask before each Get to see every request first. On a song, Get the album asks for the album it's on.
 
 An artist's page has Get albums, which asks which kinds you want (studio albums to start with; EPs, live albums and compilations if you like), says how many, and sends them a few at a time, most popular first.
 
-It's on unless you turn it off in Settings, Search, Show music you don't have in search. What you type goes to your Lidarr, or to MusicBrainz without Lidarr. See [Privacy](privacy.md) for what goes where.
+It's on unless you turn it off in Settings, Library, Show music you don't have in search. What you type goes to your Lidarr, or to MusicBrainz without Lidarr. See [Privacy](privacy.md) for what goes where.
 
 ## Searching while offline
 

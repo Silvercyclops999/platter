@@ -13,7 +13,7 @@ Platter reads the tags your files already have. You don't have to retag anything
 
 A value Platter doesn't know never counts as released. An album follows most of its songs on disc 1, and each song keeps its own status.
 
-Albums Plex couldn't match usually have no release type and no label. Settings, Library, File tags, Count albums Plex couldn't match as unreleased treats them as unreleased until you tag them, and Check MusicBrainz for albums Plex couldn't match (off until you turn it on, since it asks MusicBrainz) counts them as released when MusicBrainz knows them.
+Albums Plex couldn't match usually have no release type and no label. Settings, Library, Tags and archive, Count albums Plex couldn't match as unreleased treats them as unreleased until you tag them, and Check MusicBrainz for albums Plex couldn't match (off until you turn it on, since it asks MusicBrainz) counts them as released when MusicBrainz knows them.
 
 ## Labels and Why?
 
@@ -21,7 +21,7 @@ Album pages can show Probably unreleased, Unreleased, Released, Plex missed it, 
 
 ## Release status tag
 
-If your library keeps release status in a tag of its own, open Settings, Library, Archive, Release status tag, choose Custom tag and type its name, like `PROVENANCE`. Platter reads it after `ARCHIVE_VERSION` and reads your files again in the background. Auto goes back to the order above.
+If your library keeps release status in a tag of its own, open Settings, Library, Tags and archive, Release status tag, choose Custom tag and type its name, like `PROVENANCE`. Platter reads it after `ARCHIVE_VERSION` and reads your files again in the background. Auto goes back to the order above.
 
 Under Release status values, type a value your tags use, pick what it Means and choose Add. Common values like Official, Leak, Alt and OG file are known already.
 
@@ -29,7 +29,7 @@ To change the tags themselves, use the [tag editor](tag-editor.md).
 
 ## Folder keywords
 
-Settings, Library, Archive, Folder names that hint at unreleased music starts with Unreleased, Leaks, Demos, Sessions and Snippets. When a song's folder has one of these names, Why? lists it for albums that are probably unreleased. A folder name adds weight but never decides on its own. You can keep up to 20. Empty the list to stop using folder names.
+Settings, Library, Tags and archive, Folder names that hint at unreleased music starts with Unreleased, Leaks, Demos, Sessions and Snippets. When a song's folder has one of these names, Why? lists it for albums that are probably unreleased. A folder name adds weight but never decides on its own. You can keep up to 20. Empty the list to stop using folder names.
 
 ## Versions and lineage
 
@@ -45,9 +45,9 @@ Artist pages list unreleased albums under Unreleased, and Move to section puts a
 
 ## How unreleased music is treated
 
-- Discord: Settings, Integrations, Discord has Show unreleased songs, Show unreleased cover art, and Upload covers for unreleased songs (off at first). Unreleased songs never get a Find this song button.
+- Discord: Settings, Sharing and friends has Show unreleased music on Discord and Show unreleased cover art on Discord. Unreleased songs never get a Find this song button.
 - Sharing: unreleased music never gets a public song.link page, and share cards and monthly recap cards leave it off. Copy Platter link still works.
-- Mixes: Settings, Mixes, Include unreleased music decides whether demos and other versions go in mixes and radio.
-- Scrobbling: Settings, Integrations, Scrobbling, Send plays of unreleased music is off at first, so those plays stay on this computer.
+- Mixes: Settings, Sharing and friends, Include unreleased music in mixes decides whether demos and other versions go in mixes and radio.
+- Scrobbling: Settings, Sharing and friends, Scrobble unreleased music is off at first, so those plays stay on this computer.
 - [Listening sessions](listening-together.md): unreleased songs only play for people with access to your library, and you can hide their titles.
 - [Lyrics](lyrics-and-transcription.md): unreleased songs can be transcribed in the background, and aren't offered for public sharing unless you allow it.

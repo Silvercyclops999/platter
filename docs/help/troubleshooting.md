@@ -34,13 +34,13 @@ If the tooltip says you turned on Go offline, turn it off in the app menu. To ke
 
 When this computer gets low on space, Platter first clears its oldest stored music and shrinks the artwork cache. If space is still low it says "Not enough space."
 
-If downloads stop with a banner about the storage limit, remove some downloads or raise Settings, Storage, Download storage limit. You can also lower Settings, Storage, Artwork and cache size.
+If downloads stop with a banner about the storage limit, remove some downloads or raise Settings, Downloads and devices, Download storage limit. You can also lower Settings, App, Artwork and cache size.
 
 ## Lyrics wrong
 
 1. In the lyrics view, choose **Wrong lyrics?** to pick other lyrics that were found, or turn lyrics off for that song.
 2. If the words are right but the timing is off, use the minus and plus buttons (or the `-` and `+` keys) to move them by half a second.
-3. To have Platter skip lyrics that belong to another song, turn on Settings, Appearance, Check lyrics against the song. It needs the speech model on this computer.
+3. To have Platter skip lyrics that belong to another song, turn on Settings, Lyrics, Check lyrics against the song. It needs the speech model on this computer.
 
 Lyrics marked "Not checked" may be for another version. See [Lyrics and transcription](lyrics-and-transcription.md).
 

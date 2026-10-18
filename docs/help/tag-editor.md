@@ -6,7 +6,7 @@ How to set up the music folder, edit tags in your files, check your tags for pro
 
 The tag editor is the only part of Platter that writes to your music files. It edits them in place, so this computer needs to see your server's music folder.
 
-1. Open Settings, Library, Tag editor, Music folder.
+1. Open Settings, Library, Tags and archive, Music folder.
 2. Choose Choose… and pick the folder, or type a path like `\\server\music` on Windows or `/Volumes/Music` on a Mac and choose Use this folder.
 3. Platter looks for 5 songs where Plex says they are, and says something like "Connected, 5 of 5 files found".
 
@@ -28,7 +28,7 @@ After a save, a message says how many files were saved, with Undo for a few seco
 
 ### Rescan
 
-With Settings, Library, Tag editor, Rescan in Plex after saving on, Plex rescans just the folders you changed, so it shows the new tags.
+With Settings, Library, Tags and archive, Rescan in Plex after saving on, Plex rescans just the folders you changed, so it shows the new tags.
 
 ### Ask before many files
 
@@ -36,7 +36,7 @@ With Ask before saving more than 50 files on, a save that big tells you how many
 
 ## Check tags
 
-Choose Check tags in Settings, Library, Tag editor to check the whole library, or Check tags… in an artist's or album's menu. Findings are grouped as Needs fixing, Worth fixing and Good to know. Each one says what's wrong and why it matters. Choose Fix to open the editor at that field (this needs the music folder), or This is fine to stop showing it.
+Choose Check tags in Settings, Library, Tags and archive to check the whole library, or Check tags… in an artist's or album's menu. Findings are grouped as Needs fixing, Worth fixing and Good to know. Each one says what's wrong and why it matters. Choose Fix to open the editor at that field (this needs the music folder), or This is fine to stop showing it.
 
 It looks for things like:
 
@@ -54,7 +54,7 @@ Some findings offer a fix: Fill disc tags, Fill release status, Look up ISRCs (f
 
 ## Plex library settings
 
-Settings, Library, Tag editor, Plex library settings shows, for each music library, how Plex treats your tags:
+Settings, Library, Tags and archive, Plex library settings shows, for each music library, how Plex treats your tags:
 
 - Local metadata preferred, so Plex doesn't replace your tags with its own matches.
 - Embedded tags read.

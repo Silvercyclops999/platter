@@ -13,19 +13,19 @@ Platter looks in this order:
 3. LRCLIB, a free lyrics library, if you turn it on.
 4. A transcription made on this computer, only when nothing else fits.
 
-To show your own lyrics first, turn on Settings, Appearance, Prefer my own lyrics over Plex's.
+To show your own lyrics first, turn on Settings, Lyrics, Prefer my own lyrics over Plex's.
 
 ### LRCLIB
 
-Settings, Appearance, Lyrics from LRCLIB when Plex has none starts off. Platter sends the song's artist, title, album and length, and keeps answers for 30 days. On live versions, found lyrics show without timing unless you turn on Show borrowed timing on live versions.
+Settings, Lyrics, Lyrics from LRCLIB when Plex has none starts off. Platter sends the song's artist, title, album and length, and keeps answers for 30 days. On live versions, found lyrics show without timing unless you turn on Show borrowed timing on live versions.
 
 ## Checking lyrics against the song
 
-With Settings, Appearance, Check lyrics against the song on, Platter listens to a short part of the song with the speech model on this computer and skips lyrics that belong to another song. The song never leaves your computer. Until the [speech model](#the-model-download) is downloaded, lyrics show as Not checked.
+With Settings, Lyrics, Check lyrics against the song on, Platter listens to a short part of the song with the speech model on this computer and skips lyrics that belong to another song. The song never leaves your computer. Until the [speech model](#the-model-download) is downloaded, lyrics show as Not checked.
 
 ### Timing fixes
 
-Settings, Appearance, Fix lyrics timing automatically moves checked lyrics that run early, late or drift. To move them yourself, use the minus and plus buttons under the lyrics (or the `-` and `+` keys), or Tap to sync.
+Settings, Lyrics, Fix lyrics timing automatically moves checked lyrics that run early, late or drift. To move them yourself, use the minus and plus buttons under the lyrics (or the `-` and `+` keys), or Tap to sync.
 
 Demos and other versions ask before using the released song's lyrics (Use anyway), unless you turn on Use released lyrics for other versions.
 
@@ -33,7 +33,7 @@ Demos and other versions ask before using the released song's lyrics (Use anyway
 
 Choose Wrong lyrics? under the lyrics or in a song's menu to see every set found and what the check said. Pick another set, or choose Transcribe this song, Write or paste lyrics, or No lyrics for this song. Let Platter pick goes back to automatic.
 
-Your picks and timing win over everything automatic. Settings, Appearance, Lyrics choices and timing has Reset.
+Your picks and timing win over everything automatic. Settings, Lyrics, Lyrics choices and timing has Reset.
 
 ## Writing your own
 
@@ -41,13 +41,13 @@ Choose Add lyrics or Edit lyrics and type or paste the words, one line each. To 
 
 ## Translation and pronunciation
 
-Settings, Appearance, Show pronunciation adds a romanised line under Japanese, Korean, Chinese, Hindi and Cyrillic lyrics, made on this computer.
+Settings, Lyrics, Show pronunciation adds a romanised line under Japanese, Korean, Chinese, Hindi and Cyrillic lyrics, made on this computer.
 
-For translation, put the address of a LibreTranslate-compatible service in Settings, Appearance, Translation service address, and pick a language in Translate lyrics into. Lyrics then get a Translate button. With no service set, nothing is sent.
+For translation, put the address of a LibreTranslate-compatible service in Settings, Lyrics, Translation service address, and pick a language in Translate lyrics into. Lyrics then get a Translate button. With no service set, nothing is sent.
 
 ## Transcription
 
-Turn on Settings, Appearance, Lyrics transcription, Transcribe songs without lyrics on this computer. Transcribe this song then shows in the lyrics view, and Transcribe songs without lyrics in an album's menu. Transcribe all unreleased songs without lyrics, with Transcribe now, works through them in the background. The audio never leaves your computer. The models understand English only; fix mistakes in the lyrics editor.
+Turn on Settings, Lyrics, Transcribe songs without lyrics on this computer. Transcribe this song then shows in the lyrics view, and Transcribe songs without lyrics in an album's menu. Transcribe all unreleased songs without lyrics, with Transcribe now, works through them in the background. The audio never leaves your computer. The models understand English only; fix mistakes in the lyrics editor.
 
 ### The model download
 

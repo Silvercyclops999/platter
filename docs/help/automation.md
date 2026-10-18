@@ -6,7 +6,7 @@ How to control Platter from links, scripts, the command line, Home Assistant and
 
 Everything on this page is off until you turn it on.
 
-1. Open Settings, Automation.
+1. Open Settings, Integrations, Stream Deck. Automation is on the same page, below the Stream Deck settings.
 2. Turn on **Allow automation**.
 
 It stays on only for this computer. Nothing listens on your network: only programs on this computer can reach Platter, and web pages can't use it. Under the switch you'll see a six-digit pairing code, which scripts and the command line use once to pair.

@@ -16,26 +16,26 @@ Downloaded items get a small mark. In Your Library, the Downloaded chip shows on
 
 Downloaded playlists and Liked Songs stay up to date. Songs you add are downloaded too, and a song you take out is removed from your computer once nothing else you downloaded needs it.
 
-To keep Liked Songs on this computer all the time, turn on Settings, Downloads and offline, Download Liked Songs.
+To keep Liked Songs on this computer all the time, turn on Settings, Downloads and devices, Download Liked Songs.
 
 ### Removing downloads
 
-Press the download button again and confirm **Remove**. Platter tells you how much space that frees. To remove everything, use **Remove all downloads** in Settings, Storage.
+Press the download button again and confirm **Remove**. Platter tells you how much space that frees. To remove everything, use **Remove all downloads** in Settings, Downloads and devices.
 
 ## Download quality
 
-Settings, Audio quality, Download quality decides what gets saved:
+Settings, Downloads and devices, Download quality decides what gets saved:
 
 - Original keeps each file as it is, at full quality. This is the usual setting.
 - 320, 192 or 128 kbps MP3 are smaller files your server makes, which take less space.
 
 A change applies to new downloads. Songs you already downloaded stay as they are.
 
-Some Jellyfin and Subsonic accounts aren't allowed to download. Settings, Library, Music servers says so under the server, and the server's owner can allow it.
+Some Jellyfin and Subsonic accounts aren't allowed to download. Settings, Account and servers, Music servers says so under the server, and the server's owner can allow it.
 
 ## Storage and the limit
 
-Settings, Storage shows how much space your downloads use.
+Settings, Downloads and devices shows how much space your downloads use.
 
 - Download storage limit stops downloads at the size you pick, from 5 GB to 500 GB (20 GB to begin with). A banner tells you when downloads have stopped. Remove some or raise the limit to carry on.
 - Download location is the folder downloads are kept in. Changing it moves them there.
@@ -45,11 +45,11 @@ Downloads also stop if your computer runs out of space.
 
 ## Downloading at home only
 
-Settings, Downloads and offline, Download only on your home network is on to begin with. Downloads wait while you reach your server from away from home or through the Plex relay, and carry on when you're home. Turn it off to download anywhere. See [Connecting to your server](connecting.md#home-and-away-from-home).
+Settings, Downloads and devices, Download only on your home network is on to begin with. Downloads wait while you reach your server from away from home or through the Plex relay, and carry on when you're home. Turn it off to download anywhere. See [Connecting to your server](connecting.md#home-and-away-from-home).
 
 ## Go offline
 
-Go offline stops Platter using the network. Turn it on from the app menu, or in Settings, Downloads and offline, Go offline.
+Go offline stops Platter using the network. Turn it on from the app menu, or in Settings, Downloads and devices, Go offline.
 
 While it's on, nothing goes to your server, plex.tv, artist info sources, lyrics lookups, Discord, share links or update checks. Only music on this computer plays. The one exception is a speech model download you start yourself in Settings. Turn Go offline off to use your server again.
 
