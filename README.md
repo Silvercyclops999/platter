@@ -19,7 +19,7 @@ no Plex app really has a place for.
 So Platter treats your server like a streaming catalogue, and has an archive
 side for the stuff that never got an official release.
 
-![Home](docs/screenshots/home.png)
+![Home in the Studio look](docs/screenshots/home.png)
 
 ## Features
 
@@ -30,12 +30,17 @@ side for the stuff that never got an official release.
 - Automix blends songs on playlists and mixes on the beat, matching tempo and key when it can, and leaves albums alone.
 - Headphone correction from the AutoEq project, applied before your own EQ and kept per output device.
 - Bit-perfect output takes the device for itself (exclusive mode on Windows, hog mode on Mac) and plays each song at its own sample rate.
+- Signal path: a badge in the player bar opens every step from the file to the output device, says whether what you hear is bit-perfect, and points at the setting to change if it isn't.
 - A queue with drag and drop, a Recently played tab, an A-B loop and a "Next:" hint near the end of a song.
 - Smart shuffle mixes similar songs from your library into a playlist or album, marked so you can tell them apart.
 - Downloads of albums, playlists, Liked Songs and mixes, in original quality or as smaller MP3s, that keep playing with no server.
-- A miniplayer with its own queue, side by side when the window is wide.
+- A miniplayer with its own queue you can reorder, laid out side by side when the window is wide.
 - Go Offline stops all network use, and a dropped server dims what isn't on this computer instead of breaking.
-- Works with media keys and the Windows media flyout, and has a Mac menu bar, a miniplayer, close to tray and start at sign-in.
+- Works with media keys and the Windows media flyout, and has a Mac menu bar, close to tray and start at sign-in.
+
+![The record player in the expanded view](docs/screenshots/record-player.png)
+
+![The Signal path panel](docs/screenshots/signal-path.png)
 
 ### Library and search
 
@@ -43,6 +48,9 @@ side for the stuff that never got an official release.
 - Connects to your server directly, on your home network first, then remote access, then the relay.
 - Keeps a local copy of the library, so search keeps up with typing and browsing works offline.
 - Search shows artists, albums and songs you don't have yet, with photos, and Get brings an album in through Lidarr in one click, following it until it's in your library.
+- Sleeve notes for each album: release dates, label, edition and credits from your tags, Plex, MusicBrainz and Discogs. Every name opens a page with everything that person is credited on.
+- Albums with a vinyl edition show Side A and Side B, and you can play one side or split any album into sides yourself.
+- Crates file your library by label, producer, studio, era and genre, the way a record shop would.
 - Likes, editable playlists, smart playlists built from rules, library folders, pins and bookmarks.
 - Describe a playlist in plain words and get a smart playlist from your own library, worked out on your computer.
 - Mixes made from your own listening: Daily Mixes, Discover, On Repeat, a daylist that changes through the day, and song and artist radio.
@@ -52,7 +60,11 @@ side for the stuff that never got an official release.
 - A sound map lays your library out by how songs sound. Zoom around, click a dot to play it, or draw around a patch to make a playlist.
 - Jellyfin and Subsonic servers (Navidrome and other OpenSubsonic servers) work alongside Plex or on their own, both in beta.
 
-![An album](docs/screenshots/album.png)
+![An album split into Side A and Side B](docs/screenshots/album.png)
+
+![Sleeve notes on an album](docs/screenshots/sleeve-notes.png)
+
+![Crates, filed by label](docs/screenshots/crates.png)
 
 ![Search](docs/screenshots/search.png)
 
@@ -95,7 +107,7 @@ The tagging rules are in [docs/TAGGING.md](docs/TAGGING.md).
 
 - A Stats page for any range, with minutes, top songs, artists, albums and genres, streaks and your busiest hours.
 - A Profile page with your top artists and tracks this month, your playlists and your friends.
-- On this day and Time travel shelves on Home, built from your plays and any listening history you import.
+- On this day and Time travel on Home: what you played on today's date in earlier years, and a mix for each decade and for your year. Imported history counts too.
 - Artist and album pages show your plays, first and last listen and all-time rank.
 - Monthly recap cards and song share cards you can save as images.
 - Your Plex play history, Tautulli and Last.fm scrobbles can count too, each play once.
@@ -107,6 +119,8 @@ The tagging rules are in [docs/TAGGING.md](docs/TAGGING.md).
 - Lidarr shows official albums you're missing, with a Request button, after checking it can't touch your existing music.
 - A release radar for artists you follow, with requests through Lidarr if you have it.
 - Library import reads exports from other services and transfer tools, and keeps a Missing list.
+- Played a lot lists what your imported listening history played most that isn't in your library. Bring in my listening asks Lidarr for those albums a few a day, and pauses when Lidarr's queue or disk fills up.
+- Platter Bridge is an optional small container for your server. Once paired, it keeps Lidarr work like Bring in my listening going while your computer is off. See [docs/BRIDGE.md](docs/BRIDGE.md).
 - Scrobbling to Last.fm and ListenBrainz, with unreleased songs left out unless you say so.
 - Tautulli, read for plays from before you used Platter.
 - Discord status with the album cover.
@@ -124,11 +138,18 @@ All of it is off by default. The details are in [docs/AUTOMATION.md](docs/AUTOMA
 
 ### Looks
 
-- Ready-made looks (Dark, Light, Midnight, Forest, Sand, High contrast, OLED black), or make your own with a live preview.
+- Platter's own looks: Studio and Studio Black (dark, with a brass accent) and Sleeve (light). Classic, Classic light, Midnight, Forest and Sand are still there, or make your own with a live preview.
+- In Studio, Studio Black and Sleeve, Home starts with records: the album you were partway through, then New arrivals, Spun this week, Finish what you started and Not played in a year.
+- The expanded view can show a record player, with the cover as the label and a tonearm that lowers when music plays. The seek bar can be a stylus on a groove line.
+- Settings in ten groups with a side menu and search, and each integration on a page of its own.
 - A layout section for the sidebar, the player bar, Home shelves and list columns.
 - Keyboard shortcuts everywhere (Ctrl+/ or Cmd+/ lists them), and a power mode with jump hints.
 
-![Settings](docs/screenshots/settings.png)
+![Settings, on the Integrations group](docs/screenshots/settings.png)
+
+![An album in the Sleeve look](docs/screenshots/sleeve.png)
+
+![Home in the Classic look](docs/screenshots/classic.png)
 
 The screenshots come from the app's built-in demo library (made-up artists
 and generated artwork), never from a real server.
@@ -151,7 +172,8 @@ It only plays music, and only from servers you can reach. There's no outside
 catalogue to stream from. Recommendations and mixes come from your own
 library, and music you don't have is shown but can't be played.
 
-Nothing gets installed on your server. No container, no companion service.
+Nothing needs to be installed on your server. Platter Bridge is the one
+optional extra, and everything works without it.
 
 It's also one person's project, built around how I listen. There will be bugs
 I haven't run into yet.
