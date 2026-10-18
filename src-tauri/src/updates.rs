@@ -172,6 +172,13 @@ pub async fn update_check(app: AppHandle) -> AppResult<UpdateInfo> {
 /// "Restart to install"; on Windows the installer exits the app itself.
 #[tauri::command]
 pub async fn update_install_on_restart(app: AppHandle, state: State<'_, Updates>) -> AppResult<()> {
+    // The waiting update may have been downloaded hours ago. Ask once more so a
+    // newer release replaces it here, instead of installing the old one and
+    // offering the new one straight after the restart. A failed check keeps
+    // the one already downloaded.
+    if let Err(e) = check_and_download(&app).await {
+        tracing::info!("update check before install failed: {e}");
+    }
     if state.ready.lock().is_none() {
         return Err(AppError::Invalid("no update has been downloaded".into()));
     }
