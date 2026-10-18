@@ -186,7 +186,7 @@ impl Connector for LocalDiscord {
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, desktop))]
 #[async_trait]
 impl Connector for LocalDiscord {
     async fn connect(&self) -> io::Result<Box<dyn Stream>> {
@@ -203,8 +203,17 @@ impl Connector for LocalDiscord {
     }
 }
 
+/// A phone has no Discord desktop client to talk to.
+#[cfg(mobile)]
+#[async_trait]
+impl Connector for LocalDiscord {
+    async fn connect(&self) -> io::Result<Box<dyn Stream>> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "Discord status isn't available on a phone"))
+    }
+}
+
 /// Where Discord puts its socket on macOS and Linux, in the order it checks.
-#[cfg(unix)]
+#[cfg(all(unix, desktop))]
 fn socket_dirs() -> Vec<std::path::PathBuf> {
     let mut dirs: Vec<std::path::PathBuf> = ["XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP"]
         .iter()

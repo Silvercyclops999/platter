@@ -9,9 +9,11 @@ pub mod art;
 pub mod commands;
 pub mod cpu;
 pub mod discord;
+#[cfg(desktop)]
 pub mod keys;
 pub mod logs;
 pub mod media;
+#[cfg(desktop)]
 pub mod menubar;
 pub mod miniplayer;
 pub mod power;
@@ -20,6 +22,7 @@ pub mod reveal;
 pub mod session;
 #[cfg(target_os = "windows")]
 pub mod thumbbar;
+#[cfg(desktop)]
 pub mod tray;
 pub mod visibility;
 
@@ -121,7 +124,9 @@ enum Msg {
 pub struct Tap {
     inner: Arc<dyn EventSink>,
     tx: mpsc::Sender<Msg>,
+    #[cfg(desktop)]
     tray: watch::Sender<tray::TrayView>,
+    #[cfg(desktop)]
     menu: watch::Sender<menubar::MenuView>,
 }
 
@@ -129,10 +134,12 @@ impl EventSink for Tap {
     fn state(&self, state: &PlayerState) {
         self.inner.state(state);
         let _ = self.tx.send(Msg::State(Box::new(state.clone())));
+        #[cfg(desktop)]
         self.tray.send_if_modified(|v| {
             let next = tray::tray_view(state);
             std::mem::replace(v, next.clone()) != next
         });
+        #[cfg(desktop)]
         self.menu.send_if_modified(|v| {
             let next = menubar::menu_view(state);
             std::mem::replace(v, next) != next
@@ -157,7 +164,9 @@ impl EventSink for Tap {
 pub struct Platform {
     tx: mpsc::Sender<Msg>,
     rx: mpsc::Receiver<Msg>,
+    #[cfg(desktop)]
     tray: watch::Sender<tray::TrayView>,
+    #[cfg(desktop)]
     menu: watch::Sender<menubar::MenuView>,
 }
 
@@ -167,17 +176,27 @@ impl Platform {
         Self {
             tx,
             rx,
+            #[cfg(desktop)]
             tray: watch::channel(tray::TrayView::default()).0,
+            #[cfg(desktop)]
             menu: watch::channel(menubar::MenuView::default()).0,
         }
     }
 
     /// The sink to give the player, wrapping the UI's sink.
     pub fn tap(&self, inner: Arc<dyn EventSink>) -> Arc<dyn EventSink> {
-        Arc::new(Tap { inner, tx: self.tx.clone(), tray: self.tray.clone(), menu: self.menu.clone() })
+        Arc::new(Tap {
+            inner,
+            tx: self.tx.clone(),
+            #[cfg(desktop)]
+            tray: self.tray.clone(),
+            #[cfg(desktop)]
+            menu: self.menu.clone(),
+        })
     }
 
     /// Start the worker, tray, keys and launch at login.
+    #[cfg(desktop)]
     pub fn start<R: Runtime>(self, app: &AppHandle<R>, player: PlayerHandle, art: ArtCache, cover_dir: PathBuf, switches: Switches) {
         let Self { tx, rx, tray: tray_tx, menu: menu_tx } = self;
         app.manage(tray::Tray::<R>::default());
@@ -297,6 +316,57 @@ impl Platform {
     }
 }
 
+#[cfg(mobile)]
+impl Platform {
+    /// A phone: no tray, menu bar, media keys or launch at login. The
+    /// system's own now playing controls come from a native plugin (not
+    /// yet); the worker keeps its state ready for it.
+    pub fn start<R: Runtime>(self, app: &AppHandle<R>, player: PlayerHandle, art: ArtCache, cover_dir: PathBuf, switches: Switches) {
+        let Self { tx, rx } = self;
+        let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<OsCommand>();
+        let on_command = move |c: OsCommand| {
+            let _ = cmd_tx.send(c);
+        };
+        {
+            let player = player.clone();
+            tauri::async_runtime::spawn(async move {
+                while let Some(c) = cmd_rx.recv().await {
+                    if matches!(c, OsCommand::Show | OsCommand::Quit) {
+                        continue;
+                    }
+                    if let Err(e) = commands::run(&player, c).await {
+                        tracing::debug!("OS command {c:?} failed: {e}");
+                    }
+                }
+            });
+        }
+        let controller = Controller::new(session_factory(app), Arc::new(on_command));
+        let worker_tx = tx.clone();
+        let rt = tauri::async_runtime::handle();
+        let _ = std::thread::Builder::new()
+            .name("platter-media".into())
+            .spawn(move || run_worker(controller, rx, worker_tx, art, cover_dir, rt, |_| {}));
+        {
+            let tx = tx.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Ok(s) = player.state().await {
+                    let _ = tx.send(Msg::State(Box::new(s)));
+                }
+            });
+        }
+        let mut rx = switches.subscribe();
+        tauri::async_runtime::spawn(async move {
+            loop {
+                let s = *rx.borrow_and_update();
+                let _ = tx.send(Msg::Settings(s));
+                if rx.changed().await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
+}
+
 impl Default for Platform {
     fn default() -> Self {
         Self::new()
@@ -337,7 +407,10 @@ fn run_worker(
             Msg::Position(p) => c.on_position(&p, at),
             Msg::Settings(s) => {
                 c.set_enabled(s.media_session);
+                #[cfg(desktop)]
                 set_keys(keys::wants_shortcuts(&s, c.is_attached()));
+                #[cfg(mobile)]
+                set_keys(false);
             }
             Msg::Cover(id, path) => c.on_cover(&id, path),
         }
@@ -375,6 +448,7 @@ fn session_factory<R: Runtime>(_app: &AppHandle<R>) -> Box<dyn media::SessionFac
 }
 
 /// Bring the main window back from the tray or the taskbar.
+#[cfg(desktop)]
 pub fn show_window<R: Runtime>(app: &AppHandle<R>) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -383,8 +457,28 @@ pub fn show_window<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// Pick a folder. A phone has no folder picker, so it answers as if the
+/// picker was cancelled.
+pub fn pick_folder<R: Runtime>(
+    d: tauri_plugin_dialog::FileDialogBuilder<R>,
+    f: impl FnOnce(Option<tauri_plugin_dialog::FilePath>) + Send + 'static,
+) {
+    #[cfg(desktop)]
+    d.pick_folder(f);
+    #[cfg(mobile)]
+    {
+        let _ = d;
+        f(None);
+    }
+}
+
+/// A phone app is always in front when it's used.
+#[cfg(mobile)]
+pub fn show_window<R: Runtime>(_app: &AppHandle<R>) {}
+
 /// Make the OS's launch-at-login entry match the setting. Only touches it
 /// when they differ.
+#[cfg(desktop)]
 fn sync_autostart<R: Runtime>(app: &AppHandle<R>, on: bool) {
     use tauri_plugin_autostart::ManagerExt;
     let al = app.autolaunch();

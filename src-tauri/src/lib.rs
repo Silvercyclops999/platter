@@ -52,6 +52,7 @@ pub mod tagedit;
 pub mod tags;
 pub mod themes;
 pub mod tracking;
+#[cfg(desktop)]
 pub mod updates;
 pub mod web;
 
@@ -358,6 +359,31 @@ pub fn speech_worker(args: &[String]) -> Option<i32> {
     }
 }
 
+/// The desktop-only plugins: one running copy, updates, global media keys
+/// and launch at login. A phone build has none of them.
+#[cfg(desktop)]
+fn desktop_plugins(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    b
+        // First, so a second launch (a platter:// link on Windows) hands its
+        // link to the copy already running and quits before doing anything.
+        // A command link (platter://next) leaves the window where it is.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if !args.iter().any(|a| feed::deck::automation::is_command_link(a)) {
+                share::commands::focus_main(app)
+            }
+        }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // Launch at login (a LaunchAgent on macOS, the default).
+        .plugin(tauri_plugin_autostart::Builder::new().arg(platform::AUTOSTART_ARG).build())
+        .manage(updates::Updates::default())
+}
+
+#[cfg(mobile)]
+fn desktop_plugins(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    b
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // `platter --next` and the rest talk to the running app and exit.
@@ -384,25 +410,12 @@ pub fn run() {
         tracing_subscriber::registry().with(console).with(file).init();
     }
 
-    tauri::Builder::default()
-        // First, so a second launch (a platter:// link on Windows) hands its
-        // link to the copy already running and quits before doing anything.
-        // A command link (platter://next) leaves the window where it is.
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            if !args.iter().any(|a| feed::deck::automation::is_command_link(a)) {
-                share::commands::focus_main(app)
-            }
-        }))
+    desktop_plugins(tauri::Builder::default())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        // Launch at login (a LaunchAgent on macOS, the default).
-        .plugin(tauri_plugin_autostart::Builder::new().arg(platform::AUTOSTART_ARG).build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .manage(updates::Updates::default())
         .manage(platform::miniplayer::Miniplayer::default())
         .register_asynchronous_uri_scheme_protocol("art", |ctx, req, responder| {
             let cache = ctx.app_handle().state::<ArtCache>().inner().clone();
@@ -1457,6 +1470,7 @@ pub fn run() {
             app.manage(audio::compare::CompareState::default());
             app.manage(app_settings);
             app.manage(live.platform.clone());
+            #[cfg(desktop)]
             updates::start(app.handle().clone());
             Ok(())
         })
@@ -1714,7 +1728,9 @@ pub fn run() {
             soundmap::commands::soundmap_points,
             soundmap::commands::soundmap_find,
             soundmap::commands::soundmap_song,
+            #[cfg(desktop)]
             updates::update_check,
+            #[cfg(desktop)]
             updates::update_install_on_restart,
             share::commands::share_info,
             share::commands::share_public_link,
@@ -1926,6 +1942,7 @@ pub fn run() {
             platform::visibility::on_window_event(window, event);
             platform::reveal::on_window_event(window, event);
             // Back in front: look for an update if the last check is old.
+            #[cfg(desktop)]
             if let tauri::WindowEvent::Focused(true) = event
                 && window.label() == "main"
             {
@@ -1938,6 +1955,7 @@ pub fn run() {
             {
                 plex.recheck_if_local_network_blocked();
             }
+            #[cfg(desktop)]
             if let tauri::WindowEvent::CloseRequested { api, .. } = event
                 && window.label() == "main"
                 && let Some(live) = window.try_state::<platform::Switches>()

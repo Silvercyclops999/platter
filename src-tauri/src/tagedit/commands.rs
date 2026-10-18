@@ -110,7 +110,7 @@ pub async fn tagedit_pick_music_folder(
     settings: State<'_, SettingsState>,
 ) -> AppResult<Option<FolderCheck>> {
     let (tx, rx) = tokio::sync::oneshot::channel();
-    app.dialog().file().set_title("Choose the folder that holds your music").pick_folder(move |p| {
+    crate::platform::pick_folder(app.dialog().file().set_title("Choose the folder that holds your music"), move |p| {
         let _ = tx.send(p);
     });
     let Some(picked) = rx.await.ok().flatten() else { return Ok(None) };

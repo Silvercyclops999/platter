@@ -71,13 +71,20 @@ fn main_window<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::WebviewWindow<R>
     app.get_webview_window("main")
 }
 
+/// Whether the main window has focus (a phone app in use always has).
+#[cfg(desktop)]
+fn is_focused<R: Runtime>(app: &AppHandle<R>) -> bool {
+    main_window(app).and_then(|w| w.is_focused().ok()).unwrap_or(false)
+}
+
+#[cfg(mobile)]
+fn is_focused<R: Runtime>(app: &AppHandle<R>) -> bool {
+    main_window(app).is_some()
+}
+
 /// Brings the window forward (a click on a notification).
 fn bring_forward<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(w) = main_window(app) {
-        let _ = w.unminimize();
-        let _ = w.show();
-        let _ = w.set_focus();
-    }
+    crate::platform::show_window(app);
 }
 
 /// Saves the cover where the notification can read it. None on any failure
@@ -121,7 +128,7 @@ pub fn spawn<R: Runtime>(
             };
             let c = Conditions {
                 enabled: switches.enabled.load(Ordering::Relaxed),
-                window_focused: main_window(&app).and_then(|w| w.is_focused().ok()).unwrap_or(false),
+                window_focused: is_focused(&app),
                 private_session: switches.private_session.load(Ordering::Relaxed),
             };
             if !gate.on_track(Instant::now(), c) {

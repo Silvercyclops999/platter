@@ -142,13 +142,10 @@ pub async fn devices_add(devices: State<'_, Devices>, root: String, name: String
 #[tauri::command]
 pub async fn devices_choose_folder(app: AppHandle, root: String) -> AppResult<Option<String>> {
     let (tx, rx) = tokio::sync::oneshot::channel();
-    app.dialog()
-        .file()
-        .set_title("Choose the music folder on the device")
-        .set_directory(&root)
-        .pick_folder(move |p| {
-            let _ = tx.send(p);
-        });
+    let d = app.dialog().file().set_title("Choose the music folder on the device").set_directory(&root);
+    crate::platform::pick_folder(d, move |p| {
+        let _ = tx.send(p);
+    });
     let Some(picked) = rx.await.ok().flatten() else {
         return Ok(None);
     };

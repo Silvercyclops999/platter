@@ -129,6 +129,7 @@ pub fn grown_for_queue(b: WindowBounds, screen: Option<&ScreenRect>) -> Option<W
 }
 
 /// The queue was turned on: grow the open window to fit it.
+#[cfg(desktop)]
 pub fn grow_for_queue<R: Runtime>(app: &AppHandle<R>) {
     let Some(w) = app.get_webview_window(LABEL) else { return };
     let Ok(scale) = w.scale_factor() else { return };
@@ -153,7 +154,12 @@ pub struct Miniplayer {
     moves: Arc<AtomicU64>,
 }
 
+/// No miniplayer window on a phone.
+#[cfg(mobile)]
+pub fn grow_for_queue<R: Runtime>(_app: &AppHandle<R>) {}
+
 /// A monitor's usable area in logical pixels.
+#[cfg(desktop)]
 fn rect_of(m: &tauri::Monitor) -> ScreenRect {
     let scale = m.scale_factor();
     let area = m.work_area();
@@ -165,6 +171,7 @@ fn rect_of(m: &tauri::Monitor) -> ScreenRect {
     }
 }
 
+#[cfg(desktop)]
 fn screens<R: Runtime>(app: &AppHandle<R>) -> (Vec<ScreenRect>, Option<ScreenRect>) {
     let all = app.available_monitors().unwrap_or_default().iter().map(rect_of).collect();
     let main = app
@@ -187,6 +194,7 @@ pub fn is_open<R: Runtime>(app: &AppHandle<R>) -> bool {
 }
 
 /// Open the window (or bring it forward when it's open).
+#[cfg(desktop)]
 pub async fn open<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
     if let Some(w) = app.get_webview_window(LABEL) {
         let _ = w.unminimize();
@@ -227,16 +235,26 @@ pub async fn open<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
     Ok(())
 }
 
+/// A phone has one window: the miniplayer is the phone's own mini player.
+#[cfg(mobile)]
+pub async fn open<R: Runtime>(_app: &AppHandle<R>) -> AppResult<()> {
+    Err(AppError::Invalid("There's no miniplayer window on a phone.".into()))
+}
+
 /// Close the window if it's open.
 pub fn close<R: Runtime>(app: &AppHandle<R>) {
+    #[cfg(desktop)]
     if let Some(w) = app.get_webview_window(LABEL) {
         let _ = w.destroy();
     }
+    #[cfg(mobile)]
+    let _ = app;
 }
 
 /// A miniplayer setting changed: both windows get the settings, and the
 /// window goes on top or not.
 pub fn settings_changed<R: Runtime>(app: &AppHandle<R>, s: &Settings) {
+    #[cfg(desktop)]
     if let Some(w) = app.get_webview_window(LABEL)
         && let Err(e) = w.set_always_on_top(s.miniplayer_on_top)
     {
@@ -245,6 +263,7 @@ pub fn settings_changed<R: Runtime>(app: &AppHandle<R>, s: &Settings) {
     let _ = app.emit("settings://changed", s);
 }
 
+#[cfg(desktop)]
 fn bounds_of<R: Runtime>(w: &Window<R>) -> Option<WindowBounds> {
     let scale = w.scale_factor().ok()?;
     let pos = w.outer_position().ok()?.to_logical::<f64>(scale);
@@ -252,6 +271,7 @@ fn bounds_of<R: Runtime>(w: &Window<R>) -> Option<WindowBounds> {
     Some(WindowBounds { x: pos.x, y: pos.y, width: size.width, height: size.height })
 }
 
+#[cfg(desktop)]
 async fn save<R: Runtime>(app: &AppHandle<R>, b: WindowBounds) {
     let Some(st) = app.try_state::<SettingsState>() else { return };
     let res = st
@@ -269,6 +289,7 @@ async fn save<R: Runtime>(app: &AppHandle<R>, b: WindowBounds) {
 }
 
 /// Window events for the miniplayer (and the main window closing).
+#[cfg(desktop)]
 pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &tauri::WindowEvent) {
     let app = window.app_handle().clone();
     if window.label() == "main" {
@@ -308,6 +329,10 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &tauri::WindowEven
         _ => {}
     }
 }
+
+/// A phone has no miniplayer window to follow.
+#[cfg(mobile)]
+pub fn on_window_event<R: Runtime>(_window: &Window<R>, _event: &tauri::WindowEvent) {}
 
 #[tauri::command]
 pub async fn miniplayer_state(app: AppHandle) -> AppResult<MiniplayerState> {

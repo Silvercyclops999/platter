@@ -35,8 +35,11 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
     if window.label() != "main" {
         return;
     }
-    let minimized = window.is_minimized().unwrap_or(false);
-    let visible = window.is_visible().unwrap_or(true);
+    #[cfg(desktop)]
+    let (minimized, visible) = (window.is_minimized().unwrap_or(false), window.is_visible().unwrap_or(true));
+    // A phone's one window is on screen while the app is in front.
+    #[cfg(mobile)]
+    let (minimized, visible) = (false, true);
     if let Some(seen) = after_event(event, minimized, visible)
         && let Some(w) = window.app_handle().get_webview_window("main")
     {

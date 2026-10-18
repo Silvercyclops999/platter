@@ -309,12 +309,9 @@ pub async fn sync_file_choose_folder(
     settings: State<'_, SettingsState>,
 ) -> AppResult<Option<SyncFileStatus>> {
     let (tx, rx) = tokio::sync::oneshot::channel();
-    app.dialog()
-        .file()
-        .set_title("Choose a folder to sync with")
-        .pick_folder(move |p| {
-            let _ = tx.send(p);
-        });
+    crate::platform::pick_folder(app.dialog().file().set_title("Choose a folder to sync with"), move |p| {
+        let _ = tx.send(p);
+    });
     let Some(picked) = rx.await.ok().flatten() else {
         return Ok(None);
     };

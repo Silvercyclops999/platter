@@ -52,7 +52,7 @@ pub async fn import_choose(app: AppHandle, folder: bool) -> AppResult<Option<Str
     let (tx, rx) = tokio::sync::oneshot::channel();
     let d = app.dialog().file().set_title(if folder { "Choose the folder to import" } else { "Choose the file to import" });
     if folder {
-        d.pick_folder(move |p| {
+        crate::platform::pick_folder(d, move |p| {
             let _ = tx.send(p);
         });
     } else {

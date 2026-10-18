@@ -73,6 +73,47 @@ impl StreamQuality {
     }
 }
 
+/// Phone stream quality over mobile data. Auto keeps the original file
+/// when it is lossless and under 1.5 Mbps, else streams at 320 kbps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum MobileQuality {
+    #[default]
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "original")]
+    Original,
+    #[serde(rename = "320")]
+    Kbps320,
+    #[serde(rename = "256")]
+    Kbps256,
+    #[serde(rename = "192")]
+    Kbps192,
+    #[serde(rename = "128")]
+    Kbps128,
+}
+
+impl MobileQuality {
+    /// The bitrate below which a lossless original plays as it is on Auto.
+    pub const AUTO_ORIGINAL_UNDER_KBPS: u32 = 1500;
+
+    /// The cap for a song of `bitrate_kbps` (lossless or not), or None for
+    /// the original file.
+    pub fn cap_kbps(self, lossless: bool, bitrate_kbps: u32) -> Option<u32> {
+        match self {
+            Self::Auto if lossless && bitrate_kbps < Self::AUTO_ORIGINAL_UNDER_KBPS => None,
+            Self::Auto => Some(320),
+            Self::Original => None,
+            Self::Kbps320 => Some(320),
+            Self::Kbps256 => Some(256),
+            Self::Kbps192 => Some(192),
+            Self::Kbps128 => Some(128),
+        }
+    }
+}
+
+/// How many recently played songs a phone may keep for offline play.
+pub const PHONE_KEEP_RECENT_CHOICES: [u32; 6] = [0, 25, 50, 100, 250, 500];
+
 /// Reduce motion: follow the OS, or force it on or off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -601,6 +642,15 @@ pub struct Settings {
     /// Go offline: no network use at all, only music on this computer plays
     /// (this device only).
     pub go_offline: bool,
+    /// Phone: downloads also run over mobile data (this device only).
+    pub phone_mobile_downloads: bool,
+    /// Phone: the last N songs played stay playable offline; 0 is off
+    /// (this device only).
+    pub phone_keep_recent: u32,
+    /// Phone: stream quality over mobile data (this device only).
+    pub phone_mobile_quality: MobileQuality,
+    /// Phone: a light tap of feedback on the player's controls (this device only).
+    pub phone_haptics: bool,
     /// Sync to a device: what songs become on a device that doesn't pick
     /// its own format (synced).
     pub device_format: crate::devices::DeviceFormat,
@@ -1126,6 +1176,10 @@ impl Default for Settings {
             download_home_only: true,
             download_liked: false,
             go_offline: false,
+            phone_mobile_downloads: false,
+            phone_keep_recent: 50,
+            phone_mobile_quality: MobileQuality::Auto,
+            phone_haptics: true,
             device_format: crate::devices::DeviceFormat::Original,
             device_delete_removed: false,
             home_mixes: true,
@@ -1522,6 +1576,10 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "downloadHomeOnly",
     "downloadLiked",
     "goOffline",
+    "phoneMobileDownloads",
+    "phoneKeepRecent",
+    "phoneMobileQuality",
+    "phoneHaptics",
     "notifyNewReleases",
     "autoRequest",
     "autoRequestCap",
@@ -1688,6 +1746,11 @@ pub struct SettingsPatch {
     pub download_home_only: Option<bool>,
     pub download_liked: Option<bool>,
     pub go_offline: Option<bool>,
+    pub phone_mobile_downloads: Option<bool>,
+    /// One of PHONE_KEEP_RECENT_CHOICES.
+    pub phone_keep_recent: Option<u32>,
+    pub phone_mobile_quality: Option<MobileQuality>,
+    pub phone_haptics: Option<bool>,
     pub device_format: Option<crate::devices::DeviceFormat>,
     pub device_delete_removed: Option<bool>,
     pub home_mixes: Option<bool>,
@@ -2044,6 +2107,15 @@ impl Settings {
         set(&mut self.download_home_only, p.download_home_only);
         set(&mut self.download_liked, p.download_liked);
         set(&mut self.go_offline, p.go_offline);
+        set(&mut self.phone_mobile_downloads, p.phone_mobile_downloads);
+        set(&mut self.phone_mobile_quality, p.phone_mobile_quality);
+        set(&mut self.phone_haptics, p.phone_haptics);
+        if let Some(n) = p.phone_keep_recent {
+            if !PHONE_KEEP_RECENT_CHOICES.contains(&n) {
+                return Err(AppError::Invalid("Keep 0, 25, 50, 100, 250 or 500 recent songs.".into()));
+            }
+            self.phone_keep_recent = n;
+        }
         set(&mut self.device_format, p.device_format);
         set(&mut self.device_delete_removed, p.device_delete_removed);
         set(&mut self.home_mixes, p.home_mixes);
@@ -3152,7 +3224,12 @@ pub struct AppInfo {
     pub version: String,
     pub licence: String,
     pub repo_url: String,
+    /// "phone" in a phone build (the UI uses its phone layout), else "desktop".
+    pub form: &'static str,
 }
+
+/// What kind of device this build runs on.
+pub const FORM: &str = if cfg!(mobile) { "phone" } else { "desktop" };
 
 #[tauri::command]
 pub async fn app_info(app: AppHandle) -> AppResult<AppInfo> {
@@ -3160,6 +3237,7 @@ pub async fn app_info(app: AppHandle) -> AppResult<AppInfo> {
         version: app.package_info().version.to_string(),
         licence: LICENCE.into(),
         repo_url: REPO_URL.into(),
+        form: FORM,
     })
 }
 
@@ -5197,5 +5275,43 @@ mod tests {
         db.write(|c| Ok(c.execute_batch("ALTER TABLE kv_away RENAME TO kv")?)).unwrap();
         assert_eq!(db.read(|c| kv_get(c, KEY)).unwrap(), saved);
         assert_eq!(load(&db).download_limit_gb, 64);
+    }
+
+    #[test]
+    fn phone_settings_default_save_and_stay_on_this_device() {
+        let d = Settings::default();
+        assert!(!d.phone_mobile_downloads && d.phone_haptics);
+        assert_eq!((d.phone_keep_recent, d.phone_mobile_quality), (50, MobileQuality::Auto));
+        for k in ["phoneMobileDownloads", "phoneKeepRecent", "phoneMobileQuality", "phoneHaptics"] {
+            assert!(DEVICE_SETTINGS.contains(&k) && !SYNCED_SETTINGS.contains(&k), "{k} is this device only");
+        }
+        let mut s = Settings::default();
+        let p: SettingsPatch =
+            serde_json::from_str(r#"{"phoneMobileDownloads":true,"phoneKeepRecent":250,"phoneMobileQuality":"192","phoneHaptics":false}"#).unwrap();
+        s.apply(&p).unwrap();
+        assert!(s.phone_mobile_downloads && !s.phone_haptics);
+        assert_eq!((s.phone_keep_recent, s.phone_mobile_quality), (250, MobileQuality::Kbps192));
+        let wire = serde_json::to_value(&s).unwrap();
+        assert_eq!(wire["phoneMobileQuality"], "192");
+        assert!(s.apply(&SettingsPatch { phone_keep_recent: Some(7), ..Default::default() }).is_err(), "only the listed counts");
+        assert_eq!(s.phone_keep_recent, 250);
+        assert!(serde_json::from_str::<SettingsPatch>(r#"{"phoneMobileQuality":"999"}"#).is_err());
+        // Saved settings from before the phone keep their defaults.
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.phone_keep_recent, 50);
+    }
+
+    #[test]
+    fn mobile_data_auto_keeps_small_lossless_files_else_320() {
+        assert_eq!(MobileQuality::Auto.cap_kbps(true, 1000), None);
+        assert_eq!(MobileQuality::Auto.cap_kbps(true, 2300), Some(320));
+        assert_eq!(MobileQuality::Auto.cap_kbps(false, 256), Some(320));
+        assert_eq!(MobileQuality::Original.cap_kbps(true, 4600), None);
+        assert_eq!(MobileQuality::Kbps128.cap_kbps(true, 900), Some(128));
+    }
+
+    #[test]
+    fn the_build_says_what_kind_of_device_it_is() {
+        assert_eq!(FORM, if cfg!(mobile) { "phone" } else { "desktop" });
     }
 }

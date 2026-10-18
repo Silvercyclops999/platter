@@ -165,13 +165,10 @@ pub async fn downloads_choose_folder(
     settings: State<'_, SettingsState>,
 ) -> AppResult<Option<String>> {
     let (tx, rx) = tokio::sync::oneshot::channel();
-    app.dialog()
-        .file()
-        .set_title("Choose where downloads go")
-        .set_directory(downloads.dir())
-        .pick_folder(move |p| {
-            let _ = tx.send(p);
-        });
+    let d = app.dialog().file().set_title("Choose where downloads go").set_directory(downloads.dir());
+    crate::platform::pick_folder(d, move |p| {
+        let _ = tx.send(p);
+    });
     let Some(picked) = rx.await.ok().flatten() else {
         return Ok(None);
     };

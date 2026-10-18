@@ -211,6 +211,7 @@ fn now_s() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+#[cfg(desktop)]
 fn screens<R: Runtime>(app: &AppHandle<R>) -> Vec<ScreenRect> {
     app.available_monitors()
         .unwrap_or_default()
@@ -235,6 +236,8 @@ pub fn install<R: Runtime>(app: &AppHandle<R>, root: &Path, mode: StartMode) {
     let switching = saved.switching(now_s());
     saved.switching_at = None;
     let plan = first_show(mode, switching);
+    // A phone's window has no place, size or minimised state to restore.
+    #[cfg(desktop)]
     if let Some(w) = app.get_webview_window("main") {
         let color = saved.background.as_deref().and_then(parse_color).unwrap_or(DEFAULT_BACKGROUND);
         let _ = w.set_background_color(Some(color));
@@ -274,6 +277,9 @@ pub fn install<R: Runtime>(app: &AppHandle<R>, root: &Path, mode: StartMode) {
 pub fn show_first<R: Runtime>(app: &AppHandle<R>) -> bool {
     let Some(plan) = app.try_state::<Reveal>().and_then(|r| r.take()) else { return false };
     let Some(w) = app.get_webview_window("main") else { return false };
+    #[cfg(mobile)]
+    let _ = (w, plan);
+    #[cfg(desktop)]
     match plan {
         FirstShow::Show => {
             let _ = w.show();
@@ -299,9 +305,12 @@ pub async fn window_ready(app: AppHandle, window: Window, background: Option<Str
         && let Some(c) = parse_color(bg)
         && r.set_background(bg)
     {
+        #[cfg(desktop)]
         if let Some(w) = app.get_webview_window("main") {
             let _ = w.set_background_color(Some(c));
         }
+        #[cfg(mobile)]
+        let _ = c;
         r.save();
     }
     show_first(&app);
@@ -320,6 +329,7 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
     }
     let Some(r) = window.try_state::<Reveal>() else { return };
     match event {
+        #[cfg(desktop)]
         WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
             let now = match (window.outer_position(), window.inner_size()) {
                 (Ok(p), Ok(s)) => Some(Place { x: p.x, y: p.y, width: s.width, height: s.height, maximized: false }),

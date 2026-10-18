@@ -187,7 +187,7 @@ impl DeckHost for AppDeck {
     async fn extras(&self, track: Option<&Track>) -> DeckExtras {
         let mut x = DeckExtras {
             miniplayer: crate::platform::miniplayer::is_open(&self.app),
-            window: self.app.get_webview_window("main").is_some_and(|w| w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false)),
+            window: window_on_screen(&self.app),
             ..Default::default()
         };
         if let Some(s) = self.app.try_state::<crate::settings::SettingsState>()
@@ -387,7 +387,10 @@ impl DeckHost for AppDeck {
     async fn set_window(&self, visible: bool) -> AppResult<()> {
         if visible {
             crate::platform::show_window(&self.app);
-        } else if let Some(w) = self.app.get_webview_window("main") {
+            return Ok(());
+        }
+        #[cfg(desktop)]
+        if let Some(w) = self.app.get_webview_window("main") {
             w.hide().map_err(|e| AppError::Internal(e.to_string()))?;
         }
         Ok(())
@@ -418,6 +421,18 @@ impl DeckHost for AppDeck {
 }
 
 /// Every mix on Home, made for you first.
+/// Whether the main window is on screen (shown and not minimised).
+#[cfg(desktop)]
+fn window_on_screen(app: &AppHandle) -> bool {
+    app.get_webview_window("main").is_some_and(|w| w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false))
+}
+
+/// A phone's one window is on screen while the app is in use.
+#[cfg(mobile)]
+fn window_on_screen(app: &AppHandle) -> bool {
+    app.get_webview_window("main").is_some()
+}
+
 fn all_mixes(s: crate::mixes::MixShelves) -> Vec<crate::mixes::MixSummary> {
     s.made_for_you.into_iter().chain(s.moods).chain(s.genres).collect()
 }

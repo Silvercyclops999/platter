@@ -25,11 +25,7 @@ impl ServerId for PlexServerId {
 
 /// Bring the main window forward.
 pub fn focus_main<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.unminimize();
-        let _ = w.show();
-        let _ = w.set_focus();
-    }
+    crate::platform::show_window(app);
 }
 
 impl<R: Runtime> ShareEvents for AppHandle<R> {

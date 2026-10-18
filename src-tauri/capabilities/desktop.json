@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop",
+  "description": "Desktop-only permissions for the main window (a phone build has no updater)",
+  "platforms": ["windows", "macOS", "linux"],
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "updater:default"
+  ]
+}
