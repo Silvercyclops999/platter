@@ -121,6 +121,7 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   // Library: how lists, search and mixes behave beyond the defaults.
   "popularSource",
   "linkFeatured",
+  "libraryChipsRemember",
   "playlistAskDuplicates",
   "playlistNewName",
   "likedMeans",
