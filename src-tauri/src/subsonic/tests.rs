@@ -685,7 +685,7 @@ async fn library_sync_requests() {
             "getPlaylists",
             "getPlaylist id=p1",
             "getAlbumList2 musicFolderId=1&offset=0&size=500&type=newest",
-            "getAlbumList2 musicFolderId=1&offset=0&size=50&type=recent",
+            "getAlbumList2 musicFolderId=1&offset=0&size=500&type=recent",
             "getAlbum id=al1",
             "search3 albumCount=0&artistCount=0&musicFolderId=1&query=&songCount=500&songOffset=0",
             "getAlbumList2 musicFolderId=1&offset=0&size=500&type=alphabeticalByName",
@@ -730,6 +730,34 @@ async fn server_search_stays_in_the_included_folders() {
     assert_eq!(hits.tracks.len(), 2);
     let l = log(&s).await;
     assert!(l.contains(&"search3 albumCount=5&artistCount=5&musicFolderId=2&query=song&songCount=5".to_string()), "{l:?}");
+}
+
+#[tokio::test]
+async fn a_song_added_to_an_album_already_here_is_seen_by_the_change_check() {
+    let s = subsonic(Some(all_ext()), true).await;
+    let d = tempfile::tempdir().unwrap();
+    let db = crate::db::DbHandle::open(d.path().join("t.db")).unwrap();
+    let t = tag_of(&s);
+    // The cache has one of the album's two songs.
+    db.write(|c| {
+        c.execute(
+            "INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, track_number,
+               disc_number, duration_ms, part_key) VALUES (?1, 'Song 1', ?2, 'Record', 'r', 'R', 1, 1, 1000, '/p')",
+            [format!("{t}:s1"), format!("{t}:al1")],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let http = client::http();
+    let unsigned = SubsonicClient::new(http.clone(), &s.uri()).unwrap();
+    let core = Arc::new(Core::new(&t, "Navidrome", unsigned, Arc::new(StreamPrefs::new(None, None)), Some(db)));
+    core.set_features(Features::new(true, all_ext().into_iter().map(str::to_string)));
+    core.sign_in(SubsonicClient::new(http, &s.uri()).unwrap().signed_in(Secret::ApiKey(Token::new(KEY).unwrap())), USER, User::default());
+    let lib = SubsonicLibrary::all(core);
+    // Long after the album was added and played: only its song count tells.
+    let changed = lib.changed_since("1", 1_900_000_000).await.unwrap();
+    assert_eq!(changed.albums.len(), 1);
+    assert_eq!(changed.tracks.len(), 2);
 }
 
 #[tokio::test]

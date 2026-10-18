@@ -4,7 +4,7 @@
 //! similar songs, what others are playing and the saved queue. What it can
 //! do comes from its extension list, never from its name.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -46,6 +46,8 @@ use crate::tracking::{PlayReport, PlayReporter, PlaybackState};
 pub const PAGE: u64 = 500;
 /// How long the artist list is reused while a sync pages through it.
 const ARTISTS_FRESH: Duration = Duration::from_secs(120);
+/// Pages of recently played albums a change check reads at most.
+const RECENT_PAGES: usize = 4;
 
 pub const NO_DOWNLOAD: &str = "Your account on this server isn't allowed to download songs. The server's owner can allow it.";
 pub const NO_STREAM: &str = "Your account on this server isn't allowed to play songs.";
@@ -418,6 +420,21 @@ impl Core {
         Ok(self.get::<AlbumList>("getAlbumList2", &q, "albumList2").await?.album)
     }
 
+    /// How many songs the cache has for each of this server's albums.
+    async fn cached_song_counts(&self) -> Option<HashMap<String, u64>> {
+        let db = self.db.clone()?;
+        let like = format!("{}:%", self.tag);
+        db.read_async(move |c| {
+            let mut st = c.prepare("SELECT album_id, COUNT(*) FROM tracks WHERE id LIKE ?1 GROUP BY album_id")?;
+            let rows = st
+                .query_map([like], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64)))?
+                .collect::<Result<HashMap<_, _>, _>>()?;
+            Ok(rows)
+        })
+        .await
+        .ok()
+    }
+
     async fn all_albums(&self, section: &str) -> AppResult<Vec<SAlbum>> {
         let mut out = Vec::new();
         loop {
@@ -713,8 +730,10 @@ impl LibrarySource for SubsonicLibrary {
     }
 
     /// Albums added since `since` (the newest first, until an older one),
-    /// albums played since then (for play counts), each with its songs, and
-    /// their artists. Edits to existing albums arrive with the weekly full
+    /// albums played since then (for play counts), albums whose number of
+    /// songs differs from the cache's (a song added to an album already
+    /// here doesn't change its date), each with its songs, and their
+    /// artists. Other edits to existing albums arrive with the weekly full
     /// pass; likes with every sync.
     async fn changed_since(&self, section_id: &str, since: i64) -> AppResult<Changes> {
         let mut picked: Vec<SAlbum> = Vec::new();
@@ -736,9 +755,31 @@ impl LibrarySource for SubsonicLibrary {
             }
             offset += n;
         }
-        for a in self.core.album_page(section_id, "recent", 0, 50).await? {
-            if a.played.as_deref().and_then(unix_s).is_some_and(|t| t >= since) && seen.insert(a.id.clone()) {
-                picked.push(a);
+        // Played since then, most recent first, until an older play.
+        let mut offset = 0;
+        'recent: for _ in 0..RECENT_PAGES {
+            let page = self.core.album_page(section_id, "recent", offset, PAGE).await?;
+            let n = page.len() as u64;
+            for a in page {
+                if !a.played.as_deref().and_then(unix_s).is_some_and(|t| t >= since) {
+                    break 'recent;
+                }
+                if seen.insert(a.id.clone()) {
+                    picked.push(a);
+                }
+            }
+            if n < PAGE {
+                break;
+            }
+            offset += n;
+        }
+        // Albums whose song count moved.
+        if let Some(cached) = self.core.cached_song_counts().await {
+            for a in self.core.all_albums(section_id).await? {
+                let here = cached.get(&qualify_any(&self.core.tag, &a.id)).copied();
+                if a.song_count.is_some_and(|n| here.is_some_and(|h| h != n)) && seen.insert(a.id.clone()) {
+                    picked.push(a);
+                }
             }
         }
         let mut out = Changes::default();
