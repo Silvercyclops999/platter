@@ -2030,8 +2030,17 @@ mod tests {
         st.restore().await.unwrap();
         // The cache file can't be written either.
         let cache = DiscoveryCache::path(dir.path());
-        let _ = std::fs::remove_file(&cache);
-        std::fs::create_dir_all(cache.join("in-the-way")).unwrap();
+        // A background save from restore can put the file back between the two steps.
+        let mut blocked = false;
+        for _ in 0..100 {
+            let _ = std::fs::remove_file(&cache);
+            if std::fs::create_dir_all(cache.join("in-the-way")).is_ok() {
+                blocked = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(blocked, "the cache path is blocked by a folder");
         st.select_server("m1").await.unwrap();
         assert!(rec.toasts().iter().any(|t| t.contains("couldn't save your choice of Home")), "{:?}", rec.toasts());
         assert!(st.client().await.is_ok(), "connected anyway");
