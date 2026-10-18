@@ -33,11 +33,23 @@ export const UNRELEASED_RULE_OPTIONS: readonly { value: UnreleasedSharing; label
   { value: "always", label: "Always" },
 ];
 
-/** What choosing a rule writes: Never and Always set every switch; Ask puts each back to how it starts. */
-export function patchForRule(rule: UnreleasedSharing): Partial<Settings> {
+/**
+ * What choosing a rule writes. Never and Always set every switch. Ask puts
+ * each back to how it starts, except that it never turns sharing on: a
+ * feature that can't ask (Discord, mixes, scrobbles, listening sessions)
+ * keeps sharing off when it's off now, unless the user turns it on.
+ */
+export function patchForRule(rule: UnreleasedSharing, current?: Settings | null): Partial<Settings> {
   const p: Partial<Settings> = { unreleasedSharing: rule };
   for (const o of UNRELEASED_OVERRIDES) {
-    const v = rule === "ask" ? DEFAULT_SETTINGS[o.key] : rule === "always" ? o.onShares : !o.onShares;
+    let v: boolean;
+    if (rule === "ask") {
+      v = DEFAULT_SETTINGS[o.key];
+      const shares = v === o.onShares;
+      if (shares && current && current[o.key] !== o.onShares) v = current[o.key];
+    } else {
+      v = rule === "always" ? o.onShares : !o.onShares;
+    }
     (p as Record<string, unknown>)[o.key] = v;
   }
   return p;
@@ -45,6 +57,12 @@ export function patchForRule(rule: UnreleasedSharing): Partial<Settings> {
 
 /** The switches that differ from what the rule sets (shown as exceptions). */
 export function exceptionsTo(s: Settings): Key[] {
-  const want = patchForRule(s.unreleasedSharing ?? "ask");
+  const want = patchForRule(s.unreleasedSharing ?? "ask", s);
   return UNRELEASED_OVERRIDES.filter((o) => s[o.key] !== want[o.key]).map((o) => o.key);
+}
+
+/** Exceptions choosing `rule` would undo (asked about first). */
+export function exceptionsLost(s: Settings, rule: UnreleasedSharing): Key[] {
+  const next = patchForRule(rule, s);
+  return exceptionsTo(s).filter((k) => next[k] !== s[k]);
 }

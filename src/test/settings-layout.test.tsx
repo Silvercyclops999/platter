@@ -345,4 +345,34 @@ describe("Share unreleased music", () => {
     await waitFor(() => expect(useSettings.getState().settings).toMatchObject({ unreleasedSharing: "always", scrobbleUnreleased: true, shareTranscriptionsUnreleased: true, listenHideUnreleased: false }));
     expect(within(sharing).queryByText(/set differently/)).toBeNull();
   });
+
+  it("Ask each time never turns Discord sharing on, and asks before undoing exceptions", async () => {
+    const never = { ...DEFAULT_SETTINGS, ...patchForRule("never") } as Settings;
+    const ask = patchForRule("ask", never);
+    // Discord can't ask, so it stays off; nothing else that can't ask starts sharing either.
+    expect(ask).toMatchObject({ discordShowUnreleased: false, discordUnreleasedArt: false, mixUnreleased: false, listenHideUnreleased: true });
+    for (const o of UNRELEASED_OVERRIDES) expect(ask[o.key] === o.onShares && never[o.key] !== o.onShares, o.key).toBe(false);
+    // Turned on by the user, it stays on.
+    expect(patchForRule("ask", { ...never, discordShowUnreleased: true }).discordShowUnreleased).toBe(true);
+
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+    const sharing = await screen.findByRole("region", { name: "Sharing and friends" });
+    const rule = within(sharing).getByRole("combobox", { name: "Share unreleased music" });
+    await user.selectOptions(rule, "never");
+    await waitFor(() => expect(useSettings.getState().settings?.unreleasedSharing).toBe("never"));
+    await user.selectOptions(rule, "ask");
+    await waitFor(() => expect(useSettings.getState().settings?.unreleasedSharing).toBe("ask"));
+    expect(useSettings.getState().settings).toMatchObject({ discordShowUnreleased: false, discordUnreleasedArt: false });
+    // An exception the next rule would undo: asked first, and Cancel keeps it.
+    await user.selectOptions(rule, "never");
+    await waitFor(() => expect(useSettings.getState().settings?.unreleasedSharing).toBe("never"));
+    await user.click(within(sharing).getByRole("button", { name: /^Advanced/ }));
+    await user.click(within(sharing).getByRole("switch", { name: "Scrobble unreleased music" }));
+    await waitFor(() => expect(useSettings.getState().settings?.scrobbleUnreleased).toBe(true));
+    await user.selectOptions(rule, "ask");
+    const confirm = await screen.findByRole("dialog", { name: "Undo your exceptions?" });
+    await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
+    expect(useSettings.getState().settings).toMatchObject({ unreleasedSharing: "never", scrobbleUnreleased: true });
+  });
 });

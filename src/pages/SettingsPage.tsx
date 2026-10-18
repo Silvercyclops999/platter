@@ -100,7 +100,7 @@ import { AccentPicker, ThemeFileControl, ThemeFileProblems, ThemeSelect, themeNo
 import { LookCards } from "./looks/LookCards";
 import { looks } from "../stores/looks";
 import { CLASSIC_LAYOUT, type Layout } from "../design/themes";
-import type { AiProvider, CapName, PlayHistorySource } from "../lib/types";
+import type { AiProvider, CapName, PlayHistorySource, UnreleasedSharing } from "../lib/types";
 import {
   HistorySourceControl,
   INCLUDE_KEYS,
@@ -130,7 +130,7 @@ import {
   type PageId,
   type PageMeta,
 } from "./settingsMeta";
-import { UNRELEASED_RULE_OPTIONS, exceptionsTo, patchForRule } from "./unreleasedRule";
+import { UNRELEASED_RULE_OPTIONS, exceptionsLost, exceptionsTo, patchForRule } from "./unreleasedRule";
 import { openContextMenu } from "../components/ContextMenu";
 import { GUIDES } from "../guides/guides";
 import { GuideButton } from "../guides/GuideButton";
@@ -784,6 +784,14 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
   const [openAdvanced, setOpenAdvanced] = useState<ReadonlySet<string>>(() => new Set());
   const allOpen = advancedView.startOpen;
   const [resetSection, setResetSection] = useState<string | null>(null);
+  /** A sharing rule waiting for an OK, since it undoes exceptions under Advanced. */
+  const [pendingRule, setPendingRule] = useState<{ rule: UnreleasedSharing; lost: number } | null>(null);
+  const chooseRule = (rule: UnreleasedSharing) => {
+    const cur = useSettings.getState().settings;
+    const lost = cur ? exceptionsLost(cur, rule).length : 0;
+    if (lost > 0) setPendingRule({ rule, lost });
+    else void updateSettings(patchForRule(rule, cur));
+  };
   const [art, setArt] = useState<ArtCacheInfo | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [update, setUpdate] = useState<UpdateState>({ kind: "idle" });
@@ -2186,7 +2194,7 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
         return n ? `${n} ${n === 1 ? "feature is" : "features are"} set differently under Advanced.` : undefined;
       })(),
       control: (ids) =>
-        select(s, (x) => x.unreleasedSharing ?? "ask", UNRELEASED_RULE_OPTIONS, ids, (v) => void updateSettings(patchForRule(v))),
+        select(s, (x) => x.unreleasedSharing ?? "ask", UNRELEASED_RULE_OPTIONS, ids, chooseRule),
     },
     {
       key: "sharePublicLinks",
@@ -3464,9 +3472,12 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
   const [active, setActive] = useState<GroupName>(GROUPS[0]);
   const pendingScroll = useRef<GroupName | null>(null);
   const shownGroup = page?.group;
+  /** Until when the nav keeps the group just clicked, while the scroll it started settles. */
+  const navLock = useRef(0);
   const scrollToGroup = (g: GroupName) => {
     const heading = document.getElementById(groupId(g));
     if (!heading) return;
+    navLock.current = Date.now() + 1000;
     heading.closest("section")?.scrollIntoView?.({ block: "start" });
     heading.focus({ preventScroll: true });
   };
@@ -3486,6 +3497,9 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
     pendingScroll.current = null;
     scrollToGroup(g);
   });
+  // Sections can come and go (settings loading, a capability turning up):
+  // the observer follows the ones on screen.
+  const sectionsKey = s ? usable.map((r) => r.section).join("|") : "";
   useEffect(() => {
     if (page || searching || typeof IntersectionObserver === "undefined") return;
     const seen = new Map<string, boolean>();
@@ -3493,17 +3507,33 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
     const sections = document.querySelectorAll<HTMLElement>(".settings__group[data-group]");
     let root: HTMLElement | null = sections[0]?.parentElement ?? null;
     while (root && !/(auto|scroll)/.test(getComputedStyle(root).overflowY)) root = root.parentElement;
+    const shown = GROUPS.filter((g) => [...sections].some((el) => el.dataset.group === g));
+    const pick = () => {
+      if (Date.now() < navLock.current) return;
+      // Scrolled to the end: the last groups are too short to reach the band.
+      if (root && root.scrollHeight > root.clientHeight && root.scrollTop + root.clientHeight >= root.scrollHeight - 2) {
+        const last = shown[shown.length - 1];
+        if (last) setActive(last);
+        return;
+      }
+      const first = GROUPS.find((g) => seen.get(g));
+      if (first) setActive(first);
+    };
     const io = new IntersectionObserver(
       (entries) => {
         for (const e of entries) seen.set((e.target as HTMLElement).dataset.group ?? "", e.isIntersecting);
-        const first = GROUPS.find((g) => seen.get(g));
-        if (first) setActive(first);
+        pick();
       },
       { root, rootMargin: "-80px 0px -60% 0px" },
     );
     sections.forEach((el) => io.observe(el));
-    return () => io.disconnect?.();
-  }, [page, searching]);
+    const onScroll = () => pick();
+    root?.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      io.disconnect?.();
+      root?.removeEventListener("scroll", onScroll);
+    };
+  }, [page, searching, sectionsKey]);
   const current = shownGroup ?? active;
 
   const backToSettings = () => {
@@ -3512,6 +3542,21 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
   };
 
   // ------------------------------------------------------------ parts
+  /** The linked row whose Advanced section was opened (once, so its toggle still works). */
+  const seededRow = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!routeRow || seededRow.current === routeRow || !ADVANCED.has(routeRow)) return;
+    const r = usable.find((x) => x.key === routeRow);
+    if (!r) return;
+    seededRow.current = routeRow;
+    const scope = r.page ? `page:${r.page}` : r.section;
+    setOpenAdvanced((prev) => {
+      const next = new Set(prev);
+      if (allOpen) next.delete(scope);
+      else next.add(scope);
+      return next;
+    });
+  });
   const toggleAdvanced = (scope: string) =>
     setOpenAdvanced((prev) => {
       const next = new Set(prev);
@@ -3525,7 +3570,8 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
     const everyday = list.filter((r) => !ADVANCED.has(r.key));
     const advanced = list.filter((r) => ADVANCED.has(r.key));
     // A search shows matching Advanced rows without a click, and so does a link to one.
-    const open = searching || allOpen !== openAdvanced.has(scope) || advanced.some((r) => r.key === routeRow);
+    // A link to an Advanced row opens it until the effect below takes over; the toggle works after.
+    const open = searching || allOpen !== openAdvanced.has(scope) || (advanced.some((r) => r.key === routeRow) && seededRow.current !== routeRow);
     return (
       <>
         <RowList rows={everyday} />
@@ -3774,6 +3820,14 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
         confirm="Reset"
         onConfirm={() => resetSection && void reset(resetSection)}
         onClose={() => setResetSection(null)}
+      />
+      <ConfirmDialog
+        open={pendingRule !== null}
+        title="Undo your exceptions?"
+        body={`${pendingRule?.lost === 1 ? "1 feature is" : `${pendingRule?.lost ?? 0} features are`} set differently under Advanced. This rule sets ${pendingRule?.lost === 1 ? "it" : "them"} back.`}
+        confirm="Change the rule"
+        onConfirm={() => pendingRule && void updateSettings(patchForRule(pendingRule.rule, useSettings.getState().settings))}
+        onClose={() => setPendingRule(null)}
       />
       <ServerDialog open={dialog === "server"} onClose={() => setDialog(null)} current={auth?.server?.machineId} />
       <NoticesDialog open={dialog === "notices"} onClose={() => setDialog(null)} />
