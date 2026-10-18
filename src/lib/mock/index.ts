@@ -130,6 +130,8 @@ import type {
   DevicePatch,
   SoundMapArea,
   CrateKind,
+  DiaryEdit,
+  DiaryQuery,
 } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
 import { MockCrates } from "./crates";
@@ -208,6 +210,7 @@ import { MockDoctor } from "./doctor";
 import { MockPhysical } from "./physical";
 import { MockSleeve } from "./sleeve";
 import { MockSides } from "./sides";
+import { MockDiary } from "./diary";
 import { MockAutomix } from "./automix";
 import { MockDevices } from "./devices";
 import { MockSoundMap } from "./soundmap";
@@ -399,6 +402,10 @@ export class MockBackend implements Backend {
   readonly sleeve: MockSleeve;
   /** Record sides (vinyl editions and splits by hand). */
   readonly sides: MockSides;
+  /** The listening diary. */
+  readonly diary: MockDiary;
+  /** What the last diary export would have written, and in which format. */
+  lastDiaryExport: { format: "text" | "csv"; body: string } | null = null;
   /** Mixed playlists and made-up tempos (test hook: reset). */
   readonly automix: MockAutomix;
   /** Sync to a device (test hooks: plugged, fail, stepMs, reset). */
@@ -540,6 +547,7 @@ export class MockBackend implements Backend {
     this.physical = new MockPhysical(this.fx, () => this.settings, () => this.later(0, () => this.emit("physical://changed", {})));
     this.sleeve = new MockSleeve(this.fx, () => this.settings, () => this.physical.status().saved);
     this.sides = new MockSides(this.fx);
+    this.diary = new MockDiary(this.fx);
     this.automix = new MockAutomix(
       (id) => this.trackById(id) ?? undefined,
       () => this.later(0, () => this.emit("syncstore://changed", { namespaces: ["mixedPlaylists"], remote: false })),
@@ -3068,6 +3076,40 @@ export class MockBackend implements Backend {
       const out = this.sides.set(id, starts);
       this.later(0, () => this.emit("syncstore://changed", { namespaces: ["albumSides"], remote: false }));
       return out;
+    });
+  }
+  diaryEntries(query?: DiaryQuery | null) {
+    return this.delay(() => this.diary.list(query));
+  }
+  diaryEntryEdit(id: string, edit: DiaryEdit) {
+    return this.delay(() => {
+      const out = this.diary.edit(id, edit);
+      this.later(0, () => this.emit("diary://changed", null));
+      return out;
+    });
+  }
+  diaryEntryDelete(id: string) {
+    return this.delay(() => {
+      const gone = this.diary.delete(id);
+      if (gone) this.later(0, () => this.emit("diary://changed", null));
+      return gone;
+    });
+  }
+  diaryLogAlbum(id: string) {
+    return this.delay(() => {
+      if (this.settings.keepDiary === false) throw { kind: "invalid", message: "Turn on Keep a listening diary to log albums." };
+      const out = this.diary.log(id);
+      this.later(0, () => this.emit("diary://changed", null));
+      return out;
+    });
+  }
+  albumFirstHeard(id: string) {
+    return this.delay(() => this.diary.firstHeard(id));
+  }
+  diaryExport(format: "text" | "csv", query?: DiaryQuery | null) {
+    return this.delay(() => {
+      this.lastDiaryExport = { format, body: this.diary.exportText(query) };
+      return `Listening diary.${format === "csv" ? "csv" : "txt"}`;
     });
   }
   albumReleaseStatus(id: string) {

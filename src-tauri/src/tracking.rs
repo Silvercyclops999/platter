@@ -91,6 +91,14 @@ struct Current {
     duration_ms: u64,
     play_id: Option<i64>,
     last_timeline_ms: Option<u64>,
+    /// The album the play was started from, when it was.
+    album: Option<String>,
+}
+
+/// Told when a logged play started from an album has ended (and its row
+/// in the listen log is written), so the listening diary can look.
+pub trait PlayEnded: Send + Sync {
+    fn album_play_ended(&self, album_id: &str);
 }
 
 fn timeline(c: &Current, state: PlaybackState, time_ms: u64) -> Report {
@@ -112,6 +120,7 @@ fn reports_for(cur: &mut Current, ev: &TrackingEvent) -> Vec<Report> {
                 duration_ms: track.duration_ms,
                 play_id: None,
                 last_timeline_ms: Some(0),
+                album: None,
             };
             vec![timeline(cur, PlaybackState::Playing, 0)]
         }
@@ -190,6 +199,7 @@ pub struct Tracker {
     settings: TrackingSettings,
     /// Wakes the retry loop when a scrobble is queued for later.
     queued: tokio::sync::Notify,
+    ended: Option<Arc<dyn PlayEnded>>,
 }
 
 impl Tracker {
@@ -199,7 +209,13 @@ impl Tracker {
     }
 
     pub fn with_reporter(plex: Arc<dyn PlayReporter>, db: DbHandle, settings: TrackingSettings) -> Self {
-        Self { plex, db, settings, queued: tokio::sync::Notify::new() }
+        Self { plex, db, settings, queued: tokio::sync::Notify::new(), ended: None }
+    }
+
+    /// Who hears about plays from an album ending.
+    pub fn with_play_ended(mut self, ended: Arc<dyn PlayEnded>) -> Self {
+        self.ended = Some(ended);
+        self
     }
 
     fn reporting(&self) -> bool {
@@ -334,6 +350,10 @@ impl Tracker {
                     offline: !self.plex.online().await,
                 };
                 let snap = PlaySnapshot::of_track(track);
+                cur.album = match (kind, &start.context_id) {
+                    (Some(ContextKind::Album), Some(id)) => Some(id.clone()),
+                    _ => None,
+                };
                 cur.play_id =
                     Some(self.db.write_async(move |c| listens::start_play_with(c, &start, Some(&snap))).await?);
             }
@@ -359,6 +379,9 @@ impl Tracker {
                         .await?;
                     if upd.scrobble_now {
                         self.scrobble(Some(id), track.id.clone()).await;
+                    }
+                    if let (Some(album), Some(ended)) = (&cur.album, &self.ended) {
+                        ended.album_play_ended(album);
                     }
                 }
             }

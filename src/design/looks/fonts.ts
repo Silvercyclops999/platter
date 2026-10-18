@@ -42,6 +42,27 @@ const FACES: Partial<Record<FontId, Face[]>> = {
 
 const loaded = new Map<FontId, Promise<void>>();
 
+let noteFace: Promise<void> | null = null;
+
+/**
+ * Fraunces italic, for notes written by hand in the listening diary (one
+ * small bundled Latin file, loaded the first time the diary opens).
+ */
+export function loadNoteFace(doc: Document = document): Promise<void> {
+  if (typeof FontFace === "undefined" || !doc.fonts) return Promise.resolve();
+  if (!noteFace) {
+    noteFace = import("@fontsource-variable/fraunces/files/fraunces-latin-wght-italic.woff2?url")
+      .then(async ({ default: url }) => {
+        const face = new FontFace("Fraunces Variable", `url(${JSON.stringify(url)}) format("woff2")`, { weight: "100 900", style: "italic", display: "swap" });
+        doc.fonts.add(await face.load());
+      })
+      .catch(() => {
+        noteFace = null;
+      });
+  }
+  return noteFace;
+}
+
 /** Make a bundled font available. Inter is always loaded. */
 export function loadFont(id: FontId, doc: Document = document): Promise<void> {
   const faces = FACES[id];

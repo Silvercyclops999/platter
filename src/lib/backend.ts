@@ -54,6 +54,10 @@ import type {
   ArtistInfo,
   AlbumCredits,
   AlbumSides,
+  DiaryEdit,
+  DiaryItem,
+  DiaryList,
+  DiaryQuery,
   CreditPage,
   SleeveNotes,
   SongCredits,
@@ -627,6 +631,18 @@ export interface Backend {
   albumSides(id: string): Promise<AlbumSides>;
   /** Split an album into sides by hand (`starts`: where sides B, C... start; empty for none), or null to use its edition's sides. */
   setAlbumSides(id: string, starts: string[] | null): Promise<AlbumSides>;
+  /** Listening diary entries, newest first (all of them without a query). */
+  diaryEntries(query?: DiaryQuery | null): Promise<DiaryList>;
+  /** Rate, note or move a diary entry. */
+  diaryEntryEdit(id: string, edit: DiaryEdit): Promise<DiaryItem>;
+  /** Delete a diary entry; false when it was already gone. */
+  diaryEntryDelete(id: string): Promise<boolean>;
+  /** Log an album in the diary by hand, now. */
+  diaryLogAlbum(id: string): Promise<DiaryItem>;
+  /** When an album was first heard (unix ms), imported history included; null when never. */
+  albumFirstHeard(id: string): Promise<number | null>;
+  /** Save the diary as text or CSV through a save dialog; the file's name, or null when cancelled. */
+  diaryExport(format: "text" | "csv", query?: DiaryQuery | null): Promise<string | null>;
   /** Whether an album counts as released and why; `releasestatus://changed` fires when it changes. */
   albumReleaseStatus(id: string): Promise<AlbumReleaseStatus>;
 
@@ -1420,6 +1436,12 @@ export function createTauriBackend(): Backend {
     albumCrates: (id) => call("album_crates", { id }),
     albumSides: (id) => call("album_sides", { id }),
     setAlbumSides: (id, starts) => call("album_sides_set", { id, starts }),
+    diaryEntries: (query) => call("diary_entries", { query: query ?? null }),
+    diaryEntryEdit: (id, edit) => call("diary_entry_edit", { id, edit }),
+    diaryEntryDelete: (id) => call("diary_entry_delete", { id }),
+    diaryLogAlbum: (id) => call("diary_log_album", { id }),
+    albumFirstHeard: (id) => call("album_first_heard", { id }),
+    diaryExport: (format, query) => call("diary_export", { format, query: query ?? null }),
     albumReleaseStatus: (id) => call("album_release_status", { id }),
     releaseMarkSet: (kind, id, mark) => call("release_mark_set", { kind, id, mark }),
     trackVersions: (id) => call("track_versions", { id }),

@@ -36,11 +36,14 @@ pub struct Groups {
     /// Lyrics you wrote, transcriptions (when that setting is on) and
     /// which songs' lyrics you shared.
     pub lyrics: bool,
+    /// The listening diary (its own setting, off until turned on).
+    #[serde(default)]
+    pub diary: bool,
 }
 
 impl Default for Groups {
     fn default() -> Self {
-        Self { settings: true, library: true, follows: true, lyrics: true }
+        Self { settings: true, library: true, follows: true, lyrics: true, diary: false }
     }
 }
 
@@ -76,6 +79,9 @@ impl Groups {
                 store::TRANSCRIPTS.name(),
                 store::LYRICS_SHARED.name(),
             ]);
+        }
+        if self.diary {
+            out.push(store::DIARY.name());
         }
         out
     }

@@ -1,0 +1,322 @@
+/* ---------------------------------------------------------------- Listening diary
+   A record journal: month headings in the display face, entries ruled
+   like a notebook with the date in the margin, the sleeve with its record
+   edge, and notes in Fraunces italic in Platter's own looks (plain italic
+   in Classic). Stars are ink, not brass: brass stays for primary and
+   playing. Sleeve adds paper grain. */
+
+.diary-page { max-width: 980px; container-type: inline-size; }
+
+.diary-head { margin-bottom: var(--space-6); }
+.diary-head__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+.diary-head .diary-head__title { margin: 0 0 var(--space-2); }
+.diary-page > .page-title { margin-left: 0; }
+.diary-head__lede { margin: 0; color: var(--color-text-secondary); font-size: var(--font-size-md); }
+
+/* Controls: views, filters, year, search, export. */
+.diary-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+  padding-bottom: var(--space-4);
+  margin-bottom: var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+}
+:root[data-identity] .diary-bar { border-bottom-color: var(--engrave-dark); box-shadow: 0 1px 0 var(--engrave-light); }
+.diary-bar__views { margin: 0; }
+.diary-bar__filters { margin: 0; }
+.diary-bar__year select {
+  height: 32px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-raised);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+}
+.diary-bar__step { display: inline-flex; align-items: center; gap: var(--space-1); }
+.diary-bar__step-year {
+  min-width: 3.2em;
+  text-align: center;
+  font-family: var(--font-headings, var(--font-family));
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.diary-bar__search { flex: 1 1 200px; max-width: 300px; margin-left: auto; }
+
+/* Month sections. */
+.diary-month { margin-bottom: var(--space-8); }
+.diary-month__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.diary-month__title {
+  margin: 0;
+  font-family: var(--font-headings, var(--font-family));
+  font-size: clamp(22px, 3.2cqi, 30px);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.diary-month__count { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.diary-month__list { list-style: none; margin: 0; padding: 0; }
+
+/* One entry: margin date, sleeve, text, edit. */
+.diary-entry {
+  position: relative;
+  display: grid;
+  grid-template-columns: 52px auto minmax(0, 1fr) auto;
+  gap: var(--space-4);
+  align-items: start;
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--color-border);
+}
+:root[data-identity] .diary-entry { border-top-color: var(--engrave-dark); box-shadow: inset 0 1px 0 var(--engrave-light); }
+.diary-entry__date {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 2px;
+  line-height: 1;
+}
+.diary-entry__day {
+  font-family: var(--font-headings, var(--font-family));
+  font-size: 28px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.diary-entry__weekday {
+  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  letter-spacing: 0.02em;
+}
+.diary-entry__sleeve {
+  position: relative;
+  isolation: isolate;
+  display: block;
+  width: 72px;
+  margin-right: 0;
+  padding: 0;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.diary-entry__sleeve:disabled { cursor: default; }
+.diary-entry__sleeve .art { border-radius: 2px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.2); }
+:root[data-identity="sleeve"] .diary-entry__sleeve .art { box-shadow: 0 4px 10px rgba(43, 33, 23, 0.22), 0 0 0 1px rgba(43, 33, 23, 0.08); }
+/* The record edge peeking out of the sleeve (Platter's own looks). */
+.diary-entry__disc { display: none; }
+:root[data-identity] .diary-entry__sleeve { margin-right: 14px; }
+:root[data-identity] .diary-entry__disc {
+  display: block;
+  position: absolute;
+  z-index: -1;
+  top: 6%;
+  left: 22%;
+  width: 88%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, transparent 0 30%, #0b0b0b 30.5% 31.5%, transparent 32%),
+    repeating-radial-gradient(circle, #141312 0 1px, #1e1c1a 1px 2px);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+.diary-entry__body { min-width: 0; }
+.diary-entry__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.diary-entry__title {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.25;
+}
+:root[data-identity] .diary-entry__title { font-family: var(--font-headings, var(--font-family)); font-weight: 600; }
+.diary-entry__link { font: inherit; color: var(--color-text-primary); text-align: left; border-radius: 2px; }
+.diary-entry__link:hover { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.diary-entry__artist { margin: 2px 0 0; color: var(--color-text-secondary); font-size: var(--font-size-md); }
+.diary-entry__year { color: var(--color-text-muted); }
+.diary-entry__meta { margin: var(--space-1) 0 0; font-size: var(--font-size-sm); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.diary-entry__note {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: var(--space-2) 0 0;
+  max-width: 62ch;
+}
+.diary-entry__edit { opacity: 0.7; }
+.diary-entry:hover .diary-entry__edit,
+.diary-entry__edit:focus-visible { opacity: 1; }
+
+/* Notes: legible, but in a hand of their own. */
+.diary-note {
+  font-style: italic;
+  font-size: var(--font-size-md);
+  line-height: 1.5;
+  color: var(--color-text-primary);
+  white-space: pre-line;
+}
+:root[data-identity] .diary-note {
+  font-family: "Fraunces Variable", Georgia, serif;
+  font-size: 15.5px;
+  font-weight: 380;
+  font-variation-settings: "opsz" 14;
+}
+
+/* Stars. */
+.stars { display: inline-flex; gap: 2px; color: var(--color-text-primary); }
+.stars__star { position: relative; display: inline-block; flex: none; }
+.stars__empty { position: absolute; inset: 0; color: var(--color-text-muted); opacity: 0.55; }
+.stars__fill { position: absolute; inset: 0 auto 0 0; overflow: hidden; }
+.stars__fill svg { display: block; }
+.stars--input { padding: 4px; border-radius: 6px; cursor: pointer; touch-action: none; }
+.stars--input:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+
+/* Year view: a calm grid of months. */
+.diary-year__sum { margin: 0 0 var(--space-4); color: var(--color-text-secondary); }
+.diary-year__grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+@container (max-width: 720px) { .diary-year__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@container (max-width: 480px) { .diary-year__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.diary-cell {
+  min-height: 124px;
+  padding: var(--space-3);
+  border-radius: 6px;
+  background: var(--color-bg-raised);
+  box-shadow: inset 0 0 0 1px var(--color-border);
+}
+:root[data-identity] .diary-cell { box-shadow: var(--panel-highlight, none), inset 0 0 0 1px var(--engrave-dark); }
+:root[data-identity="sleeve"] .diary-cell { background-image: var(--paper-grain); }
+.diary-cell.is-empty { background: transparent; box-shadow: inset 0 0 0 1px var(--color-border); }
+:root[data-identity] .diary-cell.is-empty { box-shadow: inset 0 0 0 1px var(--engrave-dark); }
+.diary-cell__head {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+  font: inherit;
+  color: var(--color-text-primary);
+  border-radius: 2px;
+  text-align: left;
+}
+.diary-cell__head:disabled { color: var(--color-text-muted); cursor: default; }
+.diary-cell__head:not(:disabled):hover .diary-cell__month { text-decoration: underline; text-underline-offset: 3px; }
+.diary-cell__month { font-family: var(--font-headings, var(--font-family)); font-weight: 600; font-size: var(--font-size-md); }
+.diary-cell__count { font-size: var(--font-size-sm); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.diary-cell__covers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.diary-cell__cover { display: block; width: 100%; padding: 0; border-radius: 2px; cursor: pointer; }
+.diary-cell__cover .art { width: 100% !important; height: auto !important; aspect-ratio: 1; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18); }
+.diary-cell__more {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px var(--color-border);
+}
+
+.diary-empty { margin-top: var(--space-6); }
+.diary-skeleton { display: grid; gap: var(--space-3); }
+.diary-foot { margin: var(--space-8) 0 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+
+/* The editor. */
+.diary-dialog { width: min(560px, calc(100vw - 32px)); padding: var(--space-6); }
+:root[data-identity="sleeve"] .diary-dialog { background-image: var(--paper-grain); }
+.diary-dialog__card { display: flex; gap: var(--space-5, 20px); align-items: center; margin-bottom: var(--space-5, 20px); }
+.diary-dialog__sleeve { position: relative; isolation: isolate; flex: none; width: 96px; }
+:root[data-identity] .diary-dialog__sleeve { margin-right: 18px; }
+.diary-dialog__sleeve .art { border-radius: 2px; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35); }
+.diary-dialog__sleeve .diary-entry__disc { display: none; }
+:root[data-identity] .diary-dialog__sleeve .diary-entry__disc {
+  display: block;
+  position: absolute;
+  z-index: -1;
+  top: 6%;
+  left: 22%;
+  width: 88%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: repeating-radial-gradient(circle, #141312 0 1px, #1e1c1a 1px 2px);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.35);
+}
+.diary-dialog__about { min-width: 0; }
+.diary-dialog__title { margin: 0; font-size: var(--font-size-xl); line-height: 1.2; }
+:root[data-identity] .diary-dialog__title { font-family: var(--font-headings, var(--font-family)); font-weight: 600; }
+.diary-dialog__artist { margin: 2px 0 0; color: var(--color-text-secondary); }
+.diary-dialog__meta { margin: var(--space-2) 0 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+.diary-dialog__row { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); }
+.diary-dialog__label { min-width: 64px; font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-text-secondary); }
+.diary-dialog__date {
+  height: 34px;
+  padding: 0 var(--space-3);
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-base);
+  color: var(--color-text-primary);
+  font: inherit;
+  color-scheme: light dark;
+}
+.diary-dialog__note { display: grid; gap: var(--space-2); margin-bottom: var(--space-4); }
+.diary-dialog__text {
+  width: 100%;
+  font-family: var(--font-family);
+  resize: vertical;
+  min-height: 112px;
+  padding: var(--space-3);
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-base);
+  /* Ruled like notebook paper. */
+  background-image: repeating-linear-gradient(transparent 0 calc(1.5em - 1px), color-mix(in srgb, var(--color-text-muted) 18%, transparent) calc(1.5em - 1px) 1.5em);
+  background-attachment: local;
+  background-position: 0 calc(var(--space-3) - 2px);
+}
+.diary-dialog__text:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 1px; }
+:root[data-identity="sleeve"] .diary-dialog__text { background-color: color-mix(in srgb, #fff 55%, var(--color-bg-raised)); }
+.diary-dialog__count { justify-self: end; font-size: var(--font-size-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.diary-dialog__count.is-near { color: var(--color-warning-text); }
+.diary-dialog__actions { display: flex; align-items: center; gap: var(--space-2); }
+.diary-dialog__spacer { flex: 1; }
+.diary-dialog__delete { color: var(--color-text-secondary); }
+.diary-dialog__delete.is-confirming { color: var(--color-error-text); }
+
+/* First heard on album pages. */
+.first-heard {
+  margin: calc(var(--space-2) * -1) 0 var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+.first-heard__label { color: var(--color-text-muted); }
+
+@container (max-width: 560px) {
+  .diary-entry { grid-template-columns: 40px auto minmax(0, 1fr); }
+  .diary-entry__edit { grid-column: 3; justify-self: start; }
+  .diary-bar__search { margin-left: 0; max-width: none; }
+}

@@ -146,6 +146,12 @@ const CALLS: [string, (b: ReturnType<typeof createTauriBackend>) => Promise<unkn
   ["album_crates", (b) => b.albumCrates("5"), { id: "5" }],
   ["album_sides", (b) => b.albumSides("5"), { id: "5" }],
   ["album_sides_set", (b) => b.setAlbumSides("5", ["t3"]), { id: "5", starts: ["t3"] }],
+  ["diary_entries", (b) => b.diaryEntries({ rated: true }), { query: { rated: true } }],
+  ["diary_entry_edit", (b) => b.diaryEntryEdit("e1", { rating: 4.5, note: "Good" }), { id: "e1", edit: { rating: 4.5, note: "Good" } }],
+  ["diary_entry_delete", (b) => b.diaryEntryDelete("e1"), { id: "e1" }],
+  ["diary_log_album", (b) => b.diaryLogAlbum("5"), { id: "5" }],
+  ["album_first_heard", (b) => b.albumFirstHeard("5"), { id: "5" }],
+  ["diary_export", (b) => b.diaryExport("csv"), { format: "csv", query: null }],
 ];
 
 const EVENTS = [

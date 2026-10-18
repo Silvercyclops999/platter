@@ -77,6 +77,8 @@ export type Route =
   | { name: "onThisDay" }
   /** Albums owned on vinyl, CD or cassette, and what a Discogs import found. */
   | { name: "shelf" }
+  /** The listening diary; `edit` opens one entry's editor. */
+  | { name: "diary"; edit?: string }
   /** Create a Blend: pick people to combine tastes with. */
   | { name: "blendNew" }
   /** Everything in the library a person is credited on (from sleeve notes and file tags). */

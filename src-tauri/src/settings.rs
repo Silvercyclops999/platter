@@ -809,6 +809,12 @@ pub struct Settings {
     pub show_crates: bool,
     /// Album pages show "More from <label>" and other crate shelves.
     pub crate_shelves: bool,
+    /// Keep a listening diary (albums played start to finish, rated and noted).
+    pub keep_diary: bool,
+    /// Albums played start to finish go in the diary on their own.
+    pub diary_auto: bool,
+    /// The diary travels in the sync file (this device; off: it stays here).
+    pub sync_diary: bool,
     /// List DLNA / UPnP renderers under Listen on (SSDP searches only while on).
     pub show_dlna_devices: bool,
     /// platter:// command links, scripts and the command line can control playback (through the local control API).
@@ -1153,6 +1159,9 @@ impl Default for Settings {
             flip_pause: false,
             show_crates: true,
             crate_shelves: true,
+            keep_diary: true,
+            diary_auto: true,
+            sync_diary: false,
             show_dlna_devices: true,
             allow_automation: false,
             translate_to: "en".into(),
@@ -1336,6 +1345,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "flipPause",
     "showCrates",
     "crateShelves",
+    "keepDiary",
+    "diaryAuto",
     "showDlnaDevices",
     "translateTo",
     "showPronunciation",
@@ -1350,6 +1361,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
 
 /// Settings kept on this device only.
 pub const DEVICE_SETTINGS: &[&str] = &[
+    "syncDiary",
     "musicFolder",
     "musicFolderServer",
     "privateSession",
@@ -1685,6 +1697,9 @@ pub struct SettingsPatch {
     pub flip_pause: Option<bool>,
     pub show_crates: Option<bool>,
     pub crate_shelves: Option<bool>,
+    pub keep_diary: Option<bool>,
+    pub diary_auto: Option<bool>,
+    pub sync_diary: Option<bool>,
     pub show_dlna_devices: Option<bool>,
     pub allow_automation: Option<bool>,
     pub translate_to: Option<String>,
@@ -2049,6 +2064,9 @@ impl Settings {
         set(&mut self.flip_pause, p.flip_pause);
         set(&mut self.show_crates, p.show_crates);
         set(&mut self.crate_shelves, p.crate_shelves);
+        set(&mut self.keep_diary, p.keep_diary);
+        set(&mut self.diary_auto, p.diary_auto);
+        set(&mut self.sync_diary, p.sync_diary);
         set(&mut self.show_friend_activity, p.show_friend_activity);
         set(&mut self.share_activity, p.share_activity);
         set(&mut self.whats_new_announcements, p.whats_new_announcements);
@@ -2343,6 +2361,7 @@ impl Settings {
                 library: self.sync_library,
                 follows: self.sync_follows,
                 lyrics: self.sync_lyrics,
+                diary: self.keep_diary && self.sync_diary,
             },
         }
     }
@@ -2567,6 +2586,8 @@ pub struct Live {
     pub save_queue_on_server: Arc<AtomicBool>,
     /// Sleeve notes: shown, and looked up online.
     pub sleeve: crate::sleeve::service::SleeveSwitches,
+    /// The listening diary: kept, and filled on its own.
+    pub diary: crate::diary::DiarySwitches,
 }
 
 /// Push settings to the tracker, stream requests, Popular and the art cache.
@@ -2626,6 +2647,8 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.share_public_links.store(s.share_public_links && on, Ordering::Relaxed);
     live.lyrics_lrclib.store(s.lyrics_lrclib && on, Ordering::Relaxed);
     live.sleeve.show.store(s.show_sleeve_notes, Ordering::Relaxed);
+    live.diary.on.store(s.keep_diary, Ordering::Relaxed);
+    live.diary.auto.store(s.keep_diary && s.diary_auto, Ordering::Relaxed);
     live.sleeve.online.store(s.show_sleeve_notes && s.sleeve_lookups && on, Ordering::Relaxed);
     live.lyrics_prefer_own.store(s.lyrics_prefer_own, Ordering::Relaxed);
     live.lyrics_show_auto.store(s.show_auto_lyrics, Ordering::Relaxed);
@@ -4749,6 +4772,30 @@ mod tests {
         let mut s = s;
         s.apply(&serde_json::from_str(r#"{"showCrates":false,"crateShelves":false}"#).unwrap()).unwrap();
         assert!(!s.show_crates && !s.crate_shelves);
+    }
+
+    #[test]
+    fn the_diary_is_kept_and_filled_but_stays_on_this_device() {
+        let s = Settings::default();
+        assert!(s.keep_diary && s.diary_auto && !s.sync_diary);
+        assert!(!s.sync_config().groups.diary, "the diary isn't synced by default");
+        for k in ["keepDiary", "diaryAuto"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
+        }
+        assert!(!SYNCED_SETTINGS.contains(&"syncDiary"), "each device opts in to syncing the diary");
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(old.keep_diary && old.diary_auto && !old.sync_diary, "older settings files get the defaults");
+        let mut s = s;
+        s.apply(&serde_json::from_str(r#"{"syncDiary":true}"#).unwrap()).unwrap();
+        assert!(s.sync_config().groups.diary);
+        let live = Live::default();
+        let (db, _dir) = db();
+        publish(&s, &live, &db);
+        assert!(live.diary.on.load(Ordering::Relaxed) && live.diary.auto.load(Ordering::Relaxed));
+        s.apply(&serde_json::from_str(r#"{"keepDiary":false}"#).unwrap()).unwrap();
+        assert!(!s.sync_config().groups.diary, "no diary, nothing to sync");
+        publish(&s, &live, &db);
+        assert!(!live.diary.on.load(Ordering::Relaxed) && !live.diary.auto.load(Ordering::Relaxed));
     }
 
     #[test]

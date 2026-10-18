@@ -161,6 +161,7 @@ export function AppMenu() {
   const goOffline = useSettings((s) => !!s.settings?.goOffline);
   const statsPage = useSettings((s) => s.settings?.statsPage !== false);
   const wrappedOn = useSettings((s) => s.settings?.wrappedTopSongs !== false);
+  const diaryOn = useSettings((s) => s.settings?.keepDiary !== false);
   const doctorOn = useSettings((s) => s.settings?.libraryDoctor !== false);
   const doctorCount = useDoctorCount();
   const soundMapOn = useSoundMapEntry();
@@ -270,6 +271,11 @@ export function AppMenu() {
             <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "stats" }))}>
               <span>Stats</span>
               <StatsGlyph size={18} className="appmenu__glyph" />
+            </button>
+          )}
+          {diaryOn && (
+            <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "diary" }))}>
+              <span>Listening diary</span>
             </button>
           )}
           {wrappedOn && (

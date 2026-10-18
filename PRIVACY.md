@@ -267,6 +267,17 @@ Some optional features planned for later will talk to other services, but
 only once you turn them on. Examples are Lidarr and Tautulli. Each one is
 off until you set it up, and this file will list exactly what each one sends.
 
+## Listening diary
+
+The listening diary is kept on this computer. Each entry holds the album,
+the date, how much of it you played, this computer's name and the audio
+output's name, and the rating and note you add. Platter never shares,
+scrobbles or sends it to your server or anyone else. It goes in the sync
+file only if you turn on "Sync the diary to my devices" on each computer,
+which is off to begin with. Export writes a text or CSV file only where you
+choose to save it. Turn off "Keep a listening diary" and no new entries are
+made.
+
 ## The sync file
 
 Sync with a folder is off until you turn it on in Settings. When it's on,
@@ -280,7 +291,8 @@ The file holds the settings that aren't marked This device only, your pins,
 library folders and which playlists are in them, followed artists, hidden and
 snoozed items, bookmarks, lyrics you wrote in the editor, transcribed lyrics
 (unless you turn off "Sync transcriptions to my devices") and which songs'
-lyrics you shared, and for each of your
+lyrics you shared, your listening diary (only with "Sync the diary to my
+devices" on), and for each of your
 devices its name and when it last wrote the file. You choose which of these go
 in under What to sync. It never holds your Plex token, API keys, the
 ListenBrainz token, the Imgur client ID, AirPlay passwords or any other

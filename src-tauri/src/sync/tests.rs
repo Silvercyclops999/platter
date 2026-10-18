@@ -368,7 +368,7 @@ fn groups_turned_off_stay_out_but_other_devices_entries_are_kept() {
     mac.pass(cloud.path()).unwrap();
     pins::toggle(&pc.store, pin("album", "1")).unwrap();
     pc.store.put(&FOLLOWS, "p", &follow("pc")).unwrap();
-    let only_library = Groups { settings: true, library: true, follows: false, lyrics: true };
+    let only_library = Groups { settings: true, library: true, follows: false, lyrics: true, diary: false };
     engine::pass(&pc.store, cloud.path(), TAG, only_library, "PC", pc.store.now()).unwrap();
     let data = file::read(&file_path(cloud.path())).unwrap().unwrap();
     assert!(data.entries["pins"].contains_key("album:1"));

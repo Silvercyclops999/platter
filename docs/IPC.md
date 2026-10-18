@@ -2872,6 +2872,37 @@ The answer is worked out once and kept until the library, the credit index, `alb
 
 Settings: `showCrates` (on) shows the Crates page, its app menu entry and the Home link in Platter's own looks; while off `crates` is empty and `crate_page` null. `crateShelves` (on) shows the album page shelves (needs `showCrates`); while either is off `album_crates` is empty. Both synced.
 
+## Listening diary
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `diary_entries` | `{ query: DiaryQuery \| null }` | `DiaryList` |
+| `diary_entry_edit` | `{ id, edit: DiaryEdit }` | `DiaryItem` |
+| `diary_entry_delete` | `{ id }` | `boolean` (whether there was one) |
+| `diary_log_album` | `{ id }` (album) | `DiaryItem` |
+| `album_first_heard` | `{ id }` (album) | unix ms, or null when never played |
+| `diary_export` | `{ format: "text"\|"csv", query: DiaryQuery \| null }` | the saved file's name, or null when the save dialog was cancelled |
+
+`DiaryQuery = { from?, until?, rated?, withNotes?, text?, albumId? }`: `from` and `until` are unix ms (`until` excluded), `text` matches every word in the note, title or artist, case-insensitively. No query lists every entry.
+
+`DiaryList = { entries: DiaryItem[], total, firstAt, lastAt }`. Entries come newest first. `total`, `firstAt` and `lastAt` describe the whole diary whatever the query, so the page can offer years and say how many entries there are.
+
+`DiaryItem = { id, albumId, title, artist, year, at, startedAt, songsPlayed, songsTotal, minutes, device, output, rating, note, auto, thumb, inLibrary, listenedOn: "headphones"|"speakers"|null }`. `title`, `artist` and `year` are the album as it was when logged; `thumb` is its cover now and `inLibrary` says it's still there. `at` is when it finished (or was logged). `device` is this computer's name and `output` the output device's name when the entry was written; `listenedOn` is worked out from that name and is null when the name doesn't say. `rating` is 0.5 to 5 in half steps or null.
+
+`DiaryEdit = { rating, note, at? }` replaces the user's part: `rating` null clears it, `note` is plain text up to 500 characters (control characters dropped, runs of blank lines made one), `at` moves the entry (never more than a day ahead). A bad rating, a long note or a future date is `invalid`; an entry that's gone is `notFound`.
+
+Entries are written on their own when a play started from an album ends and the listen log shows a sitting that heard it through: plays from that album with no pause over two hours between them that heard at least 80% of its songs, the last song among them, on an album of 3 songs or more. A song is heard when it finished or played half way. Hearing it through again straight after starts a new sitting. Only the listen log counts, so imported plays never make entries, and a private session logs nothing. `diary_log_album` adds one by hand, dated now, with no device or output.
+
+`album_first_heard` is the earliest play of any of the album's songs in the listen log or in imported plays (sources left out of plays are left out here too), or the earliest diary entry for it when that is earlier.
+
+`diary_export` writes the listed entries with this computer's local dates: text as a journal grouped by month, CSV with a byte order mark and the columns `date,time,album,artist,year,rating,songs_played,songs_total,minutes,device,output,listened_on,source,note` (a field starting with `=`, `+`, `-` or `@` gets a leading `'`).
+
+Entries are kept in the sync store's `diary` namespace (keyed `auto:<album>:<play>` or `log:<album>:<ms>:<n>`). A deleted entry leaves a tombstone, so the same sitting is never written again. The namespace is in the sync file only while the `diary` group is on, which follows `keepDiary && syncDiary`.
+
+Events: `diary://changed` (no payload) when entries change here; `syncstore://changed` names `diary` when they change from another device.
+
+Settings: `keepDiary` (on, synced) keeps the diary, its page, Log this album and First heard; `diaryAuto` (on, synced) writes entries on their own; `syncDiary` (off, this device) puts the diary in the sync file.
+
 ## Sync, folders and keys
 
 | Command | Args | Returns |

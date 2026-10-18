@@ -44,6 +44,7 @@ const DoctorPage = lazy(() => import("../pages/DoctorPage").then((m) => ({ defau
 const DevicesPage = lazy(() => import("../pages/DevicesPage").then((m) => ({ default: m.DevicesPage })));
 const CratesPage = lazy(() => import("../pages/CratesPage").then((m) => ({ default: m.CratesPage })));
 const CratePage = lazy(() => import("../pages/CratesPage").then((m) => ({ default: m.CratePage })));
+const DiaryPage = lazy(() => import("../pages/DiaryPage").then((m) => ({ default: m.DiaryPage })));
 const SoundMapPage = lazy(() => import("../pages/SoundMapPage").then((m) => ({ default: m.SoundMapPage })));
 
 /** Scroll offset per history entry, so Back returns to where you were. */
@@ -187,6 +188,8 @@ function Page({ route }: { route: Route }) {
       return <OnThisDayPage />;
     case "shelf":
       return <ShelfPage />;
+    case "diary":
+      return <DiaryPage key={route.edit ?? "diary"} edit={route.edit} />;
     case "credits":
       return <CreditPage key={route.person} person={route.person} />;
     case "playlist":

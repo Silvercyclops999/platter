@@ -58,6 +58,8 @@ import { useSettings } from "../stores/settings";
 import { SleeveNotesPanel } from "./SleeveNotes";
 import { SidesDialog } from "./SidesDialog";
 import { useAlbumSides } from "../lib/useAlbumSides";
+import { diaryLogItems, useDiaryOn } from "../lib/diary";
+import { FirstHeard } from "./FirstHeard";
 import type { AlbumSide, CatTrack, Track } from "../lib/types";
 
 type AlbumPane = "songs" | "sleeve";
@@ -93,6 +95,7 @@ function LibraryAlbumView({ id, tab }: { id: string; tab?: "sleeve" }) {
   const [splitting, setSplitting] = useState(false);
   const sidesOn = useSettings((s) => s.settings?.showVinylSides !== false);
   const sideList = sides?.sides.length ? sides.sides : null;
+  const diaryOn = useDiaryOn();
   const [view, setView] = useState<AlbumView>(loadAlbumView);
   // Songs or Sleeve notes; switching editions keeps the tab.
   const sleeveOn = useSettings((s) => s.settings?.showSleeveNotes !== false);
@@ -225,6 +228,7 @@ function LibraryAlbumView({ id, tab }: { id: string; tab?: "sleeve" }) {
                   shareItem("album", album.id, album.thumb),
                   bookmarkPageItem("album", album.id, album.title, { subtitle: album.artistTitle, thumb: album.thumb }),
                   yourStatsItem("album", album.id, album.title),
+                  ...diaryLogItems(diaryOn, album),
                   physicalItem({ albumId: album.id, title: album.title, artist: album.artistTitle, thumb: album.thumb }),
                   {
                     label: pinned ? "Unpin from sidebar" : "Pin to sidebar",
@@ -289,6 +293,7 @@ function LibraryAlbumView({ id, tab }: { id: string; tab?: "sleeve" }) {
           />
         )}
         <StatsStrip kind="album" id={id} />
+        <FirstHeard albumId={id} />
         {sleeveOn && (
           <Tabs<AlbumPane>
             label={album ? `${album.title}: songs or sleeve notes` : "Songs or sleeve notes"}

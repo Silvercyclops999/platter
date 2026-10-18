@@ -133,6 +133,7 @@ export function ProfilePage() {
   const wrappedOn = useSettings((s) => s.settings?.wrappedTopSongs !== false);
   const compareOn = useSettings((s) => !!s.settings?.statsCompare);
   const activityOn = useSettings((s) => s.settings?.showFriendActivity !== false);
+  const diaryOn = useSettings((s) => s.settings?.keepDiary !== false);
 
   const span = useLoad(() => (statsOn ? backend.statsSpan() : NONE_YET), [statsOn]);
   const today = span.data?.today ?? null;
@@ -234,7 +235,7 @@ export function ProfilePage() {
         </Section>
       ) : null,
     links:
-      statsOn || wrappedOn ? (
+      statsOn || wrappedOn || diaryOn ? (
         <nav className="profile-links" aria-label="More of your listening">
           {statsOn && (
             <Button variant="secondary" onClick={() => nav.go({ name: "stats" })}>
@@ -244,6 +245,11 @@ export function ProfilePage() {
           {wrappedOn && (
             <Button variant="secondary" onClick={() => wrapped.open(year)}>
               {year} Wrapped
+            </Button>
+          )}
+          {diaryOn && (
+            <Button variant="secondary" onClick={() => nav.go({ name: "diary" })}>
+              Your listening diary
             </Button>
           )}
         </nav>

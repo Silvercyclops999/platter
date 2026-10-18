@@ -111,11 +111,15 @@ pub const LIDARR: Ns<Value> = Ns::new("lidarr");
 pub const PLAYED_HIDDEN: Ns<crate::import::played::HiddenRow> = Ns::new("playedHidden");
 /// Albums split into record sides by hand, keyed by album id.
 pub const ALBUM_SIDES: Ns<crate::sleeve::sides::ManualSides> = Ns::new("albumSides");
+/// Listening diary entries, keyed `auto:<album>:<play>` or `log:<album>:<ms>:<n>`.
+/// Private: synced only with the diary group, which is off by default.
+pub const DIARY: Ns<crate::diary::DiaryEntry> = Ns::new("diary");
 
 /// Every namespace the store takes. Anything else is refused, so nothing
 /// lands in the sync file by accident.
-pub const NAMESPACES: [&str; 20] = [
+pub const NAMESPACES: [&str; 21] = [
     MIXED.name(),
+    DIARY.name(),
     ALBUM_SIDES.name(),
     TRANSCRIPTS.name(),
     LYRICS_SHARED.name(),

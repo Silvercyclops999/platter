@@ -1331,6 +1331,12 @@ export interface Settings {
   showCrates: boolean;
   /** Album pages show "More from <label>" and other crate shelves. */
   crateShelves: boolean;
+  /** Keep a listening diary of albums played start to finish. */
+  keepDiary: boolean;
+  /** Albums played start to finish go in the diary on their own. */
+  diaryAuto: boolean;
+  /** The diary travels in the sync file (this device only; off by default). */
+  syncDiary: boolean;
   /** Studio (the default), Studio Black, Sleeve, Classic or another built-in look. */
   theme: ThemeSetting;
   /** A preset id ("brass" is the default) or a custom colour as #RRGGBB. */
@@ -1816,6 +1822,9 @@ export const DEFAULT_SETTINGS: Settings = {
   flipPause: false,
   showCrates: true,
   crateShelves: true,
+  keepDiary: true,
+  diaryAuto: true,
+  syncDiary: false,
   theme: "studio",
   accent: "brass",
   followSystem: true,
@@ -3640,6 +3649,59 @@ export interface AlbumSides {
   detected: boolean;
 }
 
+/** One listening diary entry (`diary_entries`). */
+export interface DiaryItem {
+  id: string;
+  albumId: string;
+  /** The album as it was when logged. */
+  title: string;
+  artist: string;
+  year: number | null;
+  /** When it finished, or was logged (unix ms). */
+  at: number;
+  startedAt: number | null;
+  songsPlayed: number;
+  songsTotal: number;
+  minutes: number;
+  /** The computer it was played on. */
+  device: string | null;
+  /** The output device's name. */
+  output: string | null;
+  /** 0.5 to 5 in half steps. */
+  rating: number | null;
+  note: string;
+  /** Written on its own (false: logged by hand). */
+  auto: boolean;
+  /** The album's cover now. */
+  thumb: string | null;
+  inLibrary: boolean;
+  listenedOn: "headphones" | "speakers" | null;
+}
+
+export interface DiaryQuery {
+  from?: number;
+  until?: number;
+  rated?: boolean;
+  withNotes?: boolean;
+  text?: string;
+  albumId?: string;
+}
+
+export interface DiaryList {
+  /** Newest first. */
+  entries: DiaryItem[];
+  /** Entries in the whole diary. */
+  total: number;
+  firstAt: number | null;
+  lastAt: number | null;
+}
+
+export interface DiaryEdit {
+  rating: number | null;
+  note: string;
+  at?: number;
+}
+
 /** `credit_page`: everything in the library a person is credited on, by role. */
 /** What a crate groups albums by. Years are reached from their era. */
 export type CrateKind = "label" | "producer" | "studio" | "era" | "year" | "genre";
@@ -4055,6 +4117,8 @@ export interface EventMap {
   /** How far preparing Compare is: one version's file, 0 to 1. */
   "compare://progress": { side: CompareSide; fraction: number };
   "library://changed": null;
+  /** Listening diary entries changed on this device. */
+  "diary://changed": null;
   /** One artist's page data changed outside a sync (similar artists fetched). */
   "artist://changed": { id: string };
   /** New outside info arrived for an artist (artistInfo can be asked again). */

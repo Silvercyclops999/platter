@@ -1935,6 +1935,26 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
         />
       ),
     },
+    // Library: the listening diary
+    {
+      key: "keepDiary",
+      section: "Library",
+      title: "Keep a listening diary",
+      description: "A private journal of albums you play start to finish, to rate and write about.",
+      more: "When you play an album from start to finish, a dated entry goes in your diary with how much you played and where: this computer, and headphones or speakers when the output's name says. Add a rating and a short note, or log any album from its menu. Album pages show when you first heard them. The diary is never shared or scrobbled, and stays on this computer unless you sync it.",
+      control: (ids) => toggle(s, "keepDiary", ids),
+      block: () =>
+        s?.keepDiary === false ? null : (
+          <Checklist
+            s={s}
+            label="Diary options"
+            items={[
+              { key: "diaryAuto", label: "Add albums played start to finish automatically" },
+              { key: "syncDiary", label: "Sync the diary to my devices" },
+            ]}
+          />
+        ),
+    },
     // Library: stats from your listening before Platter and in other apps
     ...historyRows("plexHistory", "Include my Plex listening history", "Stats and mixes also count what you played in Plex before Platter.", "Stats, mixes, On Repeat and recaps also count what you played on your Plex server before Platter and in other Plex apps. Only your own plays, never other people's on the server, and a play from Platter counts once."),
     ...(history.source("tautulli")?.setUp

@@ -7,6 +7,7 @@ pub mod bookmarks;
 pub mod bridge;
 pub mod db;
 pub mod devices;
+pub mod diary;
 pub mod digging;
 pub mod discover;
 pub mod doctor;
@@ -707,8 +708,14 @@ pub fn run() {
                 app_settings.clone(),
             ));
             os.start(app.handle(), player.clone(), art.clone(), cache_dir.join("now-playing"), live.platform.clone());
+            // The listening diary: albums played start to finish, kept here
+            // (and in the sync file only when its own setting is on).
+            let diary = diary::Diary::new(db.clone(), sync_store.clone(), live.diary.clone(), plex.identity().device_name.clone());
+            diary.set_events(Arc::new(app.handle().clone()));
+            diary.set_place(Arc::new(player.clone()));
+            app.manage(diary.clone());
             tracking::spawn(
-                tracking::Tracker::new(backends.clone(), db.clone(), live.tracking.clone()),
+                tracking::Tracker::new(backends.clone(), db.clone(), live.tracking.clone()).with_play_ended(Arc::new(diary)),
                 player.subscribe_tracking(),
             );
             // The queue kept on servers that hold one, for other apps to pick up.
@@ -1631,6 +1638,12 @@ pub fn run() {
             digging::commands::album_crates,
             sleeve::sides::album_sides,
             sleeve::sides::album_sides_set,
+            diary::diary_entries,
+            diary::diary_entry_edit,
+            diary::diary_entry_delete,
+            diary::diary_log_album,
+            diary::album_first_heard,
+            diary::diary_export,
             artistinfo::commands::album_release_status,
             archive::commands::release_mark_set,
             archive::commands::track_versions,
