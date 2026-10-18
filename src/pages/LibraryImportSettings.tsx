@@ -18,6 +18,7 @@ import { ImportHistoryLinks } from "./ImportHistoryLinks";
 import { PlayedSettings } from "./PlayedALot";
 import "./library-import.css";
 import { failText } from "../lib/errorText";
+import { MoreText } from "./SettingMore";
 
 const SECTION_WORDS = "library import services playlists liked songs history csv m3u transfer played a lot missing plays period";
 
@@ -57,11 +58,14 @@ function SourceRow({ src, on, report }: { src: ImportSourceText; on: boolean | n
   return (
     <div className="setting-row import-source" data-setting={`import-${src.id}`}>
       <div className="setting-row__text">
-        <div id={`${id}-t`} className="setting-row__title">
-          {src.name}
+        <div className="setting-row__head">
+          <div id={`${id}-t`} className="setting-row__title">
+            {src.name}
+          </div>
+          {src.short && <MoreText title={src.name} text={src.help} />}
         </div>
         <p id={`${id}-d`} className="setting-row__desc">
-          {src.help}
+          {src.short ?? src.help}
         </p>
         {src.note && <p className="setting-row__desc import-source__note">{src.note}</p>}
       </div>

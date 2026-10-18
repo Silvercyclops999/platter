@@ -479,7 +479,7 @@ describe("the Show sound map setting", () => {
     menu.unmount();
 
     render(<SettingsPage />);
-    const toggle = await screen.findByRole("switch", { name: "Show sound map" });
+    const toggle = await screen.findByRole("switch", { name: "Show the sound map" });
     expect(toggle).toHaveAttribute("aria-checked", "true");
     await user.click(toggle);
     await waitFor(() => expect(useSettings.getState().settings?.showSoundMap).toBe(false));

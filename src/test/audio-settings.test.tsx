@@ -39,19 +39,19 @@ const band = (name: string) => screen.getByRole("slider", { name });
 describe("transitions and loudness", () => {
   it("shows the defaults", async () => {
     render(<SettingsPage />);
-    expect(screen.getByRole("combobox", { name: "Crossfade" })).toHaveValue("smart");
+    expect(screen.getByRole("combobox", { name: "Crossfade songs" })).toHaveValue("smart");
     expect(screen.getByRole("switch", { name: "Never crossfade within an album" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("combobox", { name: "Loudness leveling" })).toHaveValue("smart");
+    expect(screen.getByRole("combobox", { name: "Level loudness between songs" })).toHaveValue("smart");
     expect(screen.getByRole("slider", { name: "Volume before the equalizer" })).toHaveAttribute("aria-valuenow", "0");
     expect(screen.getByRole("switch", { name: "Keep loud parts from distorting" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("switch", { name: "Equalizer" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("switch", { name: "Use the equalizer" })).toHaveAttribute("aria-checked", "false");
     // Fixed length only shows for a fixed crossfade.
     expect(screen.queryByRole("slider", { name: "Crossfade length" })).toBeNull();
   });
 
   it("a fixed crossfade gets a length from 1 to 12 s", async () => {
     render(<SettingsPage />);
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Crossfade" }), "fixed");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Crossfade songs" }), "fixed");
     const len = await screen.findByRole("slider", { name: "Crossfade length" });
     expect(len).toHaveAttribute("aria-valuenow", "6");
     act(() => len.focus());
@@ -68,7 +68,7 @@ describe("transitions and loudness", () => {
     await userEvent.keyboard("{ArrowRight}{ArrowRight}{ArrowRight}");
     await waitFor(async () => expect((await core()).preampDb).toBe(1.5));
     expect(screen.getByText("+1.5 dB")).toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Loudness leveling" }), "album");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Level loudness between songs" }), "album");
     await userEvent.click(screen.getByRole("switch", { name: "Keep loud parts from distorting" }));
     await waitFor(async () => {
       const s = await core();
@@ -83,7 +83,7 @@ describe("equalizer", () => {
     expect(band("125 Hz")).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByRole("combobox", { name: "Preset" })).toBeDisabled();
     expect(screen.getByText("Turn on the equalizer to change the curve.")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("switch", { name: "Equalizer" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Use the equalizer" }));
     expect(band("125 Hz")).not.toHaveAttribute("aria-disabled");
     expect(screen.getAllByRole("slider").filter((s) => /Hz$/.test(s.getAttribute("aria-label") ?? ""))).toHaveLength(10);
   });

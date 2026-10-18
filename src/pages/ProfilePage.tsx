@@ -120,7 +120,7 @@ function NoHistory() {
         <h2 className="profile-empty__title">Nothing played yet</h2>
         <p className="profile-empty__text">Play some music, or import your past plays, and this month's listening shows up here.</p>
       </div>
-      <Button onClick={() => nav.go({ name: "settings" })}>Import past plays</Button>
+      <Button onClick={() => nav.go({ name: "settings", page: "libraryImport" })}>Import past plays</Button>
     </div>
   );
 }

@@ -27,6 +27,7 @@ import { STATE_LABEL, useLidarrReady } from "./lidarrShared";
 import { openSettingsAt } from "./SoundMapPage";
 import "./lidarr-request.css";
 import { failText } from "../lib/errorText";
+import { MoreText } from "./SettingMore";
 
 const LidarrRequestDialog = lazy(() => import("./LidarrRequest").then((m) => ({ default: m.LidarrRequestDialog })));
 
@@ -210,7 +211,7 @@ export function PlayedALot() {
         <div className="import-empty" role="status">
           <p>No listening history yet</p>
           <p>Import a history download and what you played a lot that isn't in your library shows up here.</p>
-          <Button className="import-empty__go" onClick={() => openSettingsAt("#settings-library-import")}>
+          <Button className="import-empty__go" onClick={() => openSettingsAt("#settings-library-import", { page: "libraryImport" })}>
             Import history
           </Button>
         </div>
@@ -556,11 +557,17 @@ export function PlayedSettings() {
     <>
     <div className="setting-row played-settings" data-setting="showPlayedALot">
       <div className="setting-row__text">
-        <div id={`${id}-t`} className="setting-row__title">
-          Show "Played a lot" on the Missing page
+        <div className="setting-row__head">
+          <div id={`${id}-t`} className="setting-row__title">
+            Show "Played a lot" on the Missing page
+          </div>
+          <MoreText
+            title='Show "Played a lot" on the Missing page'
+            text="Songs and albums from imported listening history that aren't in your library, the most played first. Synced."
+          />
         </div>
         <p id={`${id}-d`} className="setting-row__desc">
-          Songs and albums from imported listening history that aren't in your library, the most played first. Synced.
+          Imported songs and albums you don't have, the most played first. Synced.
         </p>
       </div>
       <div className="setting-row__control">

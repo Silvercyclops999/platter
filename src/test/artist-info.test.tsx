@@ -290,8 +290,9 @@ describe("artist page with outside info", () => {
   it("the MusicBrainz and ListenBrainz stats switches are on by default and synced", async () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
-    const mb = await within(row("infoMusicbrainz")).findByRole("switch", { name: "MusicBrainz" });
-    const lb = within(row("infoListenbrainzStats")).getByRole("switch", { name: "ListenBrainz (listener numbers)" });
+    const sources = row("artistInfoSources");
+    const mb = await within(sources).findByRole("checkbox", { name: "MusicBrainz (release dates, credits and members)" });
+    const lb = within(sources).getByRole("checkbox", { name: "ListenBrainz (listener numbers)" });
     expect(mb).toBeChecked();
     expect(lb).toBeChecked();
     await user.click(mb);
@@ -330,11 +331,11 @@ describe("artist page with outside info", () => {
 });
 
 describe("Artist info settings", () => {
-  it("has the rows under Integrations with Wikipedia on and the keyed sources waiting for keys", async () => {
+  it("has the rows on the Artist info sources page with Wikipedia on and the keyed sources waiting for keys", async () => {
     render(<SettingsPage />);
     const group = await screen.findByRole("region", { name: "Integrations" });
-    expect(within(group).getAllByRole("heading", { level: 3, name: "Artist info" })[0]).toBeInTheDocument();
-    expect(within(group).getByRole("switch", { name: "Wikipedia and Wikidata" })).toBeChecked();
+    expect(within(group).getAllByRole("heading", { level: 3, name: "Artist info sources" })[0]).toBeInTheDocument();
+    expect(within(group).getByRole("checkbox", { name: "Wikipedia and Wikidata (bios and facts)" })).toBeChecked();
     expect(await within(group).findByLabelText("Last.fm API key")).toBeInTheDocument();
     expect(within(group).getByLabelText("Fanart.tv API key")).toBeInTheDocument();
     expect(within(group).getByLabelText("TheAudioDB API key")).toBeInTheDocument();
@@ -368,7 +369,7 @@ describe("Artist info settings", () => {
   it("ListenBrainz is on without a token; a token saves without touching the switch", async () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
-    const sw = await within(row("infoListenbrainz")).findByRole("switch", { name: "ListenBrainz (popular songs)" });
+    const sw = await within(row("artistInfoSources")).findByRole("checkbox", { name: "ListenBrainz (popular songs)" });
     expect(sw).toBeChecked();
     await user.type(await screen.findByLabelText("ListenBrainz user token"), "tok");
     await user.click(within(row("infoListenbrainzToken")).getByRole("button", { name: "Save token" }));

@@ -162,15 +162,15 @@ describe("the AirPlay password prompt", () => {
 });
 
 describe("settings", () => {
-  it("has the Chromecast and AirPlay row, on by default", async () => {
+  it("has Chromecast and AirPlay in Show these devices, on by default", async () => {
     render(<SettingsPage />);
-    expect(await screen.findByText("Show Chromecast and AirPlay devices")).toBeInTheDocument();
+    expect(await screen.findByRole("checkbox", { name: "Chromecast and AirPlay" })).toBeChecked();
     expect(DEFAULT_SETTINGS.showCastDevices).toBe(true);
   });
 
-  it("has the DLNA row, on by default", async () => {
+  it("has DLNA in Show these devices, on by default", async () => {
     render(<SettingsPage />);
-    expect(await screen.findByRole("switch", { name: "Show other network speakers and TVs (DLNA)" })).toBeChecked();
+    expect(await screen.findByRole("checkbox", { name: "Other network speakers and TVs (DLNA)" })).toBeChecked();
     expect(DEFAULT_SETTINGS.showDlnaDevices).toBe(true);
   });
 });

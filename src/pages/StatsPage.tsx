@@ -246,7 +246,7 @@ export function StatsPage({ tab: openTab, month, friend }: { tab?: StatsTab; mon
         <StatsState
           title="Nothing to count yet"
           text="Play some music, or import your past plays in Settings, and your stats show up here."
-          action={<Button onClick={() => nav.go({ name: "settings" })}>Import past plays</Button>}
+          action={<Button onClick={() => nav.go({ name: "settings", page: "libraryImport" })}>Import past plays</Button>}
         />
       ) : (
         <>

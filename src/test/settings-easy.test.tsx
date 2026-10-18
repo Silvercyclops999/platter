@@ -12,7 +12,8 @@ import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS, type Settings } from "../lib/types";
 import { exportSettings, importSettings, NOT_EXPORTED } from "../lib/settingsFile";
 import { SettingsPage } from "../pages/SettingsPage";
-import { ADVANCED, GROUP_HELP, HELP_BY_KEY, advancedView, resetPatch, settingsOfRows } from "../pages/settingsMeta";
+import { ADVANCED, DESCRIPTION_MAX, GROUP_HELP, HELP_BY_KEY, advancedView, resetPatch, settingsOfRows } from "../pages/settingsMeta";
+import { ContextMenuHost } from "../components/ContextMenu";
 import { helpPage } from "../help/pages";
 import { useHelp } from "../stores/help";
 import { loadSettings, useSettings } from "../stores/settings";
@@ -63,6 +64,10 @@ const NOT_A_ROW: Record<string, string> = {
   bringInMinFreeGb: "bringIn",
   bringInMaxQueue: "bringIn",
   lookStepDone: "kept by the first-run step",
+  discordCoverArchive: "discordCoverSource",
+  discordUploadCovers: "discordCoverSource",
+  discordUploadArt: "discordCoverSource",
+  discordCoverHost: "discordCoverSource",
 };
 
 /** Rows that show only in some states (each was checked in its own test file). */
@@ -77,25 +82,37 @@ const SHOWN_WHEN: Record<string, string> = {
   subsonicCheckMinutes: "a Subsonic server (subsonic-servers.test.tsx)",
   saveQueueOnServer: "a server that keeps queues (subsonic-servers.test.tsx)",
   lidarrHeaders: "an away address for Lidarr (lidarr.test.tsx)",
+  nowPlayingFeedPort: "the widget feed turned on (settings-layout.test.tsx)",
 };
 
 describe("every setting", () => {
   it("has a row with a title, a one-line description and a section", async () => {
-    await mock.settingsSet({ lidarrUrl: "http://10.0.0.5:8686", tautulliUrl: "http://10.0.0.5:8181" });
+    // Rows that wait for their feature: Discord's status and transcription on.
+    await mock.settingsSet({ lidarrUrl: "http://10.0.0.5:8686", tautulliUrl: "http://10.0.0.5:8181", discordStatus: true, transcribeLyrics: true });
     await mock.lidarrKeySet("abc123");
     await loadSettings();
     render(<SettingsPage />);
     await screen.findByRole("switch", { name: "Private session" });
     const rows = [...document.querySelectorAll<HTMLElement>("[data-setting]")];
-    const keys = new Set(rows.map((r) => r.dataset.setting!));
+    // Settings set from a row's checklist count as that row's.
+    const keys = new Set([
+      ...rows.map((r) => r.dataset.setting!),
+      ...[...document.querySelectorAll<HTMLElement>("[data-setting-part]")].map((r) => r.dataset.settingPart!),
+    ]);
+    const long: string[] = [];
     for (const row of rows) {
       const key = row.dataset.setting;
       const title = row.querySelector(".setting-row__title")?.textContent?.trim();
-      const desc = row.querySelector(".setting-row__desc")?.textContent?.trim();
+      const descEl = row.querySelector(".setting-row__desc")?.cloneNode(true) as HTMLElement | undefined;
+      descEl?.querySelectorAll(".setting-row__note, button").forEach((n) => n.remove());
+      const desc = descEl?.textContent?.trim();
       expect(title, `${key} has a title`).toBeTruthy();
       expect(desc && desc.length > 10, `${key} has a description`).toBe(true);
+      // One line; anything longer goes behind the row's "?".
+      if (desc!.length > DESCRIPTION_MAX) long.push(`${key}: ${desc}`);
       expect(row.closest("section")?.querySelector("h2")?.textContent, `${key} is in a section`).toBeTruthy();
     }
+    expect(long).toEqual([]);
     const missing = Object.keys(DEFAULT_SETTINGS).filter((k) => !keys.has(k) && !NOT_A_ROW[k] && !SHOWN_WHEN[k]);
     expect(missing).toEqual([]);
     for (const via of Object.values(NOT_A_ROW)) {
@@ -104,7 +121,7 @@ describe("every setting", () => {
   });
 
   it("names only real rows as Advanced, and Learn more points at real help", async () => {
-    await mock.settingsSet({ lidarrUrl: "http://10.0.0.5:8686" });
+    await mock.settingsSet({ lidarrUrl: "http://10.0.0.5:8686", discordStatus: true, transcribeLyrics: true });
     await mock.lidarrKeySet("abc123");
     await loadSettings();
     render(<SettingsPage />);
@@ -135,13 +152,15 @@ describe("Advanced", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(within(playback).getByRole("spinbutton", { name: "Songs to load ahead" })).toBeInTheDocument();
     // Other sections stay folded.
-    const search = screen.getByRole("region", { name: "Search" });
-    expect(within(search).getByRole("button", { name: /^Advanced/ })).toHaveAttribute("aria-expanded", "false");
-    expect(within(search).queryByRole("switch", { name: "Forgive typos in search" })).toBeNull();
+    const library = screen.getByRole("region", { name: "Library" });
+    expect(within(library).getByRole("button", { name: /^Advanced/ })).toHaveAttribute("aria-expanded", "false");
+    expect(within(library).queryByRole("switch", { name: "Forgive typos in search" })).toBeNull();
   });
 
   it("settings search finds Advanced rows without opening anything", async () => {
     advancedView.startOpen = false;
+    await mock.settingsSet({ discordStatus: true });
+    await loadSettings();
     render(<SettingsPage />);
     await screen.findByRole("region", { name: "Playback" });
     fireEvent.change(screen.getByRole("searchbox", { name: "Search settings" }), { target: { value: "load ahead" } });
@@ -156,19 +175,29 @@ describe("Reset this section", () => {
     const user = userEvent.setup();
     await mock.settingsSet({ shuffleStyle: "standard", precacheCount: 9, theme: "light", lidarrUrl: "http://10.0.0.5:8686" });
     await loadSettings();
-    render(<SettingsPage />);
-    await user.click(await screen.findByRole("button", { name: "Reset Playback settings" }));
+    render(
+      <>
+        <SettingsPage />
+        <ContextMenuHost />
+      </>,
+    );
+    // Reset this section is in the group heading's ⋯ menu.
+    const resetFrom = async (group: string) => {
+      await user.click(await screen.findByRole("button", { name: `More options for ${group}` }));
+      await user.click(await screen.findByRole("menuitem", { name: "Reset this section" }));
+    };
+    await resetFrom("Playback");
     const dialog = screen.getByRole("dialog", { name: "Reset Playback settings?" });
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(useSettings.getState().settings?.shuffleStyle).toBe("standard");
-    await user.click(screen.getByRole("button", { name: "Reset Playback settings" }));
+    await resetFrom("Playback");
     await user.click(within(screen.getByRole("dialog", { name: "Reset Playback settings?" })).getByRole("button", { name: "Reset" }));
     await waitFor(() => expect(useSettings.getState().settings?.shuffleStyle).toBe("spread"));
     const s = await mock.settingsGet();
     expect(s.precacheCount).toBe(DEFAULT_SETTINGS.precacheCount);
     expect(s.theme).toBe("light");
     // Addresses you set up stay, even when their section is reset.
-    await user.click(screen.getByRole("button", { name: "Reset Integrations settings" }));
+    await resetFrom("Integrations");
     await user.click(within(screen.getByRole("dialog", { name: "Reset Integrations settings?" })).getByRole("button", { name: "Reset" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect((await mock.settingsGet()).lidarrUrl).toBe("http://10.0.0.5:8686");
@@ -224,12 +253,12 @@ describe("help buttons and the new settings", () => {
     expect(DEFAULT_SETTINGS.showSetupGuides && DEFAULT_SETTINGS.showHelpButtons).toBe(true);
     const user = userEvent.setup();
     render(<SettingsPage />);
-    const tx = (await screen.findAllByRole("button", { name: "Help with Lyrics transcription" }))[0];
+    const tx = (await screen.findAllByRole("button", { name: "Help with Lidarr" }))[0];
     await user.click(tx);
     expect(useUi.getState().helpOpen).toBe(true);
-    expect(useHelp.getState()).toMatchObject({ slug: "lyrics-and-transcription", anchor: "transcription" });
+    expect(useHelp.getState()).toMatchObject({ slug: "lidarr" });
     await user.click(screen.getByRole("switch", { name: 'Show "?" help buttons' }));
-    await waitFor(() => expect(screen.queryAllByRole("button", { name: "Help with Lyrics transcription" })).toHaveLength(0));
+    await waitFor(() => expect(screen.queryAllByRole("button", { name: "Help with Lidarr" })).toHaveLength(0));
     expect(screen.getByRole("switch", { name: "Show setup guides for new features" })).toBeChecked();
     // Learn more stays: it's part of the description.
     expect(screen.getAllByRole("button", { name: /^Learn more about/ }).length).toBeGreaterThan(10);

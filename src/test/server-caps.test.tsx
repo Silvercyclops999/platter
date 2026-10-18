@@ -98,13 +98,13 @@ describe("hidden without the capability", () => {
 
   it("Settings leaves out rows the servers can't use", async () => {
     const { unmount } = render(<SettingsPage />);
-    expect(document.querySelector('[data-setting="showPlexPlayers"]')).toBeTruthy();
+    expect(document.querySelector('[data-setting-part="showPlexPlayers"]')).toBeTruthy();
     expect(document.querySelector('[data-setting="actAsPlexPlayer"]')).toBeTruthy();
     expect(document.querySelector('[data-setting="showFriendActivity"]')).toBeTruthy();
     unmount();
     act(() => useCaps.setState({ all: one(without("remotePlayers", "friendActivity")) }));
     render(<SettingsPage />);
-    expect(document.querySelector('[data-setting="showPlexPlayers"]')).toBeNull();
+    expect(document.querySelector('[data-setting-part="showPlexPlayers"]')).toBeNull();
     expect(document.querySelector('[data-setting="actAsPlexPlayer"]')).toBeNull();
     expect(document.querySelector('[data-setting="showFriendActivity"]')).toBeNull();
     expect(document.querySelector('[data-setting="shareActivity"]')).toBeTruthy();

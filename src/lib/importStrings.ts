@@ -9,8 +9,10 @@ export interface ImportSourceText {
   id: ImportSourceId;
   /** The source's name in Settings and reports. */
   name: string;
-  /** One line: how to get the file. */
+  /** How to get the file. */
   help: string;
+  /** One line, when `help` is longer (Settings shows `help` behind its "?"). */
+  short?: string;
   /** A note under the help, when there's something to know. */
   note?: string;
 }
@@ -21,6 +23,7 @@ export const IMPORT_SOURCES: ImportSourceText[] = [
     name: "Spotify",
     help:
       'On spotify.com open Account > Privacy settings, tick "Account data" (library and playlists) and "Extended streaming history" (everything you ever played), request them, then pick the zips from the emails (usually a few days, up to 30).',
+    short: "Request your account data and streaming history, then pick the zips they email.",
     note: "Private session plays and podcasts are left out. Only the song, when it played and for how long are kept.",
   },
   {
@@ -28,6 +31,7 @@ export const IMPORT_SOURCES: ImportSourceText[] = [
     name: "Tidal, Deezer, Amazon Music, SoundCloud",
     help:
       "Use a free transfer tool (TuneMyMusic or Soundiiz) to export your library to a CSV file, then pick that file here.",
+    short: "Export your library to a CSV with a free transfer tool, then pick it.",
     note: "The transfer tool sees your library while it makes the file.",
   },
   {

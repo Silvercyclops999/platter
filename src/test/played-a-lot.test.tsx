@@ -178,7 +178,7 @@ describe("Played a lot", () => {
     render(<ImportPage view="played" />);
     expect(await screen.findByText("No listening history yet")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Import history" }));
-    expect(route()).toEqual({ name: "settings" });
+    expect(route()).toEqual({ name: "settings", page: "libraryImport" });
   });
 
   it("a reload that answers late doesn't replace a newer one", async () => {

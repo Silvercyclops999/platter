@@ -59,7 +59,8 @@ describe("settings page", () => {
   it("shows every section and row with its default", async () => {
     render(<SettingsPage />);
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-    expect(headings).toEqual(["Account", "Setup guides", "Audio quality", "Playback", "Library", "Storage", "Downloads and offline", "Devices", "Sync", "Search", "Appearance", "Home", "Mixes", "App", "Integrations", "Transitions", "Loudness", "Equalizer", "Sharing", "Social", "About", "Now playing", "Library import", "Editing", "Stream Deck", "Automation", "Bridge"]);
+    // The ten groups, with the sections of pages shown in place (the test setup's inline pages).
+    expect(headings).toEqual(["Account and servers", "Playback", "Sound", "Library", "Editing", "Downloads and devices", "Appearance", "Lyrics", "Integrations", "Stream Deck", "Automation", "Bridge", "Library import", "Sharing and friends", "App"]);
 
     expect(screen.getByRole("combobox", { name: "Streaming quality at home" })).toHaveValue("original");
     expect(screen.getByRole("combobox", { name: "Streaming quality away from home" })).toHaveValue("320");
@@ -95,8 +96,8 @@ describe("settings page", () => {
     expect(screen.getByRole("combobox", { name: "When the queue ends" })).toHaveValue("keepPlaying");
     expect(screen.getByRole("switch", { name: "Smart shuffle" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("switch", { name: "Show made-for-you mixes on Home" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByRole("combobox", { name: "Variety" })).toHaveValue("balanced");
-    expect(screen.getByRole("switch", { name: "Include unreleased music" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("combobox", { name: "Mix variety" })).toHaveValue("balanced");
+    expect(screen.getByRole("switch", { name: "Include unreleased music in mixes" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("combobox", { name: "Refresh the daylist" })).toHaveValue("3");
     expect(screen.getByRole("combobox", { name: "Leave out of mixes" })).toHaveValue("");
 
@@ -114,7 +115,7 @@ describe("settings page", () => {
     const user = userEvent.setup();
     const set = vi.spyOn(backend, "settingsSet");
     render(<SettingsPage />);
-    await user.selectOptions(screen.getByRole("combobox", { name: "Variety" }), "adventurous");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Mix variety" }), "adventurous");
     expect(set).toHaveBeenCalledWith({ mixVariety: "adventurous" });
     await user.selectOptions(screen.getByRole("combobox", { name: "Refresh the daylist" }), "6");
     expect(set).toHaveBeenCalledWith({ daylistHours: 6 });
@@ -264,7 +265,7 @@ describe("settings page", () => {
     expect(screen.getByText("Streaming quality at home")).toBeInTheDocument();
     expect(screen.getByText("Streaming quality away from home")).toBeInTheDocument();
     expect(screen.queryByText("Private session")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual(["Audio quality"]);
+    expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual(["Sound", "Downloads and devices"]);
 
     // Description words match too.
     await user.clear(search);

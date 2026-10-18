@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { backend } from "../lib/backend";
@@ -20,6 +20,9 @@ function row(key: string): HTMLElement {
   return el;
 }
 
+/** A row that shows once something else is turned on. */
+const waitForRow = (key: string) => waitFor(() => row(key));
+
 describe("now-playing feed settings", () => {
   it("is off by default; turning it on shows where it serves", async () => {
     const user = userEvent.setup();
@@ -35,10 +38,12 @@ describe("now-playing feed settings", () => {
     expect(within(row("nowPlayingFeed")).getByText("http://127.0.0.1:32540/now-playing.html")).toBeInTheDocument();
   });
 
-  it("the port saves on leaving the field, and a bad one snaps back", async () => {
+  it("the port waits until the feed is on, saves on leaving the field, and a bad one snaps back", async () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
-    const field = within(row("nowPlayingFeedPort")).getByRole("spinbutton");
+    expect(document.querySelector('[data-setting="nowPlayingFeedPort"]')).toBeNull();
+    await user.click(within(row("nowPlayingFeed")).getByRole("switch"));
+    const field = within(await waitForRow("nowPlayingFeedPort")).getByRole("spinbutton");
     expect(field).toHaveValue(32540);
     await user.clear(field);
     await user.type(field, "80");

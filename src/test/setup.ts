@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 import { toastExpiry, useToasts } from "../stores/toasts";
-import { advancedView } from "../pages/settingsMeta";
+import { advancedView, settingsView } from "../pages/settingsMeta";
 
 afterEach(() => {
   // Vitest runs without globals, so Testing Library can't auto-register cleanup.
@@ -30,3 +30,8 @@ toastExpiry.on = false;
 // Settings rows under Advanced start open, so a test of one row needn't open
 // Advanced first (settings-easy.test.tsx turns this off to test collapsing).
 advancedView.startOpen = true;
+
+// Rows on a Settings page of their own (an integration, Tags and archive...)
+// also show in their group, so a test of one row needn't open its page first
+// (settings-layout.test.tsx turns this off to test the pages themselves).
+settingsView.inlinePages = true;

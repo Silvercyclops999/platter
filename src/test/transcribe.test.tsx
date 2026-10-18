@@ -76,8 +76,11 @@ describe("Settings", () => {
     await waitFor(() => expect(settingRow("transcribeLyrics")).toBeTruthy());
     const sw = within(settingRow("transcribeLyrics")).getByRole("switch");
     expect(sw).not.toBeChecked();
-    expect(within(settingRow("transcribeUnreleased")).getByRole("button", { name: "Transcribe now" })).toBeDisabled();
+    // Its own settings (the Lyrics transcription page) wait until it's on.
+    expect(settingRow("transcribeUnreleased")).toBeNull();
+    expect(settingRow("transcribeModel")).toBeNull();
     await userEvent.click(sw);
+    await waitFor(() => expect(within(settingRow("transcribeUnreleased")).getByRole("button", { name: "Transcribe now" })).toBeInTheDocument());
     await waitFor(() => expect(within(settingRow("transcribeLyrics")).getByText(/181 MB\) downloads the first time/)).toBeInTheDocument());
     const download = await within(settingRow("transcribeModel")).findByRole("button", { name: "Download 181 MB" });
     await userEvent.click(download);

@@ -77,7 +77,7 @@ const mixedInCore = async (id: string) => !!(await backend.automixMixedGet())[id
 describe("settings", () => {
   it("Automix is on for playlists and mixes, smooth, and each choice saves", async () => {
     render(<SettingsPage />);
-    const sw = await screen.findByRole("switch", { name: "Automix" });
+    const sw = await screen.findByRole("switch", { name: "Blend songs like a DJ (Automix)" });
     expect(sw).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("combobox", { name: "Where Automix plays" })).toHaveValue("playlistsAndMixes");
     expect(screen.getByRole("combobox", { name: "Transition style" })).toHaveValue("smooth");

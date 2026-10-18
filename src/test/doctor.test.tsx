@@ -265,11 +265,11 @@ describe("where it opens from", () => {
     expect(screen.queryByRole("menuitem", { name: /Library doctor/ })).not.toBeInTheDocument();
   });
 
-  it("Settings > Library has Run library doctor, each check and the small cover size", async () => {
+  it("Settings > Library doctor has its switch, each check and the small cover size", async () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
     await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "library doctor");
-    const run = screen.getByRole("switch", { name: "Run library doctor" });
+    const run = screen.getByRole("switch", { name: "Check the library in the background" });
     expect(run).toBeChecked();
     const checks = screen.getByRole("list", { name: "Library doctor checks" });
     const switches = within(checks).getAllByRole("switch");

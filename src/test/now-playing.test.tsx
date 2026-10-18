@@ -12,7 +12,7 @@ import {
   lyricsPreview,
   nextInQueue,
 } from "../shell/nowPlaying";
-import { NowPlayingSettings } from "../shell/NowPlayingSettings";
+import { SettingsPage } from "../pages/SettingsPage";
 import { demoHealth } from "../lib/mock/health";
 import { useApp } from "../stores/app";
 import { usePlayer } from "../stores/player";
@@ -315,8 +315,8 @@ describe("open when a song starts", () => {
 });
 
 describe("settings", () => {
-  it("both rows switch and are remembered on this device", () => {
-    render(<NowPlayingSettings />);
+  it("both rows switch, sit under Appearance and Lyrics, and are remembered on this device", () => {
+    render(<SettingsPage />);
     const open = screen.getByRole("switch", { name: "Open now playing when a song starts" });
     const lyrics = screen.getByRole("switch", { name: "Lyrics card in now playing" });
     expect(open).toHaveAttribute("aria-checked", "false");

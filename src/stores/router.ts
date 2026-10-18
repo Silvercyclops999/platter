@@ -28,7 +28,8 @@ export type Route =
   | { name: "playlist"; id: string }
   /** Liked Songs. */
   | { name: "liked" }
-  | { name: "settings" }
+  /** Settings, or one of its pages (an integration or a tool with its own page); `row` opens where that row is. */
+  | { name: "settings"; page?: import("../pages/settingsMeta").PageId; row?: string }
   /** What was played here, by day and listening session. */
   | { name: "recents" }
   /** New releases by followed artists (the top bar's bell). */

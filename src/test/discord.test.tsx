@@ -1,5 +1,5 @@
 import { ONLINE_EXTRAS } from "./onlineExtras";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { backend } from "../lib/backend";
@@ -27,6 +27,13 @@ function row(key: string): HTMLElement {
   return el;
 }
 
+/** A setting shown inside another row (the Imgur client ID under Cover art source). */
+function part(key: string): HTMLElement {
+  const el = document.querySelector<HTMLElement>(`[data-setting-part="${key}"]`);
+  if (!el) throw new Error(`no part ${key}`);
+  return el;
+}
+
 const status = (p: Partial<DiscordStatus>): DiscordStatus => ({
   available: true,
   connected: true,
@@ -51,32 +58,36 @@ describe("Discord notes", () => {
 });
 
 describe("Discord settings", () => {
-  it("has its rows under Integrations with the defaults", async () => {
+  it("has its rows on the Discord page with the defaults; unreleased choices sit under Sharing and friends", async () => {
     render(<SettingsPage />);
     const group = await screen.findByRole("region", { name: "Integrations" });
     expect(within(group).getAllByRole("heading", { level: 3, name: "Discord" })[0]).toBeInTheDocument();
     expect(within(group).getByRole("switch", { name: "Show what you're playing on Discord" })).toBeChecked();
     expect(within(group).getByRole("switch", { name: "Clear status when paused" })).toBeChecked();
-    expect(within(group).getByRole("switch", { name: "Show unreleased songs" })).toBeChecked();
-    expect(within(group).getByRole("switch", { name: "Show unreleased cover art" })).toBeChecked();
     expect(within(group).getByRole("switch", { name: "Find this song button" })).toBeChecked();
-    expect(within(group).getByRole("switch", { name: "Covers from Cover Art Archive" })).toBeChecked();
-    expect(await within(group).findByLabelText("Imgur client ID")).toBeInTheDocument();
-    expect(within(group).getByRole("switch", { name: "Upload covers for unreleased songs" })).not.toBeChecked();
-    expect(within(row("discordUploadCovers")).getByText(/Anyone with the link can see/)).toBeInTheDocument();
-    expect(within(row("discordUploadCovers")).getByText(/Where covers come from/)).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Where covers are uploaded" })).toHaveValue("auto");
-    expect(within(row("discordCoverHost")).getByText(/Litterbox keeps a cover 3 days/)).toBeInTheDocument();
+    // The four cover rows are one choice: Cover Art Archive on, uploads off.
+    expect(within(group).getByRole("combobox", { name: "Cover art source" })).toHaveValue("archive");
+    expect(within(row("discordCoverSource")).getByText(/Anyone with the link can see/)).toBeInTheDocument();
+    expect(within(row("discordCoverSource")).getByText(/Litterbox keeps a cover 3 days/)).toBeInTheDocument();
+    expect(within(group).queryByLabelText("Imgur client ID")).toBeNull();
     expect(screen.getByRole("combobox", { name: "Discord status shows" })).toHaveValue("app");
+    const sharing = screen.getByRole("region", { name: "Sharing and friends" });
+    expect(within(sharing).getByRole("switch", { name: "Show unreleased music on Discord" })).toBeChecked();
+    expect(within(sharing).getByRole("switch", { name: "Show unreleased cover art on Discord" })).toBeChecked();
   });
 
-  it("the cover upload switch, its host and the status line save their settings", async () => {
+  it("the cover art source, its host and the status line save their settings", async () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
-    await user.click(await screen.findByRole("switch", { name: "Upload covers for unreleased songs" }));
-    expect(useSettings.getState().settings?.discordUploadCovers).toBe(true);
-    await user.selectOptions(screen.getByRole("combobox", { name: "Where covers are uploaded" }), "x0");
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Cover art source" }), "archiveThenUpload");
+    expect(useSettings.getState().settings).toMatchObject({ discordCoverArchive: true, discordUploadCovers: true });
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Image host" }), "x0");
     expect(useSettings.getState().settings?.discordCoverHost).toBe("x0");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Cover art source" }), "upload");
+    expect(useSettings.getState().settings).toMatchObject({ discordCoverArchive: false, discordUploadCovers: true });
+    await user.selectOptions(screen.getByRole("combobox", { name: "Cover art source" }), "none");
+    expect(useSettings.getState().settings).toMatchObject({ discordCoverArchive: false, discordUploadCovers: false, discordUploadArt: false });
+    expect(screen.queryByRole("combobox", { name: "Image host" })).toBeNull();
     await user.selectOptions(screen.getByRole("combobox", { name: "Discord status shows" }), "artist");
     expect(useSettings.getState().settings?.discordStatusLine).toBe("artist");
   });
@@ -96,10 +107,12 @@ describe("Discord settings", () => {
     render(<SettingsPage />);
     await user.click(await screen.findByRole("switch", { name: "Clear status when paused" }));
     expect(useSettings.getState().settings?.discordClearOnPause).toBe(false);
-    await user.click(screen.getByRole("switch", { name: "Show unreleased songs" }));
+    await user.click(screen.getByRole("switch", { name: "Show unreleased music on Discord" }));
     expect(useSettings.getState().settings?.discordShowUnreleased).toBe(false);
     await user.click(screen.getByRole("switch", { name: "Show what you're playing on Discord" }));
     expect(useSettings.getState().settings?.discordStatus).toBe(false);
+    // Its other rows wait until the status is on again.
+    await waitFor(() => expect(document.querySelector('[data-setting="discordClearOnPause"]')).toBeNull());
   });
 
   it("a build without a Discord app shows one row with a note and no controls", async () => {
@@ -107,19 +120,20 @@ describe("Discord settings", () => {
     render(<SettingsPage />);
     expect(await screen.findByText(/built without a Discord app/)).toBeInTheDocument();
     expect(within(row("discordStatus")).queryByRole("switch")).toBeNull();
-    expect(document.querySelector('[data-setting="discordUploadArt"]')).toBeNull();
+    expect(document.querySelector('[data-setting="discordCoverSource"]')).toBeNull();
     expect(document.querySelector('[data-setting="discordClearOnPause"]')).toBeNull();
   });
 
   it("saving a client ID turns uploads on; removing it turns them off", async () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Cover art source" }), "archiveThenUpload");
     await user.type(await screen.findByLabelText("Imgur client ID"), "my-client");
-    await user.click(within(row("discordUploadArt")).getByRole("button", { name: "Save ID" }));
-    expect(await within(row("discordUploadArt")).findByRole("switch", { name: "Upload other covers to Imgur" })).toBeChecked();
+    await user.click(within(part("discordUploadArt")).getByRole("button", { name: "Save ID" }));
+    expect(await within(part("discordUploadArt")).findByRole("switch", { name: "Upload to Imgur first" })).toBeChecked();
     expect(useSettings.getState().settings?.discordUploadArt).toBe(true);
     expect(screen.queryByDisplayValue("my-client")).toBeNull();
-    await user.click(within(row("discordUploadArt")).getByRole("button", { name: "Remove ID" }));
+    await user.click(within(part("discordUploadArt")).getByRole("button", { name: "Remove ID" }));
     expect(await screen.findByLabelText("Imgur client ID")).toBeInTheDocument();
     expect(useSettings.getState().settings?.discordUploadArt).toBe(false);
   });
@@ -127,10 +141,11 @@ describe("Discord settings", () => {
   it("a refused client ID shows an error on its row and stays off", async () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Cover art source" }), "archiveThenUpload");
     await user.type(await screen.findByLabelText("Imgur client ID"), "bad-client");
-    await user.click(within(row("discordUploadArt")).getByRole("button", { name: "Save ID" }));
-    expect(await within(row("discordUploadArt")).findByRole("alert")).toHaveTextContent("Imgur rejected the client ID.");
-    expect(within(row("discordUploadArt")).getByRole("switch")).not.toBeChecked();
+    await user.click(within(part("discordUploadArt")).getByRole("button", { name: "Save ID" }));
+    expect(await within(part("discordUploadArt")).findByRole("alert")).toHaveTextContent("Imgur rejected the client ID.");
+    expect(within(part("discordUploadArt")).getByRole("switch")).not.toBeChecked();
     expect(useSettings.getState().settings?.discordUploadArt).toBe(false);
   });
 
@@ -153,9 +168,11 @@ describe("Discord app states", () => {
 
   it("image upload failed: the Imgur row says Discord shows the Platter icon", async () => {
     await backend.discordImgurKeySet("my-client");
+    await backend.settingsSet({ discordUploadArt: true });
+    await loadSettings();
     render(<SettingsPage />);
-    await screen.findByRole("switch", { name: "Upload other covers to Imgur" });
+    await screen.findByRole("switch", { name: "Upload to Imgur first" });
     await act(async () => mock.discord.failUpload());
-    expect(within(row("discordUploadArt")).getByRole("alert")).toHaveTextContent(/couldn't be uploaded, so Discord shows the Platter icon/);
+    expect(await within(part("discordUploadArt")).findByRole("alert")).toHaveTextContent(/couldn't be uploaded, so Discord shows the Platter icon/);
   });
 });

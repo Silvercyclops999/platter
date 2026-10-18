@@ -180,7 +180,7 @@ function Home() {
       <div className="import-empty" role="status">
         <p>Nothing imported yet.</p>
         <p>Pick a file for a service in Settings, under Library import.</p>
-        <Button className="import-empty__go" onClick={() => nav.go({ name: "settings" })}>
+        <Button className="import-empty__go" onClick={() => nav.go({ name: "settings", page: "libraryImport" })}>
           Open Settings
         </Button>
       </div>
@@ -234,7 +234,7 @@ export function ImportPage({ view }: { view?: string }) {
             <p>Library import is off.</p>
             <p>Turn on a service in Settings, under Library import, or let the guide walk you through it.</p>
             <GuideButton id="import" variant="primary" />
-            <Button className="import-empty__go" onClick={() => nav.go({ name: "settings" })}>
+            <Button className="import-empty__go" onClick={() => nav.go({ name: "settings", page: "libraryImport" })}>
               Open Settings
             </Button>
           </div>

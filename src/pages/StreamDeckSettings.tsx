@@ -14,6 +14,7 @@ import type { DeckPluginStatus, DeckStatus } from "../lib/types";
 import { updateSettings, useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import "./feed-settings.css";
+import { MoreText } from "./SettingMore";
 
 export const DECK_DESCRIPTION =
   "Lets the Platter plugin for Elgato Stream Deck show the cover and control playback: play and pause, skip, like, volume, request the album through Lidarr and Listen along. Only a Stream Deck you pair on this computer can use it, never your network. This device only.";
@@ -206,11 +207,14 @@ export function StreamDeckSettings() {
       <DeckPluginRow status={plugin} onChanged={refreshPlugin} />
       <div className="setting-row" data-setting="allowStreamDeck">
         <div className="setting-row__text">
-          <div id={`${id}-t`} className="setting-row__title">
-            Allow Stream Deck
+          <div className="setting-row__head">
+            <div id={`${id}-t`} className="setting-row__title">
+              Allow Stream Deck
+            </div>
+            <MoreText title="Allow Stream Deck" text={DECK_DESCRIPTION} />
           </div>
           <p id={`${id}-d`} className="setting-row__desc">
-            {DECK_DESCRIPTION}
+            Lets the Stream Deck plugin show the cover and control playback. This device only.
           </p>
           {on && <DeckPairing status={status} onRevoke={() => void revoke()} />}
         </div>
@@ -282,11 +286,14 @@ export function AutomationSettings() {
       </h2>
       <div className="setting-row" data-setting="allowAutomation">
         <div className="setting-row__text">
-          <div id={`${id}-t`} className="setting-row__title">
-            Allow automation
+          <div className="setting-row__head">
+            <div id={`${id}-t`} className="setting-row__title">
+              Allow automation
+            </div>
+            <MoreText title="Allow automation" text={AUTOMATION_DESCRIPTION} />
           </div>
           <p id={`${id}-d`} className="setting-row__desc">
-            {AUTOMATION_DESCRIPTION}
+            Lets platter:// links, scripts and the command line control Platter. This device only.
           </p>
           {on && <AutomationPairing status={status} onRevoke={() => void revoke()} />}
         </div>

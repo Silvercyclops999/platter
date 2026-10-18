@@ -24,7 +24,8 @@ type Ids = { title: string; desc: string };
 /** Same shape as the Settings page's rows. */
 export interface HifiRow {
   key: string;
-  section: string;
+  section: "Sound";
+  more?: string;
   title: string;
   description: string;
   note?: ReactNode;
@@ -274,9 +275,10 @@ export function hifiRows(): HifiRow[] {
   return [
     {
       key: "headphoneCorrection",
-      section: "Equalizer",
+      section: "Sound",
       title: "Headphone correction",
-      description:
+      description: "Evens out your headphones' sound with a measured profile. This device only.",
+      more:
         "Evens out your headphones' sound with a measured profile, before your own EQ. Search for your model, then compare with the original. Each output device keeps its own. This device only.",
       note: <CorrectionNote />,
       control: (ids) => <CorrectionSwitch ids={ids} />,
@@ -284,9 +286,10 @@ export function hifiRows(): HifiRow[] {
     },
     {
       key: "bitPerfectOutputs",
-      section: "Audio quality",
+      section: "Sound",
       title: "Bit-perfect output",
-      description:
+      description: "Sends music to this output exactly as it is in the file. This device only.",
+      more:
         "Sends music to this output exactly as it is in the file, at its own sample rate, with no other app's sound mixed in. While it's on, volume, the equalizer, headphone correction, loudness leveling and crossfades are bypassed, so set the level on your DAC or amplifier. If the device is busy or can't play a song's format, Platter plays shared and says why. Each output device has its own switch. This device only.",
       note: <BitPerfectNote />,
       control: (ids) => <BitPerfectSwitch ids={ids} />,

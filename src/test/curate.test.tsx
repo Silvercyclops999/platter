@@ -327,6 +327,6 @@ describe("scrobbling settings", () => {
 
   it("ListenBrainz needs the token from Artist info", async () => {
     render(<SettingsPage />);
-    expect((await screen.findAllByText("Add your ListenBrainz user token under Artist info first.")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("Add your ListenBrainz user token on the Artist info sources page first.")).length).toBeGreaterThan(0);
   });
 });

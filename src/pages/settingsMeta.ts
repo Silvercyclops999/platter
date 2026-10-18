@@ -5,6 +5,96 @@
  */
 import type { Settings } from "../lib/types";
 
+/** The Settings page's groups, in the order the side nav lists them. */
+export const GROUPS = [
+  "Account and servers",
+  "Playback",
+  "Sound",
+  "Library",
+  "Downloads and devices",
+  "Appearance",
+  "Lyrics",
+  "Integrations",
+  "Sharing and friends",
+  "App",
+] as const;
+export type GroupName = (typeof GROUPS)[number];
+
+/** The id a group's section and nav link use. */
+export const groupId = (g: string) => `settings-${g.toLowerCase().replace(/[^a-z]+/g, "-")}`;
+
+/**
+ * Settings with their own page: an integration (a card under Integrations)
+ * or a tool moved out of a group (a Manage row stays behind).
+ */
+export type PageId =
+  | "lidarr"
+  | "discord"
+  | "scrobbling"
+  | "artistInfo"
+  | "discogs"
+  | "tautulli"
+  | "ai"
+  | "streamDeck"
+  | "widgetFeed"
+  | "bridge"
+  | "libraryImport"
+  | "tags"
+  | "doctor"
+  | "soundId"
+  | "hidden"
+  | "sync"
+  | "devices"
+  | "transcription"
+  | "looks"
+  | "guides";
+
+export interface PageMeta {
+  id: PageId;
+  title: string;
+  group: GroupName;
+  /** One line on its card or Manage row. */
+  blurb: string;
+  /** Cards say Connected / Not set up; Manage rows don't. */
+  kind: "integration" | "manage";
+}
+
+export const PAGES: readonly PageMeta[] = [
+  { id: "lidarr", title: "Lidarr", group: "Integrations", kind: "integration", blurb: "Request albums, catch up on imports and swap in better copies." },
+  { id: "discord", title: "Discord", group: "Integrations", kind: "integration", blurb: "Show what you're playing on your Discord profile." },
+  { id: "scrobbling", title: "Last.fm and ListenBrainz", group: "Integrations", kind: "integration", blurb: "Send your plays to your profiles there." },
+  { id: "artistInfo", title: "Artist info sources", group: "Integrations", kind: "integration", blurb: "Bios, photos, credits and listener numbers for artist pages." },
+  { id: "discogs", title: "Discogs", group: "Integrations", kind: "integration", blurb: "Mark the records you own from your Discogs collection." },
+  { id: "tautulli", title: "Tautulli", group: "Integrations", kind: "integration", blurb: "Count your plays in Tautulli in Stats and mixes." },
+  { id: "ai", title: "AI", group: "Integrations", kind: "integration", blurb: "Turn a description into a prompted playlist." },
+  { id: "streamDeck", title: "Stream Deck", group: "Integrations", kind: "integration", blurb: "Control Platter from Stream Deck keys and scripts." },
+  { id: "widgetFeed", title: "Desktop widget feed", group: "Integrations", kind: "integration", blurb: "What's playing, for OBS, Rainmeter and other widgets." },
+  { id: "bridge", title: "Bridge", group: "Integrations", kind: "integration", blurb: "A small container on your server that does Lidarr work." },
+  { id: "libraryImport", title: "Library import", group: "Integrations", kind: "integration", blurb: "Bring in playlists, likes and history from other services." },
+  { id: "tags", title: "Tags and archive", group: "Library", kind: "manage", blurb: "Music folder, tag checks, release status and archive rules." },
+  { id: "doctor", title: "Library doctor", group: "Library", kind: "manage", blurb: "Finds duplicates, small covers and tags worth fixing." },
+  { id: "soundId", title: "Identify by sound", group: "Library", kind: "manage", blurb: "Names songs by their audio when tags don't." },
+  { id: "hidden", title: "Hidden and not interested", group: "Library", kind: "manage", blurb: "Songs, artists and suggestions you've hidden." },
+  { id: "devices", title: "Devices", group: "Downloads and devices", kind: "manage", blurb: "USB drives and players you copy music to." },
+  { id: "looks", title: "Looks", group: "Appearance", kind: "manage", blurb: "Ready-made looks, your own, and theme files." },
+  { id: "transcription", title: "Lyrics transcription", group: "Lyrics", kind: "manage", blurb: "The speech model and how hard it may work." },
+  { id: "sync", title: "Sync", group: "App", kind: "manage", blurb: "Keep settings the same on your computers, and copy keys." },
+  { id: "guides", title: "Setup guides", group: "App", kind: "manage", blurb: "Short walk-throughs for features that need setting up." },
+];
+
+export function pageMeta(id: string | undefined): PageMeta | undefined {
+  return PAGES.find((p) => p.id === id);
+}
+
+/**
+ * How the page is laid out. Tests turn `inlinePages` on so a test of one
+ * row needn't open that row's page first (the layout tests turn it off).
+ */
+export const settingsView = { inlinePages: false };
+
+/** Descriptions stay on one line; longer text goes behind "?". */
+export const DESCRIPTION_MAX = 100;
+
 /**
  * Rows most people never need, folded under each section's Advanced row.
  * Settings search still finds them (and opens Advanced to show them).
@@ -12,25 +102,22 @@ import type { Settings } from "../lib/types";
  * names, and follow-up options of something else stay in Advanced.
  */
 export const ADVANCED: ReadonlySet<string> = new Set([
-  // Account: only matter with a Plex Home or a picture to hide.
+  // Account and servers: only matter with Subsonic, a Plex Home or a picture to hide.
+  "subsonicCheckMinutes",
+  "saveQueueOnServer",
   "showPlexAvatar",
   "homeRemember",
-  // Audio quality: a display detail.
-  "showFormatBadge",
-  // Playback: tuning and devices most homes don't have.
+  // Playback: tuning and the finer Automix rules.
   "precacheCount",
   "abLoopHandles",
-  "moveStopsOldDevice",
-  "showDlnaDevices",
-  "showAirplayLocked",
-  "computerName",
-  // Transitions and Loudness: fine tuning of an everyday choice.
   "crossfadeSkipAlbums",
   "automixWhere",
+  "automixStyle",
+  // Sound: display details and fine tuning of loudness.
+  "showFormatBadge",
   "preampDb",
   "limiter",
-  // Library: how lists and rows behave, beyond the defaults.
-  "subsonicCheckMinutes",
+  // Library: how lists, search and mixes behave beyond the defaults.
   "popularSource",
   "linkFeatured",
   "playlistAskDuplicates",
@@ -39,85 +126,75 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "bookmarksInLibrary",
   "pinsInLibrary",
   "likeControlRows",
-  "statsStrip",
-  "monthlyStats",
   "shelfMissingList",
-  "dragAndDrop",
+  "shelfOpen",
+  "showFanEdits",
+  "groupEditions",
   "showDescribePlaylist",
-  // Library: tag reading and the archive rules, for people who tag by hand.
+  "showSoundMap",
+  "dragAndDrop",
+  "searchSuggestions",
+  "searchTypos",
+  "searchRecents",
+  "catalogueSource",
+  "askBeforeGet",
+  "getAlbumsKinds",
+  "mixExclude",
+  "daylistHours",
+  "fansAlsoLikeCatalogue",
+  "homeNewToYou",
+  "includePlexHistory",
+  // Tags and archive: tag reading and the archive rules, for people who tag by hand.
   "rescanAfterTagEdit",
   "askBeforeManyFiles",
   "plexLibrarySettings",
   "readFileTags",
-  "groupEditions",
   "countUnmatchedUnreleased",
   "checkUnmatchedMusicbrainz",
   "archiveFolderKeywords",
   "releaseStatusTag",
   "releaseStatusValues",
   "compareLevelMatch",
-  "doctorChecks",
+  // Library doctor and identify by sound: their numbers and keys.
   "doctorCoverPx",
   "acoustidKey",
   "soundIdScope",
-  // Downloads: the home-only rule is a safe default nobody needs to see.
+  // Downloads and devices: safe defaults and names nobody needs to see.
+  "downloadFolder",
   "downloadHomeOnly",
-  // Sync: what goes in the file, and moving keys between devices.
-  "syncSettings",
-  "syncLibrary",
-  "syncFollows",
-  "syncLyrics",
-  "keysReceive",
-  "keysSend",
-  // Search: typo forgiveness is on and rarely worth changing.
-  "searchTypos",
-  // Appearance: look building, small display details and lyrics fine tuning.
-  "showLookBuilder",
-  "themeFile",
+  "computerName",
+  "moveStopsOldDevice",
+  // Appearance: small display details and the miniplayer's finer choices.
   "sidebarArt",
   "upNextLine",
   "volumePercent",
-  "lyricsLiveTiming",
-  "lyricsFixTiming",
-  "lyricsReleasedForVersions",
-  "lyricsOfficialFirst",
-  "lyricsChoices",
-  "translationService",
-  "translateTo",
+  "homeColourWash",
   "fullWindowHideControls",
   "fullWindowRememberMode",
   "miniplayerTint",
   "miniplayerQueue",
   "miniplayerSideBySide",
+  // Looks: building and files.
+  "showLookBuilder",
+  "themeFile",
+  // Lyrics: fine tuning and translation.
+  "lyricsLiveTiming",
+  "lyricsFixTiming",
+  "lyricsReleasedForVersions",
+  "lyricsChoices",
+  "translationService",
+  "translateTo",
+  "nowPlayingLyricsCard",
+  // Lyrics transcription: background work.
   "transcribePauseBusy",
   "transcribeFasterAway",
   "transcribeUnreleased",
   "syncTranscriptions",
-  "shareTranscriptionsUnreleased",
-  // Mixes: the daylist's timing.
-  "daylistHours",
-  // App: keyboard power use and system integration that's on already.
-  "powerKeys",
-  "hintKey",
-  "notifyTrackChange",
-  "mediaSession",
-  "mediaKeys",
-  // Sharing: what a share card carries.
-  "shareCardQr",
-  "shareCardSongLink",
-  // Social: invite rules and notifications beyond the defaults.
-  "listenInviteHours",
-  "listenRelay",
-  "listenHideUnreleased",
-  "shareUnreleased",
-  "radarNotify",
-  "notifyNewReleases",
-  "dismissedArtists",
+  "lyricsOfficialFirst",
   // Integrations: tokens, caches, ports and the finer Discord and Lidarr rules.
   "infoListenbrainzToken",
   "infoCache",
   "nowPlayingFeedPort",
-  "scrobbleUnreleased",
   "aiModel",
   "lidarrAwayUrl",
   "lidarrHeaders",
@@ -126,15 +203,42 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "upgradeOfficialPrefix",
   "autoRequestCap",
   "discordClearOnPause",
-  "discordShowUnreleased",
-  "discordUnreleasedArt",
-  "discordFindSong",
-  "discordCoverArchive",
-  "discordUploadArt",
-  "discordUploadCovers",
-  "discordCoverHost",
   "discordStatusLine",
   "discordListenAlong",
+  // Sharing and friends: share cards, sessions, invites, and unreleased music feature by feature.
+  "blends",
+  "shareCardQr",
+  "shareCardSongLink",
+  "shareDefaultLibraries",
+  "shareHideUnreleased",
+  "shareAllowDownloads",
+  "shareAcceptInvites",
+  "listenGuestsControl",
+  "listenInviteHours",
+  "listenName",
+  "listenRelay",
+  "shareOfferServer",
+  "discordShowUnreleased",
+  "discordUnreleasedArt",
+  "mixUnreleased",
+  "scrobbleUnreleased",
+  "listenHideUnreleased",
+  "shareUnreleased",
+  "shareTranscriptionsUnreleased",
+  // Sync: what goes in the file, and moving keys between devices.
+  "syncSettings",
+  "syncLibrary",
+  "syncFollows",
+  "syncLyrics",
+  "keysReceive",
+  "keysSend",
+  // App: keyboard power use, system integration that's on already, help and cache.
+  "mediaKeys",
+  "powerKeys",
+  "hintKey",
+  "showSetupGuides",
+  "showHelpButtons",
+  "artCache",
 ]);
 
 /**
@@ -200,7 +304,7 @@ const BY_KEY: Record<string, HelpRef> = {
   showEraCards: ["archive-and-release-status", "eras"],
   countUnmatchedUnreleased: ["archive-and-release-status", "how-platter-decides"],
   statsPage: ["stats-and-wrapped", "opening-stats"],
-  statsCompare: ["stats-and-wrapped", "compare-with-a-friend"],
+  unreleasedSharing: ["listening-together", "keeping-unreleased-music-home"],
   tautulliUrl: ["stats-and-wrapped", "plays-from-before-platter"],
   crossfade: ["playing-and-queue", "crossfade"],
   leveling: ["playing-and-queue", "loudness-leveling"],
@@ -211,7 +315,7 @@ const BY_KEY: Record<string, HelpRef> = {
   downloadsStorage: ["downloads-and-offline", "storage-and-the-limit"],
   listenGuestsControl: ["listening-together", "what-guests-hear-and-do"],
   listenRelay: ["listening-together", "the-relay"],
-  infoWikipedia: ["privacy", "off-until-you-turn-them-on"],
+  artistInfoSources: ["privacy", "off-until-you-turn-them-on"],
   nowPlayingFeed: ["privacy", "off-until-you-turn-them-on"],
 };
 
@@ -220,6 +324,7 @@ export const GROUP_HELP: Readonly<Record<string, HelpRef>> = {
   "Lyrics transcription": ["lyrics-and-transcription", "transcription"],
   "Listening sessions": ["listening-together"],
   Lidarr: ["lidarr"],
+  "Tags and archive": ["tag-editor"],
   "Tag editor": ["tag-editor"],
   Archive: ["archive-and-release-status"],
 };
@@ -239,6 +344,12 @@ const ROW_SETTINGS: Record<string, (keyof Settings)[]> = {
   artCache: ["artCacheMb"],
   downloadLimit: ["downloadLimitGb"],
   crossfade: ["crossfade", "crossfadeSeconds"],
+  // Rows that hold a checklist or one choice over several settings.
+  statsPage: ["statsPage", "statsStrip", "monthlyStats", "statsCompare", "wrappedTopSongs", "topSongsShowPlays"],
+  showDevices: ["showPlexPlayers", "showCastDevices", "showDlnaDevices", "showAirplayLocked"],
+  artistInfoSources: ["infoWikipedia", "infoMusicbrainz", "infoListenbrainz", "infoListenbrainzStats"],
+  notifications: ["notifyNewReleases", "radarNotify", "whatsNewAnnouncements", "notifyTrackChange"],
+  discordCoverSource: ["discordCoverArchive", "discordUploadCovers", "discordUploadArt", "discordCoverHost"],
   eqEnabled: ["eqEnabled", "eqBands", "eqPreset"],
   mixExclude: ["mixExcludeArtists", "mixExcludeGenres", "mixExcludeAlbums"],
   lidarrWork: ["lidarrPracticeUntil"],

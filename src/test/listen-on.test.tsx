@@ -252,14 +252,12 @@ describe("app states", () => {
 });
 
 describe("settings", () => {
-  it("has the three Listen on rows under Playback", async () => {
+  it("has the Listen on rows under Downloads and devices", async () => {
     render(<SettingsPage />);
-    for (const title of [
-      "Show Plex players in the device picker",
-      "Stop on the old device when moving playback",
-      "Let other Plex apps play on this computer",
-    ]) {
-      expect(await screen.findByText(title)).toBeInTheDocument();
+    const group = await screen.findByRole("region", { name: "Downloads and devices" });
+    expect(await within(group).findByRole("checkbox", { name: "Plex players (Plexamp, Plex apps, Sonos)" })).toBeChecked();
+    for (const title of ["Stop on the old device when moving playback", "Let other Plex apps play on this computer"]) {
+      expect(within(group).getByText(title)).toBeInTheDocument();
     }
     expect(screen.getAllByText(/Opens a network port/)[0]).toHaveTextContent("This device only.");
     expect(DEFAULT_SETTINGS.showPlexPlayers && !DEFAULT_SETTINGS.actAsPlexPlayer && DEFAULT_SETTINGS.moveStopsOldDevice).toBe(true);

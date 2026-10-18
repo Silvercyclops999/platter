@@ -305,16 +305,18 @@ describe("Discogs", () => {
     render(<ShelfPage />);
     expect(await screen.findByText(/add your personal token in Settings/, {}, SLOW)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Open Settings" }));
-    expect(route()).toEqual({ name: "settings" });
+    expect(route()).toEqual({ name: "settings", page: "discogs" });
   });
 });
 
 describe("settings", () => {
   it("has the rows, with the defaults", async () => {
     render(<SettingsPage />);
-    for (const k of ["showPhysicalCollection", "shelfMissingList", "shelfOpen", "discogsToken", "discogsImport"]) {
+    for (const k of ["showPhysicalCollection", "shelfMissingList", "shelfOpen", "discogsToken"]) {
       expect(await screen.findByText((_, el) => el?.getAttribute("data-setting") === k, {}, SLOW)).toBeInTheDocument();
     }
+    // Import waits for a token.
+    expect(document.querySelector('[data-setting="discogsImport"]')).toBeNull();
     expect(DEFAULT_SETTINGS.showPhysicalCollection).toBe(true);
     expect(DEFAULT_SETTINGS.shelfMissingList).toBe(false);
     expect(screen.getByLabelText("Discogs personal access token")).toHaveValue("");

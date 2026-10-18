@@ -168,8 +168,8 @@ function DiscogsPanel({ st }: { st: DiscogsStatus | null }) {
   if (!st.saved)
     return (
       <div className="shelf-discogs">
-        <p className="shelf-discogs__text">Bring in your Discogs collection: add your personal token in Settings, under Integrations.</p>
-        <Button size="sm" onClick={() => nav.go({ name: "settings" })}>
+        <p className="shelf-discogs__text">Bring in your Discogs collection: add your personal token in Settings, on the Discogs page.</p>
+        <Button size="sm" onClick={() => nav.go({ name: "settings", page: "discogs" })}>
           Open Settings
         </Button>
       </div>

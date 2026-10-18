@@ -217,7 +217,7 @@ describe("Settings, Sharing", () => {
         <ShareMusicDialog />
       </>,
     );
-    return screen.findByRole("region", { name: "Sharing" });
+    return screen.findByRole("region", { name: "Sharing and friends" });
   }
 
   it("someone who opened a share link waits for a yes", async () => {

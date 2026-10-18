@@ -76,6 +76,8 @@ describe("Settings", () => {
     expect(DEFAULT_SETTINGS.syncTranscriptions).toBe(true);
     expect(DEFAULT_SETTINGS.shareTranscriptions).toBe(true);
     expect(DEFAULT_SETTINGS.shareTranscriptionsUnreleased).toBe(false);
+    // The Lyrics transcription page shows while transcription is on.
+    await mock.settingsSet({ transcribeLyrics: true });
     await loadSettings();
     render(<SettingsPage />);
     const row = (k: string) => document.querySelector(`[data-setting="${k}"]`) as HTMLElement;

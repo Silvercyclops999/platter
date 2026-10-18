@@ -103,6 +103,6 @@ describe("settings", () => {
     render(<SettingsPage />);
     const sw = await screen.findByRole("switch", { name: "Check MusicBrainz for albums Plex couldn't match" });
     expect(sw).toBeDisabled();
-    expect(sw.closest("[data-setting]")).toHaveTextContent("Turn on MusicBrainz under Artist info to use this.");
+    expect(sw.closest("[data-setting]")).toHaveTextContent("Turn on MusicBrainz on the Artist info sources page to use this.");
   });
 });

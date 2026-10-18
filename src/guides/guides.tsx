@@ -346,7 +346,7 @@ export const GUIDES: Guide[] = [
     doneText: "Lidarr is connected. For the first week Platter runs in practice mode: it shows what it would have done without doing it.",
     next: [
       { label: "Read about practice mode", run: () => help.open("lidarr", "practice-mode") },
-      { label: "Open Lidarr settings", run: () => nav.go({ name: "settings" }) },
+      { label: "Open Lidarr settings", run: () => nav.go({ name: "settings", page: "lidarr" }) },
     ],
   },
   {

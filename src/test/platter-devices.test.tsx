@@ -118,11 +118,13 @@ describe("a Platter computer that can't be reached", () => {
 });
 
 describe("settings", () => {
-  it("has the device rows under Playback with their defaults", async () => {
+  it("has the device rows under Downloads and devices with their defaults", async () => {
     render(<SettingsPage />);
-    for (const title of ["Show this computer to my other devices", "This computer's name", "Show AirPlay devices that need a password"]) {
-      expect(await screen.findByText(title)).toBeInTheDocument();
+    const group = await screen.findByRole("region", { name: "Downloads and devices" });
+    for (const title of ["Show this computer to my other devices", "This computer's name"]) {
+      expect(await within(group).findByText(title)).toBeInTheDocument();
     }
+    expect(within(group).getByRole("checkbox", { name: "AirPlay devices that need a password" })).not.toBeChecked();
     // It opens a network port, so it starts off.
     expect(DEFAULT_SETTINGS.showToMyDevices).toBe(false);
     expect(DEFAULT_SETTINGS.computerName).toBe("");

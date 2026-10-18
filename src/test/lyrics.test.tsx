@@ -410,7 +410,7 @@ describe("lyrics settings", () => {
     await loadSettings();
     const set = vi.spyOn(backend, "settingsSet");
     render(<SettingsPage />);
-    const mode = screen.getByRole("combobox", { name: "Lyrics" });
+    const mode = screen.getByRole("combobox", { name: "Show synced lyrics automatically" });
     expect(mode).toHaveValue("autoShow");
     const lrclib = screen.getByRole("switch", { name: "Lyrics from LRCLIB when Plex has none" });
     expect(lrclib).not.toBeChecked();

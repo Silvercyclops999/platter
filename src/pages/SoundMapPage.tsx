@@ -17,6 +17,7 @@ import type { SoundMapChunk, SoundMapFound, SoundMapInfo, SoundMapSong } from ".
 import { player } from "../stores/player";
 import { createPlaylist } from "../stores/playlists";
 import { nav } from "../stores/router";
+import type { PageId } from "./settingsMeta";
 import { useSettings } from "../stores/settings";
 import { useSoundMap, useSoundMapOn } from "../stores/soundmap";
 import { MapCanvas, type MapApi, type MapMode } from "./soundmap/MapCanvas";
@@ -35,14 +36,14 @@ const WALK_MAX = 1500;
 const fmt = (n: number) => n.toLocaleString();
 const songs = (n: number) => (n === 1 ? "1 song" : `${fmt(n)} songs`);
 
-/** Opens Settings at one row. */
+/** Opens Settings at one row (on its page, with its Advanced fold open). */
 export function openSetting(key: string) {
-  openSettingsAt(`[data-setting="${key}"]`);
+  openSettingsAt(`[data-setting="${key}"]`, { row: key });
 }
 
-/** Opens Settings and scrolls to what `selector` finds (a row or a section), focusing its first control. */
-export function openSettingsAt(selector: string) {
-  nav.go({ name: "settings" });
+/** Opens Settings (or one of its pages) and scrolls to what `selector` finds (a row or a section), focusing its first control. */
+export function openSettingsAt(selector: string, to: { page?: PageId; row?: string } = {}) {
+  nav.go({ name: "settings", ...to });
   let tries = 0;
   const look = () => {
     const row = document.querySelector<HTMLElement>(selector);

@@ -460,7 +460,7 @@ export function UpgradeCard({ upgrade, onChanged }: { upgrade: ReturnType<typeof
               </Button>
             ))}
           {offer.status === "needsMapping" && (
-            <Button size="sm" onClick={() => nav.go({ name: "settings" })}>
+            <Button size="sm" onClick={() => nav.go({ name: "settings", row: "musicShare" })}>
               Open Settings
             </Button>
           )}

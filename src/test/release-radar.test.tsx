@@ -242,9 +242,11 @@ describe("settings", () => {
     await mock.radarAutoSet(mock.fx.artists[2].id, mock.fx.artists[2].title, true);
     await loadSettings();
     render(<SettingsPage />);
-    for (const k of ["releaseRadar", "radarNotify", "autoRequest", "autoRequestCap", "autoRequestArtists"]) {
+    for (const k of ["releaseRadar", "autoRequest", "autoRequestCap", "autoRequestArtists"]) {
       await waitFor(() => expect(document.querySelector(`[data-setting="${k}"]`)).not.toBeNull());
     }
+    // Its notification is one of the Notifications choices.
+    expect(screen.getByRole("checkbox", { name: "What the release radar finds" })).toBeChecked();
     const radar = document.querySelector('[data-setting="releaseRadar"]') as HTMLElement;
     await user.click(within(radar).getByRole("switch"));
     await waitFor(() => expect(useSettings.getState().settings?.releaseRadar).toBe(false));

@@ -90,7 +90,7 @@ function Problem({ text, onClose }: { text: string; onClose: () => void }) {
 
 function goSetUp(onClose: () => void) {
   onClose();
-  nav.go({ name: "settings" });
+  nav.go({ name: "settings", page: "tags" });
   toast.info("Set the music folder under Library, Tag editor");
 }
 

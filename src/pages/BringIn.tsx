@@ -12,6 +12,7 @@ import type { BringInStatus } from "../lib/types";
 import { updateSettings, useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import { errText } from "./importShared";
+import { MoreText } from "./SettingMore";
 
 const n = (v: number) => v.toLocaleString();
 
@@ -207,14 +208,17 @@ export function BringInSettings() {
   return (
     <div className="setting-row bring-in-settings" data-setting="bringIn">
       <div className="setting-row__text">
-        <div id={`${id}-t`} className="setting-row__title">
-          Bring in my listening
+        <div className="setting-row__head">
+          <div id={`${id}-t`} className="setting-row__title">
+            Bring in my listening
+          </div>
+          <MoreText
+            title="Bring in my listening"
+            text="Asks Lidarr for albums from Played a lot in waves, most played first, a few a day, each after the usual setup check. Pauses when Lidarr is busy or space runs low. Albums it can't sort out wait for you on the Missing page. Synced."
+          />
         </div>
         <p id={`${id}-d`} className="setting-row__desc">
-          Asks Lidarr for albums from Played a lot in waves, most played first,
-          a few a day, each after the usual setup check. Pauses when Lidarr is
-          busy or space runs low. Albums it can't sort out wait for you on the
-          Missing page. Synced.
+          Asks Lidarr for your most played albums, a few a day. Synced.
         </p>
       </div>
       <div className="setting-row__control">

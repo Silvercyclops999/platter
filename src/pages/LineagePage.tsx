@@ -82,7 +82,7 @@ export function LineagePage({ id }: { id: string }) {
       <div className="page-pad lineage-off">
         <h1 className="lineage-off__title">Lineage is off</h1>
         <p>Turn on Show lineage in Settings to see every version of a song on one timeline.</p>
-        <Button variant="secondary" onClick={() => nav.go({ name: "settings" })}>
+        <Button variant="secondary" onClick={() => nav.go({ name: "settings", row: "showLineage" })}>
           Open Settings
         </Button>
       </div>

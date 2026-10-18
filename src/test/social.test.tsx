@@ -448,14 +448,17 @@ describe("listening sessions", () => {
 describe("settings", () => {
   it("has the friend activity, following and session rows with their defaults", async () => {
     render(<SettingsPage />);
-    const social = await screen.findByRole("region", { name: "Social" });
+    const social = await screen.findByRole("region", { name: "Sharing and friends" });
     const sw = (name: string) => within(social).getByRole("switch", { name });
     await waitFor(() => expect(sw("Show friend activity")).toBeChecked());
     expect(sw("Share my activity with Platter friends")).toBeChecked();
-    expect(sw("What's New announcements")).toBeChecked();
-    expect(sw("Notify me about new releases")).not.toBeChecked();
     expect(sw("Let others change what's playing")).toBeChecked();
-    await userEvent.click(sw("Notify me about new releases"));
+    // Following artists: one Notifications row under App.
+    const app = screen.getByRole("region", { name: "App" });
+    expect(within(app).getByRole("checkbox", { name: "New releases, as a dot on the bell" })).toBeChecked();
+    const notify = within(app).getByRole("checkbox", { name: "New releases from artists I follow" });
+    expect(notify).not.toBeChecked();
+    await userEvent.click(notify);
     await waitFor(async () => expect((await mock.settingsGet()).notifyNewReleases).toBe(true));
     expect(social).toHaveTextContent("Only the server's owner can see it");
     expect(social).toHaveTextContent("in a private session");
@@ -476,8 +479,8 @@ describe("settings", () => {
     await userEvent.type(name, "DJ Sam{Enter}");
     await waitFor(async () => expect((await mock.settingsGet()).listenName).toBe("DJ Sam"));
     // Unreleased titles go to guests unless hidden.
-    expect(sw("Hide unreleased titles from guests")).not.toBeChecked();
-    await userEvent.click(sw("Hide unreleased titles from guests"));
+    expect(sw("Hide unreleased song titles from guests")).not.toBeChecked();
+    await userEvent.click(sw("Hide unreleased song titles from guests"));
     await waitFor(async () => expect((await mock.settingsGet()).listenHideUnreleased).toBe(true));
   });
 });
