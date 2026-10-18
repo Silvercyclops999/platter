@@ -19,6 +19,7 @@ use crate::model::Album;
 /// song's, and the album's own from sources that don't credit them on a song.
 /// Tag credits aren't repeated here (`tag_credits` has them).
 pub fn index_album(c: &Connection, notes: &SleeveNotes) -> AppResult<()> {
+    index_facts(c, notes)?;
     c.execute("DELETE FROM sleeve_credits WHERE album_id = ?1", [&notes.album_id])?;
     let mut st = c.prepare_cached(
         "INSERT OR REPLACE INTO sleeve_credits (album_id, track_id, person_key, name, role, detail, sources)
@@ -53,6 +54,29 @@ pub fn index_album(c: &Connection, notes: &SleeveNotes) -> AppResult<()> {
                 .collect();
             let album_only: Vec<Source> = p.sources.iter().copied().filter(|s| !on_songs.contains(s)).collect();
             put("", &p.key, &p.name, &g.role, &p.details, &album_only)?;
+        }
+    }
+    Ok(())
+}
+
+/// Keep the album's label and studios for crates (`album_facts`), folded
+/// for grouping.
+pub fn index_facts(c: &Connection, notes: &SleeveNotes) -> AppResult<()> {
+    use crate::digging::{label_key, split_labels, studio_key};
+    c.execute("DELETE FROM album_facts WHERE album_id = ?1", [&notes.album_id])?;
+    let mut st = c.prepare_cached("INSERT OR IGNORE INTO album_facts (album_id, kind, fact_key, name) VALUES (?1, ?2, ?3, ?4)")?;
+    if let Some(label) = &notes.label {
+        for name in split_labels(&label.value) {
+            let key = label_key(&name);
+            if !key.is_empty() {
+                st.execute(params![notes.album_id, "label", key, name])?;
+            }
+        }
+    }
+    for s in &notes.studios {
+        let key = studio_key(&s.name);
+        if !key.is_empty() {
+            st.execute(params![notes.album_id, "studio", key, s.name.trim()])?;
         }
     }
     Ok(())

@@ -2847,6 +2847,31 @@ Playing a side is `play_context` with an `album` context and that side's `trackI
 
 Settings: `showVinylSides` (on) shows sides in tracklists and the Play side and Split into sides items; `flipPause` (off) turns on Pause to flip. Both synced.
 
+## Crates
+
+The library filed like record crates: by label, producer, studio, era (decade), year and genre. The Crates page asks for one kind at a time, a crate's page for one crate, and an album page for the crates it's in.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `crates` | `{ kind }` | `CrateList` |
+| `crate_page` | `{ kind, key }` | `CratePage`, or null when there's no such crate |
+| `album_crates` | `{ id }` (album) | `AlbumShelf[]` |
+
+`kind` is `"label"|"producer"|"studio"|"era"|"year"|"genre"`.
+`CrateList = { kind, crates: Crate[] }` with `Crate = { kind, key, name, count, artists, fromYear?, toYear?, albums: Album[] }`, `albums` being the first 12 by year.
+`CratePage = { kind, key, name, artists, fromYear?, toYear?, albums: { album: Album, onMap }[], years: number[], trackIds: string[] }`.
+`AlbumShelf = { kind, key, name, count, albums: Album[] }`.
+
+Where albums go. Label: the label the album's sleeve notes last put together (kept in `album_facts`), else the label most of its files' `LABEL` tags name, else Plex's label; "A / B" and "A; B" name two labels, and "[no label]" or "self-released" none. Producer: everyone credited as producer in the files' credit tags (`tag_credits`) or by sleeve notes (`sleeve_credits`), counted once per album however many songs credit them. Studio: the studios sleeve notes found (MusicBrainz places), kept in `album_facts`. Era and year: the album year (`key` is the decade's first year, "1990", named "1990s"). Genre: Plex's album genres. Nothing is looked up for crates; online facts count once a sleeve notes lookup cached them, and albums with a cached MusicBrainz or Discogs release get their label and studios kept the first time crates are asked for (200 a call).
+
+Names fold so spellings share a crate: case, spacing and punctuation don't count, nor a leading "The", nor endings such as "Records", "Recordings", "Music", "Ltd" (labels) or "Studios", "Recording" (studios). `key` is the folded name, the person's folded name for producers. A crate shows the spelling used most; on a tie, one not all in capitals, then the shortest. A crate holds two albums or more, so crates of one never show. Hidden editions and other servers' copies leave crates, as they leave the library.
+
+`crates` sorts by size (then name); eras and years come newest first. A crate's albums run by year, then artist and title. `onMap` says the album has songs on the sound map. `years` lists, for an era, its years that are crates themselves. `trackIds` is every song album by album for Play all and Shuffle (5,000 at most). `album_crates` gives the album's label crates, then producers, then studios (biggest first within each), each with the crate's other albums (other artists first, 12 at most); crates with nothing else in them are left out.
+
+The answer is worked out once and kept until the library, the credit index, `album_facts`, the files' tags or the view change.
+
+Settings: `showCrates` (on) shows the Crates page, its app menu entry and the Home link in Platter's own looks; while off `crates` is empty and `crate_page` null. `crateShelves` (on) shows the album page shelves (needs `showCrates`); while either is off `album_crates` is empty. Both synced.
+
 ## Sync, folders and keys
 
 | Command | Args | Returns |

@@ -1327,6 +1327,10 @@ export interface Settings {
   showVinylSides: boolean;
   /** The record player pauses at the end of a side until Flip. */
   flipPause: boolean;
+  /** A Crates page: the library by label, producer, studio, era and genre. */
+  showCrates: boolean;
+  /** Album pages show "More from <label>" and other crate shelves. */
+  crateShelves: boolean;
   /** Studio (the default), Studio Black, Sleeve, Classic or another built-in look. */
   theme: ThemeSetting;
   /** A preset id ("brass" is the default) or a custom colour as #RRGGBB. */
@@ -1810,6 +1814,8 @@ export const DEFAULT_SETTINGS: Settings = {
   sleeveLookups: true,
   showVinylSides: true,
   flipPause: false,
+  showCrates: true,
+  crateShelves: true,
   theme: "studio",
   accent: "brass",
   followSystem: true,
@@ -3635,6 +3641,53 @@ export interface AlbumSides {
 }
 
 /** `credit_page`: everything in the library a person is credited on, by role. */
+/** What a crate groups albums by. Years are reached from their era. */
+export type CrateKind = "label" | "producer" | "studio" | "era" | "year" | "genre";
+
+/** One crate on the Crates page: its first sleeves and how many it holds. */
+export interface Crate {
+  kind: CrateKind;
+  /** The folded name (a decade's first year for an era: "1990"). */
+  key: string;
+  name: string;
+  count: number;
+  artists: number;
+  fromYear: number | null;
+  toYear: number | null;
+  /** The first albums, by year. */
+  albums: Album[];
+}
+
+export interface CrateList {
+  kind: CrateKind;
+  crates: Crate[];
+}
+
+export interface CratePage {
+  kind: CrateKind;
+  key: string;
+  name: string;
+  artists: number;
+  fromYear: number | null;
+  toYear: number | null;
+  albums: { album: Album; onMap: boolean }[];
+  /** For an era: its years that are crates themselves. */
+  years: number[];
+  /** Every song, album by album, for Play all and Shuffle (5,000 at most). */
+  trackIds: string[];
+}
+
+/** "More from <label>" and the like on an album page. */
+export interface AlbumShelf {
+  kind: CrateKind;
+  key: string;
+  name: string;
+  /** Albums in the whole crate, this one included. */
+  count: number;
+  /** The crate's other albums. */
+  albums: Album[];
+}
+
 export interface CreditPage {
   key: string;
   name: string;

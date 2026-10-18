@@ -113,7 +113,8 @@ function useColours(el: HTMLElement | null, by: ColourBy, groups: { slot: number
   }, [el, by, groups, theme, tick]);
 }
 
-export function SoundMapPage() {
+/** The map, or (`album`) the map with that record's songs picked and in view. */
+export function SoundMapPage({ album }: { album?: string } = {}) {
   const on = useSoundMapOn();
   const [info, setInfo] = useState<SoundMapInfo | null>(null);
   const [data, setData] = useState<MapData | null>(null);
@@ -199,6 +200,43 @@ export function SoundMapPage() {
   }, [data, picked]);
 
   const hover = useHoverCard(data);
+
+  // Opened on a record (a crate's "Sounds like this record"): pick its songs
+  // once the map is in, and move there.
+  const [record, setRecord] = useState<{ title: string; count: number } | null>(null);
+  const aimed = useRef(false);
+  const hasPoints = !!data && data.ids.length > 0;
+  useEffect(() => {
+    if (!album || !hasPoints || aimed.current) return;
+    aimed.current = true;
+    let alive = true;
+    backend.albumPage(album).then(
+      (page) => {
+        const d = shown.current?.data;
+        if (!alive || !d) return;
+        const ids = page.tracks.map((t) => d.index.get(t.id) ?? -1).filter((i) => i >= 0);
+        if (!ids.length) {
+          setSaid(`${page.album.title} isn't on the map yet.`);
+          return;
+        }
+        let x = 0;
+        let y = 0;
+        for (const i of ids) {
+          x += d.x[i];
+          y += d.y[i];
+        }
+        setFocus(-1);
+        setPicked(ids);
+        setRecord({ title: page.album.title, count: ids.length });
+        setSaid(`${songs(ids.length)} from ${page.album.title} selected. Songs that sound like it sit around them.`);
+        api.current?.flyTo(x / ids.length, y / ids.length, 6);
+      },
+      () => {},
+    );
+    return () => {
+      alive = false;
+    };
+  }, [album, hasPoints]);
 
   if (!on) {
     return (
@@ -351,7 +389,9 @@ export function SoundMapPage() {
             )}
             {picked.length > 0 && (
               <div className="soundmap__selection" role="region" aria-label="Selection">
-                <span className="soundmap__selection-count">{songs(picked.length)} selected</span>
+                <span className="soundmap__selection-count">
+                  {record && record.count === picked.length ? `${songs(picked.length)} from ${record.title}` : `${songs(picked.length)} selected`}
+                </span>
                 <Button size="sm" variant="primary" icon={<Play size={14} />} onClick={() => play(picked)}>
                   Play
                 </Button>

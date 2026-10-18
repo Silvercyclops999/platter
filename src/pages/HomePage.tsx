@@ -24,7 +24,7 @@ import { useLikes } from "../stores/likes";
 import "./home.css";
 import { LoadError } from "../components/LoadError";
 import { openSetting } from "./SoundMapPage";
-import { RecordHero, RecordShelves, hasRecords, useRecordHome, useRecordsLead } from "./RecordHome";
+import { CratesLink, RecordHero, RecordShelves, hasRecords, useRecordHome, useRecordsLead } from "./RecordHome";
 
 /**
  * Colour for the wash at the top of Home: the artwork's most vivid tone
@@ -237,6 +237,7 @@ export function HomePage() {
             <div className="home__records" data-testid="home-records">
               {records.resume && <RecordHero progress={records.resume} />}
               <RecordShelves data={records} />
+              <CratesLink />
             </div>
           )}
           {!data && showGrid ? (

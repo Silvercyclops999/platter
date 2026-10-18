@@ -61,8 +61,12 @@ export type Route =
   | { name: "doctor" }
   /** Sync to a device: drives and players music is copied to. */
   | { name: "devices" }
-  /** The sound map: songs placed by how they sound. */
-  | { name: "soundMap" }
+  /** The sound map: songs placed by how they sound; `album` picks that record's songs. */
+  | { name: "soundMap"; album?: string }
+  /** The library as record crates, on one kind's tab. */
+  | { name: "crates"; kind?: import("../lib/types").CrateKind }
+  /** One crate: a label, producer, studio, era, year or genre. */
+  | { name: "crate"; kind: import("../lib/types").CrateKind; key: string }
   /** An artist that isn't in the library (MusicBrainz artist id). */
   | { name: "catalogueArtist"; mbid: string }
   /** An album that isn't in the library (MusicBrainz release group id). */

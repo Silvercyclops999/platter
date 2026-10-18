@@ -129,8 +129,10 @@ import type {
   DeviceItemKind,
   DevicePatch,
   SoundMapArea,
+  CrateKind,
 } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
+import { MockCrates } from "./crates";
 import { exportSettings, importSettings, type SettingsFile } from "../settingsFile";
 
 /** More lyrics found for a mock song (an LRCLIB hit), for tests and screenshots. */
@@ -403,6 +405,8 @@ export class MockBackend implements Backend {
   readonly devices: MockDevices;
   /** The sound map (test hooks: limit, analysing). */
   readonly soundmap: MockSoundMap;
+  /** Crates by label, producer, studio, era and genre (from the mock sleeve notes). */
+  readonly crateIndex: MockCrates;
   private opts: MockOptions;
   private listeners = new Map<EventName, Set<(p: unknown) => void>>();
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -543,6 +547,7 @@ export class MockBackend implements Backend {
     this.soundmap = new MockSoundMap(this.fx, (a) =>
       mockUnreleased(a, this.settings.countUnmatchedUnreleased !== false, mockMbCheckOn(this.settings) && mockPlexMissed(this.fx.albums, a)),
     );
+    this.crateIndex = new MockCrates(this.fx, this.sleeve, () => this.settings, (ids) => this.soundmap.hasAny(ids));
     this.devices = new MockDevices(
       this.fx,
       () => this.likes.ids(),
@@ -3041,6 +3046,15 @@ export class MockBackend implements Backend {
   }
   creditPage(name: string) {
     return this.delay(() => this.sleeve.creditPage(name));
+  }
+  crates(kind: CrateKind) {
+    return this.delay(() => this.crateIndex.list(kind));
+  }
+  cratePage(kind: CrateKind, key: string) {
+    return this.delay(() => this.crateIndex.page(kind, key));
+  }
+  albumCrates(id: string) {
+    return this.delay(() => this.crateIndex.shelves(id));
   }
   albumSides(id: string) {
     return this.delay(() => {

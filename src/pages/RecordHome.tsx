@@ -159,10 +159,12 @@ interface SleeveCardProps {
   meta: string;
   /** Where Play starts, for records stopped partway. */
   progress?: RecordProgress;
+  /** Under the meta line (a crate's "Sounds like this record"). */
+  extra?: ReactNode;
 }
 
 /** An album as a record sleeve: the disc slides out a little on hover and focus. */
-export function SleeveCard({ album, meta, progress }: SleeveCardProps) {
+export function SleeveCard({ album, meta, progress, extra }: SleeveCardProps) {
   const a = useAlbumActions(album);
   const { isContext, playing } = useContextState("album", album.id);
   const play = () => (isContext ? player.toggle() : progress ? player.playAlbum(album.id, progress.nextTrackId) : player.playAlbum(album.id));
@@ -208,6 +210,7 @@ export function SleeveCard({ album, meta, progress }: SleeveCardProps) {
           <span className="record-groove__fill" style={{ width: `${progressOf(progress) * 100}%` }} />
         </div>
       )}
+      {extra}
     </div>
   );
 }
@@ -236,7 +239,20 @@ function moveBetweenCards(e: KeyboardEvent<HTMLElement>) {
   links[next].scrollIntoView?.({ block: "nearest", inline: "nearest" });
 }
 
-export function RecordShelf({ title, line, testId, children }: { title: string; line: string; testId: string; children: ReactNode[] }) {
+export function RecordShelf({
+  title,
+  line,
+  testId,
+  open,
+  children,
+}: {
+  title: string;
+  line: string;
+  testId: string;
+  /** A link to the shelf's own page, in place of Show all. */
+  open?: { label: string; run: () => void };
+  children: ReactNode[];
+}) {
   const id = useId();
   const box = useRef<HTMLElement>(null);
   const [cols, setCols] = useState(0);
@@ -264,7 +280,11 @@ export function RecordShelf({ title, line, testId, children }: { title: string; 
           </h2>
           <p className="record-shelf__line">{line}</p>
         </div>
-        {more && (
+        {open ? (
+          <button type="button" className="shelf__all" onClick={open.run}>
+            {open.label}
+          </button>
+        ) : more && (
           <button type="button" className="shelf__all" aria-expanded={all} onClick={() => setAll((v) => !v)}>
             {all ? "Show less" : "Show all"}
           </button>
@@ -311,5 +331,19 @@ export function RecordShelves({ data }: { data: RecordHome }) {
         ))}
       </RecordShelf>
     </>
+  );
+}
+
+/** Under the record shelves: the way into the crates (while Show crates is on). */
+export function CratesLink() {
+  const on = useSettings((s) => s.settings?.showCrates !== false);
+  if (!on) return null;
+  return (
+    <div className="record-crates" data-testid="home-crates">
+      <p className="record-crates__line">Dig through the rest by label, producer, studio and era.</p>
+      <Button variant="secondary" size="sm" onClick={() => nav.go({ name: "crates" })}>
+        Open the crates
+      </Button>
+    </div>
   );
 }

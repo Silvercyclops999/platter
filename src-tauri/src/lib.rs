@@ -7,6 +7,7 @@ pub mod bookmarks;
 pub mod bridge;
 pub mod db;
 pub mod devices;
+pub mod digging;
 pub mod discover;
 pub mod doctor;
 pub mod downloads;
@@ -1625,6 +1626,9 @@ pub fn run() {
             sleeve::commands::sleeve_notes,
             sleeve::commands::song_credits,
             sleeve::commands::credit_page,
+            digging::commands::crates,
+            digging::commands::crate_page,
+            digging::commands::album_crates,
             sleeve::sides::album_sides,
             sleeve::sides::album_sides_set,
             artistinfo::commands::album_release_status,

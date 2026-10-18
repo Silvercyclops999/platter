@@ -164,6 +164,7 @@ export function AppMenu() {
   const doctorOn = useSettings((s) => s.settings?.libraryDoctor !== false);
   const doctorCount = useDoctorCount();
   const soundMapOn = useSoundMapEntry();
+  const cratesOn = useSettings((s) => s.settings?.showCrates !== false);
   const miniOpen = useMiniplayer((s) => s.open);
   const [open, setOpen] = useState(false);
   const confirmSignOut = useUi((s) => s.signOutOpen);
@@ -295,6 +296,11 @@ export function AppMenu() {
           <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "devices" }))}>
             <span>Devices</span>
           </button>
+          {cratesOn && (
+            <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "crates" }))}>
+              <span>Crates</span>
+            </button>
+          )}
           {soundMapOn && (
             <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "soundMap" }))}>
               <span>Sound map</span>

@@ -385,6 +385,31 @@ impl SleeveService {
 
     /// A person's credit page. Albums with a cached MusicBrainz release that
     /// were never shown are indexed first (from the cache, no lookups).
+    /// Albums with a cached MusicBrainz or Discogs release whose label and
+    /// studios crates haven't kept yet are put together once (200 a call).
+    pub async fn backfill_facts(&self) {
+        let now = now_s();
+        let pending: Vec<String> = self
+            .inner
+            .db
+            .read_async(|c| {
+                let mut st = c.prepare_cached(
+                    "SELECT DISTINCT substr(ai.artist_id, 7) FROM artist_info ai
+                     WHERE ai.artist_id LIKE 'album:%' AND ai.source IN ('musicbrainz', 'discogs') AND ai.data IS NOT NULL
+                       AND NOT EXISTS (SELECT 1 FROM album_facts af WHERE af.album_id = substr(ai.artist_id, 7))
+                     LIMIT 200",
+                )?;
+                Ok(st.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?)
+            })
+            .await
+            .unwrap_or_default();
+        for id in pending {
+            if self.inner.backfilled.lock().insert(id.clone()) {
+                let _ = self.cached(&id, now).await;
+            }
+        }
+    }
+
     pub async fn credit_page(&self, name: &str) -> AppResult<Option<store::CreditPage>> {
         let now = now_s();
         let pending: Vec<String> = self

@@ -1,0 +1,250 @@
+/* ---------------------------------------------------------------- Crates
+   Records filed like a shop's crates. In Platter's own looks each crate is
+   a divider card over a row of sleeves, and a crate's page opens on an
+   engraved plate; Classic keeps plain headings and cards. Brass marks only
+   the primary button and what's playing. */
+
+.crates-page,
+.crate-page { container-type: inline-size; }
+
+.crates-page__head { margin: 0 var(--space-3) 20px; }
+.crates-page .crates-page__title { margin: 0 0 var(--space-2); font-family: var(--font-headings, var(--font-family)); }
+.crates-page__lede { margin: 0; max-width: 560px; font-size: var(--font-size-md); color: var(--color-text-secondary); }
+.crates-page__tabs { margin: 0 var(--space-3) 20px; }
+.crates-page__panel { margin: 0 var(--space-3); }
+.crates-page__loading { padding-top: var(--space-2); }
+
+.crates-page__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-6);
+  margin-bottom: var(--space-6);
+}
+.crates-page__count { margin: 0; max-width: 520px; font-size: var(--font-size-md); color: var(--color-text-primary); }
+.crates-page__source { display: block; margin-top: 2px; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.crates-page__tools { display: flex; align-items: center; gap: var(--space-3); }
+.crates-page__filter { width: 220px; }
+.crates-page__seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-ink) 7%, transparent);
+}
+.crates-page__seg button {
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.crates-page__seg button:hover { color: var(--color-text-primary); }
+.crates-page__seg button[aria-pressed="true"] { color: var(--color-text-primary); background: var(--color-bg-raised); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); }
+.crates-page__none { color: var(--color-text-secondary); }
+.crates-page__more { display: flex; justify-content: center; margin: var(--space-6) 0 var(--space-8); }
+
+/* ---------------------------------------------------------------- A crate */
+.crate { margin: 0 0 var(--space-8); }
+.crate__divider {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+:root[data-identity] .crate__divider { border-bottom-color: var(--engrave-dark); box-shadow: 0 1px 0 var(--engrave-light); }
+.crate__titles { min-width: 0; }
+.crate__name { margin: 0; font-size: var(--font-size-xl); line-height: 1.2; }
+.crate__open {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: inherit;
+  font-family: var(--font-headings, var(--font-family));
+  font-weight: var(--font-weight-display, var(--font-weight-bold));
+  color: var(--color-text-primary);
+  text-align: left;
+  border-radius: 2px;
+}
+.crate__open:hover { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 4px; }
+.crate__line { margin: 2px 0 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.crate__tools { display: flex; gap: var(--space-1); flex-shrink: 0; }
+
+.crate__sleeves {
+  display: grid;
+  grid-auto-flow: column;
+  gap: 28px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x proximity;
+  scroll-padding-left: 2px;
+  scrollbar-width: none;
+  /* Room for the lifted sleeve and the record sliding out. */
+  padding: 10px var(--space-4) var(--space-2) 2px;
+  margin-top: -10px;
+  animation: crate-in var(--motion-long) var(--motion-easing) both;
+}
+.crate__sleeves::-webkit-scrollbar { display: none; }
+.crate__sleeves.is-sleeves { grid-auto-columns: 168px; }
+.crate__sleeves.is-cards { grid-auto-columns: 180px; gap: var(--space-2); }
+.crate__sleeves > * { scroll-snap-align: start; }
+@keyframes crate-in {
+  from { opacity: 0; translate: calc(28px * var(--motion-move)) 0; }
+}
+
+/* Flipping: the record you're on rises a little out of the crate and tips
+   towards you, then settles back as you move on. */
+.crate__sleeves .sleeve-card__sleeve,
+.crate-page__grid .sleeve-card__sleeve {
+  display: block;
+  transform-origin: 50% 100%;
+  transition: translate var(--motion-medium) var(--motion-easing), rotate var(--motion-medium) var(--motion-easing);
+}
+.crate__sleeves .sleeve-card:is(:hover, :focus-within) .sleeve-card__sleeve,
+.crate-page__grid .sleeve-card:is(:hover, :focus-within) .sleeve-card__sleeve {
+  translate: 0 calc(-6px * var(--motion-move));
+  rotate: calc(-1.2deg * var(--motion-move));
+}
+
+/* The end of a row: the rest of the crate behind a card. */
+.crate__rest { display: flex; }
+.crate__all {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 2px;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: var(--space-4);
+  border-radius: 2px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  text-align: left;
+  background: color-mix(in srgb, var(--color-ink) 5%, var(--color-bg-raised));
+  box-shadow: inset 0 0 0 1px var(--color-border);
+  transition: background var(--motion-quick), color var(--motion-quick);
+}
+.crate__sleeves.is-cards .crate__all { aspect-ratio: auto; height: 100%; min-height: 180px; border-radius: var(--radius-card); }
+:root[data-identity] .crate__all { box-shadow: var(--panel-highlight), inset 0 0 0 1px var(--engrave-dark); }
+:root[data-identity="sleeve"] .crate__all { background-image: var(--paper-grain); }
+.crate__all:hover { color: var(--color-text-primary); background: color-mix(in srgb, var(--color-ink) 9%, var(--color-bg-raised)); }
+.crate__all-count {
+  font-family: var(--font-headings, var(--font-family));
+  font-size: 40px;
+  font-weight: var(--font-weight-display, var(--font-weight-bold));
+  line-height: 1;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.crate__card { min-width: 0; }
+
+/* "Sounds like this record": into the sound map, on that record's songs. */
+.crate-sounds {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  border-radius: 2px;
+}
+.crate-sounds:hover { color: var(--color-text-primary); text-decoration: underline; text-underline-offset: 3px; }
+/* One link per record would crowd the grid: it shows on the record you're on. */
+:is(.sleeve-card, .crate__card) .crate-sounds { opacity: 0; transition: opacity var(--motion-quick) var(--motion-easing); }
+:is(.sleeve-card, .crate__card):is(:hover, :focus-within) .crate-sounds { opacity: 1; }
+.crate__card .crate-sounds { margin: 0 var(--space-3) var(--space-3); }
+
+/* ---------------------------------------------------------------- A crate's page */
+.crate-plate { position: relative; margin: 0 var(--space-3) var(--space-8); max-width: 760px; }
+.crate-plate__kind { font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-text-muted); }
+.crate-plate__name {
+  margin: 2px 0 var(--space-2);
+  font-family: var(--font-headings, var(--font-family));
+  font-size: clamp(32px, 5cqi, 56px);
+  font-weight: var(--font-weight-bold);
+  line-height: 1.06;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.crate-plate__line { margin: 0; max-width: 560px; font-size: var(--font-size-md); color: var(--color-text-secondary); }
+.crate-plate__actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: 20px; }
+.crate-plate__years { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: 20px; }
+.crate-year {
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+  background: color-mix(in srgb, var(--color-ink) 7%, transparent);
+}
+.crate-year:hover { color: var(--color-text-primary); background: color-mix(in srgb, var(--color-ink) 12%, transparent); }
+
+/* In Platter's own looks the header is a label plate screwed to the crate:
+   a raised panel with engraved edges and a screw in each top corner. */
+:root[data-identity] .crate-plate {
+  max-width: none;
+  padding: var(--space-6) var(--space-8) var(--space-6);
+  border-radius: 4px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--color-ink) 4%, transparent), transparent 80%), var(--color-bg-raised);
+  box-shadow: var(--panel-highlight), inset 0 0 0 1px var(--engrave-dark), 0 1px 0 var(--engrave-light);
+}
+:root[data-identity="sleeve"] .crate-plate { background: var(--color-bg-raised); background-image: var(--paper-grain); }
+:root[data-identity] .crate-plate::before,
+:root[data-identity] .crate-plate::after {
+  content: "";
+  position: absolute;
+  top: 12px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background:
+    linear-gradient(135deg, transparent 42%, var(--engrave-dark) 42% 58%, transparent 58%),
+    color-mix(in srgb, var(--color-ink) 16%, var(--color-bg-raised));
+  box-shadow: inset 0 1px 0 var(--engrave-light), 0 0 0 1px var(--engrave-dark);
+}
+:root[data-identity] .crate-plate::before { left: 12px; }
+:root[data-identity] .crate-plate::after { right: 12px; }
+:root[data-identity] .crate-plate__kind { letter-spacing: 0.08em; text-transform: uppercase; font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+:root[data-identity] .crate-plate__name { font-weight: 600; }
+:root[data-identity] .crate-year { border-radius: 2px; box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-ink) 8%, transparent), inset 0 -1px 0 var(--engrave-dark); }
+
+.crate-page__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: var(--space-8) 28px;
+  margin: 0 var(--space-3);
+  padding-right: var(--space-3);
+}
+.crate-page__grid.is-cards { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--space-2); }
+
+/* ---------------------------------------------------------------- Album page shelves */
+.crate-shelves { margin-top: var(--space-2); }
+.crate-shelves .record-shelf { margin-bottom: var(--space-8); }
+.crate-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-3);
+  margin: 0 var(--space-3) var(--space-8);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+.crate-more__label { font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.crate-more__link { font: inherit; color: var(--color-text-secondary); border-radius: 2px; }
+.crate-more__link:hover { color: var(--color-text-primary); text-decoration: underline; text-underline-offset: 3px; }
+.crate-more__count { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+
+/* Narrow: the tools go under the count, and the plate loses its padding. */
+@container (max-width: 640px) {
+  .crates-page__tools { width: 100%; }
+  .crates-page__filter { flex: 1; width: auto; }
+  :root[data-identity] .crate-plate { padding: var(--space-6) 20px; }
+}

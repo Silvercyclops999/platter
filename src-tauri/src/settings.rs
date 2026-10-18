@@ -805,6 +805,10 @@ pub struct Settings {
     pub show_vinyl_sides: bool,
     /// The record player pauses at the end of a side until Flip.
     pub flip_pause: bool,
+    /// A Crates page: the library by label, producer, studio, era and genre.
+    pub show_crates: bool,
+    /// Album pages show "More from <label>" and other crate shelves.
+    pub crate_shelves: bool,
     /// List DLNA / UPnP renderers under Listen on (SSDP searches only while on).
     pub show_dlna_devices: bool,
     /// platter:// command links, scripts and the command line can control playback (through the local control API).
@@ -1147,6 +1151,8 @@ impl Default for Settings {
             sleeve_lookups: true,
             show_vinyl_sides: true,
             flip_pause: false,
+            show_crates: true,
+            crate_shelves: true,
             show_dlna_devices: true,
             allow_automation: false,
             translate_to: "en".into(),
@@ -1328,6 +1334,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "sleeveLookups",
     "showVinylSides",
     "flipPause",
+    "showCrates",
+    "crateShelves",
     "showDlnaDevices",
     "translateTo",
     "showPronunciation",
@@ -1675,6 +1683,8 @@ pub struct SettingsPatch {
     pub sleeve_lookups: Option<bool>,
     pub show_vinyl_sides: Option<bool>,
     pub flip_pause: Option<bool>,
+    pub show_crates: Option<bool>,
+    pub crate_shelves: Option<bool>,
     pub show_dlna_devices: Option<bool>,
     pub allow_automation: Option<bool>,
     pub translate_to: Option<String>,
@@ -2037,6 +2047,8 @@ impl Settings {
         set(&mut self.sleeve_lookups, p.sleeve_lookups);
         set(&mut self.show_vinyl_sides, p.show_vinyl_sides);
         set(&mut self.flip_pause, p.flip_pause);
+        set(&mut self.show_crates, p.show_crates);
+        set(&mut self.crate_shelves, p.crate_shelves);
         set(&mut self.show_friend_activity, p.show_friend_activity);
         set(&mut self.share_activity, p.share_activity);
         set(&mut self.whats_new_announcements, p.whats_new_announcements);
@@ -4723,6 +4735,20 @@ mod tests {
         assert!(s.apply(&serde_json::from_value(serde_json::json!({"catalogueSource": "elsewhere"})).unwrap()).is_err());
         s.apply(&serde_json::from_value(serde_json::json!({"getAlbumsKinds": []})).unwrap()).unwrap();
         assert_eq!(s.get_albums_kinds, ["studio"], "none ticked means studio albums");
+    }
+
+    #[test]
+    fn crates_and_their_album_shelves_are_on_and_synced() {
+        let s = Settings::default();
+        assert!(s.show_crates && s.crate_shelves);
+        for k in ["showCrates", "crateShelves"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
+        }
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(old.show_crates && old.crate_shelves, "older settings files get the defaults");
+        let mut s = s;
+        s.apply(&serde_json::from_str(r#"{"showCrates":false,"crateShelves":false}"#).unwrap()).unwrap();
+        assert!(!s.show_crates && !s.crate_shelves);
     }
 
     #[test]

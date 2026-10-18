@@ -253,6 +253,10 @@ import type {
   ImageChoice,
   ImageKind,
   MatchCandidate,
+  AlbumShelf,
+  CrateKind,
+  CrateList,
+  CratePage,
 } from "./types";
 import type {
   ImportDecision,
@@ -613,6 +617,12 @@ export interface Backend {
   songCredits(id: string): Promise<SongCredits>;
   /** Everything in the library a person is credited on, by role; null when nothing credits them. */
   creditPage(name: string): Promise<CreditPage | null>;
+  /** Every crate of one kind, biggest first (eras and years newest first); empty while Show crates is off. */
+  crates(kind: CrateKind): Promise<CrateList>;
+  /** One crate with all its albums; null when there's no such crate. */
+  cratePage(kind: CrateKind, key: string): Promise<CratePage | null>;
+  /** An album page's crate shelves: its label, producers and studios (empty while either setting is off). */
+  albumCrates(id: string): Promise<AlbumShelf[]>;
   /** An album's record sides from what's cached (never looks anything up). */
   albumSides(id: string): Promise<AlbumSides>;
   /** Split an album into sides by hand (`starts`: where sides B, C... start; empty for none), or null to use its edition's sides. */
@@ -1405,6 +1415,9 @@ export function createTauriBackend(): Backend {
     sleeveNotes: (id) => call("sleeve_notes", { id }),
     songCredits: (id) => call("song_credits", { id }),
     creditPage: (name) => call("credit_page", { name }),
+    crates: (kind) => call("crates", { kind }),
+    cratePage: (kind, key) => call("crate_page", { kind, key }),
+    albumCrates: (id) => call("album_crates", { id }),
     albumSides: (id) => call("album_sides", { id }),
     setAlbumSides: (id, starts) => call("album_sides_set", { id, starts }),
     albumReleaseStatus: (id) => call("album_release_status", { id }),

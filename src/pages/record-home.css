@@ -282,6 +282,25 @@
   outline-offset: 3px;
 }
 
+/* The way into the crates, after the shelves: a line and a button over an engraved rule. */
+.record-crates {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-6);
+  margin: 0 0 var(--space-8);
+  padding: var(--space-4) var(--space-1) 0;
+  border-top: 1px solid var(--engrave-dark, var(--color-border));
+  box-shadow: inset 0 1px 0 var(--engrave-light, transparent);
+}
+.record-crates__line {
+  margin: 0;
+  font-family: var(--font-headings, var(--font-family));
+  font-size: var(--font-size-lg);
+  color: var(--color-text-primary);
+}
+
 /* Reduced motion: no sliding or turning; the record still shows. */
 :root[data-reduced-motion="true"] .record-hero__disc { animation: identity-fade var(--motion-medium) ease both; }
 :root[data-reduced-motion="true"] .record-hero.is-spinning .record-hero__disc::after { animation: none; }

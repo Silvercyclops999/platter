@@ -82,6 +82,12 @@ export class MockSoundMap {
     return this.limit === null ? all : all.slice(0, this.limit);
   }
 
+  /** Whether any of these songs has a place on the map. */
+  hasAny(ids: string[]): boolean {
+    const set = new Set(ids);
+    return this.placed().some((p) => set.has(p.id));
+  }
+
   info(): SoundMapInfo {
     const placed = this.placed().length;
     return { placed, analysed: placed, total: this.fx.tracks.length, analysing: this.analysing, building: false, revision: this.revision };

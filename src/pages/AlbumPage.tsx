@@ -18,6 +18,7 @@ import { DownloadButton } from "../components/DownloadButton";
 import { downloadMenuItems } from "../stores/downloads";
 import { sendToDeviceItem } from "../components/DeviceMenu";
 import { Shelf, ShelfItem } from "../components/Shelf";
+import { CrateShelves } from "./CrateShelves";
 import { Skeleton } from "../components/Skeleton";
 import { Tabs } from "../components/Tabs";
 import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
@@ -371,6 +372,7 @@ function LibraryAlbumView({ id, tab }: { id: string; tab?: "sleeve" }) {
             </Shelf>
           </div>
         )}
+        {album && <CrateShelves albumId={id} />}
       </div>
     </div>
   );

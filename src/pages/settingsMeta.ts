@@ -131,6 +131,8 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "shelfOpen",
   "sleeveLookups",
   "showVinylSides",
+  "showCrates",
+  "crateShelves",
   "showFanEdits",
   "groupEditions",
   "showDescribePlaylist",

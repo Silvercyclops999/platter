@@ -141,6 +141,9 @@ const CALLS: [string, (b: ReturnType<typeof createTauriBackend>) => Promise<unkn
   ["sleeve_notes", (b) => b.sleeveNotes("5"), { id: "5" }],
   ["song_credits", (b) => b.songCredits("9"), { id: "9" }],
   ["credit_page", (b) => b.creditPage("Ada Moss"), { name: "Ada Moss" }],
+  ["crates", (b) => b.crates("label"), { kind: "label" }],
+  ["crate_page", (b) => b.cratePage("producer", "max volume"), { kind: "producer", key: "max volume" }],
+  ["album_crates", (b) => b.albumCrates("5"), { id: "5" }],
   ["album_sides", (b) => b.albumSides("5"), { id: "5" }],
   ["album_sides_set", (b) => b.setAlbumSides("5", ["t3"]), { id: "5", starts: ["t3"] }],
 ];

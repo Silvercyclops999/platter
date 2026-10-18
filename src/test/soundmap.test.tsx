@@ -518,3 +518,17 @@ describe("the Show sound map setting", () => {
     expect(await screen.findByText("The sound map is turned off.")).toBeInTheDocument();
   });
 });
+
+describe("opened on a record", () => {
+  it("picks that record's songs and plays them from the selection", async () => {
+    const user = userEvent.setup();
+    const play = vi.spyOn(player, "playTracks").mockResolvedValue(undefined);
+    const album = mock.fx.albums.find((a) => (mock.fx.tracksByAlbum.get(a.id)?.length ?? 0) > 2)!;
+    const ids = mock.fx.tracksByAlbum.get(album.id)!.map((t) => t.id);
+    render(<SoundMapPage album={album.id} />);
+    const sel = await screen.findByRole("region", { name: "Selection" });
+    expect(within(sel).getByText(`${ids.length} songs from ${album.title}`)).toBeInTheDocument();
+    await user.click(within(sel).getByRole("button", { name: "Play" }));
+    expect([...play.mock.calls[0][0]].sort()).toEqual([...ids].sort());
+  });
+});

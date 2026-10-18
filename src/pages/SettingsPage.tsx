@@ -1997,6 +1997,23 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       more: "When an album has a vinyl edition on MusicBrainz or Discogs, its songs are grouped by the record's sides, and each side can be played on its own from its heading or the album's menu. Any album can be split by hand with Split into sides in its menu; splits are kept for every device you sync. The album still plays in order.",
       control: (ids) => toggle(s, "showVinylSides", ids),
     },
+    // Library: crates
+    {
+      key: "showCrates",
+      section: "Library",
+      title: "Show crates",
+      description: "A Crates page in the app menu: your records by label, producer, studio, era and genre.",
+      more: "Crates file your records the way a shop would. Labels come from your files' tags, Plex and the sleeve notes you've opened; producers from credit tags and sleeve notes; studios from sleeve notes looked up online. A crate needs two records or more. Each crate's page plays everything in it, and a record that's on the sound map opens there.",
+      control: (ids) => toggle(s, "showCrates", ids),
+    },
+    {
+      key: "crateShelves",
+      section: "Library",
+      title: "Crate shelves on album pages",
+      description: "Album pages end with more from the same label, producer and studio.",
+      more: "Under the songs, an album page shows up to two shelves such as More from its label and More produced by its producer, from your library only. Any other crates it's in are listed under More crates.",
+      control: (ids) => (s?.showCrates === false ? null : toggle(s, "crateShelves", ids)),
+    },
     {
       key: "likeControlRows",
       section: "Library",

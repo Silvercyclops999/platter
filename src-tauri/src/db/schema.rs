@@ -1325,6 +1325,21 @@ CREATE TABLE IF NOT EXISTS sleeve_credits (
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS sleeve_credits_person ON sleeve_credits (person_key);
 "#,
+    // v44: crates (digging::). album_facts keeps an album's label and studios
+    // as its sleeve notes last put them together, folded for grouping. The
+    // role indexes let crates read every producer credit without a scan.
+    r#"
+CREATE TABLE IF NOT EXISTS album_facts (
+    album_id TEXT NOT NULL,
+    kind     TEXT NOT NULL,
+    fact_key TEXT NOT NULL,
+    name     TEXT NOT NULL,
+    PRIMARY KEY (album_id, kind, fact_key)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS album_facts_kind ON album_facts (kind, fact_key);
+CREATE INDEX IF NOT EXISTS tag_credits_role ON tag_credits (role, person_key);
+CREATE INDEX IF NOT EXISTS sleeve_credits_role ON sleeve_credits (role, person_key);
+"#,
 ];
 
 #[cfg(test)]

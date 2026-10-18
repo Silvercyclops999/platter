@@ -42,6 +42,8 @@ const LineagePage = lazy(() => import("../pages/LineagePage").then((m) => ({ def
 const EraPage = lazy(() => import("../pages/EraPage").then((m) => ({ default: m.EraPage })));
 const DoctorPage = lazy(() => import("../pages/DoctorPage").then((m) => ({ default: m.DoctorPage })));
 const DevicesPage = lazy(() => import("../pages/DevicesPage").then((m) => ({ default: m.DevicesPage })));
+const CratesPage = lazy(() => import("../pages/CratesPage").then((m) => ({ default: m.CratesPage })));
+const CratePage = lazy(() => import("../pages/CratesPage").then((m) => ({ default: m.CratePage })));
 const SoundMapPage = lazy(() => import("../pages/SoundMapPage").then((m) => ({ default: m.SoundMapPage })));
 
 /** Scroll offset per history entry, so Back returns to where you were. */
@@ -123,6 +125,7 @@ const PAGE_LABELS: Partial<Record<Route["name"], string>> = {
   stats: "Stats",
   profile: "Your profile",
   devices: "Devices",
+  crates: "Crates",
   soundMap: "Sound map",
 };
 
@@ -206,7 +209,11 @@ function Page({ route }: { route: Route }) {
     case "devices":
       return <DevicesPage />;
     case "soundMap":
-      return <SoundMapPage />;
+      return <SoundMapPage key={route.album ?? "all"} album={route.album} />;
+    case "crates":
+      return <CratesPage kind={route.kind} />;
+    case "crate":
+      return <CratePage key={`${route.kind}:${route.key}`} kind={route.kind} crateKey={route.key} />;
     case "import":
       return <ImportPage key={route.view ?? "home"} view={route.view} />;
     case "liked":
