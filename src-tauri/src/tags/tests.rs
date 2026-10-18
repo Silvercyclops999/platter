@@ -793,6 +793,96 @@ async fn the_scan_reads_each_file_once_and_again_when_it_changes() {
 }
 
 #[tokio::test]
+async fn a_big_scan_rebuilds_the_whole_album_view_once() {
+    // 30 albums of 4 songs: five batches. The first and last album are two
+    // editions of one group, read batches apart.
+    let mut albums = Vec::new();
+    let mut tracks = Vec::new();
+    let mut files = Vec::new();
+    for a in 1..=30 {
+        let aid = format!("{a:02}");
+        albums.push(album(&aid, "ar", Some(2000 + a), a as i64, &[]));
+        for n in 1..=4 {
+            let t = track(&format!("{aid}{n}"), &aid, n, "flac");
+            let mut entries = vec![format!("TITLE=Song {n}")];
+            if a == 1 {
+                entries.push("ARCHIVE_GROUP=g".into());
+                entries.push("ARCHIVE_EDITION=Deluxe".into());
+            }
+            if a == 30 {
+                entries.push("ARCHIVE_GROUP=g".into());
+                entries.push("ARCHIVE_EDITION=Standard".into());
+            }
+            if a % 7 == 0 {
+                entries.push("ITUNESADVISORY=1".into());
+            }
+            let refs: Vec<&str> = entries.iter().map(String::as_str).collect();
+            files.push((t.part_key.clone(), flac(&[streaminfo(), (4, vorbis(&refs))])));
+            tracks.push(t);
+        }
+    }
+    let refs: Vec<(&str, Vec<u8>)> = files.iter().map(|(p, b)| (p.as_str(), b.clone())).collect();
+    let server = serve(&refs, false, Duration::ZERO).await;
+    let (db, _d) = db_with(&albums, &tracks);
+    let events = Arc::new(Events::default());
+    let scan = TagScanner::new(db.clone(), Arc::new(Parts::new(server.uri())), reader(TransferGate::new(), None), Some(events.clone()));
+    scan.spawn();
+    let settled = || scan.status().done == 120 && !scan.status().running && scan.full_refreshes() >= 1;
+    for _ in 0..1200 {
+        if settled() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(settled(), "the scan finished");
+    assert_eq!(scan.full_refreshes(), 1, "one full rebuild at the end, not one per batch");
+    assert!(*events.changed.lock() <= 3, "the UI isn't told after every batch");
+
+    // What the batches built matches a full rebuild.
+    let snapshot = |db: &DbHandle| -> Vec<(String, i64, Option<String>, Option<String>)> {
+        db.read(|c| {
+            let mut st = c.prepare("SELECT album_id, explicit, grp, face_id FROM album_tags ORDER BY album_id")?;
+            let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+        .unwrap()
+    };
+    let after_scan = snapshot(&db);
+    assert!(after_scan.iter().any(|r| r.0 == "01" && r.3.as_deref() == Some("30")), "the Standard edition is the face");
+    db.write(|c| store::refresh_albums(c)).unwrap();
+    assert_eq!(after_scan, snapshot(&db));
+}
+
+#[test]
+fn a_batch_refresh_updates_the_whole_group() {
+    // Album 2 is read first (Deluxe, the face while alone); album 1 then
+    // turns out to be the Standard edition: album 2 moves behind it even
+    // though none of its songs were in the batch.
+    let (db, _d) = db_with(
+        &[album("1", "ar", Some(2020), 10, &[]), album("2", "ar", Some(2021), 20, &[])],
+        &[track("11", "1", 1, "flac"), track("21", "2", 1, "flac")],
+    );
+    db.write(|c| {
+        save(c, "/library/parts/21/100/file.flac", &tags(|t| {
+            t.set("ARCHIVE_GROUP", "g");
+            t.set("ARCHIVE_EDITION", "Deluxe");
+        }));
+        store::refresh_albums_for(c, &["21".to_string()])?;
+        save(c, "/library/parts/11/100/file.flac", &tags(|t| {
+            t.set("ARCHIVE_GROUP", "g");
+            t.set("ARCHIVE_EDITION", "Standard");
+        }));
+        store::refresh_albums_for(c, &["11".to_string()])
+    })
+    .unwrap();
+    let face = |id: &str| -> Option<String> {
+        db.read(|c| Ok(c.query_row("SELECT face_id FROM album_tags WHERE album_id = ?1", [id], |r| r.get(0))?)).unwrap()
+    };
+    assert_eq!(face("1").as_deref(), Some("1"));
+    assert_eq!(face("2").as_deref(), Some("1"));
+}
+
+#[tokio::test]
 async fn each_file_is_asked_of_the_server_its_track_is_on() {
     // Part keys don't carry a server; the track id says which one has the file.
     let id = format!("{}:21", crate::sid::tag("other-server"));

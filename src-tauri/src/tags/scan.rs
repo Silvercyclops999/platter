@@ -8,7 +8,7 @@
 //! until it changes. Progress goes to Settings ("Reading tags: 812 of 1,439").
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -24,13 +24,16 @@ use super::fetch::{FetchError, Reader, read_tags};
 use super::store::{self, Counts, Status};
 use super::FileTags;
 
-/// Files per batch between progress and album refreshes.
+/// Files per batch between progress and refreshes of the batch's albums.
 const BATCH: usize = 25;
 /// Re-check for new or changed files this often when idle.
 const IDLE_RECHECK: Duration = Duration::from_secs(60);
 /// Wait after network or server trouble.
 const BACKOFF: Duration = Duration::from_secs(60);
 const PROGRESS_EVERY: Duration = Duration::from_millis(750);
+/// Tell the UI tags changed at most this often while a pass runs; the end
+/// of the pass always tells it.
+const CHANGED_EVERY: Duration = Duration::from_secs(5);
 
 /// Where a track's part key can be read: its server's direct file URL plus
 /// the token header. The track id names the server (part keys don't).
@@ -73,6 +76,13 @@ struct Inner {
     enabled: AtomicBool,
     wake: Notify,
     status: Mutex<TagScanStatus>,
+    /// When the UI was last told tags changed.
+    last_changed: Mutex<Option<Instant>>,
+    /// Batches were read since the last full album rebuild.
+    dirty: AtomicBool,
+    /// Full album rebuilds so far (tests check a big scan does one, not one
+    /// per batch).
+    full_refreshes: AtomicUsize,
 }
 
 /// Handle to the scan task. Cheap to clone.
@@ -109,6 +119,9 @@ impl TagScanner {
             enabled: AtomicBool::new(true),
             wake: Notify::new(),
             status: Mutex::new(TagScanStatus { enabled: true, ..Default::default() }),
+            last_changed: Mutex::new(None),
+            dirty: AtomicBool::new(false),
+            full_refreshes: AtomicUsize::new(0),
         }))
     }
 
@@ -189,13 +202,43 @@ impl TagScanner {
         let _ = tokio::time::timeout(d, self.0.wake.notified()).await;
     }
 
-    /// Rebuilds the album view of the tags and tells the UI.
+    /// How many full album rebuilds the scan has done.
+    pub fn full_refreshes(&self) -> usize {
+        self.0.full_refreshes.load(Ordering::SeqCst)
+    }
+
+    /// Tells the UI tags changed now.
+    fn changed_now(&self) {
+        *self.0.last_changed.lock() = Some(Instant::now());
+        if let Some(ev) = &self.0.events {
+            ev.changed();
+        }
+    }
+
+    /// Tells the UI tags changed unless it was told a moment ago (the end
+    /// of the pass tells it again).
+    fn changed_soon(&self) {
+        let due = self.0.last_changed.lock().is_none_or(|t| t.elapsed() >= CHANGED_EVERY);
+        if due {
+            self.changed_now();
+        }
+    }
+
+    /// Rebuilds the whole album view of the tags and tells the UI.
     async fn refresh(&self) {
+        self.0.dirty.store(false, Ordering::SeqCst);
+        self.0.full_refreshes.fetch_add(1, Ordering::SeqCst);
         if let Err(e) = self.0.db.write_async(|c| store::refresh_albums(c)).await {
             tracing::warn!("album tags refresh failed: {e}");
         }
-        if let Some(ev) = &self.0.events {
-            ev.changed();
+        self.changed_now();
+    }
+
+    /// The end of a pass (nothing left, or trouble): one full rebuild if
+    /// batches were read since the last one.
+    async fn settle(&self) {
+        if self.0.dirty.load(Ordering::SeqCst) {
+            self.refresh().await;
         }
     }
 
@@ -217,6 +260,7 @@ impl TagScanner {
             }
             match self.pass().await {
                 Pass::Idle => {
+                    self.settle().await;
                     self.0.status.lock().running = false;
                     self.emit_progress();
                     self.sleep_or_wake(IDLE_RECHECK).await;
@@ -228,6 +272,7 @@ impl TagScanner {
                     }
                 }
                 Pass::Trouble => {
+                    self.settle().await;
                     {
                         let mut s = self.0.status.lock();
                         s.running = false;
@@ -306,16 +351,19 @@ impl TagScanner {
             }
         }
         if wrote {
-            self.refresh().await;
-            // ISRCs, recording ids and versions feed the song index: redo
-            // the rows of just these songs' artists (after album_tags, whose
-            // versions decide release status).
-            // Then release status, versions and eras for the same artists.
+            self.0.dirty.store(true, Ordering::SeqCst);
+            // The album view of just these songs' albums (and their groups),
+            // then the song index: ISRCs, recording ids and versions, redone
+            // for these songs' artists (after album_tags, whose versions
+            // decide release status). Then release status, versions and eras
+            // for the same artists. The whole view is rebuilt once at the
+            // end of the pass.
             let refreshed = self
                 .0
                 .db
                 .write_async(move |c| {
                     crate::archive::in_tx(c, |c| {
+                        store::refresh_albums_for(c, &read_ids)?;
                         crate::identity::index::refresh_for_tracks(c, &read_ids)?;
                         crate::archive::refresh_for_tracks(c, &read_ids)
                     })
@@ -324,6 +372,7 @@ impl TagScanner {
             if let Err(e) = refreshed {
                 tracing::warn!("song index refresh failed: {e}");
             }
+            self.changed_soon();
         }
         if let Some(c) = self.counts().await {
             self.set_counts(c);

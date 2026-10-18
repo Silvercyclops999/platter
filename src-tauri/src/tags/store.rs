@@ -3,7 +3,8 @@
 //! `file_tags` has one row per media part key. Plex part keys carry the
 //! part's update stamp (`/library/parts/{id}/{stamp}/file.ext`), so a file
 //! that changes gets a new key: the old row is pruned and the new one read.
-//! `album_tags` is rebuilt from it after each scan batch: an album's explicit
+//! `album_tags` is rebuilt from it (the batch's albums after each scan batch,
+//! every album at the end of a pass): an album's explicit
 //! flag, its most common version, edition and group, whether every read song
 //! is a fan or AI edit, and which album is the face of its group.
 
@@ -314,13 +315,68 @@ pub fn face(members: &[Member]) -> Option<&Member> {
 
 /// Rebuilds `album_tags` from the file tags read so far.
 pub fn refresh_albums(c: &Connection) -> AppResult<()> {
-    let mut acc: HashMap<String, AlbumAcc> = HashMap::new();
+    rebuild_albums(c, None)
+}
+
+/// Rebuilds the `album_tags` rows of just these tracks' albums, plus every
+/// album sharing a group with them (old or new) so each group's face is
+/// chosen from all of its members, the same as a full rebuild would.
+pub fn refresh_albums_for(c: &Connection, track_ids: &[String]) -> AppResult<()> {
+    let mut scope: HashSet<String> = HashSet::new();
     {
-        let mut st = c.prepare_cached(
-            "SELECT t.album_id, f.explicit, f.version, f.edition, f.grp, f.flags, t.disc_number, f.release
-             FROM tracks t JOIN file_tags f ON f.part_key = t.part_key WHERE f.status = 'ok'",
+        let mut st = c.prepare_cached("SELECT album_id FROM tracks WHERE id = ?1")?;
+        for id in track_ids {
+            if let Some(a) = st.query_row([id], |r| r.get::<_, String>(0)).optional()? {
+                scope.insert(a);
+            }
+        }
+    }
+    let mut groups: HashSet<String> = HashSet::new();
+    {
+        let mut old = c.prepare_cached("SELECT grp FROM album_tags WHERE album_id = ?1 AND grp IS NOT NULL")?;
+        let mut new = c.prepare_cached(
+            "SELECT DISTINCT f.grp FROM tracks t JOIN file_tags f ON f.part_key = t.part_key
+             WHERE t.album_id = ?1 AND f.status = 'ok' AND f.grp IS NOT NULL",
         )?;
-        let mut rows = st.query([])?;
+        for a in &scope {
+            for g in old.query_map([a], |r| r.get::<_, String>(0))? {
+                groups.insert(g?);
+            }
+            for g in new.query_map([a], |r| r.get::<_, String>(0))? {
+                groups.insert(g?);
+            }
+        }
+    }
+    {
+        let mut st = c.prepare_cached("SELECT album_id FROM album_tags WHERE grp = ?1")?;
+        for g in &groups {
+            for a in st.query_map([g], |r| r.get::<_, String>(0))? {
+                scope.insert(a?);
+            }
+        }
+    }
+    if scope.is_empty() {
+        return Ok(());
+    }
+    rebuild_albums(c, Some(&scope))
+}
+
+/// Rebuilds `album_tags`: every row, or only the albums in `scope`.
+fn rebuild_albums(c: &Connection, scope: Option<&HashSet<String>>) -> AppResult<()> {
+    const ROWS: &str = "SELECT t.album_id, f.explicit, f.version, f.edition, f.grp, f.flags, t.disc_number, f.release
+             FROM tracks t JOIN file_tags f ON f.part_key = t.part_key WHERE f.status = 'ok'";
+    let mut acc: HashMap<String, AlbumAcc> = HashMap::new();
+    let mut all = c.prepare_cached(ROWS)?;
+    let mut one = c.prepare_cached(&format!("{ROWS} AND t.album_id = ?1"))?;
+    let ids: Vec<Option<&String>> = match scope {
+        None => vec![None],
+        Some(s) => s.iter().map(Some).collect(),
+    };
+    for id in ids {
+        let mut rows = match id {
+            None => all.query([])?,
+            Some(a) => one.query([a])?,
+        };
         while let Some(r) = rows.next()? {
             let a = acc.entry(r.get::<_, String>(0)?).or_default();
             a.read += 1;
@@ -381,7 +437,17 @@ pub fn refresh_albums(c: &Connection) -> AppResult<()> {
         .iter()
         .filter_map(|(g, m)| face(m).map(|f| (g.clone(), f.album_id.clone())))
         .collect();
-    c.execute("DELETE FROM album_tags", [])?;
+    match scope {
+        None => {
+            c.execute("DELETE FROM album_tags", [])?;
+        }
+        Some(s) => {
+            let mut del = c.prepare_cached("DELETE FROM album_tags WHERE album_id = ?1")?;
+            for id in s {
+                del.execute([id])?;
+            }
+        }
+    }
     let mut ins = c.prepare_cached(
         "INSERT INTO album_tags (album_id, explicit, version, edition, grp, flagged, face_id, release, mixed)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
