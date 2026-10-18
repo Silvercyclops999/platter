@@ -195,6 +195,16 @@ pub async fn apply(db: &DbHandle, source: &dyn LibrarySource, batch: Batch) -> A
     for k in [ItemKindKey::Track, ItemKindKey::Album, ItemKindKey::Artist] {
         gone.extend(batch.removals(k).into_iter().map(|id| (k, id)));
     }
+    // A song the server doesn't place on an album yet (mid-scan): leave the
+    // whole batch to a sync rather than cache an orphan.
+    if changes.tracks.iter().any(|t| t.album_id.is_empty()) {
+        return Ok(LiveOutcome::NeedsSync);
+    }
+    // A sync that started while this batch was being read lists the server
+    // from scratch and would delete rows written behind its back.
+    if db.sync_running() {
+        return Ok(LiveOutcome::NeedsSync);
+    }
     let album_ids: Vec<String> = changes.albums.iter().map(|a| a.id.clone()).collect();
     let gen_ = state.generation;
     let (updated, removed, new_albums) = db

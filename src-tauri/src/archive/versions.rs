@@ -489,8 +489,14 @@ fn credits(c: &Connection, t: &Track, artist: &str) -> AppResult<bool> {
         return Ok(true);
     }
     let Some(line) = t.track_artist.as_deref() else { return Ok(false) };
-    if canonical(line) == artist {
+    let line_key = canonical(line);
+    if line_key == artist {
         return Ok(true);
+    }
+    // The artist's words must be in the line to be credited at all; this
+    // skips the artist scan for nearly every version.
+    if !line_key.contains(artist) {
+        return Ok(false);
     }
     Ok(crate::db::popular::line_credits(c, line)?.iter().any(|n| canonical(n) == artist))
 }
