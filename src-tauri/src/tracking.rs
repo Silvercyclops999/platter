@@ -22,7 +22,7 @@ use crate::db::DbHandle;
 use crate::db::listens::{self, ContextKind, NewReport, PlaySnapshot, PlayStart, ReportKind};
 use crate::db::queries::now_s;
 use crate::plex::PlexState;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 pub use crate::plex::client::PlaybackState;
 use crate::plex::client::TimelineReport;
 
@@ -273,7 +273,9 @@ impl Tracker {
         }
     }
 
-    /// Send queued scrobbles, oldest first. Stops at the first failure.
+    /// Send queued scrobbles, oldest first. A failure holds back only that
+    /// server's later plays (the others still go), and a song the server no
+    /// longer has is dropped instead of blocking the queue forever.
     /// Returns whether any are still waiting (so the retry loop keeps going).
     pub async fn replay_pending(&self) -> bool {
         const BATCH: u32 = 200;
@@ -287,22 +289,28 @@ impl Tracker {
         if pending.is_empty() {
             return false;
         }
-        if !self.plex.online().await {
-            return true;
-        }
         let total = pending.len();
         let mut sent = Vec::new();
+        let mut held: std::collections::HashSet<Option<String>> = std::collections::HashSet::new();
         for r in pending {
-            let ok = match r.kind {
-                ReportKind::Scrobble => self.plex.scrobble(&r.rating_key, Some(r.at)).await.is_ok(),
+            let server = crate::sid::tag_of(&r.rating_key).map(str::to_owned);
+            if held.contains(&server) {
+                continue;
+            }
+            let done = match r.kind {
+                ReportKind::Scrobble => match self.plex.scrobble(&r.rating_key, Some(r.at)).await {
+                    Ok(()) | Err(AppError::NotFound(_)) => true,
+                    Err(_) => false,
+                },
                 ReportKind::Timeline => true, // stale timelines are dropped
             };
-            if !ok {
-                break;
+            if !done {
+                held.insert(server);
+                continue;
             }
             sent.push(r.id);
         }
-        let all = sent.len() == total && total < BATCH as usize;
+        let all = held.is_empty() && sent.len() == total && total < BATCH as usize;
         if !sent.is_empty()
             && let Err(e) = self.db.write_async(move |c| listens::mark_sent(c, &sent, now_s())).await
         {
@@ -521,6 +529,8 @@ mod tests {
     struct Recorder {
         timelines: parking_lot::Mutex<Vec<PlaybackState>>,
         scrobbles: parking_lot::Mutex<Vec<String>>,
+        /// Ids whose scrobble fails: "down" (server unreachable) or "gone".
+        failing: parking_lot::Mutex<std::collections::HashMap<String, &'static str>>,
     }
 
     #[async_trait]
@@ -533,6 +543,11 @@ mod tests {
             Ok(())
         }
         async fn scrobble(&self, track_id: &str, _at: Option<i64>) -> AppResult<()> {
+            match self.failing.lock().get(track_id) {
+                Some(&"gone") => return Err(AppError::NotFound(track_id.into())),
+                Some(_) => return Err(AppError::Network("down".into())),
+                None => {}
+            }
             self.scrobbles.lock().push(track_id.to_string());
             Ok(())
         }
@@ -715,6 +730,41 @@ mod tests {
         // Reporting off: nothing to retry.
         let off = rig(false, false);
         assert!(!off.tracker.replay_pending().await);
+    }
+
+    #[tokio::test]
+    async fn one_down_server_or_deleted_song_never_blocks_the_other_plays() {
+        let r = rig(false, true);
+        let (a, b) = ("0a1b2c3d", "0f0f0f0f");
+        let ids = [format!("{a}:1"), format!("{a}:2"), format!("{b}:3"), format!("{b}:4")];
+        r.rec.failing.lock().insert(ids[0].clone(), "down");
+        r.rec.failing.lock().insert(ids[2].clone(), "gone");
+        r.db
+            .write(|c| {
+                for (n, id) in ids.iter().enumerate() {
+                    listens::enqueue_report(
+                        c,
+                        &NewReport {
+                            play_id: None,
+                            kind: ReportKind::Scrobble,
+                            rating_key: id.clone(),
+                            state: None,
+                            time_ms: None,
+                            duration_ms: None,
+                            at: n as i64 + 1,
+                        },
+                    )?;
+                }
+                Ok(())
+            })
+            .unwrap();
+        // Server a is down: its plays wait, in order. Server b's deleted song
+        // is dropped and its next play still goes.
+        assert!(r.tracker.replay_pending().await, "server a's plays still wait");
+        assert_eq!(r.rec.scrobbles.lock().clone(), vec![ids[3].clone()]);
+        r.rec.failing.lock().clear();
+        assert!(!r.tracker.replay_pending().await);
+        assert_eq!(r.rec.scrobbles.lock().clone(), vec![ids[3].clone(), ids[0].clone(), ids[1].clone()]);
     }
 
     #[tokio::test]
