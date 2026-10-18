@@ -277,9 +277,9 @@ fn decide_takes_the_first_match_and_skips_no_matches() {
         _ => None,
     };
     assert_eq!(candidates::decide(&cands, v, true, false), Decision::Show { idx: 1, note: Some(candidates::Note::Checked) });
-    // Nothing judged yet: a title search hit isn't shown while it's checked.
+    // Nothing judged yet: even a title search hit shows while it's checked.
     let none = |_: &Candidate| None;
-    assert_eq!(candidates::decide(&cands[1..2], none, true, false), Decision::Notice(Notice::Checking));
+    assert_eq!(candidates::decide(&cands[1..2], none, true, false), Decision::Show { idx: 0, note: Some(candidates::Note::Checking) });
     // The server's are shown while they're checked.
     assert_eq!(candidates::decide(&cands, none, true, false), Decision::Show { idx: 0, note: Some(candidates::Note::Checking) });
     // Every one disagreed.
@@ -537,10 +537,10 @@ async fn same_title_collision_never_shows_the_wrong_song() {
     // LRCLIB has both songs called KING; the other one is closer in length.
     f.lrclib_search(serde_json::json!([hit("Crown Season", 207.0, &lrc(KING_A)), hit("Night Bridge", 204.5, &lrc(KING_B))]));
     f.hears(timeline(KING_A, |t| t + 1500));
-    // Before the check: neither is shown (both were only found by title).
+    // Before the check: the closest title hit shows at once, marked as being checked.
     let s = f.svc.shown("701").await.unwrap().unwrap();
-    assert_eq!(s.notice, Some(Notice::Checking));
-    assert!(s.lyrics.lines.is_empty() && s.lyrics.timed.is_empty());
+    assert_eq!((s.notice, s.check), (None, Some(candidates::Note::Checking)));
+    assert!(!s.lyrics.lines.is_empty() || !s.lyrics.timed.is_empty());
     assert_eq!(f.checker.queued(), vec!["701"]);
     f.checker.drain().await.unwrap();
     assert_eq!(*f.events.0.lock(), vec!["701"]);
@@ -631,7 +631,7 @@ async fn the_check_waits_while_the_computer_is_busy_and_uses_two_threads() {
     f.hears(timeline(KING_A, |t| t));
     f.load.set(90.0);
     f.checker.spawn();
-    assert_eq!(f.svc.shown("701").await.unwrap().unwrap().notice, Some(Notice::Checking));
+    assert_eq!(f.svc.shown("701").await.unwrap().unwrap().check, Some(candidates::Note::Checking));
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert!(f.load.reads() > 0, "the processor is read while a song waits");
     assert_eq!(f.rec.calls.load(Ordering::SeqCst), 0, "nothing runs while the computer is busy");
@@ -653,7 +653,7 @@ async fn same_title_collision_the_other_way_round() {
     // Only the other KING is on LRCLIB, and the recording is this one.
     f.lrclib_search(serde_json::json!([hit("Night Bridge", 205.0, &lrc(KING_B))]));
     f.hears(timeline(KING_A, |t| t));
-    assert_eq!(f.svc.shown("701").await.unwrap().unwrap().notice, Some(Notice::Checking));
+    assert_eq!(f.svc.shown("701").await.unwrap().unwrap().check, Some(candidates::Note::Checking));
     f.checker.drain().await.unwrap();
     let s = f.svc.shown("701").await.unwrap().unwrap();
     assert_eq!(s.notice, Some(Notice::NoneMatched));
@@ -782,7 +782,8 @@ async fn other_versions_wait_for_use_anyway_unless_the_audio_matches() {
     let f = fx();
     f.lrclib_search(serde_json::json!([hit("Crown Season", 205.0, &lrc(KING_A))]));
     f.hears(timeline(KING_A, |t| t));
-    assert_eq!(f.svc.shown("801").await.unwrap().unwrap().notice, Some(Notice::Checking));
+    // Shown at once while the recording decides.
+    assert_eq!(f.svc.shown("801").await.unwrap().unwrap().check, Some(candidates::Note::Checking));
     f.checker.drain().await.unwrap();
     let s = f.svc.shown("801").await.unwrap().unwrap();
     assert_eq!(s.check, Some(candidates::Note::Checked));

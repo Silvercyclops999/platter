@@ -327,6 +327,35 @@ describe("timing", () => {
     expect(screen.queryByRole("button", { name: /Timing moved/ })).toBeNull();
   });
 
+  it("keeps the lines on screen while the song's lyrics are asked for again", async () => {
+    at(lines, 0);
+    render(<LyricsPane />);
+    const first = mockLyrics(lines)!.timed!.find((t) => t.text)!;
+    const [line] = await screen.findAllByRole("button", { name: first.text });
+    // A check landing or a nudge asks again: no skeleton, no remount.
+    act(() => lyricsChanged(lines.id));
+    expect(screen.getAllByRole("button", { name: first.text })[0]).toBe(line);
+    await waitFor(() => expect(useLyricsTrust.getState().version).toBeGreaterThan(0));
+    await act(() => loadLyrics(lines.id));
+    expect(screen.getAllByRole("button", { name: first.text })[0]).toBe(line);
+  });
+
+  it("never lets an answer from before a change replace the newer one", async () => {
+    const old = mockLyrics(lines)!;
+    const fresh = { ...old, offsetMs: 500 };
+    const answers: ((l: Lyrics) => void)[] = [];
+    vi.spyOn(mock, "lyrics").mockImplementation(() => new Promise<Lyrics | null>((r) => answers.push(r)));
+    const slow = loadLyrics(lines.id);
+    lyricsChanged(lines.id);
+    const quick = loadLyrics(lines.id);
+    answers[1](fresh);
+    await quick;
+    answers[0](old);
+    await slow;
+    vi.restoreAllMocks();
+    expect((await loadLyrics(lines.id))!.offsetMs).toBe(500);
+  });
+
   it("Tap to sync lines up the clicked line with now", async () => {
     const t = mockLyrics(lines)!.timed!;
     const target = t.find((l, i) => i > 2 && l.text)!;

@@ -59,8 +59,9 @@ export function loadLyricsInfo(trackId: string): Promise<Lyrics | null> {
     p = backend.lyrics(trackId).then(
       (l) => {
         const v = l && (hasWords(l) || l.notice) ? l : null;
-        // Cleared while asking (a setting or an edit changed): don't cache the old answer.
-        if (gen === generation) {
+        // Cleared or asked again while asking (a setting, an edit, a check
+        // or a nudge changed): don't cache the old answer over the new one.
+        if (gen === generation && pending.get(trackId) === p) {
           cache.set(trackId, v);
           if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value!);
         }
@@ -95,20 +96,23 @@ export function useLyrics(trackId: string | null | undefined): {
   const version = useLyricsEditor((s) => s.version);
   const trust = useLyricsTrust((s) => s.version);
   const sources = `${lrclib}|${preferOwn}|${showAuto}|${liveTiming}|${version}|${trust}`;
-  const [state, setState] = useState<{ key: string | null; lyrics: Lyrics | null; loading: boolean }>(() => ({
-    key: null,
-    lyrics: null,
-    loading: !!trackId,
-  }));
+  const [state, setState] = useState<{ key: string | null; trackId: string | null; lyrics: Lyrics | null; loading: boolean }>(
+    () => ({ key: null, trackId: null, lyrics: null, loading: !!trackId }),
+  );
   const key = trackId ? `${trackId}|${sources}` : null;
   if (key !== state.key) {
-    const known = trackId ? cache.has(trackId) : true;
-    setState({ key, lyrics: trackId ? (cache.get(trackId) ?? null) : null, loading: !known });
+    const id = trackId ?? null;
+    if (id && cache.has(id)) setState({ key, trackId: id, lyrics: cache.get(id) ?? null, loading: false });
+    // The same song asked again (a check landed, a nudge, a pick): keep
+    // showing what's there until the new answer arrives, so the view never
+    // blanks or remounts. Only a different song shows the skeleton.
+    else if (id && id === state.trackId && !state.loading) setState({ ...state, key });
+    else setState({ key, trackId: id, lyrics: null, loading: !!id });
   }
   useEffect(() => {
     if (!trackId) return;
     let alive = true;
-    loadLyricsInfo(trackId).then((lyrics) => alive && setState({ key: `${trackId}|${sources}`, lyrics, loading: false }));
+    loadLyricsInfo(trackId).then((lyrics) => alive && setState({ key: `${trackId}|${sources}`, trackId, lyrics, loading: false }));
     return () => {
       alive = false;
     };

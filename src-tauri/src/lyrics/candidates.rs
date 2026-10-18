@@ -87,11 +87,6 @@ impl Candidate {
         self.checkable() || self.origin == Origin::Auto
     }
 
-    /// Shown while its check runs (not one found only by its title).
-    fn safe_while_checking(&self) -> bool {
-        matches!(self.origin, Origin::Server | Origin::LrclibExact)
-    }
-
     /// Found by artist and title (Plex's licensed lyrics, LRCLIB): the
     /// timing is whichever version they were written against.
     pub fn borrows_timing(&self) -> bool {
@@ -132,8 +127,6 @@ pub struct Stored {
 pub enum Notice {
     /// Lyrics found for the released version; "Use anyway".
     VersionHeld,
-    /// The audio check is running and nothing found can be shown before it.
-    Checking,
     /// Every candidate disagreed with the recording.
     NoneMatched,
     /// The user chose no lyrics for this song.
@@ -198,21 +191,10 @@ pub fn decide<'a>(
             }
         }
     }
+    // The check never keeps lyrics off the screen: what was found shows at
+    // once and the verdict swaps or retimes it when it lands.
     if let Some(p) = pending {
-        if let Some(s) = soft {
-            return Decision::Show { idx: s, note: Some(Note::Checking) };
-        }
-        let c = &cands[p];
-        if c.safe_while_checking() && !(c.other_version && !released_ok) {
-            return Decision::Show { idx: p, note: Some(Note::Checking) };
-        }
-        if let Some(w) = winner {
-            return Decision::Show { idx: w, note: note_for(&cands[w], &verdict) };
-        }
-        if let Some(a) = fill {
-            return Decision::Show { idx: a, note: None };
-        }
-        return Decision::Notice(Notice::Checking);
+        return Decision::Show { idx: soft.unwrap_or(p), note: Some(Note::Checking) };
     }
     if let Some(w) = winner {
         if !cands[w].trusted() {
@@ -236,16 +218,6 @@ pub fn decide<'a>(
         return Decision::Notice(Notice::NoneMatched);
     }
     Decision::Nothing
-}
-
-fn note_for<'a>(c: &'a Candidate, verdict: &impl Fn(&Candidate) -> Option<&'a Stored>) -> Option<Note> {
-    if c.trusted() {
-        None
-    } else if verdict(c).is_some_and(|v| v.verdict.matched()) {
-        Some(Note::Checked)
-    } else {
-        Some(Note::NotChecked)
-    }
 }
 
 /// Shown lyrics disagree with another usable candidate (different songs
