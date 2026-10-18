@@ -276,7 +276,7 @@ struct Inner {
     /// Songs that turned out too big for the room left, with the (limit,
     /// bytes used) they were too big for. They aren't fetched again until
     /// one changes.
-    too_big: Mutex<Option<((u64, u64), std::collections::HashSet<String>)>>,
+    too_big: Mutex<Option<TooBig>>,
     /// How often [`CHECK_EVERY`] runs (shorter in tests).
     check_every: Mutex<Duration>,
     /// Held by each queue step and by a folder move, so a move never runs
@@ -285,6 +285,9 @@ struct Inner {
     /// A folder move is under way: fetches stop and wait for it.
     moving: AtomicBool,
 }
+
+/// (limit, bytes used) and the songs too big for that room.
+type TooBig = ((u64, u64), std::collections::HashSet<String>);
 
 /// Cheap to clone; clones share state.
 #[derive(Clone)]
