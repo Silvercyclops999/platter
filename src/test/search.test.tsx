@@ -98,6 +98,18 @@ describe("results page", () => {
     expect(top).toHaveTextContent("Artist");
   });
 
+  it("gives a featured-only artist on top a real photo, not a blank icon", async () => {
+    const art = vi.spyOn(backend, "artUrl");
+    const guest = { id: "credit:juno ashby", title: "Juno Ashby", sortTitle: "Juno Ashby", thumb: null, art: null, viewCount: 3 };
+    vi.spyOn(backend, "search").mockResolvedValue({ ...results([]), top: { kind: "artist", artist: guest }, artists: [guest] });
+    const photo = (await backend.featuredArtistPhoto(guest.id, guest.title)).photo;
+    expect(photo).toBeTruthy();
+    render(<SearchPage query="juno ashby" />);
+    const top = await screen.findByRole("region", { name: "Top result" });
+    expect(within(top).getByRole("button", { name: "Juno Ashby" })).toBeInTheDocument();
+    await waitFor(() => expect(art.mock.calls.map((c) => c[0])).toContain(photo));
+  });
+
   it("All is one mixed list without repeating the top result", () => {
     const res = results(["A", "B", "C"]);
     res.top = { kind: "track", track: res.songs[0] };

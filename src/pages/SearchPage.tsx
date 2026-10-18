@@ -8,6 +8,7 @@ import { Skeleton } from "../components/Skeleton";
 import { FilterChips } from "../components/Tabs";
 import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
 import { backend } from "../lib/backend";
+import { useFeaturedPhoto } from "../lib/artistPhotos";
 import { isOffline, OFFLINE_SEARCH } from "../lib/offline";
 import { modKey } from "../lib/platform";
 import type { CatArtist, SearchFilter, SearchHit, SearchResults } from "../lib/types";
@@ -111,10 +112,14 @@ function TopResult({ hit, songIds, owned }: { hit: SearchHit; songIds: string[];
   const more = useRef<HTMLButtonElement>(null);
   const PlayIcon = playing ? Pause : Play;
   const playLabel = `${playing ? "Pause" : "Play"} ${i.title}`;
+  // An artist the server has no picture for (a featured guest, say) gets the catalogue's.
+  const box = useRef<HTMLElement>(null);
+  const artistId = hit.kind === "artist" ? (hit.artist?.id ?? null) : null;
+  const photo = useFeaturedPhoto(box, artistId, i.title, i.thumb);
   return (
-    <section className="sr-top" aria-label="Top result" onContextMenu={(e) => menu(e)}>
+    <section ref={box} className="sr-top" aria-label="Top result" onContextMenu={(e) => menu(e)}>
       <span className="sr-row__art sr-top__art">
-        <Art path={i.thumb} size={92} round={i.round} kind={i.kind === "artist" ? "artist" : "album"} />
+        <Art path={hit.kind === "artist" ? photo : i.thumb} size={92} round={i.round} kind={i.kind === "artist" ? "artist" : "album"} monogram={hit.kind === "artist" ? i.title : undefined} />
         {hit.track && (
           <button type="button" tabIndex={-1} className="sr-row__play" aria-label={playLabel} onClick={toggle}>
             <PlayIcon size={22} fill="currentColor" aria-hidden="true" />

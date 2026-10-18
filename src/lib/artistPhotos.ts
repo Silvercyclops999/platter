@@ -23,17 +23,16 @@ function next() {
   }
 }
 
-/** One look-up, queued behind the others. */
-function ask(mbid: string, name: string): Promise<CataloguePhoto> {
-  const hit = known.get(mbid);
+/** One look-up, queued behind the others. `key` names it in the session's cache. */
+function ask(key: string, look: () => Promise<CataloguePhoto>): Promise<CataloguePhoto> {
+  const hit = known.get(key);
   if (hit) return Promise.resolve(hit);
   return new Promise((resolve) => {
     waiting.push(() => {
-      backend
-        .catalogueArtistPhoto(mbid, name)
+      look()
         .then(
           (p) => {
-            known.set(mbid, p);
+            known.set(key, p);
             resolve(p);
           },
           () => resolve({ photo: null, credit: null }),
@@ -77,11 +76,32 @@ export function useArtistPhoto(ref: RefObject<HTMLElement | null>, mbid: string 
   useEffect(() => {
     if (!want || !near || !mbid) return;
     let alive = true;
-    void ask(mbid, name).then((p) => alive && setFound(p));
+    void ask(mbid, () => backend.catalogueArtistPhoto(mbid, name)).then((p) => alive && setFound(p));
     return () => {
       alive = false;
     };
   }, [want, near, mbid, name]);
   if (given) return { photo: given, credit: null };
   return found ?? { photo: null, credit: null };
+}
+
+/**
+ * The photo for a library (or featured) artist the server has none for:
+ * the catalogue's, looked up by name once the element is near the view.
+ * Null while unknown, offline, and when no source has one.
+ */
+export function useFeaturedPhoto(ref: RefObject<HTMLElement | null>, id: string | null | undefined, name: string, given: string | null | undefined): string | null {
+  const key = id ? `artist:${id}` : null;
+  const want = !given && !!id && !!name;
+  const near = useNearView(ref, want);
+  const [found, setFound] = useState<string | null>(() => (key ? (known.get(key)?.photo ?? null) : null));
+  useEffect(() => {
+    if (!want || !near || !id) return;
+    let alive = true;
+    void ask(`artist:${id}`, () => backend.featuredArtistPhoto(id, name)).then((p) => alive && setFound(p.photo));
+    return () => {
+      alive = false;
+    };
+  }, [want, near, id, name]);
+  return given ?? found;
 }
