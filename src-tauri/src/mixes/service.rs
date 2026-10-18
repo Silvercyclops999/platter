@@ -255,7 +255,10 @@ impl MixService {
             ))
         })?;
         let today = ctx.mix_day();
-        let filled_since = n == 0 && tracks_now > 0 && tracks_then.as_deref() != Some(&tracks_now.to_string());
+        // Made from a library still syncing (none, or far fewer songs than
+        // there are now): made again rather than kept all day.
+        let then: Option<i64> = tracks_then.as_deref().and_then(|t| t.parse().ok());
+        let filled_since = (n == 0 && tracks_now > 0 && then != Some(tracks_now)) || grew_a_lot(then, tracks_now);
         let all_due = day.as_deref() != Some(&today) || fp.as_deref() != Some(&opts.fingerprint()) || filled_since;
         if all_due {
             let lib = self.lib()?;
@@ -294,6 +297,16 @@ impl MixService {
     pub async fn ensure_fresh(&self, now_ms: i64) -> AppResult<bool> {
         let s = self.clone();
         blocking(move || s.ensure_fresh_blocking(now_ms)).await
+    }
+
+    /// [`Self::ensure_fresh`] for checks nobody is waiting on: until the UI
+    /// has said which time zone it's in, nothing is made (today's mixes and
+    /// the daylist's hours are local).
+    pub async fn ensure_fresh_in_background(&self, now_ms: i64) -> AppResult<bool> {
+        if self.inner.tz.load(Ordering::Relaxed) == i32::MIN {
+            return Ok(false);
+        }
+        self.ensure_fresh(now_ms).await
     }
 
     /// Home's shelves (making what's due first).
@@ -491,6 +504,11 @@ impl MixService {
     }
 }
 
+/// Whether the library grew by more than a fifth since the mixes were made.
+fn grew_a_lot(then: Option<i64>, now: i64) -> bool {
+    then.is_some_and(|t| t > 0 && now * 5 > t * 6)
+}
+
 /// Checks for due mixes now and then (a new day, the next daylist block).
 pub fn spawn_schedule(service: MixService) {
     const EVERY: std::time::Duration = std::time::Duration::from_secs(10 * 60);
@@ -498,7 +516,7 @@ pub fn spawn_schedule(service: MixService) {
         // Let startup and the first sync settle first.
         tokio::time::sleep(std::time::Duration::from_secs(20)).await;
         loop {
-            if let Err(e) = service.ensure_fresh(now_ms()).await {
+            if let Err(e) = service.ensure_fresh_in_background(now_ms()).await {
                 tracing::warn!("mixes not made: {e}");
             }
             tokio::time::sleep(EVERY).await;

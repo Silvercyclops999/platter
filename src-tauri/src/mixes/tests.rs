@@ -700,3 +700,44 @@ fn bench_daily_regeneration_on_100k_songs() {
     assert_eq!(ids.len(), 20);
     assert!(full < std::time::Duration::from_secs(2), "took {full:?}");
 }
+
+#[test]
+fn mixes_made_from_a_half_synced_library_are_made_again_once_it_fills() {
+    let (s, db, _d) = service();
+    assert!(s.ensure_fresh_blocking(NOW).unwrap());
+    let total: i64 = db.read(|c| Ok(c.query_row("SELECT count(*) FROM tracks", [], |r| r.get(0))?)).unwrap();
+    let add = |n: i64, tag: &str| {
+        db.write(|c| {
+            for i in 0..n {
+                c.execute(
+                    "INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, track_number, duration_ms, part_key)
+                     SELECT id || ?1, title, album_id, album_title, artist_id, artist_title, track_number, duration_ms, part_key || ?1
+                     FROM tracks WHERE id NOT LIKE '%+%' ORDER BY id LIMIT 1 OFFSET ?2",
+                    rusqlite::params![format!("+{tag}{i}"), i % total],
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    };
+    // A few more songs the same day: the mixes stay.
+    add(total / 10, "a");
+    assert!(!s.ensure_fresh_blocking(NOW + 60_000).unwrap(), "a small change waits for tomorrow");
+    // The sync brings in many more: made again.
+    add(total / 2, "b");
+    assert!(s.ensure_fresh_blocking(NOW + 120_000).unwrap());
+    assert!(!s.ensure_fresh_blocking(NOW + 180_000).unwrap(), "once");
+}
+
+#[tokio::test]
+async fn background_checks_wait_for_the_time_zone() {
+    let (s, db, _d) = service();
+    assert!(!s.ensure_fresh_in_background(NOW).await.unwrap());
+    assert_eq!(db.read(store::count).unwrap(), 0, "nothing made on a guessed zone");
+    s.set_tz(120);
+    assert!(s.ensure_fresh_in_background(NOW).await.unwrap());
+    // A restart remembers the zone.
+    let again = MixService::new(db.clone());
+    assert!(!again.ensure_fresh_in_background(NOW + 60_000).await.unwrap(), "nothing due, but not refused either");
+    assert!(db.read(store::count).unwrap() > 0);
+}
