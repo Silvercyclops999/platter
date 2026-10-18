@@ -3,7 +3,7 @@
  * plain note. Delete asks once more before the entry goes; a deleted entry
  * never comes back on its own.
  */
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Art } from "../components/Art";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
@@ -35,11 +35,18 @@ export function DiaryEntryDialog({ entry, onClose, onSaved, onDeleted }: { entry
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const noteRef = useRef<HTMLTextAreaElement>(null);
+  const ids = useId();
+  const ratingLabel = `${ids}-rating`;
+  const countId = `${ids}-count`;
+  const dateHint = `${ids}-date-hint`;
   const length = [...note].length;
   const today = dayValue(Date.now());
   const where = whereLine(entry);
+  // A cleared or half typed date, or one ahead of today, can't be saved.
+  const dateProblem = onDay(entry.at, day) == null ? "Enter a date to save." : day > today ? "That date is in the future." : null;
 
   const save = async () => {
+    if (dateProblem) return;
     const at = day === dayValue(entry.at) ? undefined : (onDay(entry.at, day) ?? undefined);
     setBusy(true);
     try {
@@ -81,10 +88,10 @@ export function DiaryEntryDialog({ entry, onClose, onSaved, onDeleted }: { entry
       </div>
 
       <div className="diary-dialog__row">
-        <span className="diary-dialog__label" id="diary-rating-label">
+        <span className="diary-dialog__label" id={ratingLabel}>
           Rating
         </span>
-        <StarInput value={rating} onChange={setRating} label="Rating" />
+        <StarInput value={rating} onChange={setRating} labelledBy={ratingLabel} />
         {rating != null && (
           <Button size="sm" variant="ghost" onClick={() => setRating(null)}>
             Clear
@@ -92,42 +99,66 @@ export function DiaryEntryDialog({ entry, onClose, onSaved, onDeleted }: { entry
         )}
       </div>
 
-      <label className="diary-dialog__row">
-        <span className="diary-dialog__label">Date</span>
-        <input className="diary-dialog__date" type="date" value={day} max={today} onChange={(e) => setDay(e.target.value)} />
-      </label>
+      <div className="diary-dialog__row">
+        <label className="diary-dialog__field">
+          <span className="diary-dialog__label">Date</span>
+          <input
+            className="diary-dialog__date"
+            type="date"
+            value={day}
+            max={today}
+            aria-invalid={dateProblem ? true : undefined}
+            aria-describedby={dateProblem ? dateHint : undefined}
+            onChange={(e) => setDay(e.target.value)}
+          />
+        </label>
+        {dateProblem && (
+          <span id={dateHint} className="diary-dialog__hint" role="status">
+            {dateProblem}
+          </span>
+        )}
+      </div>
 
-      <label className="diary-dialog__note">
-        <span className="diary-dialog__label">Note</span>
-        <textarea
-          ref={noteRef}
-          className="diary-note diary-dialog__text"
-          value={note}
-          rows={5}
-          maxLength={NOTE_MAX}
-          placeholder="What stayed with you?"
-          onChange={(e) => setNote(e.target.value)}
-        />
-        <span className={`diary-dialog__count ${length > NOTE_MAX - 40 ? "is-near" : ""}`} aria-live="polite">
+      <div className="diary-dialog__note">
+        <label className="diary-dialog__field diary-dialog__field--note">
+          <span className="diary-dialog__label">Note</span>
+          <textarea
+            ref={noteRef}
+            className="diary-note diary-dialog__text"
+            value={note}
+            rows={5}
+            maxLength={NOTE_MAX}
+            placeholder="What stayed with you?"
+            aria-describedby={countId}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </label>
+        <span id={countId} className={`diary-dialog__count ${length > NOTE_MAX - 40 ? "is-near" : ""}`} aria-live="polite">
           {length} / {NOTE_MAX}
         </span>
-      </label>
+      </div>
 
       <div className="diary-dialog__actions">
-        {confirming ? (
-          <Button size="sm" variant="ghost" className="diary-dialog__delete is-confirming" disabled={busy} onClick={() => void remove()}>
-            Delete for good
-          </Button>
-        ) : (
-          <Button size="sm" variant="ghost" className="diary-dialog__delete" disabled={busy} onClick={() => setConfirming(true)}>
-            Delete entry
-          </Button>
-        )}
+        {/* One button that asks once more, so focus stays on it; moving away
+            takes the question back. */}
+        <Button
+          size="sm"
+          variant="ghost"
+          className={`diary-dialog__delete ${confirming ? "is-confirming" : ""}`}
+          disabled={busy}
+          onBlur={() => setConfirming(false)}
+          onClick={() => (confirming ? void remove() : setConfirming(true))}
+        >
+          {confirming ? "Delete for good" : "Delete entry"}
+        </Button>
+        <span className="sr-only" aria-live="assertive">
+          {confirming ? `Press again to delete the entry for ${entry.title} for good.` : ""}
+        </span>
         <span className="diary-dialog__spacer" />
         <Button size="sm" variant="secondary" disabled={busy} onClick={onClose}>
           Cancel
         </Button>
-        <Button size="sm" variant="primary" disabled={busy || length > NOTE_MAX} onClick={() => void save()}>
+        <Button size="sm" variant="primary" disabled={busy || length > NOTE_MAX || !!dateProblem} onClick={() => void save()}>
           Save
         </Button>
       </div>

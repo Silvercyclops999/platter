@@ -12,6 +12,12 @@ export function FirstHeard({ albumId }: { albumId: string }) {
   const on = useDiaryOn();
   const version = useDiaryVersion();
   const [at, setAt] = useState<number | null>(null);
+  // Another album clears the last one's date before its own arrives.
+  const [shownFor, setShownFor] = useState(albumId);
+  if (shownFor !== albumId) {
+    setShownFor(albumId);
+    setAt(null);
+  }
   useEffect(() => {
     if (!on) return;
     let alive = true;

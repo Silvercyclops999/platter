@@ -272,6 +272,9 @@
 .diary-dialog__artist { margin: 2px 0 0; color: var(--color-text-secondary); }
 .diary-dialog__meta { margin: var(--space-2) 0 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
 .diary-dialog__row { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); }
+.diary-dialog__field { display: flex; align-items: center; gap: var(--space-3); }
+.diary-dialog__field--note { display: grid; gap: var(--space-2); }
+.diary-dialog__hint { font-size: var(--font-size-sm); color: var(--color-warning-text); }
 .diary-dialog__label { min-width: 64px; font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-text-secondary); }
 .diary-dialog__date {
   height: 34px;

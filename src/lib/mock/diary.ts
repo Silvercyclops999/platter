@@ -41,14 +41,15 @@ export class MockDiary {
       const output = OUTPUTS[i % OUTPUTS.length];
       const at = now - i * 18 * DAY - (3 + (i % 5)) * 3_600_000;
       const auto = i % 6 !== 5;
+      const startedAt = at - n * 4 * 60_000;
       this.put({
-        id: auto ? `auto:${a.id}:${1000 + i}` : `log:${a.id}:${at}:0`,
+        id: auto ? `auto:${a.id}:s${startedAt}` : `log:${a.id}:${at}:0`,
         albumId: a.id,
         title: a.title,
         artist: a.artistTitle,
         year: a.year,
         at,
-        startedAt: auto ? at - n * 4 * 60_000 : null,
+        startedAt: auto ? startedAt : null,
         songsPlayed: auto ? n - (i % 4 === 1 ? 1 : 0) : 0,
         songsTotal: n,
         minutes: auto ? n * 4 : 0,
@@ -103,6 +104,7 @@ export class MockDiary {
     if (r != null && (r < 0.5 || r > 5 || (r * 2) % 1 !== 0)) throw { kind: "invalid", message: "A rating is from half a star to five stars." };
     const note = edit.note.trim();
     if ([...note].length > 500) throw { kind: "invalid", message: "A note can be up to 500 characters." };
+    if (edit.at != null && edit.at <= 0) throw { kind: "invalid", message: "That isn't a date the diary can use." };
     if (edit.at != null && edit.at > Date.now() + DAY) throw { kind: "invalid", message: "That date is in the future." };
     const next = { ...e, rating: r, note, at: edit.at ?? e.at };
     this.put(next);

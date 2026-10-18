@@ -57,10 +57,13 @@ function Entry({ e, onEdit }: { e: DiaryItem; onEdit: () => void }) {
         <span className="diary-entry__day">{d.getDate()}</span>
         <span className="diary-entry__weekday">{WEEKDAYS[d.getDay()]}</span>
       </time>
+      {/* The title is the album's link for keyboards and screen readers; the
+          sleeve is the same link for the mouse, so it isn't a second stop. */}
       <button
         type="button"
         className="diary-entry__sleeve"
-        aria-label={`Go to ${e.title}`}
+        tabIndex={-1}
+        aria-hidden="true"
         disabled={!e.inLibrary}
         onClick={() => nav.go({ name: "album", id: e.albumId })}
       >
@@ -200,13 +203,17 @@ export function DiaryPage({ edit }: { edit?: string }) {
   const list = loaded.data ?? null;
   const years = diaryYears(list?.firstAt ?? null, list?.lastAt ?? null);
 
-  // The year view starts on the newest year with entries.
-  const lastAt = list?.lastAt ?? null;
+  // The year view starts on the newest year with entries. `firstAt` and
+  // `lastAt` describe the whole diary whatever the filters, so this is the
+  // newest year of all, not of what the filters leave. An entry moved a day
+  // ahead over New Year never starts it in a year still to come.
+  const thisYear = new Date().getFullYear();
+  const newestYear = years.length ? Math.min(years[0], thisYear) : null;
   useEffect(() => {
-    if (lastAt == null || yearPicked.current) return;
+    if (newestYear == null || yearPicked.current) return;
     yearPicked.current = true;
-    setShownYearState(new Date(lastAt).getFullYear());
-  }, [lastAt]);
+    setShownYearState(newestYear);
+  }, [newestYear]);
 
   // Opened to edit one entry (Log this album's toast).
   useEffect(() => {
@@ -250,12 +257,15 @@ export function DiaryPage({ edit }: { edit?: string }) {
 
   const filtered = filter !== "all" || year != null || !!words.trim();
   const since = list?.firstAt != null ? new Date(list.firstAt) : null;
+  const where = synced ? "Synced to your devices." : "Only on this computer.";
   const lede =
     list == null
       ? " "
       : list.total === 0
         ? "Albums you play start to finish are written here on their own."
-        : `${plural(list.total, "entry", "entries")} since ${MONTHS[since!.getMonth()]} ${since!.getFullYear()}. ${synced ? "Synced to your devices." : "Only on this computer."}`;
+        : since == null
+          ? `${plural(list.total, "entry", "entries")}. ${where}`
+          : `${plural(list.total, "entry", "entries")} since ${MONTHS[since.getMonth()]} ${since.getFullYear()}. ${where}`;
 
   return (
     <div className="page-pad diary-page">
@@ -304,7 +314,7 @@ export function DiaryPage({ edit }: { edit?: string }) {
               label="Next year"
               size="sm"
               icon={<ChevronRight size={16} />}
-              disabled={shownYear >= new Date().getFullYear()}
+              disabled={shownYear >= thisYear}
               onClick={() => setShownYear((y) => y + 1)}
             />
           </div>

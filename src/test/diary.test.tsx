@@ -3,7 +3,7 @@
  * entry editor (rating, note, delete), filters and search, export, Log this
  * album and First heard on album pages, the off state and the settings.
  */
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextMenuHost } from "../components/ContextMenu";
@@ -13,6 +13,8 @@ import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS, type Album, type DiaryItem } from "../lib/types";
 import { AlbumPage } from "../pages/AlbumPage";
 import { DiaryPage } from "../pages/DiaryPage";
+import { FirstHeard } from "../pages/FirstHeard";
+import { StarInput } from "../pages/StarRating";
 import { SettingsPage } from "../pages/SettingsPage";
 import { nav, useRouter } from "../stores/router";
 import { loadSettings, useSettings } from "../stores/settings";
@@ -128,7 +130,7 @@ describe("the diary page", () => {
     stars.focus();
     await user.keyboard("4{ArrowRight}");
     expect(stars).toHaveAttribute("aria-valuetext", "4.5 stars");
-    await user.type(within(dialog).getByRole("textbox", { name: /Note/ }), "The quiet one in the middle.");
+    await user.type(within(dialog).getByRole("textbox", { name: "Note" }), "The quiet one in the middle.");
     expect(within(dialog).getByText("28 / 500")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -196,6 +198,93 @@ describe("the diary page", () => {
     const e = await backend.diaryLogAlbum(album.id);
     render(<DiaryPage edit={e.id} />);
     expect(await screen.findByRole("dialog", { name: `Diary entry for ${album.title}` })).toBeInTheDocument();
+  });
+
+  it("the year view starts on the newest year of the whole diary, whatever the filter", async () => {
+    mock.diary.clear();
+    const [a, b] = mock.fx.albums.filter((x) => x.section !== "demos");
+    const now = new Date();
+    const y = now.getFullYear();
+    const rated = await backend.diaryLogAlbum(a.id);
+    await backend.diaryEntryEdit(rated.id, { rating: 4, note: "", at: new Date(y - 3, 5, 10, 20).getTime() });
+    const unrated = await backend.diaryLogAlbum(b.id);
+    await backend.diaryEntryEdit(unrated.id, { rating: null, note: "", at: new Date(y - 2, 2, 4, 20).getTime() });
+    const user = page();
+    await screen.findByRole("heading", { level: 1, name: "Listening diary" });
+    await user.click(screen.getByRole("button", { name: "Rated" }));
+    await user.click(screen.getByRole("tab", { name: "Year" }));
+    expect(await screen.findByRole("list", { name: `${y - 2} by month` })).toBeInTheDocument();
+    expect(screen.getByText(`Nothing logged in ${y - 2}.`)).toBeInTheDocument();
+  });
+
+  it("an entry's sleeve and title open the album, with one stop for the keyboard", async () => {
+    const [first] = await all();
+    const user = page();
+    const row = (await screen.findAllByRole("listitem")).find((li) => li.classList.contains("diary-entry"))!;
+    const title = within(row).getByRole("button", { name: first.title });
+    const sleeve = row.querySelector<HTMLButtonElement>(".diary-entry__sleeve")!;
+    expect(sleeve).toHaveAttribute("tabindex", "-1");
+    expect(sleeve).toHaveAttribute("aria-hidden", "true");
+    await user.click(sleeve);
+    let r = useRouter.getState();
+    expect(r.entries[r.index].route).toEqual({ name: "album", id: first.albumId });
+    await user.click(title);
+    r = useRouter.getState();
+    expect(r.entries[r.index].route).toEqual({ name: "album", id: first.albumId });
+  });
+
+  it("the editor won't save an empty or future date, and says why", async () => {
+    const [first] = await all();
+    const user = page();
+    await user.click((await screen.findAllByRole("button", { name: `Edit the entry for ${first.title}` }))[0]);
+    const dialog = await screen.findByRole("dialog");
+    const date = dialog.querySelector<HTMLInputElement>('input[type="date"]')!;
+    const save = within(dialog).getByRole("button", { name: "Save" });
+    expect(save).toBeEnabled();
+    fireEvent.change(date, { target: { value: "" } });
+    expect(save).toBeDisabled();
+    expect(within(dialog).getByText("Enter a date to save.")).toBeInTheDocument();
+    expect(date).toHaveAccessibleDescription("Enter a date to save.");
+    const next = new Date();
+    next.setDate(next.getDate() + 2);
+    const ahead = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}`;
+    fireEvent.change(date, { target: { value: ahead } });
+    expect(save).toBeDisabled();
+    expect(within(dialog).getByText("That date is in the future.")).toBeInTheDocument();
+    fireEvent.change(date, { target: { value: "2020-05-01" } });
+    expect(save).toBeEnabled();
+    expect(within(dialog).queryByText("That date is in the future.")).toBeNull();
+  });
+
+  it("the editor names its rating and note count for screen readers", async () => {
+    const [first] = await all();
+    const user = page();
+    await user.click((await screen.findAllByRole("button", { name: `Edit the entry for ${first.title}` }))[0]);
+    const dialog = await screen.findByRole("dialog");
+    const stars = within(dialog).getByRole("slider", { name: "Rating" });
+    const label = within(dialog).getByText("Rating", { selector: "span" });
+    expect(stars).toHaveAttribute("aria-labelledby", label.id);
+    expect(stars).not.toHaveAttribute("aria-label");
+    const note = within(dialog).getByRole("textbox", { name: "Note" });
+    expect(note).toHaveAccessibleDescription(`${[...first.note].length} / 500`);
+  });
+
+  it("Delete asks once more on the same button, says so, and takes it back on leaving", async () => {
+    const [first] = await all();
+    const user = page();
+    await user.click((await screen.findAllByRole("button", { name: `Edit the entry for ${first.title}` }))[0]);
+    const dialog = await screen.findByRole("dialog");
+    const del = within(dialog).getByRole("button", { name: "Delete entry" });
+    await user.click(del);
+    expect(del).toHaveFocus();
+    expect(del).toHaveTextContent("Delete for good");
+    const live = dialog.querySelector('[aria-live="assertive"]')!;
+    expect(live).toHaveTextContent(`Press again to delete the entry for ${first.title} for good.`);
+    // Moving away takes the question back.
+    await user.tab();
+    expect(del).toHaveTextContent("Delete entry");
+    expect(live).toHaveTextContent("");
+    expect((await all()).some((e) => e.id === first.id)).toBe(true);
   });
 
   it("off, it offers to turn the diary on", async () => {
@@ -269,6 +358,38 @@ describe("album pages", () => {
     await user.click(screen.getByRole("button", { name: `More options for ${never.title}` }));
     const menu = await screen.findByRole("menu");
     expect(within(menu).queryByRole("menuitem", { name: "Log this album" })).toBeNull();
+  });
+});
+
+describe("first heard and stars", () => {
+  it("First heard drops the last album's date as soon as the album changes", async () => {
+    const { heard, never } = albums();
+    const at = await backend.albumFirstHeard(heard.id);
+    const { rerender } = render(<FirstHeard albumId={heard.id} />);
+    expect(await screen.findByText(longDate(at!))).toBeInTheDocument();
+    // The next album's answer is slow to come.
+    vi.spyOn(backend, "albumFirstHeard").mockReturnValue(new Promise(() => {}));
+    rerender(<FirstHeard albumId={never.id} />);
+    expect(screen.queryByText("First heard:")).toBeNull();
+  });
+
+  it("stars pick on a click, not a press, and step a whole star with Page Up and Page Down", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const { rerender } = render(<StarInput value={2} onChange={onChange} label="Rating" />);
+    const stars = screen.getByRole("slider", { name: "Rating" });
+    expect(stars).toHaveAttribute("aria-orientation", "horizontal");
+    vi.spyOn(stars, "getBoundingClientRect").mockReturnValue({ left: 0, width: 100, top: 0, height: 20, right: 100, bottom: 20, x: 0, y: 0, toJSON: () => ({}) });
+    fireEvent.pointerDown(stars, { clientX: 75 });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(stars, { clientX: 75 });
+    expect(onChange).toHaveBeenLastCalledWith(4);
+    stars.focus();
+    await user.keyboard("{PageUp}");
+    expect(onChange).toHaveBeenLastCalledWith(3);
+    rerender(<StarInput value={0.5} onChange={onChange} label="Rating" />);
+    await user.keyboard("{PageDown}");
+    expect(onChange).toHaveBeenLastCalledWith(null);
   });
 });
 
