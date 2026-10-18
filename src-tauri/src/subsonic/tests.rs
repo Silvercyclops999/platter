@@ -643,7 +643,8 @@ async fn library_sync_requests() {
     assert_eq!(sections.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["1", "2"]);
     assert_eq!(sections[0].uuid, format!("{t}/1"));
     assert_eq!(lib.count("1", ItemKind::Artist).await.unwrap(), 1);
-    assert_eq!(lib.count("1", ItemKind::Album).await.unwrap(), 0, "counted as they come");
+    assert_eq!(lib.count("1", ItemKind::Album).await.unwrap(), 1, "each artist's album count");
+    assert_eq!(lib.count("1", ItemKind::Track).await.unwrap(), 0, "two folders: the scan's count covers both");
     let artists = lib.artists("1", 0, 500).await.unwrap();
     assert_eq!((artists[0].id.clone(), artists[0].thumb.clone()), (format!("{t}:ar1"), Some(format!("{t}:/cover/ar-ar1"))));
     let albums = lib.albums("1", 0, 500).await.unwrap();
@@ -676,6 +677,7 @@ async fn library_sync_requests() {
         [
             "getMusicFolders",
             "getArtists musicFolderId=1",
+            "getScanStatus",
             "getAlbumList2 musicFolderId=1&offset=0&size=500&type=alphabeticalByName",
             "search3 albumCount=0&artistCount=0&musicFolderId=1&query=&songCount=500&songOffset=0",
             "getStarred2 musicFolderId=1",
@@ -689,6 +691,32 @@ async fn library_sync_requests() {
             "getArtistInfo2 count=20&id=ar1",
         ]
     );
+}
+
+#[tokio::test]
+async fn a_sync_knows_how_many_songs_and_albums_to_expect() {
+    let s = subsonic(Some(all_ext()), true).await;
+    // One folder: the scan's count is this library's.
+    Mock::given(path("/rest/getMusicFolders"))
+        .and(Authed)
+        .respond_with(ok(json!({"musicFolders": {"musicFolder": [{"id": 1, "name": "Music"}]}})))
+        .with_priority(1)
+        .mount(&s)
+        .await;
+    let core = open_core(&s);
+    let lib = SubsonicLibrary::all(core.clone());
+    lib.music_sections().await.unwrap();
+    assert_eq!(lib.count("1", ItemKind::Track).await.unwrap(), 2);
+    assert_eq!(lib.count("1", ItemKind::Album).await.unwrap(), 1);
+    // Mid-scan, more than it has so far: a short list can't delete anything.
+    Mock::given(path("/rest/getScanStatus"))
+        .and(Authed)
+        .respond_with(ok(json!({"scanStatus": {"scanning": true, "count": 2}})))
+        .with_priority(1)
+        .mount(&s)
+        .await;
+    assert_eq!(lib.count("1", ItemKind::Track).await.unwrap(), 3);
+    assert_eq!(lib.count("1", ItemKind::Album).await.unwrap(), 2);
 }
 
 /// `search3` over a long list where every tenth entry is a video.

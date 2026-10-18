@@ -664,12 +664,36 @@ impl LibrarySource for SubsonicLibrary {
         Ok(self.core.sections(self.only.as_deref()))
     }
 
-    /// Only artists can be counted without listing everything; the others
-    /// count as they arrive.
+    /// What the server says it has, so a list that ends early (a capped
+    /// page, a scan in progress) isn't taken for the whole library: the
+    /// sync then leaves deletions for another time. Albums are the sum of
+    /// each artist's album count; songs the scan's count, which covers
+    /// every folder, so only for a server with one. While the server scans,
+    /// one more than it has so far: the list isn't complete yet. 0: not
+    /// known (counted as they arrive).
     async fn count(&self, section_id: &str, kind: ItemKind) -> AppResult<u64> {
+        let scanning = || async {
+            let scan: ScanStatus = self.core.get("getScanStatus", &[], "scanStatus").await.unwrap_or_default();
+            scan
+        };
         match kind {
             ItemKind::Artist => Ok(self.core.all_artists(section_id).await?.len() as u64),
-            ItemKind::Album | ItemKind::Track => Ok(0),
+            ItemKind::Album => {
+                let artists = self.core.all_artists(section_id).await?;
+                if artists.iter().any(|a| a.album_count.is_none()) {
+                    return Ok(0);
+                }
+                let n: u64 = artists.iter().filter_map(|a| a.album_count).sum();
+                Ok(if scanning().await.scanning == Some(true) { n + 1 } else { n })
+            }
+            ItemKind::Track => {
+                if self.core.views().len() > 1 {
+                    return Ok(0);
+                }
+                let scan = scanning().await;
+                let n = scan.count.unwrap_or(0);
+                Ok(if scan.scanning == Some(true) { n + 1 } else { n })
+            }
         }
     }
 
