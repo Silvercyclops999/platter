@@ -8,12 +8,11 @@ import { backend } from "../lib/backend";
 import type { AppError, LidarrMissingItem, LidarrPreview, LidarrRequest, LidarrRequestInput } from "../lib/types";
 import { STATE_LABEL } from "./lidarrShared";
 import { GetButton } from "./GetButton";
+import { catalogueKind } from "../lib/format";
 import { toast } from "../stores/toasts";
 import "./lidarr-request.css";
 
 const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "");
-
-const KIND_LABEL: Record<string, string> = { album: "Album", ep: "EP" };
 
 /** A card for a release the library lacks, with one-click Get (or where its request stands). */
 export function MissingReleaseCard({
@@ -27,19 +26,26 @@ export function MissingReleaseCard({
   artistId: string;
   onChanged: () => void;
 }) {
-  const kind = KIND_LABEL[item.kind] ?? "Album";
+  const kind = catalogueKind({ kind: item.kind, secondary: item.secondary ?? [] });
   return (
     <div className="card card--album cat-card" aria-label={`${item.title}, not in your library`}>
       <div className="card__art">
         <Art path={item.thumb} fluid kind="album" />
       </div>
       <span className="card__title truncate">{item.title}</span>
-      <span className="card__subtitle">
+      <span className="card__subtitle truncate">
         {item.year ? `${item.year} · ` : ""}
-        {kind} · Not in your library
+        {kind}
       </span>
       <div className="missing-release__action">
-        <GetButton album={{ releaseGroupId: item.releaseGroupId, title: item.title, artist, artistId }} known={item.request} lidarrReady onChanged={onChanged} />
+        <GetButton
+          album={{ releaseGroupId: item.releaseGroupId, title: item.title, artist, artistId }}
+          known={item.request}
+          refusal={item.refusal}
+          lidarrReady
+          onChanged={onChanged}
+          compact
+        />
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 /** Artist page decisions, kept apart from the component so they can be tested. */
-import type { Album, Artist, ArtistInfo, ArtistPage, ArtistPageSection, BioLink, InfoRelated } from "../lib/types";
+import { SECTION_LABELS } from "../lib/format";
+import type { Album, Artist, ArtistInfo, ArtistPage, ArtistPageSection, BioLink, CatAlbum, CatSection, InfoRelated, LidarrMissingItem, ReleaseSection } from "../lib/types";
 import { sectionId, sectionLabel, type SectionId } from "./discography";
 
 /** Popular songs shown at first, and after "See more". */
@@ -78,42 +79,130 @@ export interface Chip {
   label: string;
 }
 
-/** "Popular releases" first, then one chip per release type the artist has, in section order. */
-export function discographyChips(sections: ArtistPageSection[]): Chip[] {
-  return [{ id: "popular", label: "Popular releases" }, ...sections.map((s) => ({ id: sectionId(s), label: sectionLabel(s) }))];
+/**
+ * One release on an artist's discography: one in the library (`album`), or
+ * one you can get (`cat`, from the catalogue, with Get).
+ */
+export interface DiscoEntry {
+  key: string;
+  section: SectionId;
+  sectionLabel: string;
+  title: string;
+  year: number | null;
+  /** Plays for a library release; for one you can get, how popular it is (higher is more). */
+  plays: number;
+  addedAt: number;
+  album?: Album;
+  cat?: CatAlbum;
+  /** A release Lidarr can get (its card keeps Lidarr's request state). */
+  missing?: LidarrMissingItem;
+}
+
+/** The library's releases, by section. */
+export function libraryEntries(sections: ArtistPageSection[]): DiscoEntry[] {
+  return sections.flatMap((s) =>
+    s.albums.map((album) => ({
+      key: album.id,
+      section: sectionId(s),
+      sectionLabel: sectionLabel(s),
+      title: album.title,
+      year: album.year,
+      plays: album.viewCount,
+      addedAt: album.addedAt,
+      album,
+    })),
+  );
+}
+
+function catEntry(cat: CatAlbum, section: ReleaseSection, plays = 0): DiscoEntry {
+  return { key: `rg:${cat.releaseGroupId}`, section, sectionLabel: SECTION_LABELS[section], title: cat.title, year: cat.year, plays, addedAt: 0, cat };
+}
+
+const isSection = (k: string): k is ReleaseSection => k in SECTION_LABELS;
+
+/**
+ * Catalogue releases by section. `popular` (most popular first) ranks them
+ * for Popular releases; `skip` leaves out library albums already shown.
+ */
+export function catalogueEntries(sections: CatSection[], popular: CatAlbum[] = [], skip: ReadonlySet<string> = new Set()): DiscoEntry[] {
+  const rank = new Map(popular.map((a, i) => [a.releaseGroupId, popular.length - i]));
+  return sections.flatMap((s) =>
+    isSection(s.kind)
+      ? s.albums.filter((a) => !a.libraryAlbumId || !skip.has(a.libraryAlbumId)).map((a) => catEntry(a, s.kind as ReleaseSection, rank.get(a.releaseGroupId) ?? 0))
+      : [],
+  );
+}
+
+/** Releases Lidarr can get for a library artist, as catalogue releases. Older cores leave the section out: albums and EPs only then. */
+export function missingEntries(items: LidarrMissingItem[], artist: string): DiscoEntry[] {
+  return items.map((i) => ({
+    ...catEntry(
+      {
+        releaseGroupId: i.releaseGroupId,
+        title: i.title,
+        artist,
+        artistMbid: null,
+        kind: i.kind,
+        secondary: i.secondary ?? [],
+        year: i.year,
+        thumb: i.thumb,
+        libraryAlbumId: null,
+        request: i.request,
+        refusal: i.refusal ?? null,
+        inMissing: false,
+      },
+      i.section ?? (i.kind === "album" ? "albums" : "singlesEps"),
+    ),
+    missing: i,
+  }));
+}
+
+/** Chips in this order first; the artist's other release types follow in page order. */
+const CHIP_ORDER: SectionId[] = ["albums", "singlesEps", "compilations"];
+
+/** "Popular releases" first, then one chip per release type the artist has (in the library or to get). */
+export function discographyChips(entries: DiscoEntry[]): Chip[] {
+  const seen = new Map<SectionId, string>();
+  for (const e of entries) if (!seen.has(e.section)) seen.set(e.section, e.sectionLabel);
+  const ids = [...CHIP_ORDER.filter((k) => seen.has(k)), ...[...seen.keys()].filter((k) => !CHIP_ORDER.includes(k))];
+  return [{ id: "popular", label: "Popular releases" }, ...ids.map((id) => ({ id, label: seen.get(id)! }))];
+}
+
+/** The chip that's on: the one asked for, or Popular releases when the artist has none of that type. */
+export function activeChip(chips: Chip[], wanted: string | null | undefined): DiscographyFilter {
+  return chips.find((c) => c.id === wanted)?.id ?? "popular";
 }
 
 export interface DiscographyItem {
-  album: Album;
+  entry: DiscoEntry;
   /** The newest release, marked on its card in the popular row. */
   latest: boolean;
 }
 
-function newer(a: Album, b: Album): number {
+/** Newest first: by year, then by when it was added. Releases without a year go last. */
+export function newerEntry(a: DiscoEntry, b: DiscoEntry): number {
   return (b.year ?? -1) - (a.year ?? -1) || b.addedAt - a.addedAt;
 }
 
 /**
  * Cards for a discography chip. Popular releases: the newest release first,
- * then the most played, `limit` cards in all. A release type: newest first,
- * every release. A chip the artist no longer has falls back to popular
- * releases.
+ * then the most played (library releases before ones you can get), `limit`
+ * cards in all. A release type: newest first, every release. A chip the
+ * artist no longer has falls back to popular releases. One release in two
+ * sections shows once.
  */
-export function discographyItems(
-  sections: ArtistPageSection[],
-  filter: DiscographyFilter,
-  limit: number = POPULAR_RELEASES_N,
-): DiscographyItem[] {
-  const section = filter === "popular" ? undefined : sections.find((s) => sectionId(s) === filter);
-  if (section) return [...section.albums].sort(newer).map((album) => ({ album, latest: false }));
-  const all = sections.flatMap((s) => s.albums);
-  if (!all.length) return [];
-  const latest = [...all].sort(newer)[0];
-  const rest = all
-    .filter((a) => a.id !== latest.id)
-    .sort((a, b) => b.viewCount - a.viewCount || newer(a, b))
+export function discographyItems(entries: DiscoEntry[], filter: DiscographyFilter, limit: number = POPULAR_RELEASES_N): DiscographyItem[] {
+  const seen = new Set<string>();
+  const unique = entries.filter((e) => !seen.has(e.key) && !!seen.add(e.key));
+  const typed = filter === "popular" ? [] : unique.filter((e) => e.section === filter);
+  if (typed.length) return typed.sort(newerEntry).map((entry) => ({ entry, latest: false }));
+  if (!unique.length) return [];
+  const latest = [...unique].sort(newerEntry)[0];
+  const rest = unique
+    .filter((e) => e !== latest)
+    .sort((a, b) => Number(!!a.cat) - Number(!!b.cat) || b.plays - a.plays || newerEntry(a, b))
     .slice(0, Math.max(0, limit - 1));
-  return [{ album: latest, latest: true }, ...rest.map((album) => ({ album, latest: false }))];
+  return [{ entry: latest, latest: true }, ...rest.map((entry) => ({ entry, latest: false }))];
 }
 
 export type ArtistSectionId = "popular" | "eras" | "discography" | "about" | "fansAlsoLike" | "appearsOn";
@@ -131,12 +220,14 @@ export function artistSections(
     plays?: number;
     /** Era cards to show (none when hidden or fewer than two). */
     eras?: unknown[];
+    /** Releases you can get, which show in the discography too. */
+    catalogue?: number;
   },
 ): ArtistSectionId[] {
   const out: ArtistSectionId[] = [];
   if (page.popular.length) out.push("popular");
   if ((page.eras?.length ?? 0) >= 2) out.push("eras");
-  if (page.sections.some((s) => s.albums.length)) out.push("discography");
+  if (page.sections.some((s) => s.albums.length) || page.catalogue) out.push("discography");
   if (page.about?.trim() || page.listeners || page.photo || page.plays) out.push("about");
   if (page.similar.length) out.push("fansAlsoLike");
   if (page.appearsOn?.length) out.push("appearsOn");

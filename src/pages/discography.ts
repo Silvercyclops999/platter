@@ -1,6 +1,7 @@
 /** Discography page decisions: the type filter, the sort, the release lines and the saved view. */
-import { SECTION_LABELS, plural, releaseTypeLabel } from "../lib/format";
-import type { Album, ArtistPageSection, ReleaseSection } from "../lib/types";
+import { SECTION_LABELS, catalogueKind, plural, releaseTypeLabel } from "../lib/format";
+import type { ArtistPageSection, ReleaseSection, Settings } from "../lib/types";
+import { discographyChips, newerEntry, type DiscoEntry } from "./artist";
 
 /** A section's id: its release type, or `custom:<name>` for one of the user's own. */
 export type SectionId = ReleaseSection | `custom:${string}`;
@@ -25,72 +26,79 @@ export interface TypeOption {
   label: string;
 }
 
-/** All, then one entry per release type the artist has, in the page's section order. */
-export function typeOptions(sections: ArtistPageSection[]): TypeOption[] {
-  return [{ id: "all", label: "All" }, ...sections.filter((s) => s.albums.length).map((s) => ({ id: sectionId(s), label: sectionLabel(s) }))];
+/** All, then one entry per release type the artist has (in the library or to get), in the shelf's chip order. */
+export function typeOptions(entries: DiscoEntry[]): TypeOption[] {
+  return [{ id: "all", label: "All" }, ...discographyChips(entries).filter((c) => c.id !== "popular").map((c) => ({ id: c.id as SectionId, label: c.label }))];
 }
 
 /** A type the artist no longer has falls back to All. */
-export function validType(sections: ArtistPageSection[], type: DiscographyType | undefined): DiscographyType {
-  return type && type !== "all" && sections.some((s) => sectionId(s) === type && s.albums.length) ? type : "all";
-}
-
-/** Newest first: by year, then by when it was added. Releases without a year go last. */
-export function byDate(a: Album, b: Album): number {
-  return (b.year ?? -1) - (a.year ?? -1) || b.addedAt - a.addedAt;
+export function validType(entries: DiscoEntry[], type: DiscographyType | undefined): DiscographyType {
+  return type && type !== "all" && entries.some((e) => e.section === type) ? type : "all";
 }
 
 /** A to Z by the sort title, numbers in number order. */
-export function byName(a: Album, b: Album): number {
-  return (a.sortTitle || a.title).localeCompare(b.sortTitle || b.title, undefined, { numeric: true, sensitivity: "base" });
+export function byName(a: DiscoEntry, b: DiscoEntry): number {
+  return (a.album?.sortTitle || a.title).localeCompare(b.album?.sortTitle || b.title, undefined, { numeric: true, sensitivity: "base" });
 }
 
-/** The releases for a type, in the chosen order. One release in two sections shows once. */
-export function discographyReleases(sections: ArtistPageSection[], type: DiscographyType, sort: DiscographySort): Album[] {
+export interface DiscographyGroup {
+  section: SectionId;
+  label: string;
+  entries: DiscoEntry[];
+}
+
+/**
+ * The releases for a type, sectioned by release type (one section when a
+ * type is picked), each in the chosen order (newest first or A to Z, or the
+ * other way round). One release in two sections shows once.
+ */
+export function discographyGroups(entries: DiscoEntry[], type: DiscographyType, sort: DiscographySort, reverse = false): DiscographyGroup[] {
+  const order = sort === "name" ? byName : newerEntry;
   const seen = new Set<string>();
-  const out: Album[] = [];
-  for (const s of sections) {
-    if (type !== "all" && sectionId(s) !== type) continue;
-    for (const a of s.albums) {
-      if (seen.has(a.id)) continue;
-      seen.add(a.id);
-      out.push(a);
-    }
-  }
-  return out.sort(sort === "name" ? byName : byDate);
+  return typeOptions(entries)
+    .filter((o) => o.id !== "all" && (type === "all" || o.id === type))
+    .map((o) => ({
+      section: o.id as SectionId,
+      label: o.label,
+      entries: entries
+        .filter((e) => e.section === o.id && !seen.has(e.key) && !!seen.add(e.key))
+        .sort((a, b) => (reverse ? -1 : 1) * order(a, b)),
+    }))
+    .filter((g) => g.entries.length > 0);
 }
 
-/** "Album · 2024 · 12 songs" under a release's title in the list view. */
-export function releaseLine(a: Pick<Album, "format" | "subformats" | "year" | "trackCount">): string {
-  return [releaseTypeLabel(a), a.year ? String(a.year) : null, plural(a.trackCount, "song")].filter(Boolean).join(" · ");
+/** "Album · 2024 · 12 songs" under a release's title in the list view ("Album · 2024" for one you can get). */
+export function releaseLine(e: DiscoEntry): string {
+  if (e.album) {
+    const a = e.album;
+    return [releaseTypeLabel(a), a.year ? String(a.year) : null, plural(a.trackCount, "song")].filter(Boolean).join(" · ");
+  }
+  return [e.cat ? catalogueKind(e.cat) : e.sectionLabel, e.year ? String(e.year) : null].filter(Boolean).join(" · ");
 }
 
 export interface DiscographyPrefs {
   sort: DiscographySort;
+  reverse: boolean;
   view: DiscographyView;
 }
 
-export const DISCOGRAPHY_PREFS_DEFAULT: DiscographyPrefs = { sort: "date", view: "list" };
-const PREFS_KEY = "platter.discography.v1"; // gitleaks:allow (localStorage key name, not a secret)
+export const DISCOGRAPHY_PREFS_DEFAULT: DiscographyPrefs = { sort: "date", reverse: false, view: "list" };
 
-/** Sort and view, remembered on this device. */
-export function loadDiscographyPrefs(): DiscographyPrefs {
+/** Sort and view as Settings keeps them (this device). */
+export function discographyPrefs(s: Partial<Pick<Settings, "discographySort" | "discographyReverse" | "discographyView">> | null | undefined): DiscographyPrefs {
   const d = DISCOGRAPHY_PREFS_DEFAULT;
-  try {
-    const p = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") as Partial<DiscographyPrefs>;
-    return {
-      sort: p.sort === "name" || p.sort === "date" ? p.sort : d.sort,
-      view: p.view === "grid" || p.view === "list" ? p.view : d.view,
-    };
-  } catch {
-    return { ...d };
-  }
+  return {
+    sort: s?.discographySort === "name" || s?.discographySort === "date" ? s.discographySort : d.sort,
+    reverse: s?.discographyReverse ?? d.reverse,
+    view: s?.discographyView === "grid" || s?.discographyView === "list" ? s.discographyView : d.view,
+  };
 }
 
-export function saveDiscographyPrefs(p: DiscographyPrefs) {
-  try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify(p));
-  } catch {
-    /* storage unavailable: this session only */
-  }
+/** The Settings change for new sort and view choices. */
+export function prefsPatch(p: Partial<DiscographyPrefs>): Partial<Settings> {
+  return {
+    ...(p.sort ? { discographySort: p.sort } : {}),
+    ...(p.reverse != null ? { discographyReverse: p.reverse } : {}),
+    ...(p.view ? { discographyView: p.view } : {}),
+  };
 }

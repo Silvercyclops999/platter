@@ -23,6 +23,7 @@ import { GetButton } from "./GetButton";
 import "./lidarr-request.css";
 import "./catalogue.css";
 import { failText } from "../lib/errorText";
+import { catalogueKind } from "../lib/format";
 
 const LidarrRequestDialog = lazy(() => import("./LidarrRequest").then((m) => ({ default: m.LidarrRequestDialog })));
 
@@ -30,22 +31,7 @@ export const NOT_IN_LIBRARY = "Not in your library";
 
 export const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "");
 
-const KIND_LABEL: Record<string, string> = { album: "Album", ep: "EP", single: "Single" };
-
-/** "Album", "EP", "Single", "Live album"... */
-export function catalogueKind(a: Pick<CatAlbum, "kind" | "secondary">): string {
-  const base = KIND_LABEL[a.kind] ?? "Album";
-  const sec = a.secondary[0];
-  if (!sec) return base;
-  return `${sec.charAt(0).toUpperCase()}${sec.slice(1)} ${base.toLowerCase()}`;
-}
-
-export const SECTION_TITLE: Record<string, string> = {
-  album: "Albums",
-  ep: "EPs",
-  single: "Singles",
-  other: "Live albums and compilations",
-};
+export { catalogueKind };
 
 function actionToast(message: string, label: string, run: () => void) {
   useToasts.getState().push({ kind: "info", message, action: { label, run } }, 6000);
@@ -117,7 +103,22 @@ export function requestInput(a: CatAlbum, artistLibraryId?: string | null): Lida
 }
 
 /** Where a catalogue album stands, with one-click Get. */
-export function CatalogueAction({ album, lidarrReady, artistLibraryId, onChanged, size = "sm" }: { album: CatAlbum; lidarrReady: boolean; artistLibraryId?: string | null; onChanged?: () => void; size?: "sm" | "md" }) {
+export function CatalogueAction({
+  album,
+  lidarrReady,
+  artistLibraryId,
+  onChanged,
+  size = "sm",
+  compact = false,
+}: {
+  album: CatAlbum;
+  lidarrReady: boolean;
+  artistLibraryId?: string | null;
+  onChanged?: () => void;
+  size?: "sm" | "md";
+  /** On a card: short state labels, the full one as a tooltip. */
+  compact?: boolean;
+}) {
   return (
     <GetButton
       album={{ releaseGroupId: album.releaseGroupId, title: album.title, artist: album.artist, artistMbid: album.artistMbid, artistId: artistLibraryId ?? null }}
@@ -127,6 +128,7 @@ export function CatalogueAction({ album, lidarrReady, artistLibraryId, onChanged
       lidarrReady={lidarrReady}
       onChanged={onChanged}
       size={size}
+      compact={compact}
     />
   );
 }
@@ -140,9 +142,20 @@ export function RequestDialog({ input, onClose, onDone }: { input: LidarrRequest
   );
 }
 
-function openAlbum(a: CatAlbum) {
+export function openAlbum(a: CatAlbum) {
   if (a.libraryAlbumId) nav.go({ name: "album", id: a.libraryAlbumId });
   else nav.go({ name: "catalogueAlbum", id: a.releaseGroupId });
+}
+
+/** The menu of a release you may not have: open it, its artist, Add to Missing. */
+export function catalogueAlbumMenu(album: CatAlbum, onChanged?: () => void): MenuItem[] {
+  const owned = !!album.libraryAlbumId;
+  return [
+    { label: "Open", onSelect: () => openAlbum(album) },
+    ...(album.artistMbid ? [{ label: "Go to artist", onSelect: () => nav.go({ name: "catalogueArtist", mbid: album.artistMbid! }) }] : []),
+    ...(!owned && !album.inMissing ? [{ label: "Add to Missing", onSelect: () => void addToMissing(album).then((ok) => ok && onChanged?.()) }] : []),
+    ...(!owned && album.inMissing ? [{ label: "Remove from Missing", onSelect: () => void removeFromMissing(album).then((ok) => ok && onChanged?.()) }] : []),
+  ];
 }
 
 /** An album card for music you may not have, with Get below. */
@@ -151,25 +164,24 @@ export function CatalogueAlbumCard({
   lidarrReady,
   onChanged,
   subtitle = "year",
+  artistLibraryId,
+  note,
 }: {
   album: CatAlbum;
   lidarrReady: boolean;
   onChanged?: () => void;
   /** "year": year and type (an artist's page); "artist": the artist (search, Home). */
   subtitle?: "year" | "artist";
+  /** The library artist Get files it under. */
+  artistLibraryId?: string | null;
+  /** Said in place of the year ("Latest release"). */
+  note?: string;
 }) {
-  const owned = !!album.libraryAlbumId;
   const kind = catalogueKind(album);
-  const sub = subtitle === "artist" ? album.artist : `${album.year ? `${album.year} · ` : ""}${kind}`;
+  const sub = note ? `${note} · ${kind}` : subtitle === "artist" ? album.artist : `${album.year ? `${album.year} · ` : ""}${kind}`;
   const menu = (e: MouseEvent<HTMLElement>) => {
     e.preventDefault();
-    const items: MenuItem[] = [
-      { label: "Open", onSelect: () => openAlbum(album) },
-      ...(album.artistMbid ? [{ label: "Go to artist", onSelect: () => nav.go({ name: "catalogueArtist", mbid: album.artistMbid! }) }] : []),
-      ...(!owned && !album.inMissing ? [{ label: "Add to Missing", onSelect: () => void addToMissing(album).then((ok) => ok && onChanged?.()) }] : []),
-      ...(!owned && album.inMissing ? [{ label: "Remove from Missing", onSelect: () => void removeFromMissing(album).then((ok) => ok && onChanged?.()) }] : []),
-    ];
-    openContextMenu(`Options for ${album.title}`, items, e);
+    openContextMenu(`Options for ${album.title}`, catalogueAlbumMenu(album, onChanged), e);
   };
   return (
     <div className="card card--album cat-card" aria-label={`${album.title} by ${album.artist}`} onContextMenu={menu}>
@@ -181,7 +193,7 @@ export function CatalogueAlbumCard({
       </button>
       <span className="card__subtitle truncate">{sub}</span>
       <div className="missing-release__action cat-card__action">
-        <CatalogueAction album={album} lidarrReady={lidarrReady} onChanged={onChanged} />
+        <CatalogueAction album={album} lidarrReady={lidarrReady} artistLibraryId={artistLibraryId} onChanged={onChanged} compact />
       </div>
     </div>
   );

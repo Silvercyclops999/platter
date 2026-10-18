@@ -24,6 +24,7 @@ import type {
   SetOwned,
   ShelfStats,
   CatAlbum,
+  FeaturedArtist,
   CatArtist,
   CatalogueAlbumPage,
   CatalogueArtistPage,
@@ -1096,6 +1097,10 @@ export interface Backend {
   catalogueSearchPart(query: string, part: CataloguePartKind): Promise<CataloguePart>;
   /** A photo for an artist outside the library (Lidarr, Wikimedia Commons, TheAudioDB); empty when none has one. */
   catalogueArtistPhoto(mbid: string, name: string): Promise<CataloguePhoto>;
+  /** A featured guest (a `credit:` page): a photo and their releases by section, with Get. Empty while offline. */
+  featuredArtist(id: string, name: string): Promise<FeaturedArtist>;
+  /** Just a featured guest's photo (search's top result card); empty while offline. */
+  featuredArtistPhoto(id: string, name: string): Promise<CataloguePhoto>;
   /** "Get albums": what it would queue for an artist, most popular first. */
   catalogueGetAlbumsPlan(mbid: string, name: string, kinds: string[]): Promise<GetAlbumsPlan>;
   /** "Get albums": queue them, paced like Bring in my listening. */
@@ -1640,6 +1645,8 @@ export function createTauriBackend(): Backend {
     catalogueSearch: (query) => call("catalogue_search", { query }),
     catalogueSearchPart: (query, part) => call("catalogue_search_part", { query, part }),
     catalogueArtistPhoto: (mbid, name) => call("catalogue_artist_photo", { mbid, name }),
+    featuredArtist: (id, name) => call("featured_artist", { id, name }),
+    featuredArtistPhoto: (id, name) => call("featured_artist_photo", { id, name }),
     catalogueGetAlbumsPlan: (mbid, name, kinds) => call("catalogue_get_albums_plan", { mbid, name, kinds }),
     catalogueGetAlbums: (mbid, name, kinds) => call("catalogue_get_albums", { mbid, name, kinds }),
     catalogueArtist: (mbid) => call("catalogue_artist", { mbid }),

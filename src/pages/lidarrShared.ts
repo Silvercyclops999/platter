@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { backend } from "../lib/backend";
-import type { LidarrMissing, LidarrMissingItem, LidarrRequestState } from "../lib/types";
+import type { LidarrMissing, LidarrRequestState } from "../lib/types";
 import { useSettings } from "../stores/settings";
 
 export const STATE_LABEL: Record<LidarrRequestState, string> = {
@@ -44,13 +44,6 @@ export function useMissingReleases(artistId: string, artist: string | undefined)
   }, [artistId, artist, on, home, away]);
   useEffect(load, [load]);
   return { items: missing?.shown ? missing.items : [], reload: load };
-}
-
-/** The missing releases a discography filter shows: albums under Albums, EPs under Singles and EPs. */
-export function missingFor(items: LidarrMissingItem[], filter: string): LidarrMissingItem[] {
-  if (filter === "popular" || filter === "albums") return items.filter((i) => i.kind === "album");
-  if (filter === "singlesEps") return items.filter((i) => i.kind === "ep");
-  return [];
 }
 
 /**

@@ -1,9 +1,9 @@
 import { Download, Ellipsis, Pause, Pin, PinOff, Play, Shuffle, X } from "lucide-react";
 import { PageMissing } from "../components/PageMissing";
-import { Suspense, lazy, useEffect, useId, useState, type RefObject } from "react";
+import { useEffect, useId, useState, type RefObject } from "react";
 import { Art } from "../components/Art";
 import { Button, IconButton } from "../components/Button";
-import { Card, CardSkeleton } from "../components/Card";
+import { Card } from "../components/Card";
 import { openContextMenu } from "../components/ContextMenu";
 import { sendToDeviceItem } from "../components/DeviceMenu";
 import { shareItem } from "../components/ShareMenu";
@@ -14,13 +14,12 @@ import { yourStatsItem } from "../stores/stats";
 import { StatsStrip, useItemStats } from "../components/StatsStrip";
 import { Shelf, ShelfItem } from "../components/Shelf";
 import { Skeleton } from "../components/Skeleton";
-import { FilterChips } from "../components/Tabs";
 import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
 import { artUrl, backend } from "../lib/backend";
 import { isCreditId } from "../lib/credits";
 import { useLoad, useReload } from "../lib/useLoad";
 import { useArtTint } from "../lib/useTint";
-import type { Album, Artist, ArtistPage as ArtistPageData, ArtistPageSection, Era } from "../lib/types";
+import type { Album, Artist, ArtistPage as ArtistPageData, Era } from "../lib/types";
 import { useSettings } from "../stores/settings";
 import { eraRange, filterByEra, showEraCards } from "./era";
 import { usePins } from "../stores/pins";
@@ -31,15 +30,14 @@ import { nav, useRouter } from "../stores/router";
 import { AlbumCard, ArtistCard, useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
 import { AboutCard, useArtistInfo } from "./ArtistAbout";
-import { missingFor, useLidarrReady, useMissingReleases } from "./lidarrShared";
+import { useLidarrReady } from "./lidarrShared";
 import { useAutoOn, useAutoRequest } from "../stores/radar";
 import { AutoRequestDialog } from "./AutoRequestDialog";
 import { GetAlbumsDialog } from "./GetAlbumsDialog";
-import { CatalogueAlbumCard, CatalogueArtistCard, NOT_IN_LIBRARY, SECTION_TITLE, dismissArtist, undismissArtist, useCatalogueFans } from "./catalogue";
+import { CatalogueArtistCard, NOT_IN_LIBRARY, dismissArtist, undismissArtist, useCatalogueFans } from "./catalogue";
 import type { CatArtist, CatalogueArtistPage } from "../lib/types";
-
-/** Cards for releases the library lacks (and their request dialog), loaded once an artist has some. */
-const MissingReleaseCard = lazy(() => import("./LidarrRequest").then((m) => ({ default: m.MissingReleaseCard })));
+import { DiscographyShelf } from "./DiscographyShelf";
+import { useArtistDiscography } from "./discographySources";
 import {
   POPULAR_FIRST,
   POPULAR_MORE,
@@ -47,14 +45,18 @@ import {
   aboutText,
   artistSections,
   bannerPath,
-  discographyChips,
-  discographyItems,
+  catalogueEntries,
   headerVariant,
   listenersLine,
   photoPath,
   playsLine,
   type DiscographyFilter,
 } from "./artist";
+
+/** The full discography's route, at a chip's release type. */
+function discographyRoute(id: string, filter: DiscographyFilter, catalogue?: boolean) {
+  return { name: "discography" as const, id, ...(filter === "popular" ? {} : { type: filter }), ...(catalogue ? { catalogue: true } : {}) };
+}
 
 /**
  * Page state (see more, chip, expanded rows) starts over for each artist. `era` filters it to one era.
@@ -109,6 +111,11 @@ function ArtistView({ id, era: eraName }: { id: string; era?: string }) {
   const artist = data?.artist;
   const info = useArtistInfo(id);
   const fans = useCatalogueFans(credited ? null : id, artist?.title);
+  // Releases you can get, and for an artist the server has no albums (or
+  // photo) for, the catalogue's photo.
+  const disco = useArtistDiscography(id, artist?.title, data?.sections);
+  const lidarrReady = useLidarrReady();
+  const photo = artist ? (photoPath(artist, info) ?? disco.photo) : null;
   const banner = artist ? bannerPath(artist, info) : null;
   const variant = artist ? headerVariant(artist, banner) : "photo";
   const about = data ? aboutText(data.about, info) : null;
@@ -129,6 +136,7 @@ function ArtistView({ id, era: eraName }: { id: string; era?: string }) {
         photo: credited ? null : photoPath(data.artist, info),
         plays: credited ? 0 : data.plays,
         eras: showEraCards(data.eras, eraCardsOn) ? data.eras : undefined,
+        catalogue: disco.catalogue,
       })
     : [];
   // Artists outside the library alone still make a "Fans also like" shelf.
@@ -172,7 +180,7 @@ function ArtistView({ id, era: eraName }: { id: string; era?: string }) {
           data-variant="photo"
         >
           <div className="detail-header__art">
-            {artist ? <Art path={photoPath(artist, info)} size={232} round kind="artist" /> : <Skeleton width={232} height={232} radius="circle" />}
+            {artist ? <Art path={photo} size={232} round kind="artist" monogram={credited ? artist.title : undefined} /> : <Skeleton width={232} height={232} radius="circle" />}
           </div>
           <div ref={column} className="detail-header__text">
             {text}
@@ -200,7 +208,16 @@ function ArtistView({ id, era: eraName }: { id: string; era?: string }) {
               case "eras":
                 return <EraShelf key={s} id={id} eras={data.eras ?? []} selected={era?.name ?? null} />;
               case "discography":
-                return <Discography key={s} id={id} sections={data.sections} artist={credited ? undefined : data.artist.title} />;
+                return (
+                  <DiscographyShelf
+                    key={s}
+                    entries={disco.entries}
+                    lidarrReady={lidarrReady}
+                    artistLibraryId={credited ? null : id}
+                    onChanged={disco.reload}
+                    onShowAll={(f) => nav.go(discographyRoute(id, f))}
+                  />
+                );
               case "appearsOn":
                 return <AppearsOn key={s} id={id} albums={data.appearsOn} />;
               case "about":
@@ -484,39 +501,6 @@ function PopularSection({ id, data }: { id: string; data: ArtistPageData }) {
   );
 }
 
-/** The discography shelf with its type chips; Show all opens the full discography page at the chosen type. */
-function Discography({ id, sections, artist }: { id: string; sections: ArtistPageSection[]; artist?: string }) {
-  const [filter, setFilter] = useState<DiscographyFilter>("popular");
-  const missing = useMissingReleases(id, artist);
-  const chips = discographyChips(sections);
-  const chipRow = (
-    <FilterChips label="Release type" items={chips} value={filter} onChange={setFilter} className="discography__chips" scroll />
-  );
-  return (
-    <div className="discography">
-      <Shelf
-        title="Discography"
-        onShowAll={() => nav.go(filter === "popular" ? { name: "discography", id } : { name: "discography", id, type: filter })}
-        filters={chipRow}
-      >
-        {discographyItems(sections, filter).map(({ album, latest }) => (
-          <ShelfItem key={album.id}>
-            <AlbumCard album={album} subtitle="year" note={latest ? "Latest release" : undefined} />
-          </ShelfItem>
-        ))}
-        {artist &&
-          missingFor(missing.items, filter).map((item) => (
-            <ShelfItem key={`missing-${item.releaseGroupId}`}>
-              <Suspense fallback={<CardSkeleton />}>
-                <MissingReleaseCard item={item} artist={artist} artistId={id} onChanged={missing.reload} />
-              </Suspense>
-            </ShelfItem>
-          ))}
-      </Shelf>
-    </div>
-  );
-}
-
 function AppearsOn({ id, albums }: { id: string; albums: Album[] }) {
   return (
     <Shelf title="Appears on" onShowAll={() => nav.go({ name: "artistShelf", id, shelf: "appearsOn" })}>
@@ -653,25 +637,15 @@ function CatalogueArtistView({ mbid }: { mbid: string }) {
         </div>
         {artist && getting && <GetAlbumsDialog mbid={artist.mbid} name={artist.name} open onClose={() => setGetting(false)} />}
         {!data && <Shelf title="Discography" loading />}
-        {data?.popular && data.popular.length > 0 && (
-          <Shelf title="Popular">
-            {data.popular.map((a) => (
-              <ShelfItem key={`p-${a.releaseGroupId}`}>
-                <CatalogueAlbumCard album={a} lidarrReady={lidarrReady} onChanged={reload} />
-              </ShelfItem>
-            ))}
-          </Shelf>
-        )}
         {data && data.sections.length === 0 && <p className="cat-bio__none">MusicBrainz has no official albums for this artist yet.</p>}
-        {data?.sections.map((s) => (
-          <Shelf key={s.kind} title={SECTION_TITLE[s.kind] ?? "Albums"}>
-            {s.albums.map((a) => (
-              <ShelfItem key={a.releaseGroupId}>
-                <CatalogueAlbumCard album={a} lidarrReady={lidarrReady} onChanged={reload} />
-              </ShelfItem>
-            ))}
-          </Shelf>
-        ))}
+        {data && data.sections.length > 0 && (
+          <DiscographyShelf
+            entries={catalogueEntries(data.sections, data.popular)}
+            lidarrReady={lidarrReady}
+            onChanged={reload}
+            onShowAll={(f) => nav.go(discographyRoute(data.artist.mbid, f, true))}
+          />
+        )}
         {data && <CatalogueAbout page={data} />}
         {data && data.similar.length > 0 && (
           <Shelf title="Fans also like" skeletonKind="artist">

@@ -175,7 +175,7 @@ function Page({ route }: { route: Route }) {
     case "era":
       return <EraPage key={`${route.id}:${route.era}`} artistId={route.id} name={route.era} />;
     case "discography":
-      return <DiscographyPage id={route.id} type={route.type} />;
+      return <DiscographyPage id={route.id} type={route.type} catalogue={route.catalogue} />;
     case "album":
       return <AlbumPage id={route.id} tab={route.tab} />;
     case "catalogueArtist":

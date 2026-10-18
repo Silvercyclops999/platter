@@ -46,6 +46,24 @@ export function getLabel(state: LidarrRequestState, progress?: number | null): s
   }
 }
 
+/** The short label a card's narrow pill uses (the full one is its tooltip). */
+export function getShortLabel(state: LidarrRequestState, progress?: number | null): string {
+  switch (state) {
+    case "queued":
+      return "Waiting";
+    case "searching":
+      return "Searching";
+    case "downloading":
+      return progress != null ? `${progress}%` : "Downloading";
+    case "notFound":
+      return "Not found";
+    case "failed":
+      return "Failed";
+    default:
+      return getLabel(state, progress);
+  }
+}
+
 export interface GetTarget {
   releaseGroupId: string;
   title: string;
@@ -63,6 +81,7 @@ export function GetButton({
   size = "sm",
   onChanged,
   idleLabel = "Get",
+  compact = false,
 }: {
   album: GetTarget;
   /** The request state the list came with (the live one wins). */
@@ -75,6 +94,8 @@ export function GetButton({
   onChanged?: () => void;
   /** What the button says before it's clicked ("Get the album" on a song). */
   idleLabel?: string;
+  /** On a card: short state labels that fit its width, the full one as a tooltip. */
+  compact?: boolean;
 }) {
   const rec = useRequestFor(album.releaseGroupId);
   const askFirst = useSettings((s) => s.settings?.askBeforeGet === true);
@@ -207,12 +228,18 @@ export function GetButton({
     );
   }
   if (state && state !== "failed") {
+    const full = getLabel(state, rec?.progress);
     const Icon = state === "queued" ? Clock : state === "notFound" ? Search : Download;
     return (
       <span className="get-row">
-        <span className={`lidarr-state lidarr-state--${state} get-state`} role="status" title={rec?.message ?? undefined}>
+        <span
+          className={`lidarr-state lidarr-state--${state} get-state ${compact ? "get-state--compact" : ""}`}
+          role="status"
+          title={compact ? [full, rec?.message].filter(Boolean).join(". ") : (rec?.message ?? undefined)}
+          aria-label={compact ? full : undefined}
+        >
           <Icon size={14} aria-hidden="true" />
-          {getLabel(state, rec?.progress)}
+          <span className="get-state__text">{compact ? getShortLabel(state, rec?.progress) : full}</span>
         </span>
         {state === "notFound" && rec && (
           <>

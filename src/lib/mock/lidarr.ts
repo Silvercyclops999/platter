@@ -11,6 +11,7 @@ import type {
   LidarrRequestInput,
   LidarrRequestState,
   LidarrStatus,
+  ReleaseSection,
   Settings,
 } from "../types";
 
@@ -25,11 +26,30 @@ import type {
 export type LidarrDemo = "demo" | "clear" | "empty" | "away" | "unreachable" | "badKey" | "old" | "ready" | "offline";
 export const LIDARR_DEMOS: LidarrDemo[] = ["demo", "clear", "empty", "away", "unreachable", "badKey", "old", "ready", "offline"];
 
+/** The "Get albums" kind each section needs (the rest never show). */
+const SECTION_KIND: Record<string, string> = { albums: "studio", singlesEps: "ep", live: "live", compilations: "compilation" };
+
+/** Whether a section shows for releases you don't have, with these "Get albums" kinds. */
+export function sectionWanted(section: string | null, kinds: string[] | undefined): boolean {
+  const k = section ? SECTION_KIND[section] : undefined;
+  return !!k && (kinds?.length ? kinds : ["studio"]).includes(k);
+}
+
 /** Mock MusicBrainz: official releases each artist lacks, by artist title. */
-const MISSING_BY_DEFAULT = [
-  { releaseGroupId: "6f1c0c55-0000-4000-8000-000000000001", title: "Paper Lanterns", kind: "album", year: 2014 },
-  { releaseGroupId: "6f1c0c55-0000-4000-8000-000000000002", title: "Low Tide EP", kind: "ep", year: 2017 },
-  { releaseGroupId: "6f1c0c55-0000-4000-8000-000000000003", title: "Northern Rooms", kind: "album", year: 2022 },
+const MISSING_BY_DEFAULT: { releaseGroupId: string; title: string; kind: string; secondary: string[]; section: ReleaseSection; year: number; refusal?: string }[] = [
+  { releaseGroupId: "6f1c0c55-0000-4000-8000-000000000001", title: "Paper Lanterns", kind: "album", secondary: [], section: "albums", year: 2014 },
+  { releaseGroupId: "6f1c0c55-0000-4000-8000-000000000002", title: "Low Tide EP", kind: "ep", secondary: [], section: "singlesEps", year: 2017 },
+  { releaseGroupId: "6f1c0c55-0000-4000-8000-000000000003", title: "Northern Rooms", kind: "album", secondary: [], section: "albums", year: 2022 },
+  { releaseGroupId: "6f1c0c55-0000-4000-8000-000000000004", title: "Signal Fires", kind: "single", secondary: [], section: "singlesEps", year: 2023 },
+  {
+    releaseGroupId: "6f1c0c55-0000-4000-8000-000000000005",
+    title: "The Early Years",
+    kind: "album",
+    secondary: ["compilation"],
+    section: "compilations",
+    year: 2020,
+    refusal: "This is only on a compilation release.",
+  },
 ];
 /** The small cover path the core gives a release group (null: the archive has none). */
 export const coverThumb = (rgid: string) => `/ext/https://coverartarchive.org/release-group/${rgid}/front-250`;
@@ -155,8 +175,9 @@ export class MockLidarr {
     if (!s.showMissingReleases || !this.setUp(s) || !this.lastPassed) return { shown: false, items: [] };
     return {
       shown: true,
-      items: MISSING_BY_DEFAULT.map((m) => ({
+      items: MISSING_BY_DEFAULT.filter((m) => sectionWanted(m.section, s.getAlbumsKinds)).map((m) => ({
         ...m,
+        refusal: m.refusal ?? null,
         request: this.requests.find((r) => r.releaseGroupId === m.releaseGroupId)?.state ?? null,
         // The EP has no cover in the archive: its card keeps the placeholder.
         thumb: m.kind === "ep" ? null : coverThumb(m.releaseGroupId),

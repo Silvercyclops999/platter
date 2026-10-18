@@ -12,6 +12,8 @@ import type {
   CataloguePartKind,
   CataloguePhoto,
   CatalogueSearch,
+  CatSection,
+  FeaturedArtist,
   GetAlbumsPlan,
   CatSong,
   CatTrack,
@@ -22,7 +24,7 @@ import type {
   WantedAlbum,
 } from "../types";
 import type { Fixtures } from "./fixtures";
-import { coverThumb } from "./lidarr";
+import { coverThumb, sectionWanted } from "./lidarr";
 
 export interface CatalogueHooks {
   settings: () => Settings;
@@ -115,6 +117,52 @@ const WORLD: Who[] = [
     ],
   },
 ];
+
+/** Featured guests on library songs (fixtures' GUEST_NAMES), as the catalogue knows them. */
+const GUESTS: Who[] = [
+  {
+    n: 71,
+    name: "Juno Ashby",
+    kind: "Person",
+    area: "Bristol",
+    since: "2012–present",
+    releases: [
+      { n: 711, title: "Overcast Bloom", kind: "album", year: 2023 },
+      { n: 712, title: "Small Rooms", kind: "album", year: 2019 },
+      { n: 713, title: "Paper Weather", kind: "album", year: 2015 },
+      { n: 714, title: "Hollow Light", kind: "single", year: 2024 },
+      { n: 715, title: "Late Ferry", kind: "single", year: 2022 },
+      { n: 716, title: "Four Walls", kind: "ep", year: 2017 },
+      { n: 717, title: "Collected Rooms", kind: "album", secondary: ["compilation"], year: 2021 },
+      { n: 718, title: "Live at the Fleece", kind: "album", secondary: ["live"], year: 2020 },
+    ],
+  },
+  {
+    n: 72,
+    name: "Pell Rivers",
+    kind: "Person",
+    area: "Cardiff",
+    since: "2016–present",
+    releases: [
+      { n: 721, title: "Brightwater", kind: "album", year: 2021 },
+      { n: 722, title: "Rivers EP", kind: "ep", year: 2018 },
+    ],
+  },
+];
+
+/** The library's section a catalogue release shows in (same ids as the library's). */
+export function sectionOf(r: Pick<Rel, "kind" | "secondary">): string | null {
+  const sec = r.secondary ?? [];
+  if (!sec.length) return r.kind === "album" ? "albums" : "singlesEps";
+  if (sec.includes("compilation")) return "compilations";
+  if (sec.includes("live")) return "live";
+  if (sec.includes("soundtrack")) return "soundtracks";
+  if (sec.includes("remix")) return "remixes";
+  return null;
+}
+
+const SECTION_ORDER = ["albums", "singlesEps", "compilations", "live", "soundtracks", "remixes", "mixtapes", "demos"];
+
 
 const SONG_WORDS = ["Undertow", "Glass Weather", "Breakwater", "Salt Lines", "Pilot Light", "Low Sun", "Rook", "Shoreline", "The Long Field", "Lantern Hours", "Foghorn", "Quiet Engine"];
 
@@ -285,20 +333,35 @@ export class MockCatalogue {
     return null;
   }
 
-  artistPage(id: string): CatalogueArtistPage {
-    if (this.hooks.offline()) throw { kind: "network", message: "You're offline." };
-    const w = WORLD.find((x) => mbid(x.n) === id);
-    if (!w) throw { kind: "notFound", message: "MusicBrainz doesn't know this artist." };
-    const kinds = ["album", "ep", "single", "other"];
-    const sections = kinds
+  /** Releases by section (page order, newest first), only the "Get albums" kinds. */
+  private sectioned(w: Who): CatSection[] {
+    const kinds = this.hooks.settings().getAlbumsKinds;
+    return SECTION_ORDER.filter((k) => sectionWanted(k, kinds))
       .map((k) => ({
         kind: k,
         albums: w.releases
-          .filter((r) => (k === "other" ? !!r.secondary?.length : !r.secondary?.length && r.kind === k))
+          .filter((r) => sectionOf(r) === k)
           .sort((a, b) => b.year - a.year)
           .map((r) => this.album(w, r)),
       }))
       .filter((s) => s.albums.length > 0);
+  }
+
+  /** A featured guest (a `credit:` page): their photo and releases by section; empty offline or for names the catalogue doesn't know. */
+  featured(_id: string, name: string): FeaturedArtist {
+    const none: FeaturedArtist = { shown: false, mbid: null, photo: null, photoCredit: null, sections: [] };
+    if (this.hooks.offline()) return none;
+    const w = [...GUESTS, ...WORLD].find((x) => fold(x.name) === fold(name));
+    if (!w) return none;
+    const pic = photoOf(w.n);
+    return { shown: true, mbid: mbid(w.n), photo: pic.photo, photoCredit: pic.credit, sections: this.sectioned(w) };
+  }
+
+  artistPage(id: string): CatalogueArtistPage {
+    if (this.hooks.offline()) throw { kind: "network", message: "You're offline." };
+    const w = WORLD.find((x) => mbid(x.n) === id);
+    if (!w) throw { kind: "notFound", message: "MusicBrainz doesn't know this artist." };
+    const sections = this.sectioned(w);
     const dismissed = this.dismissed();
     const twin = this.libraryTwin;
     const similar: CatArtist[] = [

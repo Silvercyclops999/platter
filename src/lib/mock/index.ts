@@ -3827,6 +3827,15 @@ export class MockBackend implements Backend {
   catalogueArtistPhoto(mbid: string, _name: string) {
     return this.delay(() => this.catalogue.photo(mbid));
   }
+  featuredArtist(id: string, name: string) {
+    return this.delay(() => this.catalogue.featured(id, name));
+  }
+  featuredArtistPhoto(id: string, name: string) {
+    return this.delay(() => {
+      const f = this.catalogue.featured(id, name);
+      return { photo: f.photo, credit: f.photoCredit };
+    });
+  }
   catalogueGetAlbumsPlan(mbid: string, _name: string, kinds: string[]) {
     return this.delay(() => this.catalogue.getAlbumsPlan(mbid, kinds));
   }

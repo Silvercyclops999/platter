@@ -265,7 +265,7 @@ describe("artist page sections and eras", () => {
     const names = within(chips)
       .getAllByRole("button")
       .map((b) => b.textContent);
-    expect(names).toEqual(["Popular releases", "Albums", "Singles & EPs", "Mixtapes", "Unreleased", "Live", "Demos"]);
+    expect(names).toEqual(["Popular releases", "Albums", "Singles and EPs", "Mixtapes", "Unreleased", "Live", "Demos"]);
     const page = await backend.artistPage(ARCHIVE_ARTIST_ID);
     const ids = (s: string) => page.sections.find((x) => x.section === s)!.albums.map((a) => a.title).sort();
     expect(ids("demos")).toEqual(["Basement Takes"]);

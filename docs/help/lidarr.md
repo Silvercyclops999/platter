@@ -53,7 +53,7 @@ With a staging folder set, an album's menu has **Find a better copy**. When the 
 
 ## Requests
 
-With **Show missing official releases** on, artist pages list official albums and EPs you don't have, with **Request**. Your first request asks you to type the album's name. If Lidarr can't be reached, the request waits and sends later. **Requests** shows where each one stands.
+With **Show missing official releases** on, artist pages list official releases you don't have in their discography, with **Get**. Which kinds show (albums, singles and EPs, live albums, compilations) follows **Album kinds for Get albums**. Your first request asks you to type the album's name. If Lidarr can't be reached, the request waits and sends later. **Requests** shows where each one stands.
 
 ## Auto requests
 

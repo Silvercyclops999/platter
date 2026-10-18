@@ -1321,6 +1321,12 @@ export interface Settings {
   askBeforeGet: boolean;
   /** The kinds "Get albums" offers ticked. */
   getAlbumsKinds: string[];
+  /** The discography chip an artist page opens on: the last one picked (this device). */
+  discographyChip: string;
+  /** The full discography's order, whether it's reversed, and its view (this device). */
+  discographySort: "date" | "name";
+  discographyReverse: boolean;
+  discographyView: "list" | "grid";
   /** Badges, the On the shelf filter and the Stats shelf for albums owned on vinyl, CD, cassette or another format. */
   showPhysicalCollection: boolean;
   /** "Missing from the shelf": albums played most that aren't owned. */
@@ -1821,6 +1827,10 @@ export const DEFAULT_SETTINGS: Settings = {
   catalogueSource: "lidarr",
   askBeforeGet: false,
   getAlbumsKinds: ["studio"],
+  discographyChip: "popular",
+  discographySort: "date",
+  discographyReverse: false,
+  discographyView: "list",
   showPhysicalCollection: true,
   shelfMissingList: false,
   showSleeveNotes: true,
@@ -3085,12 +3095,18 @@ export interface AutoArtist {
 export interface LidarrMissingItem {
   releaseGroupId: string;
   title: string;
-  /** "album" or "ep". */
+  /** "album", "ep" or "single". */
   kind: string;
+  /** Secondary types ("live", "compilation"...), lower case. */
+  secondary?: string[];
+  /** The discography section it shows in (older cores leave it out: albums and EPs only then). */
+  section?: ReleaseSection;
   year: number | null;
   request: LidarrRequestState | null;
   /** The small front cover from the Cover Art Archive, as an art path. */
   thumb: string | null;
+  /** Why Get would be refused (a live album or compilation isn't asked for on its own). */
+  refusal?: string | null;
 }
 
 /** A MusicBrainz release group Lidarr could be asked for. */
@@ -4420,9 +4436,20 @@ export interface CatalogueSearch {
 }
 
 export interface CatSection {
-  /** "album", "ep", "single" or "other". */
+  /** The section, with the library's section ids ("albums", "singlesEps", "compilations", "live"...). */
   kind: string;
   albums: CatAlbum[];
+}
+
+/** `featured_artist`: what the catalogue knows about a featured guest (a `credit:` page). */
+export interface FeaturedArtist {
+  /** Lookups ran (online, and MusicBrainz knows the name). */
+  shown: boolean;
+  mbid: string | null;
+  photo: string | null;
+  photoCredit: string | null;
+  /** Their releases by section, newest first. */
+  sections: CatSection[];
 }
 
 /** `catalogue_artist`. */

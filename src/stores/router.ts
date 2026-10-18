@@ -18,8 +18,8 @@ export type Route =
   | { name: "library"; tab?: LibraryTab }
   /** An artist page, filtered to one era when `era` is set (Back clears it). */
   | { name: "artist"; id: string; era?: string }
-  /** An artist's whole discography, optionally filtered to one release type (or `custom:<name>`). */
-  | { name: "discography"; id: string; type?: ReleaseSection | `custom:${string}` }
+  /** An artist's whole discography, optionally filtered to one release type (or `custom:<name>`). `catalogue`: `id` is a MusicBrainz id of an artist outside the library. */
+  | { name: "discography"; id: string; type?: ReleaseSection | `custom:${string}`; catalogue?: boolean }
   /** Every version of a song on one timeline (`id`: any of its versions). */
   | { name: "lineage"; id: string }
   /** One era of an artist (ARCHIVE_ERA). */

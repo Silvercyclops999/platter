@@ -132,13 +132,15 @@ describe("search", () => {
 });
 
 describe("catalogue artist page", () => {
-  it("looks like a normal page: photo, popular albums, releases by type, the bio's source", async () => {
+  it("looks like a normal page: photo, a discography with popular releases and types, the bio's source", async () => {
     render(<ArtistPage id={COLD} catalogue />);
     expect(await screen.findByRole("heading", { level: 1, name: "Cold Coast" })).toBeInTheDocument();
     expect(screen.getAllByText("Not in your library").length).toBeGreaterThan(0);
-    for (const t of ["Popular", "Albums", "EPs", "Singles", "Live albums and compilations"]) {
-      expect(screen.getByRole("heading", { name: t })).toBeInTheDocument();
-    }
+    expect(screen.getByRole("heading", { name: "Discography" })).toBeInTheDocument();
+    // The Get albums kinds (studio albums to start with) decide the types.
+    const chips = screen.getByRole("group", { name: "Release type" });
+    expect(within(chips).getAllByRole("button").map((b) => b.textContent)).toEqual(["Popular releases", "Albums"]);
+    expect(screen.getByText("Latest release · Album")).toBeInTheDocument();
     const cards = screen.getAllByLabelText("Low Tide Radio by Cold Coast");
     expect(cards[0].className).not.toContain("missing-release");
     expect(document.querySelector(".detail-header__art img"), "the header has a photo").not.toBeNull();

@@ -108,3 +108,9 @@
 .get-albums__list { margin: 0; padding-left: var(--space-5); color: var(--color-text-primary); font-size: var(--font-size-sm); line-height: 1.7; }
 .get-albums__year, .get-albums__more { color: var(--color-text-secondary); }
 .get-albums__more { list-style: none; margin-left: calc(var(--space-5) * -1); }
+
+/* On a card the state pill fits the card: a short label, cut short as a last resort. */
+.missing-release__action { min-width: 0; max-width: 100%; }
+.missing-release__action .get-row { min-width: 0; max-width: 100%; }
+.get-state--compact { min-width: 0; max-width: 100%; flex: 0 1 auto; }
+.get-state__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -12,8 +12,8 @@ import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS } from "../lib/types";
 import { ArtistPage } from "../pages/ArtistPage";
-import { missingFor } from "../pages/lidarrShared";
 import { MissingReleaseCard } from "../pages/LidarrRequest";
+import { DiscographyPage } from "../pages/DiscographyPage";
 import { ImportPage } from "../pages/ImportPage";
 import { coverThumb } from "../lib/mock/lidarr";
 import { SettingsPage } from "../pages/SettingsPage";
@@ -45,13 +45,25 @@ describe("missing official releases on the artist page", () => {
     render(<ArtistPage id={artist().id} />);
     const paper = await screen.findByLabelText("Paper Lanterns, not in your library");
     expect(paper.className).toContain("cat-card");
-    expect(within(paper).getByText("2014 · Album · Not in your library")).toBeInTheDocument();
+    expect(within(paper).getByText("2014 · Album")).toBeInTheDocument();
     expect(within(paper).getByRole("button", { name: "Get Paper Lanterns" })).toBeInTheDocument();
     // At the end of the shelf, after the library's own albums.
     const items = screen.getAllByRole("listitem").filter((li) => li.closest(".discography"));
     expect(items[items.length - 1].querySelector(".cat-card")).not.toBeNull();
     // EPs only under Singles and EPs.
     expect(screen.queryByLabelText("Low Tide EP, not in your library")).toBeNull();
+  });
+
+  it("are on the full discography too, in their sections, with Get", async () => {
+    await setUp("ready", { getAlbumsKinds: ["studio", "ep", "compilation"] });
+    render(<DiscographyPage id={artist().id} />);
+    await screen.findByRole("heading", { level: 1, name: artist().title });
+    const paper = await screen.findByRole("region", { name: "Paper Lanterns" });
+    expect(within(paper).getByText("Album · 2014")).toBeInTheDocument();
+    expect(within(paper).getByRole("button", { name: "Get Paper Lanterns" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Low Tide EP" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "The Early Years" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Compilations" })).toBeInTheDocument();
   });
 
   it("shows each release's real cover from the cover archive through the art cache", async () => {
@@ -95,16 +107,6 @@ describe("missing official releases on the artist page", () => {
     expect(document.querySelector(".discography .cat-card")).toBeNull();
   });
 
-  it("filters by the discography chip", () => {
-    const items = [
-      { releaseGroupId: "a", title: "A", kind: "album", year: 1, request: null, thumb: null },
-      { releaseGroupId: "e", title: "E", kind: "ep", year: 1, request: null, thumb: null },
-    ];
-    expect(missingFor(items, "popular").map((i) => i.title)).toEqual(["A"]);
-    expect(missingFor(items, "albums").map((i) => i.title)).toEqual(["A"]);
-    expect(missingFor(items, "singlesEps").map((i) => i.title)).toEqual(["E"]);
-    expect(missingFor(items, "live")).toEqual([]);
-  });
 });
 
 describe("the request dialog (Ask before each Get)", () => {
@@ -126,7 +128,10 @@ describe("the request dialog (Ask before each Get)", () => {
     await user.click(send);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     const card = screen.getByLabelText("Paper Lanterns, not in your library");
-    await within(card).findByText("Looking on your indexers");
+    // The card's pill fits it: a short label, the full one as its name and tooltip.
+    const pill = await within(card).findByRole("status", { name: "Looking on your indexers" });
+    expect(pill).toHaveTextContent("Searching");
+    expect(pill).toHaveAttribute("title", expect.stringContaining("Looking on your indexers"));
     expect(mock.lidarr.requests[0].state).toBe("searching");
 
     // The next request doesn't ask again.
@@ -148,7 +153,7 @@ describe("the request dialog (Ask before each Get)", () => {
     expect(within(dialog).getByText(/at the last check/)).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Save request" }));
     const card = screen.getByLabelText("Paper Lanterns, not in your library");
-    await within(card).findByText("Waiting to send");
+    expect(await within(card).findByRole("status", { name: "Waiting to send" })).toHaveTextContent("Waiting");
     expect(useToasts.getState().toasts.some((t) => t.message.includes("sends when Platter can reach Lidarr"))).toBe(true);
   });
 

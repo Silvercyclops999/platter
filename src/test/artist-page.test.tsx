@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ContextMenuHost } from "../components/ContextMenu";
@@ -7,7 +7,18 @@ import type { MockBackend } from "../lib/mock";
 import type { Album, ArtistPageSection, ReleaseSection } from "../lib/types";
 import { ArtistPage } from "../pages/ArtistPage";
 import { useRouter } from "../stores/router";
-import { artistSections, discographyChips, discographyItems, headerVariant, playsLine } from "../pages/artist";
+import { loadSettings, useSettings } from "../stores/settings";
+import {
+  activeChip,
+  artistSections,
+  catalogueEntries,
+  discographyChips,
+  discographyItems,
+  headerVariant,
+  libraryEntries,
+  missingEntries,
+  playsLine,
+} from "../pages/artist";
 import { body } from "./rows";
 
 const mock = backend as MockBackend;
@@ -46,22 +57,61 @@ describe("artist page decisions", () => {
   });
 
   it("offers popular releases plus one chip per release type the artist has", () => {
-    expect(discographyChips(SECTIONS).map((c) => c.label)).toEqual(["Popular releases", "Albums", "Singles & EPs", "Compilations"]);
+    expect(discographyChips(libraryEntries(SECTIONS)).map((c) => c.label)).toEqual(["Popular releases", "Albums", "Singles and EPs", "Compilations"]);
   });
 
   it("puts the latest release first in popular releases, then the most played", () => {
-    const items = discographyItems(SECTIONS, "popular");
-    expect(items.map((i) => i.album.id)).toEqual(["s1", "a3", "a1", "s2", "a2", "c1"]);
+    const items = discographyItems(libraryEntries(SECTIONS), "popular");
+    expect(items.map((i) => i.entry.key)).toEqual(["s1", "a3", "a1", "s2", "a2", "c1"]);
     expect(items.map((i) => i.latest)).toEqual([true, false, false, false, false, false]);
-    expect(discographyItems(SECTIONS, "popular", 3).map((i) => i.album.id)).toEqual(["s1", "a3", "a1"]);
+    expect(discographyItems(libraryEntries(SECTIONS), "popular", 3).map((i) => i.entry.key)).toEqual(["s1", "a3", "a1"]);
   });
 
   it("lists a release type newest first, every release", () => {
-    expect(discographyItems(SECTIONS, "albums").map((i) => i.album.id)).toEqual(["a2", "a1", "a3"]);
-    expect(discographyItems(SECTIONS, "singlesEps").every((i) => !i.latest)).toBe(true);
+    const entries = libraryEntries(SECTIONS);
+    expect(discographyItems(entries, "albums").map((i) => i.entry.key)).toEqual(["a2", "a1", "a3"]);
+    expect(discographyItems(entries, "singlesEps").every((i) => !i.latest)).toBe(true);
     // A chip the artist doesn't have falls back to popular releases.
-    expect(discographyItems(SECTIONS, "live")[0].album.id).toBe("s1");
+    expect(discographyItems(entries, "live")[0].entry.key).toBe("s1");
     expect(discographyItems([], "popular")).toEqual([]);
+    expect(activeChip(discographyChips(entries), "live")).toBe("popular");
+    expect(activeChip(discographyChips(entries), "compilations")).toBe("compilations");
+  });
+
+  it("puts releases you can get in the same chips, after the library's in popular releases", () => {
+    const cat = (n: string, kind: string, secondary: string[], year: number) => ({
+      releaseGroupId: n,
+      title: `Get ${n}`,
+      artist: "A",
+      artistMbid: null,
+      kind,
+      secondary,
+      year,
+      thumb: null,
+      libraryAlbumId: null,
+      request: null,
+      refusal: null,
+      inMissing: false,
+    });
+    const got = catalogueEntries([
+      { kind: "albums", albums: [cat("g1", "album", [], 2024)] },
+      { kind: "singlesEps", albums: [cat("g2", "single", [], 2025)] },
+      { kind: "compilations", albums: [cat("g3", "album", ["compilation"], 2010)] },
+    ]);
+    const all = [...libraryEntries(SECTIONS.slice(0, 1)), ...got];
+    expect(discographyChips(all).map((c) => c.id)).toEqual(["popular", "albums", "singlesEps", "compilations"]);
+    expect(discographyItems(all, "albums").map((i) => i.entry.key)).toEqual(["rg:g1", "a2", "a1", "a3"]);
+    expect(discographyItems(all, "popular").map((i) => i.entry.key)).toEqual(["rg:g2", "a3", "a1", "a2", "rg:g1", "rg:g3"]);
+    // Lidarr's releases keep their section; older cores without one: albums and EPs.
+    const missing = missingEntries(
+      [
+        { releaseGroupId: "m1", title: "M1", kind: "single", section: "singlesEps", year: 2020, request: null, thumb: null },
+        { releaseGroupId: "m2", title: "M2", kind: "album", year: 2019, request: null, thumb: null },
+      ],
+      "A",
+    );
+    expect(missing.map((e) => e.section)).toEqual(["singlesEps", "albums"]);
+    expect(missing[0].missing?.releaseGroupId).toBe("m1");
   });
 
   it("orders sections and leaves out empty ones", () => {
@@ -70,6 +120,12 @@ describe("artist page decisions", () => {
     expect(artistSections({ ...base, about: "  ", similar: [] })).toEqual(["popular", "discography"]);
     expect(artistSections({ popular: [], sections: [], about: null, similar: [] })).toEqual([]);
     expect(artistSections({ ...base, appearsOn: [album("x", "albums", 2020, 0)] })).toEqual(["popular", "discography", "about", "fansAlsoLike", "appearsOn"]);
+    // A featured guest: no albums of their own, but releases to get.
+    expect(artistSections({ popular: [mock.fx.tracks[0]], sections: [], about: null, similar: [], catalogue: 3, appearsOn: [album("x", "albums", 2020, 0)] })).toEqual([
+      "popular",
+      "discography",
+      "appearsOn",
+    ]);
   });
 
   it("writes the plays line", () => {
@@ -290,7 +346,8 @@ describe("credited artist page", () => {
       </>,
     );
     await screen.findByRole("heading", { level: 1, name: "Juno Ashby" });
-    expect(headings()).toEqual(["Popular", "Appears on"]);
+    await screen.findByRole("heading", { name: "Discography" });
+    expect(headings()).toEqual(["Popular", "Discography", "Appears on"]);
     const list = screen.getByRole("grid", { name: "Popular songs" });
     expect(within(list).getAllByRole("row", { name: new RegExp(track.title) }).length).toBeGreaterThan(0);
     const appears = screen.getByRole("heading", { name: "Appears on" }).closest("section")!;
@@ -298,6 +355,53 @@ describe("credited artist page", () => {
     await user.click(screen.getByRole("button", { name: "More options for Juno Ashby" }));
     const menu = await screen.findByRole("menu");
     expect(within(menu).queryByRole("menuitem", { name: /Share/ })).toBeNull();
+  });
+
+  // A featured-only artist: no artist item on the server, only songs of
+  // other artists that credit them ("feat. Juno Ashby").
+  it("gives a featured-only artist a real photo and their catalogue by type, with Get", async () => {
+    const user = userEvent.setup();
+    const art = vi.spyOn(mock, "artUrl");
+    await mock.settingsSet({ getAlbumsKinds: ["studio", "ep", "live", "compilation"], discographyChip: "popular" });
+    useSettings.setState({ settings: null });
+    await loadSettings();
+    const { id } = guest();
+    render(<ArtistPage id={id} />);
+    await screen.findByRole("heading", { level: 1, name: "Juno Ashby" });
+    const featured = await mock.featuredArtist(id, "Juno Ashby");
+    expect(featured.photo).toBeTruthy();
+    await waitFor(() => expect(art.mock.calls.map((c) => c[0])).toContain(featured.photo));
+    art.mockRestore();
+
+    const chips = await screen.findByRole("group", { name: "Release type" });
+    expect(within(chips).getAllByRole("button").map((b) => b.textContent)).toEqual(["Popular releases", "Albums", "Singles and EPs", "Compilations", "Live"]);
+    const shelf = screen.getByRole("heading", { name: "Discography" }).closest("section")!;
+    // Popular releases: the latest release first.
+    expect(within(shelf).getAllByRole("listitem")[0]).toHaveTextContent("Hollow Light");
+    expect(within(shelf).getByText("Latest release · Single")).toBeInTheDocument();
+
+    await user.click(within(chips).getByRole("button", { name: "Singles and EPs" }));
+    const cards = within(shelf).getAllByRole("listitem");
+    expect(cards.map((c) => c.querySelector(".card__title")?.textContent)).toEqual(["Hollow Light", "Late Ferry", "Four Walls"]);
+    expect(within(cards[2]).getByText("2017 · EP")).toBeInTheDocument();
+    expect(useSettings.getState().settings?.discographyChip).toBe("singlesEps");
+
+    // Show all opens the full discography at the type.
+    useRouter.getState().reset();
+    await user.click(within(shelf).getByRole("button", { name: "Show all" }));
+    expect(useRouter.getState().entries[useRouter.getState().index].route).toEqual({ name: "discography", id, type: "singlesEps" });
+    await mock.settingsSet({ getAlbumsKinds: ["studio"], discographyChip: "popular" });
+  });
+
+  it("leaves the catalogue out for a featured-only artist while offline", async () => {
+    const { id } = guest();
+    mock.setHealth("offline");
+    try {
+      expect(await mock.featuredArtist(id, "Juno Ashby")).toEqual({ shown: false, mbid: null, photo: null, photoCredit: null, sections: [] });
+      expect((await mock.featuredArtistPhoto(id, "Juno Ashby")).photo).toBeNull();
+    } finally {
+      mock.setHealth("local");
+    }
   });
 
   it("is not found when nothing credits the name", async () => {

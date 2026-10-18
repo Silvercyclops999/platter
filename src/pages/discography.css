@@ -63,3 +63,13 @@
   .disco-release__cover .art { width: 96px !important; height: 96px !important; }
   .disco-release__title { font-size: var(--font-size-2xl); }
 }
+
+/* One release type, when the page holds several. */
+.disco__group + .disco__group { margin-top: var(--space-10, 40px); }
+.disco__section-title {
+  margin: 0 var(--space-3) var(--space-4);
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+}
+.disco-release__title:is(h3) { font-size: var(--font-size-2xl); }
+.disco__none { margin: 0 var(--space-3); color: var(--color-text-secondary); }

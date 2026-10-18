@@ -53,6 +53,8 @@ Get on an album sends it to Lidarr in one click, with all of Platter's checks, a
 
 An artist's page has Get albums, which asks which kinds you want (studio albums to start with; EPs, live albums and compilations if you like), says how many, and sends them a few at a time, most popular first.
 
+The same kinds (Settings, Album kinds for Get albums) decide which releases you don't have show in an artist's Discography: its chips (Popular releases, Albums, Singles and EPs, Compilations) hold the library's releases and the ones you can get alike, and Show all opens the full discography with every one, sectioned by type. An artist who's only a featured guest on your songs gets a page too: a photo, their releases with Get, the albums of yours they appear on, and their popular songs.
+
 It's on unless you turn it off in Settings, Library, Show music you don't have in search. What you type goes to your Lidarr, or to MusicBrainz without Lidarr. See [Privacy](privacy.md) for what goes where.
 
 ## Searching while offline

@@ -9,7 +9,7 @@ import { Switch } from "../components/Switch";
 import { useSidebarArt, useUi } from "../stores/ui";
 import { shortcutLabel } from "../shell/shortcuts";
 import { backend } from "../lib/backend";
-import { formatBytes } from "../lib/format";
+import { SECTION_LABELS, formatBytes } from "../lib/format";
 import { modKey, platform } from "../lib/platform";
 import type {
   AppError,
@@ -101,7 +101,7 @@ import { AccentPicker, ThemeFileControl, ThemeFileProblems, ThemeSelect, followN
 import { LookCards } from "./looks/LookCards";
 import { looks } from "../stores/looks";
 import { CLASSIC_LAYOUT, identityOf, type Layout } from "../design/themes";
-import type { AiProvider, CapName, PlayHistorySource, UnreleasedSharing } from "../lib/types";
+import type { AiProvider, CapName, PlayHistorySource, ReleaseSection, UnreleasedSharing } from "../lib/types";
 import {
   HistorySourceControl,
   INCLUDE_KEYS,
@@ -509,6 +509,22 @@ function Checklist({ s, items, label }: { s: Settings | null; items: CheckItem[]
 }
 
 /** The kinds Get albums starts with, as the choices Settings offers. */
+/** Where artist pages' discography opens (the chip picked last is kept the same way). */
+const DISCOGRAPHY_CHIP_CHOICES = [
+  { value: "popular", label: "Popular releases" },
+  { value: "albums", label: "Albums" },
+  { value: "singlesEps", label: "Singles and EPs" },
+  { value: "compilations", label: "Compilations" },
+] as const;
+
+/** The choices, with the one picked last on an artist page when it's another type (Live, one of your own sections...). */
+function discographyChipChoices(current: string | undefined): SelectOption<string>[] {
+  const known: SelectOption<string>[] = [...DISCOGRAPHY_CHIP_CHOICES];
+  if (!current || known.some((c) => c.value === current)) return known;
+  const name = current.startsWith("custom:") ? current.slice(7) : (SECTION_LABELS[current as ReleaseSection] ?? current);
+  return [...known, { value: current, label: name }];
+}
+
 const GET_KIND_CHOICES: { value: string; label: string; kinds: string[] }[] = [
   { value: "studio", label: "Studio albums", kinds: ["studio"] },
   { value: "studio-ep", label: "Studio albums and EPs", kinds: ["studio", "ep"] },
@@ -1454,7 +1470,8 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       key: "getAlbumsKinds",
       section: "Library",
       title: "Album kinds for Get albums",
-      description: "Which kinds Get albums on an artist's page ticks to start with. You can change them each time.",
+      description: "What Get albums ticks to start with, and which releases you don't have artist pages show.",
+      more: "Which kinds Get albums on an artist's page ticks to start with (you can change them each time). The same kinds decide which releases you don't have show in an artist's discography and full discography: albums, singles and EPs, live albums, compilations.",
       control: (ids) =>
         select(
           s,
@@ -1465,6 +1482,55 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
             const c = GET_KIND_CHOICES.find((x) => x.value === v);
             if (c) void updateSettings({ getAlbumsKinds: c.kinds });
           },
+        ),
+    },
+    {
+      key: "discographyChip",
+      section: "Library",
+      title: "Discography opens on",
+      description: "The release type artist pages show first. The chip you pick last is kept. This device only.",
+      control: (ids) =>
+        select<string>(s, (x) => x.discographyChip || "popular", discographyChipChoices(s?.discographyChip), ids, (v) => void updateSettings({ discographyChip: v })),
+    },
+    {
+      key: "discographySort",
+      section: "Library",
+      title: "Full discography order",
+      description: "Newest release first, or by name from A to Z. This device only.",
+      control: (ids) =>
+        select(
+          s,
+          (x) => x.discographySort ?? "date",
+          [
+            { value: "date", label: "Release date (newest first)" },
+            { value: "name", label: "Name (A to Z)" },
+          ] as const,
+          ids,
+          (v) => void updateSettings({ discographySort: v }),
+        ),
+    },
+    {
+      key: "discographyReverse",
+      section: "Library",
+      title: "Reverse the full discography's order",
+      description: "Oldest first, or Z to A. This device only.",
+      control: (ids) => toggle(s, "discographyReverse", ids),
+    },
+    {
+      key: "discographyView",
+      section: "Library",
+      title: "Full discography view",
+      description: "Releases with their songs, or a grid of covers. This device only.",
+      control: (ids) =>
+        select(
+          s,
+          (x) => x.discographyView ?? "list",
+          [
+            { value: "list", label: "List" },
+            { value: "grid", label: "Grid" },
+          ] as const,
+          ids,
+          (v) => void updateSettings({ discographyView: v }),
         ),
     },
     // Appearance
@@ -2766,7 +2832,7 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
             page: "lidarr",
             title: "Show missing official releases",
             description: "Artist pages list official albums you don't have, with Request.",
-            more: "Artist pages list official albums and EPs you don't have, dimmed at the end, with Request. Only while Lidarr's setup check passes. Anything sharing a title with an album in your library, unreleased ones included, is left out.",
+            more: "Artist pages list official releases you don't have in their discography, with Get, of the kinds set in Album kinds for Get albums. Only while Lidarr's setup check passes. Anything sharing a title with an album in your library, unreleased ones included, is left out.",
             control: (ids) => toggle(s, "showMissingReleases", ids),
           },
           {

@@ -41,7 +41,7 @@ export function isHiRes(t: Pick<Track, "bitDepth" | "sampleRate">): boolean {
 
 export const SECTION_LABELS: Record<ReleaseSection, string> = {
   albums: "Albums",
-  singlesEps: "Singles & EPs",
+  singlesEps: "Singles and EPs",
   live: "Live",
   compilations: "Compilations",
   soundtracks: "Soundtracks",
@@ -63,6 +63,16 @@ export function releaseTypeLabel(a: Pick<Album, "format" | "subformats">): strin
   if (a.format === "ep") return "EP";
   if (a.format === "single") return "Single";
   return "Album";
+}
+
+const CAT_KIND_LABEL: Record<string, string> = { album: "Album", ep: "EP", single: "Single" };
+
+/** A release you don't have: "Album", "EP", "Single", "Live album"... */
+export function catalogueKind(a: { kind: string; secondary: string[] }): string {
+  const base = CAT_KIND_LABEL[a.kind] ?? "Album";
+  const sec = a.secondary[0];
+  if (!sec) return base;
+  return `${sec.charAt(0).toUpperCase()}${sec.slice(1)} ${base.toLowerCase()}`;
 }
 
 /** Disk size for people: "412 MB", "2 GB", "1.5 GB". */
