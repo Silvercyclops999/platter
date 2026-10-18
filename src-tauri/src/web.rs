@@ -119,6 +119,36 @@ pub fn address_candidates(raw: &str) -> Vec<String> {
     }
 }
 
+/// A server whose certificate this computer doesn't trust.
+pub const CERT_REFUSED: &str =
+    "The server's certificate isn't trusted by this computer (a self-signed one, or for another name). Give the server a trusted certificate, or use its http address at home.";
+
+/// Whether a request failed on the server's certificate.
+pub fn certificate_problem(e: &reqwest::Error) -> bool {
+    let mut src: Option<&(dyn std::error::Error + 'static)> = std::error::Error::source(e);
+    while let Some(s) = src {
+        let t = s.to_string().to_ascii_lowercase();
+        if t.contains("certificate") || t.contains("unknownissuer") || t.contains("self signed") || t.contains("self-signed") {
+            return true;
+        }
+        src = s.source();
+    }
+    false
+}
+
+/// What to say when a server sent Platter to another address (redirects
+/// are only followed on the same host), naming only where it pointed.
+pub fn redirect_note(resp: &reqwest::Response) -> Option<String> {
+    if !resp.status().is_redirection() {
+        return None;
+    }
+    let to = resp.headers().get(reqwest::header::LOCATION)?.to_str().ok()?;
+    let to = url::Url::parse(to).ok().or_else(|| resp.url().join(to).ok())?;
+    let host = to.host_str()?;
+    let port = to.port().map(|p| format!(":{p}")).unwrap_or_default();
+    Some(format!("The server sends Platter on to {}://{host}{port}. Use that address instead.", to.scheme()))
+}
+
 /// What an answer too big to read says.
 pub const TOO_BIG: &str = "The answer was larger than Platter reads, so it was left unread.";
 

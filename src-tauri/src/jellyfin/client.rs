@@ -184,9 +184,17 @@ impl JellyfinClient {
             req = req.json(b);
         }
         let resp = req.send().await.map_err(|e| {
+            let cert = crate::web::certificate_problem(&e);
             tracing::debug!("jellyfin request failed: {}", self.scrub(e.without_url().to_string()));
-            AppError::Network(OFFLINE.into())
+            if cert {
+                AppError::Network(crate::web::CERT_REFUSED.into())
+            } else {
+                AppError::Network(OFFLINE.into())
+            }
         })?;
+        if let Some(note) = crate::web::redirect_note(&resp) {
+            return Err(AppError::Invalid(note));
+        }
         check(resp.status())?;
         Ok(resp)
     }

@@ -409,6 +409,14 @@ async fn wrong_address_and_not_a_subsonic_server() {
     Mock::given(any()).respond_with(ResponseTemplate::new(200).set_body_json(json!({"hello": "world"}))).mount(&json_but_not).await;
     assert_eq!(os.check(&json_but_not.uri()).await.unwrap_err().to_string(), format!("invalid: {NOT_SUBSONIC}"));
     assert!(os.sign_in(&web.uri(), None, Some(KEY.into()), None).await.is_err());
+    // A server that moved to another host says where.
+    let moved = MockServer::start().await;
+    Mock::given(any())
+        .respond_with(ResponseTemplate::new(301).insert_header("location", "https://music.example.org/rest/ping"))
+        .mount(&moved)
+        .await;
+    let e = os.check(&moved.uri()).await.unwrap_err().to_string();
+    assert!(e.contains("https://music.example.org"), "{e}");
 }
 
 #[tokio::test]

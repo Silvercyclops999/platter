@@ -241,9 +241,17 @@ impl SubsonicClient {
             self.http.get(self.url(method, params)?)
         };
         let resp = req.header("Accept", "application/json").send().await.map_err(|e| {
+            let cert = crate::web::certificate_problem(&e);
             tracing::debug!("subsonic request failed: {}", self.scrub(e.without_url().to_string()));
-            AppError::Network(OFFLINE.into())
+            if cert {
+                AppError::Network(crate::web::CERT_REFUSED.into())
+            } else {
+                AppError::Network(OFFLINE.into())
+            }
         })?;
+        if let Some(note) = crate::web::redirect_note(&resp) {
+            return Err(AppError::Invalid(note));
+        }
         check_http(resp.status())?;
         Ok(resp)
     }
@@ -339,8 +347,27 @@ pub fn check_status(s: &Status, secret: Option<&Secret>) -> AppResult<()> {
         44 => AppError::Auth(KEY_REFUSED.into()),
         50 => AppError::Auth(NOT_ALLOWED.into()),
         70 => AppError::NotFound("not on the server".into()),
-        code => AppError::Server(format!("The server answered with error {code}.")),
+        // The server's own words (with any sign-in taken out), when it has some.
+        code => AppError::Server(match server_words(e.message.as_deref(), secret) {
+            Some(m) => format!("The server said: {m}"),
+            None => format!("The server answered with error {code}."),
+        }),
     })
+}
+
+/// A server's error message as it can be shown: short, one line, with no
+/// part of the sign-in in it.
+fn server_words(message: Option<&str>, secret: Option<&Secret>) -> Option<String> {
+    let mut m: String = message?.split_whitespace().collect::<Vec<_>>().join(" ");
+    if let Some(s) = secret {
+        for v in s.values() {
+            if !v.is_empty() {
+                m = m.replace(v, "<redacted>");
+            }
+        }
+    }
+    let m: String = m.chars().take(160).collect();
+    (!m.is_empty()).then_some(m)
 }
 
 /// Status codes as the app's errors.
@@ -430,5 +457,19 @@ mod tests {
         assert_eq!(msg(50, Some(&pw)), format!("auth: {NOT_ALLOWED}"));
         assert!(matches!(check_status(&failed(70), Some(&pw)), Err(AppError::NotFound(_))));
         assert!(check_status(&Status { status: "ok".into(), ..Default::default() }, None).is_ok());
+    }
+
+    #[test]
+    fn the_server_s_own_words_come_through_without_the_sign_in() {
+        let said = |m: &str| Status {
+            status: "failed".into(),
+            error: Some(super::super::types::ApiError { code: Some(0), message: Some(m.into()) }),
+            ..Default::default()
+        };
+        let key = Secret::ApiKey(Token::new("sekrit-key").unwrap());
+        assert_eq!(check_status(&said("Scanner is busy,\n try later"), Some(&key)).unwrap_err().to_string(), "server: The server said: Scanner is busy, try later");
+        let e = check_status(&said("bad key sekrit-key"), Some(&key)).unwrap_err().to_string();
+        assert!(!e.contains("sekrit-key"), "{e}");
+        assert_eq!(check_status(&said("  "), None).unwrap_err().to_string(), "server: The server answered with error 0.");
     }
 }
