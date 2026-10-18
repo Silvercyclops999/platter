@@ -82,12 +82,20 @@ export function GetButton({
   const [needs, setNeeds] = useState<LidarrGetOutcome["needs"]>(null);
   const [dialog, setDialog] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
+  const mounted = useRef(true);
+  const sendNow = useRef<() => Promise<void>>(async () => {});
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      // Gone while the Get could still be undone (the row scrolled away or
+      // was opened): it's sent now rather than lost.
+      if (timer.current) {
+        clearTimeout(timer.current);
+        void sendNow.current();
+      }
+    };
+  }, []);
   const input: LidarrRequestInput = {
     releaseGroupId: album.releaseGroupId,
     title: album.title,
@@ -107,6 +115,9 @@ export function GetButton({
         upsertRequest(out.record);
         setNeeds(null);
         onChanged?.();
+      } else if (out.needs && !mounted.current) {
+        // The button is gone, so say it where it can still be seen.
+        toast.info(out.needs.kind === "firstTime" ? `${name} wasn't sent: your first request is confirmed by typing its name. Get it again` : `${name} needs you: ${out.needs.reason}`);
       } else if (out.needs) {
         setNeeds(out.needs);
         // The first request ever goes through the dialog (its name is typed once).
@@ -118,6 +129,7 @@ export function GetButton({
       setPhase("idle");
     }
   };
+  sendNow.current = send;
 
   const get = () => {
     if (askFirst) {

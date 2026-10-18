@@ -314,9 +314,16 @@ function PlayedLine({
   const [busy, setBusy] = useState(false);
   const [undoable, setUndoable] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestNow = useRef(onRequest);
+  requestNow.current = onRequest;
   useEffect(
     () => () => {
-      if (timer.current) clearTimeout(timer.current);
+      // Gone while the Get could still be undone: it's sent now rather than lost.
+      if (timer.current) {
+        clearTimeout(timer.current);
+        timer.current = null;
+        void requestNow.current();
+      }
     },
     [],
   );
@@ -449,6 +456,8 @@ function BatchDialog({ rows, onClose, onDone }: { rows: PlayedRow[]; onClose: ()
       const out: Planned[] = [];
       const seen = new Set<string>();
       for (const row of rows.slice(0, BATCH_MAX)) {
+        // Closed: no more lookups for a dialog nobody sees.
+        if (!alive) return;
         try {
           const p = await pick(row);
           if ("reason" in p) {

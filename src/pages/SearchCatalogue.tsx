@@ -17,6 +17,7 @@ import { formatDuration } from "../lib/format";
 import type { CatAlbum, CatArtist, CataloguePart, CataloguePartKind, CatSong, SearchFilter } from "../lib/types";
 import type { MenuItem } from "../stores/ui";
 import { nav } from "../stores/router";
+import { useRequestFor } from "../stores/requests";
 import { useSettings } from "../stores/settings";
 import { addToMissing, catalogueKind, dismissArtist, useOnline } from "./catalogue";
 import { GetButton } from "./GetButton";
@@ -260,8 +261,11 @@ export function CatalogueRow({ row, lidarrReady }: { row: Row; lidarrReady: bool
     e.preventDefault();
     openContextMenu(`Options for ${row.title}`, row.menu, at ?? e);
   };
+  const rec = useRequestFor(row.album?.releaseGroupId ?? row.song?.releaseGroupId);
+  const inLibrary = !!row.album?.libraryAlbumId || rec?.state === "imported";
+  const where = inLibrary ? (row.song ? "its album is in your library" : "in your library") : "not in your library";
   return (
-    <li ref={box} className="sr-row sr-row--catalogue" aria-label={`${row.title}, ${row.type}${row.byline ? `, ${row.byline}` : ""}, not in your library`} onContextMenu={(e) => menu(e)} onDoubleClick={row.open}>
+    <li ref={box} className="sr-row sr-row--catalogue" aria-label={`${row.title}, ${row.type}${row.byline ? `, ${row.byline}` : ""}, ${where}`} onContextMenu={(e) => menu(e)} onDoubleClick={row.open}>
       <span className="sr-row__art">
         <RowArt row={row} box={box} size={48} />
       </span>
@@ -271,7 +275,8 @@ export function CatalogueRow({ row, lidarrReady }: { row: Row; lidarrReady: bool
         </button>
         <span className="sr-row__by truncate">{row.byline || row.type}</span>
       </span>
-      <span className="sr-row__action">
+      {/* A double click or right click on Get stays on Get (it doesn't open the row). */}
+      <span className="sr-row__action" onDoubleClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}>
         <RowGet row={row} lidarrReady={lidarrReady} />
       </span>
       <span className="sr-type sr-row__type">{row.type}</span>
