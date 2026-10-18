@@ -897,6 +897,37 @@ async fn a_server_whose_search_lists_nothing_is_checked_for_deletions_by_album_c
 }
 
 #[tokio::test]
+async fn a_server_that_ignores_the_offset_does_not_page_forever() {
+    let s = subsonic(Some(all_ext()), true).await;
+    let page: Vec<serde_json::Value> = (0..500).map(|i| json!({ "id": format!("al{i}"), "name": format!("A{i}") })).collect();
+    Mock::given(path("/rest/getAlbumList2"))
+        .and(Authed)
+        .and(TypeIs("alphabeticalByName"))
+        .respond_with(ok(json!({"albumList2": {"album": page}})))
+        .with_priority(1)
+        .mount(&s)
+        .await;
+    let lib = SubsonicLibrary::all(open_core(&s));
+    let ids = tokio::time::timeout(std::time::Duration::from_secs(10), lib.all_ids("1", ItemKind::Album)).await.expect("stops").unwrap();
+    assert_eq!(ids.len(), 500);
+}
+
+#[test]
+fn finished_plays_are_not_shown_as_playing_now() {
+    let s = tokio::runtime::Runtime::new().unwrap().block_on(MockServer::start());
+    let core = open_core(&s);
+    let list: super::types::NowPlayingList = serde_json::from_value(json!({"entry": [
+        { "id": "s2", "title": "Song 2", "type": "music", "username": "sam", "minutesAgo": 1, "playerName": "Phone" },
+        { "id": "s3", "title": "Song 3", "type": "music", "username": "kim", "minutesAgo": 45, "playerName": "Phone" }
+    ]}))
+    .unwrap();
+    let v = core.sessions_json(&list);
+    let rows = v["MediaContainer"]["Metadata"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["User"]["title"], "sam");
+}
+
+#[tokio::test]
 async fn change_checks_wait_for_the_scan_and_spot_a_new_index() {
     let s = subsonic(Some(all_ext()), true).await;
     let core = open_core(&s);

@@ -88,6 +88,9 @@ pub fn spawn(core: Arc<Core>, db: DbHandle, stop: watch::Receiver<bool>) {
     tauri::async_runtime::spawn(follow(core, db, stop));
 }
 
+/// How long connecting the live socket may take.
+const SOCKET_CONNECT: Duration = Duration::from_secs(20);
+
 async fn follow(core: Arc<Core>, db: DbHandle, mut stop: watch::Receiver<bool>) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Option<LiveEvent>>();
     let tag = core.tag().to_string();
@@ -183,8 +186,10 @@ async fn run_once(
     let url = socket_url(core)?;
     let mut req = url.as_str().into_client_request().map_err(|e| AppError::Internal(format!("websocket request: {e}")))?;
     req.headers_mut().insert("Authorization", core.client()?.header()?);
-    let (mut ws, _) = tokio_tungstenite::connect_async(req)
+    // A port that never answers mustn't hold up the fallback sync.
+    let (mut ws, _) = tokio::time::timeout(SOCKET_CONNECT, tokio_tungstenite::connect_async(req))
         .await
+        .map_err(|_| AppError::Network("jellyfin socket took too long to connect".into()))?
         .map_err(|_| AppError::Network("jellyfin socket failed to connect".into()))?;
     // Connected (again): catch up on anything missed.
     let _ = tx.send(None);

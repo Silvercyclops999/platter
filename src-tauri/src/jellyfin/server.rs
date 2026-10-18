@@ -384,12 +384,17 @@ impl Core {
     /// Every page of a list, until a short one.
     async fn all_pages(&self, section: &str, types: &str, fields: &str, extra: &[(&str, &str)]) -> AppResult<Vec<Item>> {
         let mut out = Vec::new();
+        let mut seen = HashSet::new();
         let mut start = 0;
         loop {
             let r = self.page(section, types, fields, start, PAGE, extra).await?;
             let n = r.items.len() as u64;
-            out.extend(r.items);
-            if n < PAGE {
+            let total = r.total_record_count;
+            let before = out.len();
+            out.extend(r.items.into_iter().filter(|i| seen.insert(i.id.clone())));
+            // The end: a short page, everything counted, or a page with
+            // nothing new (a server that ignores the start).
+            if n < PAGE || out.len() == before || total.is_some_and(|t| start + n >= t) {
                 return Ok(out);
             }
             start += n;

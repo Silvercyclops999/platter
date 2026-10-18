@@ -46,6 +46,8 @@ use crate::tracking::{PlayReport, PlayReporter, PlaybackState};
 pub const PAGE: u64 = 500;
 /// How long the artist list is reused while a sync pages through it.
 const ARTISTS_FRESH: Duration = Duration::from_secs(120);
+/// A now-playing entry older than this many minutes is a finished play.
+const NOW_PLAYING_MINUTES: u64 = 10;
 /// Pages of recently played albums a change check reads at most.
 const RECENT_PAGES: usize = 4;
 
@@ -437,13 +439,18 @@ impl Core {
 
     async fn all_albums(&self, section: &str) -> AppResult<Vec<SAlbum>> {
         let mut out = Vec::new();
+        let mut seen = HashSet::new();
+        let mut offset = 0;
         loop {
-            let page = self.album_page(section, "alphabeticalByName", out.len() as u64, PAGE).await?;
+            let page = self.album_page(section, "alphabeticalByName", offset, PAGE).await?;
             let n = page.len() as u64;
-            out.extend(page);
-            if n < PAGE {
+            let before = out.len();
+            out.extend(page.into_iter().filter(|a| seen.insert(a.id.clone())));
+            // A server that ignores the offset sends the same page again.
+            if n < PAGE || out.len() == before {
                 return Ok(out);
             }
+            offset += n;
         }
     }
 
@@ -658,6 +665,8 @@ impl Core {
             .iter()
             .filter(|e| !(e.username.as_deref().is_some_and(|u| u.eq_ignore_ascii_case(&me)) && e.player_name.as_deref() == Some(super::client::CLIENT_NAME)))
             .filter(|e| map::is_song(&e.song))
+            // Some servers keep finished plays in the list for a while.
+            .filter(|e| e.minutes_ago.is_none_or(|m| m <= NOW_PLAYING_MINUTES))
             .filter_map(|e| {
                 let user = e.username.as_deref().filter(|u| !u.is_empty())?;
                 let t = map::track(&self.tag, &e.song);

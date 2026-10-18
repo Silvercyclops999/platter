@@ -37,15 +37,45 @@ impl Identity {
         let device_name = std::env::var("COMPUTERNAME")
             .or_else(|_| std::env::var("HOSTNAME"))
             .ok()
+            .map(|n| ascii_name(&n))
             .filter(|n| !n.trim().is_empty())
             .unwrap_or_else(|| "Desktop".into());
         Self { device_id: device_id.into(), device_name, version: env!("CARGO_PKG_VERSION").into() }
     }
 }
 
-/// A value for the header: no quotes or commas, which would end the field.
+/// A value for the header: no quotes or commas, which would end the field,
+/// and only printable ASCII, which is all a header takes.
 fn field(v: &str) -> String {
-    v.chars().filter(|c| !matches!(c, '"' | ',' | '\r' | '\n')).collect()
+    v.chars().filter(|c| (c.is_ascii_graphic() || *c == ' ') && !matches!(c, '"' | ',')).collect()
+}
+
+/// A computer name as a header can carry it: accents dropped from the
+/// letters that have them, anything else outside ASCII left out.
+pub fn ascii_name(name: &str) -> String {
+    name.chars()
+        .filter_map(|c| match c {
+            'à'..='å' => Some('a'),
+            'À'..='Å' => Some('A'),
+            'è'..='ë' => Some('e'),
+            'È'..='Ë' => Some('E'),
+            'ì'..='ï' => Some('i'),
+            'Ì'..='Ï' => Some('I'),
+            'ò'..='ö' | 'ø' => Some('o'),
+            'Ò'..='Ö' | 'Ø' => Some('O'),
+            'ù'..='ü' => Some('u'),
+            'Ù'..='Ü' => Some('U'),
+            'ç' => Some('c'),
+            'Ç' => Some('C'),
+            'ñ' => Some('n'),
+            'Ñ' => Some('N'),
+            'ß' => Some('s'),
+            c if c.is_ascii_graphic() || c == ' ' => Some(c),
+            _ => None,
+        })
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 /// The `Authorization` header value, with the token when there is one.
@@ -264,6 +294,15 @@ pub fn check(s: StatusCode) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_computer_name_outside_ascii_still_makes_a_header() {
+        assert_eq!(ascii_name("Jürgen's Büro-PC"), "Jurgen's Buro-PC");
+        assert_eq!(ascii_name("音楽"), "");
+        let id = Identity { device_id: "d1".into(), device_name: "Café 音楽".into(), version: "1".into() };
+        let h = auth_header(&id, None).unwrap();
+        assert!(h.to_str().unwrap().contains("Device=\"Caf \""), "{h:?}");
+    }
 
     #[test]
     fn addresses_are_tidied() {
