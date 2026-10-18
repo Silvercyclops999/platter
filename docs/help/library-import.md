@@ -10,7 +10,7 @@ The files are read on this computer. Nothing changes in Plex unless you choose t
 
 ## Turning it on
 
-1. Open Settings, Library import.
+1. Open Settings, Integrations, Library import.
 2. Turn on the service you're coming from. Each one is off until you turn it on.
 3. Choose **Choose file**, or **Choose folder** if the download is a folder of files. Zip files work too.
 
@@ -65,6 +65,24 @@ Imported playlists and liked songs are listed with how many of their songs are i
 ## Missing songs
 
 **See missing songs** lists songs from your imported playlists and likes that aren't in your library, the most wanted first. Each has links to search Bandcamp, Qobuz or iTunes, and **Request** if you use [Lidarr](lidarr.md).
+
+## Played a lot
+
+The Missing page has a second tab, Played a lot. It lists songs and albums your imported listening history played that aren't in your library, the most played first. Plays count when they lasted 30 seconds or more. Switch between songs and albums, and narrow the list by period (All time, Last year or Last 90 days) and by fewest plays (5 to begin with). Hide a row, or a whole artist, if you never want it.
+
+With [Lidarr](lidarr.md) set up, Request on a row asks for that album (a song asks for its album), after the usual safety check. Request these sends up to 10 at once after one confirm. After every library sync, plays of songs you now have are matched to them, so those rows leave the list and count in your stats.
+
+Turn the tab off with Settings, Integrations, Library import, Show "Played a lot" on the Missing page. The same row has the period and fewest plays.
+
+## Bring in my listening
+
+Bring in my listening asks Lidarr for the albums on Played a lot by itself, in waves, the most played first and a few a day. Each album is checked on MusicBrainz and sent the same way as a request you make by hand. In practice mode it only lists what it would ask for.
+
+It pauses while Lidarr's queue is full, while space runs low where Lidarr downloads, while Lidarr can't be reached or its check fails, and after three failed requests in a row. It carries on once that clears. Albums it can't sort out wait under Needs you on Played a lot, with the reason. A card on Played a lot shows how far it's got, and you can pause it there.
+
+Turn it on in Settings, Integrations, Library import, under the Played a lot row. Albums a day, Pause below free space, Pause above Lidarr's queue and Waves (plays) set the pace. Requests and pauses go to the Changes log in Settings, Integrations, Lidarr, and a notification sums up each day.
+
+Bring in my listening runs while Platter is open. With a [Platter Bridge](https://github.com/Silvercyclops999/platter/blob/main/docs/BRIDGE.md) paired, your computer hands the waves to the Bridge, so they carry on while your computers are off, and the card says "Running on your Bridge". The Bridge gets only the albums still to ask for and how many plays each has, never your listening history.
 
 ## Importing again or removing
 

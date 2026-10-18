@@ -59,4 +59,12 @@ With **Show missing official releases** on, artist pages list official albums an
 
 Turn on **Auto-request new albums**, then choose it from an artist page's menu. New official albums the release radar finds are requested by themselves, up to **Most automatic requests a day**. Bootlegs and promos never are.
 
+## Bring in my listening
+
+If you imported listening history, Bring in my listening asks Lidarr for the albums you played a lot but don't have, a few a day. See [Library import](library-import.md#bring-in-my-listening).
+
+## Platter Bridge
+
+Platter does its Lidarr work while it's open, and catches up when you open it again. Platter Bridge is an optional small container for your server that does the same work while every computer is off. Pair it in Settings, Integrations, Bridge. Setting it up is described in [Platter Bridge](https://github.com/Silvercyclops999/platter/blob/main/docs/BRIDGE.md).
+
 If the check fails, see [Troubleshooting](troubleshooting.md#lidarr-check-failing).

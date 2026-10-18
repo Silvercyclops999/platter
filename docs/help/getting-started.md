@@ -39,11 +39,25 @@ An album that's on two servers shows once and plays from the best copy. [Connect
 
 ## Picking a look
 
-Right after you sign in for the first time, the Get started guide walks you through your libraries, a look, Discord and online look-ups. You can skip it, and open it again any time from Settings, Setup guides. With setup guides turned off, Platter offers **Pick a look** instead.
+Right after you sign in for the first time, the Get started guide walks you through your libraries, a look, Discord and online look-ups. You can skip it, and open it again any time from Settings, App, Setup guides. With setup guides turned off, Platter offers **Pick a look** instead.
 
-In the look step, choose a ready-made look (Dark, Light, Midnight, Forest, Sand, High contrast or OLED black), or press **Make your own** to build one with a live preview.
+Studio, Studio Black and Sleeve are Platter's own looks. Studio is warm graphite with a brass accent, Studio Black puts it on true black for OLED screens, and Sleeve is cream paper and ink. Classic is the look Platter had before, and Classic light, Midnight, Forest and Sand are there too. Press **Make your own** to build one with a live preview.
 
-You can change it any time in Settings, Appearance, Look. Settings, Appearance, Theme also has Match system, which follows your computer's light or dark mode.
+You can change it any time in Settings, Appearance, Theme. Settings, Appearance, Looks has the ready-made looks, your own and theme files. With Settings, Appearance, Follow system light or dark on, Platter switches to a theme's light or dark partner along with your computer: Studio and Studio Black pair with Sleeve, the other themes with Classic or Classic light.
+
+## Home
+
+In Studio, Studio Black and Sleeve, Home starts with records. First comes the album you stopped partway through, with Resume, then New arrivals, Spun this week, Finish what you started and Not played in a year. Mixes, playlists and the other shelves follow. Turn off Settings, Appearance, Home leads with records to get the usual Home back. Classic and the other looks always have the usual Home.
+
+On this day lists what you played on today's date in earlier years, one card for each year. Time travel has a mix of your most played songs from each decade, and one for your year. Both count listening history you imported too. Turn them off with Settings, Appearance, Show On this day on Home and Show Time travel on Home.
+
+## Crates
+
+Crates file your library the way a record shop would: by label, producer, studio, era and genre. Open them from the app menu, or from the link on Home in Platter's own looks. Pick a kind at the top, filter by name, and sort by most records or A to Z. A crate needs two records or more. Its page plays everything in it, and a record that's on the sound map opens there.
+
+Labels come from your files' tags, Plex and the sleeve notes you've opened. Producers come from credit tags and sleeve notes, and studios from sleeve notes looked up online, so crates fill in as you open albums.
+
+Under the songs, an album page shows up to two shelves, such as More from its label and More produced by its producer, from your library only. Other crates it's in are listed under More crates. Turn off Settings, Library, Crate shelves on album pages to leave them out, or Show crates to hide crates everywhere.
 
 ## Discord
 
@@ -61,7 +75,7 @@ Every name is a link. It opens a page with everything in your library that perso
 
 Point at a fact, or move to it with Tab, and small marks show where it came from: **Tags** for your files' own tags, **Plex**, **MB** for MusicBrainz and **Discogs**. A line at the bottom of the tab says what the marks mean. When sources agree, every one is marked. When they disagree, your files' tags win, then Plex, then MusicBrainz, then Discogs.
 
-Settings, Library, Look up credits online asks MusicBrainz (when MusicBrainz is on, Settings, Integrations, Artist info) and Discogs (once you've added a Discogs token) when you open the tab. What they say is kept on your computer, so offline you still see it. Unreleased albums are never looked up. Turn off Show sleeve notes to hide the tab and the Credits item.
+Settings, Library, Look up credits online asks MusicBrainz (when MusicBrainz is on, Settings, Integrations, Artist info sources) and Discogs (once you've added a Discogs token) when you open the tab. What they say is kept on your computer, so offline you still see it. Unreleased albums are never looked up. Turn off Show sleeve notes to hide the tab and the Credits item.
 
 ### Record sides
 
@@ -87,7 +101,7 @@ The app menu also has the miniplayer, Private session, Go offline, Check for upd
 
 These help pages are built into Platter and work offline. Choose **Help** in the app menu to see them all, or search for anything and press the **Help** chip. Busier screens have a small **?** that opens the right page beside them, and many settings have **Learn more**. Settings, App, Show "?" help buttons hides the **?** buttons.
 
-Settings, Setup guides has short guides for getting started, Lidarr, library import, inviting a friend and Stream Deck. Each one picks up where you left it.
+Settings, App, Setup guides has short guides for getting started, Lidarr, library import, inviting a friend and Stream Deck. Each one picks up where you left it.
 
 Press `Ctrl+/` (`⌘/` on a Mac) for the list of keyboard shortcuts. `Ctrl+K` (`⌘K` on a Mac) opens quick search and commands.
 
