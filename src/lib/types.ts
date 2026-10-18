@@ -2682,6 +2682,8 @@ export interface BringInStatus {
   practiced: BringInPracticed[];
   /** Albums "Get albums" queued and not asked for yet, in order. */
   queued?: QueuedGet[];
+  /** The paired Bridge's name while it runs the waves. */
+  bridge?: string | null;
 }
 
 /** An album "Get albums" queued. */

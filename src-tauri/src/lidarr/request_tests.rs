@@ -289,6 +289,45 @@ impl Rig {
     }
 }
 
+impl Rig {
+    /// A Platter Bridge beside this rig's desktop: its own database (with
+    /// the same library) and device, the same Lidarr, MusicBrainz and
+    /// clock, in bridge mode.
+    pub(super) fn bridge(&self) -> (tempfile::TempDir, DbHandle, Lidarr) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DbHandle::open(dir.path().join("bridge.db")).unwrap();
+        let s = crate::settings::Settings { lidarr_url: "http://10.20.30.40:8686".into(), ..Default::default() };
+        crate::settings::save(&db, &s).unwrap();
+        db.write(|c| {
+            c.execute_batch(
+                "INSERT INTO albums (id, title, sort_title, artist_id, artist_title, format, subformats, matched) VALUES
+                   ('a1', 'First Light', 'First Light', 'ar1', 'Northlight', 'Album', '[]', 1),
+                   ('a2', 'Quiet Sketches (Build 2)', 'Quiet Sketches', 'ar1', 'Northlight', NULL, '[]', 0);
+                 INSERT INTO album_tags (album_id, version) VALUES ('a2', 'build');",
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        let keys = Arc::new(MemoryStore::new());
+        let n = self.now.clone();
+        let lidarr = Lidarr::new(LidarrDeps {
+            web: self.web.clone(),
+            keys: keys.clone(),
+            db: db.clone(),
+            plex: Arc::new(Plex),
+            clock: Arc::new(move || *n.lock()),
+            mb: self.mb.clone(),
+            artist_mbid: Arc::new(Mbid),
+            album_wait: std::time::Duration::ZERO,
+            shared: super::shared::Shared::new(crate::sync::SyncStore::new(db.clone(), "bridge-device"), Arc::new(|| "Shed Bridge".to_string())),
+            plex_server: Arc::new(super::plexside::fake::FakePlex::default()),
+        });
+        lidarr.set_bridge_mode(true);
+        lidarr.set_key(Some("abc123")).unwrap();
+        (dir, db, lidarr)
+    }
+}
+
 fn lidarr_on(db: &DbHandle, web: &Arc<FakeLidarr>, mb: &Arc<FakeMb>, keys: &Arc<MemoryStore>, now: &Arc<Mutex<i64>>) -> Lidarr {
     let n = now.clone();
     Lidarr::new(LidarrDeps {

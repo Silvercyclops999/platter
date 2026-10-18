@@ -2749,7 +2749,7 @@ Settings (synced): `showPlayedALot` (on), `playedMinPlays` (5, from 1 to 1000), 
 
 ### Bring in my listening
 
-With `bringIn` on, Platter asks Lidarr for albums from Played a lot in waves while it's open: albums with at least the first wave's plays, most played first, then the next wave, at most `bringInPerDay` a local day. Each album is picked on MusicBrainz and sent the way a request by hand is, full setup check included; in practice mode it's only listed. Albums that can't be picked, or that a check refuses, go to Needs you with the reason. It pauses while Lidarr's queue holds more than `bringInMaxQueue`, while less than `bringInMinFreeGb` is free on the root folder Lidarr downloads into, while Lidarr can't be reached or its check is red, and after three failed requests in a row, and carries on once that clears. Progress is kept on the device. Requests, pauses and practice runs go to the Changes log, and a notification sums up each day.
+With `bringIn` on, Platter asks Lidarr for albums from Played a lot in waves while it's open: albums with at least the first wave's plays, most played first, then the next wave, at most `bringInPerDay` a local day. Each album is picked on MusicBrainz and sent the way a request by hand is, full setup check included; in practice mode it's only listed. Albums that can't be picked, or that a check refuses, go to Needs you with the reason. It pauses while Lidarr's queue holds more than `bringInMaxQueue`, while less than `bringInMinFreeGb` is free on the root folder Lidarr downloads into, while Lidarr can't be reached or its check is red, and after three failed requests in a row, and carries on once that clears. Progress is kept on the device. Requests, pauses and practice runs go to the Changes log, and a notification sums up each day. With a Platter Bridge paired, the desktop hands the waves to it (the albums still to ask for, the settings and what was already asked for) and stops running them itself; the Bridge's progress comes back over the sealed link, and `bridge` names the Bridge while it has them. Turning it off stops the Bridge; a Bridge silent for over an hour gives them back.
 
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -2758,7 +2758,7 @@ With `bringIn` on, Platter asks Lidarr for albums from Played a lot in waves whi
 | `bring_in_needs_you` | `{ key, retry }` | `BringInStatus`. Takes an album off Needs you; with `retry` the next pass looks at it again (a "Get albums" album goes back on its queue) |
 | `get_albums_unqueue` | `{ releaseGroupIds: string[] }` | `BringInStatus`. Takes albums off the "Get albums" queue, all of them when the list is empty |
 
-`BringInStatus = { on, practice, ready, waves, wave, threshold, done, remaining, today, perDay, paused, userPaused, finished, requestedTotal, needsYou: { key, artist, album, plays, reason, at }[], practiced: { key, artist, album, releaseGroupId, at }[] }`.
+`BringInStatus = { on, practice, ready, waves, wave, threshold, done, remaining, today, perDay, paused, userPaused, finished, requestedTotal, needsYou: { key, artist, album, plays, reason, at }[], practiced: { key, artist, album, releaseGroupId, at }[], queued, bridge: string | null }`.
 
 Settings (synced): `bringIn` (off), `bringInWaves` (`[100, 50, 20]`, 1 to 5 different counts), `bringInPerDay` (30), `bringInMinFreeGb` (50), `bringInMaxQueue` (20).
 

@@ -340,3 +340,106 @@ async fn the_bridge_passes_on_only_lidarr_reads_and_platters_fixed_writes() {
     assert!(super::route::serve(None, "", &get("/artist")).await.is_some_and(|m| matches!(m, Msg::Failed { .. })));
     assert!(super::route::serve(Some(&home), "", &Msg::Unpair).await.is_none());
 }
+
+#[test]
+fn an_older_bridges_hello_means_no_waves() {
+    let old: Msg = serde_json::from_value(json!({"t": "hello", "name": "Shed", "version": "0.2.20", "music": "none"})).unwrap();
+    assert!(matches!(old, Msg::Hello { waves: false, .. }));
+}
+
+struct Quiet;
+
+impl crate::social::Notifier for Quiet {
+    fn notify(&self, _: &str, _: &str) {}
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn bring_in_my_listening_goes_to_the_bridge_sealed_and_comes_back() {
+    use crate::db::listens::{ImportSource, ImportedPlay, insert_imported};
+    use crate::lidarr::waves::{Waves, WavesDeps};
+    let ntfy = FakeNtfy::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let relays: Arc<dyn RelayFactory> = Arc::new(Ntfy::new().unwrap());
+    let d = side(tmp.path(), "desk");
+    let mut s = crate::settings::load(&d.db);
+    s.lidarr_url = LIDARR_URL.into();
+    s.bring_in = true;
+    crate::settings::save(&d.db, &s).unwrap();
+    d.lidarr.set_key(Some(LIDARR_KEY)).unwrap();
+    // Listening history: one album played a lot.
+    let plays: Vec<ImportedPlay> = (0..120)
+        .map(|n| ImportedPlay {
+            source: ImportSource::File,
+            source_id: format!("streaming:{n}"),
+            played_at: 1_700_000_000_000 + n * 1000,
+            ms_played: Some(200_000),
+            title: "Breathe In".into(),
+            artist: Some("Northlight".into()),
+            album: Some("Second Wind".into()),
+            rating_key: None,
+        })
+        .collect();
+    d.db.write(|c| insert_imported(c, &plays, 1)).unwrap();
+    let waves = Waves::new(WavesDeps {
+        lidarr: d.lidarr.clone(),
+        notifier: Arc::new(Quiet),
+        day_of: Arc::new(|at| at / 86_400),
+        hidden: Arc::new(Vec::new),
+    });
+    let desk = Desktop::new(DesktopDeps {
+        db: d.db.clone(),
+        keys: d.keys.clone(),
+        relays: relays.clone(),
+        clock: Arc::new(super::peer::system_ms),
+        store: d.store.clone(),
+        lidarr: d.lidarr.clone(),
+        plex: None,
+        name: Arc::new(|| "Desk".to_string()),
+    });
+    desk.set_waves(waves.clone());
+    tokio::spawn(desk.clone().run());
+    let start = desk.pair_start(Some(ntfy.url.clone())).unwrap();
+
+    let b = side(tmp.path(), "bridge");
+    b.web.route("/api/v1/system/status", None, 200, r#"{"appName": "Lidarr", "version": "2.8.2"}"#);
+    let env = Env { data: tmp.path().join("bridge-data"), name: "Shed Bridge".into(), pair_code: Some(start.code.clone()), ..Default::default() };
+    let bridge = Bridge::new(Parts {
+        env,
+        db: b.db.clone(),
+        keys: b.keys.clone(),
+        relays: relays.clone(),
+        clock: Arc::new(super::peer::system_ms),
+        store: b.store.clone(),
+        lidarr: b.lidarr.clone(),
+        web: b.web.clone(),
+        plex: None,
+        music: MusicAccess::ReadOnly,
+    });
+    assert!(tokio::time::timeout(Duration::from_secs(20), bridge.pair_from_env()).await.unwrap().unwrap());
+    let (stop_tx, stop) = tokio::sync::watch::channel(false);
+    tokio::spawn(bridge.clone().run(stop));
+
+    // The Bridge says it can run the waves; the desktop hands them over and
+    // the Bridge's answer comes back.
+    until("the plan on the Bridge", || bridge.waves.plan_running()).await;
+    until("the Bridge's answer", || waves.lease().is_some_and(|l| l.acked && l.running)).await;
+    assert_eq!(waves.status().unwrap().bridge.as_deref(), Some("Shed Bridge"));
+    assert!(crate::settings::load(&b.db).bring_in);
+    let on_bridge: i64 = b.db.read(|c| Ok(c.query_row("SELECT count(*) FROM imported_plays", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(on_bridge, 0, "no listening history on the Bridge");
+
+    // Off on the desktop: the Bridge stops.
+    let mut s = crate::settings::load(&d.db);
+    s.bring_in = false;
+    crate::settings::save(&d.db, &s).unwrap();
+    waves.settings_changed();
+    until("the Bridge to stop", || !bridge.waves.plan_running()).await;
+    until("the waves back on the desktop", || waves.lease().is_none()).await;
+
+    for m in &ntfy.published() {
+        for secret in ["Second Wind", "Northlight", "Breathe In"] {
+            assert!(!m.body.contains(secret), "{secret} travelled in the clear");
+        }
+    }
+    let _ = stop_tx.send(true);
+}

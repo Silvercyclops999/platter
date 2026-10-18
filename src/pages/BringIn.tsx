@@ -34,9 +34,13 @@ export function stateLine(s: BringInStatus): string {
   if (s.finished) return "Every album with enough plays has been dealt with.";
   if (s.today >= s.perDay)
     return `Today's ${n(s.perDay)} are done. More tomorrow.`;
-  return s.practice
-    ? "Practice mode: albums are only listed, nothing is sent to Lidarr."
-    : "Running while Platter is open.";
+  if (s.practice) return "Practice mode: albums are only listed, nothing is sent to Lidarr.";
+  return s.bridge ? "Asking Lidarr for a few albums a day." : "Running while Platter is open.";
+}
+
+/** Where the waves run, when a Bridge has them. */
+export function whereLine(s: BringInStatus): string | null {
+  return s.bridge ? `Running on your Bridge (${s.bridge}), even while this computer is off.` : null;
 }
 
 export function BringInCard() {
@@ -76,6 +80,7 @@ export function BringInCard() {
       >
         {stateLine(s)}
       </p>
+      {whereLine(s) && <p className="bring-in__counts">{whereLine(s)}</p>}
       {s.needsYou.length > 0 && (
         <div className="bring-in__needs">
           <Button

@@ -15,7 +15,7 @@ use crate::social::Notifier;
 use crate::web::Method;
 
 #[derive(Default)]
-struct Told(Mutex<Vec<(String, String)>>);
+pub(super) struct Told(pub(super) Mutex<Vec<(String, String)>>);
 
 impl Notifier for Told {
     fn notify(&self, title: &str, body: &str) {
@@ -24,11 +24,11 @@ impl Notifier for Told {
 }
 
 /// The rig's clock is fixed at 1,800,000,000; days are moved by hand.
-struct Setup {
-    r: Rig,
-    w: Waves,
-    told: Arc<Told>,
-    day: Arc<Mutex<i64>>,
+pub(super) struct Setup {
+    pub(super) r: Rig,
+    pub(super) w: Waves,
+    pub(super) told: Arc<Told>,
+    pub(super) day: Arc<Mutex<i64>>,
 }
 
 /// Plays of Northlight albums: Second Wind 120, Basement Tapes (a
@@ -55,7 +55,7 @@ fn history(r: &Rig) {
     r.db.write(|c| insert_imported(c, &v, 1)).unwrap();
 }
 
-async fn setup(practice: bool, patch: serde_json::Value) -> Setup {
+pub(super) async fn setup(practice: bool, patch: serde_json::Value) -> Setup {
     let r = rig();
     let mut s = crate::settings::load(&r.db);
     s.bring_in = true;

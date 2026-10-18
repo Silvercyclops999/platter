@@ -4,8 +4,12 @@
 //! Lidarr the way an open desktop would. Shared Lidarr state goes back and
 //! forth over the link so it and the desktops never act on the same event.
 //!
+//! With "Bring in my listening" handed over by a desktop, it also runs the
+//! request waves (`crate::lidarr::waves_bridge`).
+//!
 //! It only ever opens outbound connections (the relay, Lidarr, Plex,
-//! plex.tv). The health check listens on 127.0.0.1 inside the container.
+//! plex.tv, MusicBrainz). The health check listens on 127.0.0.1 inside the
+//! container.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -29,6 +33,8 @@ use crate::db::store::{kv_get, kv_set};
 use crate::error::{AppError, AppResult};
 use crate::lidarr::Lidarr;
 use crate::lidarr::api::{DirectRoute, Route};
+use crate::lidarr::waves::{Waves, WavesDeps};
+use crate::lidarr::waves_bridge::PlanAlbums;
 use crate::plex::PlexState;
 use crate::plex::keychain::{ACCOUNT_TOKEN, TokenStore};
 use crate::plex::token::Token;
@@ -134,6 +140,8 @@ pub struct Bridge {
     hello: Mutex<HashSet<String>>,
     library_now: tokio::sync::Notify,
     configured: AtomicBool,
+    /// Bring in my listening, from the album list a desktop handed over.
+    pub waves: Waves,
 }
 
 impl Bridge {
@@ -150,6 +158,16 @@ impl Bridge {
             ..Default::default()
         };
         let configured = p.db.read(|c| kv_get(c, CONFIG_KEY)).ok().flatten().is_some() || p.env.lidarr_url.is_some();
+        let day_db = p.db.clone();
+        let waves = Waves::with_albums(
+            WavesDeps {
+                lidarr: p.lidarr.clone(),
+                notifier: Arc::new(LogNotifier),
+                day_of: Arc::new(move |at| crate::lidarr::waves::local_day(&day_db, at)),
+                hidden: Arc::new(Vec::new),
+            },
+            Arc::new(PlanAlbums { db: p.db.clone() }),
+        );
         Arc::new(Self {
             p,
             wire,
@@ -158,6 +176,7 @@ impl Bridge {
             hello: Mutex::default(),
             library_now: tokio::sync::Notify::new(),
             configured: AtomicBool::new(configured),
+            waves,
         })
     }
 
@@ -272,7 +291,15 @@ impl Bridge {
                 tracing::info!("Unpaired by the desktop.");
                 let _ = self.wire.links.remove(&link.id);
             }
-            Msg::Hello { .. } | Msg::Status(_) | Msg::Answer { .. } | Msg::Failed { .. } => {}
+            Msg::WavesPlan(plan) => {
+                if let Err(e) = self.waves.take_plan(&plan).await {
+                    tracing::warn!("Couldn't take Bring in my listening's list: {e}");
+                }
+                let progress = Msg::WavesProgress(Box::new(self.waves.progress()));
+                let _ = self.wire.send(link, &progress).await;
+                self.waves.poke();
+            }
+            Msg::Hello { .. } | Msg::Status(_) | Msg::Answer { .. } | Msg::Failed { .. } | Msg::WavesProgress(_) => {}
         }
     }
 
@@ -412,6 +439,50 @@ impl Bridge {
         Some(line)
     }
 
+    /// One pass of Bring in my listening, when a desktop handed it over,
+    /// then its progress to the desktops.
+    pub async fn waves_once(&self) -> Option<crate::lidarr::waves::PassOutcome> {
+        if !self.waves.plan_running() {
+            return None;
+        }
+        let st = self.p.lidarr.status();
+        if st.url_set && st.has_key && self.p.lidarr.last_check().is_none() {
+            self.doing("Running Lidarr's setup check");
+            if let Err(e) = self.p.lidarr.check().await {
+                tracing::info!("Lidarr's setup check: {e}");
+            }
+        }
+        self.doing("Bringing in your listening");
+        let out = match self.waves.pass().await {
+            Ok(o) => {
+                if !o.requested.is_empty() || !o.practiced.is_empty() || !o.needs_you.is_empty() {
+                    tracing::info!(
+                        requested = o.requested.len(),
+                        practice = o.practiced.len(),
+                        needs_you = o.needs_you.len(),
+                        "Bring in my listening: pass done"
+                    );
+                }
+                Some(o)
+            }
+            Err(e) => {
+                tracing::warn!("Bring in my listening: {e}");
+                None
+            }
+        };
+        self.send_waves_progress().await;
+        self.flush_entries().await;
+        self.doing("Waiting for the next catch-up");
+        out
+    }
+
+    pub async fn send_waves_progress(&self) {
+        let msg = Msg::WavesProgress(Box::new(self.waves.progress()));
+        for link in self.wire.links.links() {
+            let _ = self.wire.send(&link, &msg).await;
+        }
+    }
+
     async fn sync_library(&self) {
         let Some(plex) = &self.p.plex else { return };
         if plex.client().await.is_err() {
@@ -439,6 +510,7 @@ impl Bridge {
         let mut beat = tokio::time::interval(HEARTBEAT);
         let mut library = tokio::time::interval(LIBRARY_EVERY);
         let mut tick = tokio::time::interval(Duration::from_secs(30));
+        let mut waves = tokio::time::interval(crate::lidarr::waves::LOOK_EVERY);
         let (stop_links, _) = watch::channel(false);
         let mut dirty: Option<tokio::time::Instant> = None;
         beat.tick().await;
@@ -461,7 +533,7 @@ impl Bridge {
                         if self.hello.lock().insert(id.clone())
                             && let Some(link) = self.wire.links.link(&id)
                         {
-                            let hello = Msg::Hello { name: self.p.env.name.clone(), version: super::VERSION.into(), music: self.p.music };
+                            let hello = Msg::Hello { name: self.p.env.name.clone(), version: super::VERSION.into(), music: self.p.music, waves: true };
                             let _ = self.wire.send(&link, &hello).await;
                             dirty = Some(tokio::time::Instant::now());
                         }
@@ -492,6 +564,12 @@ impl Bridge {
                     }
                 }
                 _ = beat.tick() => self.send_status().await,
+                _ = waves.tick() => {
+                    self.waves_once().await;
+                }
+                _ = self.waves.woken() => {
+                    self.waves_once().await;
+                }
                 _ = library.tick() => self.sync_library().await,
                 _ = self.library_now.notified() => self.sync_library().await,
                 _ = tick.tick() => {}
@@ -525,7 +603,14 @@ pub fn build(env: Env) -> AppResult<Parts> {
         db: db.clone(),
         plex: Arc::new(crate::lidarr::PlexMusicFiles(plex.clone())),
         clock: Arc::new(crate::db::queries::now_s),
-        mb: Arc::new(NoMusicBrainz),
+        // Each album a wave asks for is checked on MusicBrainz first, as on a desktop.
+        mb: Arc::new(crate::lidarr::mbpick::MbCached {
+            http: Arc::new(crate::artistinfo::http::ReqwestHttp::new()?),
+            limiter: Arc::new(crate::artistinfo::limit::Limiter::per_second(1.0)),
+            db: db.clone(),
+            clock: Arc::new(crate::db::queries::now_s),
+            ttl: crate::lidarr::mbpick::CACHE_TTL,
+        }),
         artist_mbid: Arc::new(NoMbid),
         album_wait: Duration::from_secs(2),
         shared,
@@ -549,13 +634,12 @@ impl crate::lidarr::catchup::Announcer for LogAnnouncer {
     }
 }
 
-/// The Bridge doesn't pick releases (requests start on a desktop).
-struct NoMusicBrainz;
+/// Bring in my listening's daily summary goes to the log.
+struct LogNotifier;
 
-#[async_trait::async_trait]
-impl crate::lidarr::mbpick::MbGet for NoMusicBrainz {
-    async fn get(&self, _url: &str) -> AppResult<Option<serde_json::Value>> {
-        Err(AppError::Invalid("Platter Bridge doesn't look things up on MusicBrainz.".into()))
+impl crate::social::Notifier for LogNotifier {
+    fn notify(&self, title: &str, body: &str) {
+        tracing::info!("{title}: {body}");
     }
 }
 

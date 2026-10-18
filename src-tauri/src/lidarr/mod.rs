@@ -33,6 +33,7 @@ pub mod tagcarry;
 pub mod upgrade;
 pub mod upmatch;
 pub mod waves;
+pub mod waves_bridge;
 pub mod write;
 
 #[cfg(test)]
@@ -47,6 +48,8 @@ mod modes_tests;
 mod request_tests;
 #[cfg(test)]
 mod waves_tests;
+#[cfg(test)]
+mod waves_bridge_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

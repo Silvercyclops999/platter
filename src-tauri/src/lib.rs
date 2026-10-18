@@ -788,6 +788,12 @@ pub fn run() {
                 })
             };
             tauri::async_runtime::spawn(lidarr::waves::watch(bring_in.clone()));
+            {
+                // A settings change (the switch, waves, pace) runs a pass soon and reaches a Bridge.
+                let w = bring_in.clone();
+                app.listen_any("settings://changed", move |_| w.settings_changed());
+            }
+            let bring_in_for_bridge = bring_in.clone();
             app.manage(bring_in);
             // Upgrades: better copies through the staging folder, swapped on this computer.
             let upgrades = lidarr::upgrade::Upgrades::new(lidarr::upgrade::UpgradeDeps {
@@ -829,6 +835,7 @@ pub fn run() {
                     let _ = app.emit("bridge://changed", ());
                 }));
             }
+            bridge_desktop.set_waves(bring_in_for_bridge);
             tauri::async_runtime::spawn(bridge_desktop.clone().run());
             app.manage(bridge_desktop);
             let radar_lidarr = lidarr_service.clone();

@@ -3687,7 +3687,7 @@ export class MockBackend implements Backend {
     });
   }
   /** Mock "Bring in my listening": made-up progress while the setting is on. */
-  bringIn = { userPaused: false, paused: null as string | null, needsYou: [{ key: "album:mira vale\u001fsecond bloom", artist: "Mira Vale", album: "Second Bloom", plays: 9, reason: "MusicBrainz lists this only as a bootleg or promo, not an official release. Platter never asks Lidarr for those.", at: 0 }] };
+  bringIn = { userPaused: false, paused: null as string | null, bridge: null as string | null, needsYou: [{ key: "album:mira vale\u001fsecond bloom", artist: "Mira Vale", album: "Second Bloom", plays: 9, reason: "MusicBrainz lists this only as a bootleg or promo, not an official release. Platter never asks Lidarr for those.", at: 0 }] };
   private bringInStatus_() {
     const s = this.settings;
     return {
@@ -3708,6 +3708,7 @@ export class MockBackend implements Backend {
       needsYou: this.bringIn.needsYou,
       practiced: [],
       queued: this.getQueued,
+      bridge: this.bringIn.bridge,
     };
   }
   bringInStatus() {

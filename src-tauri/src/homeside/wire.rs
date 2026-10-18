@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::lidarr::waves_bridge::{WavesPlan, WavesProgress};
 use crate::sync::store::EntryMap;
 
 /// How the Bridge reaches the music folder.
@@ -103,8 +104,15 @@ pub struct BridgeStatus {
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "t", rename_all = "camelCase")]
 pub enum Msg {
-    /// From the Bridge, after pairing and on every start.
-    Hello { name: String, version: String, music: MusicAccess },
+    /// From the Bridge, after pairing and on every start. `waves`: it can
+    /// run Bring in my listening.
+    Hello {
+        name: String,
+        version: String,
+        music: MusicAccess,
+        #[serde(default)]
+        waves: bool,
+    },
     /// From a desktop.
     Config(Box<BridgeConfig>),
     /// Shared Lidarr state (the sync store's `lidarr` namespace), both ways.
@@ -123,6 +131,10 @@ pub enum Msg {
     Failed { id: u64, message: String },
     /// Either side forgets the other.
     Unpair,
+    /// From a desktop: Bring in my listening's album list and settings.
+    WavesPlan(Box<WavesPlan>),
+    /// From the Bridge: how the waves are going.
+    WavesProgress(Box<WavesProgress>),
 }
 
 impl Msg {
@@ -138,6 +150,8 @@ impl Msg {
             Msg::Answer { .. } => "answer",
             Msg::Failed { .. } => "failed",
             Msg::Unpair => "unpair",
+            Msg::WavesPlan(_) => "wavesPlan",
+            Msg::WavesProgress(_) => "wavesProgress",
         }
     }
 }

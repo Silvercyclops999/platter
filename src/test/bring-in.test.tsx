@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS, type BringInStatus } from "../lib/types";
-import { BringInCard, BringInSettings, parseWaves, stateLine, waveLine } from "../pages/BringIn";
+import { BringInCard, BringInSettings, parseWaves, stateLine, waveLine, whereLine } from "../pages/BringIn";
 import { ImportPage } from "../pages/ImportPage";
 import { resetImportListeners } from "../pages/importShared";
 import { loadSettings, useSettings } from "../stores/settings";
@@ -27,6 +27,7 @@ beforeEach(() => {
   resetImportListeners();
   mock.bringIn.userPaused = false;
   mock.bringIn.paused = null;
+  mock.bringIn.bridge = null;
   mock.bringIn.needsYou = [{ key: "album:a\u001fb", artist: "Mira Vale", album: "Second Bloom", plays: 9, reason: "Only a bootleg on MusicBrainz.", at: 0 }];
   useToasts.setState({ toasts: [] });
 });
@@ -60,6 +61,9 @@ describe("wording", () => {
     expect(stateLine({ ...base, today: 30 })).toBe("Today's 30 are done. More tomorrow.");
     expect(stateLine({ ...base, practice: true })).toMatch(/^Practice mode/);
     expect(stateLine({ ...base, ready: false })).toMatch(/^Waiting for Lidarr/);
+    expect(whereLine(base)).toBeNull();
+    expect(stateLine({ ...base, bridge: "Shed" })).toBe("Asking Lidarr for a few albums a day.");
+    expect(whereLine({ ...base, bridge: "Shed" })).toBe("Running on your Bridge (Shed), even while this computer is off.");
   });
 
   it("reads waves typed as a list", () => {
@@ -96,6 +100,16 @@ describe("the progress card", () => {
     expect(mock.bringIn.userPaused).toBe(true);
     fireEvent.click(within(card).getByRole("button", { name: "Carry on" }));
     await waitFor(() => expect(mock.bringIn.userPaused).toBe(false));
+  });
+
+  it("says when the Bridge runs it", async () => {
+    await settings({ bringIn: true });
+    mock.bringIn.bridge = "Shed Bridge";
+    mock.bringIn.paused = "Lidarr's queue has 25 items. It carries on once it's down to 20.";
+    render(<BringInCard />);
+    const card = await screen.findByRole("region", { name: "Bring in my listening" });
+    expect(card).toHaveTextContent("Running on your Bridge (Shed Bridge)");
+    expect(within(card).getByRole("status")).toHaveTextContent("Paused: Lidarr's queue has 25 items.");
   });
 
   it("says why a guard paused it", async () => {

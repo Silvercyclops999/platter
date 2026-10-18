@@ -24,6 +24,8 @@ Every few minutes, the same way an open Platter would:
   automatically), following each artist's own folder and tag habits.
 - Lets a computer away from home reach Lidarr through it, if Lidarr has no
   away address.
+- Runs Bring in my listening, so the waves of requests keep going while
+  your computers are off (see below).
 
 What it never does:
 
@@ -102,8 +104,9 @@ forgets your computer. Then remove the container if you like.
 
 ## Privacy
 
-- The Bridge only makes outgoing connections: to the relay, Lidarr, Plex
-  and plex.tv. It opens no ports. Its health check listens on 127.0.0.1
+- The Bridge only makes outgoing connections: to the relay, Lidarr, Plex,
+  plex.tv and MusicBrainz (to check albums Bring in my listening asks for).
+  It opens no ports. Its health check listens on 127.0.0.1
   inside the container, for Docker only.
 - Everything between the Bridge and your computers goes through the same
   relay as Listen along (ntfy.sh by default, or your own ntfy server: set it
@@ -140,9 +143,32 @@ waiting for your computer's settings, catching up, what it added. Docker's
 health check runs `platter-bridge health`, which is healthy while the Bridge
 keeps working.
 
+## Bring in my listening
+
+When Bring in my listening is on and a Bridge is paired, your computer hands
+the waves to the Bridge and stops running them itself, so only one of them
+ever asks Lidarr for anything. The Bridge gets the list of albums still to
+ask for (artist, album, the MusicBrainz release group when your computer
+already knows it, and how many plays), the waves settings, and which albums
+were already asked for. Nothing else from your listening history leaves your
+computer: no songs, dates or play times.
+
+The Bridge asks for each album the same way your computer would. It checks
+the album on MusicBrainz first, runs Lidarr's setup check, follows the
+Managed and Protected rules and the staging folder, keeps to the daily
+pace, and pauses when Lidarr's queue is full, space runs low, Lidarr can't
+be reached or requests keep failing. Practice mode holds here too. Each
+step is in `docker logs`, and requests and pauses go to the Changes log.
+
+The card on Played a lot says "Running on your Bridge" while the Bridge has
+the waves, and shows its progress and anything that needs you. Turning Bring
+in my listening off on your computer stops the Bridge. If the Bridge stops
+answering for over an hour, your computer takes the waves back and carries
+on from where the Bridge got to.
+
 ## What needs a computer
 
-Requests (asking Lidarr for an album) start on a computer. The library's
+Requests by hand (asking Lidarr for an album) start on a computer. The library's
 file tags, which decide which artists are protected, are read on a computer.
 Better copies ("Look for better copies" and upgrades you started) are kept
 per computer, so they're swapped on the computer that asked for them.

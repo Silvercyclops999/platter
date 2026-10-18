@@ -21,6 +21,8 @@
 //! - "Get albums" on an artist's page queues that artist's albums here; a
 //!   pass asks for queued albums first, with the same guards and daily
 //!   pace, whether or not Bring in my listening is on.
+//! - With a Platter Bridge paired, the Bridge runs the waves instead, from
+//!   an album list this computer hands it (`waves_bridge`).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,7 +35,7 @@ use super::status::RequestState;
 use crate::db::store::{kv_get, kv_set};
 use crate::error::{AppError, AppResult};
 use crate::identity::fold::{fold_album, fold_artist};
-use crate::import::played::{self, Kind, PlayedRow, Query};
+use crate::import::played::{self, Kind, Query};
 use crate::social::Notifier;
 
 pub const DEFAULT_WAVES: [u32; 3] = [100, 50, 20];
@@ -150,6 +152,10 @@ pub struct WaveState {
     pub requested_total: u32,
     /// Albums "Get albums" queued, in the order they go out.
     pub queued: Vec<QueuedGet>,
+    /// What the last daily summary said (for the day in `summary_day`).
+    pub last_summary: Option<String>,
+    /// On a Bridge: changes from the desktop already made, by id.
+    pub applied: Vec<String>,
 }
 
 /// What the progress card shows.
@@ -179,6 +185,58 @@ pub struct WavesStatus {
     pub practiced: Vec<Practiced>,
     /// Albums "Get albums" queued and not asked for yet.
     pub queued: Vec<QueuedGet>,
+    /// The paired Bridge's name while it runs the waves.
+    pub bridge: Option<String>,
+}
+
+/// One album the waves can ask for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WaveAlbum {
+    /// Its key on "Played a lot".
+    pub key: String,
+    pub artist: String,
+    pub album: String,
+    pub plays: u64,
+    /// Its songs already in the library.
+    pub in_library: u64,
+    /// The release group, when it's known already.
+    pub release_group_id: Option<String>,
+}
+
+/// Where the waves' albums come from: "Played a lot" on a desktop, the
+/// album list a desktop handed over on a Bridge.
+pub trait AlbumSource: Send + Sync {
+    /// The most played album with at least `min` plays whose key isn't in
+    /// `skip`, and how many such albums there are.
+    fn first(&self, min: u32, skip: &[String]) -> AppResult<(Option<WaveAlbum>, u64)>;
+
+    /// Release groups asked for elsewhere (never asked for again).
+    fn requested(&self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+/// "Played a lot" on this computer.
+pub struct PlayedAlbums {
+    pub db: crate::db::DbHandle,
+    pub clock: Arc<dyn Fn() -> i64 + Send + Sync>,
+}
+
+impl AlbumSource for PlayedAlbums {
+    fn first(&self, min: u32, skip: &[String]) -> AppResult<(Option<WaveAlbum>, u64)> {
+        let now_ms = (self.clock)() * 1000;
+        let page = self.db.read(|c| played::list(c, &album_query(min), skip, now_ms))?;
+        let total = page.total;
+        let row = page.rows.into_iter().next().map(|r| WaveAlbum {
+            key: r.key,
+            artist: r.artist,
+            album: r.title,
+            plays: r.plays,
+            in_library: r.in_library.unwrap_or(0),
+            release_group_id: None,
+        });
+        Ok((row, total))
+    }
 }
 
 /// What one pass did.
@@ -229,11 +287,20 @@ pub struct WavesDeps {
     pub hidden: Arc<dyn Fn() -> Vec<String> + Send + Sync>,
 }
 
+/// Called when something the Bridge should hear about changed.
+pub type OnChange = Arc<dyn Fn() + Send + Sync>;
+
 #[derive(Clone)]
 pub struct Waves {
-    inner: Arc<WavesDeps>,
-    lock: Arc<tokio::sync::Mutex<()>>,
+    pub(super) inner: Arc<WavesDeps>,
+    pub(super) albums: Arc<dyn AlbumSource>,
+    pub(super) lock: Arc<tokio::sync::Mutex<()>>,
     wake: Arc<tokio::sync::Notify>,
+    on_change: Arc<parking_lot::RwLock<Option<OnChange>>>,
+    /// When this run started (unix seconds).
+    pub(super) started: i64,
+    /// The waves settings last seen, so only their changes count.
+    seen_settings: Arc<parking_lot::Mutex<String>>,
 }
 
 /// How a request came out, for the pacing.
@@ -248,11 +315,27 @@ enum Sent {
 }
 
 impl Waves {
+    /// Albums from "Played a lot" in this computer's database.
     pub fn new(deps: WavesDeps) -> Self {
-        Self { inner: Arc::new(deps), lock: Arc::new(tokio::sync::Mutex::new(())), wake: Arc::new(tokio::sync::Notify::new()) }
+        let albums = Arc::new(PlayedAlbums { db: deps.lidarr.inner.db.clone(), clock: deps.lidarr.inner.clock.clone() });
+        Self::with_albums(deps, albums)
     }
 
-    fn l(&self) -> &Lidarr {
+    pub fn with_albums(deps: WavesDeps, albums: Arc<dyn AlbumSource>) -> Self {
+        let started = (deps.lidarr.inner.clock)();
+        let deps_db = deps.lidarr.inner.db.clone();
+        Self {
+            inner: Arc::new(deps),
+            albums,
+            lock: Arc::new(tokio::sync::Mutex::new(())),
+            wake: Arc::new(tokio::sync::Notify::new()),
+            on_change: Arc::default(),
+            started,
+            seen_settings: Arc::new(parking_lot::Mutex::new(settings_sig(&deps_db))),
+        }
+    }
+
+    pub(super) fn l(&self) -> &Lidarr {
         &self.inner.lidarr
     }
 
@@ -260,12 +343,12 @@ impl Waves {
         self.l().inner.db.read(|c| kv_get(c, STATE_KEY)).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
     }
 
-    fn save(&self, st: &WaveState) -> AppResult<()> {
+    pub(super) fn save(&self, st: &WaveState) -> AppResult<()> {
         let json = serde_json::to_string(st).map_err(|e| AppError::Internal(e.to_string()))?;
         self.l().inner.db.write(|c| kv_set(c, STATE_KEY, &json))
     }
 
-    fn now(&self) -> i64 {
+    pub(super) fn now(&self) -> i64 {
         (self.l().inner.clock)()
     }
 
@@ -274,18 +357,57 @@ impl Waves {
         self.wake.notify_one();
     }
 
+    /// Waits for [`Self::poke`].
+    pub async fn woken(&self) {
+        self.wake.notified().await;
+    }
+
+    /// Tell `f` whenever something a paired Bridge should hear changed.
+    pub fn set_on_change(&self, f: OnChange) {
+        *self.on_change.write() = Some(f);
+    }
+
+    pub(super) fn changed(&self) {
+        if let Some(f) = self.on_change.read().clone() {
+            f();
+        }
+    }
+
+    /// Settings changed: when the waves' own did, run a pass soon and tell
+    /// the Bridge.
+    pub fn settings_changed(&self) {
+        let now = settings_sig(&self.l().inner.db);
+        let changed = {
+            let mut seen = self.seen_settings.lock();
+            let changed = *seen != now;
+            *seen = now;
+            changed
+        };
+        if changed {
+            self.poke();
+            self.changed();
+        }
+    }
+
     /// The progress card.
     pub fn status(&self) -> AppResult<WavesStatus> {
         let s = crate::settings::load(&self.l().inner.db);
-        let st = self.state();
+        let own = self.state();
+        // While a Bridge runs the waves, its progress is what counts.
+        let lease = self.on_bridge();
+        let st = match lease.as_ref().and_then(|l| l.mirror.clone()) {
+            Some(mut m) => {
+                m.user_paused = own.user_paused;
+                m.queued = own.queued.clone();
+                m.needs_you.extend(own.needs_you.iter().filter(|n| n.get.is_some()).cloned());
+                m
+            }
+            None => own,
+        };
         let waves = clean_waves(&s.bring_in_waves).unwrap_or_else(|_| DEFAULT_WAVES.to_vec());
         let threshold = waves.get(st.wave).copied().filter(|_| !st.finished);
         let remaining = match threshold {
-            Some(t) => {
-                let skip = self.skip_keys(&st);
-                let now_ms = self.now() * 1000;
-                self.l().inner.db.read(|c| played::list(c, &album_query(t), &skip, now_ms))?.total
-            }
+            Some(t) => self.albums.first(t, &self.skip_keys(&st))?.1,
             None => 0,
         };
         let today = if st.day == (self.inner.day_of)(self.now()) { st.today } else { 0 };
@@ -307,6 +429,7 @@ impl Waves {
             needs_you: st.needs_you.clone(),
             practiced: st.practiced.clone(),
             queued: st.queued.clone(),
+            bridge: lease.map(|l| l.name),
         })
     }
 
@@ -363,6 +486,7 @@ impl Waves {
         if !paused {
             self.poke();
         }
+        self.changed();
         self.status()
     }
 
@@ -370,6 +494,10 @@ impl Waves {
     pub fn needs_you(&self, key: &str, retry: bool) -> AppResult<WavesStatus> {
         let mut st = self.state();
         let get = st.needs_you.iter().find(|n| n.key == key).and_then(|n| n.get.clone());
+        if get.is_none() {
+            // The Bridge's list, while it runs the waves: it hears next.
+            self.bridge_edit(key, retry)?;
+        }
         st.needs_you.retain(|n| n.key != key);
         if let (true, Some(g)) = (retry, get) {
             st.queued.insert(0, g);
@@ -393,7 +521,7 @@ impl Waves {
         self.save(&st)
     }
 
-    fn skip_keys(&self, st: &WaveState) -> Vec<String> {
+    pub(super) fn skip_keys(&self, st: &WaveState) -> Vec<String> {
         let mut keys = (self.inner.hidden)();
         keys.extend(st.done.iter().cloned());
         keys.extend(st.needs_you.iter().map(|n| n.key.clone()));
@@ -402,12 +530,10 @@ impl Waves {
 
     /// The next album: the most played of the current wave not dealt with,
     /// moving to the next wave when one runs out.
-    fn next(&self, waves: &[u32], st: &mut WaveState) -> AppResult<Option<PlayedRow>> {
-        let now_ms = self.now() * 1000;
+    fn next(&self, waves: &[u32], st: &mut WaveState) -> AppResult<Option<WaveAlbum>> {
         while let Some(&t) = waves.get(st.wave) {
             let skip = self.skip_keys(st);
-            let page = self.l().inner.db.read(|c| played::list(c, &album_query(t), &skip, now_ms))?;
-            if let Some(r) = page.rows.into_iter().next() {
+            if let (Some(r), _) = self.albums.first(t, &skip)? {
                 return Ok(Some(r));
             }
             self.l().log_change(&format!("Finished the {t}+ plays wave of Bring in my listening"), "", "", false, None)?;
@@ -419,6 +545,7 @@ impl Waves {
 
     fn pause(&self, st: &mut WaveState, why: String) -> AppResult<()> {
         if st.paused.as_deref() != Some(why.as_str()) {
+            tracing::info!("Bring in my listening paused: {why}");
             self.l().log_change("Paused Bring in my listening", "", &why, false, None)?;
             st.paused = Some(why);
         }
@@ -427,6 +554,7 @@ impl Waves {
 
     fn resume(&self, st: &mut WaveState) -> AppResult<()> {
         if let Some(was) = st.paused.take() {
+            tracing::info!("Bring in my listening carried on");
             self.l().log_change("Bring in my listening carried on", &was, "Clear again", false, None)?;
         }
         Ok(())
@@ -440,6 +568,7 @@ impl Waves {
         let albums = if st.today == 1 { "1 album".to_string() } else { format!("{} albums", st.today) };
         let did = if practice { format!("{albums} listed (practice mode)") } else { format!("{albums} requested") };
         let body = if st.today_needs > 0 { format!("{did}, {} need you.", st.today_needs) } else { format!("{did}.") };
+        st.last_summary = Some(body.clone());
         self.inner.notifier.notify("Bring in my listening", &body);
     }
 
@@ -493,8 +622,11 @@ impl Waves {
             st.today_needs = 0;
         }
         let waves = clean_waves(&s.bring_in_waves).unwrap_or_else(|_| DEFAULT_WAVES.to_vec());
-        // Bring in my listening's own albums; "Get albums" goes on regardless.
-        let bring = s.bring_in && !st.user_paused && !(st.finished && st.wave >= waves.len());
+        // A Bridge that stopped answering gives the waves back to this computer.
+        self.take_back(&mut st)?;
+        // Bring in my listening's own albums (unless a Bridge runs them);
+        // "Get albums" goes on regardless.
+        let bring = s.bring_in && !st.user_paused && !(st.finished && st.wave >= waves.len()) && self.on_bridge().is_none();
         if !bring && st.queued.is_empty() {
             self.save(&st)?;
             return Ok(out);
@@ -555,14 +687,14 @@ impl Waves {
     }
 
     /// One album. False stops the pass (paused, or a failure to try later).
-    async fn album(&self, row: &PlayedRow, practice: bool, st: &mut WaveState, out: &mut PassOutcome) -> AppResult<bool> {
-
+    async fn album(&self, row: &WaveAlbum, practice: bool, st: &mut WaveState, out: &mut PassOutcome) -> AppResult<bool> {
         let needs = |st: &mut WaveState, out: &mut PassOutcome, reason: String| {
-            st.needs_you.insert(0, NeedsYou { key: row.key.clone(), artist: row.artist.clone(), album: row.title.clone(), plays: row.plays, reason, at: self.now(), get: None });
+            tracing::info!(album = %row.album, "Bring in my listening: needs you ({reason})");
+            st.needs_you.insert(0, NeedsYou { key: row.key.clone(), artist: row.artist.clone(), album: row.album.clone(), plays: row.plays, reason, at: self.now(), get: None });
             st.today_needs += 1;
-            out.needs_you.push(row.title.clone());
+            out.needs_you.push(row.album.clone());
         };
-        if row.in_library.unwrap_or(0) > 0 {
+        if row.in_library > 0 {
             needs(
                 st,
                 out,
@@ -572,38 +704,50 @@ impl Waves {
         }
         // Asked for before (by hand or by a wave).
         let fa = fold_artist(&row.artist);
-        let fal = fold_album(&row.title);
+        let fal = fold_album(&row.album);
         if self.l().records().iter().any(|r| r.state != RequestState::Failed && fold_artist(&r.artist) == fa && fold_album(&r.title) == fal) {
             st.done.push(row.key.clone());
             return Ok(true);
         }
-        let picked = match self.l().pick(&row.artist, None, &row.title, false, None).await {
-            Ok(p) => p,
-            Err(e) if e.kind() == "network" => {
-                st.fails += 1;
-                if st.fails >= FAILS_TO_PAUSE {
-                    self.pause(st, format!("MusicBrainz didn't answer {FAILS_TO_PAUSE} times in a row. It tries again later."))?;
-                }
-                return Ok(false);
+        // The release group: known already (picked on a desktop), else
+        // MusicBrainz picks one now. Either way it's checked again on sending.
+        let (group_id, group_title) = match row.release_group_id.clone().filter(|g| crate::artistinfo::is_mbid(g)) {
+            Some(g) => (g, row.album.clone()),
+            None => {
+                let picked = match self.l().pick(&row.artist, None, &row.album, false, None).await {
+                    Ok(p) => p,
+                    Err(e) if e.kind() == "network" => {
+                        st.fails += 1;
+                        if st.fails >= FAILS_TO_PAUSE {
+                            self.pause(st, format!("MusicBrainz didn't answer {FAILS_TO_PAUSE} times in a row. It tries again later."))?;
+                        }
+                        return Ok(false);
+                    }
+                    Err(e) => {
+                        needs(st, out, e.message());
+                        return Ok(true);
+                    }
+                };
+                let Some(group) = picked.group else {
+                    needs(st, out, picked.reason.unwrap_or_else(|| "MusicBrainz has no official release of this album for Lidarr to get.".into()));
+                    return Ok(true);
+                };
+                self.remember_group(&row.key, &group.id);
+                (group.id, group.title)
             }
-            Err(e) => {
-                needs(st, out, e.message());
-                return Ok(true);
-            }
-        };
-        let Some(group) = picked.group else {
-            needs(st, out, picked.reason.unwrap_or_else(|| "MusicBrainz has no official release of this album for Lidarr to get.".into()));
-            return Ok(true);
         };
         let input = RequestInput {
-            release_group_id: group.id.clone(),
-            title: group.title.clone(),
+            release_group_id: group_id.clone(),
+            title: group_title.clone(),
             artist: row.artist.clone(),
             artist_id: None,
             artist_mbid: None,
             typed: None,
         };
-        if self.l().records().iter().any(|r| r.release_group_id.eq_ignore_ascii_case(&group.id) && r.state != RequestState::Failed) {
+        let elsewhere = self.albums.requested();
+        if self.l().records().iter().any(|r| r.release_group_id.eq_ignore_ascii_case(&group_id) && r.state != RequestState::Failed)
+            || elsewhere.iter().any(|g| g.eq_ignore_ascii_case(&group_id))
+        {
             st.done.push(row.key.clone());
             return Ok(true);
         }
@@ -612,12 +756,13 @@ impl Waves {
                 Ok(p) if p.existing.is_some() => st.done.push(row.key.clone()),
                 Ok(p) => {
                     let to = p.destination.clone().unwrap_or_default();
-                    self.l().log_practice(&format!("Would request {} by {} (Bring in my listening)", group.title, row.artist), "", &to)?;
-                    st.practiced.insert(0, Practiced { key: row.key.clone(), artist: row.artist.clone(), album: group.title.clone(), release_group_id: group.id.clone(), at: self.now() });
+                    self.l().log_practice(&format!("Would request {} by {} (Bring in my listening)", input.title, row.artist), "", &to)?;
+                    tracing::info!(album = %input.title, "Bring in my listening: would request (practice mode)");
+                    st.practiced.insert(0, Practiced { key: row.key.clone(), artist: row.artist.clone(), album: input.title.clone(), release_group_id: input.release_group_id.clone(), at: self.now() });
                     st.done.push(row.key.clone());
                     st.today += 1;
                     st.fails = 0;
-                    out.practiced.push(group.title.clone());
+                    out.practiced.push(input.title.clone());
                 }
                 Err(e) => return self.after_error(classify(&e), st, out, needs),
             }
@@ -633,6 +778,7 @@ impl Waves {
                     out.requested.push(rec.title.clone());
                     let to = rec.destination.clone().unwrap_or_default();
                     self.l().log_change(&format!("Requested {} by {} (Bring in my listening)", rec.title, rec.artist), "", &to, false, None)?;
+                    tracing::info!(album = %rec.title, "Bring in my listening: requested");
                 }
                 Ok(true)
             }
@@ -710,6 +856,12 @@ impl Waves {
             }
         }
     }
+}
+
+/// The settings the waves follow, in one line.
+fn settings_sig(db: &crate::db::DbHandle) -> String {
+    let s = crate::settings::load(db);
+    format!("{}|{:?}|{}|{}|{}|{}", s.bring_in, s.bring_in_waves, s.bring_in_per_day, s.bring_in_min_free_gb, s.bring_in_max_queue, s.lidarr_practice_until)
 }
 
 const UNREACHABLE: &str = "Lidarr can't be reached. It carries on once Platter can reach it.";

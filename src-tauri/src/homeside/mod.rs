@@ -9,6 +9,7 @@
 //! put back together, with replays dropped (`peer`).
 //!
 //! - [`run`]: the Bridge (the `platter-bridge` binary): Lidarr catch-up,
+//!   Bring in my listening once a desktop hands it over,
 //!   promotions and swaps when the music folder is mounted read-write, the
 //!   home Platter route, shared state with the desktops.
 //! - [`desktop`]: Settings > Bridge, and the desktop's half of the link.

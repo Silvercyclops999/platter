@@ -451,6 +451,14 @@ fn song_row(c: &Connection, known: &Known, a: String, t: String, plays: i64, ms:
     })
 }
 
+/// An album's songs in the library (released ones), by folded names.
+pub fn album_in_library(c: &Connection, artist_fold: &str, album_fold: &str) -> AppResult<u64> {
+    let n: i64 = c
+        .prepare_cached("SELECT count(DISTINCT track_id) FROM song_index WHERE artist_fold = ?1 AND album_fold = ?2 AND unreleased = 0")?
+        .query_row(params![artist_fold, album_fold], |r| r.get(0))?;
+    Ok(n.max(0) as u64)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn album_row(c: &Connection, known: &Known, a: String, al: String, plays: i64, ms: i64, first: i64, last: i64, songs: i64) -> AppResult<PlayedRow> {
     let (album, artist): (String, Option<String>) = c
@@ -462,9 +470,7 @@ fn album_row(c: &Connection, known: &Known, a: String, al: String, plays: i64, m
         .optional()?
         .unwrap_or_default();
     let artist = artist.unwrap_or_default();
-    let in_library: i64 = c
-        .prepare_cached("SELECT count(DISTINCT track_id) FROM song_index WHERE artist_fold = ?1 AND album_fold = ?2 AND unreleased = 0")?
-        .query_row(params![a, al], |r| r.get(0))?;
+    let in_library = album_in_library(c, &a, &al)?;
     let (thumb, request) = known.get(&a, &al);
     Ok(PlayedRow {
         kind: Kind::Album,
@@ -478,7 +484,7 @@ fn album_row(c: &Connection, known: &Known, a: String, al: String, plays: i64, m
         first_played: first,
         last_played: last,
         songs: Some(songs as u64),
-        in_library: Some(in_library as u64),
+        in_library: Some(in_library),
         thumb,
         request,
     })

@@ -24,6 +24,7 @@ use crate::error::{AppError, AppResult};
 use crate::lidarr::Lidarr;
 use crate::lidarr::api::LidarrRoute;
 use crate::lidarr::homeside::QueuedWrite;
+use crate::lidarr::waves::Waves;
 use crate::plex::PlexState;
 use crate::plex::keychain::{ACCOUNT_TOKEN, TokenStore};
 use crate::social::listen::relay::{RelayEvent, RelayFactory};
@@ -48,6 +49,9 @@ pub struct Seen {
     pub status: Option<BridgeStatus>,
     #[serde(default)]
     pub music: MusicAccess,
+    /// It can run Bring in my listening.
+    #[serde(default)]
+    pub waves: bool,
 }
 
 /// One paired Bridge, for Settings.
@@ -109,6 +113,11 @@ pub struct Desktop {
     notify: RwLock<Option<Arc<dyn Fn() + Send + Sync>>>,
     /// The settings last sent, per link (this run only), so a change goes out.
     sent_config: Mutex<HashMap<String, String>>,
+    /// Bring in my listening, which a Bridge can run.
+    waves: RwLock<Option<Waves>>,
+    waves_changed: Arc<Notify>,
+    /// The plan last sent, per link (this run only).
+    sent_plan: Mutex<HashMap<String, String>>,
 }
 
 impl Desktop {
@@ -128,11 +137,58 @@ impl Desktop {
             links_changed: Notify::new(),
             notify: RwLock::default(),
             sent_config: Mutex::default(),
+            waves: RwLock::default(),
+            waves_changed: Arc::new(Notify::new()),
+            sent_plan: Mutex::default(),
         });
         // Lidarr's last route: through a Bridge that's answering.
         let weak = Arc::downgrade(&me);
         me.d.lidarr.set_bridge_route(Some(Arc::new(move || weak.upgrade().and_then(|d| d.route()))));
         me
+    }
+
+    /// Bring in my listening: handed to a paired Bridge that can run it.
+    pub fn set_waves(&self, w: Waves) {
+        let n = self.waves_changed.clone();
+        w.set_on_change(Arc::new(move || n.notify_one()));
+        *self.waves.write() = Some(w);
+    }
+
+    /// Send the Bridge Bring in my listening's plan (when it changed since
+    /// the last one, or `always`): to the Bridge that has the waves, else
+    /// the first one answering that can run them.
+    pub async fn send_waves_plan(&self, always: bool) {
+        let Some(w) = self.waves.read().clone() else { return };
+        let now = self.now_s();
+        let links = self.wire.links.links();
+        let held = w.lease().and_then(|l| links.iter().find(|x| x.id == l.link).cloned());
+        let link = held.or_else(|| {
+            links.iter().find(|l| {
+                let s = self.seen(&l.id);
+                s.waves && s.last_seen.is_some_and(|t| now - t < ONLINE_S)
+            }).cloned()
+        });
+        let Some(link) = link else { return };
+        let name = self.wire.links.all().into_iter().find(|p| p.id == link.id).map(|p| p.name).unwrap_or_default();
+        let plan = match w.bridge_plan(&link.id, &name).await {
+            Ok(Some(p)) => p,
+            Ok(None) => return,
+            Err(e) => {
+                tracing::warn!("bring in my listening: {e}");
+                return;
+            }
+        };
+        let Ok(json) = serde_json::to_string(&plan) else { return };
+        if !always && self.sent_plan.lock().get(&link.id) == Some(&json) {
+            return;
+        }
+        match self.wire.send(&link, &Msg::WavesPlan(Box::new(plan))).await {
+            Ok(()) => {
+                self.sent_plan.lock().insert(link.id.clone(), json);
+            }
+            Err(e) => tracing::info!("bring in my listening: the Bridge didn't get the plan: {e}"),
+        }
+        self.changed();
     }
 
     /// Tell the UI something changed (set by the app).
@@ -267,6 +323,15 @@ impl Desktop {
         if let Some(stop) = self.listeners.lock().remove(id) {
             let _ = stop.send(true);
         }
+        if let Some(w) = self.waves.read().clone() {
+            // Its waves come back to this computer.
+            let id = id.to_string();
+            tokio::spawn(async move {
+                if let Err(e) = w.bridge_gone(&id).await {
+                    tracing::warn!("bring in my listening: {e}");
+                }
+            });
+        }
         self.wire.links.remove(id)?;
         let _ = self.d.db.write(|c| {
             c.execute("DELETE FROM kv WHERE key = ?1", [seen_key(id)])?;
@@ -337,14 +402,32 @@ impl Desktop {
         let now = self.now_s();
         self.set_seen(&link.id, |s| s.last_seen = Some(now));
         match msg {
-            Msg::Hello { name, version, music } => {
+            Msg::Hello { name, version, music, waves } => {
                 let _ = self.wire.links.update(&link.id, |p| {
                     p.name = name.chars().take(60).collect();
                     p.version = version.chars().take(20).collect();
                 });
-                self.set_seen(&link.id, |s| s.music = music);
+                self.set_seen(&link.id, |s| {
+                    s.music = music;
+                    s.waves = waves;
+                });
                 self.send_config_to(link, true).await;
                 self.flush_entries().await;
+                if waves {
+                    self.send_waves_plan(true).await;
+                }
+                self.changed();
+            }
+            Msg::WavesProgress(p) => {
+                self.set_seen(&link.id, |s| s.waves = true);
+                let w = self.waves.read().clone();
+                if let Some(w) = w {
+                    match w.bridge_progress(&link.id, *p).await {
+                        Ok(true) => self.send_waves_plan(true).await,
+                        Ok(false) => {}
+                        Err(e) => tracing::warn!("bring in my listening: {e}"),
+                    }
+                }
                 self.changed();
             }
             Msg::Status(st) => {
@@ -352,6 +435,9 @@ impl Desktop {
                     s.music = st.music;
                     s.status = Some(*st);
                 });
+                if self.seen(&link.id).waves {
+                    self.send_waves_plan(false).await;
+                }
                 self.changed();
             }
             Msg::Entries { entries } => {
@@ -366,7 +452,7 @@ impl Desktop {
                 tracing::info!("A Bridge unpaired itself.");
                 let _ = self.forget(&link.id);
             }
-            Msg::Config(_) | Msg::Get { .. } | Msg::Write { .. } => {}
+            Msg::Config(_) | Msg::Get { .. } | Msg::Write { .. } | Msg::WavesPlan(_) => {}
         }
     }
 
@@ -398,6 +484,9 @@ impl Desktop {
                                 tracing::info!("bridge pairing: {}", peer::relay_error(e));
                             }
                             self.changed();
+                        } else {
+                            // Back in touch: the Bridge running the waves says how they went.
+                            self.send_waves_plan(true).await;
                         }
                     }
                     Incoming::Msg(id, msg) => {
@@ -407,10 +496,12 @@ impl Desktop {
                     }
                 },
                 _ = self.links_changed.notified() => {}
+                _ = self.waves_changed.notified() => self.send_waves_plan(false).await,
                 _ = settings.tick() => {
                     for link in self.wire.links.links() {
                         self.send_config_to(&link, false).await;
                     }
+                    self.send_waves_plan(false).await;
                 }
                 c = changes.recv() => {
                     if c.is_ok_and(|c| c.namespaces.iter().any(|n| n == LIDARR.name())) && !self.wire.links.all().is_empty() {
