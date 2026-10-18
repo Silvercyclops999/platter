@@ -569,7 +569,7 @@ export interface LyricsCheckStatus {
  * checking: being compared with the song and nothing safe to show yet;
  * noneMatched: every set found disagreed with the song; chosenNone: the user chose no lyrics.
  */
-export type LyricsNotice = "versionHeld" | "checking" | "noneMatched" | "chosenNone";
+export type LyricsNotice = "versionHeld" | "checking" | "noneMatched" | "chosenNone" | "unavailable" | "instrumental";
 
 /** What the check said about one set of lyrics. */
 export type LyricsVerdict = "match" | "matchOffset" | "noMatch" | "cantTell";

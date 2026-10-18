@@ -14,7 +14,6 @@ import { backend } from "../lib/backend";
 import { formatDuration, trackArtistLine } from "../lib/format";
 import type { LyricLine, Lyrics, LyricsCandidate, LyricsCandidates, LyricsCheck, LyricsCheckStatus, LyricsVerdict, Track } from "../lib/types";
 import { openLyricsEditor } from "../stores/lyricsEditor";
-import { usePlayer } from "../stores/player";
 import { useSettings, updateSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import type { MenuItem } from "../stores/ui";
@@ -23,12 +22,14 @@ import {
   chooseLyrics,
   closeWrongLyrics,
   NUDGE_MS,
+  nudgeLyricsOffset,
+  offsetArrived,
   openWrongLyrics,
   setLyricsOffset,
   setTapping,
   useWrongLyrics,
 } from "../stores/wrongLyrics";
-import { loadCheckStatus, lyricsChanged, retryCheck, useLyricsTrust } from "./lyrics";
+import { currentPositionMs, loadCheckStatus, lyricsChanged, retryCheck, useLyricsTrust } from "./lyrics";
 import { ShareTranscription } from "./ShareTranscription";
 import "./lyrics-trust.css";
 
@@ -102,7 +103,12 @@ export const NOTICE_TEXT = {
   checking: "Checking lyrics against the song…",
   noneMatched: "None of the lyrics found match this song",
   chosenNone: "You turned lyrics off for this song",
+  unavailable: "Couldn't get lyrics right now",
+  instrumental: "This song is instrumental",
 } as const;
+
+/** Under "Couldn't get lyrics right now". */
+export const UNAVAILABLE_NOTE = "A lyrics source couldn't be reached. Platter asks again when you're back online.";
 
 /** What a check in progress is doing, in words; `stuck` when it couldn't run and Try again helps. */
 export function checkProgress(s: LyricsCheckStatus | undefined): { text: string; spin: boolean; retry: boolean } | null {
@@ -259,11 +265,29 @@ function CheckStatus({ lyrics, track }: { lyrics: Lyrics; track: Track }) {
   );
 }
 
+/** Said on the timing controls while the check may still move the timing itself. */
+export const TIMING_HELD = "Timing can be moved once the check against the song finishes";
+
+/**
+ * The check against the song is still running and may move the timing
+ * itself: a nudge now would be added on top of its correction, so the
+ * stepper and Tap to sync wait. They come back if the check stalls.
+ */
+export function useTimingHeld(lyrics: Lyrics, trackId: string): boolean {
+  const { phase } = useCheckPhase(trackId, lyrics.check);
+  const failed = useLyricsTrust((s) => s.checks[trackId]?.state === "failed");
+  return lyrics.check === "checking" && phase !== "stuck" && !failed;
+}
+
 /** −, the offset (click to reset) and +, in one control. The - and + keys nudge too. */
-function TimingStepper({ lyrics, track }: { lyrics: Lyrics; track: Track }) {
-  const offset = lyrics.offsetMs ?? 0;
+function TimingStepper({ lyrics, track, held }: { lyrics: Lyrics; track: Track; held: boolean }) {
+  const fetched = lyrics.offsetMs ?? 0;
+  // A press shows at once, before the lyrics come back with it.
+  const offset = useWrongLyrics((s) => s.offsets[track.id] ?? fetched);
+  useEffect(() => offsetArrived(track.id, fetched), [track.id, fetched]);
   const pickerOpen = useWrongLyrics((s) => !!s.track);
   useEffect(() => {
+    if (held) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || pickerOpen) return;
       const t = e.target as HTMLElement | null;
@@ -271,21 +295,23 @@ function TimingStepper({ lyrics, track }: { lyrics: Lyrics; track: Track }) {
       const step = e.key === "-" || e.key === "_" ? -NUDGE_MS : e.key === "+" || e.key === "=" ? NUDGE_MS : 0;
       if (!step) return;
       e.preventDefault();
-      void setLyricsOffset(track.id, offset + step);
+      // From what shows now, so a held key or quick presses all count.
+      void nudgeLyricsOffset(track.id, fetched, step);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [track.id, offset, pickerOpen]);
+  }, [track.id, fetched, pickerOpen, held]);
   // A new song ends tapping.
   useEffect(() => () => setTapping(null), [track.id]);
   return (
-    <span className="lyrics-trust__stepper" role="group" aria-label="Lyrics timing">
+    <span className="lyrics-trust__stepper" role="group" aria-label="Lyrics timing" title={held ? TIMING_HELD : undefined}>
       <button
         type="button"
         className="lyrics-trust__step"
         aria-label="Show lyrics 0.5 seconds earlier"
-        title="Earlier (−)"
-        onClick={() => void setLyricsOffset(track.id, offset - NUDGE_MS)}
+        title={held ? TIMING_HELD : "Earlier (−)"}
+        disabled={held}
+        onClick={() => void nudgeLyricsOffset(track.id, fetched, -NUDGE_MS)}
       >
         <Minus size={14} aria-hidden="true" />
       </button>
@@ -295,6 +321,7 @@ function TimingStepper({ lyrics, track }: { lyrics: Lyrics; track: Track }) {
           className="lyrics-trust__offset is-moved"
           aria-label={`Timing moved ${offsetText(offset)}. Reset`}
           title="Reset the timing"
+          disabled={held}
           onClick={() => void setLyricsOffset(track.id, 0)}
         >
           {offsetText(offset)}
@@ -308,8 +335,9 @@ function TimingStepper({ lyrics, track }: { lyrics: Lyrics; track: Track }) {
         type="button"
         className="lyrics-trust__step"
         aria-label="Show lyrics 0.5 seconds later"
-        title="Later (+)"
-        onClick={() => void setLyricsOffset(track.id, offset + NUDGE_MS)}
+        title={held ? TIMING_HELD : "Later (+)"}
+        disabled={held}
+        onClick={() => void nudgeLyricsOffset(track.id, fetched, NUDGE_MS)}
       >
         <Plus size={14} aria-hidden="true" />
       </button>
@@ -331,6 +359,11 @@ function collapsed(el: HTMLElement | null): boolean {
  */
 export function LyricsTools({ lyrics, track, synced }: { lyrics: Lyrics; track: Track; synced: boolean }) {
   const tapping = useWrongLyrics((s) => s.tapping === track.id);
+  const held = useTimingHeld(lyrics, track.id);
+  // The check started meanwhile: tapping waits with the stepper.
+  useEffect(() => {
+    if (held && useWrongLyrics.getState().tapping === track.id) setTapping(null);
+  }, [held, track.id]);
   const tapRef = useRef<HTMLButtonElement>(null);
   const wrongRef = useRef<HTMLButtonElement>(null);
   const shareRef = useRef<HTMLSpanElement>(null);
@@ -339,7 +372,7 @@ export function LyricsTools({ lyrics, track, synced }: { lyrics: Lyrics; track: 
     const items: MenuItem[] = [];
     const share = shareRef.current?.querySelector("button") ?? null;
     if (collapsed(share)) items.push({ label: share!.textContent ?? "", icon: Globe, onSelect: () => share!.click() });
-    if (collapsed(tapRef.current)) items.push({ label: "Tap to sync", icon: Hand, checked: tapping, onSelect: toggleTap });
+    if (collapsed(tapRef.current) && !held) items.push({ label: "Tap to sync", icon: Hand, checked: tapping, onSelect: toggleTap });
     if (collapsed(wrongRef.current)) items.push({ label: "Wrong lyrics?", icon: AlertTriangle, onSelect: () => openWrongLyrics(track) });
     if (items.length) openContextMenu("More lyrics tools", items, e.currentTarget);
   };
@@ -358,14 +391,15 @@ export function LyricsTools({ lyrics, track, synced }: { lyrics: Lyrics; track: 
       <div className="lyrics-trust__bar">
         <CheckStatus lyrics={lyrics} track={track} />
         <span className="lyrics-trust__actions">
-          {synced && <TimingStepper lyrics={lyrics} track={track} />}
+          {synced && <TimingStepper lyrics={lyrics} track={track} held={held} />}
           {synced && (
             <button
               ref={tapRef}
               type="button"
               className={`lyrics-trust__btn lyrics-trust__tap ${tapping ? "is-on" : ""}`}
               aria-pressed={tapping}
-              title="Click a line as it's sung to line the lyrics up there"
+              title={held ? TIMING_HELD : "Click a line as it's sung to line the lyrics up there"}
+              disabled={held}
               onClick={toggleTap}
             >
               Tap to sync
@@ -401,7 +435,9 @@ export function LyricsTools({ lyrics, track, synced }: { lyrics: Lyrics; track: 
 /** A line clicked while tapping: set the offset so it starts now. True when it was used. */
 export function tapLine(trackId: string, line: LyricLine, lyrics: Lyrics): boolean {
   if (useWrongLyrics.getState().tapping !== trackId) return false;
-  const pos = usePlayer.getState().positionMs;
+  // Where playback is this instant, not the last 4-a-second tick.
+  const pos = currentPositionMs();
+  // The line's time already carries the offset these lyrics came with.
   void setLyricsOffset(trackId, tapOffset(line, pos, lyrics.offsetMs ?? 0));
   setTapping(null);
   return true;
@@ -422,6 +458,7 @@ export function LyricsNotice({ info, track }: { info: Lyrics; track: Track }) {
           This is another version of the song (unreleased, alternate, live or tagged with a version), so its words may differ.
         </p>
       )}
+      {n === "unavailable" && <p className="lyrics-trust__notice-note">{UNAVAILABLE_NOTE}</p>}
       {n === "checking" &&
         (p ? (
           <p className="lyrics-trust__notice-note" role="status">
@@ -449,7 +486,15 @@ export function LyricsNotice({ info, track }: { info: Lyrics; track: Track }) {
             Try again
           </Button>
         )}
-        <Button variant={n === "versionHeld" || n === "chosenNone" ? "ghost" : "primary"} onClick={() => openWrongLyrics(track)}>
+        {n === "unavailable" && (
+          <Button variant="primary" onClick={() => lyricsChanged(track.id)}>
+            Retry
+          </Button>
+        )}
+        <Button
+          variant={n === "versionHeld" || n === "chosenNone" || n === "unavailable" || n === "instrumental" ? "ghost" : "primary"}
+          onClick={() => openWrongLyrics(track)}
+        >
           Wrong lyrics?
         </Button>
       </div>
@@ -537,6 +582,16 @@ export function WrongLyricsDialog() {
       if (msg) toast.info(msg);
     }
   };
+  const lookAgain = async () => {
+    try {
+      await backend.lyricsLookAgain(track.id);
+      setList(null);
+      // Asks for the lyrics and the list again.
+      lyricsChanged(track.id);
+    } catch {
+      toast.error("Couldn't look for lyrics again");
+    }
+  };
   const transcribeNow = async () => {
     if (!transcribeOn) await updateSettings({ transcribeLyrics: true });
     // Picked first, so the song is transcribed even when official lyrics match.
@@ -570,6 +625,14 @@ export function WrongLyricsDialog() {
               Let Platter pick
             </button>
           )}
+          <button
+            type="button"
+            className="lyrics__source-edit wrong-lyrics__auto"
+            title="Ask the lyrics sources again, in case they have this song now"
+            onClick={() => void lookAgain()}
+          >
+            Look again
+          </button>
           {!c.canCheck && <CheckModelOffer />}
         </>
       )}

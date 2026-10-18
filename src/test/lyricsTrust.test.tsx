@@ -12,7 +12,7 @@ import { mockLyrics, mockLyricsKind } from "../lib/mock/details";
 import { DEFAULT_SETTINGS, type Lyrics, type PlayerState, type Track, type TranscribeStatus } from "../lib/types";
 import { trackMenuItems } from "../components/TrackRow";
 import { LyricsPane } from "../shell/LyricsView";
-import { clearLyricsCache, lyricsChanged, loadLyrics, lyricsSeen, setCheckStatus, useLyricsTrust } from "../shell/lyrics";
+import { actionableNotice, clearLyricsCache, lyricsChanged, loadLyrics, loadLyricsInfo, lyricsSeen, setCheckStatus, useLyricsTrust } from "../shell/lyrics";
 import {
   CHECK_STUCK_MS,
   CHECK_TEXT,
@@ -22,6 +22,7 @@ import {
   offsetText,
   resetCheckClocks,
   tapOffset,
+  UNAVAILABLE_NOTE,
   WrongLyricsDialog,
 } from "../shell/LyricsTrust";
 import { SettingsPage } from "../pages/SettingsPage";
@@ -91,7 +92,7 @@ beforeEach(async () => {
   mock.lyricsVerdicts.clear();
   useSettings.setState({ settings: { ...DEFAULT_SETTINGS } });
   useTranscribe.setState({ status: null, empty: new Set() });
-  useWrongLyrics.setState({ track: null, tapping: null });
+  useWrongLyrics.setState({ track: null, tapping: null, offsets: {} });
   useRouter.getState().reset();
   mock.checkStatuses.clear();
   useLyricsTrust.setState({ checks: {} });
@@ -375,6 +376,79 @@ describe("timing", () => {
     expect(tapOffset({ startMs: 10_000 }, 9_000, 500)).toBe(-500);
   });
 
+  it("counts every quick press: shown at once, written one at a time, none lost", async () => {
+    let inFlight = 0;
+    let most = 0;
+    const real = mock.lyricsOffset.bind(mock);
+    const write = vi.spyOn(backend, "lyricsOffset").mockImplementation(async (id, ms) => {
+      most = Math.max(most, ++inFlight);
+      try {
+        return await real(id, ms);
+      } finally {
+        inFlight--;
+      }
+    });
+    at(lines, 0);
+    render(<LyricsPane />);
+    const later = await screen.findByRole("button", { name: "Show lyrics 0.5 seconds later" });
+    fireEvent.click(later);
+    fireEvent.click(later);
+    fireEvent.keyDown(window, { key: "+" });
+    // All three show before any answer comes back.
+    expect(screen.getByRole("button", { name: `Timing moved ${offsetText(1500)}. Reset` })).toBeInTheDocument();
+    await waitFor(() => expect(mock.lyricsChoices.get(lines.id)?.offsetMs).toBe(1500));
+    expect(most).toBe(1);
+    expect(write.mock.calls[write.mock.calls.length - 1]?.[1]).toBe(1500);
+    await waitFor(() => expect(useWrongLyrics.getState().offsets[lines.id]).toBeUndefined());
+    expect(screen.getByRole("button", { name: `Timing moved ${offsetText(1500)}. Reset` })).toBeInTheDocument();
+  });
+
+  it("Tap to sync uses where playback is this instant, not the last tick", async () => {
+    let now = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const t = mockLyrics(lines)!.timed!;
+    const target = t.find((l, i) => i > 2 && l.text)!;
+    at(lines, 0);
+    act(() => usePlayer.setState({ state: { ...state(lines), status: "playing" }, positionMs: target.startMs + 2_340 }));
+    render(<LyricsPane />);
+    await screen.findAllByRole("button", { name: target.text });
+    fireEvent.click(await screen.findByRole("button", { name: "Tap to sync" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Tap to sync" })).toHaveAttribute("aria-pressed", "true"));
+    // 200 ms after the last position tick.
+    now = 1_200;
+    fireEvent.click(screen.getAllByRole("button", { name: target.text }).find((b) => b.classList.contains("lyrics__line"))!);
+    await waitFor(() => expect(mock.lyricsChoices.get(lines.id)?.offsetMs).toBe(2_500));
+  });
+
+  it("holds the nudge while the check may still move the timing itself", async () => {
+    const synced = mockLyrics(lines)!;
+    const spy = vi.spyOn(backend, "lyrics").mockResolvedValue({ ...synced, check: "checking" });
+    const write = vi.spyOn(backend, "lyricsOffset");
+    at(lines, 0);
+    render(<LyricsPane />);
+    const later = await screen.findByRole("button", { name: "Show lyrics 0.5 seconds later" });
+    expect(later).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Tap to sync" })).toBeDisabled();
+    fireEvent.keyDown(window, { key: "+" });
+    fireEvent.click(later);
+    expect(write).not.toHaveBeenCalled();
+    // The check landed (and fixed the timing itself): the nudge is back.
+    spy.mockResolvedValue({ ...synced, check: "checked", autoOffsetMs: 1500 });
+    act(() => lyricsChanged(lines.id));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Show lyrics 0.5 seconds later" })).toBeEnabled());
+    fireEvent.keyDown(window, { key: "+" });
+    await waitFor(() => expect(write).toHaveBeenCalledWith(lines.id, 500));
+  });
+
+  it("lets the nudge back if the check stalls", async () => {
+    vi.spyOn(backend, "lyrics").mockResolvedValue({ ...mockLyrics(lines)!, check: "checking" });
+    at(lines, 0);
+    render(<LyricsPane />);
+    expect(await screen.findByRole("button", { name: "Show lyrics 0.5 seconds later" })).toBeDisabled();
+    act(() => setCheckStatus({ trackId: lines.id, state: "failed", reason: "stuck" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Show lyrics 0.5 seconds later" })).toBeEnabled());
+  });
+
   it("has no timing nudge for lyrics without timing", async () => {
     at(plain, 0);
     render(<LyricsPane />);
@@ -404,6 +478,77 @@ describe("when nothing is shown", () => {
     spy.mockResolvedValue({ synced: false, lines: [], notice: "noneMatched" });
     act(() => lyricsChanged(lines.id));
     expect(await screen.findByText(NOTICE_TEXT.noneMatched)).toBeInTheDocument();
+  });
+});
+
+describe("couldn't ask, instrumentals and Look again", () => {
+  it("a source that couldn't be reached isn't 'no lyrics': Retry, Wrong lyrics?, the button stays on", async () => {
+    mock.lyricsUnreachable = true;
+    try {
+      at(lines, 0);
+      render(<LyricsPane />);
+      expect(await screen.findByText(NOTICE_TEXT.unavailable)).toBeInTheDocument();
+      expect(screen.getByText(UNAVAILABLE_NOTE)).toBeInTheDocument();
+      expect(screen.queryByText("No lyrics for this song")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Add lyrics" })).toBeNull();
+      // The song's menu offers Wrong lyrics? for it.
+      expect(lyricsSeen(lines.id)).toBe(true);
+      expect(actionableNotice({ synced: false, lines: [], notice: "unavailable" })).toBe(true);
+      // Back: Retry asks again and the lyrics show.
+      mock.lyricsUnreachable = false;
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+      expect(await screen.findByText(CHECK_TEXT.notChecked)).toBeInTheDocument();
+    } finally {
+      mock.lyricsUnreachable = false;
+    }
+  });
+
+  it("isn't cached, and coming back online asks again", async () => {
+    mock.lyricsUnreachable = true;
+    const ask = vi.spyOn(backend, "lyrics");
+    try {
+      at(lines, 0);
+      render(<LyricsPane />);
+      expect(await screen.findByText(NOTICE_TEXT.unavailable)).toBeInTheDocument();
+      expect((await loadLyricsInfo(lines.id))?.notice).toBe("unavailable");
+      expect(ask).toHaveBeenCalledTimes(2);
+      mock.lyricsUnreachable = false;
+      act(() => {
+        window.dispatchEvent(new Event("online"));
+      });
+      expect(await screen.findByText(CHECK_TEXT.notChecked)).toBeInTheDocument();
+    } finally {
+      mock.lyricsUnreachable = false;
+    }
+  });
+
+  it("says when a song is instrumental, without Add lyrics, and dims the button", async () => {
+    mock.lyricsDown = true;
+    mock.lyricsInstrumental.add(lines.id);
+    try {
+      at(lines, 0);
+      render(<LyricsPane />);
+      expect(await screen.findByText(NOTICE_TEXT.instrumental)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Add lyrics" })).toBeNull();
+      expect(actionableNotice({ synced: false, lines: [], notice: "instrumental" })).toBe(false);
+    } finally {
+      mock.lyricsDown = false;
+      mock.lyricsInstrumental.clear();
+    }
+  });
+
+  it("Look again in Wrong lyrics? forgets the song's misses and asks again", async () => {
+    at(lines, 0);
+    useWrongLyrics.setState({ track: lines });
+    const list = vi.spyOn(backend, "lyricsCandidates");
+    render(<WrongLyricsDialog />);
+    const dialog = await screen.findByRole("dialog", { name: "Wrong lyrics?" });
+    const look = await within(dialog).findByRole("button", { name: "Look again" });
+    const before = list.mock.calls.length;
+    fireEvent.click(look);
+    await waitFor(() => expect(mock.lookedAgain).toContain(lines.id));
+    await waitFor(() => expect(list.mock.calls.length).toBeGreaterThan(before));
+    expect(await within(dialog).findByRole("button", { name: "Look again" })).toBeInTheDocument();
   });
 });
 

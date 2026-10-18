@@ -551,7 +551,7 @@ or another Home user isn't in the list under that token and is refused.
   `[by:...]` and a copyright line, or plain text.
 - After a burst of a few dozen lyrics requests the server started answering
   404 for every lyrics stream (ones that had returned 200 minutes before).
-  The app treats a failed lyrics stream as "no lyrics" without caching it.
+  The app treats a failed lyrics stream as "couldn't ask" (Retry), not "no lyrics", and never caches it.
 - Telling a sidecar file from agent lyrics: of 65 well-played tracks checked
   again, the one with lyrics had `provider: "com.plexapp.agents.lyricfind"`.
   No sidecar `.lrc` or `.txt` was in that sample, so the app's rule is an

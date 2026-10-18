@@ -26,11 +26,12 @@ import {
   useCoverColors,
   useNowPlayingDetails,
 } from "./nowPlaying";
+import { timedLines, useLyrics } from "./lyrics";
 
 /** Requested art size for the panel's cover: the widest panel minus its padding. */
 const PANEL_ART = 388;
 
-type View = "main" | "lyrics" | "bio";
+type View = "main" | "bio";
 
 /** The context name in the header, linking to it when it's a page. */
 function ContextName({ className = "" }: { className?: string }) {
@@ -210,23 +211,17 @@ function PanelBody({ track, view, setView }: { track: Track; view: View; setView
   const { details } = useNowPlayingDetails(track.id);
   const lyricsOn = useUi((s) => s.nowPlayingPrefs.lyricsCard);
   const colors = useCoverColors(track.thumb);
-  const lyrics = lyricsOn && details?.lyrics?.lines.length ? details.lyrics : null;
+  // The same lyrics the lyrics view shows (your pick, LRCLIB, your own, a
+  // transcription), and no card when it has none to show.
+  const { lyrics: found } = useLyrics(lyricsOn ? track.id : null);
+  const lines = found ? (timedLines(found)?.map((l) => l.text) ?? found.lines) : [];
+  const lyrics = lyricsOn && found && lines.some((l) => l.trim()) ? { lines } : null;
   // Offline: sections that need the server (about the artist, its credits) step aside.
   const offline = useApp((s) => isOffline(s.health));
   const about = !offline && details?.artist?.summary ? details.artist : null;
   // The spinning-record style turns the cover while music plays.
   const spinning = usePlayer((s) => s.state?.status === "playing");
 
-  if (view === "lyrics" && lyrics) {
-    return (
-      <SubView title={`Lyrics: ${track.title}`} onBack={() => setView("main")}>
-        <div className="np-lyrics-full">
-          {lyrics.lines.map((l, i) => (l ? <p key={i}>{l}</p> : <p key={i} className="np-lyrics-full__gap" aria-hidden="true" />))}
-        </div>
-        {lyrics.credit && <p className="np-lyrics-credit">{lyrics.credit}</p>}
-      </SubView>
-    );
-  }
   if (view === "bio" && about) {
     return (
       <SubView title={about.title} onBack={() => setView("main")}>
@@ -245,7 +240,8 @@ function PanelBody({ track, view, setView }: { track: Track; view: View; setView
         <Art path={track.thumb} fluid requestSize={PANEL_ART} />
       </button>
       <TrackTitle track={track} />
-      {lyrics && <LyricsCard lines={lyrics.lines} tint={colors?.shade ?? null} onOpen={() => setView("lyrics")} />}
+      {/* Show lyrics opens the lyrics view itself: synced, with its tools. */}
+      {lyrics && <LyricsCard lines={lyrics.lines} tint={colors?.shade ?? null} onOpen={() => fullWindow.open("lyrics")} />}
       {about && <AboutCard details={about} onOpen={() => setView("bio")} />}
       <CreditsCard track={track} details={offline ? null : details} />
       <NextCard />

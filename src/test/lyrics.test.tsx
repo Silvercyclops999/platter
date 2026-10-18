@@ -10,7 +10,7 @@ import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { mockLyrics, mockLyricsKind } from "../lib/mock/details";
 import { DEFAULT_SETTINGS, type Lyrics, type PlayerState, type Track } from "../lib/types";
-import { BORROWED_NOTE, LyricsPane, UNSYNCED_NOTE } from "../shell/LyricsView";
+import { BORROWED_NOTE, isInstrumentalGap, LyricsPane, UNSYNCED_NOTE } from "../shell/LyricsView";
 import { SettingsPage, SOURCE_NOTICES } from "../pages/SettingsPage";
 import {
   clearLyricsCache,
@@ -27,7 +27,7 @@ import {
 } from "../shell/lyrics";
 import { PlayerBar } from "../shell/PlayerBar";
 import { FULL_WINDOW_PREFS_DEFAULT, fullWindow, loadFullWindowPrefs, useFullWindow } from "../stores/fullWindow";
-import { usePlayer } from "../stores/player";
+import { player, usePlayer } from "../stores/player";
 import { useRouter } from "../stores/router";
 import { loadSettings, useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
@@ -206,8 +206,9 @@ describe("synced lyrics", () => {
     // No timer brings following back: the pill stays.
     act(() => vi.advanceTimersByTime(60_000));
     expect(screen.getByRole("button", { name: /^Sync/ })).toBeInTheDocument();
-    // The highlight keeps moving while scrolled away.
-    act(() => usePlayer.setState({ positionMs: 90_000 }));
+    // The highlight keeps moving while scrolled away (ticks, not a seek).
+    act(() => usePlayer.setState({ positionMs: 31_000 }));
+    expect(screen.getByRole("button", { name: /^Sync/ })).toBeInTheDocument();
     // Sync resumes at once.
     fireEvent.click(screen.getByRole("button", { name: /^Sync/ }));
     expect(screen.queryByRole("button", { name: /^Sync/ })).toBeNull();
@@ -295,18 +296,25 @@ describe("plain and missing lyrics", () => {
     expect(await screen.findByText("No lyrics for this song")).toBeInTheDocument();
   });
 
-  it("lyrics source down: silent, the view says there are none", async () => {
-    mock.lyricsDown = true;
-    at(words, 0);
-    render(<LyricsPane />);
-    expect(await screen.findByText("No lyrics for this song")).toBeInTheDocument();
+  it("lyrics sources out of reach: the view says it couldn't get them, not that there are none", async () => {
+    mock.lyricsUnreachable = true;
+    try {
+      at(words, 0);
+      render(<LyricsPane />);
+      expect(await screen.findByText("Couldn't get lyrics right now")).toBeInTheDocument();
+      expect(screen.queryByText("No lyrics for this song")).toBeNull();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    } finally {
+      mock.lyricsUnreachable = false;
+    }
   });
 
-  it("a failed fetch is none, and isn't remembered", async () => {
+  it("a failed fetch shows nothing, isn't remembered, and counts as looked up", async () => {
     const spy = vi.spyOn(backend, "lyrics").mockRejectedValueOnce({ kind: "network", message: "down" });
     expect(await loadLyrics(words.id)).toBeNull();
-    expect(await loadLyrics(words.id)).not.toBeNull();
+    expect((await loadLyricsInfo(words.id))?.notice).not.toBe("unavailable");
     expect(spy).toHaveBeenCalledTimes(2);
+    expect(lyricsSeen(words.id)).toBe(true);
   });
 });
 
@@ -518,5 +526,127 @@ describe("expanded view mode", () => {
     act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS, lyricsLrclib: true } }));
     await loadLyrics(none.id);
     expect(spy).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("following, seeking and the keyboard", () => {
+  const timed = () => mockLyrics(words)!.timed!;
+  const scrollerOf = async () => {
+    const el = await screen.findByLabelText("Lyrics", { selector: ".lyrics__scroll" });
+    const spy = vi.fn();
+    (el as HTMLElement & { scrollTo: unknown }).scrollTo = spy;
+    return { el, spy };
+  };
+
+  it("a seek while paused moves the highlight and the view at once, even after a hand scroll", async () => {
+    const t = timed();
+    at(words, 30_000);
+    render(<LyricsPane />);
+    const { el, spy } = await scrollerOf();
+    await screen.findByRole("button", { current: true });
+    fireEvent.wheel(el, { deltaY: 400 });
+    expect(screen.getByRole("button", { name: /^Sync/ })).toBeInTheDocument();
+    const target = t.findIndex((l) => l.text && l.startMs > 90_000);
+    act(() => void player.seek(t[target].startMs));
+    // Still paused: the line it landed on is current, followed, with no easing.
+    expect(usePlayer.getState().state?.status).toBe("paused");
+    expect(document.querySelectorAll(".lyrics__line")[target]).toHaveAttribute("aria-current", "true");
+    expect(screen.queryByRole("button", { name: /^Sync/ })).toBeNull();
+    expect(spy).toHaveBeenLastCalledWith(expect.objectContaining({ behavior: "auto" }));
+  });
+
+  it("pausing never steps the highlight back to the line before", async () => {
+    let now = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const t = timed();
+    const k = t.findIndex((l, i) => i > 1 && l.text && l.startMs - t[i - 1].startMs > 400);
+    at(words, 0);
+    at(words, t[k].startMs - 100, "playing");
+    render(<LyricsPane />);
+    await waitFor(() => expect(document.querySelectorAll(".lyrics__line")[k - 1]).toHaveAttribute("aria-current", "true"));
+    // 200 ms on, between ticks, the line has started; then pause.
+    now = 1_200;
+    act(() => usePlayer.setState({ state: state(words, "paused") }));
+    expect(document.querySelectorAll(".lyrics__line")[k]).toHaveAttribute("aria-current", "true");
+  });
+
+  it("re-centres when the layout changes under the current line", async () => {
+    const callbacks: (() => void)[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: () => void) {
+          callbacks.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    try {
+      at(words, 30_000);
+      render(<LyricsPane />);
+      const { spy } = await scrollerOf();
+      await screen.findByRole("button", { current: true });
+      expect(callbacks.length).toBeGreaterThan(0);
+      act(() => callbacks.forEach((f) => f()));
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("re-centres when a translation arrives", async () => {
+    await mock.settingsSet({ translationService: "https://tr.example.com" });
+    await loadSettings();
+    try {
+      at(words, 30_000);
+      render(<LyricsPane />);
+      const { spy } = await scrollerOf();
+      await screen.findByRole("button", { current: true });
+      fireEvent.click(await screen.findByRole("button", { name: "Translate" }));
+      await waitFor(() => expect(document.querySelector(".lyrics__extra--trans")).not.toBeNull());
+      expect(spy).toHaveBeenCalled();
+      // Its name includes the translation.
+      const current = screen.getByRole("button", { current: true });
+      expect(current.getAttribute("aria-label")).toMatch(/, \[en\] /);
+    } finally {
+      await mock.settingsSet({ translationService: "" });
+      await loadSettings();
+    }
+  });
+
+  it("one tab stop for the lines; arrows move between them; short verse breaks aren't announced", async () => {
+    const l: Lyrics = {
+      synced: true,
+      lines: [],
+      timed: [
+        { startMs: 0, text: "One" },
+        { startMs: 3_000, text: "" },
+        { startMs: 4_000, text: "Two" },
+        { startMs: 10_000, text: "" },
+        { startMs: 20_000, text: "Three" },
+      ],
+    };
+    expect(isInstrumentalGap(l.timed!, 1)).toBe(false);
+    expect(isInstrumentalGap(l.timed!, 3)).toBe(true);
+    vi.spyOn(backend, "lyrics").mockResolvedValue(l);
+    at(words, 4_500);
+    render(<LyricsPane />);
+    const two = await screen.findByRole("button", { name: "Two" });
+    await waitFor(() => expect(two).toHaveAttribute("aria-current", "true"));
+    const lines = [...document.querySelectorAll<HTMLElement>(".lyrics__line")];
+    expect(lines.filter((b) => b.tabIndex === 0)).toEqual([two]);
+    expect(lines[1]).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByRole("button", { name: "Instrumental" })).toBe(lines[3]);
+    two.focus();
+    fireEvent.keyDown(two, { key: "ArrowDown" });
+    expect(lines[3]).toHaveFocus();
+    fireEvent.keyDown(lines[3], { key: "ArrowDown" });
+    expect(screen.getByRole("button", { name: "Three" })).toHaveFocus();
+    fireEvent.keyDown(lines[4], { key: "ArrowUp" });
+    fireEvent.keyDown(lines[3], { key: "ArrowUp" });
+    // The verse break is skipped.
+    expect(two).toHaveFocus();
+    expect(screen.getByRole("button", { name: /^Sync/ })).toBeInTheDocument();
   });
 });

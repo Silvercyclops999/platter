@@ -13,9 +13,11 @@ interface WrongLyricsState {
   track: Track | null;
   /** The song whose lines set the timing when clicked, or null. */
   tapping: string | null;
+  /** Timing offsets asked for but not yet in the lyrics shown, per song (shown at once). */
+  offsets: Record<string, number>;
 }
 
-export const useWrongLyrics = create<WrongLyricsState>()(() => ({ track: null, tapping: null }));
+export const useWrongLyrics = create<WrongLyricsState>()(() => ({ track: null, tapping: null, offsets: {} }));
 
 export function openWrongLyrics(track: Track) {
   useWrongLyrics.setState({ track, tapping: null });
@@ -48,13 +50,61 @@ export const MAX_OFFSET_MS = 60_000;
 /** One press of the nudge buttons. */
 export const NUDGE_MS = 500;
 
-/** Set a song's timing offset (rounded to 0.1 s, kept within a minute). */
-export async function setLyricsOffset(trackId: string, offsetMs: number): Promise<void> {
-  const v = Math.max(-MAX_OFFSET_MS, Math.min(MAX_OFFSET_MS, Math.round(offsetMs / 100) * 100));
-  try {
-    await backend.lyricsOffset(trackId, v);
-    lyricsChanged(trackId);
-  } catch (e) {
-    toast.error(message(e));
-  }
+const clampOffset = (ms: number) => Math.max(-MAX_OFFSET_MS, Math.min(MAX_OFFSET_MS, Math.round(ms / 100) * 100));
+
+/** Writes going out per song: one at a time, the last value asked for wins. */
+const writing = new Map<string, Promise<void>>();
+
+function setPending(trackId: string, v: number | null) {
+  useWrongLyrics.setState((s) => {
+    const offsets = { ...s.offsets };
+    if (v === null) delete offsets[trackId];
+    else offsets[trackId] = v;
+    return { offsets };
+  });
+}
+
+/** The offset the song shows: the one asked for, until the lyrics carry it. */
+export function shownOffset(trackId: string, fetchedMs: number | undefined): number {
+  return useWrongLyrics.getState().offsets[trackId] ?? fetchedMs ?? 0;
+}
+
+/** The lyrics now carry `fetchedMs`: an offset asked for that matches is done. */
+export function offsetArrived(trackId: string, fetchedMs: number) {
+  if (!writing.has(trackId) && useWrongLyrics.getState().offsets[trackId] === fetchedMs) setPending(trackId, null);
+}
+
+/**
+ * Set a song's timing offset (rounded to 0.1 s, kept within a minute). It
+ * shows at once; writes go out one at a time, and presses made while one is
+ * out are folded into the next, so none is lost.
+ */
+export function setLyricsOffset(trackId: string, offsetMs: number): Promise<void> {
+  setPending(trackId, clampOffset(offsetMs));
+  const running = writing.get(trackId);
+  if (running) return running;
+  const run = (async () => {
+    let sent: number | undefined;
+    try {
+      for (;;) {
+        const want = useWrongLyrics.getState().offsets[trackId];
+        if (want === undefined || want === sent) break;
+        await backend.lyricsOffset(trackId, want);
+        sent = want;
+      }
+      writing.delete(trackId);
+      lyricsChanged(trackId);
+    } catch (e) {
+      writing.delete(trackId);
+      setPending(trackId, null);
+      toast.error(message(e));
+    }
+  })();
+  writing.set(trackId, run);
+  return run;
+}
+
+/** Nudge a song's timing by `deltaMs` from what it shows now (the last press included). */
+export function nudgeLyricsOffset(trackId: string, fetchedMs: number | undefined, deltaMs: number): Promise<void> {
+  return setLyricsOffset(trackId, shownOffset(trackId, fetchedMs) + deltaMs);
 }

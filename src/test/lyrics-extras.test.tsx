@@ -11,6 +11,7 @@ import { DEFAULT_SETTINGS, type PlayerState, type Track } from "../lib/types";
 import { SettingsPage } from "../pages/SettingsPage";
 import { clearLyricsCache } from "../shell/lyrics";
 import { LyricsPane } from "../shell/LyricsView";
+import { clearTranslations } from "../shell/lyricExtras";
 import { usePlayer } from "../stores/player";
 import { loadSettings, useSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
@@ -46,6 +47,7 @@ const view = () => screen.getByLabelText("Lyrics", { selector: ".lyrics__scroll"
 
 beforeEach(async () => {
   clearLyricsCache();
+  clearTranslations();
   mock.translateFails = false;
   useToasts.setState({ toasts: [] });
   await withSettings({});
@@ -73,8 +75,8 @@ describe("pronunciation", () => {
     await waitFor(() => expect(within(current).getByText(`roman ${line}`)).toHaveClass("lyrics__extra--pron"));
     expect(pron).toHaveBeenCalledWith(t.map((l) => l.text));
     expect(current.querySelectorAll(".lyrics__word.is-sung")).toHaveLength(2);
-    // The line's name is still the lyric itself.
-    expect(current).toHaveAccessibleName(t[line].text);
+    // The line's name is the lyric, then its pronunciation.
+    expect(current).toHaveAccessibleName(`${t[line].text}, roman ${line}`);
   });
 
   it("works on plain lyrics too", async () => {
@@ -107,6 +109,26 @@ describe("translation", () => {
     expect(view().querySelector(".lyrics__extra--trans")!.textContent).toMatch(/^\[fr\] /);
     await user.click(screen.getByRole("button", { name: "Hide translation" }));
     expect(view().querySelector(".lyrics__extra--trans")).toBeNull();
+  });
+
+  it("keeps a song's translation: Hide then Translate, or coming back, doesn't ask again", async () => {
+    const user = userEvent.setup();
+    await withSettings({ translationService: "https://tr.example.com", translateTo: "fr" });
+    const tr = vi.spyOn(backend, "lyricsTranslate");
+    at(plain, 40_000);
+    const { unmount } = render(<LyricsPane />);
+    await user.click(await screen.findByRole("button", { name: "Translate" }));
+    await waitFor(() => expect(view().querySelector(".lyrics__extra--trans")).not.toBeNull());
+    unmount();
+    render(<LyricsPane />);
+    await user.click(await screen.findByRole("button", { name: "Translate" }));
+    await waitFor(() => expect(view().querySelector(".lyrics__extra--trans")).not.toBeNull());
+    expect(tr).toHaveBeenCalledTimes(1);
+    // Another language is another translation.
+    await withSettings({ translationService: "https://tr.example.com", translateTo: "de" });
+    await user.click(await screen.findByRole("button", { name: "Translate" }));
+    await waitFor(() => expect(view().querySelector(".lyrics__extra--trans")!.textContent).toMatch(/^\[de\] /));
+    expect(tr).toHaveBeenCalledTimes(2);
   });
 
   it("a service that can't be reached says so and leaves the lyrics as they are", async () => {

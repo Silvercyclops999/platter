@@ -473,6 +473,8 @@ export interface Backend {
   lyricsCheckStatus(trackId: string): Promise<LyricsCheckStatus | null>;
   /** Pick the song's lyrics: a candidate key, "none", or null for automatic. */
   lyricsChoose(trackId: string, pick: string | null): Promise<void>;
+  /** Forget the song's remembered misses (and the server's reused answer) so the next lookup asks again. */
+  lyricsLookAgain(trackId: string): Promise<void>;
   /** The song's lyrics timing offset in ms (positive: later). */
   lyricsOffset(trackId: string, offsetMs: number): Promise<void>;
   /** How many songs have a lyrics choice or offset. */
@@ -1352,6 +1354,7 @@ export function createTauriBackend(): Backend {
     lyricsCandidates: (trackId) => call("lyrics_candidates", { trackId }),
     lyricsCheckStatus: (trackId) => call("lyrics_check_status", { trackId }),
     lyricsChoose: (trackId, pick) => call("lyrics_choose", { trackId, pick }),
+    lyricsLookAgain: (trackId) => call("lyrics_look_again", { trackId }),
     lyricsOffset: (trackId, offsetMs) => call("lyrics_offset", { trackId, offsetMs }),
     lyricsChoicesCount: () => call("lyrics_choices_count"),
     lyricsChoicesClear: () => call("lyrics_choices_clear"),

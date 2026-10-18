@@ -13,7 +13,18 @@ import { LYRIC_LINES_MAX } from "../lib/shareCard";
 import { trackArtistLine } from "../lib/format";
 import { useSettings } from "../stores/settings";
 import { LyricExtras, TranslateButton, useLyricExtras, type Extras } from "./lyricExtras";
-import { currentLineIndex, currentWordIndex, followTarget, interpolate, lineState, lyricsSourceLabel, timedLines, useLyrics } from "./lyrics";
+import {
+  currentLineIndex,
+  currentPositionMs,
+  currentWordIndex,
+  followTarget,
+  lineState,
+  lyricsSourceLabel,
+  onSeek,
+  setPlayhead,
+  timedLines,
+  useLyrics,
+} from "./lyrics";
 import { useCoverColors } from "./nowPlaying";
 import { TranscribeOffer } from "./TranscribeOffer";
 import { LyricsNotice, LyricsTools, tapLine } from "./LyricsTrust";
@@ -40,13 +51,36 @@ function scrollEl(el: HTMLElement, top: number, smooth: boolean) {
   else el.scrollTop = top;
 }
 
+/** A break in the singing this long or longer is read out as "Instrumental"; shorter ones are verse breaks. */
+export const INSTRUMENTAL_GAP_MS = 5000;
+
+/** Line `i` is a wordless break long enough to call instrumental (or the end of the song). */
+export function isInstrumentalGap(lines: LyricLine[], i: number): boolean {
+  const l = lines[i];
+  if (!l || l.text) return false;
+  const next = lines[i + 1];
+  return !next || next.startMs - l.startMs >= INSTRUMENTAL_GAP_MS;
+}
+
+/** What a screen reader says for a line: its words, then its pronunciation and translation. */
+function lineLabel(text: string, extras: Extras, i: number): string {
+  return [text, extras.pron?.[i], extras.trans?.[i]].filter(Boolean).join(", ");
+}
+
+/** The line nearest `i` (forward first) a keyboard can land on. */
+function nearestStop(i: number, stop: (i: number) => boolean, n: number): number {
+  for (let d = 0; d < n; d++) {
+    if (i + d < n && stop(i + d)) return i + d;
+    if (i - d >= 0 && stop(i - d)) return i - d;
+  }
+  return i;
+}
+
 /** Which line and word are playing, updated every frame but only re-rendering on a change. */
 function usePlayhead(lines: LyricLine[]): { line: number; word: number; jump: (ms: number) => void } {
   const [pos, setPos] = useState({ line: -1, word: -1 });
-  const base = useRef({ positionMs: usePlayer.getState().positionMs, at: performance.now() });
   const measure = useCallback(() => {
-    const st = usePlayer.getState();
-    const ms = interpolate(base.current, performance.now(), st.state?.status === "playing", st.durationMs);
+    const ms = currentPositionMs();
     const line = currentLineIndex(lines, ms);
     const word = line >= 0 ? currentWordIndex(lines[line].words, ms) : -1;
     setPos((p) => (p.line === line && p.word === word ? p : { line, word }));
@@ -56,11 +90,9 @@ function usePlayhead(lines: LyricLine[]): { line: number; word: number; jump: (m
   const playing = usePlayer((s) => s.state?.status === "playing");
   const visible = usePageVisible();
   useEffect(() => {
+    // The shared playhead (lyrics.ts) has already taken the change in.
     const unsub = usePlayer.subscribe((s, p) => {
-      if (s.positionMs !== p.positionMs || s.state?.status !== p.state?.status) {
-        base.current = { positionMs: s.positionMs, at: performance.now() };
-        measure();
-      }
+      if (s.positionMs !== p.positionMs || s.state?.status !== p.state?.status) measure();
     });
     measure();
     return unsub;
@@ -77,7 +109,7 @@ function usePlayhead(lines: LyricLine[]): { line: number; word: number; jump: (m
   }, [measure, playing, visible]);
   const jump = useCallback(
     (ms: number) => {
-      base.current = { positionMs: ms, at: performance.now() };
+      setPlayhead(ms);
       measure();
     },
     [measure],
@@ -111,6 +143,10 @@ function SyncedLyrics({
   const lineEls = useRef<(HTMLElement | null)[]>([]);
   const [following, setFollowing] = useState(true);
   const first = useRef(true);
+  /** The next placement jumps instead of easing (after a seek). */
+  const instant = useRef(false);
+  /** The line keyboard focus lands on (one tab stop for the whole list). */
+  const [focusIdx, setFocusIdx] = useState<number | null>(null);
 
   const scrollToCurrent = useCallback(
     (smooth: boolean) => {
@@ -124,20 +160,67 @@ function SyncedLyrics({
     [current],
   );
 
-  // Keep the current line a little above the middle (the first placement jumps).
+  // Keep the current line a little above the middle (the first placement
+  // and a seek jump; line changes ease).
   useLayoutEffect(() => {
     if (!following) return;
-    scrollToCurrent(!first.current);
+    scrollToCurrent(!first.current && !instant.current);
     first.current = false;
+    instant.current = false;
   }, [current, following, scrollToCurrent]);
+
+  // Any seek, playing or paused, shows the line it landed on at once.
+  useEffect(
+    () =>
+      onSeek(() => {
+        instant.current = true;
+        setFollowing(true);
+      }),
+    [],
+  );
+
+  // The layout moved under the current line (the window resized, a
+  // translation or pronunciation arrived): put it back at the anchor.
+  const followingRef = useRef(following);
+  followingRef.current = following;
+  const recentre = useRef(scrollToCurrent);
+  recentre.current = scrollToCurrent;
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => followingRef.current && recentre.current(false));
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => ro.disconnect();
+  }, []);
+  useLayoutEffect(() => {
+    if (followingRef.current && !first.current) recentre.current(false);
+  }, [extras.trans, extras.pron]);
 
   const resume = () => setFollowing(true);
   // Scrolling by hand stops following; the view stays put until Sync.
   const pause = () => setFollowing(false);
-  const onKey = (e: KeyboardEvent) => {
-    // From the scroller or a line in it: arrows and page keys scroll by hand.
-    if (e.target instanceof Node && scroller.current?.contains(e.target) && SCROLL_KEYS.has(e.key)) pause();
+  /** Lines a keyboard can land on: words, and real instrumental breaks. */
+  const stop = (i: number) => !!lines[i]?.text || isInstrumentalGap(lines, i);
+  const moveFocus = (from: number, step: number) => {
+    let i = from + step;
+    while (i >= 0 && i < lines.length && !stop(i)) i += step;
+    if (i < 0 || i >= lines.length) return;
+    setFocusIdx(i);
+    lineEls.current[i]?.focus();
   };
+  const onKey = (e: KeyboardEvent) => {
+    if (!(e.target instanceof Node) || !scroller.current?.contains(e.target) || !SCROLL_KEYS.has(e.key)) return;
+    // From the scroller or a line in it: arrows and page keys scroll by hand.
+    pause();
+    // On a line, up and down move to the line before or after.
+    const at = lineEls.current.indexOf(e.target as HTMLElement);
+    if (at >= 0 && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      e.preventDefault();
+      moveFocus(at, e.key === "ArrowUp" ? -1 : 1);
+    }
+  };
+  const tabStop = nearestStop(focusIdx ?? Math.max(0, current), stop, lines.length);
 
   return (
     <div className={`lyrics lyrics--synced ${className}`}>
@@ -153,10 +236,16 @@ function SyncedLyrics({
           // A press on the scrollbar itself (not a line) is a hand scroll.
           onPointerDown={(e) => e.target === scroller.current && pause()}
         >
-          <div className="lyrics__lines">
+          <div
+            className="lyrics__lines"
+            // Leaving the list: the tab stop follows the current line again.
+            onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setFocusIdx(null)}
+          >
             {lines.map((l, i) => {
               const state = lineState(i, current);
               const words = state === "current" && l.words?.length ? l.words : null;
+              // A short break between verses isn't announced; a long one is "Instrumental".
+              const hidden = !l.text && !isInstrumentalGap(lines, i);
               return (
                 <button
                   key={i}
@@ -166,10 +255,13 @@ function SyncedLyrics({
                   }}
                   dir="auto"
                   className={`lyrics__line is-${state} ${l.text ? "" : "lyrics__line--gap"} ${picking && picked.includes(i) ? "is-picked" : ""}`}
+                  tabIndex={i === tabStop && !hidden ? 0 : -1}
+                  aria-hidden={hidden || undefined}
                   aria-current={state === "current" ? "true" : undefined}
-                  aria-label={l.text || "Instrumental"}
+                  aria-label={l.text ? lineLabel(l.text, extras, i) : hidden ? undefined : "Instrumental"}
                   aria-pressed={picking && l.text ? picked.includes(i) : undefined}
                   disabled={picking && !l.text}
+                  onFocus={() => setFocusIdx(i)}
                   onClick={(e) => {
                     if (picking) return useLyricPick.getState().toggle(i);
                     if (onTap?.(l)) return;

@@ -1580,8 +1580,19 @@ export class MockBackend implements Backend {
     });
   }
 
-  /** Lyrics sources unreachable (app states: the view says there are none). */
+  /** Lyrics sources have nothing for any song (the view says there are none). */
   lyricsDown = false;
+  /** Lyrics sources can't be reached (app states: "Couldn't get lyrics", with Retry). */
+  lyricsUnreachable = false;
+  /** Songs the sources call instrumentals. */
+  lyricsInstrumental = new Set<string>();
+  /** Songs "Look again" was asked for. */
+  lookedAgain: string[] = [];
+  lyricsLookAgain(trackId: string) {
+    return this.delay(() => {
+      this.lookedAgain.push(trackId);
+    });
+  }
 
   /** Lyrics written in the editor, by track id (the core keeps them in SQLite). */
   own = new Map<string, OwnLyrics>();
@@ -1604,8 +1615,8 @@ export class MockBackend implements Backend {
     const mine = own ? lyricsFromText(own.text) : null;
     if (mine && own?.auto) mine.source = "auto";
     if (mine && !own?.auto && (own!.prefer || this.settings.lyricsPreferOwn)) return { ...mine, pick: "user" };
-    const plex = this.lyricsDown ? null : mockLyrics(track);
-    const extra = this.lyricsDown ? [] : (this.lyricsExtra.get(track.id) ?? []);
+    const plex = this.lyricsDown || this.lyricsUnreachable ? null : mockLyrics(track);
+    const extra = this.lyricsDown || this.lyricsUnreachable ? [] : (this.lyricsExtra.get(track.id) ?? []);
     const verdicts = this.lyricsVerdicts.get(track.id) ?? {};
     const found = [...(plex ? [{ key: "server", lyrics: plex }] : []), ...extra];
     // The first that matches the song, else the first not ruled out.
@@ -1632,7 +1643,7 @@ export class MockBackend implements Backend {
   /** Every set of lyrics found for a song, with its key. */
   private lyricsFound(track: Track): { key: string; lyrics: Lyrics; c: Omit<LyricsCandidate, "key" | "preview" | "synced" | "source"> }[] {
     const out: { key: string; lyrics: Lyrics; c: Omit<LyricsCandidate, "key" | "preview" | "synced" | "source"> }[] = [];
-    const plex = this.lyricsDown ? null : mockLyrics(track);
+    const plex = this.lyricsDown || this.lyricsUnreachable ? null : mockLyrics(track);
     if (plex) out.push({ key: "server", lyrics: plex, c: { origin: "server", album: track.albumTitle, durationMs: track.durationMs } });
     const own = this.own.get(track.id);
     const mine = own ? lyricsFromText(own.text) : null;
@@ -1654,6 +1665,8 @@ export class MockBackend implements Backend {
       } else {
         l = this.autoLyrics(track);
       }
+      if (!l && this.lyricsUnreachable) return { synced: false, lines: [], notice: "unavailable" };
+      if (!l && this.lyricsInstrumental.has(trackId)) return { synced: false, lines: [], notice: "instrumental" };
       const offset = choice?.offsetMs ?? 0;
       if (l && offset && l.synced && l.timed) {
         const move = (t: number) => Math.max(0, t + offset);

@@ -2,8 +2,9 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
-import type { NowPlayingDetails, PlayerState, QueueItem, Track } from "../lib/types";
+import type { Lyrics, NowPlayingDetails, PlayerState, QueueItem, Track } from "../lib/types";
 import { AppShell } from "../shell/AppShell";
+import { clearLyricsCache } from "../shell/lyrics";
 import {
   buildCredits,
   clearNowPlayingCache,
@@ -62,7 +63,9 @@ const FULL: NowPlayingDetails = {
   lyrics: { synced: true, lines: ["", "First line", "Second line", "", "Third line", "Fourth line", "Fifth line", "Sixth line"] },
 };
 
-function details(d: NowPlayingDetails) {
+/** The panel's details, and the lyrics the lyrics pipeline answers with (the details' own, for that track). */
+function details(d: NowPlayingDetails, lyrics: Lyrics | null = d.lyrics ?? null) {
+  vi.spyOn(backend, "lyrics").mockImplementation(async (id) => (id === d.trackId ? lyrics : null));
   return vi.spyOn(backend, "nowPlayingDetails").mockResolvedValue(d);
 }
 
@@ -72,6 +75,7 @@ const artButton = () => screen.getByRole("button", { name: "Now playing view" })
 beforeEach(() => {
   localStorage.clear();
   clearNowPlayingCache();
+  clearLyricsCache();
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
   useUi.setState({ queueOpen: false, nowPlayingOpen: false, nowPlayingPrefs: { ...NOW_PLAYING_PREFS_DEFAULT }, menu: null });
   usePlayer.setState({ state: playerState(solo) });
@@ -169,41 +173,61 @@ describe("panel content", () => {
     expect(screen.getByText("About the artist")).toBeInTheDocument();
     expect(screen.getByText(/Formed in a small harbour town/)).toBeInTheDocument();
     expect(screen.getByText("Credits")).toBeInTheDocument();
-    expect(screen.getByText("Main artist • Composer")).toBeInTheDocument();
+    expect(await screen.findByText("Main artist • Composer")).toBeInTheDocument();
     expect(screen.getByText("Writer • Lyricist")).toBeInTheDocument();
   });
 
   it("offline: sections that need the server step aside, and come back on reconnect", async () => {
-    details(FULL);
+    const spy = details(FULL);
     const server = { name: "Basement Server", version: "1.42.2" };
     act(() => useApp.setState({ health: demoHealth("offline", server) }));
     try {
       useUi.getState().setNowPlayingOpen(true);
       render(<AppShell />);
       expect(await screen.findByText("First line")).toBeInTheDocument();
+      // The details are in (the lyrics come separately): still no artist or credits.
+      await waitFor(() => expect(spy).toHaveBeenCalled());
+      await act(async () => {});
       expect(screen.queryByText("About the artist")).toBeNull();
       expect(screen.queryByText("Writer • Lyricist")).toBeNull();
       act(() => useApp.setState({ health: demoHealth("local", server) }));
       expect(await screen.findByText("About the artist")).toBeInTheDocument();
-      expect(screen.getByText("Writer • Lyricist")).toBeInTheDocument();
+      expect(await screen.findByText("Writer • Lyricist")).toBeInTheDocument();
     } finally {
       act(() => useApp.setState({ health: null }));
     }
   });
 
-  it("opens full lyrics and the full bio in the panel, with a way back", async () => {
+  it("Show lyrics opens the lyrics view; the full bio opens in the panel, with a way back", async () => {
     details(FULL);
     useUi.getState().setNowPlayingOpen(true);
     render(<AppShell />);
     fireEvent.click(await screen.findByRole("button", { name: "Show lyrics" }));
-    expect(screen.getByText("Sixth line")).toBeInTheDocument();
-    const back = screen.getByRole("button", { name: "Back to now playing" });
-    expect(back).toHaveFocus();
-    fireEvent.click(back);
-    fireEvent.click(screen.getByRole("button", { name: `About ${solo.artistTitle}` }));
+    expect(useFullWindow.getState()).toMatchObject({ open: true, mode: "lyrics" });
+    act(() => useFullWindow.setState({ open: false }));
+    fireEvent.click(await screen.findByRole("button", { name: `About ${solo.artistTitle}` }));
+    expect(screen.getByRole("button", { name: "Back to now playing" })).toHaveFocus();
     expect(screen.getByText("Second paragraph.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Back to now playing" }));
     expect(screen.getByText("Next in queue")).toBeInTheDocument();
+  });
+
+  it("the card shows the lyrics the lyrics view would, not the server's raw ones", async () => {
+    // The server has lyrics, but they're turned off for this song: no card.
+    details(FULL, { synced: false, lines: [], notice: "chosenNone" });
+    useUi.getState().setNowPlayingOpen(true);
+    const { unmount } = render(<AppShell />);
+    await screen.findByText("About the artist");
+    await waitFor(() => expect(backend.lyrics).toHaveBeenCalledWith(solo.id));
+    expect(screen.queryByText("First line")).toBeNull();
+    unmount();
+    vi.restoreAllMocks();
+    clearLyricsCache();
+    clearNowPlayingCache();
+    // The server has none, LRCLIB does: a card.
+    details({ ...FULL, lyrics: null }, { synced: false, lines: ["Found on LRCLIB", "Second"], source: "lrclib", credit: "Lyrics from LRCLIB" });
+    render(<AppShell />);
+    expect(await screen.findByText("Found on LRCLIB")).toBeInTheDocument();
   });
 
   it("the lyrics card setting hides the card", async () => {
@@ -240,6 +264,7 @@ describe("panel content", () => {
 
   it("follows the track as it changes", async () => {
     const spy = vi.spyOn(backend, "nowPlayingDetails").mockImplementation(async (id) => ({ ...FULL, trackId: id, lyrics: id === solo.id ? FULL.lyrics : null }));
+    vi.spyOn(backend, "lyrics").mockImplementation(async (id) => (id === solo.id ? (FULL.lyrics ?? null) : null));
     useUi.getState().setNowPlayingOpen(true);
     render(<AppShell />);
     await screen.findByText("First line");

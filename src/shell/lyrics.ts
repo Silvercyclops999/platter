@@ -8,6 +8,8 @@ import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { backend } from "../lib/backend";
 import type { LyricLine, LyricWord, Lyrics, LyricsCheckStatus } from "../lib/types";
+import { isOffline } from "../lib/offline";
+import { useApp } from "../stores/app";
 import { useLyricsEditor } from "../stores/lyricsEditor";
 import { usePlayer } from "../stores/player";
 import { fullWindow, useFullWindow } from "../stores/fullWindow";
@@ -20,6 +22,8 @@ import { useUi } from "../stores/ui";
 const CACHE_SIZE = 30;
 const cache = new Map<string, Lyrics | null>();
 const pending = new Map<string, Promise<Lyrics | null>>();
+/** Songs whose last lookup couldn't ask a source: never cached, asked again when back online. */
+const failed = new Set<string>();
 /** Moves on each clear, so a fetch from before it can't put stale lyrics back. */
 let generation = 0;
 
@@ -27,11 +31,28 @@ export function clearLyricsCache() {
   generation++;
   cache.clear();
   pending.clear();
+  failed.clear();
 }
 
-/** Lyrics were looked up for the song this session (shown, held back or checked): its menu offers "Wrong lyrics?". */
+/**
+ * Lyrics were looked up for the song this session (shown, held back,
+ * checked, or the lookup couldn't ask): its menu offers "Wrong lyrics?".
+ */
 export function lyricsSeen(trackId: string): boolean {
-  return !!cache.get(trackId);
+  return !!cache.get(trackId) || failed.has(trackId);
+}
+
+/** What a lookup that failed outright reads as. */
+const UNAVAILABLE: Lyrics = { synced: false, lines: [], notice: "unavailable" };
+
+/** The core couldn't ask a source and found nothing else: not "no lyrics". */
+export function isUnavailable(l: Lyrics | null | undefined): boolean {
+  return l?.notice === "unavailable";
+}
+
+/** Ask again for every song whose lookup couldn't reach a source (back online). */
+export function retryUnavailable() {
+  for (const id of [...failed]) lyricsChanged(id);
 }
 
 /** Lyrics with words to show (not just a notice saying why there are none). */
@@ -46,31 +67,40 @@ export function loadLyrics(trackId: string): Promise<Lyrics | null> {
 
 /**
  * The core's whole answer, notices included ("Lyrics from the released
- * version", "Checking…"). A failed fetch is "none" (and not cached).
+ * version", "Couldn't get lyrics"). A lookup that couldn't ask a source
+ * (the "unavailable" notice, or the call itself failing) is never cached:
+ * the next ask, Retry or coming back online asks again.
  */
 export function loadLyricsInfo(trackId: string): Promise<Lyrics | null> {
   if (cache.has(trackId)) return Promise.resolve(cache.get(trackId) ?? null);
   let p = pending.get(trackId);
   if (!p) {
     const gen = generation;
+    const current = () => gen === generation && pending.get(trackId) === p;
     const settle = () => {
-      if (gen === generation && pending.get(trackId) === p) pending.delete(trackId);
+      if (current()) pending.delete(trackId);
     };
     p = backend.lyrics(trackId).then(
       (l) => {
         const v = l && (hasWords(l) || l.notice) ? l : null;
         // Cleared or asked again while asking (a setting, an edit, a check
         // or a nudge changed): don't cache the old answer over the new one.
-        if (gen === generation && pending.get(trackId) === p) {
-          cache.set(trackId, v);
-          if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value!);
+        if (current()) {
+          if (isUnavailable(v)) {
+            failed.add(trackId);
+          } else {
+            failed.delete(trackId);
+            cache.set(trackId, v);
+            if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value!);
+          }
         }
         settle();
         return v;
       },
       () => {
+        if (current()) failed.add(trackId);
         settle();
-        return null;
+        return UNAVAILABLE;
       },
     );
     pending.set(trackId, p);
@@ -120,9 +150,13 @@ export function useLyrics(trackId: string | null | undefined): {
   return { lyrics: hasWords(state.lyrics) ? state.lyrics : null, loading: state.loading, info: state.lyrics };
 }
 
-/** A notice the lyrics view can act on (not "you chose none"): the lyrics button stays on. */
+/**
+ * A notice the lyrics view can act on (not "you chose none" or "it's an
+ * instrumental"): the lyrics button stays on. "Couldn't get lyrics" is one,
+ * so a source being down never dims the button like a song with none.
+ */
 export function actionableNotice(l: Lyrics | null | undefined): boolean {
-  return !!l?.notice && l.notice !== "chosenNone";
+  return !!l?.notice && l.notice !== "chosenNone" && l.notice !== "instrumental";
 }
 
 /**
@@ -166,6 +200,13 @@ export function lyricsChanged(trackId?: string) {
   }
   useLyricsTrust.setState((s) => ({ version: s.version + 1 }));
 }
+
+// Back online (the browser says so, or the core reaches the server again):
+// lookups that couldn't ask a source ask again.
+if (typeof window !== "undefined") window.addEventListener("online", () => retryUnavailable());
+useApp.subscribe((s, p) => {
+  if (isOffline(p.health) && !isOffline(s.health)) retryUnavailable();
+});
 
 let trustStarted = false;
 
@@ -267,6 +308,45 @@ export function followTarget(lineTop: number, lineHeight: number, viewHeight: nu
 export function interpolate(base: { positionMs: number; at: number }, now: number, playing: boolean, durationMs: number): number {
   const ms = playing ? base.positionMs + Math.max(0, now - base.at) : base.positionMs;
   return durationMs > 0 ? Math.min(ms, durationMs) : ms;
+}
+
+/** A position this far from where playback should be is a seek, not a tick. */
+export const SEEK_JUMP_MS = 1500;
+
+/** The core's last position and when it came, shared by every lyrics view and Tap to sync. */
+let head = { positionMs: usePlayer.getState().positionMs, at: performance.now() };
+const seekListeners = new Set<() => void>();
+
+usePlayer.subscribe((s, p) => {
+  const now = performance.now();
+  const wasPlaying = p.state?.status === "playing";
+  if (s.positionMs !== p.positionMs) {
+    const expected = interpolate(head, now, wasPlaying, p.durationMs);
+    head = { positionMs: s.positionMs, at: now };
+    if (Math.abs(s.positionMs - expected) > SEEK_JUMP_MS) seekListeners.forEach((f) => f());
+  } else if (s.state?.status !== p.state?.status) {
+    // Paused (or playing again) between ticks: carry on from where playback
+    // got to, not from the last tick up to 250 ms back, so the highlight
+    // never steps back to the line before.
+    head = { positionMs: interpolate(head, now, wasPlaying, p.durationMs), at: now };
+  }
+});
+
+/** Where playback is now, between the core's updates. */
+export function currentPositionMs(now = performance.now()): number {
+  const st = usePlayer.getState();
+  return interpolate(head, now, st.state?.status === "playing", st.durationMs);
+}
+
+/** Playback is known to be at `ms` now (a line was clicked to seek there). */
+export function setPlayhead(ms: number) {
+  head = { positionMs: ms, at: performance.now() };
+}
+
+/** Called on every seek (a jump in position, playing or paused). */
+export function onSeek(f: () => void): () => void {
+  seekListeners.add(f);
+  return () => seekListeners.delete(f);
 }
 
 // ---------------------------------------------------------------- auto-show

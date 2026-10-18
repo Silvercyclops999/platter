@@ -21,6 +21,15 @@ export interface Extras {
 
 const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "");
 
+/** Translations made this session, per service, language and song text: Hide then Translate, or coming back to the song, doesn't ask again. */
+const TRANSLATIONS_KEPT = 20;
+const translations = new Map<string, string[]>();
+
+/** Forget the translations kept (tests). */
+export function clearTranslations() {
+  translations.clear();
+}
+
 export function useLyricExtras(texts: string[]): Extras {
   const show = useSettings((s) => !!s.settings?.showPronunciation);
   const service = useSettings((s) => s.settings?.translationService ?? "");
@@ -30,6 +39,7 @@ export function useLyricExtras(texts: string[]): Extras {
   const [on, setOn] = useState(false);
   const [translating, setTranslating] = useState(false);
   const key = texts.join("\n");
+  const transKey = `${service}\u0001${target}\u0001${key}`;
 
   useEffect(() => {
     setPron(null);
@@ -54,11 +64,21 @@ export function useLyricExtras(texts: string[]): Extras {
 
   useEffect(() => {
     if (!on || trans || !service) return;
+    const kept = translations.get(transKey);
+    if (kept) {
+      setTrans(kept);
+      return;
+    }
     let live = true;
     setTranslating(true);
     backend
       .lyricsTranslate(texts)
-      .then((t) => live && setTrans(t))
+      .then((t) => {
+        translations.delete(transKey);
+        translations.set(transKey, t);
+        if (translations.size > TRANSLATIONS_KEPT) translations.delete(translations.keys().next().value!);
+        if (live) setTrans(t);
+      })
       .catch((e) => {
         if (!live) return;
         setOn(false);
@@ -68,7 +88,7 @@ export function useLyricExtras(texts: string[]): Extras {
     return () => {
       live = false;
     };
-  }, [on, trans, service, key]);
+  }, [on, trans, service, key, transKey]);
 
   return {
     pron,
