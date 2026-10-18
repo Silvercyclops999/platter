@@ -33,7 +33,7 @@ impl BackendCaps {
     pub async fn of(b: &Backends) -> Self {
         let primary = b.primary().ok();
         let mut servers = Vec::new();
-        for s in b.all() {
+        for s in b.in_use() {
             let is_primary = primary.as_ref().is_some_and(|p| std::ptr::addr_eq(std::sync::Arc::as_ptr(p), std::sync::Arc::as_ptr(&s)));
             servers.push(ServerCaps {
                 tag: s.tag().await,

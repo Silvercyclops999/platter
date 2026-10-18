@@ -675,9 +675,9 @@ impl Playlists {
         let title = title_now().await.or(edited);
         let name = title.map(|t| format!("\"{t}\"")).unwrap_or_else(|| "a playlist".into());
         let message = match &q.op {
-            Op::Create => format!("Plex didn't accept the new playlist {name}."),
-            Op::Delete => format!("Plex didn't delete {name}."),
-            _ => format!("Plex didn't accept a change to {name}. Showing it as it is in Plex."),
+            Op::Create => format!("Your server didn't accept the new playlist {name}."),
+            Op::Delete => format!("Your server didn't delete {name}."),
+            _ => format!("Your server didn't accept a change to {name}. Showing it as it is there."),
         };
         self.inner.events.error(&message);
     }

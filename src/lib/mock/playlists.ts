@@ -100,7 +100,7 @@ export class MockPlaylists {
         this.restore(before);
         const q = name ? `"${name}"` : "a playlist";
         this.toastError(
-          what === "delete" ? `Plex didn't delete ${q}.` : what === "create" ? `Plex didn't accept the new playlist ${q}.` : `Plex didn't accept a change to ${q}. Showing it as it is in Plex.`,
+          what === "delete" ? `Your server didn't delete ${q}.` : what === "create" ? `Your server didn't accept the new playlist ${q}.` : `Your server didn't accept a change to ${q}. Showing it as it is there.`,
         );
         this.changed();
       }, 0);

@@ -226,14 +226,7 @@ impl Backends {
     /// account while one is set up (so its library stays as it was), else
     /// the primary server.
     pub fn main_server(&self) -> AppResult<Arc<dyn MusicServer>> {
-        let plex_set_up = {
-            let g = self.inner.records.lock();
-            match g.as_ref() {
-                Some((_, f)) => f.servers.is_empty() || f.servers.iter().any(|r| r.kind == BackendKind::Plex),
-                None => true,
-            }
-        };
-        if plex_set_up && let Some(p) = self.default_server() {
+        if self.plex_set_up() && let Some(p) = self.default_server() {
             return Ok(p);
         }
         self.primary()
@@ -249,6 +242,16 @@ impl Backends {
         self.primary()
     }
 
+    /// Whether a Plex account is part of the setup: no servers saved yet
+    /// (Plex is how most start), or a Plex one among them.
+    fn plex_set_up(&self) -> bool {
+        let g = self.inner.records.lock();
+        match g.as_ref() {
+            Some((_, f)) => f.servers.is_empty() || f.servers.iter().any(|r| r.kind == BackendKind::Plex),
+            None => true,
+        }
+    }
+
     /// Every server in use.
     pub fn all(&self) -> Vec<Arc<dyn MusicServer>> {
         let mut out: Vec<Arc<dyn MusicServer>> = self.default_server().into_iter().collect();
@@ -256,9 +259,18 @@ impl Backends {
         out
     }
 
+    /// The servers whose features count: like [`Self::all`], without the
+    /// Plex account when only Jellyfin or Subsonic servers are set up, so
+    /// Plex-only features don't show for them.
+    pub fn in_use(&self) -> Vec<Arc<dyn MusicServer>> {
+        let mut out: Vec<Arc<dyn MusicServer>> = if self.plex_set_up() { self.default_server().into_iter().collect() } else { Vec::new() };
+        out.extend(self.inner.servers.read().values().cloned());
+        out
+    }
+
     /// What any server in use can do.
     pub fn caps_all(&self) -> Caps {
-        self.all().iter().fold(Caps::NONE, |a, s| a | s.caps())
+        self.in_use().iter().fold(Caps::NONE, |a, s| a | s.caps())
     }
 
     /// What the server with this item can do (none when there's no server).

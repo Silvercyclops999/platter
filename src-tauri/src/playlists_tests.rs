@@ -387,7 +387,7 @@ async fn a_refused_edit_drops_the_rest_shows_a_toast_and_reads_plex_back() {
     assert_eq!(r.queued(), 0, "the playlist's other queued edits are dropped");
     assert!(r.plex.calls().is_empty());
     let errors = r.events.errors.lock().clone();
-    assert_eq!(errors, ["Plex didn't accept a change to \"Road\". Showing it as it is in Plex."]);
+    assert_eq!(errors, ["Your server didn't accept a change to \"Road\". Showing it as it is there."]);
     assert_eq!(r.local_tracks("50"), ["1", "2"], "back to what Plex has");
     assert_eq!(r.page("50").playlist.title, "Road");
 }

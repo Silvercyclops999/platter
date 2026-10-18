@@ -496,7 +496,7 @@ describe("app states", () => {
     await waitFor(() => expect(body(screen.getAllByRole("row"))).toHaveLength(2));
     mock.pl.refuseNextWrite();
     await act(() => backend.playlistUpdate(p.id, { title: "Never" }));
-    await waitFor(() => expect(toastText()).toContain(`Plex didn't accept a change to "Refused". Showing it as it is in Plex.`));
+    await waitFor(() => expect(toastText()).toContain(`Your server didn't accept a change to "Refused". Showing it as it is there.`));
     await waitFor(async () => expect((await backend.playlistPage(p.id)).playlist.title).toBe("Refused"));
     expect(await screen.findByRole("button", { name: "Refused" })).toBeInTheDocument();
   });

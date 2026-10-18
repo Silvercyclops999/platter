@@ -81,7 +81,7 @@ export class MockLikes {
         for (const t of changed) Object.assign(t, before.get(t.id));
         const name = `"${changed[0].title}"`;
         this.toastError(
-          liked ? `Plex didn't save the like for ${name}. It's back as it was.` : `Plex didn't remove ${name} from Liked Songs. It's back as it was.`,
+          liked ? `Your server didn't save the like for ${name}. It's back as it was.` : `Your server didn't remove ${name} from Liked Songs. It's back as it was.`,
         );
         this.changed(ids);
       }, 0);

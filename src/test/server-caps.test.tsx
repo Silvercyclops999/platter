@@ -102,9 +102,11 @@ describe("hidden without the capability", () => {
     expect(document.querySelector('[data-setting-part="showPlexPlayers"]')).toBeTruthy();
     expect(document.querySelector('[data-setting="actAsPlexPlayer"]')).toBeTruthy();
     expect(document.querySelector('[data-setting="showFriendActivity"]')).toBeTruthy();
+    expect(document.querySelector('[data-setting="likedMeans"]')).toBeTruthy();
     unmount();
-    act(() => useCaps.setState({ all: one(without("remotePlayers", "friendActivity")) }));
+    act(() => useCaps.setState({ all: one(without("remotePlayers", "friendActivity", "starRatings")) }));
     render(<SettingsPage />);
+    expect(document.querySelector('[data-setting="likedMeans"]')).toBeNull();
     expect(document.querySelector('[data-setting-part="showPlexPlayers"]')).toBeNull();
     expect(document.querySelector('[data-setting="actAsPlexPlayer"]')).toBeNull();
     expect(document.querySelector('[data-setting="showFriendActivity"]')).toBeNull();

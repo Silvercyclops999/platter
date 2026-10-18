@@ -431,7 +431,7 @@ export function PlaylistPage({ id }: { id: string }) {
             <div className="empty-state">
               <ListMusic size={40} strokeWidth={1.5} aria-hidden="true" />
               <h2 className="empty-state__title">This playlist is empty</h2>
-              <p className="empty-state__text">Songs that match it in Plex will show up here.</p>
+              <p className="empty-state__text">Songs that match it on your server will show up here.</p>
             </div>
           )
         ) : (

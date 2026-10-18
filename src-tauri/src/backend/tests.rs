@@ -340,6 +340,21 @@ fn capabilities_combine_across_servers() {
 }
 
 #[test]
+fn without_plex_set_up_its_features_dont_count() {
+    let (b, _log) = rig();
+    let d = tempfile::tempdir().unwrap();
+    b.keep_records_in(d.path().to_path_buf());
+    assert!(b.caps_all().has(Caps::LYRICS), "nothing saved yet: the Plex account counts");
+    b.edit_records(|f| {
+        f.upsert(crate::backend::ServerRecord::new(OTHER, BackendKind::Jellyfin, "Den"));
+    })
+    .unwrap();
+    assert!(!b.caps_all().has(Caps::LYRICS), "only a Jellyfin server is set up");
+    assert!(b.caps_all().has(Caps::SONIC));
+    assert_eq!(b.in_use().len(), 1);
+}
+
+#[test]
 fn no_server_is_an_offline_error() {
     let b = Backends::with_fallback(Arc::new(Server(Fake::new("x", Caps::NONE, &Arc::default()))));
     assert!(b.primary().is_ok());

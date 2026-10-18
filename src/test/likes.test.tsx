@@ -158,7 +158,7 @@ describe("save control", () => {
     // fireEvent: the rollback lands a tick later, so the like shows first.
     fireEvent.click(screen.getByRole("button", { name: `Add ${t.title} to Liked Songs` }));
     expect(isLiked(t.id)).toBe(true);
-    await waitFor(() => expect(toastText().some((m) => m.includes("Plex didn't save the like") && m.includes(t.title))).toBe(true));
+    await waitFor(() => expect(toastText().some((m) => m.includes("Your server didn't save the like") && m.includes(t.title))).toBe(true));
     await waitFor(() => expect(isLiked(t.id)).toBe(false));
     expect(screen.getByRole("button", { name: `Add ${t.title} to Liked Songs` })).toBeInTheDocument();
   });

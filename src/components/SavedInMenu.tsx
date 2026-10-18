@@ -320,7 +320,7 @@ function Row({
       role="checkbox"
       aria-checked={checked}
       aria-disabled={disabled || undefined}
-      title={disabled ? "Smart playlists change in Plex" : undefined}
+      title={disabled ? "Smart playlists change by their rules" : undefined}
       className={`saved-in__row ${checked ? "is-checked" : ""}`}
       onClick={() => !disabled && onToggle()}
     >

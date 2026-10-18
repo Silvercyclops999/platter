@@ -360,9 +360,9 @@ impl Likes {
             .flatten();
         let name = title.map(|t| format!("\"{t}\"")).unwrap_or_else(|| "a song".into());
         let message = if op.rating.is_some() {
-            format!("Plex didn't save the like for {name}. It's back as it was.")
+            format!("Your server didn't save the like for {name}. It's back as it was.")
         } else {
-            format!("Plex didn't remove {name} from Liked Songs. It's back as it was.")
+            format!("Your server didn't remove {name} from Liked Songs. It's back as it was.")
         };
         self.inner.events.error(&message);
     }

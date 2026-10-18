@@ -456,7 +456,7 @@ describe("which lyrics show", () => {
     const user = userEvent.setup();
     await loadSettings();
     render(<SettingsPage />);
-    const prefer = await screen.findByRole("switch", { name: "Prefer my own lyrics over Plex's" });
+    const prefer = await screen.findByRole("switch", { name: "Prefer my own lyrics over your server's" });
     const add = screen.getByRole("switch", { name: "Show Add lyrics on songs without lyrics" });
     expect(prefer).toHaveAttribute("aria-checked", "false");
     expect(add).toHaveAttribute("aria-checked", "true");

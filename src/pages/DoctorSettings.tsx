@@ -17,7 +17,7 @@ export const DOCTOR_CHECKS: { key: keyof DoctorChecks; label: string; hint: stri
   { key: "duplicates", label: "Duplicate files", hint: "The same recording more than once on one album." },
   { key: "covers", label: "Missing or small covers", hint: "Albums with no cover, or one smaller than the size below." },
   { key: "albumTags", label: "Album tags that differ", hint: "Album name, album artist or year that aren't the same on every song of an album." },
-  { key: "splitAlbums", label: "Albums split in two", hint: "One album Plex shows as two, with its songs divided between them." },
+  { key: "splitAlbums", label: "Albums split in two", hint: "One album your server shows as two, with its songs divided between them." },
   { key: "albumArtist", label: "Missing album artist", hint: "Songs with no album artist on albums that credit several artists." },
   { key: "lowQuality", label: "Low-quality copies", hint: "A song you also have in better quality on another album." },
   { key: "unmatched", label: "Albums that weren't matched", hint: "Albums MusicBrainz knows but your server couldn't match. Unreleased albums are never listed." },

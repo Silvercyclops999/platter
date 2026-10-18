@@ -1116,7 +1116,7 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       section: "Sharing and friends",
       title: "Private session",
       description: "Plays aren't saved to your listening history on this device.",
-      more: "Plays aren't saved to your listening history on this device. Plex still counts them unless you turn off Report plays to your server, under Playback.",
+      more: "Plays aren't saved to your listening history on this device. Your server still counts them unless you turn off Report plays to your server, under Playback.",
       control: (ids) => toggle(s, "privateSession", ids),
     },
     {
@@ -1967,6 +1967,8 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
     {
       key: "likedMeans",
       section: "Library",
+      // Only where likes are star ratings (Plex); elsewhere a like is a like.
+      cap: "starRatings",
       title: "Liked means",
       description: "Which Plex star ratings count as liked. Liking a song gives it five stars.",
       more: "Liked Songs are Plex star ratings, so other Plex apps see them. Liking a song always gives it five stars; this picks which ratings count as liked.",
@@ -2357,7 +2359,7 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       section: "Sound",
       title: "Level loudness between songs",
       description: "Plays songs at a similar volume. Smart keeps an album's own dynamics.",
-      more: "Plays songs at a similar volume using Plex's loudness analysis. Smart keeps an album's own dynamics while you play it in order and levels each song otherwise.",
+      more: "Plays songs at a similar volume using your server's loudness analysis. Smart keeps an album's own dynamics while you play it in order and levels each song otherwise.",
       control: (ids) => select(s, (x) => x.leveling, LEVELING, ids, (v) => updateSettings({ leveling: v })),
     },
     {
@@ -2365,7 +2367,7 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       section: "Sound",
       title: "Volume before the equalizer",
       description: "Raises or lowers every song, from -12 to +12 dB. This device only.",
-      more: "Raises or lowers every song, from -12 to +12 dB. Songs Plex hasn't analysed get only this. This device only.",
+      more: "Raises or lowers every song, from -12 to +12 dB. Songs your server hasn't analysed get only this. This device only.",
       control: (ids) => <PreampControl ids={ids} />,
     },
     {
@@ -2505,7 +2507,7 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       section: "Sharing and friends",
       title: "Share my activity with Platter friends",
       description: "Lets friends see what you're playing right now.",
-      more: "Lets Plex show what you're playing right now. Off, and in a private session, Platter stops telling Plex about the song as it plays, so friends don't see you live. Songs you finish still go into Plex's history, which the server's owner and other Plex apps can see.",
+      more: "Lets your server show what you're playing right now. Off, and in a private session, Platter stops telling your server about the song as it plays, so friends don't see you live. Songs you finish still go into your server's history, which its owner and other apps can see.",
       control: (ids) => toggle(s, "shareActivity", ids),
     },
     {
@@ -3030,7 +3032,7 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
     {
       key: "lyricsLrclib",
       section: "Lyrics",
-      title: "Lyrics from LRCLIB when Plex has none",
+      title: "Lyrics from LRCLIB when your server has none",
       description: "Looks songs up on LRCLIB, a free lyrics library. Kept 30 days.",
       more: "Looks the song up on LRCLIB, a free lyrics library, sending its artist, title, album and length. Songs it doesn't know are searched by artist and title only. Results are kept for 30 days.",
       control: (ids) => toggle(s, "lyricsLrclib", ids),
@@ -3038,9 +3040,9 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
     {
       key: "lyricsPreferOwn",
       section: "Lyrics",
-      title: "Prefer my own lyrics over Plex's",
-      description: "Songs you've written lyrics for show yours, even when Plex has some.",
-      more: "Songs you've written lyrics for in Platter show yours, even when Plex has some. Off shows yours only when Plex has none, unless you chose otherwise for the song.",
+      title: "Prefer my own lyrics over your server's",
+      description: "Songs you've written lyrics for show yours, even when your server has some.",
+      more: "Songs you've written lyrics for in Platter show yours, even when your server has some. Off shows yours only when your server has none, unless you chose otherwise for the song.",
       control: (ids) => toggle(s, "lyricsPreferOwn", ids),
     },
     {

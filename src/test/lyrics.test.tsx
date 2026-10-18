@@ -434,7 +434,7 @@ describe("lyrics settings", () => {
     render(<SettingsPage />);
     const mode = screen.getByRole("combobox", { name: "Show synced lyrics automatically" });
     expect(mode).toHaveValue("autoShow");
-    const lrclib = screen.getByRole("switch", { name: "Lyrics from LRCLIB when Plex has none" });
+    const lrclib = screen.getByRole("switch", { name: "Lyrics from LRCLIB when your server has none" });
     expect(lrclib).not.toBeChecked();
     const fade = screen.getByRole("switch", { name: "Expanded view hides controls" });
     expect(fade).toBeChecked();
