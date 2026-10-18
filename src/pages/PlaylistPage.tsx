@@ -18,6 +18,7 @@ import type { Playlist, PlaylistPage as PlaylistData, SharedInfo, SharedSummary,
 import { Faces } from "../components/Faces";
 import { bylineText, openCircleDialog, useCircle, useShared } from "../stores/circle";
 import { useSettings } from "../stores/settings";
+import { useCap } from "../stores/caps";
 import { useLoad } from "../lib/useLoad";
 import { useArtTint } from "../lib/useTint";
 import { usePins } from "../stores/pins";
@@ -127,6 +128,7 @@ export function PlaylistPage({ id }: { id: string }) {
   const status = usePlayer((s) => s.state?.status);
   const { isContext: isThis, playing: isThisPlaying } = useContextState("playlist", id);
   const pinned = usePins((s) => s.isPinned("playlist", id));
+  const canCover = useCap("playlistPoster", id);
   const play = () => (isThis ? player.toggle() : player.playPlaylist(id, undefined, undefined, sortedIds()));
   usePageBar(pl?.title, isThisPlaying, play);
   const { header, column, step, compact } = useTitleStep(pl?.title);
@@ -313,7 +315,7 @@ export function PlaylistPage({ id }: { id: string }) {
       <header ref={header} className={`detail-header ${compact ? "detail-header--compact" : ""}`}>
         <div className="detail-header__art">
           {pl ? (
-            own ? (
+            own && canCover ? (
               <button type="button" className="cover-button pl-cover" aria-label="Edit details: choose a cover" onClick={() => editDetails(pl)}>
                 <Art path={pl.thumb} size={232} kind="playlist" />
                 <span className="pl-cover__hint" aria-hidden="true">

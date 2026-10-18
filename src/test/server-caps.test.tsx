@@ -12,6 +12,7 @@ import type { MockBackend } from "../lib/mock";
 import { plexCaps } from "../lib/mock/servers";
 import type { BackendCaps, Caps, CapName } from "../lib/types";
 import { DEFAULT_SETTINGS } from "../lib/types";
+import { EditDetailsDialog } from "../components/PlaylistDialogs";
 import { SettingsPage } from "../pages/SettingsPage";
 import { TopBar } from "../shell/TopBar";
 import { useApp } from "../stores/app";
@@ -115,5 +116,18 @@ describe("hidden without the capability", () => {
     expect(hasCap("metadataEdit", "0a1b2c3d:5")).toBe(false);
     act(() => useCaps.setState({ all: one(ALL_CAPS) }));
     expect(hasCap("metadataEdit", "0a1b2c3d:5")).toBe(true);
+  });
+
+  it("a playlist's details offer a cover and a description only where its server keeps them", () => {
+    const pl = { id: "0a1b2c3d:77", title: "Road", smart: false, trackCount: 1, durationMs: 0, thumb: null, summary: null, updatedAt: 1 };
+    const { unmount } = render(<EditDetailsDialog playlist={pl} onClose={() => {}} />);
+    expect(screen.getByRole("button", { name: "Choose a cover image" })).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Description/)).toBeInTheDocument();
+    unmount();
+    act(() => useCaps.setState({ all: one(without("playlistPoster", "playlistSummary")) }));
+    render(<EditDetailsDialog playlist={pl} onClose={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Choose a cover image" })).toBeNull();
+    expect(screen.queryByLabelText(/^Description/)).toBeNull();
+    expect(screen.getByLabelText(/^Name/)).toBeInTheDocument();
   });
 });

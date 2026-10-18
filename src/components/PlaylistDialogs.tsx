@@ -8,6 +8,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { backend } from "../lib/backend";
 import { coverImage } from "../lib/coverImage";
 import type { Playlist } from "../lib/types";
+import { useCap, useServerName } from "../stores/caps";
 import { answerDuplicate, confirmDelete, confirmRemove, savePlaylistDetails, usePlaylistUi } from "../stores/playlists";
 import { toast } from "../stores/toasts";
 import { Art } from "./Art";
@@ -87,11 +88,14 @@ function RemoveDialog() {
 
 function DeleteDialog() {
   const p = usePlaylistUi((s) => s.deleting);
+  const server = useServerName(p?.id);
   if (!p) return null;
   return (
     <Dialog open onClose={() => usePlaylistUi.getState().set({ deleting: null })} label={`Delete ${p.title}?`} className="confirm">
       <h2 className="confirm__title">Delete this playlist?</h2>
-      <p className="confirm__body">"{p.title}" will be deleted from Plex, so it's gone from your other Plex apps too.</p>
+      <p className="confirm__body">
+        "{p.title}" will be deleted from {server ?? "your server"}, so it's gone from your other apps there too.
+      </p>
       <div className="confirm__actions">
         <Button variant="ghost" onClick={() => usePlaylistUi.getState().set({ deleting: null })}>
           Cancel
@@ -113,6 +117,9 @@ function EditDetailsHost() {
 /** Cover, name (up to 100) and description (up to 300), saved together. */
 export function EditDetailsDialog({ playlist, onClose }: { playlist: Playlist; onClose: () => void }) {
   const id = useId();
+  // Only what the playlist's server can keep is offered.
+  const canCover = useCap("playlistPoster", playlist.id);
+  const canSummary = useCap("playlistSummary", playlist.id);
   const [title, setTitle] = useState(playlist.title);
   const [summary, setSummary] = useState(playlist.summary ?? "");
   const [cover, setCover] = useState<{ bytes: Uint8Array; type: string; url: string } | null>(null);
@@ -172,13 +179,19 @@ export function EditDetailsDialog({ playlist, onClose }: { playlist: Playlist; o
       >
         <h2 className="pl-edit__title">Edit details</h2>
         <div className="pl-edit__body">
-          <button type="button" className="pl-edit__cover" aria-label="Choose a cover image" onClick={() => fileRef.current?.click()}>
-            {cover ? <img src={cover.url} alt="" width={180} height={180} /> : <Art path={playlist.thumb} size={180} kind="playlist" />}
-            <span className="pl-edit__cover-hint" aria-hidden="true">
-              <ImagePlus size={32} />
-              <span>Choose image</span>
-            </span>
-          </button>
+          {canCover ? (
+            <button type="button" className="pl-edit__cover" aria-label="Choose a cover image" onClick={() => fileRef.current?.click()}>
+              {cover ? <img src={cover.url} alt="" width={180} height={180} /> : <Art path={playlist.thumb} size={180} kind="playlist" />}
+              <span className="pl-edit__cover-hint" aria-hidden="true">
+                <ImagePlus size={32} />
+                <span>Choose image</span>
+              </span>
+            </button>
+          ) : (
+            <div className="pl-edit__cover">
+              <Art path={playlist.thumb} size={180} kind="playlist" />
+            </div>
+          )}
           <input
             ref={fileRef}
             type="file"
@@ -206,21 +219,23 @@ export function EditDetailsDialog({ playlist, onClose }: { playlist: Playlist; o
                 {[...title].length}/{NAME_MAX}
               </span>
             </label>
-            <label className="pl-edit__field pl-edit__field--grow" htmlFor={`${id}-desc`}>
-              <span className="pl-edit__label">Description</span>
-              <textarea
-                id={`${id}-desc`}
-                className="pl-edit__input pl-edit__textarea"
-                value={summary}
-                maxLength={DESCRIPTION_MAX}
-                placeholder="Add an optional description"
-                aria-describedby={`${id}-desc-count`}
-                onChange={(e) => setSummary(e.target.value)}
-              />
-              <span id={`${id}-desc-count`} className="pl-edit__count" aria-label={`${[...summary].length} of ${DESCRIPTION_MAX} characters`}>
-                {[...summary].length}/{DESCRIPTION_MAX}
-              </span>
-            </label>
+            {canSummary && (
+              <label className="pl-edit__field pl-edit__field--grow" htmlFor={`${id}-desc`}>
+                <span className="pl-edit__label">Description</span>
+                <textarea
+                  id={`${id}-desc`}
+                  className="pl-edit__input pl-edit__textarea"
+                  value={summary}
+                  maxLength={DESCRIPTION_MAX}
+                  placeholder="Add an optional description"
+                  aria-describedby={`${id}-desc-count`}
+                  onChange={(e) => setSummary(e.target.value)}
+                />
+                <span id={`${id}-desc-count`} className="pl-edit__count" aria-label={`${[...summary].length} of ${DESCRIPTION_MAX} characters`}>
+                  {[...summary].length}/{DESCRIPTION_MAX}
+                </span>
+              </label>
+            )}
           </div>
         </div>
         {error && (
