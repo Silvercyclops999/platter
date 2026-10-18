@@ -150,7 +150,7 @@
   border-radius: 3px;
   border: 1px solid color-mix(in srgb, currentColor 32%, transparent);
   box-shadow: inset 0 1px 0 color-mix(in srgb, #000 16%, transparent);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -282,7 +282,7 @@
 .ph-np__top { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; margin: 0 -8px; }
 .ph-np__top .ph-icon-btn { color: var(--color-text-primary); }
 .ph-np__from { display: flex; flex-direction: column; align-items: center; min-width: 0; text-align: center; }
-.ph-np__from-label { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-text-secondary); }
+.ph-np__from-label { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); }
 .ph-np__from-name { max-width: 100%; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ph-np__art {
   width: min(100%, 420px);
@@ -434,7 +434,7 @@
 .ph-track-head .art { border-radius: 4px; }
 
 .ph-queue__now { display: flex; align-items: center; gap: 14px; padding: 10px 12px; margin: 0 -12px 8px; border-radius: 12px; background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
-.ph-queue__next { margin: 12px 0 2px; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
+.ph-queue__next { margin: 12px 0 2px; font-size: 13px; font-weight: 700; color: var(--color-text-muted); }
 .ph-queue__list { list-style: none; margin: 0; padding: 0; }
 .ph-queue__row { display: flex; align-items: center; gap: 4px; height: 64px; position: relative; }
 .ph-queue__row.is-dragging { z-index: 2; background: var(--color-bg-raised2); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); border-radius: 8px; }
