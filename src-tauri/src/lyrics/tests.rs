@@ -427,7 +427,10 @@ fn live_versions_are_recognised() {
     for t in ["The Song (Live)", "The Song [Live at the Hall]", "The Song - Live", "The Song (MTV Unplugged)"] {
         assert!(live::is_live(&facts(t, "Studio Album", Some("album"), &[], None)), "{t}");
     }
-    for a in ["Live at the Hall", "Live From Somewhere", "Live in Paris 1999", "Unplugged", "The Tour (Live)"] {
+    for t in ["The Song - Live at the Hall", "The Song - Live 1986", "The Song - Live (Remastered)"] {
+        assert!(live::is_live(&facts(t, "Studio Album", Some("album"), &[], None)), "{t}");
+    }
+    for a in ["Live at the Hall", "Live From Somewhere", "Live in Paris 1999", "Unplugged", "The Tour (Live)", "The Tour: Live in Paris"] {
         assert!(live::is_live(&facts("The Song", a, Some("album"), &[], None)), "{a}");
     }
     // Not live.
@@ -436,6 +439,8 @@ fn live_versions_are_recognised() {
         ("The Song (Lively Mix)", "Studio Album"),
         ("Where We Live", "Alive"),
         ("The Song", "Delivered"),
+        ("Song - Live and Let Die", "Studio Album"),
+        ("The Song", "Songs We Live In Between"),
     ] {
         assert!(!live::is_live(&facts(t, a, Some("album"), &[], None)), "{t} / {a}");
     }

@@ -45,7 +45,18 @@ fn has_marker(text: &str, marker: &str) -> bool {
 /// "- Live", "Unplugged".
 pub fn track_title_says_live(title: &str) -> bool {
     let t = title.to_lowercase();
-    ["(live", "[live", "- live", "\u{2013} live", "unplugged"].iter().any(|m| has_marker(&t, m))
+    ["(live", "[live", "unplugged"].iter().any(|m| has_marker(&t, m)) || ["- live", "\u{2013} live"].iter().any(|m| dash_live(&t, m))
+}
+
+/// "- Live" ends the title or leads into where or when ("- Live at the
+/// Hall", "- Live 1986"), so "Song - Live and Let Die" doesn't count.
+fn dash_live(t: &str, marker: &str) -> bool {
+    t.match_indices(marker).any(|(i, _)| {
+        let rest = t[i + marker.len()..].trim_start();
+        rest.is_empty()
+            || rest.starts_with(|c: char| c.is_ascii_digit() || matches!(c, ')' | ']' | '(' | '[' | '/' | ',' | '-' | '\u{2013}'))
+            || ["at ", "from ", "in ", "version", "recording", "session", "take"].iter().any(|w| rest.starts_with(w))
+    })
 }
 
 /// An album title that names a live recording: what a track title would,
@@ -54,8 +65,14 @@ pub fn album_title_says_live(title: &str) -> bool {
     if track_title_says_live(title) {
         return true;
     }
+    // "Live in Paris", "Tour: Live at the Hall", but not "Songs We Live In Between".
     let t = format!(" {}", title.to_lowercase());
-    [" live at ", " live from ", " live in "].iter().any(|m| t.contains(m))
+    [" live at ", " live from ", " live in "].iter().any(|m| {
+        t.match_indices(m).any(|(i, _)| {
+            let before = t[..i].trim_end();
+            before.is_empty() || before.ends_with(['(', '[', '-', ':', '\u{2013}', ','])
+        })
+    })
 }
 
 /// The one live rule.
