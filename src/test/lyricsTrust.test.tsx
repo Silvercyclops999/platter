@@ -333,8 +333,10 @@ describe("timing", () => {
     at(lines, target.startMs + 2_340);
     const seek = vi.spyOn(backend, "playSeek");
     render(<LyricsPane />);
+    // Wait for the lines themselves, so a late lyrics load can't reset tap mode after the click.
+    await screen.findAllByRole("button", { name: target.text });
     fireEvent.click(await screen.findByRole("button", { name: "Tap to sync" }));
-    expect(screen.getByRole("button", { name: "Tap to sync" })).toHaveAttribute("aria-pressed", "true");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Tap to sync" })).toHaveAttribute("aria-pressed", "true"));
     expect(screen.getByText(/Click a line as it's sung/)).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: target.text }).find((b) => b.classList.contains("lyrics__line"))!);
     await waitFor(() => expect(mock.lyricsChoices.get(lines.id)?.offsetMs).toBe(2_300));
