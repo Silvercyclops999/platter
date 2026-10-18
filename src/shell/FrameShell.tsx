@@ -7,6 +7,8 @@
 import {
   Archive,
   ChevronLeft,
+  Radio,
+  ArchiveRestore,
   ChevronRight,
   Disc3,
   House,
@@ -84,6 +86,7 @@ function useSections(): { main: Section[]; library: Section[] } {
     const main: Section[] = [
       { key: "home", label: "Home", icon: <House size={18} />, route: { name: "home" }, on: (r) => r.name === "home" },
       { key: "search", label: "Search", icon: <Search size={18} />, route: { name: "search" }, on: (r) => r.name === "search" },
+      { key: "mixes", label: "Radio and mixes", icon: <Radio size={18} />, route: { name: "mixes" }, on: (r) => r.name === "mixes" || r.name === "mix" || r.name === "radio" },
       { key: "new", label: "What's new", icon: <Sparkles size={18} />, route: { name: "whatsNew" }, on: (r) => r.name === "whatsNew" },
     ];
     const library: Section[] = [
@@ -93,6 +96,7 @@ function useSections(): { main: Section[]; library: Section[] } {
       { key: "songs", label: "Liked songs", icon: <Heart size={18} />, route: { name: "liked" }, on: (r) => r.name === "liked" },
       ...(crates ? [{ key: "crates", label: "Crates", icon: <Boxes size={18} />, route: { name: "crates" } as Route, on: (r: Route) => r.name === "crates" || r.name === "crate" }] : []),
       ...(shelf ? [{ key: "shelf", label: "On the shelf", icon: <Archive size={18} />, route: { name: "shelf" } as Route, on: (r: Route) => r.name === "shelf" }] : []),
+      { key: "archive", label: "Archive", icon: <ArchiveRestore size={18} />, route: { name: "archive" }, on: (r) => r.name === "archive" },
     ];
     return { main, library };
   }, [crates, shelf]);
@@ -389,7 +393,13 @@ export function FrameShell({ children }: { children: ReactNode }) {
   const panes = usePaneWidths();
   const cs = solveConsole(width, panes.tree, panes.details);
   const detailsOpen = useConsole((s) => s.detailsOpen);
-  const route = useCurrentEntry().route;
+  const entry = useCurrentEntry();
+  const route = entry.route;
+  // A song picked in Console's table belongs to that page: going anywhere
+  // else hands the details pane back to what's playing.
+  useEffect(() => {
+    if (useConsole.getState().selected) useConsole.setState({ selected: null });
+  }, [entry.key]);
 
   const queueOpen = useUi((s) => s.queueOpen);
   const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);

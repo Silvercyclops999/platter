@@ -329,7 +329,7 @@ function ReleaseBlock({ album, line, headed }: { album: Album; line: string; hea
     <section ref={box} className="disco-release" aria-label={album.title}>
       <header className="disco-release__head">
         <button type="button" className="disco-release__cover" tabIndex={-1} aria-hidden="true" onClick={a.open}>
-          <Art path={album.thumb} size={136} />
+          <Art path={album.thumb} size={136} sleeve={{ title: album.title, artist: album.artistTitle }} />
         </button>
         <div className="disco-release__text">
           <ReleaseTitle headed={headed}>
@@ -391,7 +391,7 @@ function CatalogueReleaseBlock({
     <section className="disco-release disco-release--catalogue" aria-label={album.title}>
       <header className="disco-release__head">
         <button type="button" className="disco-release__cover" tabIndex={-1} aria-hidden="true" onClick={() => openAlbum(album)}>
-          <Art path={album.thumb} size={136} />
+          <Art path={album.thumb} size={136} sleeve={{ title: album.title, artist: album.artist }} />
         </button>
         <div className="disco-release__text">
           <ReleaseTitle headed={headed}>

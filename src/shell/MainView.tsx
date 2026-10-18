@@ -45,6 +45,7 @@ const DevicesPage = lazy(() => import("../pages/DevicesPage").then((m) => ({ def
 const CratesPage = lazy(() => import("../pages/CratesPage").then((m) => ({ default: m.CratesPage })));
 const CratePage = lazy(() => import("../pages/CratesPage").then((m) => ({ default: m.CratePage })));
 const DiaryPage = lazy(() => import("../pages/DiaryPage").then((m) => ({ default: m.DiaryPage })));
+const MixesPage = lazy(() => import("../pages/MixesPage").then((m) => ({ default: m.MixesPage })));
 const SoundMapPage = lazy(() => import("../pages/SoundMapPage").then((m) => ({ default: m.SoundMapPage })));
 
 /** Scroll offset per history entry, so Back returns to where you were. */
@@ -128,6 +129,8 @@ const PAGE_LABELS: Partial<Record<Route["name"], string>> = {
   devices: "Devices",
   crates: "Crates",
   soundMap: "Sound map",
+  mixes: "Radio and mixes",
+  archive: "Archive",
 };
 
 /**
@@ -239,6 +242,10 @@ function Page({ route }: { route: Route }) {
       return <MixPage key={`mix-${route.id}`} id={route.id} />;
     case "radio":
       return <MixPage key={`radio-${route.seed}`} seed={route.seed} />;
+    case "mixes":
+      return <MixesPage />;
+    case "archive":
+      return <LibraryPage key="archive" tab="albums" archive />;
     case "lyrics":
       // Never pushed: the router opens the expanded view in lyrics mode instead.
       return null;

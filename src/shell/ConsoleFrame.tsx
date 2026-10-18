@@ -386,7 +386,7 @@ export function ConsoleTable({ src }: { src: ConsoleSource }) {
               onDragEnd={songDrags ? endSongDrag : undefined}
             >
               <div role="gridcell" className="console-cell console-cell--cover">
-                <Art path={t.thumb} size={24} />
+                <Art path={t.thumb} size={24} sleeve={{ title: t.albumTitle, artist: t.artistTitle }} />
                 {now && <span className="console-row__now" aria-label="Playing" />}
               </div>
               <div role="gridcell" className="console-cell console-cell--name">
@@ -850,7 +850,7 @@ export function ConsoleDetails({ drawer = false }: { drawer?: boolean }) {
       {track ? (
         <div className="console-details__body" key={track.id}>
           <div className="console-details__cover">
-            <Art path={track.thumb} fluid requestSize={320} />
+            <Art path={track.thumb} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} fluid requestSize={320} />
           </div>
           <div className="console-details__song">
             <span className="console-details__which">{isPlaying ? "Playing" : "Selected"}</span>
@@ -923,7 +923,7 @@ export function ConsoleStatus({ detailsDrawer }: { detailsDrawer: boolean }) {
                 fullWindow.open();
               }}
             >
-              <Art path={track.thumb} size={28} />
+              <Art path={track.thumb} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} size={28} />
             </button>
             <span className="console-status__song truncate">
               <TextLink className="console-status__title" onActivate={() => nav.go({ name: "album", id: track.albumId })}>

@@ -188,7 +188,7 @@ function DeckWindow() {
             fullWindow.open();
           }}
         >
-          <Art path={track.thumb} size={80} />
+          <Art path={track.thumb} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} size={80} />
         </button>
       ) : loading ? (
         <Skeleton width={80} height={80} />

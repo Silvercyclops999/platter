@@ -46,6 +46,32 @@ export function upNextItems(q: QueueView | null | undefined, n = SLEEVES_SHOWN):
   return [...q.userQueue, ...q.nextUp].slice(0, n);
 }
 
+/** One sleeve in the up-next stack: a run of songs from the same record. */
+export interface UpNextSleeve {
+  item: QueueItem;
+  /** Songs in a row from this record (1 or more). */
+  count: number;
+}
+
+/** How far ahead the stack looks for different records. */
+const SLEEVE_LOOKAHEAD = 40;
+
+/**
+ * The up-next stack as sleeves: songs in a row from one record share a
+ * sleeve with a count, so the stack shows different records, not the same
+ * cover three times.
+ */
+export function upNextSleeves(q: QueueView | null | undefined, n = SLEEVES_SHOWN): UpNextSleeve[] {
+  const out: UpNextSleeve[] = [];
+  for (const item of upNextItems(q, SLEEVE_LOOKAHEAD)) {
+    const last = out[out.length - 1];
+    if (last && last.item.track.albumId === item.track.albumId) last.count += 1;
+    else if (out.length < n) out.push({ item, count: 1 });
+    else break;
+  }
+  return out;
+}
+
 /** The record on its platter, with speed and format plates on the plinth. */
 function Platter({ compact }: { compact: boolean }) {
   const track = usePlayer((s) => s.state?.track);
@@ -55,7 +81,7 @@ function Platter({ compact }: { compact: boolean }) {
   return (
     <div className="tt-plinth">
       <div className="tt-plinth__deck">
-        <Turntable thumb={track?.thumb} playing={!!track && playing} requestSize={compact ? 240 : 480} />
+        <Turntable thumb={track?.thumb} sleeve={track ? { title: track.albumTitle, artist: track.artistTitle } : null} playing={!!track && playing} requestSize={compact ? 240 : 480} />
         {track && (
           <button
             type="button"
@@ -126,25 +152,31 @@ function NowLines() {
 /** The next few songs as a short stack of sleeves. Opens the queue. */
 function UpNext() {
   const queue = usePlayer((s) => s.state?.queue);
-  const items = useMemo(() => upNextItems(queue), [queue]);
+  const sleeves = useMemo(() => upNextSleeves(queue), [queue]);
   const queueOpen = useUi((s) => s.queueOpen);
-  if (!items.length) return <p className="tt-next__empty">Nothing up next.</p>;
-  const first = items[0].track;
+  if (!sleeves.length) return <p className="tt-next__empty">Nothing up next. Add songs to the queue and they stack here.</p>;
+  const first = sleeves[0].item.track;
+  const more = sleeves[0].count - 1;
   return (
     <button
       type="button"
       className="tt-next"
       aria-pressed={queueOpen}
-      aria-label={`Up next: ${first.title} by ${trackArtistLine(first)}. Open the queue`}
+      aria-label={`Up next: ${first.title} by ${trackArtistLine(first)}${more > 0 ? `, then ${more} more from ${first.albumTitle}` : ""}. Open the queue`}
       onClick={() => useUi.getState().setQueueOpen(!queueOpen)}
     >
       <span className="tt-next__stack" aria-hidden="true">
-        {items
+        {sleeves
           .slice()
           .reverse()
-          .map((it, i, all) => (
-            <span key={it.itemId} className="tt-next__sleeve" style={{ "--i": all.length - 1 - i } as React.CSSProperties}>
-              <Art path={it.track.thumb} size={56} />
+          .map((sl, i, all) => (
+            <span key={sl.item.itemId} className="tt-next__sleeve" style={{ "--i": all.length - 1 - i } as React.CSSProperties}>
+              <Art path={sl.item.track.thumb} size={56} sleeve={{ title: sl.item.track.albumTitle, artist: sl.item.track.artistTitle }} />
+              {sl.count > 1 && (
+                <span className="tt-next__count" data-testid="tt-next-count">
+                  {sl.count}
+                </span>
+              )}
             </span>
           ))}
       </span>

@@ -95,7 +95,7 @@ function RowView({ entry, art, actions }: { entry: RecentsEntry; art: ReactNode;
 }
 
 function AlbumRow({ entry, album }: { entry: RecentsEntry; album: Album }) {
-  return <RowView entry={entry} art={<Art path={album.thumb} size={48} />} actions={useAlbumActions(album)} />;
+  return <RowView entry={entry} art={<Art path={album.thumb} size={48} sleeve={{ title: album.title, artist: album.artistTitle }} />} actions={useAlbumActions(album)} />;
 }
 function ArtistRow({ entry, artist }: { entry: RecentsEntry; artist: Artist }) {
   return <RowView entry={entry} art={<Art path={artist.thumb} size={48} round kind="artist" />} actions={useArtistActions(artist)} />;

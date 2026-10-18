@@ -3,7 +3,7 @@
  * Turntable's section tabs. Crates and the shelf show only when they're on,
  * as in the sidebar. Settings is always last, so it's always in reach.
  */
-import { Archive, Boxes, History, House, Library, ListMusic, Search, Settings as SettingsIcon } from "lucide-react";
+import { Archive, ArchiveRestore, Boxes, History, House, Library, ListMusic, Search, Settings as SettingsIcon } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 import type { Route } from "../stores/router";
 import { useSettings } from "../stores/settings";
@@ -39,6 +39,7 @@ export function useSourceKeys(opts: { search: boolean; size?: number }): SourceK
       },
       { key: "history", label: "History", icon: <History size={size} />, route: { name: "recents" }, on: (r) => r.name === "recents" },
       shelf && { key: "shelf", label: "Shelf", icon: <Archive size={size} />, route: { name: "shelf" }, on: (r) => r.name === "shelf" },
+      { key: "archive", label: "Archive", icon: <ArchiveRestore size={size} />, route: { name: "archive" }, on: (r) => r.name === "archive" },
       { key: "settings", label: "Settings", icon: <SettingsIcon size={size} />, route: { name: "settings" }, on: (r) => r.name === "settings" },
     ];
     return keys.filter((k): k is SourceKey => !!k);

@@ -251,3 +251,39 @@
 .layout-glyph__side { grid-row: 1 / 3; border-radius: 2px; background: var(--color-text-secondary); opacity: 0.6; }
 .layout-glyph__strip { border-radius: 2px; background: var(--color-text-primary); }
 .layout-glyph__page { border-radius: 2px; background: var(--color-text-secondary); opacity: 0.3; }
+
+/* ---------------------------------------------------------------- the page in a frame */
+/* A frame has its own window row and transport above the page, so the page
+   doesn't leave room for Classic's floating header: titles start near the
+   top edge, and the header shrinks to the sticky title row. The sync note
+   floats in its corner. */
+.app.frame .main {
+  --page-top: var(--space-8);
+  /* Pinned rows (Home's chips, the Settings sections) pin to the top edge. */
+  --main-header-h: 0px;
+}
+.app.frame .main-header { height: 48px; padding: 0 var(--space-4); pointer-events: none; }
+.app.frame .main-header > * { pointer-events: auto; }
+/* No empty band over the page: the header's backdrop shows only behind the
+   sticky title and play button. */
+.app.frame .main-header::before { opacity: 0; transition: opacity var(--motion-medium) var(--motion-easing); }
+.app.frame .main-header:has(.main-header__bar.is-shown)::before { opacity: var(--bar-alpha, 0); }
+.app.frame .main-header__end { position: absolute; top: var(--space-2); right: var(--space-4); }
+.app.frame .main-header__title { font-size: var(--font-size-xl); }
+
+/* Album, artist and playlist headers in a layout: no band of colour behind
+   a poster-sized title. A quiet tint from the cover on the panel, the title
+   in the display face at a reading size, and the third tone kept to the
+   three the app uses. */
+.app.frame .main .detail-header {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tint-shade) 30%, var(--color-bg-raised)) 0%, var(--color-bg-raised) 100%);
+  box-shadow: inset 0 -1px 0 var(--engrave-dark, var(--color-border));
+}
+:root[data-theme-base="light"] .app.frame .main .detail-header {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tint) 10%, var(--color-bg-raised)) 0%, var(--color-bg-raised) 100%);
+}
+.app.frame .detail-header ~ .detail-body { background: none; }
+.app.frame .detail-header__title[data-step="1"] { font-size: 56px; line-height: 1.04; }
+.app.frame .detail-header__title[data-step="2"] { font-size: 48px; line-height: 1.06; }
+.app.frame .detail-header__title[data-step="3"] { font-size: 40px; }
+.app.frame .detail-header__muted { color: var(--color-text-secondary); }

@@ -105,6 +105,7 @@ import type {
   PinRecord,
   MixStyle,
   Track,
+  AudioQuality,
   TranscribeModel,
   QueueAt,
   MixSteer,
@@ -136,7 +137,8 @@ import type {
   SubsonicCreds,
 } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
-import { layoutProblem } from "../../design/themes/validate";
+import { isLosslessCodec } from "../libraryChips";
+import { FRAMES, layoutProblem, type Frame } from "../../design/themes/validate";
 import { MockCrates } from "./crates";
 import { exportSettings, importSettings, type SettingsFile } from "../settingsFile";
 
@@ -269,6 +271,14 @@ export interface MockOptions {
   today?: string;
   /** Start in a listening session that shows sharing (?listen=cantHear or ?listen=invited). */
   listenDemo?: "cantHear" | "invited";
+  /** Start on this layout frame (?frame=deck). */
+  frame?: Frame;
+  /** A library with no music in it (?library=empty). */
+  emptyLibrary?: boolean;
+  /** Very long album, artist and song titles (?titles=long). */
+  longTitles?: boolean;
+  /** Every third album has no cover, the playing one too (?art=missing). */
+  missingArt?: boolean;
 }
 
 const isTestEnv = (() => {
@@ -288,6 +298,46 @@ interface ResumePoint {
   index: number;
   trackId: string;
   positionMs: number;
+}
+
+/** An album's files from its songs, as the core works it out for the format filter. */
+export function albumQuality(tracks: Pick<Track, "codec" | "bitDepth" | "sampleRate">[]): AudioQuality | null {
+  if (!tracks.length) return null;
+  if (tracks.some((t) => !isLosslessCodec(t.codec))) return "lossy";
+  return tracks.some((t) => (t.bitDepth ?? 0) > 16 || (t.sampleRate ?? 0) > 48_000) ? "hiRes" : "lossless";
+}
+
+/**
+ * Screenshot switches over the built library: long titles and missing art.
+ * Without them the fixtures come back untouched. (An empty library is
+ * emptied after the mock is built; see createMockBackend.)
+ */
+export function shapeFixtures(fx: Fixtures, o: Partial<MockOptions>): Fixtures {
+  if (o.longTitles) {
+    fx.albums.forEach((a, i) => {
+      if (i % 3 !== 0) return;
+      a.title = `${a.title}: The Complete Sessions, Outtakes and Alternate Takes (Deluxe Anniversary Edition)`;
+      a.sortTitle = a.title.toLowerCase();
+      for (const t of fx.tracksByAlbum.get(a.id) ?? []) {
+        t.albumTitle = a.title;
+        t.title = `${t.title} (Extended Version, Recorded Live at the Old Exchange Hall)`;
+      }
+    });
+    const long = fx.artists[0];
+    if (long) {
+      long.title = `${long.title} and the Northern Lights Chamber Orchestra`;
+      for (const a of fx.albums) if (a.artistId === long.id) a.artistTitle = long.title;
+      for (const t of fx.tracks) if (t.artistId === long.id) t.artistTitle = long.title;
+    }
+  }
+  if (o.missingArt) {
+    fx.albums.forEach((a, i) => {
+      if (i % 3 !== 0) return;
+      a.thumb = null;
+      for (const t of fx.tracksByAlbum.get(a.id) ?? []) t.thumb = null;
+    });
+  }
+  return fx;
 }
 
 export function optionsFromUrl(search: string): MockOptions {
@@ -312,10 +362,14 @@ export function optionsFromUrl(search: string): MockOptions {
     radarEmpty: p.get("radar") === "empty",
     theme: (["dark", "light", "system", "midnight", "forest", "sand", "studio", "studioBlack", "sleeve"] as const).find((t) => t === p.get("theme")),
     importDemo: p.get("import") === "demo",
-    statsEmpty: p.get("stats") === "empty",
+    statsEmpty: p.get("stats") === "empty" || p.get("library") === "empty",
     statsSparse: p.get("stats") === "sparse",
     statsCompare: p.get("compare") === "1",
     today: /^\d{4}-\d{2}-\d{2}$/.test(p.get("today") ?? "") ? (p.get("today") as string) : undefined,
+    frame: FRAMES.find((f) => f === p.get("frame")),
+    emptyLibrary: p.get("library") === "empty",
+    longTitles: p.get("titles") === "long",
+    missingArt: p.get("art") === "missing",
     listenDemo: p.get("listen") === "cantHear" || p.get("listen") === "invited" ? (p.get("listen") as "cantHear" | "invited") : undefined,
   };
 }
@@ -502,7 +556,7 @@ export class MockBackend implements Backend {
 
   constructor(opts: Partial<MockOptions> = {}) {
     this.opts = { ...optionsFromUrl(""), ...opts };
-    this.fx = buildFixtures();
+    this.fx = shapeFixtures(buildFixtures(), this.opts);
     this.pl = new MockPlaylists(
       this.fx,
       (id) => this.trackById(id),
@@ -637,6 +691,7 @@ export class MockBackend implements Backend {
       offline: () => !!this.healthState?.cachedOnly,
     });
     if (this.opts.theme) this.settings = { ...this.settings, theme: this.opts.theme };
+    if (this.opts.frame) this.settings = { ...this.settings, layout: { ...this.settings.layout, frame: this.opts.frame }, layoutOffered: true };
     if (this.opts.statsCompare) this.settings = { ...this.settings, statsCompare: true };
     this.importMock = new MockImport(this.fx, () => this.settings.importSources);
     if (this.opts.importDemo) {
@@ -1303,6 +1358,9 @@ export class MockBackend implements Backend {
           playedAt: a.lastViewedAt,
           tint: a.tint ?? null,
           trackCount: a.trackCount,
+          year: a.year,
+          section: a.section,
+          quality: albumQuality(this.fx.tracksByAlbum.get(a.id) ?? []),
         };
       });
       for (const a of this.fx.artists) {
@@ -4638,6 +4696,16 @@ export class MockBackend implements Backend {
 export function createMockBackend(opts?: Partial<MockOptions>): MockBackend {
   const fromUrl = typeof window !== "undefined" ? optionsFromUrl(window.location.search) : optionsFromUrl("");
   const mock = new MockBackend({ ...fromUrl, ...opts });
+  // An empty library: the parts that read the fixtures see nothing.
+  if ({ ...fromUrl, ...opts }.emptyLibrary) {
+    const fx = mock.fx;
+    fx.artists.length = 0;
+    fx.albums.length = 0;
+    fx.tracks.length = 0;
+    fx.playlists.length = 0;
+    fx.playlistTracks.clear();
+    fx.tracksByAlbum.clear();
+  }
   if (typeof window !== "undefined") (window as unknown as { __platterMock?: MockBackend }).__platterMock = mock;
   return mock;
 }

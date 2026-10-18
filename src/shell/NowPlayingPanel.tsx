@@ -160,7 +160,7 @@ function NextCard() {
       {next ? (
         <div className="np-next__row" onDoubleClick={() => player.queueJump(next.itemId)}>
           <button type="button" className="np-next__art" aria-label={`Play ${next.track.title}`} onClick={() => player.queueJump(next.itemId)}>
-            <Art path={next.track.thumb} size={48} />
+            <Art path={next.track.thumb} sleeve={{ title: next.track.albumTitle, artist: next.track.artistTitle }} size={48} />
             <span className="np-next__play" aria-hidden="true">
               <Play size={18} fill="currentColor" />
             </span>
@@ -237,7 +237,7 @@ function PanelBody({ track, view, setView }: { track: Track; view: View; setView
   return (
     <div className="np-content" key={track.id}>
       <button type="button" className={`np-art ${spinning ? "is-spinning" : ""}`} aria-label={`Go to album ${track.albumTitle}`} onClick={() => nav.go({ name: "album", id: track.albumId })}>
-        <Art path={track.thumb} fluid requestSize={PANEL_ART} />
+        <Art path={track.thumb} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} fluid requestSize={PANEL_ART} />
       </button>
       <TrackTitle track={track} />
       {/* Show lyrics opens the lyrics view itself: synced, with its tools. */}

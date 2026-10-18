@@ -140,7 +140,7 @@ function LibraryAlbumView({ id, tab }: { id: string; tab?: "sleeve" }) {
               aria-haspopup="dialog"
               onClick={() => setCoverOpen(true)}
             >
-              <Art path={album.thumb} size={232} alt="" />
+              <Art path={album.thumb} size={232} alt="" sleeve={{ title: album.title, artist: album.artistTitle }} />
             </button>
           ) : (
             <Skeleton width={232} height={232} />
@@ -414,7 +414,7 @@ function CatalogueAlbumView({ rgid }: { rgid: string }) {
   return (
     <div className="detail cat-page">
       <header ref={header} className={`detail-header ${compact ? "detail-header--compact" : ""}`}>
-        <div className="detail-header__art">{album ? <Art path={album.thumb} size={232} alt="" /> : <Skeleton width={232} height={232} />}</div>
+        <div className="detail-header__art">{album ? <Art path={album.thumb} size={232} alt="" sleeve={{ title: album.title, artist: album.artist }} /> : <Skeleton width={232} height={232} />}</div>
         <div ref={column} className="detail-header__text">
           {album ? (
             <>

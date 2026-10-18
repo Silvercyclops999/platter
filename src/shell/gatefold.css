@@ -18,7 +18,9 @@
   flex: none;
   display: flex;
   flex-direction: column;
-  width: clamp(280px, 30vw, 420px);
+  /* Narrow at the fold point so the right page keeps about 600 px, growing
+     with the window to its full width. */
+  width: clamp(232px, calc(37vw - 130px), 420px);
   min-height: 0;
   border-radius: var(--radius-card) 0 0 var(--radius-card);
   background: var(--color-bg-raised);
@@ -55,7 +57,7 @@
 .gf-song__artist { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
 .gf-song__album { font-size: var(--font-size-sm); color: var(--color-text-muted); }
 .gf-song--big .gf-song__title {
-  font-family: var(--font-family-display, inherit);
+  font-family: var(--font-headings, var(--font-family));
   font-size: var(--font-size-2xl);
   font-weight: var(--font-weight-display, var(--font-weight-bold));
   line-height: 1.15;
@@ -71,14 +73,14 @@
 .gf-leaf__plates:empty { display: none; }
 .gf-leaf__plates .signal-badge { width: auto; height: 22px; padding: 0 7px; }
 
-/* Small capitals over each part of the page, like the headings on a sleeve. */
+/* A heading over each part of the page, set in the display face and in
+   sentence case, like the headings printed on a sleeve. */
 .gf-label {
   margin: 0 0 var(--space-2);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--color-text-muted);
+  font-family: var(--font-headings, var(--font-family));
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--color-text-secondary);
 }
 
 .gf-sleeve { padding-top: var(--space-4); border-top: 1px solid var(--engrave-dark, var(--color-border)); box-shadow: inset 0 1px 0 var(--engrave-light, transparent); }
@@ -175,7 +177,7 @@
     radial-gradient(circle at 50% 50%, transparent 0 18%, color-mix(in srgb, var(--color-text-muted) 14%, transparent) 18.5% 19%, transparent 19.5%),
     var(--color-bg-base);
 }
-.gf-leaf__idle-title { margin: 0; font-family: var(--font-family-display, inherit); font-size: var(--font-size-xl); font-weight: var(--font-weight-display, var(--font-weight-bold)); color: var(--color-text-primary); }
+.gf-leaf__idle-title { margin: 0; font-family: var(--font-headings, var(--font-family)); font-size: var(--font-size-xl); font-weight: var(--font-weight-display, var(--font-weight-bold)); color: var(--color-text-primary); }
 
 /* ---------------------------------------------------------------- the spine */
 .gf-spine {
@@ -227,7 +229,7 @@
   background: var(--color-bg-base);
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 0 var(--engrave-light, transparent);
 }
-.gf-handle__label { font-size: 10px; font-weight: var(--font-weight-semibold); letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
+.gf-handle__label { font-size: 11px; font-weight: var(--font-weight-semibold); color: var(--color-text-secondary); }
 .gf-handle.is-open .gf-handle__label { color: var(--color-text-primary); }
 /* Pop-ups beside the spine open into the page. */
 .gf-spine .signal-panel { left: calc(100% + var(--space-4)); right: auto; top: auto; bottom: var(--space-4); }

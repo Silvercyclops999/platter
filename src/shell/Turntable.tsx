@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { Art } from "../components/Art";
+import { Art, type SleeveText } from "../components/Art";
 import { prefersReducedMotion } from "../design/motion";
 import "./turntable.css";
 
@@ -27,11 +27,14 @@ export function nextSpeed(speed: number, target: number, dtMs: number): number {
  */
 export function Turntable({
   thumb,
+  sleeve,
   playing,
   requestSize = 640,
   children,
 }: {
   thumb: string | null | undefined;
+  /** The record's title and artist, printed on the label when it has no cover. */
+  sleeve?: SleeveText | null;
   playing: boolean;
   requestSize?: number;
   /** Laid over the record (the Flip button at the end of a side). */
@@ -84,7 +87,7 @@ export function Turntable({
       <div className="turntable__platter" aria-hidden="true" />
       <div className="turntable__record" ref={record}>
         <div className="turntable__label">
-          <Art path={thumb} fluid requestSize={requestSize} />
+          <Art path={thumb} fluid requestSize={requestSize} sleeve={sleeve} />
         </div>
       </div>
       <div className="turntable__spindle" aria-hidden="true" />

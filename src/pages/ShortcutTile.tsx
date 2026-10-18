@@ -42,7 +42,7 @@ function Tile({ kind, title, art, actions, onHover }: TileProps & { kind: HomeIt
 }
 
 function AlbumTile({ album, onHover }: TileProps & { album: Album }) {
-  return <Tile kind="album" title={album.title} art={<Art path={album.thumb} size={64} />} actions={useAlbumActions(album)} onHover={onHover} />;
+  return <Tile kind="album" title={album.title} art={<Art path={album.thumb} size={64} sleeve={{ title: album.title, artist: album.artistTitle }} />} actions={useAlbumActions(album)} onHover={onHover} />;
 }
 function ArtistTile({ artist, onHover }: TileProps & { artist: Artist }) {
   return <Tile kind="artist" title={artist.title} art={<Art path={artist.thumb} size={56} round kind="artist" />} actions={useArtistActions(artist)} onHover={onHover} />;

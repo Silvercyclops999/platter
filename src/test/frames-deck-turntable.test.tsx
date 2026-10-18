@@ -215,7 +215,8 @@ describe("the Deck frame", () => {
 
   it("folds the faceplate and the rail with container queries in narrow windows", () => {
     expect(deckCss).toMatch(/@container deck-face \(max-width: 1180px\)/);
-    expect(deckCss).toMatch(/@container deck-rail \(max-width: 900px\)/);
+    // The rail goes to icons before its keys run out of room (with Archive, at about 1040 px).
+    expect(deckCss).toMatch(/@container deck-rail \(max-width: 1040px\)/);
     // Only the display line uses a mono face.
     expect(deckCss.match(/font-family:[^;]*monospace/g)).toHaveLength(1);
     expect(deckCss.slice(deckCss.indexOf(".deck-display__line {"), deckCss.indexOf(".deck-display__line--title"))).toMatch(/monospace/);

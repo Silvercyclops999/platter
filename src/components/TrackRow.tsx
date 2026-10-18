@@ -608,7 +608,7 @@ export function TrackRow({
       <div className="track-row__main" role="gridcell">
         {(showArt || compact) && (
           <span className="track-row__art">
-            <Art path={track.thumb} size={compact ? 48 : 40} />
+            <Art path={track.thumb} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} size={compact ? 48 : 40} />
             {playOnArt && (
               <button
                 type="button"

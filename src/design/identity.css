@@ -49,9 +49,30 @@
 :root[data-identity] .detail-header__title[data-step="3"] { font-size: 40px; }
 :root[data-identity] .empty-state__title { font-size: var(--font-size-2xl); }
 /* Times, bitrates and counts never jiggle. */
-:root[data-identity] :is(.track-row__duration, .track-row__num, .seek__time, .badge, .hifi-mark, .stats-strip, .queue-row__dur) {
-  font-variant-numeric: tabular-nums;
+:root[data-identity] :is(.track-row__duration, .track-row__num, .seek__time, .badge, .hifi-mark, .stats-strip, .queue-row__dur),
+.app.frame :is(.seek__time, .console-cell--year, .console-cell--length, .console-cell--plays, .console-cell--format, .console-node__count, .console-status, .library__count, .track-row__duration, .track-row__num, .track-row__plays, .detail-header__meta, .tt-plate, .deck-display, .facet) {
+  font-variant-numeric: tabular-nums lining-nums;
 }
+
+/* Titles in a layout share the display face: page, album and panel titles,
+   the record in Turntable's column, Gatefold's left page, Console's details. */
+.app.frame :is(.page-title, .library-wide__title, .section-title, .empty-state__title, .detail-header__title, .tt-now__title, .gf-leaf__title, .console-details__title) {
+  font-family: var(--font-headings, var(--font-family));
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+/* Covers get one edge treatment: a hairline inside the edge, so a pale cover
+   never bleeds into the page, and the look's own corner. */
+.app.frame .art:not(.art--round)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 9%, transparent);
+  pointer-events: none;
+}
+:root[data-theme-base="light"] .app.frame .art:not(.art--round)::after { box-shadow: inset 0 0 0 1px rgba(43, 33, 23, 0.12); }
 
 /* ---------------------------------------------------------------- Accent use */
 /* Brass is for on, primary and playing. A chosen filter chip is "on". */

@@ -2,7 +2,7 @@
 .recents {
   max-width: 640px;
   margin: 0 auto;
-  padding-top: 72px;
+  padding-top: var(--page-top, 72px);
   padding-bottom: var(--space-6);
 }
 .recents__title {

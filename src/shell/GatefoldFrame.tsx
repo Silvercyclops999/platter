@@ -92,7 +92,7 @@ export function usePageTurn(page: RefObject<HTMLElement | null>, crease: RefObje
       return () => window.clearTimeout(t);
     }
     const a = el.animate(plan.page, { duration: plan.ms, easing: TURN_EASING });
-    const c = plan.crease && crease.current?.animate ? crease.current.animate(plan.crease, { duration: plan.ms, easing: "ease-out" }) : null;
+    const c = plan.crease && crease.current?.animate ? crease.current.animate(plan.crease, { duration: plan.ms, easing: TURN_EASING }) : null;
     a.onfinish = done;
     a.oncancel = done;
     return () => {
@@ -120,7 +120,7 @@ function Cover({ track, size }: { track: Track; size: number }) {
         fullWindow.open();
       }}
     >
-      <Art path={track.thumb} fluid requestSize={size} />
+      <Art path={track.thumb} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} fluid requestSize={size} />
     </button>
   );
 }
@@ -262,11 +262,35 @@ function CreditsText({ track }: { track: Track }) {
   );
 }
 
-type LeafTab = "lyrics" | "credits";
+export type LeafTab = "lyrics" | "credits";
 
-/** Lyrics or credits, as two tabs. */
+/** Where the left page's lyrics or credits choice is kept. App-only and per device (localStorage). */
+export const LEAF_TAB_KEY = "platter.gatefold-tab.v1"; // gitleaks:allow (localStorage key name, not a secret)
+
+/** The left page's last choice, lyrics when none was kept. */
+export function loadLeafTab(): LeafTab {
+  try {
+    return localStorage.getItem(LEAF_TAB_KEY) === "credits" ? "credits" : "lyrics";
+  } catch {
+    return "lyrics";
+  }
+}
+
+function saveLeafTab(tab: LeafTab) {
+  try {
+    localStorage.setItem(LEAF_TAB_KEY, tab);
+  } catch {
+    /* storage unavailable: this session only */
+  }
+}
+
+/** Lyrics or credits, as two tabs. The choice holds across songs and restarts. */
 function LyricsOrCredits({ track }: { track: Track }) {
-  const [tab, setTab] = useState<LeafTab>("lyrics");
+  const [tab, setTabState] = useState<LeafTab>(loadLeafTab);
+  const setTab = (t: LeafTab) => {
+    setTabState(t);
+    saveLeafTab(t);
+  };
   const id = useId();
   const tabs: { id: LeafTab; label: string }[] = [
     { id: "lyrics", label: "Lyrics" },

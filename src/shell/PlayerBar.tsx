@@ -466,7 +466,7 @@ export function PlayerBar() {
                 fullWindow.open();
               }}
             >
-              <Art path={track.thumb} size={56} />
+              <Art path={track.thumb} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} size={56} />
             </button>
             <div className="player-bar__meta">
               <div

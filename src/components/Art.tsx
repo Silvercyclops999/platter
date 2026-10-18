@@ -28,6 +28,50 @@ export interface ArtProps {
   onLoad?: (img: HTMLImageElement) => void;
   /** A name whose initials stand in when there's no picture (instead of the blank icon). */
   monogram?: string;
+  /** A record with no cover: its title and artist set like a printed sleeve stand in. */
+  sleeve?: SleeveText | null;
+}
+
+/** What a fallback sleeve prints. */
+export interface SleeveText {
+  title: string;
+  artist?: string | null;
+}
+
+/** Below this size a sleeve prints only its first letter; from the next, an artist line too. */
+export const SLEEVE_LETTER_BELOW = 40;
+export const SLEEVE_ARTIST_FROM = 96;
+
+/**
+ * The sleeve's flat tone, from its title: a hue for each record, so
+ * neighbouring sleeves differ, at one muted lightness so they read as print.
+ */
+export function sleeveHue(title: string): number {
+  let h = 0;
+  for (let i = 0; i < title.length; i++) h = (h * 31 + title.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+
+/** A typographic sleeve for a record without a cover. Decorative: the row or card names it. */
+function FallbackSleeve({ text, size, fluid }: { text: SleeveText; size: number; fluid: boolean }) {
+  const title = text.title.trim() || "Untitled";
+  const hue = { "--sleeve-h": sleeveHue(title) } as React.CSSProperties;
+  // Type scales with the sleeve's own width (container units), so a fluid
+  // cover of any size sets its title right.
+  if (!fluid && size < SLEEVE_LETTER_BELOW) {
+    return (
+      <span className="art__fallback art__sleeve art__sleeve--letter" aria-hidden="true" data-testid="fallback-sleeve" style={hue}>
+        <span className="art__sleeve-letter">{Array.from(title)[0]?.toLocaleUpperCase()}</span>
+      </span>
+    );
+  }
+  const artist = fluid || size >= SLEEVE_ARTIST_FROM ? text.artist?.trim() : null;
+  return (
+    <span className="art__fallback art__sleeve" aria-hidden="true" data-testid="fallback-sleeve" style={hue}>
+      <span className="art__sleeve-title">{title}</span>
+      {artist && <span className="art__sleeve-artist">{artist}</span>}
+    </span>
+  );
 }
 
 /** Up to two initials of a name ("Cold Coast" is CC, "Ostra" is O). */
@@ -53,7 +97,7 @@ export function initials(name: string): string {
  * rounded up to a shared step (see lib/artSize), since decoded art is most of
  * the WebView's memory.
  */
-export function Art({ path, size = 48, fluid, requestSize, round, kind = "album", alt = "", className = "", onLoad, monogram }: ArtProps) {
+export function Art({ path, size = 48, fluid, requestSize, round, kind = "album", alt = "", className = "", onLoad, monogram, sleeve }: ArtProps) {
   const fluidSize = useContext(FluidArtSize);
   const cssSize = fluid ? (fluidSize ?? requestSize ?? 200) : size;
   const active = useContext(ArtActive);
@@ -88,7 +132,9 @@ export function Art({ path, size = 48, fluid, requestSize, round, kind = "album"
   return (
     <span className={`art ${round ? "art--round" : ""} ${loaded ? "is-loaded" : ""} ${loaded && fadeSrc === src ? "is-fading" : ""} ${className}`} style={style}>
       {(!wanted || failed) &&
-        (monogram && initials(monogram) ? (
+        (sleeve && kind === "album" && !round ? (
+          <FallbackSleeve text={sleeve} size={cssSize} fluid={!!fluid} />
+        ) : monogram && initials(monogram) ? (
           <span className="art__fallback art__monogram" aria-hidden="true" style={{ fontSize: Math.max(12, Math.round(cssSize * 0.36)) }}>
             {initials(monogram)}
           </span>

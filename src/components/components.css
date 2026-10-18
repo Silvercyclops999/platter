@@ -169,6 +169,57 @@
   justify-content: center;
   color: var(--color-text-muted);
 }
+/* A record with no cover: its title and artist printed on a flat tone, like
+   a plain sleeve. One muted lightness, a hue per record. */
+.art__sleeve {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5em;
+  padding: 9%;
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.06), transparent 55%),
+    hsl(var(--sleeve-h, 30) 18% 24%);
+  color: #F2EBDD;
+  text-align: left;
+  user-select: none;
+  container-type: inline-size;
+}
+.art__sleeve-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
+  font-family: var(--font-headings, var(--font-family));
+  font-size: max(9px, 12.5cqi);
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.005em;
+  overflow-wrap: anywhere;
+}
+.art__sleeve-artist {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: max(8px, 6cqi);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: color-mix(in srgb, #F2EBDD 72%, transparent);
+}
+.art__sleeve--letter { align-items: center; justify-content: center; padding: 0; }
+.art__sleeve-letter { font-family: var(--font-headings, var(--font-family)); font-size: 52cqi; font-weight: 600; line-height: 1; }
+/* Too small for an artist line (a fluid cover in a narrow grid). */
+@container (max-width: 90px) {
+  .art__sleeve-artist { display: none; }
+}
+:root[data-theme-base="light"] .art__sleeve {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.35), transparent 55%), hsl(var(--sleeve-h, 30) 24% 80%);
+  color: #241D15;
+}
+:root[data-theme-base="light"] .art__sleeve-artist { color: color-mix(in srgb, #241D15 70%, transparent); }
 /* Initials for an artist no source has a picture of. */
 .art__monogram {
   background: var(--color-state-pressed);

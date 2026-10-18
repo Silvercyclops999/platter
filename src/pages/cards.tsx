@@ -174,6 +174,7 @@ export function AlbumCard({ album, subtitle = "artist", note }: { album: Album; 
       title={album.title}
       subtitle={sub}
       thumb={album.thumb}
+      sleeve={{ title: album.title, artist: album.artistTitle }}
       playing={a.playing}
       onOpen={a.open}
       onPlay={a.play}

@@ -113,7 +113,8 @@
   font-size: var(--font-size-md);
   color: var(--color-text-secondary);
 }
-.record-hero__artist-link { font: inherit; color: var(--color-text-primary); border-radius: 2px; }
+/* A long name wraps like the line around it, not as a centred block. */
+.record-hero__artist-link { display: inline; font: inherit; text-align: left; color: var(--color-text-primary); border-radius: 2px; }
 .record-hero__artist-link:hover { text-decoration: underline; }
 .record-hero__where { margin: var(--space-6) 0 var(--space-6); max-width: 420px; }
 .record-hero__next {

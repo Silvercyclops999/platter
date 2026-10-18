@@ -11,7 +11,7 @@
   position: relative;
   isolation: isolate;
   /* The chips sit right under the main header. */
-  padding-top: 64px;
+  padding-top: calc(var(--page-top, 72px) - var(--space-2));
   transition: --home-wash var(--motion-slow) var(--motion-easing-in-out);
 }
 

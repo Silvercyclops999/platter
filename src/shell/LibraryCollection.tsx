@@ -235,7 +235,7 @@ function Row({ e, index, setSize, tabIndex, selected, isContext, playing, filter
           ) : e.liked || e.bookmarks || e.stats ? (
             <LikedCover size={LIST_ART} icon={coverIcon(e)} />
           ) : (
-            <Art path={e.thumb} size={LIST_ART} round={e.kind === "artist"} kind={e.kind} />
+            <Art path={e.thumb} sleeve={e.kind === "album" ? { title: e.title, artist: e.creator } : null} size={LIST_ART} round={e.kind === "artist"} kind={e.kind} />
           )}
           <PlayOverlay e={e} playing={isContext && playing} className="lib-row__play" />
         </span>
@@ -313,7 +313,7 @@ function Cell({ e, index, setSize, tabIndex, selected, isContext, playing, filte
       onDoubleClick={() => !e.unavailable && void playEntry(e)}
     >
       <span className="lib-cell__art">
-        {e.folder ? <FolderArt fluid /> : e.liked || e.bookmarks || e.stats ? <LikedCover fluid icon={coverIcon(e)} /> : <Art path={e.thumb} fluid round={e.kind === "artist"} kind={e.kind} />}
+        {e.folder ? <FolderArt fluid /> : e.liked || e.bookmarks || e.stats ? <LikedCover fluid icon={coverIcon(e)} /> : <Art path={e.thumb} sleeve={e.kind === "album" ? { title: e.title, artist: e.creator } : null} fluid round={e.kind === "artist"} kind={e.kind} />}
         <PlayOverlay e={e} playing={isContext && playing} className={`lib-cell__play ${isContext && playing ? "is-on" : ""}`} />
       </span>
       <button
@@ -400,7 +400,7 @@ function Spine({ e, index, setSize, tabIndex, selected, isContext, playing, onMe
       </button>
       {out && !still && (
         <span className="lib-spine__cover" data-testid="spine-cover">
-          <Art path={e.thumb} size={SPINE_HEIGHT} kind="album" />
+          <Art path={e.thumb} sleeve={e.kind === "album" ? { title: e.title, artist: e.creator } : null} size={SPINE_HEIGHT} kind="album" />
           <PlayOverlay e={e} playing={isContext && playing} className="lib-cell__play lib-spine__play" />
         </span>
       )}
@@ -441,7 +441,7 @@ function Tile({ e, index, setSize, tabIndex, selected, onMenu }: ItemProps) {
           ) : e.liked || e.bookmarks || e.stats ? (
             <LikedCover size={RAIL_ART} icon={coverIcon(e)} />
           ) : (
-            <Art path={e.thumb} size={RAIL_ART} round={e.kind === "artist"} kind={e.kind} />
+            <Art path={e.thumb} sleeve={e.kind === "album" ? { title: e.title, artist: e.creator } : null} size={RAIL_ART} round={e.kind === "artist"} kind={e.kind} />
           )}
         </button>
       </Tooltip>

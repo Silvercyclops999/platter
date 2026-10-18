@@ -135,6 +135,25 @@
   color-scheme: light;
 }
 
+/* One easing system for Platter's own looks and the layouts: controls
+   answer in 100 to 150 ms, panels in 200 to 300 ms, pages and the platter in
+   300 to 500 ms. Things enter on an ease-out and leave on an ease-in; only
+   the platter's spin-up and spin-down use the motor curve. Nothing in the
+   flow runs past 500 ms. */
+:root[data-identity],
+.app.frame {
+  --motion-very-quick: 100ms;
+  --motion-quick: 140ms;
+  --motion-fast: 140ms;
+  --motion-medium: 240ms;
+  --motion-slow: 400ms;
+  --motion-long: 480ms;
+  --motion-easing: cubic-bezier(0.2, 0, 0, 1);
+  --motion-easing-exit: cubic-bezier(0.4, 0, 1, 1);
+  --motion-easing-in-out: cubic-bezier(0.45, 0, 0.25, 1);
+  --motion-easing-motor: cubic-bezier(0.6, 0, 0.3, 1);
+}
+
 /* Views drawn over artwork colour (expanded now playing and lyrics, text on
    photos, and the miniplayer, which floats over other windows) keep light
    text on every theme: on a light theme they take the Dark theme's surface,

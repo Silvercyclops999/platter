@@ -55,6 +55,9 @@
   overflow: hidden;
 }
 .turntable__label .art { width: 100%; height: 100%; border-radius: 50%; }
+.turntable__label .art__sleeve { align-items: center; justify-content: center; padding: 20%; text-align: center; }
+.turntable__label .art__sleeve-title { -webkit-line-clamp: 3; line-clamp: 3; font-size: max(9px, 11cqi); }
+.turntable__label .art__sleeve-artist { display: none; }
 .turntable__spindle {
   position: absolute;
   left: calc(2% + 43% - 1%);
@@ -94,7 +97,7 @@
 @keyframes tt-fade {
   from { opacity: 0; }
 }
-:root[data-reduced-motion="true"] .turntable__arm { animation: tt-fade var(--motion-medium) ease; }
+:root[data-reduced-motion="true"] .turntable__arm { animation: tt-fade var(--motion-medium) var(--motion-easing); }
 
 /* Laid over the record: the Flip button when a side has ended. It sits on
    the lower half of the record, under the label, and fades in. */
@@ -108,7 +111,7 @@
   align-items: center;
   gap: 6px;
   z-index: 2;
-  animation: tt-fade var(--motion-medium) ease;
+  animation: tt-fade var(--motion-medium) var(--motion-easing);
 }
 .turntable__flip {
   display: inline-flex;
@@ -125,7 +128,7 @@
   letter-spacing: 0.02em;
   cursor: pointer;
   backdrop-filter: blur(6px);
-  transition: background var(--motion-quick) ease, border-color var(--motion-quick) ease;
+  transition: background var(--motion-quick) var(--motion-easing), border-color var(--motion-quick) var(--motion-easing);
 }
 .turntable__flip:hover { background: rgba(14, 13, 12, 0.86); border-color: rgba(255, 255, 255, 0.32); }
 .turntable__flip:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }

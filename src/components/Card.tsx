@@ -2,7 +2,7 @@ import { Pause, Play } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import { endSongDrag, startSongDrag, type DragSongs } from "../stores/drag";
 import { useSettings } from "../stores/settings";
-import { Art } from "./Art";
+import { Art, type SleeveText } from "./Art";
 import { Skeleton } from "./Skeleton";
 
 export interface CardProps {
@@ -21,13 +21,15 @@ export interface CardProps {
   artSize?: number;
   /** The songs a drag of the card carries (albums and playlists). */
   drag?: () => DragSongs;
+  /** A record with no cover prints this on a plain sleeve. */
+  sleeve?: SleeveText | null;
 }
 
 /**
  * Album / artist (round art) / playlist card. The whole card opens the item
  * via a stretched title button; the hover play button sits above it.
  */
-export function Card({ kind, title, subtitle, thumb, onOpen, onPlay, playing, onContextMenu, artSize = 200, drag }: CardProps) {
+export function Card({ kind, title, subtitle, thumb, onOpen, onPlay, playing, onContextMenu, artSize = 200, drag, sleeve }: CardProps) {
   const songDrags = useSettings((s) => s.settings?.dragAndDrop !== false);
   const dragProps =
     drag && songDrags
@@ -36,7 +38,7 @@ export function Card({ kind, title, subtitle, thumb, onOpen, onPlay, playing, on
   return (
     <div className={`card card--${kind} ${playing ? "is-playing" : ""}`} onContextMenu={onContextMenu} {...dragProps}>
       <div className="card__art">
-        <Art path={thumb} fluid requestSize={artSize} round={kind === "artist"} kind={kind} />
+        <Art path={thumb} fluid requestSize={artSize} round={kind === "artist"} kind={kind} sleeve={sleeve} />
         {onPlay && (
           <button
             type="button"

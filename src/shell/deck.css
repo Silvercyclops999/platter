@@ -250,7 +250,7 @@
 .deck-lyrics .icon-btn { color: rgba(255, 255, 255, 0.8); }
 .deck-lyrics .icon-btn:hover { color: #ffffff; }
 .deck-lyrics__head { flex: none; display: flex; align-items: baseline; gap: var(--space-4); }
-.deck-lyrics__title { margin: 0; font-family: var(--font-family-display, inherit); font-size: var(--font-size-2xl); font-weight: var(--font-weight-display, var(--font-weight-bold)); }
+.deck-lyrics__title { margin: 0; font-family: var(--font-headings, var(--font-family)); font-size: var(--font-size-2xl); font-weight: var(--font-weight-display, var(--font-weight-bold)); }
 .deck-lyrics__song { flex: 1; min-width: 0; font-size: var(--font-size-sm); color: rgba(255, 255, 255, 0.72); }
 .deck-lyrics__head .icon-btn { align-self: center; }
 .deck-lyrics__body { margin-top: var(--space-3); }
@@ -276,7 +276,7 @@
   .deck-rail__search { flex-basis: 240px; min-width: 160px; }
 }
 /* Narrow: icons only (the names stay for screen readers). */
-@container deck-rail (max-width: 900px) {
+@container deck-rail (max-width: 1040px) {
   .deck-rail.is-labelled .deck-key__icon { display: inline-flex; }
   .deck-key__label {
     position: absolute;

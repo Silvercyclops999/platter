@@ -107,7 +107,7 @@ export function RecordHero({ progress: p }: { progress: RecordProgress }) {
       <div className="record-hero__sleeve">
         <span className="record-hero__disc" aria-hidden="true" />
         <button type="button" className="record-hero__cover" onClick={open} aria-label={`Open ${p.album.title}`} tabIndex={-1}>
-          <Art path={p.album.thumb} fluid requestSize={320} kind="album" />
+          <Art path={p.album.thumb} fluid requestSize={320} kind="album" sleeve={{ title: p.album.title, artist: p.album.artistTitle }} />
         </button>
       </div>
       <div className="record-hero__body">
@@ -179,7 +179,7 @@ export function SleeveCard({ album, meta, progress, extra }: SleeveCardProps) {
       <div className="sleeve-card__art">
         <span className="sleeve-card__disc" aria-hidden="true" />
         <span className="sleeve-card__sleeve">
-          <Art path={album.thumb} fluid requestSize={220} kind="album" />
+          <Art path={album.thumb} fluid requestSize={220} kind="album" sleeve={{ title: album.title, artist: album.artistTitle }} />
         </span>
         <button
           type="button"

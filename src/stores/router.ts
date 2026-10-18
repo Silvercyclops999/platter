@@ -82,7 +82,11 @@ export type Route =
   /** Create a Blend: pick people to combine tastes with. */
   | { name: "blendNew" }
   /** Everything in the library a person is credited on (from sleeve notes and file tags). */
-  | { name: "credits"; person: string };
+  | { name: "credits"; person: string }
+  /** Every mix made for you, and where radio starts. */
+  | { name: "mixes" }
+  /** The archive: demos, mixtapes and unreleased albums (the library with that filter on). */
+  | { name: "archive" };
 
 export interface HistoryEntry {
   key: number;

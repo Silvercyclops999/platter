@@ -74,7 +74,7 @@ function StripNow() {
               fullWindow.open();
             }}
           >
-            <Art path={track.thumb} size={48} />
+            <Art path={track.thumb} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} size={48} />
           </button>
           <div className="ts-now__meta">
             <div
