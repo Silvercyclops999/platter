@@ -729,7 +729,6 @@ impl PlayerHandle {
     /// While only music on this computer can play, leaves the rest out (and
     /// tells the lookup how many, for its notice). A start song that can't
     /// play gives way to the next one that can.
-
     async fn keep_playable(
         &self,
         tracks: Vec<Track>,

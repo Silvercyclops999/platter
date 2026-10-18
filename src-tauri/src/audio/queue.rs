@@ -1480,7 +1480,7 @@ mod tests {
         assert!(q.shuffle());
         assert_eq!(q.repeat(), Repeat::All);
         assert_eq!(q.context().and_then(|c| c.id.as_deref()), Some("al"));
-        assert!(!q.shuffle_pref("al"), "the context's own shuffle choice is left alone");
+        assert!(q.shuffle_pref("al"), "the page toggle shows the shuffle the queue came with");
     }
 
     #[test]
