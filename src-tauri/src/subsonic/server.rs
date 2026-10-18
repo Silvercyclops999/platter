@@ -1033,34 +1033,62 @@ fn ids_param(name: &'static str, ids: &[String]) -> Vec<(&'static str, String)> 
     ids.iter().map(|i| (name, key(i).to_string())).collect()
 }
 
+/// Song ids sent in one request when they go in the address (no form
+/// posts): more makes an address longer than servers and proxies take.
+pub const URL_IDS: usize = 150;
+
+impl Core {
+    /// How many song ids one request may carry.
+    fn ids_per_request(&self) -> usize {
+        if self.has(ext::FORM_POST) { usize::MAX } else { URL_IDS }
+    }
+
+    /// Add songs to the end of a playlist, in parts when needed.
+    async fn append(&self, id: &str, track_ids: &[String]) -> AppResult<()> {
+        for part in track_ids.chunks(self.ids_per_request()) {
+            let mut q = p(&[("playlistId", key(id))]);
+            q.extend(ids_param("songIdToAdd", part));
+            self.call("updatePlaylist", &q).await?;
+        }
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl PlaylistRemote for Core {
     async fn online(&self) -> bool {
         LikeRemote::online(self).await
     }
 
+    /// A long one is made with its first songs, the rest added after.
     async fn create(&self, title: &str, track_ids: &[String]) -> AppResult<String> {
+        let (first, rest) = track_ids.split_at(track_ids.len().min(self.ids_per_request()));
         let mut q = p(&[("name", title)]);
-        q.extend(ids_param("songId", track_ids));
+        q.extend(ids_param("songId", first));
         let made: SPlaylist = self.get("createPlaylist", &q, "playlist").await?;
-        if !made.id.is_empty() {
-            return Ok(qualify_any(&self.tag, &made.id));
+        let id = if !made.id.is_empty() {
+            qualify_any(&self.tag, &made.id)
+        } else {
+            // Servers before 1.14 don't answer with the playlist: the newest
+            // with that name is it.
+            let all: Playlists = self.get("getPlaylists", &[], "playlists").await?;
+            all.playlist
+                .iter()
+                .filter(|x| x.name.as_deref() == Some(title))
+                .max_by_key(|x| x.created.as_deref().and_then(unix_s).unwrap_or(0))
+                .map(|x| qualify_any(&self.tag, &x.id))
+                .ok_or_else(|| AppError::Server("the new playlist didn't show up".into()))?
+        };
+        // The playlist exists now: a later part that fails is left for the
+        // caller to see (it compares and adds what's missing).
+        if let Err(e) = self.append(&id, rest).await {
+            tracing::warn!("new playlist made without all its songs: {}", e.kind());
         }
-        // Servers before 1.14 don't answer with the playlist: the newest
-        // with that name is it.
-        let all: Playlists = self.get("getPlaylists", &[], "playlists").await?;
-        all.playlist
-            .iter()
-            .filter(|x| x.name.as_deref() == Some(title))
-            .max_by_key(|x| x.created.as_deref().and_then(unix_s).unwrap_or(0))
-            .map(|x| qualify_any(&self.tag, &x.id))
-            .ok_or_else(|| AppError::Server("the new playlist didn't show up".into()))
+        Ok(id)
     }
 
     async fn add(&self, id: &str, track_ids: &[String]) -> AppResult<()> {
-        let mut q = p(&[("playlistId", key(id))]);
-        q.extend(ids_param("songIdToAdd", track_ids));
-        self.call("updatePlaylist", &q).await
+        self.append(id, track_ids).await
     }
 
     /// Rows are indexes: the playlist is read again first, so the row
@@ -1080,9 +1108,13 @@ impl PlaylistRemote for Core {
         let from = find_row(&songs, item_id)?;
         let after = after.map(|a| find_row(&songs, a)).transpose()?;
         let order = reorder(&songs, from, after);
+        // Written again with its first songs, the rest added after when
+        // the ids go in the address.
+        let (first, rest) = order.split_at(order.len().min(self.ids_per_request()));
         let mut q = p(&[("playlistId", key(id))]);
-        q.extend(order.iter().map(|s| ("songId", s.clone())));
-        self.call("createPlaylist", &q).await
+        q.extend(first.iter().map(|s| ("songId", s.clone())));
+        self.call("createPlaylist", &q).await?;
+        self.append(id, rest).await
     }
 
     async fn update(&self, id: &str, title: Option<&str>, summary: Option<&str>) -> AppResult<()> {
@@ -1294,7 +1326,16 @@ impl ResumeQueue for Core {
         if ids.is_empty() {
             return Err(AppError::Invalid("None of these songs are on this server.".into()));
         }
-        let current = current.min(ids.len() - 1);
+        let mut current = current.min(ids.len() - 1);
+        // With the ids in the address, a long queue is saved from a little
+        // before the playing song.
+        let mut ids = ids;
+        let most = self.ids_per_request();
+        if ids.len() > most {
+            let start = current.saturating_sub(10).min(ids.len() - most);
+            ids = ids[start..start + most].to_vec();
+            current -= start;
+        }
         let mut q: Vec<(&'static str, String)> = ids.iter().map(|i| ("id", i.to_string())).collect();
         q.push(("position", position_ms.to_string()));
         if self.has(ext::INDEX_QUEUE) {

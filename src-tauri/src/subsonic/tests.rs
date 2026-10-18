@@ -732,6 +732,26 @@ async fn server_search_stays_in_the_included_folders() {
     assert!(l.contains(&"search3 albumCount=5&artistCount=5&musicFolderId=2&query=song&songCount=5".to_string()), "{l:?}");
 }
 
+#[tokio::test]
+async fn long_id_lists_go_out_in_parts_when_ids_are_in_the_address() {
+    let s = subsonic(Some(all_ext()), true).await;
+    let core = open_core(&s);
+    let ids: Vec<String> = (0..400).map(|i| id(&s, &format!("s{i}"))).collect();
+    PlaylistRemote::create(core.as_ref(), "Long", &ids).await.unwrap();
+    PlaylistRemote::add(core.as_ref(), &id(&s, "p1"), &ids).await.unwrap();
+    ResumeQueue::save(core.as_ref(), &ids, 300, 0).await.unwrap();
+    let reqs = s.received_requests().await.unwrap();
+    let count = |m: &str| reqs.iter().filter(|r| r.url.path() == format!("/rest/{m}")).count();
+    assert_eq!(count("createPlaylist"), 1);
+    assert_eq!(count("updatePlaylist"), 2 + 3, "two parts after the create, three for the add");
+    let longest = reqs.iter().map(|r| r.url.as_str().len()).max().unwrap();
+    assert!(longest < 6_000, "{longest}");
+    let saved = reqs.iter().find(|r| r.url.path().ends_with("savePlayQueueByIndex")).unwrap();
+    let p = params(saved);
+    assert_eq!(p["id"].len(), super::server::URL_IDS);
+    assert_eq!(p["id"][one(&p, "currentIndex").unwrap().parse::<usize>().unwrap()], "s300", "still on the playing song");
+}
+
 /// `search3` over a long list where every tenth entry is a video.
 struct LongSearch;
 

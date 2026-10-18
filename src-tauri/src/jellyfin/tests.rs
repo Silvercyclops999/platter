@@ -701,6 +701,18 @@ async fn lyrics_mix_details_activity_and_files() {
     token_only_in_headers(&s).await;
 }
 
+#[tokio::test]
+async fn long_playlist_adds_go_out_in_parts() {
+    let s = jellyfin(false, true, true).await;
+    let core = signed_core(&s, false, true, true);
+    let id = |x: &str| format!("{}:{x}", tag());
+    let ids: Vec<String> = (0..250).map(|i| id(&format!("{i:032x}"))).collect();
+    PlaylistRemote::add(core.as_ref(), &id("p1"), &ids).await.unwrap();
+    let posts: Vec<_> = s.received_requests().await.unwrap().into_iter().filter(|r| r.url.path() == "/Playlists/p1/Items").collect();
+    assert_eq!(posts.len(), 3);
+    assert!(posts.iter().all(|r| r.url.as_str().len() < 4_000));
+}
+
 // ---- ids and the library cache --------------------------------------------------------
 
 #[tokio::test]

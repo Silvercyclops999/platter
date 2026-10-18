@@ -724,6 +724,9 @@ async fn entries(core: &Core, playlist_id: &str) -> AppResult<Vec<PlaylistEntry>
 
 // ---- search and art ---------------------------------------------------------
 
+/// Song ids sent in one playlist add.
+pub const ADD_IDS: usize = 100;
+
 #[async_trait]
 impl RemoteSearch for Core {
     /// Each kind is asked on its own, so many matching songs don't crowd
@@ -969,10 +972,15 @@ impl PlaylistRemote for Core {
         Ok(qualify_any(&self.tag, &r?.id))
     }
 
+    /// In parts of [`ADD_IDS`]: the ids go in the address, and a few
+    /// hundred 32-character ids are more than servers and proxies take.
     async fn add(&self, id: &str, track_ids: &[String]) -> AppResult<()> {
         let uid = self.uid()?;
-        let ids = track_ids.iter().map(|i| key(i)).collect::<Vec<_>>().join(",");
-        self.call(Method::POST, &format!("/Playlists/{}/Items", key(id)), &[("ids", &ids), ("userId", &uid)], None).await
+        for part in track_ids.chunks(ADD_IDS) {
+            let ids = part.iter().map(|i| key(i)).collect::<Vec<_>>().join(",");
+            self.call(Method::POST, &format!("/Playlists/{}/Items", key(id)), &[("ids", &ids), ("userId", &uid)], None).await?;
+        }
+        Ok(())
     }
 
     async fn remove(&self, id: &str, item_id: &str) -> AppResult<()> {
