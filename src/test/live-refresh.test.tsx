@@ -4,7 +4,7 @@
  * page and in What's New without a manual refresh, when the core says
  * `library://changed`.
  */
-import { render, renderHook, screen, waitFor } from "@testing-library/react";
+import { render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
@@ -100,5 +100,20 @@ describe("live library updates", () => {
     const { album, artist } = fresh();
     mock.libraryAdded(album, artist);
     await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+  });
+
+  it("What's New keeps what was new in New while the page stays open", async () => {
+    const a = fresh().album;
+    const b = fresh().album;
+    vi.spyOn(backend, "whatsNewSeen").mockResolvedValue(undefined);
+    vi.spyOn(backend, "whatsNew")
+      .mockResolvedValueOnce({ following: true, unseen: 1, items: [{ album: a, new: true }] })
+      .mockResolvedValue({ following: true, unseen: 1, items: [{ album: b, new: true }, { album: a, new: false }] });
+    render(<WhatsNewPage />);
+    const newGroup = () => screen.getByRole("heading", { name: "New" }).closest("section")!;
+    await waitFor(() => expect(within(newGroup()).getByText(a.title)).toBeInTheDocument());
+    mock.libraryAdded(b);
+    await waitFor(() => expect(within(newGroup()).getByText(b.title)).toBeInTheDocument());
+    expect(within(newGroup()).getByText(a.title)).toBeInTheDocument();
   });
 });

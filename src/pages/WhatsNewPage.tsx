@@ -1,5 +1,5 @@
 import { Ellipsis, Pause, Play } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Art } from "../components/Art";
 import { IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
@@ -95,13 +95,17 @@ export function WhatsNewPage() {
   const [attempt, setAttempt] = useState(0);
   // Albums added while the page is open show up (`library://changed`).
   const libraryVersion = useApp((s) => s.libraryVersion);
+  // What was new while the page is open stays in New, even after a live
+  // refetch (the core no longer calls it new once it was seen).
+  const newIds = useRef(new Set<string>());
   useEffect(() => {
     let alive = true;
     setError(null);
     backend.whatsNew().then(
       (w) => {
         if (!alive) return;
-        setData(w);
+        for (const i of w.items) if (i.new) newIds.current.add(i.album.id);
+        setData({ ...w, items: w.items.map((i) => (newIds.current.has(i.album.id) ? { ...i, new: true } : i)) });
         // Shown: what's here stops being new (it stays in New until the page is left).
         if (w.unseen > 0) void backend.whatsNewSeen().catch(() => {});
       },
