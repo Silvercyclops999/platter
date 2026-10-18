@@ -36,6 +36,9 @@ pub struct ServerCheck {
     pub name: String,
     pub version: String,
     pub quick_connect: bool,
+    /// Plain http to an address on the internet: the sign-in can be read
+    /// on the way.
+    pub insecure: bool,
 }
 
 /// A Quick Connect code to show.
@@ -234,16 +237,31 @@ impl Jellyfin {
 
     /// What's at an address: a Jellyfin server new enough, and whether
     /// Quick Connect is on.
+    /// An address typed without http or https is tried as https first
+    /// when it's on the internet.
     pub async fn check(&self, url: &str) -> AppResult<ServerCheck> {
-        let c = self.unsigned(url)?;
-        let info = c.public_info().await.map_err(wrong_url)?;
-        let quick = auth::quick_connect_enabled(&c).await.unwrap_or(false);
-        Ok(ServerCheck {
-            url: c.base().to_string(),
-            name: info.server_name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "Jellyfin".into()),
-            version: info.version.clone().unwrap_or_default(),
-            quick_connect: quick,
-        })
+        let tries = crate::web::address_candidates(url);
+        let mut last = None;
+        for (i, url) in tries.iter().enumerate() {
+            let c = self.unsigned(url)?;
+            let info = match c.public_info().await {
+                Ok(i) => i,
+                Err(AppError::Network(m)) if i + 1 < tries.len() => {
+                    last = Some(AppError::Network(m));
+                    continue;
+                }
+                Err(e) => return Err(wrong_url(e)),
+            };
+            let quick = auth::quick_connect_enabled(&c).await.unwrap_or(false);
+            return Ok(ServerCheck {
+                url: c.base().to_string(),
+                name: info.server_name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "Jellyfin".into()),
+                version: info.version.clone().unwrap_or_default(),
+                quick_connect: quick,
+                insecure: crate::web::plain_http_warning(c.base()).is_some(),
+            });
+        }
+        Err(wrong_url(last.unwrap_or_else(|| AppError::Invalid(WRONG_URL.into()))))
     }
 
     /// Start Quick Connect: a code for the user to approve in a Jellyfin

@@ -4111,6 +4111,8 @@ export interface ServerCheck {
   name: string;
   version: string;
   quickConnect: boolean;
+  /** Plain http to an address on the internet: the sign-in can be read on the way. */
+  insecure?: boolean;
 }
 
 /** What an address turned out to be (`subsonic_check`). */
@@ -4123,6 +4125,8 @@ export interface SubsonicCheck {
   openSubsonic: boolean;
   /** It takes API keys. */
   apiKeys: boolean;
+  /** Plain http to an address on the internet: the sign-in can be read on the way. */
+  insecure?: boolean;
 }
 
 /** A queue another app saved on a server (`resume_queues`). */

@@ -21,6 +21,18 @@ export type AddressKind = "jellyfin" | "subsonic";
 
 const message = (e: unknown, fallback: string) => (e as AppError)?.message || fallback;
 
+/** Said before signing in over plain http on the internet. */
+export const INSECURE =
+  "This address is plain http on the internet, so your sign-in can be read on its way to the server. Use the server's https address if it has one.";
+
+function Insecure({ on }: { on?: boolean }) {
+  return on ? (
+    <p className="add-server__warn" role="note">
+      {INSECURE}
+    </p>
+  ) : null;
+}
+
 interface Props {
   /** Start by choosing the kind of server; else at the address for `kind`. */
   choose?: boolean;
@@ -315,6 +327,7 @@ export function AddServerFlow({ choose = false, kind = "jellyfin", plexSignedIn 
           if (ready && !busy) void osSignIn();
         }}
       >
+        <Insecure on={server.insecure} />
         {!server.apiKeys && <p className="add-server__hint">This server doesn't take API keys, so sign in with your user name and password.</p>}
         {useKey ? (
           <div>
@@ -405,6 +418,7 @@ export function AddServerFlow({ choose = false, kind = "jellyfin", plexSignedIn 
   if (step.kind === "code") {
     return (
       <div className="add-server">
+        <Insecure on={step.server.insecure} />
         <p className="add-server__hint">
           In a Jellyfin app where you're signed in to {step.server.name}, open your profile, choose Quick Connect and enter this code:
         </p>
@@ -444,6 +458,7 @@ export function AddServerFlow({ choose = false, kind = "jellyfin", plexSignedIn 
         if (user.trim() && password && !busy) void signIn();
       }}
     >
+      <Insecure on={step.server.insecure} />
       {step.note && <p className="add-server__hint">{step.note}</p>}
       <div>
         <label className="add-server__label" htmlFor={`${id}-user`}>

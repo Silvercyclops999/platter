@@ -50,7 +50,8 @@ export class MockSubsonic {
     const tidy = (u.includes("://") ? u : `http://${u}`).replace(/\/(rest|app)(\/.*)?$/, "").replace(/#.*$/, "").replace(/\/+$/, "");
     const open = this.failure !== "noExtensions";
     const host = tidy.replace(/^https?:\/\//, "").split(/[:/]/)[0];
-    return { url: tidy, name: open ? `Navidrome on ${host}` : host, version: open ? "0.58.0" : null, openSubsonic: open, apiKeys: open };
+    const insecure = tidy.startsWith("http://") && host.includes(".") && !/\.(local|lan|home|internal)$/.test(host) && !/^(10|127|192\.168)\./.test(host);
+    return { url: tidy, name: open ? `Navidrome on ${host}` : host, version: open ? "0.58.0" : null, openSubsonic: open, apiKeys: open, insecure };
   }
 
   signIn(url: string, creds: { apiKey?: string; user?: string; password?: string }, tag?: string): SavedServer {

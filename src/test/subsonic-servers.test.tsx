@@ -12,7 +12,7 @@ import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { KEY_REFUSED, NO_API_KEYS, NOT_SUBSONIC, NOT_THIS_SERVER, WRONG_PASSWORD, WRONG_URL } from "../lib/mock/subsonic";
 import { DEFAULT_SETTINGS } from "../lib/types";
-import { AddServerFlow } from "../pages/AddServer";
+import { AddServerFlow, INSECURE } from "../pages/AddServer";
 import { SettingsPage } from "../pages/SettingsPage";
 import { ResumeFrom, offerLine } from "../shell/ResumeFrom";
 import { useApp } from "../stores/app";
@@ -97,6 +97,22 @@ describe("adding a Navidrome or other Subsonic server", () => {
     await typeAddress(user, "http://nas.example:4533");
     expect(await screen.findByRole("alert")).toHaveTextContent(text);
     expect(screen.getByLabelText("Server address")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("warns before signing in over plain http on the internet", async () => {
+    const user = userEvent.setup();
+    flow();
+    await typeAddress(user, "http://music.example.com:4533");
+    expect(await screen.findByRole("note")).toHaveTextContent(INSECURE);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+  });
+
+  it("says nothing about an address at home", async () => {
+    const user = userEvent.setup();
+    flow();
+    await typeAddress(user);
+    await screen.findByLabelText("API key from Navidrome on navidrome.local");
+    expect(screen.queryByRole("note")).toBeNull();
   });
 
   it("is offered next to Plex and Jellyfin, in beta", async () => {

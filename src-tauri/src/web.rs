@@ -104,6 +104,21 @@ pub fn plain_http_warning(url: &str) -> Option<&'static str> {
         .then_some("A service is set up with a plain http address on the internet, so its key or password can be read on the way. Use its https address.")
 }
 
+/// What a server address typed without http or https is tried as: https
+/// first for an address on the internet (http after it, for a server that
+/// only has that), plain as typed for one at home.
+pub fn address_candidates(raw: &str) -> Vec<String> {
+    let raw = raw.trim();
+    if raw.contains("://") {
+        return vec![raw.to_string()];
+    }
+    let host = url::Url::parse(&format!("http://{raw}")).ok().and_then(|u| u.host_str().map(str::to_string));
+    match host {
+        Some(h) if !crate::lidarr::paths::is_private_host(&h) => vec![format!("https://{raw}"), raw.to_string()],
+        _ => vec![raw.to_string()],
+    }
+}
+
 /// What an answer too big to read says.
 pub const TOO_BIG: &str = "The answer was larger than Platter reads, so it was left unread.";
 
@@ -304,6 +319,10 @@ mod tests {
 
     #[test]
     fn plain_http_is_flagged_only_off_the_home_network() {
+        assert_eq!(address_candidates("music.example.com"), ["https://music.example.com", "music.example.com"]);
+        assert_eq!(address_candidates("nas.local:4533"), ["nas.local:4533"]);
+        assert_eq!(address_candidates("10.20.30.40:8096"), ["10.20.30.40:8096"]);
+        assert_eq!(address_candidates("http://music.example.com"), ["http://music.example.com"]);
         assert!(plain_http_warning("http://tautulli.example.org:8181").is_some());
         assert!(plain_http_warning("http://203.0.113.9:4533").is_some());
         for ok in ["https://tautulli.example.org", "http://10.0.0.4:8181", "http://nas.local:4533", "http://localhost:8096", "nonsense"] {

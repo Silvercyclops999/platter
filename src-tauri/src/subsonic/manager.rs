@@ -53,6 +53,9 @@ pub struct SubsonicCheck {
     pub open_subsonic: bool,
     /// It takes API keys.
     pub api_keys: bool,
+    /// Plain http to an address on the internet: the sign-in can be read
+    /// on the way.
+    pub insecure: bool,
 }
 
 /// Tauri-managed.
@@ -272,17 +275,32 @@ impl Subsonic {
     // ---- adding a server ---------------------------------------------------------
 
     /// What's at an address: a Subsonic server, and whether it takes API keys.
+    /// An address typed without http or https is tried as https first
+    /// when it's on the internet.
     pub async fn check(&self, url: &str) -> AppResult<SubsonicCheck> {
-        let c = self.unsigned(url)?;
-        let status = c.probe().await.map_err(wrong_url)?;
-        let exts = c.extensions().await;
-        Ok(SubsonicCheck {
-            url: c.base().to_string(),
-            name: server_name(status.kind.as_deref(), c.base()),
-            version: status.server_version.or(status.version),
-            open_subsonic: status.open_subsonic.unwrap_or(false),
-            api_keys: exts.iter().any(|e| e.name == ext::API_KEY),
-        })
+        let tries = crate::web::address_candidates(url);
+        let mut last = None;
+        for (i, url) in tries.iter().enumerate() {
+            let c = self.unsigned(url)?;
+            let status = match c.probe().await {
+                Ok(s) => s,
+                Err(AppError::Network(m)) if i + 1 < tries.len() => {
+                    last = Some(AppError::Network(m));
+                    continue;
+                }
+                Err(e) => return Err(wrong_url(e)),
+            };
+            let exts = c.extensions().await;
+            return Ok(SubsonicCheck {
+                url: c.base().to_string(),
+                name: server_name(status.kind.as_deref(), c.base()),
+                version: status.server_version.or(status.version),
+                open_subsonic: status.open_subsonic.unwrap_or(false),
+                api_keys: exts.iter().any(|e| e.name == ext::API_KEY),
+                insecure: crate::web::plain_http_warning(c.base()).is_some(),
+            });
+        }
+        Err(wrong_url(last.unwrap_or_else(|| AppError::Invalid(WRONG_URL.into()))))
     }
 
     /// Sign in with an API key (preferred) or a user name and password, and
