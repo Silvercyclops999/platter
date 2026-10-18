@@ -264,6 +264,42 @@ export type HomeItem =
   | { kind: "artist"; artist: Artist }
   | { kind: "playlist"; playlist: Playlist };
 
+/** An album stopped partway, and where Resume picks it up (`home_records`). */
+export interface RecordProgress {
+  album: Album;
+  nextTrackId: string;
+  nextTitle: string;
+  /** The song's place in the album, from 1. */
+  nextNumber: number;
+  /** Songs on the album. */
+  total: number;
+  /** The session's last play, unix ms. */
+  playedAt: number;
+}
+
+export interface RecordSpin {
+  album: Album;
+  /** Plays in the last 7 days. */
+  plays: number;
+}
+
+export interface RecordLapsed {
+  album: Album;
+  plays: number;
+  /** The last play anywhere, unix ms. */
+  lastPlayed: number;
+}
+
+/** Home led by records in the Studio looks (`home_records`; `shown` is false while the setting is off). */
+export interface RecordHome {
+  shown: boolean;
+  resume: RecordProgress | null;
+  newArrivals: Album[];
+  spunThisWeek: RecordSpin[];
+  unfinished: RecordProgress[];
+  notInAYear: RecordLapsed[];
+}
+
 export interface HomeData {
   /** Up to 8 shortcut tiles: what's played most lately first, then long-time favourites, de-duplicated (Liked Songs is added by the UI). */
   shortcuts: HomeItem[];
@@ -1059,6 +1095,8 @@ export interface Settings {
   homeOnThisDay: boolean;
   /** Home's Time travel shelf: a mix per decade and your year. */
   homeTimeTravel: boolean;
+  /** In the Studio looks, Home leads with records: the album you were in the middle of, then shelves of albums. */
+  homeRecordsFirst: boolean;
   /** How much of a mix is favourites. */
   mixVariety: MixVariety;
   /** Artist ids left out of mixes and radio. */
@@ -1640,6 +1678,7 @@ export const DEFAULT_SETTINGS: Settings = {
   homeMixes: true,
   homeOnThisDay: true,
   homeTimeTravel: true,
+  homeRecordsFirst: true,
   mixVariety: "balanced",
   mixExcludeArtists: [],
   mixExcludeGenres: [],

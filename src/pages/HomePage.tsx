@@ -24,6 +24,7 @@ import { useLikes } from "../stores/likes";
 import "./home.css";
 import { LoadError } from "../components/LoadError";
 import { openSetting } from "./SoundMapPage";
+import { RecordHero, RecordShelves, hasRecords, useRecordHome, useRecordsLead } from "./RecordHome";
 
 /**
  * Colour for the wash at the top of Home: the artwork's most vivid tone
@@ -168,6 +169,10 @@ export function HomePage() {
   const mixes = useMixShelves(mixesOn && !cachedOnly);
   const radarOn = useSettings((s) => s.settings?.releaseRadar !== false);
   const showMixes = !!mixes && filter === "all";
+  // Platter's own looks lead with records (albums, so on All and Albums).
+  const recordsOn = useRecordsLead();
+  const records = useRecordHome(recordsOn);
+  const recordsLead = recordsOn && hasRecords(records) && (filter === "all" || filter === "albums");
 
   // Offline, Liked Songs keeps its tile only while something liked can play.
   const likedCount = useLikes((s) => s.ids.size);
@@ -177,7 +182,8 @@ export function HomePage() {
   const tiles = data ? gridItems(data, filter, showGrid, liked).slice(0, look.quickAccess - (liked ? 1 : 0)) : [];
   const shelves = data ? visibleShelves(data, filter) : [];
   const washItem = tiles.find((t) => homeItemInfo(t).key === hovered) ?? tiles[0];
-  const wash = useWashColour(washItem, washOn);
+  // The hero carries its record's colour, so the wash stays off while records lead.
+  const wash = useWashColour(washItem, washOn && !recordsLead);
 
   const pick = (f: HomeFilter) => {
     setFilter(f);
@@ -227,6 +233,12 @@ export function HomePage() {
         </div>
       ) : (
         <>
+          {recordsLead && records && (
+            <div className="home__records" data-testid="home-records">
+              {records.resume && <RecordHero progress={records.resume} />}
+              <RecordShelves data={records} />
+            </div>
+          )}
           {!data && showGrid ? (
             <div className="home-grid" aria-hidden="true">
               {Array.from({ length: look.quickAccess }, (_, i) => (
@@ -270,6 +282,8 @@ export function HomePage() {
                 if (key === "mixGenres") return showMixes && <MixShelf key={key} title="Your genre mixes" mixes={mixes.genres} />;
                 const s = shelves.find((x) => x.id === key);
                 if (!s) return null;
+                // New arrivals already lead the page.
+                if (s.id === "recentlyAdded" && recordsLead && records?.newArrivals.length) return null;
                 return (
                   <Shelf
                     key={s.id}

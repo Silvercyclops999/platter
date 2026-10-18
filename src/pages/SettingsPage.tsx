@@ -100,7 +100,7 @@ import { useTheme } from "../stores/theme";
 import { AccentPicker, ThemeFileControl, ThemeFileProblems, ThemeSelect, followNote, themeNote, useThemeFolder } from "./ThemeSettings";
 import { LookCards } from "./looks/LookCards";
 import { looks } from "../stores/looks";
-import { CLASSIC_LAYOUT, type Layout } from "../design/themes";
+import { CLASSIC_LAYOUT, identityOf, type Layout } from "../design/themes";
 import type { AiProvider, CapName, PlayHistorySource, UnreleasedSharing } from "../lib/types";
 import {
   HistorySourceControl,
@@ -1634,6 +1634,15 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       title: "Show the shortcut grid",
       description: "Shows up to 8 things you've played lately or play most at the top of Home.",
       control: (ids) => toggle(s, "homeShortcuts", ids),
+    },
+    {
+      key: "homeRecordsFirst",
+      section: "Appearance",
+      title: "Home leads with records",
+      description: "In Studio, Studio Black and Sleeve, Home opens with the album you were in the middle of.",
+      more: "Home starts with the album you stopped partway through, ready to resume, then New arrivals, Spun this week, Finish what you started and Not played in a year. Mixes, playlists and the other shelves follow. Classic and the other looks keep the usual Home.",
+      note: s && !identityOf(theme.id) ? "Only applies in Studio, Studio Black and Sleeve." : undefined,
+      control: (ids) => toggle(s, "homeRecordsFirst", ids),
     },
     {
       key: "homeColourWash",

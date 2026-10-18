@@ -33,6 +33,9 @@ pub mod playlists;
 pub mod popular;
 pub mod qualify;
 pub mod queries;
+pub mod records;
+#[cfg(test)]
+mod records_tests;
 pub mod release;
 pub mod schema;
 pub mod search;

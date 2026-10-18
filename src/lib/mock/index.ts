@@ -171,6 +171,7 @@ import * as eq from "./eq";
 import * as hifi from "./hifi";
 import { mockSignalPath } from "./signal";
 import { MockHome, type ContextPlay } from "./home";
+import { mockRecordHome } from "./records";
 import { MockHomeUsers } from "./homeUsers";
 import { mockBackendCaps } from "./servers";
 import { MockLibraries } from "./libraries";
@@ -3955,6 +3956,9 @@ export class MockBackend implements Backend {
   }
   homeTimeTravel() {
     return this.delay(() => this.stats.timeTravel());
+  }
+  homeRecords() {
+    return this.delay(() => mockRecordHome(this.fx, this.settings));
   }
   topSongsList(year: number | null) {
     return this.delay(() => this.stats.topSongsList(year, this.opts.today));

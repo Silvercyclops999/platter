@@ -56,6 +56,50 @@ pub async fn home(db: State<'_, DbHandle>) -> AppResult<HomeData> {
     .await
 }
 
+/// The last answer [`home_records`] worked out, until its stamp changes.
+static RECORDS: parking_lot::Mutex<Option<(super::records::Stamp, super::records::RecordHome)>> = parking_lot::const_mutex(None);
+
+/// Home led by records in the Studio looks (empty with `shown: false` while
+/// the setting is off). Hidden editions and other servers' copies leave.
+#[tauri::command]
+pub async fn home_records(db: State<'_, DbHandle>) -> AppResult<super::records::RecordHome> {
+    use super::records::{self, RecordHome};
+    if !crate::settings::load(&db).home_records_first {
+        return Ok(RecordHome::default());
+    }
+    crate::stats::commands::fresh(&db).await?;
+    let now_ms = now_s() * 1000;
+    let stamp = db.read_async(move |c| records::stamp(c, now_ms)).await?;
+    let cached = RECORDS.lock().as_ref().filter(|(s, _)| *s == stamp).map(|(_, v)| v.clone());
+    let mut data = match cached {
+        Some(v) => v,
+        None => {
+            let v = db
+                .read_async(move |c| {
+                    let today = crate::stats::today(c)?;
+                    records::record_home(c, now_ms, today)
+                })
+                .await?;
+            *RECORDS.lock() = Some((stamp, v.clone()));
+            v
+        }
+    };
+    let view = db.tag_view();
+    let server = db.server_view();
+    db.read_async(move |c| {
+        let hidden = crate::tags::store::hidden_albums(c, view)?;
+        let filter = super::merge::ViewFilter::load(c, &server)?;
+        let shows = |id: &str| !hidden.contains(id) && filter.shows(id);
+        data.resume = data.resume.take().filter(|p| shows(&p.album.id));
+        data.new_arrivals.retain(|a| shows(&a.id));
+        data.spun_this_week.retain(|s| shows(&s.album.id));
+        data.unfinished.retain(|p| shows(&p.album.id));
+        data.not_in_a_year.retain(|l| shows(&l.album.id));
+        Ok(data)
+    })
+    .await
+}
+
 /// Everything in one Home shelf, for its "Show all" page.
 #[tauri::command]
 pub async fn home_shelf(db: State<'_, DbHandle>, shelf: HomeShelf, limit: Option<u32>) -> AppResult<Vec<HomeItem>> {

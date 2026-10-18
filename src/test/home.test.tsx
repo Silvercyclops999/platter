@@ -83,9 +83,12 @@ function renderHome(d: HomeData) {
   );
 }
 
+// These cover the usual Home; the record-led Home has its own file (record-home.test.tsx).
+const USUAL_HOME = { ...ONLINE_EXTRAS, homeRecordsFirst: false };
+
 beforeEach(async () => {
-  await mock.settingsSet(ONLINE_EXTRAS);
-  useSettings.setState({ settings: { ...DEFAULT_SETTINGS, ...ONLINE_EXTRAS } });
+  await mock.settingsSet(USUAL_HOME);
+  useSettings.setState({ settings: { ...DEFAULT_SETTINGS, ...USUAL_HOME } });
   useRouter.getState().reset();
   Element.prototype.scrollTo = vi.fn();
   vi.spyOn(backend, "artUrl").mockImplementation((path) => `http://art.test${path}`);
@@ -225,7 +228,7 @@ describe("home page", () => {
   });
 
   it("the shortcut grid setting hides the grid", async () => {
-    useSettings.setState({ settings: { ...DEFAULT_SETTINGS, homeShortcuts: false } });
+    useSettings.setState({ settings: { ...DEFAULT_SETTINGS, ...USUAL_HOME, homeShortcuts: false } });
     renderHome(data());
     await waitFor(() => expect(shelfTitles()).toContain("Recently played"));
     expect(screen.queryByRole("list", { name: "Shortcuts" })).toBeNull();
@@ -300,7 +303,7 @@ describe("colour wash", () => {
   });
 
   it("is off with Artwork colours off, or with its own setting off", async () => {
-    useSettings.setState({ settings: { ...DEFAULT_SETTINGS, artworkColours: false } });
+    useSettings.setState({ settings: { ...DEFAULT_SETTINGS, ...USUAL_HOME, artworkColours: false } });
     const { unmount } = renderHome(data());
     await waitFor(() => expect(tiles()).toHaveLength(8));
     fireEvent.pointerEnter(tiles()[1]);
@@ -308,7 +311,7 @@ describe("colour wash", () => {
     expect(washOf()).toBe("");
     expect(screen.getByTestId("home")).not.toHaveClass("has-wash");
     unmount();
-    useSettings.setState({ settings: { ...DEFAULT_SETTINGS, homeColourWash: false } });
+    useSettings.setState({ settings: { ...DEFAULT_SETTINGS, ...USUAL_HOME, homeColourWash: false } });
     renderHome(data());
     await waitFor(() => expect(tiles()).toHaveLength(8));
     await act(async () => {});

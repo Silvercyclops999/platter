@@ -238,6 +238,7 @@ with each server's tag, kind and name and never a token or password.
 | `sync_now` | `{ full?: bool }` | – |
 | `home` | – | `HomeData { shortcuts: HomeItem[], recentlyPlayed: HomeItem[], jumpBackIn: Album[], playlists: Playlist[], recentlyAdded: Album[], topArtists: Artist[] }` |
 | `home_shelf` | `{ shelf: "recentlyPlayed"|"jumpBackIn"|"playlists"|"recentlyAdded"|"topArtists", limit?: number }` | `HomeItem[]` (the whole shelf, for Show all; limit defaults to and caps at 200) |
+| `home_records` | – | `RecordHome { shown, resume: RecordProgress \| null, newArrivals: Album[], spunThisWeek: RecordSpin[], unfinished: RecordProgress[], notInAYear: RecordLapsed[] }`; `shown` is false (and the rest empty) while `homeRecordsFirst` is off |
 | `artists` | `{ sort: "name"|"recent"|"plays", offset, limit }` | `Page<Artist>` |
 | `artist_names` | – | `{ id, title }[]` (every artist, then learned names with `credit:` ids) |
 | `albums` | `{ sort: "name"|"artist"|"year"|"recent"|"plays", offset, limit, section?: ReleaseSection }` | `Page<Album>` |
@@ -250,6 +251,27 @@ with each server's tag, kind and name and never a token or password.
 | `playlist_page` | `{ id }` | `{ playlist, tracks: Track[] }` |
 
 `Page<T> = { items: T[], total }`.
+
+`home_records` feeds Home in Platter's own looks (Studio, Studio Black and
+Sleeve), where it leads with albums. A listening session is the run of plays
+started from one album with no pause over two hours between them; only each
+album's latest session counts. An album was stopped partway when that
+session played at least 2 songs, the album has at least 4, and a song is
+left: the next one when the last play finished or was skipped, else the same
+one (it was stopped in the middle). `RecordProgress = { album, nextTrackId,
+nextTitle, nextNumber, total, playedAt }`: Resume plays the album from
+`nextTrackId`, its place `nextNumber` (from 1) of `total`; `playedAt` is the
+session's last play in unix ms. `resume` is the newest of these in the last
+14 days and `unfinished` the rest from the last 60 days, newest first.
+`newArrivals` are albums added in the last 90 days, newest first.
+`spunThisWeek` (`RecordSpin = { album, plays }`) are albums with at least 2
+counted plays over the last 7 days, most first. `notInAYear` (`RecordLapsed =
+{ album, plays, lastPlayed }`) are albums with at least 5 plays (counted
+plays or Plex's own count, whichever is higher) whose last play anywhere is
+over a year ago, most played first. Each list holds up to 12. Hidden
+editions and other servers' copies leave as on Home. The answer is kept
+until album plays, counted plays or the library's albums change, or the hour
+turns.
 `HomeItem` is `{ kind: "album", album }`, `{ kind: "artist", artist }` or
 `{ kind: "playlist", playlist }`. Home rows hold 12 items. Recently played
 counts a play started from an artist or a playlist for that artist or
@@ -3624,6 +3646,7 @@ The rest of the fields, with their defaults:
 | `homeMixes` | bool, true | Home shows Made for you, Your mixes by mood and Your genre mixes. |
 | `homeOnThisDay` | bool, true | Home shows On this day: what you played on today's date in earlier years. Synced. |
 | `homeTimeTravel` | bool, true | Home shows Time travel: a mix per decade and your year. Synced. |
+| `homeRecordsFirst` | bool, true | In Studio, Studio Black and Sleeve, Home leads with records (`home_records`): the album you were in the middle of, then New arrivals, Spun this week, Finish what you started and Not played in a year, before the usual shelves. Other looks keep the usual Home. Synced. |
 | `mixVariety` | `"balanced"`, `"familiar"` or `"adventurous"`, `"balanced"` | The share of favourites in a mix: 70%, 85% or 50%. |
 | `mixExcludeArtists` | string[], `[]` | Artist ids never in mixes or radio. |
 | `mixExcludeGenres` | string[], `[]` | Genre, style or mood names (any case) never in mixes or radio. |

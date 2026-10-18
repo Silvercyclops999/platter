@@ -554,6 +554,9 @@ pub struct Settings {
     pub home_on_this_day: bool,
     /// Home's Time travel shelf: a mix per decade and your year.
     pub home_time_travel: bool,
+    /// In the Studio looks, Home leads with records: the album you were in
+    /// the middle of, then shelves of albums.
+    pub home_records_first: bool,
     /// How much of a mix is favourites.
     pub mix_variety: crate::mixes::Variety,
     /// Artist ids left out of mixes and radio.
@@ -1030,6 +1033,7 @@ impl Default for Settings {
             home_mixes: true,
             home_on_this_day: true,
             home_time_travel: true,
+            home_records_first: true,
             mix_variety: crate::mixes::Variety::Balanced,
             mix_exclude_artists: Vec::new(),
             mix_exclude_genres: Vec::new(),
@@ -1233,6 +1237,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "homeMixes",
     "homeOnThisDay",
     "homeTimeTravel",
+    "homeRecordsFirst",
     "mixVariety",
     "mixExcludeArtists",
     "mixExcludeGenres",
@@ -1554,6 +1559,7 @@ pub struct SettingsPatch {
     pub home_mixes: Option<bool>,
     pub home_on_this_day: Option<bool>,
     pub home_time_travel: Option<bool>,
+    pub home_records_first: Option<bool>,
     pub mix_variety: Option<crate::mixes::Variety>,
     pub mix_exclude_artists: Option<Vec<String>>,
     pub mix_exclude_genres: Option<Vec<String>>,
@@ -1884,6 +1890,7 @@ impl Settings {
         set(&mut self.home_mixes, p.home_mixes);
         set(&mut self.home_on_this_day, p.home_on_this_day);
         set(&mut self.home_time_travel, p.home_time_travel);
+        set(&mut self.home_records_first, p.home_records_first);
         set(&mut self.mix_variety, p.mix_variety);
         set(&mut self.mix_unreleased, p.mix_unreleased);
         set(&mut self.queue_end, p.queue_end);
@@ -4460,6 +4467,19 @@ mod tests {
         save(&db, &s).unwrap();
         let again = load(&db);
         assert!(!again.lyrics_check_audio && !again.lyrics_fix_timing && again.lyrics_released_for_versions);
+    }
+
+    #[test]
+    fn home_leads_with_records_by_default_syncs_and_turns_off() {
+        assert!(Settings::default().home_records_first);
+        let old: Settings = serde_json::from_str(r#"{"volume":0.5}"#).unwrap();
+        assert!(old.home_records_first, "settings saved before it existed get it on");
+        assert!(SYNCED_SETTINGS.contains(&"homeRecordsFirst"));
+        let p: SettingsPatch = serde_json::from_str(r#"{"homeRecordsFirst":false}"#).unwrap();
+        let mut s = Settings::default();
+        s.apply(&p).unwrap();
+        assert!(!s.home_records_first);
+        assert_eq!(serde_json::to_value(&s).unwrap()["homeRecordsFirst"], false);
     }
 
     #[test]

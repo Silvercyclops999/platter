@@ -86,6 +86,7 @@ import type {
   LibraryServers,
   LibrarySources,
   HomeData,
+  RecordHome,
   HomeItem,
   RecentsEntry,
   HomeShelfId,
@@ -1151,6 +1152,8 @@ export interface Backend {
   homeOnThisDay(): Promise<OnThisDay>;
   /** Home's Time travel: a mix per decade plus your year (shown false while off). */
   homeTimeTravel(): Promise<TimeTravel>;
+  /** Home led by records in the Studio looks (shown false while off). */
+  homeRecords(): Promise<RecordHome>;
   /** A year's Top Songs list, or All-Time for null. */
   topSongsList(year: number | null): Promise<TopSongsList>;
   /** A year's Wrapped. */
@@ -1631,6 +1634,7 @@ export function createTauriBackend(): Backend {
     topSongsIndex: () => call("top_songs_index"),
     homeOnThisDay: () => call("home_on_this_day"),
     homeTimeTravel: () => call("home_time_travel"),
+    homeRecords: () => call("home_records"),
     topSongsList: (year) => call("top_songs_list", { year }),
     statsWrapped: (year) => call("stats_wrapped", { year }),
     statsCompareSummary: (unreleasedOk, theirUnreleasedOk) => call("stats_compare_summary", { unreleasedOk, theirUnreleasedOk }),
