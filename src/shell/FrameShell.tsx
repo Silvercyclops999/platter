@@ -33,7 +33,10 @@ import { useLayout } from "../stores/theme";
 import { rightView as slotView, useUi, type RightView } from "../stores/ui";
 import { useApp } from "../stores/app";
 import { FriendActivityPanel } from "./FriendActivityPanel";
-import { frameRegions, regionOf, solveFrame, type FrameSolve } from "./frames";
+import { frameRegions, regionOf, solveFrame, solveTurntable, type FrameSolve } from "./frames";
+import { DeckFaceplate, DeckLyricsPage, DeckRail } from "./DeckFrame";
+import { useDeckLyrics } from "./deckLyrics";
+import { TurntableColumn, TurntableTabs } from "./TurntableFrame";
 import { LazyHelpPanel } from "./lazyHosts";
 import { Logo } from "./Logo";
 import { MainView } from "./MainView";
@@ -237,12 +240,18 @@ function NowPlayingSpot() {
  * The window's own row over the page: back and forward, then the account,
  * What's New and, on Windows, the window buttons. It's the drag area.
  */
-function FrameBar() {
+function FrameBar({ logo = false, search = false }: { logo?: boolean; search?: boolean }) {
   const canBack = useCanGoBack();
   const canForward = useCanGoForward();
   return (
     <header className={`frame-bar frame-bar--${chrome}`} data-tauri-drag-region>
       <div className="frame-bar__start" data-tauri-drag-region>
+        {/* A frame with nothing down the left carries the mark here. */}
+        {logo && chrome !== "mac" && (
+          <span className="frame-bar__logo" data-tauri-drag-region>
+            <Logo size={22} />
+          </span>
+        )}
         <IconButton className="topbar__nav" label="Go back" tooltip="Go back (Alt+←)" tooltipPlacement="bottom" icon={<ChevronLeft size={20} />} disabled={!canBack} onClick={() => nav.back()} />
         <IconButton
           className="topbar__nav"
@@ -254,6 +263,11 @@ function FrameBar() {
           onClick={() => nav.forward()}
         />
       </div>
+      {search && (
+        <div className="frame-bar__search">
+          <SearchBox />
+        </div>
+      )}
       <div className="frame-bar__end" data-tauri-drag-region>
         <OfflineIndicator />
         <WhatsNewButton />
@@ -356,6 +370,11 @@ export function FrameShell({ children }: { children: ReactNode }) {
   const regions = frameRegions(layout) as Regions;
   const width = useWindowWidth();
   const solve = solveFrame({ windowWidth: width, regions, leftSize: layout.frame === "custom" ? layout.leftSize : "medium", rightSize: layout.rightSize });
+  const deck = layout.frame === "deck";
+  const turntable = layout.frame === "turntable";
+  const columnSize = useSettings((s) => s.settings?.turntableColumn ?? "medium");
+  const tt = solveTurntable(width, columnSize);
+  const deckLyrics = useDeckLyrics();
   const shell = useRef<HTMLDivElement>(null);
   useShellTabOrder(shell);
 
@@ -369,16 +388,31 @@ export function FrameShell({ children }: { children: ReactNode }) {
   if (slot.view !== view) setSlot({ view, swap: slot.view !== null && view !== null });
   const place = view ? panelPlace(regions, view, solve) : null;
 
-  const style = { "--frame-left": `${solve.left}px`, "--frame-right": `${solve.right}px` } as CSSProperties;
+  const style = { "--frame-left": `${turntable ? tt.column : solve.left}px`, "--frame-right": `${solve.right}px` } as CSSProperties;
   const top = regions.top;
   const bottom = regions.bottom;
   const left = regions.left;
-  const mainSearch = regions.main.includes("search");
+  const mainSearch = regions.main.includes("search") && !deck && !turntable;
+
+  // Deck and Turntable draw their own player and keys; other frames place
+  // the shared parts from their arrangement.
+  const leftEl = turntable ? <TurntableColumn compact={tt.compact} /> : !deck && left.length > 0 ? <LeftRegion items={left} solve={solve} /> : null;
+  const topEl = deck ? (
+    <>
+      <DeckFaceplate />
+      <DeckRail />
+    </>
+  ) : turntable ? (
+    <TurntableTabs />
+  ) : top.length > 0 ? (
+    <EdgeRegion place="top" items={top} />
+  ) : null;
+  const bottomEl = !deck && !turntable && bottom.length > 0 ? <EdgeRegion place="bottom" items={bottom} /> : null;
 
   return (
     <div
       ref={shell}
-      className={`app app--chrome-${chrome} frame frame--${layout.frame} ${left.length ? "has-left" : ""} ${place === "column" ? "has-right" : ""}`}
+      className={`app app--chrome-${chrome} frame frame--${layout.frame} ${leftEl ? "has-left" : ""} ${place === "column" ? "has-right" : ""} ${turntable && tt.compact ? "is-compact" : ""}`}
       style={style}
       data-frame={layout.frame}
     >
@@ -392,17 +426,19 @@ export function FrameShell({ children }: { children: ReactNode }) {
       >
         Skip to main content
       </a>
-      {left.length > 0 && <LeftRegion items={left} solve={solve} />}
+      {leftEl}
       <div className="frame-center">
-        <FrameBar />
-        {top.length > 0 && <EdgeRegion place="top" items={top} />}
+        <FrameBar logo={deck} search={turntable} />
+        {topEl}
         <div className="frame-page">
           {mainSearch && (
             <div className="frame-page__search">
               <SearchBox />
             </div>
           )}
-          {place === "main" && view ? (
+          {deckLyrics ? (
+            <DeckLyricsPage />
+          ) : place === "main" && view ? (
             <div className="frame-page__panel">
               <Panel view={view} />
             </div>
@@ -414,7 +450,7 @@ export function FrameShell({ children }: { children: ReactNode }) {
         </div>
         <RemoteStrip />
         <ListenStrip />
-        {bottom.length > 0 && <EdgeRegion place="bottom" items={bottom} />}
+        {bottomEl}
       </div>
       {place === "column" && view && (
         <div className={`frame-right ${slot.swap ? "right-swap" : ""}`}>

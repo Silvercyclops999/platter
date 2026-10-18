@@ -259,3 +259,57 @@
 .lp-fplatter .lp-tonearm { flex: none; width: 100%; }
 .lp-fleft .lp-np { flex: 1; width: auto; }
 .lp-top__search--main { margin: 0; flex: none; }
+
+/* ---------------------------------------------------------------- Deck */
+.lp-fbody--deck .lp-fcenter { gap: 0; }
+.lp-deck {
+  flex: none;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--color-bg-raised2) 55%, var(--color-bg-raised)), var(--color-bg-raised) 60%);
+}
+.lp-deck__window { display: grid; place-items: center; width: 58px; height: 58px; border-radius: 6px; background: var(--color-bg-base); box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.35); }
+.lp-deck__art { width: 46px; }
+.lp-deck__display { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.lp-deck__screen { display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border-radius: var(--radius-row); background: var(--color-bg-base); box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3); }
+.lp-deck__mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, "Cascadia Mono", Menlo, monospace; font-size: 10px; color: var(--color-text-secondary); }
+.lp-deck__mono--title { font-size: 11px; font-weight: 600; color: var(--color-text-primary); }
+.lp-deck__keys { display: flex; gap: 4px; }
+.lp-deck__key { display: inline-grid; place-items: center; width: 24px; height: 22px; border-radius: 4px; border: 1px solid var(--color-border); background: linear-gradient(180deg, var(--color-bg-raised2), var(--color-bg-raised)); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.3); color: var(--color-text-primary); }
+.lp-deck__key--play { width: 32px; background: var(--color-text-primary); color: var(--color-bg-base); border-color: transparent; }
+.lp-deck__knob { width: 28px; height: 28px; border-radius: 50%; background: radial-gradient(circle at 40% 30%, var(--color-bg-raised2), var(--color-bg-raised) 70%); box-shadow: 0 0 0 2px var(--color-bg-base), 0 0 0 3px var(--color-text-muted); }
+.lp-deck__rail { flex: none; display: flex; align-items: center; gap: 4px; margin-bottom: 6px; padding: 5px 8px; border-radius: 0 0 var(--radius-card) var(--radius-card); background: var(--color-bg-raised); border-top: 1px solid var(--color-border); }
+.lp-deck__source { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 4px; font-weight: 600; color: var(--color-text-secondary); }
+.lp-deck__source.is-on { color: var(--color-text-primary); background: var(--color-bg-base); }
+.lp-deck__lamp { width: 3px; height: 3px; border-radius: 50%; background: var(--color-text-muted); }
+.lp-deck__source.is-on .lp-deck__lamp { background: var(--color-accent); }
+.lp-deck__search { margin: 0 0 0 auto; width: 150px; }
+
+/* ---------------------------------------------------------------- Turntable */
+.lp-tt { gap: 8px; padding: 12px; border-radius: var(--radius-card); background: var(--color-bg-raised); width: 200px; }
+.lp-tt__plinth { position: relative; display: block; padding: 8px; border-radius: 8px; background: var(--color-bg-base); box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.3); }
+.lp-tt__disc { display: grid; place-items: center; width: 150px; aspect-ratio: 1; border-radius: 50%; background: repeating-radial-gradient(circle, #121212 0 1px, #1b1b1b 1px 2px), #141414; box-shadow: 0 0 0 3px #3b3833; }
+.lp-tt__label { width: 54px; }
+.lp-tt__arm { position: absolute; right: 10px; top: 10px; width: 4px; height: 110px; border-radius: 2px; background: var(--color-text-secondary); transform: rotate(14deg); transform-origin: top center; }
+.lp-tt__arm::after { content: ""; position: absolute; bottom: -4px; left: -3px; width: 10px; height: 14px; border-radius: 2px; background: var(--color-accent); }
+.lp-tt__plates { display: flex; gap: 6px; }
+.lp-tt__plates .lp-plate { display: inline-flex; align-items: center; gap: 4px; }
+.lp-tt__lamp { width: 4px; height: 4px; border-radius: 50%; background: var(--color-accent); }
+.lp-tt__meta { display: flex; flex-direction: column; }
+.lp-tt__meta .lp-line--big { margin-top: 0; }
+.lp-tt .lp-player__controls { justify-content: center; }
+.lp-tt__next { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--color-border); }
+.lp-tt__sleeves { position: relative; flex: none; width: 52px; height: 32px; }
+.lp-tt__sleeve { position: absolute; top: 0; width: 32px; box-shadow: 2px 0 4px rgba(0, 0, 0, 0.35); }
+.lp-tt__sleeve:nth-child(1) { left: 20px; opacity: 0.6; transform: scale(0.84); }
+.lp-tt__sleeve:nth-child(2) { left: 10px; opacity: 0.8; transform: scale(0.92); }
+.lp-tt__sleeve:nth-child(3) { left: 0; }
+.lp-tt__next-text { display: flex; flex-direction: column; min-width: 0; }
+.lp-tt__tabs { flex: none; display: flex; align-items: center; gap: 14px; padding: 0 4px 6px; border-bottom: 1px solid var(--color-border); }
+.lp-tt__tab { position: relative; font-weight: 600; color: var(--color-text-secondary); }
+.lp-tt__tab.is-on { color: var(--color-text-primary); }
+.lp-tt__tab.is-on::after { content: ""; position: absolute; left: 0; right: 0; bottom: -7px; height: 2px; background: var(--color-text-primary); }

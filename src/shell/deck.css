@@ -1,0 +1,291 @@
+/* Deck (DeckFrame.tsx): a faceplate across the top, the source rail under
+   it, the page at full width. One instrument: machined panel, a recessed
+   window for the cover, a sunk display that is the only mono type in the
+   app, keys that travel when pressed. Colours are the look's tokens; brass
+   (the accent) marks only what is on. */
+
+.frame--deck .frame-center { gap: 0; }
+
+/* ---------------------------------------------------------------- faceplate */
+.deck-face {
+  position: relative;
+  flex: none;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--color-bg-raised2) 55%, var(--color-bg-raised)), var(--color-bg-raised) 60%);
+  box-shadow: inset 0 1px 0 var(--engrave-light, transparent);
+  container: deck-face / inline-size;
+}
+/* Two screws, one each end, so the plate reads as fitted. */
+.deck-face::before,
+.deck-face::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: var(--color-bg-base);
+  box-shadow: inset 0 1px 1px var(--engrave-dark, rgba(0, 0, 0, 0.4)), 0 1px 0 var(--engrave-light, transparent);
+}
+.deck-face::before { left: 6px; }
+.deck-face::after { right: 6px; }
+.deck-face__body {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "window display keys end";
+  align-items: center;
+  column-gap: var(--space-6);
+  row-gap: var(--space-3);
+}
+
+/* The recessed window for the cover. */
+.deck-window {
+  grid-area: window;
+  display: grid;
+  place-items: center;
+  width: 96px;
+  height: 96px;
+  border-radius: calc(var(--radius-row) + 4px);
+  background: var(--color-bg-base);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.35), inset 0 0 0 1px var(--engrave-dark, var(--color-border)), 0 1px 0 var(--engrave-light, transparent);
+}
+.deck-window__art { display: block; border-radius: var(--radius-row); }
+.deck-window__art .art { box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-ink) 10%, transparent); }
+.deck-window__art:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+.deck-window__empty {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 1px dashed var(--color-border);
+}
+
+/* The display: sunk, dark-on-panel, two lines of mono over the tonearm line. */
+.deck-display { grid-area: display; display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.deck-display__screen {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-height: 56px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-row);
+  background: var(--color-bg-base);
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.3), inset 0 0 0 1px var(--engrave-dark, var(--color-border)), 0 1px 0 var(--engrave-light, transparent);
+}
+.deck-display__row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.deck-display__row .save-btn,
+.deck-display__row .icon-btn { flex: none; margin: -6px 0; }
+.deck-display__line {
+  min-width: 0;
+  font-family: var(--font-mono, ui-monospace, "Cascadia Mono", "SF Mono", Menlo, monospace);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+}
+.deck-display__line--title { font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.deck-display__line--sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.deck-display__line--sub .artist-line,
+.deck-display__line--sub .text-link { font: inherit; color: inherit; }
+.deck-display__line--title .explicit-mark,
+.deck-display__line--title > :not(:first-child) { margin-left: var(--space-2); }
+.deck-display__sep { margin: 0 var(--space-2); color: var(--color-text-muted); }
+.deck-display__line--idle { color: var(--color-text-muted); }
+.deck-display__line--idle.deck-display__line--title { color: var(--color-text-secondary); }
+.deck-display__line-seek { min-width: 0; }
+.deck-display__line-seek .seek--strip .seek__bar { min-width: 60px; }
+
+/* Transport keys: real keys that travel and sink when pressed. Shuffle and
+   repeat light a brass lamp when on. */
+.deck-keys { grid-area: keys; }
+.deck-keys .player-bar__controls { display: flex; align-items: center; gap: 6px; }
+.deck-keys .icon-btn {
+  position: relative;
+  width: 44px;
+  height: 40px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: linear-gradient(180deg, var(--color-bg-raised2), var(--color-bg-raised));
+  color: var(--color-text-primary);
+  box-shadow: 0 2px 0 var(--engrave-dark, rgba(0, 0, 0, 0.35)), inset 0 1px 0 var(--engrave-light, transparent);
+  transition: transform var(--motion-very-quick) var(--motion-easing), box-shadow var(--motion-very-quick) var(--motion-easing), background-color var(--motion-quick) var(--motion-easing);
+}
+.deck-keys .icon-btn:hover:not(:disabled) { background: linear-gradient(180deg, color-mix(in srgb, var(--color-bg-raised2) 80%, var(--color-text-primary)), var(--color-bg-raised2)); }
+.deck-keys .icon-btn:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: 0 0 0 var(--engrave-dark, transparent), inset 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+.deck-keys .icon-btn.is-active { color: var(--color-text-primary); }
+.deck-keys .icon-btn.is-active::after,
+.deck-keys .icon-btn[aria-pressed="false"]::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-bg-base);
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.4);
+}
+.deck-keys .icon-btn.is-active::after { background: var(--color-accent); box-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 70%, transparent); }
+/* Play is the big key. */
+.deck-keys .player-bar__play { width: 60px; height: 44px; background: linear-gradient(180deg, var(--color-text-primary), color-mix(in srgb, var(--color-text-primary) 82%, var(--color-bg-base))); color: var(--color-bg-base); border-color: transparent; }
+.deck-keys .player-bar__play:hover:not(:disabled) { background: color-mix(in srgb, var(--color-text-primary) 88%, var(--color-bg-base)); }
+.deck-keys .icon-btn:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+
+/* Knob and output. */
+.deck-face__end { grid-area: end; display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.deck-face__end .ts-extras { gap: var(--space-1); }
+.deck-face__end .ts-extras .player-bar__fold { display: none; }
+.deck-face__end .ts-extras .player-bar__more { display: inline-flex; }
+
+.deck-knob { display: flex; align-items: center; gap: var(--space-1); }
+.deck-knob .volume__bar { position: relative; }
+.deck-knob__dial {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  cursor: ns-resize;
+  touch-action: none;
+  outline: none;
+}
+/* The scale: a ring of ticks, with the turned-up part drawn in ink. */
+.deck-knob__scale {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 225deg, var(--color-text-secondary) 0 var(--knob-level), color-mix(in srgb, var(--color-text-muted) 40%, transparent) var(--knob-level) 270deg, transparent 270deg);
+  -webkit-mask: radial-gradient(circle, transparent 0 19px, #000 19.5px 22px, transparent 22.5px);
+  mask: radial-gradient(circle, transparent 0 19px, #000 19.5px 22px, transparent 22.5px);
+}
+.deck-knob__cap {
+  position: absolute;
+  inset: 7px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 30%, var(--color-bg-raised2), var(--color-bg-raised) 70%);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35), inset 0 1px 0 var(--engrave-light, transparent), inset 0 0 0 1px var(--color-border);
+  transform: rotate(var(--knob-turn));
+  transition: transform var(--motion-quick) var(--motion-easing);
+}
+.deck-knob__dial.is-turning .deck-knob__cap { transition: none; }
+.deck-knob__mark {
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  width: 2px;
+  height: 9px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--color-text-primary);
+}
+.deck-knob__dial:hover .deck-knob__cap { box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35), inset 0 1px 0 var(--engrave-light, transparent), inset 0 0 0 1px var(--color-text-muted); }
+.deck-knob__dial:focus-visible { box-shadow: 0 0 0 2px var(--color-focus-ring); }
+.deck-knob .volume-readout { left: 50% !important; top: calc(100% + 4px); bottom: auto; z-index: 2; }
+
+/* The faceplate's pop-ups open downwards. */
+.deck-face .signal-panel { top: 168px; bottom: auto; }
+
+/* ---------------------------------------------------------------- source rail */
+.deck-rail {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 0 0 var(--radius-card) var(--radius-card);
+  background: var(--color-bg-raised);
+  border-top: 1px solid var(--engrave-dark, var(--color-border));
+  box-shadow: inset 0 1px 0 var(--engrave-light, transparent);
+  container: deck-rail / inline-size;
+}
+.deck-rail__keys { flex: 1; min-width: 0; display: flex; gap: var(--space-1); margin: 0; padding: 0; list-style: none; overflow: hidden; }
+.deck-key {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-3) 0 var(--space-2);
+  border-radius: 5px;
+  border: 1px solid transparent;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  transition: background-color var(--motion-quick) var(--motion-easing), color var(--motion-quick) var(--motion-easing), transform var(--motion-very-quick) var(--motion-easing);
+}
+.deck-key:hover { background: var(--color-state-hover); color: var(--color-text-primary); }
+.deck-key:active { transform: translateY(1px); }
+.deck-key:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; }
+.deck-key.is-on {
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
+  background: var(--color-bg-base);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+/* A small lamp on each key; lit (brass) on the source in use. */
+.deck-key__lamp { width: 4px; height: 4px; border-radius: 50%; background: transparent; }
+.deck-key.is-on .deck-key__lamp { background: var(--color-accent); box-shadow: 0 0 5px color-mix(in srgb, var(--color-accent) 70%, transparent); }
+.deck-key__icon { display: inline-flex; }
+.deck-rail.is-bare .deck-key { padding: 0 var(--space-2); }
+.deck-rail__search { flex: 0 1 320px; min-width: 180px; }
+.deck-rail__search .searchbox { width: 100%; }
+.deck-rail__search .search-field { height: 34px; max-width: none; }
+
+/* ---------------------------------------------------------------- lyrics page */
+.main.deck-lyrics {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: var(--space-4) var(--space-6) 0;
+  border-radius: var(--radius-card);
+  /* Lyrics sit on the cover's colour, as in the expanded view. */
+  background: var(--fw-tint);
+  color: #ffffff;
+  animation: frame-fade-in var(--motion-medium) var(--motion-easing);
+}
+.deck-lyrics .icon-btn { color: rgba(255, 255, 255, 0.8); }
+.deck-lyrics .icon-btn:hover { color: #ffffff; }
+.deck-lyrics__head { flex: none; display: flex; align-items: baseline; gap: var(--space-4); }
+.deck-lyrics__title { margin: 0; font-family: var(--font-family-display, inherit); font-size: var(--font-size-2xl); font-weight: var(--font-weight-display, var(--font-weight-bold)); }
+.deck-lyrics__song { flex: 1; min-width: 0; font-size: var(--font-size-sm); color: rgba(255, 255, 255, 0.72); }
+.deck-lyrics__head .icon-btn { align-self: center; }
+.deck-lyrics__body { margin-top: var(--space-3); }
+
+/* ---------------------------------------------------------------- narrow
+   Most windows: one row. Narrower: the keys and output go under the window
+   and display. Narrower still: the rail's keys keep only their icons
+   (their names stay for screen readers). */
+@container deck-face (max-width: 1180px) {
+  .deck-face__body {
+    grid-template-columns: auto auto minmax(0, 1fr);
+    grid-template-areas: "window display display" "window keys end";
+    column-gap: var(--space-4);
+    row-gap: var(--space-3);
+  }
+  .deck-keys { justify-self: start; }
+  .deck-face__end { justify-self: end; }
+}
+/* Mid widths: the keys keep their names and drop their icons. */
+@container deck-rail (max-width: 1180px) {
+  .deck-rail.is-labelled .deck-key__icon { display: none; }
+  .deck-key { padding: 0 var(--space-3) 0 var(--space-2); }
+  .deck-rail__search { flex-basis: 240px; min-width: 160px; }
+}
+/* Narrow: icons only (the names stay for screen readers). */
+@container deck-rail (max-width: 900px) {
+  .deck-rail.is-labelled .deck-key__icon { display: inline-flex; }
+  .deck-key__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .deck-key { padding: 0 var(--space-2); }
+  .deck-rail__search { flex-basis: 240px; min-width: 140px; }
+}

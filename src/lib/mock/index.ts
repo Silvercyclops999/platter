@@ -2824,6 +2824,9 @@ export class MockBackend implements Backend {
         const why = layoutProblem(patch.layout);
         if (why) throw { kind: "invalid", message: why };
       }
+      if (patch.turntableColumn !== undefined && !["small", "medium", "large"].includes(patch.turntableColumn)) {
+        throw { kind: "invalid", message: "Pick one of the widths offered." };
+      }
       if (patch.doctorChecks !== undefined) next.doctorChecks = { ...DEFAULT_SETTINGS.doctorChecks, ...patch.doctorChecks };
       if (patch.listenRelay !== undefined) {
         const r = patch.listenRelay.trim().replace(/\/+$/, "");

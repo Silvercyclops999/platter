@@ -123,6 +123,16 @@ fn legacy_record_motion() -> RecordMotion {
     RecordMotion::Off
 }
 
+/// The Turntable layout's player column width on this computer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ColumnSize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+
 /// What record-player motion is on: full screen now playing only, also the side panel, or none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -301,6 +311,8 @@ pub struct Settings {
     /// Done for new installs; settings saved before layouts get the offer.
     #[serde(default)]
     pub layout_offered: bool,
+    /// The Turntable layout's player column width (this device).
+    pub turntable_column: ColumnSize,
     /// Appearance shows the "Make your own" look builder.
     pub show_look_builder: bool,
     /// The "Pick a look" step was shown or skipped on this computer.
@@ -963,6 +975,7 @@ impl Default for Settings {
             theme_file: None,
             layout: crate::themes::Layout::index(),
             layout_offered: true,
+            turntable_column: ColumnSize::Medium,
             show_look_builder: true,
             look_step_done: false,
             output_device: None,
@@ -1410,6 +1423,7 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "lookStepDone",
     "newLookOffered",
     "layoutOffered",
+    "turntableColumn",
     "volume",
     "precacheCount",
     "artCacheMb",
@@ -1520,6 +1534,7 @@ pub struct SettingsPatch {
     pub theme_file: Option<Option<crate::themes::ThemeFile>>,
     pub layout: Option<crate::themes::Layout>,
     pub layout_offered: Option<bool>,
+    pub turntable_column: Option<ColumnSize>,
     pub show_look_builder: Option<bool>,
     pub look_step_done: Option<bool>,
     pub home_shortcuts: Option<bool>,
@@ -1861,6 +1876,7 @@ impl Settings {
             self.layout = l.clone();
         }
         set(&mut self.layout_offered, p.layout_offered);
+        set(&mut self.turntable_column, p.turntable_column);
         set(&mut self.show_look_builder, p.show_look_builder);
         set(&mut self.look_step_done, p.look_step_done);
         set(&mut self.home_shortcuts, p.home_shortcuts);
@@ -4697,6 +4713,16 @@ mod tests {
         let mut s = old;
         s.apply(&serde_json::from_str(r#"{"layoutOffered":true}"#).unwrap()).unwrap();
         assert!(s.layout_offered);
+        // The Turntable column width: medium, this device only, presets only.
+        assert_eq!(s.turntable_column, ColumnSize::Medium);
+        assert!(DEVICE_SETTINGS.contains(&"turntableColumn"));
+        s.apply(&serde_json::from_str(r#"{"turntableColumn":"large"}"#).unwrap()).unwrap();
+        assert_eq!(s.turntable_column, ColumnSize::Large);
+        assert!(serde_json::from_str::<SettingsPatch>(r#"{"turntableColumn":"huge"}"#).is_err());
+        // Deck's source key labels ride in the layout (synced), on by default.
+        assert!(Settings::default().layout.deck_labels);
+        s.apply(&serde_json::from_str(r#"{"layout":{"frame":"deck","deckLabels":false}}"#).unwrap()).unwrap();
+        assert!(!s.layout.deck_labels && s.layout.frame == "deck");
     }
 
     #[test]

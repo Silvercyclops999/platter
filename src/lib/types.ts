@@ -4,7 +4,7 @@
  * serializes as `null`, so model fields are `T | null`; IPC types documented
  * with `?` are optional and may also be null.
  */
-import { CLASSIC_LAYOUT, type Layout, type UserTheme } from "../design/themes/validate";
+import { CLASSIC_LAYOUT, type Layout, type RegionSize, type UserTheme } from "../design/themes/validate";
 
 // ---------------------------------------------------------------- model.rs
 
@@ -1370,6 +1370,8 @@ export interface Settings {
   layout: Layout;
   /** The one-time "Try the Index layout" offer was shown or not needed. */
   layoutOffered: boolean;
+  /** The Turntable layout's player column width (this device). */
+  turntableColumn: RegionSize;
   /** Appearance shows the "Make your own" look builder. */
   showLookBuilder: boolean;
   /** The "Pick a look" step was shown or skipped on this computer. */
@@ -1859,6 +1861,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // and the core start new installs on Index.
   layout: CLASSIC_LAYOUT,
   layoutOffered: true,
+  turntableColumn: "medium",
   showLookBuilder: true,
   lookStepDone: false,
 };

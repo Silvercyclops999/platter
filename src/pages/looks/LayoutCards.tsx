@@ -155,12 +155,20 @@ export function RegionEditor({ layout }: { layout: Layout }) {
   );
 }
 
+/** What a frame does in a narrow window, in a sentence. */
+export function collapseNote(frame: Frame): string {
+  if (frame === "deck") return "In a narrow window the faceplate folds to two rows, then the source keys keep only their icons.";
+  if (frame === "turntable") return "In a narrow window the player column shrinks to a small platter with the transport.";
+  return `In a narrow window: ${COLLAPSE_ORDER.map((x, i) => (i ? x.toLowerCase() : x)).join(", then ")}.`;
+}
+
 /** Settings > Appearance > Layout: the cards, the frame's options, and the ways back. */
 export function LayoutSettings({ extra }: { extra?: ReactNode }) {
   const s = useSettings((st) => st.settings);
   const layout = layoutOf(s);
   const frame = layout.frame;
-  const isDefault = JSON.stringify(layout) === JSON.stringify({ ...structuredClone(CLASSIC_LAYOUT), frame });
+  const column = s?.turntableColumn ?? "medium";
+  const isDefault = JSON.stringify(layout) === JSON.stringify({ ...structuredClone(CLASSIC_LAYOUT), frame }) && (frame !== "turntable" || column === "medium");
   return (
     <div className="layout-settings">
       <FrameCards frames={FRAME_INFO.map((f) => f.id)} />
@@ -175,11 +183,31 @@ export function LayoutSettings({ extra }: { extra?: ReactNode }) {
           onChange={(v) => void updateSettings({ layout: { ...layout, transport: v } })}
         />
       )}
+      {frame === "deck" && (
+        <Choice
+          label="Source key names"
+          value={layout.deckLabels === false ? "off" : "on"}
+          options={[
+            { value: "on", label: "Shown" },
+            { value: "off", label: "Icons only" },
+          ]}
+          onChange={(v) => void updateSettings({ layout: { ...layout, deckLabels: v === "on" } })}
+        />
+      )}
+      {frame === "turntable" && (
+        <div data-setting-part="turntableColumn">
+          <Choice label="Player column (this device)" value={column} options={SIZE_OPTIONS} onChange={(v) => void updateSettings({ turntableColumn: v })} />
+        </div>
+      )}
       {frame === "custom" && <RegionEditor layout={layout} />}
-      {frame !== "classic" && <p className="layout-settings__note">In a narrow window: {COLLAPSE_ORDER.map((x, i) => (i ? x.toLowerCase() : x)).join(", then ")}.</p>}
+      {frame !== "classic" && <p className="layout-settings__note">{collapseNote(frame)}</p>}
       <div className="layout-settings__actions">
         {extra}
-        <Button size="sm" disabled={!s || isDefault} onClick={() => void updateSettings({ layout: { ...structuredClone(CLASSIC_LAYOUT), frame } })}>
+        <Button
+          size="sm"
+          disabled={!s || isDefault}
+          onClick={() => void updateSettings({ layout: { ...structuredClone(CLASSIC_LAYOUT), frame }, ...(frame === "turntable" ? { turntableColumn: "medium" as const } : {}) })}
+        >
           Reset layout
         </Button>
         <Button size="sm" disabled={!s || frame === "classic"} onClick={() => void updateSettings(framePatch("classic", s))}>

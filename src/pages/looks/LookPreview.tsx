@@ -487,6 +487,142 @@ function FrameBody({ parts, regions, page, drag }: { parts: LookParts; regions: 
   );
 }
 
+const SOURCE_KEYS = ["Home", "Search", "Library", "Crates", "Playlists", "History"];
+
+/** Deck, drawn small: the faceplate, the source rail, the page at full width. */
+function DeckBody({ parts, page, drag, labels }: { parts: LookParts; page: "home" | "album"; drag: ReturnType<typeof useDrag>; labels: boolean }) {
+  const a = ALBUMS[0];
+  return (
+    <div className="lp-fbody lp-fbody--deck">
+      <div className="lp-fcenter">
+        <div className="lp-deck">
+          <span className="lp-deck__window">
+            <Cover hue={a.hue} className="lp-deck__art" />
+          </span>
+          <span className="lp-deck__display">
+            <span className="lp-deck__screen">
+              <span className="lp-deck__mono lp-deck__mono--title">{TRACKS[1]}</span>
+              <span className="lp-deck__mono">
+                {a.artist} / {a.title}
+              </span>
+            </span>
+            <span className="lp-strip__line">
+              <span className="lp-plate">1:42</span>
+              <span className="lp-tonearm">
+                <span className="lp-tonearm__fill" />
+              </span>
+              <span className="lp-plate">-2:16</span>
+              <span className="lp-plate lp-plate--format">FLAC 24/96</span>
+            </span>
+          </span>
+          <span className="lp-deck__keys">
+            <span className="lp-deck__key">
+              <Shuffle size={11} aria-hidden="true" />
+            </span>
+            <span className="lp-deck__key">
+              <SkipBack size={12} aria-hidden="true" />
+            </span>
+            <span className="lp-deck__key lp-deck__key--play">
+              <Play size={12} fill="currentColor" aria-hidden="true" />
+            </span>
+            <span className="lp-deck__key">
+              <SkipForward size={12} aria-hidden="true" />
+            </span>
+            <span className="lp-deck__key">
+              <Repeat size={11} aria-hidden="true" />
+            </span>
+          </span>
+          <span className="lp-deck__knob" />
+          <span className="lp-strip__extras">
+            <ListMusic size={13} aria-hidden="true" />
+            <MonitorSpeaker size={13} aria-hidden="true" />
+          </span>
+        </div>
+        <div className="lp-deck__rail">
+          {SOURCE_KEYS.map((k, i) => (
+            <span key={k} className={`lp-deck__source ${i === 0 ? "is-on" : ""}`}>
+              <span className="lp-deck__lamp" />
+              {labels ? k : <span className="lp-fnav__icon" />}
+            </span>
+          ))}
+          <span className="lp-top__search lp-deck__search">
+            <Search size={11} aria-hidden="true" /> Search
+          </span>
+        </div>
+        <div className="lp-main">{page === "album" ? <Album parts={parts} drag={drag} /> : <Home parts={parts} drag={drag} />}</div>
+      </div>
+    </div>
+  );
+}
+
+/** Turntable, drawn small: the player column with its record, browsing with tabs. */
+function TurntableBody({ parts, page, drag }: { parts: LookParts; page: "home" | "album"; drag: ReturnType<typeof useDrag> }) {
+  const a = ALBUMS[0];
+  return (
+    <div className="lp-fbody">
+      <div className="lp-fleft lp-tt">
+        <span className="lp-tt__plinth">
+          <span className="lp-tt__disc">
+            <Cover hue={a.hue} round className="lp-tt__label" />
+          </span>
+          <span className="lp-tt__arm" />
+        </span>
+        <span className="lp-tt__plates">
+          <span className="lp-plate">
+            <span className="lp-tt__lamp" />
+            33⅓
+          </span>
+          <span className="lp-plate">FLAC 24/96</span>
+        </span>
+        <span className="lp-tt__meta">
+          <span className="lp-line lp-line--big">{TRACKS[1]}</span>
+          <span className="lp-line lp-line--sub">{a.artist}</span>
+        </span>
+        <span className="lp-strip__line">
+          <span className="lp-plate">1:42</span>
+          <span className="lp-tonearm">
+            <span className="lp-tonearm__fill" />
+          </span>
+          <span className="lp-plate">-2:16</span>
+        </span>
+        <span className="lp-player__controls">
+          <Shuffle size={12} aria-hidden="true" />
+          <SkipBack size={13} aria-hidden="true" />
+          <span className="lp-play lp-play--small lp-play--ink">
+            <Play size={12} fill="currentColor" aria-hidden="true" />
+          </span>
+          <SkipForward size={13} aria-hidden="true" />
+          <Repeat size={12} aria-hidden="true" />
+        </span>
+        <span className="lp-tt__next">
+          <span className="lp-tt__sleeves">
+            {[3, 2, 1].map((n) => (
+              <Cover key={n} hue={ALBUMS[n].hue} className="lp-tt__sleeve" />
+            ))}
+          </span>
+          <span className="lp-tt__next-text">
+            <span className="lp-line lp-line--sub">Up next</span>
+            <span className="lp-line">{TRACKS[2]}</span>
+          </span>
+        </span>
+      </div>
+      <div className="lp-fcenter">
+        <div className="lp-tt__tabs">
+          {["Home", "Library", "Crates", "Playlists", "History"].map((t, i) => (
+            <span key={t} className={`lp-tt__tab ${i === 0 ? "is-on" : ""}`}>
+              {t}
+            </span>
+          ))}
+          <span className="lp-top__search lp-deck__search">
+            <Search size={11} aria-hidden="true" /> Search
+          </span>
+        </div>
+        <div className="lp-main">{page === "album" ? <Album parts={parts} drag={drag} /> : <Home parts={parts} drag={drag} />}</div>
+      </div>
+    </div>
+  );
+}
+
 /** The picture itself. Its size comes from its parent (it scales to fit). */
 export function LookPreview({ base, tokens, parts, page = "home", onReorder, label = "Preview" }: LookPreviewProps) {
   const drag = useDrag(onReorder);
@@ -496,9 +632,17 @@ export function LookPreview({ base, tokens, parts, page = "home", onReorder, lab
   const { layout } = parts;
   const regions = sketchRegions(layout.frame ?? "classic", layout);
   if (regions) {
-    return (
-      <div className="lp lp--frame" role={onReorder ? "group" : "img"} aria-label={label} data-theme-base={base} {...attrs} style={vars as CSSProperties}>
+    const body =
+      layout.frame === "deck" ? (
+        <DeckBody parts={parts} page={page} drag={drag} labels={layout.deckLabels !== false} />
+      ) : layout.frame === "turntable" ? (
+        <TurntableBody parts={parts} page={page} drag={drag} />
+      ) : (
         <FrameBody parts={parts} regions={regions} page={page} drag={drag} />
+      );
+    return (
+      <div className={`lp lp--frame lp--${layout.frame}`} role={onReorder ? "group" : "img"} aria-label={label} data-theme-base={base} {...attrs} style={vars as CSSProperties}>
+        {body}
       </div>
     );
   }

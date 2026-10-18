@@ -106,7 +106,7 @@ describe("the frame model", () => {
 
   it("lists the six frames plus Custom, with only the built ones ready", () => {
     expect(FRAME_INFO.map((f) => f.id)).toEqual(["index", "deck", "turntable", "gatefold", "classic", "console", "custom"]);
-    expect(FRAME_INFO.filter((f) => f.ready).map((f) => f.id)).toEqual(["index", "classic", "custom"]);
+    expect(FRAME_INFO.filter((f) => f.ready).map((f) => f.id)).toEqual(["index", "deck", "turntable", "classic", "custom"]);
   });
 
   it("panels slide in with movement scaled by the motion setting, so reduced motion fades", () => {
@@ -239,9 +239,9 @@ describe("the first-run step", () => {
     act(() => looks.openPick());
     const dialog = await screen.findByRole("dialog", { name: "Pick a layout and a look" });
     const layouts = within(within(dialog).getByRole("radiogroup", { name: "Layout" }));
-    expect(layouts.getAllByRole("radio").map((r) => r.getAttribute("aria-label"))).toEqual(["Index", "Deck, coming soon", "Turntable, coming soon", "Gatefold, coming soon"]);
-    expect(layouts.getByRole("radio", { name: "Deck, coming soon" })).toHaveAttribute("aria-disabled", "true");
-    await user.click(layouts.getByRole("radio", { name: "Deck, coming soon" }));
+    expect(layouts.getAllByRole("radio").map((r) => r.getAttribute("aria-label"))).toEqual(["Index", "Deck", "Turntable", "Gatefold, coming soon"]);
+    expect(layouts.getByRole("radio", { name: "Gatefold, coming soon" })).toHaveAttribute("aria-disabled", "true");
+    await user.click(layouts.getByRole("radio", { name: "Gatefold, coming soon" }));
     expect(useSettings.getState().settings?.layout.frame).toBe("classic");
     await user.click(within(dialog).getByRole("button", { name: "More layouts" }));
     expect(layouts.getByRole("radio", { name: "Classic" })).toBeInTheDocument();

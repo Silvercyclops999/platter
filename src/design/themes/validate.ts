@@ -81,6 +81,8 @@ export interface Layout {
   /** A custom frame's left and right region widths, as presets. */
   leftSize: RegionSize;
   rightSize: RegionSize;
+  /** Deck: the source keys under the faceplate show their names. */
+  deckLabels: boolean;
   sidebarSide: "left" | "right";
   sidebarCollapsed: boolean;
   sidebarSections: SidebarSection[];
@@ -107,6 +109,7 @@ export const CLASSIC_LAYOUT: Layout = {
   regions: structuredClone(DEFAULT_REGIONS),
   leftSize: "medium",
   rightSize: "medium",
+  deckLabels: true,
   sidebarSide: "left",
   sidebarCollapsed: false,
   sidebarSections: [...LOOK.layout.sidebarSections] as SidebarSection[],
@@ -357,6 +360,9 @@ function parseLayout(v: unknown, notes: string[]): Layout {
         break;
       case "regions":
         l.regions = parseRegions(val);
+        break;
+      case "deckLabels":
+        l.deckLabels = flag(f, val);
         break;
       default:
         notes.push(`Left out layout.${shownKey(k)}: Platter doesn't know it.`);

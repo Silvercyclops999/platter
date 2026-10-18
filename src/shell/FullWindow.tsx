@@ -17,6 +17,7 @@ import { LyricsPane, useLyricsBackground } from "./LyricsView";
 import { contextRoute, useNowPlayingDetails } from "./nowPlaying";
 import { SEEK_KEY_STEP } from "./PlayerBar";
 import { Turntable } from "./Turntable";
+import { useDeckLyrics } from "./deckLyrics";
 import { useFlipPause } from "./useFlipPause";
 import { SignalLink } from "./SignalPath";
 import { VOLUME_KEY_STEP } from "./useShortcuts";
@@ -329,5 +330,7 @@ function FullWindowView() {
  */
 export function FullWindow() {
   const open = useFullWindow((s) => s.open);
-  return open ? <FullWindowView /> : null;
+  // Deck shows lyrics as a page under its faceplate instead.
+  const asPage = useDeckLyrics();
+  return open && !asPage ? <FullWindowView /> : null;
 }

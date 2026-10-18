@@ -3589,7 +3589,7 @@ goes in one region at most, and `library`, `navigation`, `search`,
 `transport`, `nowPlaying` and `queue` must all be placed. An unknown region
 or component, one in a region it doesn't fit, or a missing one refuses the
 file with the reason. `leftSize` and `rightSize` are `small`, `medium` or
-`large`.
+`large`. `deckLabels` (bool, true) shows the names on Deck's source keys.
 
 ## Settings and tracking
 | Command | Args |
@@ -3642,7 +3642,8 @@ The rest of the fields, with their defaults:
 | `tonearmSeek` | bool, true | The player bar's seek bar is drawn as a stylus on a groove line. It is the same slider either way. False for settings saved before it existed. |
 | `themeFile` | `ThemeFile` or null | The theme or look file in use, held whole so it travels in the sync file. Checked like a file in the folder; a bad one is refused. Null clears it. |
 | `layoutOffered` | bool, true | The one-time offer to try the Index layout was shown, or wasn't needed. False for settings saved before frames existed. This device only. |
-| `layout` | `Layout`, Index | Index for new installs; settings saved without a layout, or with one that has no `frame`, are Classic. Layout options: `frame`, `transport`, `regions`, `leftSize`, `rightSize`, `sidebarSide`, `sidebarCollapsed`, `sidebarSections`, `nowPlaying`, `playerStyle`, `playerButtons`, `homeShelves`, `homeGreeting`, `quickAccess`, `headerStyle`, `trackColumns`, `coverShape`, `spinRecord`, `motion`. Checked like a look's layout; a bad one is refused, and a hand-edited bad one goes back to Classic. See Themes and looks. |
+| `turntableColumn` | `small`, `medium` or `large`, `medium` | The Turntable layout's player column width. Any other value is refused. This device only. |
+| `layout` | `Layout`, Index | Index for new installs; settings saved without a layout, or with one that has no `frame`, are Classic. Layout options: `frame`, `transport`, `regions`, `leftSize`, `rightSize`, `deckLabels`, `sidebarSide`, `sidebarCollapsed`, `sidebarSections`, `nowPlaying`, `playerStyle`, `playerButtons`, `homeShelves`, `homeGreeting`, `quickAccess`, `headerStyle`, `trackColumns`, `coverShape`, `spinRecord`, `motion`. Checked like a look's layout; a bad one is refused, and a hand-edited bad one goes back to Classic. See Themes and looks. |
 | `showLookBuilder` | bool, true | Appearance shows Make your own. |
 | `lookStepDone` | bool, false | The first-run Pick a look step was shown or skipped. This device only. |
 | `outputDevice` | device id or null, null | Read only here. Set with `output_select`; null follows the system default. |

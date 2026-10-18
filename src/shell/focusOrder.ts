@@ -11,7 +11,9 @@ import { useEffect, type RefObject } from "react";
 export const FOCUS_REGIONS = [
   ".skip-link",
   ".topbar, .frame-bar",
-  ".sidebar, .resize-handle--sidebar, .frame-left, .frame-edge__row",
+  // Deck's faceplate and Turntable's column are players drawn as the
+  // frame's first object, so they keep their place in reading order.
+  ".sidebar, .resize-handle--sidebar, .frame-left, .frame-edge__row, .deck-face, .deck-rail, .tt-column, .tt-browse-head",
   ".remote-strip, .player-bar, .transport-strip",
   ".frame-page__search, .main, .frame-page__panel",
   ".resize-handle--right, .queue-panel, .np-panel, .output-panel, .right-strip, .frame-right, .frame-drawer",

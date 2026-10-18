@@ -23,6 +23,7 @@ import { usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useLayout } from "../stores/theme";
+import type { PlayerButton } from "../design/themes/validate";
 import { useUi } from "../stores/ui";
 import { HifiMark } from "./HifiMark";
 import { ListenMark } from "./ListenStrip";
@@ -108,11 +109,14 @@ function StripNow() {
   );
 }
 
-/** Volume, output and the panels, in the order the layout's button list gives. */
-function StripExtras() {
+/**
+ * Volume, output and the panels, in the order the layout's button list
+ * gives. `skip` leaves some to the frame (Deck draws its own volume knob).
+ */
+export function StripExtras({ skip = [] }: { skip?: readonly PlayerButton[] } = {}) {
   const outputOpen = useUi((s) => s.outputOpen);
   const toggleOutput = useUi((s) => s.toggleOutput);
-  const buttons = useLayout().playerButtons;
+  const buttons = useLayout().playerButtons.filter((b) => !skip.includes(b));
   const hasTrack = usePlayer((s) => !!s.state?.track);
   return (
     <div className="ts-extras">

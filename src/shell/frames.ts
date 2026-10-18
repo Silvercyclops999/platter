@@ -22,8 +22,8 @@ export interface FrameInfo {
 /** Index first: it's the default. Classic and Console sit under More in the first-run step. */
 export const FRAME_INFO: readonly FrameInfo[] = [
   { id: "index", name: "Index", line: "Sections down the left, the player strip across the top, the queue in a drawer.", ready: true },
-  { id: "deck", name: "Deck", line: "A faceplate across the top with a two-line display, source keys under it.", ready: false },
-  { id: "turntable", name: "Turntable", line: "The player is a column on the left: platter, tonearm and what's next.", ready: false },
+  { id: "deck", name: "Deck", line: "A faceplate across the top with a two-line display, source keys under it.", ready: true },
+  { id: "turntable", name: "Turntable", line: "The player is a column on the left: platter, tonearm and what's next.", ready: true },
   { id: "gatefold", name: "Gatefold", line: "Two pages: now playing on the left, browsing on the right.", ready: false },
   { id: "classic", name: "Classic", line: "Your library on the left and the player bar along the bottom.", ready: true },
   { id: "console", name: "Console", line: "A tree, a dense table and a details pane, for big libraries.", ready: false },
@@ -70,12 +70,38 @@ export function indexRegions(transport: Layout["transport"]): Regions {
 }
 
 /**
+ * Deck: the faceplate (now playing, transport, format plates) and under it
+ * the source keys with search, all across the top. The page is full width;
+ * lyrics open as a page, the queue and credits as a drawer.
+ */
+export const DECK_REGIONS: Regions = {
+  top: ["nowPlaying", "transport", "signal", "navigation", "search"],
+  left: [],
+  main: ["library", "lyrics"],
+  right: [],
+  bottom: [],
+  overlay: ["queue", "credits"],
+};
+
+/**
+ * Turntable: the player is the left column (platter, plates, transport, up
+ * next); browsing on the right has its own section tabs and search. Nothing
+ * at the bottom. The queue, lyrics and credits open as a drawer.
+ */
+export const TURNTABLE_REGIONS: Regions = {
+  top: ["navigation", "search"],
+  left: ["nowPlaying", "signal", "transport"],
+  main: ["library"],
+  right: [],
+  bottom: [],
+  overlay: ["queue", "lyrics", "credits"],
+};
+
+/**
  * Sketches of the frames still to come, so the picker can show their shape.
  * Never used to draw the app.
  */
 const SKETCH: Partial<Record<Frame, Regions>> = {
-  deck: { top: ["transport", "nowPlaying", "signal", "navigation"], left: [], main: ["library", "search"], right: [], bottom: [], overlay: ["queue", "lyrics"] },
-  turntable: { top: [], left: ["transport", "nowPlaying"], main: ["library", "search"], right: [], bottom: [], overlay: ["queue"] },
   gatefold: { top: [], left: ["nowPlaying", "navigation"], main: ["library", "search"], right: [], bottom: ["transport", "signal"], overlay: ["queue"] },
   console: { top: [], left: ["navigation", "filters"], main: ["library", "search"], right: ["credits", "signal"], bottom: ["transport", "nowPlaying"], overlay: ["queue"] },
 };
@@ -89,8 +115,12 @@ export function frameRegions(l: Pick<Layout, "frame" | "transport" | "regions">)
       return l.regions;
     case "index":
       return indexRegions(l.transport);
+    case "deck":
+      return DECK_REGIONS;
+    case "turntable":
+      return TURNTABLE_REGIONS;
     default:
-      // Deck, Turntable, Gatefold and Console aren't built yet: Index stands in.
+      // Gatefold and Console aren't built yet: Index stands in.
       return indexRegions(l.transport);
   }
 }
@@ -100,6 +130,8 @@ export function sketchRegions(frame: Frame, l: Pick<Layout, "transport" | "regio
   if (frame === "classic") return null;
   if (frame === "custom") return l.regions;
   if (frame === "index") return indexRegions(l.transport);
+  if (frame === "deck") return DECK_REGIONS;
+  if (frame === "turntable") return TURNTABLE_REGIONS;
   return SKETCH[frame] ?? indexRegions("top");
 }
 
@@ -149,6 +181,20 @@ export function solveFrame(input: { windowWidth: number; regions: Regions; leftS
     left = FRAME_RAIL;
   }
   return { left, leftMode, rightMode, right };
+}
+
+/** Turntable's player column for each width preset, and its small state (px). */
+export const TURNTABLE_COLUMN: Record<RegionSize, number> = { small: 288, medium: 336, large: 400 };
+export const TURNTABLE_COMPACT = 216;
+
+/**
+ * Turntable's column in a window: its preset width while the browsing side
+ * keeps a usable width beside it, else the small platter with transport.
+ */
+export function solveTurntable(windowWidth: number, size: RegionSize): { column: number; compact: boolean } {
+  const full = TURNTABLE_COLUMN[size] ?? TURNTABLE_COLUMN.medium;
+  if (windowWidth - FRAME_EDGES - full >= FRAME_MAIN_MIN) return { column: full, compact: false };
+  return { column: TURNTABLE_COMPACT, compact: true };
 }
 
 /** The order a frame gives way in narrow windows, for the Layout settings. */

@@ -65,6 +65,7 @@ const NOT_A_ROW: Record<string, string> = {
   bringInMaxQueue: "bringIn",
   lookStepDone: "kept by the first-run step",
   newLookOffered: "kept by the one-time new look offer",
+  turntableColumn: "layout",
   discordCoverArchive: "discordCoverSource",
   discordUploadCovers: "discordCoverSource",
   discordUploadArt: "discordCoverSource",
