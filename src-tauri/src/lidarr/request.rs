@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use super::api::{Album, Artist, Route};
 use super::check::{CheckReport, Level};
-use super::mbpick::{Group, LibraryAlbum, Picked, Picker, Want, library_albums, missing};
+use super::mbpick::{Group, LibraryAlbum, MissingGroup, Picked, Picker, Want, library_albums, missing_in};
 use super::status::{RequestState, map_status};
 use super::write::{AddArtist, clear_exclusion};
 use super::paths::NormPath;
@@ -266,13 +266,21 @@ pub struct MissingReleases {
 pub struct MissingItem {
     pub release_group_id: String,
     pub title: String,
-    /// `album` or `ep`.
+    /// `album`, `ep` or `single`.
     pub kind: String,
+    /// Secondary types (`live`, `compilation`...), lower case.
+    pub secondary: Vec<String>,
+    /// The discography section it shows in (`albums`, `singlesEps`,
+    /// `compilations`, `live`...).
+    pub section: String,
     pub year: Option<i32>,
     /// A request made for it, if any.
     pub request: Option<RequestState>,
     /// Its front cover from the Cover Art Archive, small, as an art path.
     pub thumb: Option<String>,
+    /// Why Get would be refused (a live album or compilation isn't asked
+    /// for on its own).
+    pub refusal: Option<String>,
 }
 
 /// The art path of a release group's small front cover (the Cover Art
@@ -1252,8 +1260,10 @@ impl Lidarr {
         Ok(self.requests())
     }
 
-    /// An artist's official albums and EPs the library lacks, when the
-    /// setting is on, Lidarr is set up and its last check passed.
+    /// An artist's official releases the library lacks, of the "Get albums"
+    /// kinds (albums, singles and EPs, live albums, compilations), each with
+    /// its section, when the setting is on, Lidarr is set up and its last
+    /// check passed.
     pub async fn missing_releases(&self, artist_id: &str, artist: &str) -> AppResult<MissingReleases> {
         let hidden = MissingReleases { shown: false, items: Vec::new() };
         let s = crate::settings::load(&self.inner.db);
@@ -1269,14 +1279,17 @@ impl Lidarr {
         let library = self.library(&want).await?;
         let groups = self.picker().artist_groups(&mbid).await?;
         let records = self.records();
-        let items = missing(groups, &want, &library)
+        let items = missing_in(groups, &want, &library, &crate::discover::clean_kinds(&s.get_albums_kinds))
             .into_iter()
-            .filter(|g| self.allowed(&want, &g.id))
-            .map(|g| MissingItem {
+            .filter(|m| self.allowed(&want, &m.group.id))
+            .map(|MissingGroup { group: g, section, refusal }| MissingItem {
                 request: records.iter().find(|r| r.release_group_id == g.id).map(|r| r.state),
                 year: g.first_release.get(..4).and_then(|y| y.parse().ok()),
                 kind: g.primary.clone().unwrap_or_default(),
+                secondary: g.secondary.clone(),
+                section: section.to_string(),
                 thumb: cover_thumb(&g.id),
+                refusal: refusal.map(|r| r.message()),
                 release_group_id: g.id,
                 title: g.title,
             })

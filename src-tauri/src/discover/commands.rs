@@ -3,7 +3,7 @@
 use serde::Serialize;
 use tauri::State;
 
-use super::{CatArtist, CatalogueAlbumPage, CatalogueArtistPage, CataloguePart, CataloguePhoto, CatalogueSearch, Discover, GetAlbumsPlan, NewToYou};
+use super::{CatArtist, CatalogueAlbumPage, CatalogueArtistPage, CataloguePart, CataloguePhoto, CatalogueSearch, Discover, FeaturedArtist, GetAlbumsPlan, NewToYou};
 use crate::error::AppResult;
 use crate::lidarr::waves::{QueuedGet, Waves};
 
@@ -26,6 +26,21 @@ pub async fn catalogue_search_part(discover: State<'_, Discover>, query: String,
 #[tauri::command]
 pub async fn catalogue_artist_photo(discover: State<'_, Discover>, mbid: String, name: String) -> AppResult<CataloguePhoto> {
     discover.artist_photo(&mbid, &name).await
+}
+
+/// What the catalogue knows about a featured guest (a `credit:` artist
+/// page): a photo and their releases by section, with Get. Empty while
+/// offline.
+#[tauri::command]
+pub async fn featured_artist(discover: State<'_, Discover>, id: String, name: String) -> AppResult<FeaturedArtist> {
+    discover.featured_artist(&id, &name).await
+}
+
+/// Just a featured guest's photo (search's top result card). Empty while
+/// offline.
+#[tauri::command]
+pub async fn featured_artist_photo(discover: State<'_, Discover>, id: String, name: String) -> AppResult<CataloguePhoto> {
+    discover.featured_photo(&id, &name).await
 }
 
 /// A page for an artist outside the library (by MusicBrainz id).

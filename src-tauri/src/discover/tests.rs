@@ -188,7 +188,7 @@ fn rig() -> Rig {
     similar.map.lock().insert(HARBOR.into(), vec![sim(ARTIST, "Northlight", 900), sim(COLD, "Cold Coast", 500), sim(FEN, "Fen", 400)]);
     let top = Arc::new(Top::default());
     top.0.lock().push(RadarArtist { id: Some("ar-h".into()), name: "Harbor Sound".into() });
-    let prefs = Arc::new(FakePrefs(Mutex::new(Prefs { search: true, fans: true, new_to_you: true, dismissed: HashSet::from([NOPE.to_string()]), lidarr_source: true })));
+    let prefs = Arc::new(FakePrefs(Mutex::new(Prefs { search: true, fans: true, new_to_you: true, dismissed: HashSet::from([NOPE.to_string()]), lidarr_source: true, get_kinds: every_kind() })));
     let requests = Arc::new(Requests::default());
     let offline = Arc::new(AtomicBool::new(false));
     let lookup = Arc::new(FakeLookup::default());
@@ -260,7 +260,7 @@ async fn searches_are_paced_and_cached() {
         top: Arc::new(Top::default()),
         info: Arc::new(Info),
         requests: Arc::new(Requests::default()),
-        prefs: Arc::new(FakePrefs(Mutex::new(Prefs { search: true, fans: true, new_to_you: true, dismissed: HashSet::new(), lidarr_source: true }))),
+        prefs: Arc::new(FakePrefs(Mutex::new(Prefs { search: true, fans: true, new_to_you: true, dismissed: HashSet::new(), lidarr_source: true, get_kinds: every_kind() }))),
         lookup: Arc::new(FakeLookup::default()),
         offline: Arc::new(AtomicBool::new(false)),
         clock: Arc::new(|| NOW),
@@ -289,10 +289,9 @@ async fn catalogue_artist_page_lists_official_releases_by_type() {
     assert_eq!(
         by,
         vec![
-            ("album".to_string(), vec!["Quiet Sketches".to_string(), "Second Wind".into(), "Tides".into(), "First Light".into()]),
-            ("ep".to_string(), vec!["Small Hours".to_string()]),
-            ("single".to_string(), vec!["Second Wind".to_string()]),
-            ("other".to_string(), vec!["Live at the Harbor".to_string()]),
+            ("albums".to_string(), vec!["Quiet Sketches".to_string(), "Second Wind".into(), "Tides".into(), "First Light".into()]),
+            ("singlesEps".to_string(), vec!["Second Wind".to_string(), "Small Hours".into()]),
+            ("live".to_string(), vec!["Live at the Harbor".to_string()]),
         ],
         "bootlegs, promos, Various Artists and duets are left out; newest first"
     );
@@ -302,6 +301,88 @@ async fn catalogue_artist_page_lists_official_releases_by_type() {
     assert!(!p.dismissed);
     r.prefs.0.lock().dismissed.insert(ARTIST.into());
     assert!(r.d.artist_page(ARTIST).await.unwrap().dismissed);
+}
+
+fn every_kind() -> Vec<String> {
+    super::GET_KINDS.iter().map(|s| s.to_string()).collect()
+}
+
+#[tokio::test]
+async fn catalogue_sections_follow_the_get_albums_kinds() {
+    let r = rig();
+    r.prefs.0.lock().get_kinds = vec!["studio".into(), "ep".into()];
+    let p = r.d.artist_page(ARTIST).await.unwrap();
+    let kinds: Vec<&str> = p.sections.iter().map(|s| s.kind.as_str()).collect();
+    assert_eq!(kinds, ["albums", "singlesEps"], "the live album is left out");
+    assert!(!p.popular.is_empty(), "Popular stays");
+}
+
+#[tokio::test]
+async fn a_featured_guest_gets_a_photo_and_their_releases_by_section() {
+    let r = rig();
+    with_lidarr(&r);
+    let f = r.d.featured_artist("credit:northlight", "Northlight").await.unwrap();
+    assert!(f.shown);
+    assert_eq!(f.mbid.as_deref(), Some(ARTIST));
+    assert_eq!(f.photo.as_deref(), Some("/ext/https://assets.fanart.tv/fanart/music/n.jpg"), "a real photo, not a blank icon");
+    let by: Vec<(&str, Vec<&str>)> = f.sections.iter().map(|s| (s.kind.as_str(), s.albums.iter().map(|a| a.title.as_str()).collect())).collect();
+    assert_eq!(
+        by,
+        vec![
+            ("albums", vec!["Quiet Sketches", "Second Wind", "Tides", "First Light"]),
+            ("singlesEps", vec!["Second Wind", "Small Hours"]),
+            ("live", vec!["Live at the Harbor"]),
+        ]
+    );
+    assert!(f.sections.iter().flat_map(|s| &s.albums).all(|a| a.artist == "Northlight" && a.artist_mbid.as_deref() == Some(ARTIST)));
+    // Asked again: the photo comes from the cache, not from Lidarr again.
+    let lookups = r.lookup.calls.lock().len();
+    let again = r.d.featured_artist("credit:northlight", "Northlight").await.unwrap();
+    assert_eq!(again, f);
+    assert_eq!(r.lookup.calls.lock().len(), lookups, "the photo is cached");
+
+    // A name MusicBrainz doesn't know: nothing to show, no catalogue asked.
+    let before = r.mb.calls.lock().len();
+    let none = r.d.featured_artist("credit:nobody", "Nobody At All").await.unwrap();
+    assert!(!none.shown && none.sections.is_empty() && none.mbid.is_none());
+    assert_eq!(r.mb.calls.lock().len(), before);
+
+    // Offline: nothing at all.
+    r.offline.store(true, Ordering::SeqCst);
+    let off = r.d.featured_artist("credit:northlight", "Northlight").await.unwrap();
+    assert_eq!(off, FeaturedArtist::default());
+    assert_eq!(r.mb.calls.lock().len(), before, "nothing reached MusicBrainz");
+}
+
+#[tokio::test]
+async fn a_featured_guests_photo_alone_skips_their_releases() {
+    let r = rig();
+    with_lidarr(&r);
+    let p = r.d.featured_photo("credit:northlight", "Northlight").await.unwrap();
+    assert_eq!(p.photo.as_deref(), Some("/ext/https://assets.fanart.tv/fanart/music/n.jpg"));
+    assert_eq!(r.mb.count("/release?artist="), 0, "no discography browse for a photo");
+    assert_eq!(r.d.featured_photo("credit:x", "Nobody At All").await.unwrap(), CataloguePhoto::default());
+}
+
+#[tokio::test]
+async fn a_featured_guest_marks_what_the_library_has_and_whats_asked_for() {
+    let r = rig();
+    r.db.write(|c| {
+        c.execute_batch(
+            "INSERT INTO artists (id, title, sort_title) VALUES ('ar-n', 'Northlight', 'Northlight');
+             INSERT INTO albums (id, title, sort_title, artist_id, artist_title, format, subformats, matched) VALUES
+               ('al-n', 'First Light', 'First Light', 'ar-n', 'Northlight', 'Album', '[]', 1);",
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    r.requests.0.lock().insert(RG_TIDES.into(), RequestState::Searching);
+    let f = r.d.featured_artist("credit:northlight", "Northlight").await.unwrap();
+    let albums = &f.sections[0].albums;
+    let first = albums.iter().find(|a| a.title == "First Light").unwrap();
+    assert_eq!(first.library_album_id.as_deref(), Some("al-n"), "owned shows In your library");
+    let tides = albums.iter().find(|a| a.title == "Tides").unwrap();
+    assert_eq!(tides.request, Some(RequestState::Searching));
 }
 
 #[tokio::test]
@@ -648,7 +729,7 @@ async fn first_catalogue_results_arrive_sooner_through_lidarr() {
     let lookup = Arc::new(FakeLookup::default());
     lookup.delay_ms.store(150, Ordering::SeqCst);
     *lookup.artists.lock() = vec![lartist(ARTIST, "Northlight", None)];
-    let prefs = Arc::new(FakePrefs(Mutex::new(Prefs { search: true, fans: true, new_to_you: true, dismissed: HashSet::new(), lidarr_source: true })));
+    let prefs = Arc::new(FakePrefs(Mutex::new(Prefs { search: true, fans: true, new_to_you: true, dismissed: HashSet::new(), lidarr_source: true, get_kinds: every_kind() })));
     let d = Discover::new(DiscoverDeps {
         db: db.clone(),
         mb: Arc::new(MbCached { http: Arc::new(Slow(http.clone())), limiter: Arc::new(Limiter::per_second(1.0)), db: db.clone(), clock: Arc::new(|| NOW), ttl: 3600 }),

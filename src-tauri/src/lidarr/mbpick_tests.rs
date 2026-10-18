@@ -310,6 +310,59 @@ fn missing_skips_what_the_library_has_or_clashes_with() {
     assert_eq!(titles, vec!["Small Hours", "Second Wind"]);
 }
 
+#[test]
+fn release_groups_sort_into_discography_sections() {
+    let g = |primary: &str, sec: &[&str]| Group {
+        id: "x".into(),
+        title: "x".into(),
+        primary: Some(primary.into()),
+        secondary: sec.iter().map(|s| s.to_string()).collect(),
+        first_release: String::new(),
+        statuses: vec![],
+        credit: vec![],
+    };
+    assert_eq!(release_section(&g("album", &[])), Some("albums"));
+    assert_eq!(release_section(&g("ep", &[])), Some("singlesEps"));
+    assert_eq!(release_section(&g("single", &[])), Some("singlesEps"));
+    assert_eq!(release_section(&g("album", &["compilation"])), Some("compilations"));
+    assert_eq!(release_section(&g("album", &["live", "compilation"])), Some("compilations"), "a live best-of is a compilation");
+    assert_eq!(release_section(&g("album", &["live"])), Some("live"));
+    assert_eq!(release_section(&g("ep", &["remix"])), Some("remixes"));
+    assert_eq!(release_section(&g("album", &["soundtrack"])), Some("soundtracks"));
+    assert_eq!(release_section(&g("album", &["mixtape/street"])), Some("mixtapes"));
+    assert_eq!(release_section(&g("album", &["interview"])), None, "spoken word has no section");
+    assert_eq!(release_section(&g("broadcast", &[])), None);
+    let kinds = |k: &[&str]| k.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let every = kinds(&["studio", "ep", "live", "compilation"]);
+    assert_eq!(wanted_section(&g("single", &[]), &every), Some("singlesEps"), "singles come with EPs");
+    assert_eq!(wanted_section(&g("album", &["live"]), &every), Some("live"));
+    assert_eq!(wanted_section(&g("album", &["soundtrack"]), &every), None, "not a Get kind");
+    assert_eq!(wanted_section(&g("ep", &[]), &kinds(&["studio"])), None);
+    assert_eq!(wanted_section(&g("album", &["compilation"]), &kinds(&["compilation"])), Some("compilations"));
+}
+
+#[test]
+fn missing_in_keeps_singles_and_secondaries_by_section() {
+    let mut all = BTreeMap::new();
+    groups_from_releases(&browse(), &mut all);
+    let groups: Vec<Group> = all.into_values().collect();
+    let every: Vec<String> = ["studio", "ep", "live", "compilation"].iter().map(|s| s.to_string()).collect();
+    let got: Vec<(String, &str, bool)> =
+        missing_in(groups.clone(), &want(), &library(), &every).into_iter().map(|m| (m.group.title, m.section, m.refusal.is_some())).collect();
+    assert_eq!(
+        got,
+        vec![
+            ("Small Hours".to_string(), "singlesEps", false),
+            ("Second Wind".to_string(), "singlesEps", false),
+            ("Second Wind".to_string(), "albums", false),
+            ("Live at the Harbor".to_string(), "live", true),
+        ],
+        "the single shows now; the live album shows with why it can't be asked for; bootleg, VA, duet and clashes stay out"
+    );
+    let albums_only = missing_in(groups, &want(), &library(), &["studio".to_string()]);
+    assert_eq!(albums_only.iter().map(|m| m.group.title.as_str()).collect::<Vec<_>>(), ["Second Wind"]);
+}
+
 #[tokio::test]
 async fn picks_from_an_album_or_a_song() {
     let mb = FakeMb::northlight();

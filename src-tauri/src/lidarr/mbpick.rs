@@ -376,6 +376,78 @@ pub fn missing(groups: Vec<Group>, want: &Want, library: &[LibraryAlbum]) -> Vec
     out
 }
 
+/// The discography sections releases sort into, in page order (the same ids
+/// as the library's own sections).
+pub const RELEASE_SECTIONS: [&str; 8] = ["albums", "singlesEps", "compilations", "live", "soundtracks", "remixes", "mixtapes", "demos"];
+
+/// The section a release group shows in: albums, singles and EPs, then one
+/// per secondary type (a compilation of live songs is a compilation). Spoken
+/// word, interviews, audiobooks and field recordings have none.
+pub fn release_section(g: &Group) -> Option<&'static str> {
+    type_rank(g.primary.as_deref())?;
+    if g.secondary.is_empty() {
+        return Some(if g.primary.as_deref() == Some("album") { "albums" } else { "singlesEps" });
+    }
+    let has = |k: &str| g.secondary.iter().any(|s| s == k);
+    [
+        ("compilation", "compilations"),
+        ("dj-mix", "compilations"),
+        ("live", "live"),
+        ("soundtrack", "soundtracks"),
+        ("remix", "remixes"),
+        ("mixtape/street", "mixtapes"),
+        ("demo", "demos"),
+    ]
+    .into_iter()
+    .find(|(k, _)| has(k))
+    .map(|(_, s)| s)
+}
+
+/// The section a release group shows in when "Get albums" kinds are
+/// `kinds` (`studio`, `ep`, `live`, `compilation`): albums with `studio`,
+/// singles and EPs with `ep`, live albums with `live`, compilations with
+/// `compilation`. Soundtracks, remixes and the like never show.
+pub fn wanted_section(g: &Group, kinds: &[String]) -> Option<&'static str> {
+    let section = release_section(g)?;
+    let kind = match section {
+        "albums" => "studio",
+        "singlesEps" => "ep",
+        "live" => "live",
+        "compilations" => "compilation",
+        _ => return None,
+    };
+    kinds.iter().any(|k| k == kind).then_some(section)
+}
+
+/// One release the library lacks, with its section and, when a request
+/// would be refused (a live album or a compilation isn't asked for on its
+/// own), why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingGroup {
+    pub group: Group,
+    pub section: &'static str,
+    pub refusal: Option<Refusal>,
+}
+
+/// The artist's official releases of the "Get albums" `kinds` that the
+/// library lacks, oldest first. Anything whose title matches a library
+/// album is left out, as are other artists' releases and bootlegs.
+pub fn missing_in(groups: Vec<Group>, want: &Want, library: &[LibraryAlbum], kinds: &[String]) -> Vec<MissingGroup> {
+    let mut out: Vec<MissingGroup> = groups
+        .into_iter()
+        .filter_map(|g| {
+            let section = wanted_section(&g, kinds)?;
+            if vet(&g, want, library, true).is_err() {
+                return None;
+            }
+            let refusal = vet(&g, want, library, false).err();
+            Some(MissingGroup { group: g, section, refusal })
+        })
+        .collect();
+    out.sort_by_key(|m| (date_key(&m.group.first_release), m.group.title.to_lowercase()));
+    out
+}
+
 // ---------------------------------------------------------------- the library
 
 /// Albums by the artist in the library: by library artist id, and by

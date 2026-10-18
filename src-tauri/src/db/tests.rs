@@ -810,6 +810,24 @@ async fn library_artist_pages_list_albums_they_appear_on() {
 }
 
 #[tokio::test]
+async fn an_artist_item_with_only_featured_credits_lists_what_they_appear_on() {
+    // The server has an artist item for the guest, but no album of theirs:
+    // every song of theirs is on someone else's album.
+    let mut lib = credited_library();
+    lib.artists.push(fake::artist("a9", "Rue Ellis"));
+    let t = open();
+    sync(&t.db, &Arc::new(FakeSource::new(lib)), false).await;
+    let page = t.db.read(|c| queries::artist_page(c, "a9")).unwrap();
+    assert!(page.sections.is_empty(), "no albums of their own");
+    let mut albums: Vec<_> = page.appears_on.iter().map(|a| a.id.as_str()).collect();
+    albums.sort();
+    assert_eq!(albums, ["al2", "al3"]);
+    let mut songs: Vec<_> = page.popular.iter().map(|p| p.id.as_str()).collect();
+    songs.sort();
+    assert_eq!(songs, ["m1", "s1", "s3"], "the songs that credit them");
+}
+
+#[tokio::test]
 async fn learned_names_with_separators_stay_whole() {
     let t = open();
     sync(&t.db, &Arc::new(FakeSource::new(credited_library())), false).await;

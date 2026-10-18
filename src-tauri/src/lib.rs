@@ -1894,6 +1894,8 @@ pub fn run() {
             discover::commands::new_to_you,
             discover::commands::catalogue_search_part,
             discover::commands::catalogue_artist_photo,
+            discover::commands::featured_artist,
+            discover::commands::featured_artist_photo,
             discover::commands::catalogue_get_albums_plan,
             discover::commands::catalogue_get_albums,
             physical::commands::physical_list,

@@ -792,6 +792,14 @@ pub struct Settings {
     pub ask_before_get: bool,
     /// The kinds "Get albums" offers ticked: `studio`, `ep`, `live`, `compilation`.
     pub get_albums_kinds: Vec<String>,
+    /// The discography chip an artist page opens on (the last one picked):
+    /// `popular`, `albums`, `singlesEps`, `compilations`...
+    pub discography_chip: String,
+    /// The full discography's order (`date` newest first, or `name` A to Z),
+    /// whether it's reversed, and its view (`list` or `grid`).
+    pub discography_sort: String,
+    pub discography_reverse: bool,
+    pub discography_view: String,
     /// Badges, the On the shelf filter and the Stats shelf for albums the
     /// user owns on vinyl, CD, cassette or another format.
     pub show_physical_collection: bool,
@@ -911,6 +919,14 @@ pub fn tautulli_url(u: &str) -> AppResult<String> {
 /// purpose: reporting plays to your own Plex server (it's what a Plex player
 /// does; Private session stops it), looking for speakers on your own network
 /// (nothing about you is sent), and offers that ask before each send.
+/// A discography chip: Popular releases, a release section, or one of the
+/// user's own sections (`custom:<name>`).
+fn discography_chip(c: &str) -> AppResult<String> {
+    const CHIPS: [&str; 10] = ["popular", "albums", "singlesEps", "live", "compilations", "soundtracks", "remixes", "demos", "mixtapes", "unreleased"];
+    let custom = c.strip_prefix("custom:").is_some_and(|n| !n.trim().is_empty() && n.chars().count() <= 200);
+    if CHIPS.contains(&c) || custom { Ok(c.to_string()) } else { Err(AppError::Invalid("Pick one of the release types.".into())) }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -1154,6 +1170,10 @@ impl Default for Settings {
             catalogue_source: "lidarr".into(),
             ask_before_get: false,
             get_albums_kinds: crate::discover::DEFAULT_GET_KINDS.iter().map(|k| k.to_string()).collect(),
+            discography_chip: "popular".into(),
+            discography_sort: "date".into(),
+            discography_reverse: false,
+            discography_view: "list".into(),
             show_physical_collection: true,
             shelf_missing_list: false,
             show_sleeve_notes: true,
@@ -1365,6 +1385,10 @@ pub const SYNCED_SETTINGS: &[&str] = &[
 
 /// Settings kept on this device only.
 pub const DEVICE_SETTINGS: &[&str] = &[
+    "discographyChip",
+    "discographySort",
+    "discographyReverse",
+    "discographyView",
     "syncDiary",
     "spineWidthByTracks",
     "musicFolder",
@@ -1694,6 +1718,10 @@ pub struct SettingsPatch {
     pub catalogue_source: Option<String>,
     pub ask_before_get: Option<bool>,
     pub get_albums_kinds: Option<Vec<String>>,
+    pub discography_chip: Option<String>,
+    pub discography_sort: Option<String>,
+    pub discography_reverse: Option<bool>,
+    pub discography_view: Option<String>,
     pub show_physical_collection: Option<bool>,
     pub shelf_missing_list: Option<bool>,
     pub show_sleeve_notes: Option<bool>,
@@ -2044,6 +2072,22 @@ impl Settings {
         set(&mut self.ask_before_get, p.ask_before_get);
         if let Some(k) = &p.get_albums_kinds {
             self.get_albums_kinds = crate::discover::clean_kinds(k);
+        }
+        if let Some(c) = &p.discography_chip {
+            self.discography_chip = discography_chip(c)?;
+        }
+        if let Some(o) = &p.discography_sort {
+            if !matches!(o.as_str(), "date" | "name") {
+                return Err(AppError::Invalid("Sort by release date or by name.".into()));
+            }
+            self.discography_sort = o.clone();
+        }
+        set(&mut self.discography_reverse, p.discography_reverse);
+        if let Some(v) = &p.discography_view {
+            if !matches!(v.as_str(), "list" | "grid") {
+                return Err(AppError::Invalid("Show the discography as a list or a grid.".into()));
+            }
+            self.discography_view = v.clone();
         }
         set(&mut self.show_dlna_devices, p.show_dlna_devices);
         set(&mut self.allow_automation, p.allow_automation);
@@ -4765,6 +4809,25 @@ mod tests {
         assert!(s.apply(&serde_json::from_value(serde_json::json!({"catalogueSource": "elsewhere"})).unwrap()).is_err());
         s.apply(&serde_json::from_value(serde_json::json!({"getAlbumsKinds": []})).unwrap()).unwrap();
         assert_eq!(s.get_albums_kinds, ["studio"], "none ticked means studio albums");
+    }
+
+    #[test]
+    fn the_discography_chip_sort_and_view_are_kept_on_this_device() {
+        let mut s = Settings::default();
+        assert_eq!((s.discography_chip.as_str(), s.discography_sort.as_str(), s.discography_reverse, s.discography_view.as_str()), ("popular", "date", false, "list"));
+        for k in ["discographyChip", "discographySort", "discographyReverse", "discographyView"] {
+            assert!(DEVICE_SETTINGS.contains(&k) && !SYNCED_SETTINGS.contains(&k), "{k} is this device only");
+        }
+        let patch = |v: serde_json::Value| serde_json::from_value::<SettingsPatch>(v).unwrap();
+        s.apply(&patch(serde_json::json!({"discographyChip": "singlesEps", "discographySort": "name", "discographyReverse": true, "discographyView": "grid"}))).unwrap();
+        assert_eq!((s.discography_chip.as_str(), s.discography_sort.as_str(), s.discography_reverse, s.discography_view.as_str()), ("singlesEps", "name", true, "grid"));
+        s.apply(&patch(serde_json::json!({"discographyChip": "custom:B-sides"}))).unwrap();
+        assert_eq!(s.discography_chip, "custom:B-sides", "the user's own sections too");
+        for bad in [serde_json::json!({"discographyChip": "everything"}), serde_json::json!({"discographySort": "plays"}), serde_json::json!({"discographyView": "wall"})] {
+            assert!(s.clone().apply(&patch(bad.clone())).is_err(), "{bad}");
+        }
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.discography_chip, "popular", "settings saved before it get the default");
     }
 
     #[test]

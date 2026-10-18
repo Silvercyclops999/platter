@@ -39,7 +39,7 @@ use crate::db::store::{kv_get, kv_set};
 use crate::error::{AppError, AppResult};
 use crate::import::store::{StoreLinks, album_store_links, wanted_albums};
 use crate::lidarr::ArtistMbid;
-use crate::lidarr::mbpick::{Group, MbGet, Picker, Refusal, VARIOUS_ARTISTS, Want, group_url, library_albums, parse_group, vet};
+use crate::lidarr::mbpick::{Group, MbGet, Picker, RELEASE_SECTIONS, Refusal, VARIOUS_ARTISTS, Want, group_url, library_albums, parse_group, vet, wanted_section};
 use crate::lidarr::request::cover_thumb;
 use crate::lidarr::status::RequestState;
 use crate::radar::TopPlayed;
@@ -211,9 +211,24 @@ pub struct CatalogueSearch {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CatSection {
-    /// `album`, `ep`, `single` or `other` (compilations, live albums...).
+    /// The section, with the library's section ids: `albums`, `singlesEps`,
+    /// `compilations`, `live`, `soundtracks`, `remixes`, `mixtapes`, `demos`.
     pub kind: String,
     pub albums: Vec<CatAlbum>,
+}
+
+/// `featured_artist`: what the catalogue knows about an artist the library
+/// only has as a featured guest (a `credit:` page).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeaturedArtist {
+    /// Lookups ran (online, and the name was found on MusicBrainz).
+    pub shown: bool,
+    pub mbid: Option<String>,
+    pub photo: Option<String>,
+    pub photo_credit: Option<String>,
+    /// Their releases by section, newest first, of the "Get albums" kinds.
+    pub sections: Vec<CatSection>,
 }
 
 /// A bio and pictures for an artist outside the library.
@@ -364,6 +379,8 @@ pub struct Prefs {
     pub dismissed: HashSet<String>,
     /// Catalogue source: Lidarr when it's set up (else MusicBrainz).
     pub lidarr_source: bool,
+    /// The "Get albums" kinds: which releases you don't have show.
+    pub get_kinds: Vec<String>,
 }
 
 pub trait PrefsSource: Send + Sync {
@@ -382,6 +399,7 @@ impl PrefsSource for SettingsPrefs {
             new_to_you: s.home_new_to_you,
             dismissed: s.dismissed_artists.into_iter().map(|d| d.mbid).collect(),
             lidarr_source: s.catalogue_source != "musicbrainz",
+            get_kinds: clean_kinds(&s.get_albums_kinds),
         }
     }
 }
@@ -480,15 +498,33 @@ fn year_of(date: &str) -> Option<i32> {
     date.get(..4).and_then(|y| y.parse().ok())
 }
 
-fn section_of(g: &Group) -> &'static str {
-    if !g.secondary.is_empty() {
-        return "other";
+/// The most popular albums and EPs (no singles, nothing refused).
+fn popular_of(vetted: &[(Group, CatAlbum)]) -> Vec<CatAlbum> {
+    let mut popular: Vec<&(Group, CatAlbum)> = vetted
+        .iter()
+        .filter(|(g, a)| g.secondary.is_empty() && matches!(g.primary.as_deref(), Some("album" | "ep")) && a.refusal.is_none())
+        .collect();
+    popular.sort_by(|a, b| by_popularity(&a.0, &b.0));
+    popular.into_iter().take(POPULAR_SHOWN).map(|(_, a)| a.clone()).collect()
+}
+
+/// Catalogue albums in discography sections (page order, newest first in
+/// each), only the releases of the "Get albums" `kinds`.
+pub fn sectioned(vetted: Vec<(Group, CatAlbum)>, kinds: &[String]) -> Vec<CatSection> {
+    let mut by_kind: HashMap<&'static str, Vec<CatAlbum>> = HashMap::new();
+    for (g, a) in vetted {
+        if let Some(s) = wanted_section(&g, kinds) {
+            by_kind.entry(s).or_default().push(a);
+        }
     }
-    match g.primary.as_deref() {
-        Some("ep") => "ep",
-        Some("single") => "single",
-        _ => "album",
-    }
+    RELEASE_SECTIONS
+        .into_iter()
+        .filter_map(|k| {
+            let mut albums = by_kind.remove(k)?;
+            albums.sort_by(|a, b| b.year.cmp(&a.year).then_with(|| a.title.cmp(&b.title)));
+            Some(CatSection { kind: k.into(), albums })
+        })
+        .collect()
 }
 
 impl Discover {
@@ -911,21 +947,8 @@ impl Discover {
         let prefs = self.inner.prefs.prefs();
 
         let vetted = self.vetted(&mbid, &artist.name, artist.library_id.clone()).await?;
-        let mut popular: Vec<&(Group, CatAlbum)> =
-            vetted.iter().filter(|(g, a)| matches!(section_of(g), "album" | "ep") && a.refusal.is_none()).collect();
-        popular.sort_by(|a, b| by_popularity(&a.0, &b.0));
-        let popular: Vec<CatAlbum> = popular.into_iter().take(POPULAR_SHOWN).map(|(_, a)| a.clone()).collect();
-        let mut by_kind: HashMap<&'static str, Vec<CatAlbum>> = HashMap::new();
-        for (g, a) in vetted {
-            by_kind.entry(section_of(&g)).or_default().push(a);
-        }        let sections = ["album", "ep", "single", "other"]
-            .into_iter()
-            .filter_map(|k| {
-                let mut albums = by_kind.remove(k)?;
-                albums.sort_by(|a, b| b.year.cmp(&a.year).then_with(|| a.title.cmp(&b.title)));
-                Some(CatSection { kind: k.into(), albums })
-            })
-            .collect();
+        let popular = popular_of(&vetted);
+        let sections = sectioned(vetted, &prefs.get_kinds);
 
         let bio = self.inner.info.bio(&mbid, &artist.name).await.unwrap_or_default();
         artist.photo = bio.photo.clone();
@@ -950,6 +973,41 @@ impl Discover {
             similar,
             popular,
         })
+    }
+
+    /// A featured guest's MusicBrainz id, while online.
+    async fn featured_mbid(&self, id: &str, name: &str) -> Option<String> {
+        if name.is_empty() || !self.online() {
+            return None;
+        }
+        self.inner.mbids.artist_mbid(id, name).await.map(|m| m.trim().to_ascii_lowercase()).filter(|m| is_mbid(m))
+    }
+
+    /// Just the photo of a featured guest (search's top result card), without
+    /// their releases.
+    pub async fn featured_photo(&self, id: &str, name: &str) -> AppResult<CataloguePhoto> {
+        let name = name.trim();
+        match self.featured_mbid(id, name).await {
+            Some(mbid) => self.artist_photo(&mbid, name).await,
+            None => Ok(CataloguePhoto::default()),
+        }
+    }
+
+    /// What the catalogue knows about a featured guest (a `credit:` page,
+    /// `id`): their MusicBrainz id (an exact name match, cached), a photo
+    /// from the free picture sources and their releases by section, each
+    /// with Get or "In your library". Nothing while offline or when
+    /// MusicBrainz doesn't know the name.
+    pub async fn featured_artist(&self, id: &str, name: &str) -> AppResult<FeaturedArtist> {
+        let name = name.trim();
+        let Some(mbid) = self.featured_mbid(id, name).await else { return Ok(FeaturedArtist::default()) };
+        let prefs = self.inner.prefs.prefs();
+        let ix = self.index().await?;
+        let library_id = ix.artist(Some(&mbid), name);
+        let vetted = self.vetted(&mbid, name, library_id).await?;
+        let sections = sectioned(vetted, &prefs.get_kinds);
+        let photo = self.artist_photo(&mbid, name).await.unwrap_or_default();
+        Ok(FeaturedArtist { shown: true, mbid: Some(mbid), photo: photo.photo, photo_credit: photo.credit, sections })
     }
 
     /// A catalogue album page: the tracklist of its earliest official

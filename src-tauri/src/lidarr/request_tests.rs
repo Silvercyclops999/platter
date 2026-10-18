@@ -679,6 +679,8 @@ async fn only_waiting_or_finished_requests_can_be_cancelled() {
 #[tokio::test]
 async fn missing_releases_need_the_setting_and_a_green_check() {
     let r = rig();
+    let every = ["studio", "ep", "live", "compilation"].map(String::from).to_vec();
+    crate::settings::save(&r.db, &crate::settings::Settings { get_albums_kinds: every, ..crate::settings::load(&r.db) }).unwrap();
     // No check yet: hidden.
     assert!(!r.lidarr.missing_releases("ar1", "Northlight").await.unwrap().shown);
     assert!(!r.lidarr.status().ready, "Request stays off before a green check");
@@ -688,19 +690,32 @@ async fn missing_releases_need_the_setting_and_a_green_check() {
     assert!(m.shown);
     let titles: Vec<&str> = m.items.iter().map(|i| i.title.as_str()).collect();
     // Have First Light; Quiet Sketches clashes with an unreleased build.
-    assert_eq!(titles, vec!["Tides", "Small Hours", "Second Wind"]);
-    assert_eq!(m.items[2].year, Some(2021));
+    // Singles and live albums show too, each in its section; the live album
+    // says why Get can't ask for it.
+    assert_eq!(titles, vec!["Tides", "Small Hours", "Second Wind", "Second Wind", "Live at the Harbor"]);
+    let sections: Vec<&str> = m.items.iter().map(|i| i.section.as_str()).collect();
+    assert_eq!(sections, vec!["albums", "singlesEps", "singlesEps", "albums", "live"]);
+    assert_eq!(m.items[3].year, Some(2021));
     assert_eq!(m.items[1].kind, "ep");
+    assert_eq!(m.items[2].kind, "single");
+    assert!(m.items[..4].iter().all(|i| i.refusal.is_none()));
+    assert!(m.items[4].refusal.as_deref().is_some_and(|r| r.contains("live")), "{:?}", m.items[4].refusal);
+    assert_eq!(m.items[4].secondary, ["live"]);
     // Each has its small cover from the Cover Art Archive, fetched through the art cache.
     assert_eq!(
-        m.items[2].thumb.as_deref(),
+        m.items[3].thumb.as_deref(),
         Some(format!("/ext/https://coverartarchive.org/release-group/{RG_SECOND}/front-250").as_str())
     );
     assert!(m.items.iter().all(|i| crate::artistinfo::art::ext_url(i.thumb.as_deref().unwrap()).is_some()));
     assert_eq!(super::request::cover_thumb("not an id"), None);
     r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
     let m = r.lidarr.missing_releases("ar1", "Northlight").await.unwrap();
-    assert_eq!(m.items[2].request, Some(RequestState::Searching));
+    assert_eq!(m.items[3].request, Some(RequestState::Searching));
+    // The Get albums kinds narrow them.
+    let s = crate::settings::Settings { get_albums_kinds: vec!["studio".into()], ..crate::settings::load(&r.db) };
+    crate::settings::save(&r.db, &s).unwrap();
+    let m = r.lidarr.missing_releases("ar1", "Northlight").await.unwrap();
+    assert_eq!(m.items.iter().map(|i| i.section.as_str()).collect::<Vec<_>>(), ["albums", "albums"]);
     // Setting off: hidden.
     let s = crate::settings::Settings { show_missing_releases: false, ..crate::settings::load(&r.db) };
     crate::settings::save(&r.db, &s).unwrap();
