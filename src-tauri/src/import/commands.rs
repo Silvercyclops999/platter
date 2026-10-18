@@ -112,6 +112,8 @@ pub fn run(db: &DbHandle, src: &sources::Source, path: &std::path::Path, now: i6
         return Err(AppError::Invalid("Nothing Platter can import was found there.".into()));
     }
     let parsed = src.parser.parse(&input)?;
+    // The files' bytes aren't needed while matching and writing.
+    drop(input);
     if parsed.is_empty() {
         return Err(AppError::Invalid(nothing_usable(&parsed.skipped)));
     }

@@ -654,3 +654,36 @@ fn the_two_history_formats_count_a_play_once_in_either_order() {
         assert_eq!(import(&mut c, "streaming", both, 10).plays_added, 3);
     }
 }
+
+#[test]
+fn a_stray_bad_byte_keeps_a_utf8_file_utf8() {
+    let mut bytes = "Écho Fiéld,Café\n".as_bytes().to_vec();
+    bytes.push(0xFF);
+    bytes.extend_from_slice("Low Tide,Shoreline\n".as_bytes());
+    let text = decode_text(&bytes);
+    assert!(text.starts_with("Écho Fiéld,Café\n"), "{text}");
+    assert!(text.ends_with("Low Tide,Shoreline\n"));
+    // A file with no UTF-8 in it at all is still Latin-1.
+    assert_eq!(decode_text(&[0x43, 0x61, 0x66, 0xE9, 0x20, 0xFF]), "Café ÿ");
+}
+
+#[test]
+fn a_long_history_is_written_in_chunks() {
+    use crate::db::listens::{IMPORT_CHUNK, ImportSource, ImportedPlay, insert_imported};
+    let (_d, mut c) = db();
+    let n = IMPORT_CHUNK * 2 + 17;
+    let plays: Vec<ImportedPlay> = (0..n)
+        .map(|i| ImportedPlay {
+            source: ImportSource::File,
+            source_id: format!("x:{i}"),
+            played_at: 1_700_000_000_000 + i as i64 * 1_000,
+            ms_played: Some(200_000),
+            title: format!("Song {}", i % 50),
+            artist: Some("Low Tide".into()),
+            album: None,
+            rating_key: None,
+        })
+        .collect();
+    assert_eq!(insert_imported(&mut c, &plays, 1).unwrap(), n);
+    assert_eq!(insert_imported(&mut c, &plays, 2).unwrap(), 0, "again adds nothing");
+}

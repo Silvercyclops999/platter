@@ -152,8 +152,9 @@ pub fn read_zip_bytes(bytes: &[u8]) -> AppResult<Vec<InputFile>> {
 }
 
 /// Text from a file's bytes: UTF-8 (with or without a byte order mark),
-/// UTF-16 with a byte order mark, or, failing those, Latin-1 (older
-/// spreadsheet exports).
+/// UTF-16 with a byte order mark, or Latin-1 (older spreadsheet exports).
+/// A UTF-8 file with a stray bad byte stays UTF-8 (that byte becomes a
+/// replacement mark); only a file with no UTF-8 in it at all is Latin-1.
 pub fn decode_text(bytes: &[u8]) -> String {
     if let Some(rest) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
         return String::from_utf8_lossy(rest).into_owned();
@@ -171,6 +172,12 @@ pub fn decode_text(bytes: &[u8]) -> String {
     }
     match std::str::from_utf8(bytes) {
         Ok(s) => s.to_string(),
+        Err(_) if has_utf8_sequences(bytes) => String::from_utf8_lossy(bytes).into_owned(),
         Err(_) => bytes.iter().map(|&b| b as char).collect(),
     }
+}
+
+/// Whether the bytes hold any well-formed multi-byte UTF-8 character.
+fn has_utf8_sequences(bytes: &[u8]) -> bool {
+    bytes.utf8_chunks().any(|c| c.valid().chars().any(|ch| !ch.is_ascii()))
 }

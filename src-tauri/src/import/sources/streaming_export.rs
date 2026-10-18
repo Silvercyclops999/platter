@@ -38,7 +38,12 @@ impl Parser for StreamingExport {
         let mut out = Parsed::default();
         let mut usable = 0;
         for f in files.iter().filter(|f| f.ext() == "json") {
-            let Ok(v) = serde_json::from_str::<Value>(&decode_text(&f.bytes)) else {
+            // Plain UTF-8 is parsed in place, without a second copy as text.
+            let v = match serde_json::from_slice::<Value>(&f.bytes) {
+                Ok(v) => Ok(v),
+                Err(_) => serde_json::from_str::<Value>(&decode_text(&f.bytes)),
+            };
+            let Ok(v) = v else {
                 out.skipped.unknown_files += 1;
                 continue;
             };

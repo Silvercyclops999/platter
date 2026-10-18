@@ -322,6 +322,19 @@ pub struct ImportedPlay {
 /// Add imported plays, skipping any already imported from the same source.
 /// Returns how many were new.
 pub fn insert_imported(c: &mut Connection, plays: &[ImportedPlay], now_ms: i64) -> AppResult<usize> {
+    let mut added = 0;
+    // In chunks, so a history of years doesn't hold the database in one
+    // long transaction.
+    for chunk in plays.chunks(IMPORT_CHUNK) {
+        added += insert_imported_chunk(c, chunk, now_ms)?;
+    }
+    Ok(added)
+}
+
+/// Plays written per transaction by [`insert_imported`].
+pub const IMPORT_CHUNK: usize = 5_000;
+
+fn insert_imported_chunk(c: &mut Connection, plays: &[ImportedPlay], now_ms: i64) -> AppResult<usize> {
     let tx = c.transaction()?;
     let mut added = 0;
     {
