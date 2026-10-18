@@ -1799,3 +1799,18 @@ async fn a_song_cut_short_by_a_lost_connection_pauses_where_it_stopped() {
     assert!(completed);
     assert!((7_950..=8_050).contains(&listened_ms), "{listened_ms}");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_slow_play_request_never_replaces_a_newer_one() {
+    let r = rig(&["a", "b", "c"], 0.3, false, PlayerConfig::default()).await;
+    *r.resolver.slow_context.lock() = Some(("a".into(), Duration::from_millis(300)));
+    let slow = {
+        let p = r.player.clone();
+        tokio::spawn(async move { p.play_context(ctx(&["a", "b"]), None, Some(false)).await })
+    };
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    r.player.play_context(ctx(&["c"]), None, Some(false)).await.unwrap();
+    slow.await.unwrap().unwrap();
+    let s = r.player.state().await.unwrap();
+    assert_eq!(tid(&s.track), "c", "the album clicked last keeps playing");
+}

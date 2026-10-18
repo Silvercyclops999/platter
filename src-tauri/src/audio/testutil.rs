@@ -360,6 +360,8 @@ pub struct FakeResolver {
     /// Track ids whose server can't be reached (stream and transcode fail
     /// with a network error).
     pub unreachable: Mutex<std::collections::HashSet<String>>,
+    /// Contexts starting with this track id take this long to look up.
+    pub slow_context: Mutex<Option<(String, std::time::Duration)>>,
 }
 
 impl FakeResolver {
@@ -374,6 +376,7 @@ impl FakeResolver {
             more_calls: Mutex::new(Vec::new()),
             hidden: Mutex::new(None),
             unreachable: Mutex::new(std::collections::HashSet::new()),
+            slow_context: Mutex::new(None),
         })
     }
 }
@@ -416,6 +419,12 @@ impl TrackLookup for FakeResolver {
             .track_ids
             .clone()
             .ok_or_else(|| AppError::Invalid("no ids".into()))?;
+        let slow = self.slow_context.lock().clone();
+        if let Some((first, wait)) = slow
+            && ids.first() == Some(&first)
+        {
+            tokio::time::sleep(wait).await;
+        }
         Ok(ResolvedContext {
             tracks: self.tracks(&ids).await?,
             title: Some("Test context".into()),

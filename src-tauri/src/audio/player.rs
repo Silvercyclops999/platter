@@ -252,6 +252,9 @@ pub struct PlayerHandle {
     host: Arc<dyn PrecacheHost>,
     /// What putting whole files in the cache needs (Compare).
     files: WholeFiles,
+    /// Moves on each play request: a slow lookup that finishes after a
+    /// newer play is dropped instead of replacing it.
+    play_seq: Arc<std::sync::atomic::AtomicU64>,
 }
 
 /// The cache, how to reach a file, and downloads already on disk.
@@ -406,6 +409,7 @@ impl PlayerHandle {
             gate,
             host,
             files,
+            play_seq: Arc::default(),
         }
     }
 
@@ -506,11 +510,17 @@ impl PlayerHandle {
         start_track_id: Option<String>,
         shuffle: Option<bool>,
     ) -> AppResult<()> {
+        use std::sync::atomic::Ordering;
+        let seq = self.play_seq.fetch_add(1, Ordering::SeqCst) + 1;
         let resolved = self.lookup.context(&context).await?;
         if resolved.tracks.is_empty() {
             return Err(AppError::Invalid("nothing to play".into()));
         }
         let (tracks, start_track_id) = self.keep_playable(resolved.tracks, start_track_id).await?;
+        // Something else was asked to play while this was being looked up.
+        if self.play_seq.load(Ordering::SeqCst) != seq {
+            return Ok(());
+        }
         let tracks = if shuffle == Some(true) { self.skip_hidden(tracks, start_track_id.as_deref()) } else { tracks };
         let info = ContextInfo {
             kind: context.kind,
