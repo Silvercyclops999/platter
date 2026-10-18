@@ -2613,3 +2613,26 @@ fn a_locked_or_unreachable_cache_is_never_set_aside() {
     assert!(!schema::is_unavailable(&AppError::Internal("db: database disk image is malformed".into())));
     assert!(!schema::is_unavailable(&AppError::Internal("db: no such table: tracks".into())));
 }
+
+#[test]
+fn home_shelves_fill_up_after_the_server_filter() {
+    let t = open();
+    let ar = fake::artist("ar", "Artist");
+    // The other server holds the newest albums.
+    let mut albums: Vec<_> = (0..15).map(|i| fake::album(&format!("bbbbbbbb:{i}"), "B", &ar, 2001, None, &[])).collect();
+    albums.extend((0..40).map(|i| fake::album(&format!("aaaaaaaa:{i}"), "A", &ar, 2001, None, &[])));
+    t.db.write(|c| {
+        let tx = c.transaction()?;
+        store::upsert_albums(&tx, &albums, 1)?;
+        tx.commit()?;
+        Ok(())
+    })
+    .unwrap();
+    let view = crate::tags::TagView { group_editions: true, show_edits: true, filter_explicit: false };
+    let one = super::merge::ServerView::Server("bbbbbbbb".into());
+    let home = t.db.read(|c| super::commands::home_for(c, now_s(), view, &one)).unwrap();
+    assert_eq!(home.recently_added.len(), queries::HOME_ROW, "not left short by the newer albums elsewhere");
+    assert!(home.recently_added.iter().all(|a| a.id.starts_with("bbbbbbbb:")));
+    let all = t.db.read(|c| super::commands::home_for(c, now_s(), view, &Default::default())).unwrap();
+    assert_eq!(all.recently_added.len(), queries::HOME_ROW);
+}

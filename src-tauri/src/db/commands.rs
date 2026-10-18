@@ -47,13 +47,33 @@ pub async fn sync_now(db: State<'_, DbHandle>, full: Option<bool>) -> AppResult<
 pub async fn home(db: State<'_, DbHandle>) -> AppResult<HomeData> {
     let view = db.tag_view();
     let server = db.server_view();
-    db.read_async(move |c| {
-        let mut data = queries::home(c, now_s())?;
+    db.read_async(move |c| home_for(c, now_s(), view, &server)).await
+}
+
+/// Home with hidden editions and other servers' copies left out. Shelves are
+/// read longer than they show and cut after the filters, so a filter never
+/// leaves one short while there is more to show.
+pub fn home_for(
+    c: &rusqlite::Connection,
+    now: i64,
+    view: crate::tags::TagView,
+    server: &super::merge::ServerView,
+) -> AppResult<HomeData> {
+    let filter = super::merge::ViewFilter::load(c, server)?;
+    let mut row = queries::HOME_ROW * 3;
+    loop {
+        let mut data = queries::home_sized(c, now, row)?;
+        let read = queries::home_lens(&data);
         crate::tags::view::home(c, &mut data, view)?;
-        super::merge::ViewFilter::load(c, &server)?.home(&mut data);
-        Ok(data)
-    })
-    .await
+        filter.home(&mut data);
+        let kept = queries::home_lens(&data);
+        let short = read.iter().zip(kept).any(|(r, k)| *r == row && k < queries::HOME_ROW);
+        if !short || row >= queries::SHELF_ALL_MAX {
+            queries::trim_home(&mut data, queries::HOME_ROW);
+            return Ok(data);
+        }
+        row = queries::SHELF_ALL_MAX;
+    }
 }
 
 /// The last answer [`home_records`] worked out, until its stamp changes.

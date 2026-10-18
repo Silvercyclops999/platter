@@ -311,20 +311,40 @@ fn first_recent_albums(recent: &[HomeItem]) -> HashSet<String> {
 }
 
 pub fn home(c: &Connection, now: i64) -> AppResult<HomeData> {
-    let mut recently_played = recently_played(c, HOME_ROW.max(HOME_SHORTCUTS))?;
+    home_sized(c, now, HOME_ROW)
+}
+
+/// Home with each shelf read up to `row` long (longer than it shows, when
+/// filters are applied after).
+pub fn home_sized(c: &Connection, now: i64, row: usize) -> AppResult<HomeData> {
+    let mut recently_played = recently_played(c, row.max(HOME_SHORTCUTS))?;
     let most = most_played(c, HOME_SHORTCUTS)?;
     let hot = items_by_keys(c, &hot_keys(c, now, HOME_SHORTCUTS)?)?;
     let shortcuts = shortcuts(&hot, &most, &recently_played);
-    let jump_back_in = jump_back_in(c, now, &first_recent_albums(&recently_played), HOME_ROW)?;
-    recently_played.truncate(HOME_ROW);
+    let jump_back_in = jump_back_in(c, now, &first_recent_albums(&recently_played), row)?;
+    recently_played.truncate(row);
     Ok(HomeData {
         shortcuts,
         recently_played,
         jump_back_in,
-        playlists: home_playlists(c, HOME_ROW)?,
-        recently_added: recently_added(c, HOME_ROW)?,
-        top_artists: top_artists(c, HOME_ROW)?,
+        playlists: home_playlists(c, row)?,
+        recently_added: recently_added(c, row)?,
+        top_artists: top_artists(c, row)?,
     })
+}
+
+/// The length of each shelf, in [`HomeData`] order (shortcuts left out).
+pub fn home_lens(d: &HomeData) -> [usize; 5] {
+    [d.recently_played.len(), d.jump_back_in.len(), d.playlists.len(), d.recently_added.len(), d.top_artists.len()]
+}
+
+/// Cuts every shelf to `n`.
+pub fn trim_home(d: &mut HomeData, n: usize) {
+    d.recently_played.truncate(n);
+    d.jump_back_in.truncate(n);
+    d.playlists.truncate(n);
+    d.recently_added.truncate(n);
+    d.top_artists.truncate(n);
 }
 
 /// Everything in one Home shelf, for its "Show all" page.
