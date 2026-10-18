@@ -1439,6 +1439,7 @@ the call: when the artist or lyrics request fails, that part is just left out.
 | `lyrics_candidates` | `{ trackId }` | `LyricsCandidates` |
 | `lyrics_check_status` | `{ trackId }` | `CheckStatus` or null (see Checking lyrics against the song) |
 | `lyrics_choose` | `{ trackId, pick }` | – |
+| `lyrics_look_again` | `{ trackId }` | – |
 | `lyrics_offset` | `{ trackId, offsetMs }` | – |
 | `lyrics_choices_count` | – | `number` |
 | `lyrics_choices_clear` | – | `number` |
@@ -1456,8 +1457,19 @@ when both match once case, accents and featured artists are folded away
 10 s, then the closest length; synced lyrics further off keep their words
 without the times). LRCLIB
 answers are cached in SQLite (`lyrics_cache`): found 30 days, none 7 days.
-A source that's down, busy or unreadable gives `null` and isn't cached. Only
-a malformed id is an error (`invalid`).
+A credit naming several artists ("A feat. B", "A & B") is asked again with
+the lead artist alone when it finds nothing, and a compilation's "Various
+Artists" is never sent. The server's answer for a track is reused for about
+a minute and a half, so a nudge or a check landing doesn't ask it again.
+A source that's down, busy or unreadable isn't cached. When nothing else was
+found the answer is `notice: "unavailable"` rather than `null`, so the view
+can offer Retry. A song LRCLIB marks as an instrumental, or whose title says
+"Instrumental" or "Karaoke", gives `notice: "instrumental"` when nothing is
+found. Only a malformed id is an error (`invalid`).
+
+`lyrics_look_again { trackId }` forgets the song's remembered misses and the
+server's reused answer, so the next `lyrics_get` asks again ("Look again" in
+Wrong lyrics?).
 
 Live versions: a track is live when its album's format or a subformat is
 `live`, its ARCHIVE_VERSION is `live`, or the track or album title says so
@@ -1517,9 +1529,10 @@ match: the first window and at least one more from another part of the song
 are skipped) each heard plenty of words and scored well under the line, and
 no window matched or came close. One window alone, too few words, or
 windows that disagree (a song with a beat switch) can't tell: the lyrics
-show with `check: "notChecked"`. While a check runs, lyrics from the server
-or LRCLIB's exact lookup show with `check: "checking"`; ones found only by
-title wait (`notice: "checking"`). When the check is sure nothing matched,
+show with `check: "notChecked"`. While a check runs, the lyrics found show at
+once with `check: "checking"`, and the verdict swaps or retimes them when it
+lands. The timing nudge waits for the check to settle, so a nudge isn't added
+on top of the check's own correction. When the check is sure nothing matched,
 `notice: "noneMatched"` (and a transcription is queued when transcription
 is on). `lyrics://checked` (`{ trackId }`) says to ask again.
 
@@ -1562,7 +1575,8 @@ something quite different.
 `lyrics_choose` sets the song's pick: a candidate key, `"none"` (`notice:
 "chosenNone"`), or `null` for automatic. A new pick starts with no offset.
 `lyrics_offset` moves synced lines by `offsetMs` (positive is later, rounded
-to 0.1 s, at most a minute either way). Picks and offsets win over anything
+to 0.1 s, at most a minute either way). Lines moved before the start of the
+song are dropped, except the last of them, which starts at 0. Picks and offsets win over anything
 automatic and travel in the sync file (`lyricsChoices`); `lyrics://choices`
 says some arrived from another device.
 
@@ -1580,9 +1594,12 @@ as Chinese unless the song has kana somewhere. The UI asks only while
 `showPronunciation` is on.
 
 `lyrics_translate` sends the non-blank lines to the service in
-`translationService` (`POST {service}/translate` with `q`, `source: "auto"`,
+`translationService` (`POST {service}/translate` with `q`, `source`,
 `target` from `translateTo` and `format: "text"`, the LibreTranslate API)
-and returns one line per line, blank lines left blank. With no service set
+and returns one line per line, blank lines left blank. `source` is the
+language `POST {service}/detect` reads from the whole text, or `"auto"` when
+it can't say. The UI keeps a translation per song and language for the
+session, so Hide then Translate doesn't ask again. With no service set
 it fails with "Set a translation service in Settings first." and sends
 nothing. There's no default service.
 

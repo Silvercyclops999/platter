@@ -612,8 +612,8 @@ pub async fn fetch_credits(client: &PlexClient, track_id: &str) -> AppResult<Vec
 }
 
 /// Only the track's lyrics from Plex: None when the track has no lyrics
-/// stream or the stream can't be read or has no words. Errors only when the
-/// track itself can't be read.
+/// stream or the stream has no words. Errors when the track or its lyrics
+/// stream can't be read.
 pub async fn fetch_lyrics(client: &PlexClient, track_id: &str) -> AppResult<Option<Lyrics>> {
     let key = client.raw(track_id)?;
     if !valid_id(key) {
@@ -626,13 +626,10 @@ pub async fn fetch_lyrics(client: &PlexClient, track_id: &str) -> AppResult<Opti
     let Some(path) = extras.lyrics_path else {
         return Ok(None);
     };
-    Ok(client
-        .get_bytes(&path, &[])
-        .await
-        .map_err(|e| tracing::debug!(kind = e.kind(), "lyrics unavailable"))
-        .ok()
-        .and_then(|b| parse_lyrics(&b))
-        .map(|l| from_stream(l, extras.lyrics_file)))
+    // A stream that can't be read is an error, not "no lyrics": the
+    // lyrics view says it couldn't ask and offers Retry.
+    let body = client.get_bytes(&path, &[]).await?;
+    Ok(parse_lyrics(&body).map(|l| from_stream(l, extras.lyrics_file)))
 }
 
 /// Mark lyrics read from a file next to the song.

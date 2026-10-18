@@ -131,6 +131,11 @@ pub enum Notice {
     NoneMatched,
     /// The user chose no lyrics for this song.
     ChosenNone,
+    /// Nothing found, but a source couldn't be asked (offline, server or
+    /// LRCLIB down): not "no lyrics", so the view offers Retry.
+    Unavailable,
+    /// The song is an instrumental (its title says so, or LRCLIB marks it).
+    Instrumental,
 }
 
 /// The note under shown lyrics.
@@ -303,6 +308,13 @@ pub fn title_says_version(title: &str) -> bool {
     })
 }
 
+/// A track title that names an instrumental or karaoke version.
+pub fn title_says_instrumental(title: &str) -> bool {
+    let t = title.to_lowercase();
+    let words: Vec<&str> = t.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    words.iter().any(|w| matches!(*w, "instrumental" | "karaoke"))
+}
+
 /// What the candidate rules read about the song.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SongFacts {
@@ -311,6 +323,8 @@ pub struct SongFacts {
     pub live: bool,
     /// Unreleased, an alternate version, live, or with a version tag.
     pub other_version: bool,
+    /// The title says it's an instrumental (or karaoke) version.
+    pub instrumental: bool,
 }
 
 /// The song's facts from the cache (None when it isn't in it).
@@ -366,5 +380,6 @@ pub fn song_facts(c: &Connection, track_id: &str) -> AppResult<Option<SongFacts>
         duration_ms,
         live,
         other_version: live || tagged || unreleased || title_says_version(&title),
+        instrumental: title_says_instrumental(&title),
     }))
 }

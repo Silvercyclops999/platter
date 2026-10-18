@@ -1501,6 +1501,7 @@ pub fn run() {
             lyrics::commands::lyrics_candidates,
             lyrics::commands::lyrics_check_status,
             lyrics::commands::lyrics_choose,
+            lyrics::commands::lyrics_look_again,
             lyrics::commands::lyrics_offset,
             lyrics::commands::lyrics_choices_count,
             lyrics::commands::lyrics_choices_clear,

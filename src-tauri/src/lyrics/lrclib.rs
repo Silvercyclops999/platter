@@ -104,11 +104,12 @@ fn decode<T: serde::de::DeserializeOwned>(body: &[u8]) -> AppResult<T> {
     serde_json::from_slice(body).map_err(|e| AppError::Decode(format!("lyrics reply: {e}")))
 }
 
-/// The exact lookup's reply: the record, or None when it has no words
-/// (instrumental or empty).
+/// The exact lookup's reply: the record, or None when it has no words.
+/// An instrumental record is kept (it has no words to show, but says the
+/// song is an instrumental).
 pub fn parse_get(body: &[u8]) -> AppResult<Option<Record>> {
     let r: Record = decode(body)?;
-    Ok(r.usable().then_some(r))
+    Ok((r.usable() || r.instrumental).then_some(r))
 }
 
 /// Every search hit for the query with the same artist and title once

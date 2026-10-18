@@ -44,6 +44,22 @@ struct Answer {
     translated_text: Translated,
 }
 
+#[derive(Deserialize)]
+struct Detected {
+    language: String,
+}
+
+/// The language of the whole text, from the service's `POST /detect`; None
+/// when it can't say (then the service is asked to work it out itself).
+async fn detect(http: &reqwest::Client, base: &str, text: &str) -> Option<String> {
+    let res = http.post(format!("{base}/detect")).json(&json!({ "q": text })).send().await.ok()?;
+    if !res.status().is_success() {
+        return None;
+    }
+    let found: Vec<Detected> = res.json().await.ok()?;
+    found.into_iter().next().and_then(|d| language(&d.language))
+}
+
 /// The lines in `target`; blank lines stay blank and aren't sent.
 pub async fn translate(http: &reqwest::Client, service: &str, target: &str, lines: &[String]) -> AppResult<Vec<String>> {
     let base = service_url(service).ok_or_else(|| AppError::Invalid(NOT_SET.into()))?;
@@ -56,7 +72,11 @@ pub async fn translate(http: &reqwest::Client, service: &str, target: &str, line
         return Ok(out);
     }
     let q: Vec<&str> = wanted.iter().map(|(_, l)| *l).collect();
-    let body = json!({ "q": q, "source": "auto", "target": target, "format": "text" });
+    // The language is read from the whole text once, so every line is
+    // translated from it (a service guessing per request might go by the
+    // first line only, or guess each short line differently).
+    let source = detect(http, &base, &q.join("\n")).await.unwrap_or_else(|| "auto".to_owned());
+    let body = json!({ "q": q, "source": source, "target": target, "format": "text" });
     let res = http
         .post(format!("{base}/translate"))
         .json(&body)
@@ -118,6 +138,27 @@ mod tests {
             .await;
         let got = translate(&reqwest::Client::new(), &s.uri(), "en", &lines(&["愛してる", "", "さよなら"])).await.unwrap();
         assert_eq!(got, lines(&["I love you", "", "Goodbye"]));
+    }
+
+    #[tokio::test]
+    async fn the_language_is_read_from_the_whole_text() {
+        let s = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/detect"))
+            .and(body_partial_json(json!({ "q": "Hello there\nさよなら" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([{ "confidence": 90, "language": "ja" }])))
+            .expect(1)
+            .mount(&s)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/translate"))
+            .and(body_partial_json(json!({ "q": ["Hello there", "さよなら"], "source": "ja", "target": "en" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "translatedText": ["Hello there", "Goodbye"] })))
+            .expect(1)
+            .mount(&s)
+            .await;
+        let got = translate(&reqwest::Client::new(), &s.uri(), "en", &lines(&["Hello there", "", "さよなら"])).await.unwrap();
+        assert_eq!(got, lines(&["Hello there", "", "Goodbye"]));
     }
 
     #[tokio::test]

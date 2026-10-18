@@ -26,7 +26,9 @@
 //! - [`translate`] translation through the service the user set
 //! - [`commands`]   the Tauri commands and the Plex side
 //!
-//! Any source being down is silent: the view says there are no lyrics.
+//! A source being down isn't "no lyrics": when nothing else was found the
+//! answer is the `unavailable` notice (the view offers Retry), and the
+//! failure is never cached.
 
 pub mod cache;
 pub mod candidates;
@@ -53,10 +55,10 @@ mod trust_tests;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::artistinfo::http::InfoHttp;
@@ -88,7 +90,8 @@ pub trait ServerLyrics: Send + Sync {
 pub use ServerLyrics as PlexLyrics;
 
 /// What LRCLIB is asked about a library track: the track artist (or the
-/// album artist), title, album and length.
+/// album artist), title, album and length. A compilation's "Various
+/// Artists" names nobody, so it's never sent (the artist is left empty).
 fn track_query(c: &Connection, id: &str) -> AppResult<Option<Query>> {
     Ok(c.query_row(
         "SELECT title, album_title, artist_title, track_artist, duration_ms FROM tracks WHERE id = ?1",
@@ -96,15 +99,50 @@ fn track_query(c: &Connection, id: &str) -> AppResult<Option<Query>> {
         |r| {
             let album_artist: String = r.get(2)?;
             let track_artist: Option<String> = r.get(3)?;
+            let artist = track_artist.filter(|a| !a.trim().is_empty()).unwrap_or(album_artist);
             Ok(Query {
                 title: r.get(0)?,
                 album: r.get(1)?,
-                artist: track_artist.filter(|a| !a.trim().is_empty()).unwrap_or(album_artist),
+                artist: if various_artists(&artist) { String::new() } else { artist },
                 duration_ms: r.get::<_, Option<i64>>(4)?.unwrap_or(0),
             })
         },
     )
     .optional()?)
+}
+
+/// "Various Artists" and its usual spellings.
+fn various_artists(a: &str) -> bool {
+    matches!(exact_key(a).as_str(), "various artists" | "various" | "va" | "various artist")
+}
+
+/// The first artist of a credit naming several ("A feat. B", "A & B",
+/// "A, B"), as written; None when it names one.
+fn lead_artist(credit: &str) -> Option<String> {
+    if crate::share::matching::artist_names(credit).len() < 2 {
+        return None;
+    }
+    let lower = credit.to_lowercase();
+    let cut = [" feat. ", " feat ", " ft. ", " featuring ", " with ", " x ", " vs. ", " & ", " and ", ", ", " / ", "; "]
+        .iter()
+        .filter_map(|sep| lower.find(sep))
+        .min()?;
+    // Lowercasing kept the byte offsets (plain letters): cut the original.
+    let lead = if lower.len() == credit.len() && credit.is_char_boundary(cut) { &credit[..cut] } else { &lower[..cut] };
+    let lead = lead.trim();
+    (!lead.is_empty()).then(|| lead.to_owned())
+}
+
+/// The LRCLIB queries for a track, in order: as credited, then with only
+/// the lead artist when the credit names several.
+fn lrclib_queries(q: Query) -> Vec<Query> {
+    let lead = lead_artist(&q.artist);
+    let mut out = vec![q];
+    if let Some(a) = lead {
+        let first = Query { artist: a, ..out[0].clone() };
+        out.push(first);
+    }
+    out
 }
 
 fn get_key(q: &Query) -> String {
@@ -234,7 +272,17 @@ struct Inner {
     sw: Switches,
     /// The check against the recording, once it exists.
     checker: RwLock<Option<Arc<dyn AudioCheck>>>,
+    /// The server's answers for the last few tracks, reused for a short
+    /// while: a nudge, a pick or a check landing asks for the lyrics again,
+    /// and the server's text hasn't changed since.
+    server_cache: Mutex<Vec<(String, Instant, Option<Lyrics>)>>,
+    server_ttl: Duration,
 }
+
+/// How long the server's lyrics for a track are reused.
+pub const SERVER_TTL: Duration = Duration::from_secs(90);
+/// How many tracks' server lyrics are kept.
+const SERVER_CACHE_MAX: usize = 16;
 
 /// The switches lyrics read from Settings.
 #[derive(Clone)]
@@ -281,6 +329,10 @@ struct Resolved {
     facts: SongFacts,
     choice: Choice,
     shown: Option<Shown>,
+    /// A source couldn't be asked (so "nothing found" isn't "none").
+    failed: bool,
+    /// LRCLIB says the song is an instrumental.
+    instrumental: bool,
 }
 
 fn verdict_in<'a>(v: &'a [(String, String, Stored)], c: &Candidate) -> Option<&'a Stored> {
@@ -289,10 +341,21 @@ fn verdict_in<'a>(v: &'a [(String, String, Stored)], c: &Candidate) -> Option<&'
 
 impl LyricsService {
     pub fn new(db: DbHandle, http: Arc<dyn InfoHttp>, plex: Arc<dyn PlexLyrics>, switches: Switches) -> Self {
-        Self::with_gap(db, http, plex, switches, LRCLIB_GAP)
+        Self::make(db, http, plex, switches, LRCLIB_GAP, SERVER_TTL)
     }
 
+    /// With another gap between LRCLIB requests, and the server's answers
+    /// not reused (tests change them between calls).
     pub fn with_gap(db: DbHandle, http: Arc<dyn InfoHttp>, plex: Arc<dyn PlexLyrics>, switches: Switches, gap: Duration) -> Self {
+        Self::make(db, http, plex, switches, gap, Duration::ZERO)
+    }
+
+    /// Reuse the server's answers for `ttl` (tests).
+    pub fn with_server_ttl(db: DbHandle, http: Arc<dyn InfoHttp>, plex: Arc<dyn PlexLyrics>, switches: Switches, gap: Duration, ttl: Duration) -> Self {
+        Self::make(db, http, plex, switches, gap, ttl)
+    }
+
+    fn make(db: DbHandle, http: Arc<dyn InfoHttp>, plex: Arc<dyn PlexLyrics>, switches: Switches, gap: Duration, ttl: Duration) -> Self {
         Self {
             inner: Arc::new(Inner {
                 db,
@@ -301,8 +364,44 @@ impl LyricsService {
                 limiter: Limiter::with_gap(gap),
                 sw: switches,
                 checker: RwLock::new(None),
+                server_cache: Mutex::new(Vec::new()),
+                server_ttl: ttl,
             }),
         }
+    }
+
+    /// The server's lyrics for a track, reused for a short while.
+    async fn server_lyrics(&self, track_id: &str) -> AppResult<Option<Lyrics>> {
+        let ttl = self.inner.server_ttl;
+        if !ttl.is_zero() {
+            let mut cache = self.inner.server_cache.lock();
+            cache.retain(|(_, at, _)| at.elapsed() < ttl);
+            if let Some((_, _, l)) = cache.iter().find(|(id, _, _)| id == track_id) {
+                return Ok(l.clone());
+            }
+        }
+        let got = self.inner.plex.lyrics(track_id).await?;
+        if !ttl.is_zero() {
+            let mut cache = self.inner.server_cache.lock();
+            cache.retain(|(id, _, _)| id != track_id);
+            cache.push((track_id.to_owned(), Instant::now(), got.clone()));
+            if cache.len() > SERVER_CACHE_MAX {
+                cache.remove(0);
+            }
+        }
+        Ok(got)
+    }
+
+    /// "Look again": forget what was remembered about a song's lyrics (the
+    /// server's answer and LRCLIB's "none found"), so the next ask goes out.
+    pub async fn look_again(&self, track_id: &str) -> AppResult<()> {
+        self.inner.server_cache.lock().retain(|(id, _, _)| id != track_id);
+        let id = track_id.to_owned();
+        let Some(q) = self.inner.db.read_async(move |c| track_query(c, &id)).await? else {
+            return Ok(());
+        };
+        let keys: Vec<String> = lrclib_queries(q).iter().flat_map(|q| [get_key(q), search_key(q)]).collect();
+        self.inner.db.write_async(move |c| keys.iter().try_for_each(|k| cache::forget_miss(c, k))).await
     }
 
     /// Connect the check against the recording.
@@ -316,7 +415,7 @@ impl LyricsService {
     }
 
     /// The track's lyrics, or None when there are none to show (or a source
-    /// is down: that's silent).
+    /// is down and nothing else was found).
     pub async fn get(&self, track_id: &str) -> AppResult<Option<Lyrics>> {
         Ok(self.shown(track_id).await?.filter(Shown::has_words).map(|s| s.lyrics))
     }
@@ -381,7 +480,16 @@ impl LyricsService {
             })
             .await?;
         let facts = facts.unwrap_or_default();
-        let mut out = Resolved { track_id: track_id.to_owned(), cands: Vec::new(), verdicts, facts, choice, shown: None };
+        let mut out = Resolved {
+            track_id: track_id.to_owned(),
+            cands: Vec::new(),
+            verdicts,
+            facts,
+            choice,
+            shown: None,
+            failed: false,
+            instrumental: false,
+        };
         if out.choice.pick.as_deref() == Some(choice::NONE) && !full {
             out.shown = Some(Shown::notice(Notice::ChosenNone, None));
             return Ok(out);
@@ -409,7 +517,7 @@ impl LyricsService {
         // The user's own lyrics first: the server isn't asked.
         let skip_server = lazy && prefer && mine.is_some();
         if !skip_server {
-            match self.inner.plex.lyrics(track_id).await {
+            match self.server_lyrics(track_id).await {
                 Ok(Some(l)) => {
                     let mut c = Candidate::new("server", Origin::Server, l);
                     c.other_version = out.facts.other_version && c.lyrics.source == LyricsSource::Plex;
@@ -417,7 +525,10 @@ impl LyricsService {
                 }
                 Ok(None) => {}
                 Err(e) if e.kind() == "invalid" => return Err(e),
-                Err(e) => tracing::debug!(kind = e.kind(), "server lyrics unavailable"),
+                Err(e) => {
+                    tracing::debug!(kind = e.kind(), "server lyrics unavailable");
+                    out.failed = true;
+                }
             }
         }
         if !prefer && let Some(m) = mine {
@@ -452,18 +563,35 @@ impl LyricsService {
         if q.title.trim().is_empty() || q.artist.trim().is_empty() {
             return Ok(());
         }
-        let Some(exact) = self.lrclib_exact(&q).await? else {
-            // LRCLIB couldn't be asked: silent.
-            return Ok(());
-        };
-        if let Some(r) = exact {
-            self.push_record(out, &q, r, Origin::LrclibExact);
-        }
-        if lazy && settled(&out.cands, &out.verdicts) {
-            return Ok(());
-        }
-        for r in self.lrclib_search(&q).await?.unwrap_or_default() {
-            self.push_record(out, &q, r, Origin::LrclibSearch);
+        // As credited, then (when that found nothing) with only the lead
+        // artist: LRCLIB lists "A feat. B" or "A & B" under "A".
+        for q in lrclib_queries(q) {
+            let before = out.cands.len();
+            let Some(exact) = self.lrclib_exact(&q).await? else {
+                // LRCLIB couldn't be asked: "couldn't ask", not "none".
+                out.failed = true;
+                return Ok(());
+            };
+            if let Some(r) = exact {
+                if r.instrumental {
+                    out.instrumental = true;
+                }
+                self.push_record(out, &q, r, Origin::LrclibExact);
+            }
+            if lazy && settled(&out.cands, &out.verdicts) {
+                return Ok(());
+            }
+            match self.lrclib_search(&q).await? {
+                Some(hits) => {
+                    for r in hits {
+                        self.push_record(out, &q, r, Origin::LrclibSearch);
+                    }
+                }
+                None => out.failed = true,
+            }
+            if out.cands.len() > before || out.instrumental || out.failed {
+                break;
+            }
         }
         Ok(())
     }
@@ -522,6 +650,9 @@ impl LyricsService {
             }
             Decision::Held { idx } => Some(Shown::notice(Notice::VersionHeld, Some(r.cands[idx].key.clone()))),
             Decision::Notice(n) => Some(Shown::notice(n, None)),
+            // Nothing to show: say why when it isn't plain "none".
+            Decision::Nothing if r.instrumental || r.facts.instrumental => Some(Shown::notice(Notice::Instrumental, None)),
+            Decision::Nothing if r.failed => Some(Shown::notice(Notice::Unavailable, None)),
             Decision::Nothing => None,
         }
     }

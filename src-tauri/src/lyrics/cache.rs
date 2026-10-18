@@ -36,6 +36,12 @@ pub fn put(c: &Connection, key: &str, body: Option<&str>, matched: bool, now: i6
     Ok(())
 }
 
+/// Forget a remembered "none found" (kept: lyrics that were found).
+pub fn forget_miss(c: &Connection, key: &str) -> AppResult<()> {
+    c.execute("DELETE FROM lyrics_cache WHERE key = ?1 AND body IS NULL", params![key])?;
+    Ok(())
+}
+
 /// Drop expired rows.
 pub fn prune(c: &Connection, now: i64) -> AppResult<usize> {
     Ok(c.execute("DELETE FROM lyrics_cache WHERE expires_at <= ?1", params![now])?)

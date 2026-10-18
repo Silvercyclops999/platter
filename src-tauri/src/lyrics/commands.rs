@@ -65,6 +65,13 @@ pub async fn lyrics_candidates(lyrics: State<'_, LyricsService>, track_id: Strin
     lyrics.candidates(&track_id).await
 }
 
+/// "Look again" in "Wrong lyrics?": forget the song's remembered misses
+/// (and the server's answer) so the next lookup asks again.
+#[tauri::command]
+pub async fn lyrics_look_again(lyrics: State<'_, LyricsService>, track_id: String) -> AppResult<()> {
+    lyrics.look_again(&track_id).await
+}
+
 /// Pick a song's lyrics: a candidate key, "none", or null for automatic.
 #[tauri::command]
 pub async fn lyrics_choose(

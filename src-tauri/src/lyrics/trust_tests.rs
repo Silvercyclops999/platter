@@ -226,12 +226,16 @@ fn drift_stretches_timing_between_two_points() {
     check::retime(&mut l, &points, 0);
     assert_eq!(l.timed[0].start_ms, 13_500);
     assert_eq!(l.timed[12].start_ms, 170_000 + 3100);
-    // One point is a steady shift; the user's nudge goes on top; never below zero.
-    let mut l = synced(KING_A);
+    // One point is a steady shift; the user's nudge goes on top. Lines moved
+    // before the start are dropped, except the one still playing at 0.
+    let orig = synced(KING_A);
+    let mut l = orig.clone();
     check::retime(&mut l, &[Point { at_ms: 0, offset_ms: -20_000 }], 500);
+    assert_eq!(l.timed.len(), orig.timed.len() - 1, "the first line is gone, not piled on 0");
+    assert_eq!(l.timed[0].text, orig.timed[1].text);
     assert_eq!(l.timed[0].start_ms, 0);
-    assert_eq!(l.timed[1].start_ms, 0);
-    assert_eq!(l.timed[2].start_ms, 500);
+    assert_eq!(l.timed[1].start_ms, 500);
+    assert!(l.timed.windows(2).all(|w| w[0].start_ms < w[1].start_ms));
 }
 
 #[test]

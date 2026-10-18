@@ -523,11 +523,17 @@ pub fn retime(l: &mut Lyrics, points: &[Point], extra_ms: i32) {
     if points.is_empty() && extra_ms == 0 {
         return;
     }
-    let shift = |t: u32| (t as i64 + offset_at(points, t) as i64 + extra_ms as i64).max(0) as u32;
+    let shift = |t: u32| t as i64 + offset_at(points, t) as i64 + extra_ms as i64;
+    // Lines moved before the song starts are gone, except the last of them,
+    // which is still playing at 0 (piling them all on 0 would skip them).
+    let before = l.timed.iter().filter(|t| shift(t.start_ms) < 0).count();
+    if before > 1 {
+        l.timed.drain(..before - 1);
+    }
     for line in &mut l.timed {
-        line.start_ms = shift(line.start_ms);
+        line.start_ms = shift(line.start_ms).max(0) as u32;
         for w in &mut line.words {
-            w.start_ms = shift(w.start_ms);
+            w.start_ms = shift(w.start_ms).max(0) as u32;
         }
     }
 }

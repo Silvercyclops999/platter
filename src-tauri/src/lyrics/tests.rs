@@ -126,7 +126,9 @@ fn exact_reply_prefers_synced_and_skips_instrumentals() {
     assert_eq!(lrclib::parse_get(plain.to_string().as_bytes()).unwrap().and_then(|r| r.text(true)).as_deref(), Some("Hello"));
     let mut inst = record("A", "B", 1.0, Some(SYNCED), None);
     inst["instrumental"] = true.into();
-    assert!(lrclib::parse_get(inst.to_string().as_bytes()).unwrap().is_none());
+    // An instrumental is kept, flagged, with no text to show.
+    let got = lrclib::parse_get(inst.to_string().as_bytes()).unwrap().unwrap();
+    assert!(got.instrumental && got.text(true).is_none());
     assert!(lrclib::parse_get(b"not json").is_err());
 }
 
@@ -555,4 +557,124 @@ async fn a_transcription_beats_borrowed_timing_on_a_live_version() {
     f.plex.set("501", Ok(Some(synced_from(LyricsSource::Plex))));
     f.db.write(|c| user::put_auto(c, "501", MINE, "small", now)).unwrap();
     assert_eq!(f.svc.shown("501").await.unwrap().unwrap().lyrics.source, LyricsSource::Plex);
+}
+
+// ---------------------------------------------------------------- couldn't ask, credits, misses
+
+#[tokio::test]
+async fn a_source_down_with_nothing_found_says_unavailable_not_none() {
+    let f = fx();
+    // The server is down and LRCLIB is off: "couldn't ask".
+    f.on.store(false, Ordering::Relaxed);
+    f.plex.set("501", Err("offline"));
+    assert_eq!(f.svc.shown("501").await.unwrap().unwrap().notice, Some(Notice::Unavailable));
+    assert_eq!(f.svc.get("501").await.unwrap(), None);
+    // LRCLIB down (the server has none): the same, and nothing is cached.
+    let f = fx();
+    f.http.fail("lrclib");
+    assert_eq!(f.svc.shown("501").await.unwrap().unwrap().notice, Some(Notice::Unavailable));
+    let rows: i64 = f.db.read(|c| Ok(c.query_row("SELECT count(*) FROM lyrics_cache", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(rows, 0);
+    // Everyone answered and nobody has any: plain none.
+    let f = fx();
+    f.http.route("api/get", 404, "{}");
+    f.http.route("api/search", 200, "[]");
+    assert_eq!(f.svc.shown("501").await.unwrap(), None);
+    // Down but something else was found: it shows.
+    let f = fx();
+    f.plex.set("501", Err("offline"));
+    f.http.route("api/get", 200, &record("Test Artist", "Opening", 200.0, Some(SYNCED), None).to_string());
+    let s = f.svc.shown("501").await.unwrap().unwrap();
+    assert_eq!(s.notice, None);
+    assert_eq!(s.lyrics.source, LyricsSource::Lrclib);
+}
+
+#[tokio::test]
+async fn instrumentals_say_so() {
+    let f = fx();
+    let mut inst = record("Test Artist", "Opening", 200.0, None, None);
+    inst["instrumental"] = true.into();
+    f.http.route("api/get", 200, &inst.to_string());
+    f.http.route("api/search", 200, "[]");
+    assert_eq!(f.svc.shown("501").await.unwrap().unwrap().notice, Some(Notice::Instrumental));
+    // Cached, it still says so.
+    assert_eq!(f.svc.shown("501").await.unwrap().unwrap().notice, Some(Notice::Instrumental));
+    assert_eq!(f.http.calls("api/get"), 1);
+    // A title that says it, with nothing found.
+    let f = fx();
+    f.on.store(false, Ordering::Relaxed);
+    f.db.write(|c| Ok(c.execute("UPDATE tracks SET title = 'Opening (Instrumental)' WHERE id = '501'", [])?)).unwrap();
+    assert_eq!(f.svc.shown("501").await.unwrap().unwrap().notice, Some(Notice::Instrumental));
+    assert!(candidates::title_says_instrumental("Song [Karaoke Version]"));
+    assert!(!candidates::title_says_instrumental("Instrumentality"));
+}
+
+#[tokio::test]
+async fn several_artists_retry_with_the_lead_artist() {
+    let f = fx();
+    f.db.write(|c| Ok(c.execute("UPDATE tracks SET track_artist = 'Test Artist & Guest' WHERE id = '501'", [])?)).unwrap();
+    // LRCLIB knows the song under the lead artist only.
+    f.http.route("api/get?artist_name=Test+Artist+%26+Guest", 404, "{}");
+    f.http.route("api/search?artist_name=Test+Artist+%26+Guest", 200, "[]");
+    f.http.route("api/get?artist_name=Test+Artist&", 200, &record("Test Artist", "Opening", 200.0, Some(SYNCED), None).to_string());
+    let s = f.svc.shown("501").await.unwrap().unwrap();
+    assert_eq!(s.lyrics.source, LyricsSource::Lrclib);
+    assert!(f.http.urls().iter().any(|u| u.contains("Test+Artist+%26+Guest")), "asked as credited first");
+    assert_eq!(lead_artist("Ana feat. Bo"), Some("Ana".into()));
+    assert_eq!(lead_artist("Ana, Bo & Cy"), Some("Ana".into()));
+    assert_eq!(lead_artist("Solo Artist"), None);
+}
+
+#[tokio::test]
+async fn compilations_never_ask_for_various_artists() {
+    let f = fx();
+    f.db.write(|c| Ok(c.execute("UPDATE tracks SET artist_title = 'Various Artists', track_artist = NULL WHERE id = '501'", [])?)).unwrap();
+    f.http.route("lrclib", 200, &record("Various Artists", "Opening", 200.0, Some(SYNCED), None).to_string());
+    assert_eq!(f.svc.get("501").await.unwrap(), None);
+    assert!(f.http.urls().is_empty(), "Various Artists isn't anyone to look up");
+}
+
+#[tokio::test]
+async fn the_servers_lyrics_are_reused_briefly() {
+    let f = fx();
+    let svc = LyricsService::with_server_ttl(
+        f.db.clone(),
+        f.http.clone(),
+        f.plex.clone(),
+        Switches::default(),
+        Duration::from_millis(1),
+        Duration::from_secs(60),
+    );
+    f.plex.set("501", Ok(Some(plex_lyrics())));
+    svc.shown("501").await.unwrap().unwrap();
+    svc.shown("501").await.unwrap().unwrap();
+    assert_eq!(*f.plex.calls.lock(), 1, "a nudge or a check landing doesn't ask the server again");
+    // Look again forgets it.
+    svc.look_again("501").await.unwrap();
+    svc.shown("501").await.unwrap().unwrap();
+    assert_eq!(*f.plex.calls.lock(), 2);
+    // Failures aren't kept.
+    f.plex.set("801", Err("offline"));
+    svc.shown("801").await.unwrap();
+    svc.shown("801").await.unwrap();
+    assert_eq!(*f.plex.calls.lock(), 4);
+}
+
+#[tokio::test]
+async fn look_again_forgets_a_remembered_miss() {
+    let f = fx();
+    f.http.route("api/get", 404, "{}");
+    f.http.route("api/search", 200, "[]");
+    assert_eq!(f.svc.get("501").await.unwrap(), None);
+    assert_eq!(f.svc.get("501").await.unwrap(), None);
+    assert_eq!(f.http.calls("lrclib"), 2, "the miss is remembered");
+    // LRCLIB has it now; Look again asks.
+    f.http.route("api/get", 200, &record("Test Artist", "Opening", 200.0, Some(SYNCED), None).to_string());
+    f.svc.look_again("501").await.unwrap();
+    assert!(f.svc.get("501").await.unwrap().is_some());
+    // Found lyrics stay cached through another Look again.
+    f.svc.look_again("501").await.unwrap();
+    let before = f.http.calls("lrclib");
+    f.svc.get("501").await.unwrap();
+    assert_eq!(f.http.calls("lrclib"), before);
 }
