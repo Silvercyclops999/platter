@@ -1090,7 +1090,7 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       key: "downloadQuality",
       section: "Downloads and devices",
       title: "Download quality",
-      description: "Original keeps each file as it is; the others are smaller MP3s. Songs already downloaded keep theirs. This device only.",
+      description: "Original keeps each file as it is; the others are smaller MP3s. This device only.",
       more: "Original keeps each file as it is. The others are MP3s made by your server, which take less space. Applies to new downloads. This device only.",
       control: (ids) => select(s, (x) => x.downloadQuality, DOWNLOAD_QUALITY, ids, (v) => updateSettings({ downloadQuality: v })),
     },
