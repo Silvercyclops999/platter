@@ -244,8 +244,38 @@ pub fn unsync(l: &mut Lyrics) {
 // ---------------------------------------------------------------- versions
 
 /// Title words that name another version of a song.
-const VERSION_MARKERS: &[&str] =
-    &["demo", "alternate", "alt version", "alt.", "acoustic", "remix", "rough", "early version", "snippet", "session", "reference"];
+/// Matched as whole words, so "Demon" or "Obsession" don't count.
+const VERSION_MARKERS: &[&str] = &[
+    "demo",
+    "alternate",
+    "alt version",
+    "alt",
+    "acoustic",
+    "remix",
+    "rough",
+    "early version",
+    "snippet",
+    "session",
+    "sessions",
+    "reference",
+    "instrumental",
+    "karaoke",
+    "radio edit",
+    "extended",
+    "club mix",
+    "dub mix",
+    "sped up",
+    "slowed",
+    "a cappella",
+    "acapella",
+    "reprise",
+];
+
+/// `marker`'s words appear in `words` side by side.
+fn has_words(words: &[&str], marker: &str) -> bool {
+    let m: Vec<&str> = marker.split(' ').collect();
+    words.windows(m.len()).any(|w| w == m.as_slice())
+}
 
 /// A track title that names another version: "(Demo)", "[Alternate Take]", "- Remix".
 pub fn title_says_version(title: &str) -> bool {
@@ -267,7 +297,10 @@ pub fn title_says_version(title: &str) -> bool {
         parts.push(&t[s..]);
     }
     parts.extend(t.split(" - ").skip(1));
-    parts.iter().any(|p| VERSION_MARKERS.iter().any(|m| p.contains(m)))
+    parts.iter().any(|p| {
+        let words: Vec<&str> = p.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+        VERSION_MARKERS.iter().any(|m| has_words(&words, m))
+    })
 }
 
 /// What the candidate rules read about the song.

@@ -297,8 +297,25 @@ fn version_titles_are_recognised() {
     for t in ["Opening (Demo)", "Opening [Alternate Take]", "Opening - Acoustic", "Opening (Early Version)", "Opening (Remix"] {
         assert!(candidates::title_says_version(t), "{t}");
     }
+    for t in ["Opening (Instrumental)", "Opening (Radio Edit)", "Opening - Sped Up", "Opening (Alt. Take)", "Opening (Reprise)"] {
+        assert!(candidates::title_says_version(t), "{t}");
+    }
     for t in ["Opening", "Demolition", "Remixed Feelings", "Opening (feat. Guest)"] {
         assert!(!candidates::title_says_version(t), "{t}");
+    }
+    // Whole words only.
+    for t in ["Opening (Through the Fire)", "Opening (Demon)", "Opening (Obsession)", "Opening (Democracy)", "Opening (Salty)"] {
+        assert!(!candidates::title_says_version(t), "{t}");
+    }
+}
+
+#[test]
+fn track_ids_from_every_server_kind_are_accepted() {
+    for id in ["12345", "0a1b2c3d:12345", "0a1b2c3d:4b5e8c3f2a1d4e6f9a8b7c6d5e4f3a2b", "0a1b2c3d:4b5e8c3f-2a1d-4e6f-9a8b-7c6d5e4f3a2b", "0a1b2c3d:al-12_ab"] {
+        assert!(crate::lyrics::user::valid_track_id(id), "{id}");
+    }
+    for id in ["", "0a1b2c3d:", "0a1b2c3d:../x", "0a1b2c3d:a/b", r"0a1b2c3d:a\b", "0a1b2c3d:a b", "0a1b2c3d:a\nb"] {
+        assert!(!crate::lyrics::user::valid_track_id(id), "{id}");
     }
 }
 

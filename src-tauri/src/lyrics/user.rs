@@ -44,10 +44,12 @@ impl OwnLyrics {
     }
 }
 
-/// Library track ids: a Plex rating key (a number), with its server tag.
+/// Library track ids, with their server tag: a Plex rating key (a number),
+/// a Jellyfin id (hex, maybe with dashes) or a Subsonic id. Letters, digits,
+/// "-" and "_" only, so an id is always safe in a file name.
 pub fn valid_track_id(id: &str) -> bool {
     let k = crate::sid::key(id);
-    !k.is_empty() && k.len() <= 20 && k.bytes().all(|b| b.is_ascii_digit())
+    !k.is_empty() && k.len() <= 64 && k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// The text to store: line endings made plain, outer blank lines trimmed.
