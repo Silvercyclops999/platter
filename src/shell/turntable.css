@@ -95,3 +95,40 @@
   from { opacity: 0; }
 }
 :root[data-reduced-motion="true"] .turntable__arm { animation: tt-fade var(--motion-medium) ease; }
+
+/* Laid over the record: the Flip button when a side has ended. It sits on
+   the lower half of the record, under the label, and fades in. */
+.turntable__over {
+  position: absolute;
+  left: 2%;
+  top: calc(7% + 86% * 0.74);
+  width: 86%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  z-index: 2;
+  animation: tt-fade var(--motion-medium) ease;
+}
+.turntable__flip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--radius-pill, 999px);
+  background: rgba(14, 13, 12, 0.72);
+  color: #f2ede4;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: background var(--motion-quick) ease, border-color var(--motion-quick) ease;
+}
+.turntable__flip:hover { background: rgba(14, 13, 12, 0.86); border-color: rgba(255, 255, 255, 0.32); }
+.turntable__flip:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+.turntable__flip svg { color: var(--color-accent); }
+.turntable__ended { margin: 0; color: rgba(242, 237, 228, 0.72); font-size: var(--font-size-xs); letter-spacing: 0.14em; text-transform: uppercase; }
+:root[data-reduced-motion="true"] .turntable__over { animation: none; }

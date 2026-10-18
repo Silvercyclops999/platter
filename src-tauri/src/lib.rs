@@ -1157,6 +1157,8 @@ pub fn run() {
             sleeve.set_plex(Arc::new(sleeve::commands::PlexSongCredits(plex.clone())));
             sleeve.set_events(Arc::new(app.handle().clone()));
             app.manage(sleeve);
+            // Record sides: from a vinyl edition the notes read, or split by hand (synced).
+            app.manage(sleeve::sides::Sides::new(db.clone(), sync_store.clone()));
 
             // Lyrics: the song's server first, then LRCLIB when its setting is on.
             let lyrics_service = lyrics::LyricsService::new(
@@ -1623,6 +1625,8 @@ pub fn run() {
             sleeve::commands::sleeve_notes,
             sleeve::commands::song_credits,
             sleeve::commands::credit_page,
+            sleeve::sides::album_sides,
+            sleeve::sides::album_sides_set,
             artistinfo::commands::album_release_status,
             archive::commands::release_mark_set,
             archive::commands::track_versions,

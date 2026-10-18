@@ -1,4 +1,4 @@
-import { Disc3, Ellipsis, Maximize, MicVocal, Minimize, Minimize2, PenLine, UserRound } from "lucide-react";
+import { Disc3, Ellipsis, Maximize, MicVocal, Minimize, Minimize2, PenLine, RefreshCcw, UserRound } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { Art } from "../components/Art";
 import { ArtistLinks, TextLink } from "../components/ArtistLinks";
@@ -17,6 +17,7 @@ import { LyricsPane, useLyricsBackground } from "./LyricsView";
 import { contextRoute, useNowPlayingDetails } from "./nowPlaying";
 import { SEEK_KEY_STEP } from "./PlayerBar";
 import { Turntable } from "./Turntable";
+import { useFlipPause } from "./useFlipPause";
 import { SignalLink } from "./SignalPath";
 import { VOLUME_KEY_STEP } from "./useShortcuts";
 import "./full-window.css";
@@ -188,6 +189,7 @@ function FullWindowView() {
   const artistPhoto = details?.artist ? details.artist.art || details.artist.thumb : null;
   // A song whose artist has no image shows its artwork; the mode stays for the next song.
   const shown: FullWindowMode = mode === "artist" && !artistPhoto ? "artwork" : mode;
+  const { flip, play: flipOver } = useFlipPause(turntable && shown === "artwork");
 
   const onDoubleClick = (e: MouseEvent) => {
     const t = e.target as Element;
@@ -231,7 +233,19 @@ function FullWindowView() {
     stage = (
       <div className={`fw__now ${turntable ? "fw__now--turntable" : ""}`} key={track.id}>
         {turntable ? (
-          <Turntable thumb={track.thumb} playing={playing} requestSize={COVER_ART} />
+          <Turntable thumb={track.thumb} playing={playing && !flip} requestSize={COVER_ART}>
+            {flip && (
+              <>
+                <p className="turntable__ended" role="status">
+                  End of side {flip.from}
+                </p>
+                <button type="button" className="turntable__flip" onClick={flipOver}>
+                  <RefreshCcw size={16} aria-hidden="true" />
+                  Flip to side {flip.to}
+                </button>
+              </>
+            )}
+          </Turntable>
         ) : (
           <div className="fw__cover">
             <Art path={track.thumb} fluid requestSize={COVER_ART} />

@@ -771,7 +771,12 @@ impl CacheLookup {
                 let mut resolved = match ctx.kind {
                     ContextKind::Album => {
                         let page = queries::album_page(c, &id)?;
-                        ResolvedContext { tracks: page.tracks, title: Some(page.album.title) }
+                        let mut tracks = page.tracks;
+                        // One side of the record: those songs, in album order.
+                        if let Some(ids) = &ctx.track_ids {
+                            tracks.retain(|t| ids.contains(&t.id));
+                        }
+                        ResolvedContext { tracks, title: Some(page.album.title) }
                     }
                     ContextKind::Playlist => {
                         let page = queries::playlist_page(c, &id)?;

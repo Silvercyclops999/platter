@@ -53,6 +53,7 @@ import type {
   ArtistName,
   ArtistInfo,
   AlbumCredits,
+  AlbumSides,
   CreditPage,
   SleeveNotes,
   SongCredits,
@@ -612,6 +613,10 @@ export interface Backend {
   songCredits(id: string): Promise<SongCredits>;
   /** Everything in the library a person is credited on, by role; null when nothing credits them. */
   creditPage(name: string): Promise<CreditPage | null>;
+  /** An album's record sides from what's cached (never looks anything up). */
+  albumSides(id: string): Promise<AlbumSides>;
+  /** Split an album into sides by hand (`starts`: where sides B, C... start; empty for none), or null to use its edition's sides. */
+  setAlbumSides(id: string, starts: string[] | null): Promise<AlbumSides>;
   /** Whether an album counts as released and why; `releasestatus://changed` fires when it changes. */
   albumReleaseStatus(id: string): Promise<AlbumReleaseStatus>;
 
@@ -1400,6 +1405,8 @@ export function createTauriBackend(): Backend {
     sleeveNotes: (id) => call("sleeve_notes", { id }),
     songCredits: (id) => call("song_credits", { id }),
     creditPage: (name) => call("credit_page", { name }),
+    albumSides: (id) => call("album_sides", { id }),
+    setAlbumSides: (id, starts) => call("album_sides_set", { id, starts }),
     albumReleaseStatus: (id) => call("album_release_status", { id }),
     releaseMarkSet: (kind, id, mark) => call("release_mark_set", { kind, id, mark }),
     trackVersions: (id) => call("track_versions", { id }),

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Art } from "../components/Art";
 import { prefersReducedMotion } from "../design/motion";
 import "./turntable.css";
@@ -25,7 +25,18 @@ export function nextSpeed(speed: number, target: number, dtMs: number): number {
  * swings onto the record and lifts off it. Under reduced motion the record
  * holds still and the arm fades between its two places.
  */
-export function Turntable({ thumb, playing, requestSize = 640 }: { thumb: string | null | undefined; playing: boolean; requestSize?: number }) {
+export function Turntable({
+  thumb,
+  playing,
+  requestSize = 640,
+  children,
+}: {
+  thumb: string | null | undefined;
+  playing: boolean;
+  requestSize?: number;
+  /** Laid over the record (the Flip button at the end of a side). */
+  children?: ReactNode;
+}) {
   const record = useRef<HTMLDivElement>(null);
   const target = useRef(0);
   target.current = playing ? SPIN_DEG_PER_S : 0;
@@ -86,6 +97,7 @@ export function Turntable({ thumb, playing, requestSize = 640 }: { thumb: string
           <rect className="turntable__head" x="20" y="252" width="26" height="36" rx="3" transform="rotate(28 33 270)" />
         </svg>
       </div>
+      {children && <div className="turntable__over">{children}</div>}
     </div>
   );
 }

@@ -40,12 +40,12 @@ import { ReleaseStatusLabel, useReleaseStatus } from "./ReleaseStatusLabel";
 import {
   ALBUM_VIEW_LABEL,
   albumCreditGroups,
-  discGroups,
   formatReleaseDate,
   labelLine,
   loadAlbumView,
   releaseDateFor,
   saveAlbumView,
+  trackGroups,
   type AlbumView,
 } from "./album";
 import "./album.css";
@@ -54,8 +54,10 @@ import { useLidarrReady } from "./lidarrShared";
 import { LookForBetterDialog, UpgradeCard, upgradeMenuItems, useAlbumUpgrade } from "./LidarrUpgrade";
 import { useRouter } from "../stores/router";
 import { useSettings } from "../stores/settings";
-import type { CatTrack } from "../lib/types";
 import { SleeveNotesPanel } from "./SleeveNotes";
+import { SidesDialog } from "./SidesDialog";
+import { useAlbumSides } from "../lib/useAlbumSides";
+import type { AlbumSide, CatTrack, Track } from "../lib/types";
 
 type AlbumPane = "songs" | "sleeve";
 
@@ -86,6 +88,10 @@ function LibraryAlbumView({ id, tab }: { id: string; tab?: "sleeve" }) {
   const coverBtn = useRef<HTMLButtonElement>(null);
   const upgrade = useAlbumUpgrade(album ? id : null);
   const [lookingForBetter, setLookingForBetter] = useState(false);
+  const [sides, setSides] = useAlbumSides(album ? id : null);
+  const [splitting, setSplitting] = useState(false);
+  const sidesOn = useSettings((s) => s.settings?.showVinylSides !== false);
+  const sideList = sides?.sides.length ? sides.sides : null;
   const [view, setView] = useState<AlbumView>(loadAlbumView);
   // Songs or Sleeve notes; switching editions keeps the tab.
   const sleeveOn = useSettings((s) => s.settings?.showSleeveNotes !== false);
@@ -208,6 +214,7 @@ function LibraryAlbumView({ id, tab }: { id: string; tab?: "sleeve" }) {
               openContextMenu(
                 `Options for ${album.title}`,
                 [
+                  ...(sideList ?? []).map((s) => ({ label: `Play side ${s.label}`, onSelect: () => void player.playSide(album.id, s.trackIds) })),
                   { label: "Add to queue", onSelect: () => void player.addToQueue(data!.tracks, album.thumb) },
                   addToPlaylistItem(() => data?.tracks.map((t) => t.id) ?? []),
                   ...downloadMenuItems({ kind: "album", id: album.id, title: album.title }),
@@ -225,6 +232,7 @@ function LibraryAlbumView({ id, tab }: { id: string; tab?: "sleeve" }) {
                         .getState()
                         .toggle({ kind: "album", id: album.id, title: album.title, subtitle: `Album · ${album.artistTitle}`, thumb: album.thumb }),
                   },
+                  ...(sidesOn && data!.tracks.length > 1 ? [{ label: "Split into sides…", onSelect: () => setSplitting(true) }] : []),
                   {
                     label: "Copy album title",
                     onSelect: () => copyText(`${album.title} - ${album.artistTitle}`),
@@ -255,6 +263,16 @@ function LibraryAlbumView({ id, tab }: { id: string; tab?: "sleeve" }) {
         </div>
 
         <UpgradeCard upgrade={upgrade} onChanged={upgrade.reload} />
+        {album && splitting && data && (
+          <SidesDialog
+            albumId={album.id}
+            title={album.title}
+            tracks={data.tracks}
+            sides={sides}
+            onClose={() => setSplitting(false)}
+            onSaved={setSides}
+          />
+        )}
         {album && (
           <LookForBetterDialog
             open={lookingForBetter}
@@ -294,19 +312,25 @@ function LibraryAlbumView({ id, tab }: { id: string; tab?: "sleeve" }) {
               <div className={`album-tracks album-tracks--${view}`}>
                 <TrackList label={album ? `${album.title} songs` : "Songs"} showAlbum={false} showPlays>
                   {data
-                    ? discGroups(data.tracks).map((g) => (
-                        <Fragment key={g.disc ?? "all"}>
-                          {g.disc !== null && (
-                            <div className="album-disc" role="row" aria-label={`Disc ${g.disc}`}>
-                              <span className="album-disc__cell" role="gridcell">
-                                <span className="album-disc__icon">
-                                  <Disc3 size={16} aria-hidden="true" />
-                                </span>
-                                <span className="album-disc__label">Disc {g.disc}</span>
-                              </span>
-                            </div>
-                          )}
-                          {g.tracks.map((t) => (
+                    ? // One flat list (headings and songs side by side), so songs
+                      // keep their rows when the sides arrive.
+                      trackGroups(data.tracks, sideList).flatMap((g) => [
+                          ...(g.disc !== null
+                            ? [
+                                <div key={`disc-${g.disc}`} className="album-disc" role="row" aria-label={`Disc ${g.disc}`}>
+                                  <span className="album-disc__cell" role="gridcell">
+                                    <span className="album-disc__icon">
+                                      <Disc3 size={16} aria-hidden="true" />
+                                    </span>
+                                    <span className="album-disc__label">Disc {g.disc}</span>
+                                  </span>
+                                </div>,
+                              ]
+                            : []),
+                          ...(g.side
+                            ? [<SideHeading key={`side-${g.side.label}`} albumId={id} side={g.side} tracks={data.tracks} nowTrackId={nowTrackId} />]
+                            : []),
+                          ...g.tracks.map((t) => (
                             <TrackRow
                               key={t.id}
                               track={t}
@@ -318,9 +342,8 @@ function LibraryAlbumView({ id, tab }: { id: string; tab?: "sleeve" }) {
                               playing={t.id === nowTrackId && status === "playing"}
                               onPlay={() => player.playAlbum(id, t.id)}
                             />
-                          ))}
-                        </Fragment>
-                      ))
+                          )),
+                        ])
                     : Array.from({ length: 8 }, (_, i) => <TrackRowSkeleton key={i} showAlbum={false} showPlays />)}
                 </TrackList>
               </div>
@@ -530,6 +553,35 @@ function AlbumCreditsSection({ credits }: { credits: AlbumCredits }) {
         </p>
       )}
     </section>
+  );
+}
+
+/**
+ * A side's heading in the tracklist: "Side A" set quietly like the run-out
+ * etching, its length, and a play button for that side alone.
+ */
+function SideHeading({ albumId, side, tracks, nowTrackId }: { albumId: string; side: AlbumSide; tracks: Track[]; nowTrackId?: string }) {
+  const songs = tracks.filter((t) => side.trackIds.includes(t.id));
+  const ms = songs.reduce((n, t) => n + (t.durationMs || 0), 0);
+  const here = !!nowTrackId && side.trackIds.includes(nowTrackId);
+  return (
+    <div className={`album-side ${here ? "is-playing" : ""}`} role="row" aria-label={`Side ${side.label}`}>
+      <span className="album-side__cell" role="gridcell">
+        <IconButton
+          label={`Play side ${side.label}`}
+          size="sm"
+          className="album-side__play"
+          icon={<Play size={14} fill="currentColor" className="nudge-right" />}
+          onClick={() => void player.playSide(albumId, side.trackIds)}
+        />
+        <span className="album-side__label">Side {side.label}</span>
+        <span className="album-side__rule" aria-hidden="true" />
+        <span className="album-side__meta">
+          {plural(songs.length, "song")}
+          {ms > 0 && ` · ${formatDuration(ms)}`}
+        </span>
+      </span>
+    </div>
   );
 }
 

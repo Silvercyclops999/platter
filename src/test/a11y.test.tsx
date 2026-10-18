@@ -104,7 +104,7 @@ describe("structure", () => {
     const tracks = mock.fx.tracksByAlbum.get(album().id)!;
     const grid = await screen.findByRole("grid", { name: `${album().title} songs` });
     await waitFor(() => expect(grid.querySelectorAll(".track-row")).toHaveLength(tracks.length));
-    const discRows = grid.querySelectorAll(".album-disc").length;
+    const discRows = grid.querySelectorAll(".album-disc, .album-side").length;
     expect(grid).toHaveAttribute("aria-rowcount", String(tracks.length + discRows + 1));
     expect(grid).toHaveAttribute("aria-colcount", "4");
     expect(within(grid).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["#", "Title", "Plays", "Duration"]);

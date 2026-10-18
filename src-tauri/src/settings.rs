@@ -801,6 +801,10 @@ pub struct Settings {
     pub show_sleeve_notes: bool,
     /// Sleeve notes look credits up on MusicBrainz (and Discogs with a token).
     pub sleeve_lookups: bool,
+    /// Album tracklists show a record's sides (from a vinyl edition, or split by hand).
+    pub show_vinyl_sides: bool,
+    /// The record player pauses at the end of a side until Flip.
+    pub flip_pause: bool,
     /// List DLNA / UPnP renderers under Listen on (SSDP searches only while on).
     pub show_dlna_devices: bool,
     /// platter:// command links, scripts and the command line can control playback (through the local control API).
@@ -1141,6 +1145,8 @@ impl Default for Settings {
             shelf_missing_list: false,
             show_sleeve_notes: true,
             sleeve_lookups: true,
+            show_vinyl_sides: true,
+            flip_pause: false,
             show_dlna_devices: true,
             allow_automation: false,
             translate_to: "en".into(),
@@ -1320,6 +1326,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "shelfMissingList",
     "showSleeveNotes",
     "sleeveLookups",
+    "showVinylSides",
+    "flipPause",
     "showDlnaDevices",
     "translateTo",
     "showPronunciation",
@@ -1665,6 +1673,8 @@ pub struct SettingsPatch {
     pub shelf_missing_list: Option<bool>,
     pub show_sleeve_notes: Option<bool>,
     pub sleeve_lookups: Option<bool>,
+    pub show_vinyl_sides: Option<bool>,
+    pub flip_pause: Option<bool>,
     pub show_dlna_devices: Option<bool>,
     pub allow_automation: Option<bool>,
     pub translate_to: Option<String>,
@@ -2025,6 +2035,8 @@ impl Settings {
         set(&mut self.shelf_missing_list, p.shelf_missing_list);
         set(&mut self.show_sleeve_notes, p.show_sleeve_notes);
         set(&mut self.sleeve_lookups, p.sleeve_lookups);
+        set(&mut self.show_vinyl_sides, p.show_vinyl_sides);
+        set(&mut self.flip_pause, p.flip_pause);
         set(&mut self.show_friend_activity, p.show_friend_activity);
         set(&mut self.share_activity, p.share_activity);
         set(&mut self.whats_new_announcements, p.whats_new_announcements);
@@ -4711,6 +4723,20 @@ mod tests {
         assert!(s.apply(&serde_json::from_value(serde_json::json!({"catalogueSource": "elsewhere"})).unwrap()).is_err());
         s.apply(&serde_json::from_value(serde_json::json!({"getAlbumsKinds": []})).unwrap()).unwrap();
         assert_eq!(s.get_albums_kinds, ["studio"], "none ticked means studio albums");
+    }
+
+    #[test]
+    fn vinyl_sides_show_and_flip_pause_waits_to_be_asked_for() {
+        let s = Settings::default();
+        assert!(s.show_vinyl_sides && !s.flip_pause);
+        for k in ["showVinylSides", "flipPause"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
+        }
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(old.show_vinyl_sides && !old.flip_pause, "older settings files get the defaults");
+        let mut s = s;
+        s.apply(&serde_json::from_str(r#"{"showVinylSides":false,"flipPause":true}"#).unwrap()).unwrap();
+        assert!(!s.show_vinyl_sides && s.flip_pause);
     }
 
     #[test]

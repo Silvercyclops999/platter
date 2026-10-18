@@ -205,6 +205,7 @@ import { MockArchive } from "./archive";
 import { MockDoctor } from "./doctor";
 import { MockPhysical } from "./physical";
 import { MockSleeve } from "./sleeve";
+import { MockSides } from "./sides";
 import { MockAutomix } from "./automix";
 import { MockDevices } from "./devices";
 import { MockSoundMap } from "./soundmap";
@@ -394,6 +395,8 @@ export class MockBackend implements Backend {
   readonly physical: MockPhysical;
   /** Sleeve notes and credit pages (made up from the mock credits). */
   readonly sleeve: MockSleeve;
+  /** Record sides (vinyl editions and splits by hand). */
+  readonly sides: MockSides;
   /** Mixed playlists and made-up tempos (test hook: reset). */
   readonly automix: MockAutomix;
   /** Sync to a device (test hooks: plugged, fail, stepMs, reset). */
@@ -532,6 +535,7 @@ export class MockBackend implements Backend {
     this.doctor = new MockDoctor(this.fx, () => this.settings);
     this.physical = new MockPhysical(this.fx, () => this.settings, () => this.later(0, () => this.emit("physical://changed", {})));
     this.sleeve = new MockSleeve(this.fx, () => this.settings, () => this.physical.status().saved);
+    this.sides = new MockSides(this.fx);
     this.automix = new MockAutomix(
       (id) => this.trackById(id) ?? undefined,
       () => this.later(0, () => this.emit("syncstore://changed", { namespaces: ["mixedPlaylists"], remote: false })),
@@ -2042,7 +2046,10 @@ export class MockBackend implements Backend {
     switch (c.kind) {
       case "album": {
         const album = this.fx.albums.find((a) => a.id === c.id) ?? this.notFound("Album");
-        return { tracks: this.fx.tracksByAlbum.get(album.id) ?? [], info: { kind: "album", id: album.id, title: album.title } };
+        // One side of the record: those songs, in album order.
+        const all = this.fx.tracksByAlbum.get(album.id) ?? [];
+        const tracks = c.trackIds ? all.filter((t) => c.trackIds!.includes(t.id)) : all;
+        return { tracks, info: { kind: "album", id: album.id, title: album.title } };
       }
       case "playlist": {
         const pl = this.fx.playlists.find((p) => p.id === c.id) ?? this.notFound("Playlist");
@@ -3034,6 +3041,20 @@ export class MockBackend implements Backend {
   }
   creditPage(name: string) {
     return this.delay(() => this.sleeve.creditPage(name));
+  }
+  albumSides(id: string) {
+    return this.delay(() => {
+      if (!this.fx.albums.some((a) => a.id === id)) this.notFound("Album");
+      return this.sides.get(id);
+    });
+  }
+  setAlbumSides(id: string, starts: string[] | null) {
+    return this.delay(() => {
+      if (!this.fx.albums.some((a) => a.id === id)) this.notFound("Album");
+      const out = this.sides.set(id, starts);
+      this.later(0, () => this.emit("syncstore://changed", { namespaces: ["albumSides"], remote: false }));
+      return out;
+    });
   }
   albumReleaseStatus(id: string) {
     return this.delay(() => {

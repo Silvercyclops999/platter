@@ -205,6 +205,10 @@ export const player = {
     }
     return backend.playToggle().catch(report);
   },
+  /** Pause (no toggle): the record player's stop at the end of a side. */
+  pause: () => (isRemote() ? remoteCmd({ kind: "pause" }) : backend.playPause()).catch(report),
+  /** Play on from a pause (no toggle). */
+  resume: () => (isRemote() ? remoteCmd({ kind: "play" }) : backend.playResume()).catch(report),
   next: () => (guestLive() ? controlSession({ op: "next" }) : (isRemote() ? remoteCmd({ kind: "next" }) : backend.playNext()).catch(report)),
   previous: () =>
     guestLive() ? controlSession({ op: "previous" }) : (isRemote() ? remoteCmd({ kind: "previous" }) : backend.playPrevious()).catch(report),
@@ -244,6 +248,8 @@ export const player = {
   },
   playAlbum: (id: string, startTrackId?: string, shuffle?: boolean) =>
     play({ context: { kind: "album", id }, startTrackId, shuffle }).catch(report),
+  /** One side of a record: only its songs, still playing from the album. */
+  playSide: (albumId: string, trackIds: string[]) => play({ context: { kind: "album", id: albumId, trackIds } }).catch(report),
   playPlaylist: (id: string, startTrackId?: string, shuffle?: boolean) =>
     play({ context: { kind: "playlist", id }, startTrackId, shuffle }).catch(report),
   /** Liked Songs; `trackIds` plays them in the page's order (a sort or filter). */

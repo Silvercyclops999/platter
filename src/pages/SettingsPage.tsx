@@ -1990,6 +1990,14 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       control: (ids) => (s?.showSleeveNotes === false ? null : toggle(s, "sleeveLookups", ids)),
     },
     {
+      key: "showVinylSides",
+      section: "Library",
+      title: "Show vinyl sides",
+      description: "Album songs are grouped into Side A, Side B and so on, with Play side.",
+      more: "When an album has a vinyl edition on MusicBrainz or Discogs, its songs are grouped by the record's sides, and each side can be played on its own from its heading or the album's menu. Any album can be split by hand with Split into sides in its menu; splits are kept for every device you sync. The album still plays in order.",
+      control: (ids) => toggle(s, "showVinylSides", ids),
+    },
+    {
       key: "likeControlRows",
       section: "Library",
       title: "Show the like control on song rows",
@@ -2209,6 +2217,15 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       description: "Smooth blends for longer. Energetic keeps blends short and swaps songs on the bar.",
       note: s && !s.automix ? "Turn on Automix to use this." : undefined,
       control: (ids) => select(s, (x) => x.automixStyle, AUTOMIX_STYLE, ids, (v) => updateSettings({ automixStyle: v })),
+    },
+    {
+      key: "flipPause",
+      section: "Playback",
+      title: "Pause to flip at the end of a side",
+      description: "With the record player showing, playback stops between sides until you flip.",
+      more: "When the record player shows in expanded now playing and an album plays from one side into the next, playback pauses at the end of the side, the tonearm lifts, and a Flip button plays on. Needs Show vinyl sides.",
+      note: s && s.showVinylSides === false ? "Turn on Show vinyl sides to use this." : undefined,
+      control: (ids) => toggle(s, "flipPause", ids),
     },
     // Loudness
     {

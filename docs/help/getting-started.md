@@ -59,9 +59,15 @@ Every name is a link. It opens a page with everything in your library that perso
 
 ### Where the facts come from
 
-Each fact has small marks for where it came from: **Tags** for your files' own tags, **Plex**, **MB** for MusicBrainz and **Discogs**. When sources agree, every one is marked. When they disagree, your files' tags win, then Plex, then MusicBrainz, then Discogs.
+Point at a fact, or move to it with Tab, and small marks show where it came from: **Tags** for your files' own tags, **Plex**, **MB** for MusicBrainz and **Discogs**. A line at the bottom of the tab says what the marks mean. When sources agree, every one is marked. When they disagree, your files' tags win, then Plex, then MusicBrainz, then Discogs.
 
 Settings, Library, Look up credits online asks MusicBrainz (when MusicBrainz is on, Settings, Integrations, Artist info) and Discogs (once you've added a Discogs token) when you open the tab. What they say is kept on your computer, so offline you still see it. Unreleased albums are never looked up. Turn off Show sleeve notes to hide the tab and the Credits item.
+
+### Record sides
+
+When an album has a vinyl edition on MusicBrainz or Discogs, its songs are grouped under Side A, Side B and so on (A to D for a double album). Each side's heading has a play button, and the album's menu has Play side A, Play side B, which play just that side. For any other album, Split into sides in the album's menu lets you tick the songs each new side starts on. Your split is kept on every computer you sync, and No sides takes it away. Sides never change the order an album plays in.
+
+Settings, Playback, Pause to flip at the end of a side (off at first) works with the record player in the expanded view: when an album plays from one side into the next, playback stops, the tonearm lifts, and Flip to side B plays on. Turn off Settings, Library, Show vinyl sides to hide sides everywhere.
 
 ## First steps
 

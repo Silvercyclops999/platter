@@ -2830,6 +2830,23 @@ Each time an album's notes are put together, the people the other sources credit
 
 Settings: `showSleeveNotes` (on) shows the tab and the Credits item; `sleeveLookups` (on) allows the online lookups. Both synced.
 
+### Record sides
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `album_sides` | `{ id }` (album) | `AlbumSides` |
+| `album_sides_set` | `{ id, starts: string[] \| null }` | `AlbumSides` |
+
+`AlbumSides = { albumId, sides: { label, trackIds }[], source: "musicbrainz"|"discogs"|"manual"|null, detected }`. `sides` is empty when the album has none. Labels run A, B, C... in album order, whatever the edition printed, so a double album whose second record starts again at A reads A to D.
+
+`album_sides` answers from the cache and never looks anything up. Sides come from the release the sleeve notes cached: MusicBrainz track numbers as printed ("A1", "B3"; read since releases are parsed with `number`), then Discogs track positions. A side letter is one letter or a doubled one ("AA"), followed by the track on that side; CD positions ("3", "1-4", "CD1-2") have none. Songs are matched to the edition as the sleeve notes match them (disc and position when the counts agree, else title); songs the edition lacks join the side before them. At least half the songs must be matched, each side must be one run of songs, and there must be two sides or more, or the album has none.
+
+`album_sides_set` keeps a split by hand in the sync store's `albumSides` namespace (keyed by album id, `{ starts }`, synced with the library group). `starts` are the songs sides B, C... start on: each must be one of the album's songs and never its first; they're kept in album order, 26 sides at most. An empty list means the album has no sides; null removes the split so the edition's sides show again. A split by hand wins over the edition. `syncstore://changed` names `albumSides` when a split changes here or on another device, and `sleeve://changed` may bring new sides when a lookup found a vinyl edition.
+
+Playing a side is `play_context` with an `album` context and that side's `trackIds`. The UI's Pause to flip watches the track change: while the record player shows, moving from the last song of one side to the first song of the next side of the same album pauses (`play_pause`, then `play_seek` to 0) until Flip (`play_resume`). Nothing else about playback order or gapless changes.
+
+Settings: `showVinylSides` (on) shows sides in tracklists and the Play side and Split into sides items; `flipPause` (off) turns on Pause to flip. Both synced.
+
 ## Sync, folders and keys
 
 | Command | Args | Returns |
@@ -3022,6 +3039,8 @@ dropdown parts off; the UI checks them.
 `QueueView = { current?: QueueItem, userQueue: QueueItem[], nextUp: QueueItem[], history: QueueItem[], context?: { kind, id?, title? } }`
 (the window gets at most the next 500 songs in `nextUp`, so playing a whole library doesn't send every song on each change)
 `QueueItem = { itemId, track: Track, source: "user"|"context"|"autoplay"|"smart" }` (`autoplay`: similar music after the context ran out; `smart`: put in by smart shuffle)
+
+An `album` context with `trackIds` plays only those of the album's songs, in album order (one side of the record, see "Record sides"); it is still the album that's playing.
 
 Shuffle is remembered per album, playlist or artist id; repeat is one global
 setting. `shuffle` is the playing context's state and `shuffledContexts` lists

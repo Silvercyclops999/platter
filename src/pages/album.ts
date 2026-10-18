@@ -1,5 +1,5 @@
 /** Album page logic: disc groups, the footer lines and the saved view. */
-import type { AlbumCreditRow, AlbumCredits, Track } from "../lib/types";
+import type { AlbumCreditRow, AlbumCredits, AlbumSide, Track } from "../lib/types";
 
 export interface DiscGroup {
   /** null when the album has one disc: no separator row. */
@@ -20,6 +20,43 @@ export function discGroups(tracks: Track[]): DiscGroup[] {
     const last = out[out.length - 1];
     if (last && last.disc === d) last.tracks.push(t);
     else out.push({ disc: d, tracks: [t] });
+  }
+  return out;
+}
+
+export interface TrackGroup {
+  /** A disc heading before the group (albums of more than one disc). */
+  disc: number | null;
+  /** A side heading before the group, the first time a side shows. */
+  side: AlbumSide | null;
+  tracks: Track[];
+}
+
+/**
+ * Tracks split by disc and, when the album has sides, by side. A side's
+ * heading shows once, where it starts; songs no side lists go on under the
+ * side before them.
+ */
+export function trackGroups(tracks: Track[], sides: AlbumSide[] | null | undefined): TrackGroup[] {
+  const multiDisc = new Set(tracks.map((t) => t.discNumber || 1)).size > 1;
+  const sideOf = new Map<string, AlbumSide>();
+  for (const s of sides ?? []) for (const id of s.trackIds) sideOf.set(id, s);
+  const out: TrackGroup[] = [];
+  const shown = new Set<AlbumSide>();
+  let disc: number | null = null;
+  let side: AlbumSide | null = null;
+  for (const t of tracks) {
+    const d = t.discNumber || 1;
+    const s: AlbumSide | null = sideOf.get(t.id) ?? side;
+    const newDisc = multiDisc && d !== disc;
+    const newSide = !!s && s !== side;
+    if (!out.length || newDisc || newSide) {
+      out.push({ disc: newDisc ? d : null, side: s && !shown.has(s) ? s : null, tracks: [] });
+      if (s) shown.add(s);
+    }
+    out[out.length - 1].tracks.push(t);
+    disc = d;
+    side = s;
   }
   return out;
 }

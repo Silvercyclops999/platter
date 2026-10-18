@@ -28,7 +28,7 @@ pub struct Groups {
     /// Settings marked Synced.
     pub settings: bool,
     /// Library folders and pins, mixed playlists, release status marks, artist page
-    /// sections, ignored library doctor findings, the physical collection and
+    /// sections, albums split into sides, ignored library doctor findings, the physical collection and
     /// Lidarr's shared state.
     pub library: bool,
     /// Followed artists, hidden and snoozed items, bookmarks.
@@ -60,6 +60,7 @@ impl Groups {
                 store::SMART.name(),
                 store::RELEASE_MARKS.name(),
                 store::ALBUM_SECTIONS.name(),
+                store::ALBUM_SIDES.name(),
                 store::DOCTOR_IGNORED.name(),
                 store::PHYSICAL.name(),
                 store::LIDARR.name(),

@@ -1323,6 +1323,10 @@ export interface Settings {
   showSleeveNotes: boolean;
   /** Sleeve notes look credits up on MusicBrainz (and Discogs with a token). */
   sleeveLookups: boolean;
+  /** Album tracklists show a record's sides (from a vinyl edition, or split by hand). */
+  showVinylSides: boolean;
+  /** The record player pauses at the end of a side until Flip. */
+  flipPause: boolean;
   /** Studio (the default), Studio Black, Sleeve, Classic or another built-in look. */
   theme: ThemeSetting;
   /** A preset id ("brass" is the default) or a custom colour as #RRGGBB. */
@@ -1804,6 +1808,8 @@ export const DEFAULT_SETTINGS: Settings = {
   shelfMissingList: false,
   showSleeveNotes: true,
   sleeveLookups: true,
+  showVinylSides: true,
+  flipPause: false,
   theme: "studio",
   accent: "brass",
   followSystem: true,
@@ -3610,6 +3616,22 @@ export interface SongCredits {
   lookups: SleeveLookups;
   song: SleeveTrack | null;
   links: { source: SleeveSource; url: string }[];
+}
+
+/** One side of a record: "A", "B"... and its songs in album order. */
+export interface AlbumSide {
+  label: string;
+  trackIds: string[];
+}
+
+/** `album_sides`: an album's sides, from a vinyl edition or split by hand. */
+export interface AlbumSides {
+  albumId: string;
+  /** Empty when the album has no sides. */
+  sides: AlbumSide[];
+  source: "musicbrainz" | "discogs" | "manual" | null;
+  /** A vinyl edition's sides are known (used unless split by hand). */
+  detected: boolean;
 }
 
 /** `credit_page`: everything in the library a person is credited on, by role. */

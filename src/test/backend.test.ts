@@ -141,6 +141,8 @@ const CALLS: [string, (b: ReturnType<typeof createTauriBackend>) => Promise<unkn
   ["sleeve_notes", (b) => b.sleeveNotes("5"), { id: "5" }],
   ["song_credits", (b) => b.songCredits("9"), { id: "9" }],
   ["credit_page", (b) => b.creditPage("Ada Moss"), { name: "Ada Moss" }],
+  ["album_sides", (b) => b.albumSides("5"), { id: "5" }],
+  ["album_sides_set", (b) => b.setAlbumSides("5", ["t3"]), { id: "5", starts: ["t3"] }],
 ];
 
 const EVENTS = [

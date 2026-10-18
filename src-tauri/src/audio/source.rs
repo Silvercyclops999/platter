@@ -80,6 +80,8 @@ impl fmt::Debug for LocalFiles {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ContextKind {
+    /// An album, or only its songs in `track_ids` (one side of the record),
+    /// in album order.
     Album,
     Playlist,
     Artist,

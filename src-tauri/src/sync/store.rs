@@ -109,11 +109,14 @@ pub const LIDARR: Ns<Value> = Ns::new("lidarr");
 /// Rows hidden from the Missing page's "Played a lot" list (a song, an album
 /// or a whole artist), keyed by `import::played::hide_key`.
 pub const PLAYED_HIDDEN: Ns<crate::import::played::HiddenRow> = Ns::new("playedHidden");
+/// Albums split into record sides by hand, keyed by album id.
+pub const ALBUM_SIDES: Ns<crate::sleeve::sides::ManualSides> = Ns::new("albumSides");
 
 /// Every namespace the store takes. Anything else is refused, so nothing
 /// lands in the sync file by accident.
-pub const NAMESPACES: [&str; 19] = [
+pub const NAMESPACES: [&str; 20] = [
     MIXED.name(),
+    ALBUM_SIDES.name(),
     TRANSCRIPTS.name(),
     LYRICS_SHARED.name(),
     LIDARR.name(),

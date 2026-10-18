@@ -16,6 +16,7 @@
 //! - [`gather`]: reading each source's part from the library cache
 //! - [`discogs`]: reading a Discogs release
 //! - [`store`]: the credit index behind credit pages
+//! - [`sides`]: a record's sides, from a vinyl edition or split by hand
 //! - [`service`]: lazy lookups, caching and events
 //! - [`commands`]: Tauri commands (docs/IPC.md "Sleeve notes")
 
@@ -23,7 +24,10 @@ pub mod commands;
 pub mod discogs;
 pub mod gather;
 pub mod service;
+pub mod sides;
 pub mod store;
+#[cfg(test)]
+mod sides_tests;
 #[cfg(test)]
 mod tests;
 

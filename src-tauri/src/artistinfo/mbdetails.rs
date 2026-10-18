@@ -21,7 +21,8 @@ pub const ROLES: [&str; 11] =
 /// cached by an older build are looked up again.
 /// 2: catalogue number, country, barcode, formats, studios, recording dates,
 /// annotation and players with their instruments.
-pub const PARSE_VERSION: u32 = 2;
+/// 3: each track's number as printed ("A1", "B2" on a record's sides).
+pub const PARSE_VERSION: u32 = 3;
 
 /// Longest annotation kept (characters).
 pub const ANNOTATION_MAX: usize = 2000;
@@ -83,6 +84,8 @@ pub struct MbPlace {
 pub struct MbTrack {
     pub disc: u32,
     pub position: u32,
+    /// The number as printed on the medium ("3", or "B1" on a record).
+    pub number: Option<String>,
     pub title: String,
     pub credits: Vec<MbCredit>,
     /// When it was recorded: "1996-11" or a span "1996-11/1997-02".
@@ -447,7 +450,7 @@ pub fn parse_release(v: &Value) -> Option<MbRelease> {
             sort_roles(&mut c);
             let mut ps = Vec::new();
             places(rec, &mut ps);
-            tracks.push(MbTrack { disc, position, title, credits: c, recorded: recorded(rec), places: ps });
+            tracks.push(MbTrack { disc, position, number: s(t, "number").map(str::to_owned), title, credits: c, recorded: recorded(rec), places: ps });
         }
     }
     Some(MbRelease {

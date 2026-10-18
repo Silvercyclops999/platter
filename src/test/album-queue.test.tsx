@@ -67,7 +67,7 @@ describe("album page", () => {
     render(<AlbumPage id={album.id} />);
     const list = await screen.findByRole("grid", { name: `${album.title} songs` });
     await waitFor(() => expect(within(list).getByRole("row", { name: "Disc 1" })).toBeInTheDocument());
-    const items = body(within(list).getAllByRole("row"));
+    const items = body(within(list).getAllByRole("row")).filter((r) => !r.classList.contains("album-side"));
     const disc2 = items.findIndex((i) => i.getAttribute("aria-label") === "Disc 2");
     expect(items[0]).toHaveAccessibleName("Disc 1");
     expect(disc2).toBe(tracks.filter((x) => x.discNumber === 1).length + 1);
@@ -80,7 +80,7 @@ describe("album page", () => {
     const album = single();
     render(<AlbumPage id={album.id} />);
     const list = await screen.findByRole("grid", { name: `${album.title} songs` });
-    await waitFor(() => expect(body(within(list).getAllByRole("row")).length).toBe(mock.fx.tracksByAlbum.get(album.id)!.length));
+    await waitFor(() => expect(body(within(list).getAllByRole("row")).filter((r) => !r.classList.contains("album-side")).length).toBe(mock.fx.tracksByAlbum.get(album.id)!.length));
     expect(within(list).queryByRole("row", { name: /^Disc / })).toBeNull();
   });
 

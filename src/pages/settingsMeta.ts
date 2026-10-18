@@ -113,6 +113,7 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "crossfadeSkipAlbums",
   "automixWhere",
   "automixStyle",
+  "flipPause",
   // Sound: display details and fine tuning of loudness.
   "showFormatBadge",
   "preampDb",
@@ -129,6 +130,7 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "shelfMissingList",
   "shelfOpen",
   "sleeveLookups",
+  "showVinylSides",
   "showFanEdits",
   "groupEditions",
   "showDescribePlaylist",
@@ -323,6 +325,8 @@ const BY_KEY: Record<string, HelpRef> = {
   listenRelay: ["listening-together", "the-relay"],
   artistInfoSources: ["privacy", "off-until-you-turn-them-on"],
   showSleeveNotes: ["getting-started", "sleeve-notes"],
+  showVinylSides: ["getting-started", "record-sides"],
+  flipPause: ["getting-started", "record-sides"],
   sleeveLookups: ["getting-started", "where-the-facts-come-from"],
   nowPlayingFeed: ["privacy", "off-until-you-turn-them-on"],
 };
