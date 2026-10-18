@@ -183,6 +183,15 @@ const out = {
   },
 };
 
+/**
+ * Listening along, the queue here mirrors the host's: a remove or clear
+ * here would come back with the next update, so say so instead.
+ */
+const hostOnly = (): Promise<void> => {
+  toast.info("Only the host can take songs out of the session's queue");
+  return Promise.resolve();
+};
+
 /** Start a context here, or on the device playing now. */
 const play = (args: PlayContextArgs): Promise<unknown> =>
   isRemote() ? backend.remotePlayContext(args).then((r) => usePlayer.getState().setRemote(r)) : backend.playContext(args);
@@ -268,7 +277,9 @@ export const player = {
   setSmoothTransitions: (on: boolean) => backend.setSmoothTransitions(on).catch(report),
   playTracks: (trackIds: string[], startTrackId?: string, kind: "tracks" | "search" = "tracks") =>
     play({ context: { kind, trackIds }, startTrackId }).catch(report),
-  queueAdd: (trackIds: string[], at: QueueAt) => backend.queueAdd(trackIds, at).catch(report),
+  queueAdd: (trackIds: string[], at: QueueAt) =>
+    // Listening along: the queue here is the host's, so add there.
+    guestLive() ? addToSession(trackIds) : backend.queueAdd(trackIds, at).catch(report),
   /**
    * "Add to queue" from a menu: to the end of the queue, then a short toast
    * with the cover (the song's own for one song, else `thumb` when given).
@@ -401,7 +412,7 @@ export const player = {
     return next === "smart" ? backend.setContextSmartShuffle(id, true).catch(report) : player.setContextShuffle(id, next === "shuffle");
   },
   cycleRepeatNow: () => player.cycleRepeat(usePlayer.getState().state?.repeat ?? "off"),
-  queueRemove: (itemId: string) => backend.queueRemove(itemId).catch(report),
+  queueRemove: (itemId: string) => (guestLive() ? hostOnly() : backend.queueRemove(itemId).catch(report)),
   queueMove: (itemId: string, toIndex: number) => {
     // Listening along: the queue here mirrors the host's, so move it there.
     if (guestLive()) {
@@ -411,7 +422,7 @@ export const player = {
     }
     return backend.queueMove(itemId, toIndex).catch(report);
   },
-  queueClear: () => backend.queueClear().catch(report),
+  queueClear: () => (guestLive() ? hostOnly() : backend.queueClear().catch(report)),
   queueJump: (itemId: string) =>
     (isRemote()
       ? backend.remoteQueueJump(itemId).then((r) => usePlayer.getState().setRemote(r))

@@ -1846,3 +1846,24 @@ fn start_copy_counts_earlier_copies_of_the_song() {
     assert_eq!(start_copy_of(&list, Some("x".into()), Some(1)), (Some("x".into()), 0));
     assert_eq!(start_copy_of(&list, Some("x".into()), Some(9)), (Some("x".into()), 0));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn jumping_to_the_row_that_just_became_current_keeps_it_playing() {
+    let mut r = rig(&["a", "b", "c"], 3.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a", "b"]), None, Some(false)).await.unwrap();
+    r.player.queue_add(vec!["c".into()], AddAt::Next).await.unwrap();
+    r.player.next().await.unwrap();
+    let s = wait_state(&r.player, |s| tid(&s.track) == "c" && s.status == super::events::PlayerStatus::Playing).await;
+    let cur = s.queue.current.unwrap().item_id;
+    // A user-queue song is in neither list once it plays; this used to be
+    // "not found" and marked the song as ended.
+    r.player.queue_jump(cur).await.unwrap();
+    let s = r.player.state().await.unwrap();
+    assert_eq!(tid(&s.track), "c");
+    assert_eq!(s.status, super::events::PlayerStatus::Playing);
+    // Its real end is still counted.
+    r.player.seek(2_900).await.unwrap();
+    let end = next_tracking(&mut r.tracking, ended("c")).await;
+    let TrackingEvent::TrackEnded { completed, .. } = end else { unreachable!() };
+    assert!(completed);
+}

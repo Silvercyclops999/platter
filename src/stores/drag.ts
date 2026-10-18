@@ -14,6 +14,7 @@ import { isLiked, setLiked } from "./likes";
 import { player } from "./player";
 import { addToPlaylist } from "./playlists";
 import { useSettings } from "./settings";
+import { guestLive } from "./social";
 import { toast } from "./toasts";
 
 /** The drag data type for songs (anything else, like files, is ignored). */
@@ -250,6 +251,11 @@ export async function dropOnQueue(songs: DragSongs, at: number | "end"): Promise
     return;
   }
   if (!tracks.length) return;
+  // Listening along: into the shared queue, through the host (it says so).
+  if (guestLive()) {
+    await player.queueAdd(tracks.map((t) => t.id), "end");
+    return;
+  }
   await player.queueAdd(
     tracks.map((t) => t.id),
     at === "end" ? "end" : { index: at },

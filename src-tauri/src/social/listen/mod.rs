@@ -167,6 +167,28 @@ pub struct PlayerNow {
     pub up_next_items: Vec<String>,
 }
 
+/// Songs a guest's move may turn into queued songs to land where it was
+/// dropped. Past this the song goes to the end of the queued songs.
+const MOVE_SPAN: usize = 100;
+
+/// The queue moves that put the song at `from` of `items` (the user queue,
+/// `user_len` long, then the rest) at `to` of the list without it, as a
+/// guest sees it. Only the user queue can be reordered here, so a drop
+/// among the rest first queues the songs before the spot, in order, then
+/// the song after them. None when `from` is gone.
+pub fn move_steps(items: &[String], user_len: usize, from: usize, to: usize) -> Option<Vec<(String, usize)>> {
+    let item = items.get(from)?.clone();
+    let rest: Vec<&String> = items.iter().enumerate().filter(|(i, _)| *i != from).map(|(_, id)| id).collect();
+    let queued = if from < user_len { user_len - 1 } else { user_len.min(rest.len()) };
+    let to = to.min(rest.len());
+    let mut steps = Vec::new();
+    if to > queued && to - queued <= MOVE_SPAN {
+        steps.extend(rest[queued..to].iter().map(|id| ((*id).clone(), usize::MAX)));
+    }
+    steps.push((item, to));
+    Some(steps)
+}
+
 /// The local player, as a session needs it.
 #[async_trait]
 pub trait ListenPlayer: Send + Sync {
@@ -1385,8 +1407,12 @@ impl ListenAlong {
             }
             Op::Move { from, to } => {
                 let now = p.now().await.map_err(failed)?;
-                let item = now.up_next_items.get(from).cloned().ok_or_else(|| "That song isn't in the queue anymore.".to_string())?;
-                p.queue_move(item, to).await.map_err(failed)
+                let steps = move_steps(&now.up_next_items, now.user_queue.len(), from, to)
+                    .ok_or_else(|| "That song isn't in the queue anymore.".to_string())?;
+                for (item, at) in steps {
+                    p.queue_move(item, at).await.map_err(failed)?;
+                }
+                Ok(())
             }
         }
     }

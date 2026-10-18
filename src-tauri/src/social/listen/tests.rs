@@ -86,7 +86,7 @@ impl ListenPlayer for FakePlayer {
             duration_ms: 200_000,
             playing: p.playing,
             user_queue: p.user.clone(),
-            up_next_items: (0..up_next.len()).map(|i| format!("i{i}")).collect(),
+            up_next_items: up_next.iter().map(|s| format!("i:{s}")).collect(),
             up_next,
         })
     }
@@ -138,16 +138,16 @@ impl ListenPlayer for FakePlayer {
     }
     async fn queue_move(&self, item_id: String, to_index: usize) -> AppResult<()> {
         let mut p = self.p.lock();
-        let i: usize = item_id.trim_start_matches('i').parse().unwrap();
-        let k = if i < p.user.len() {
+        let song = item_id.trim_start_matches("i:").to_string();
+        let k = if let Some(i) = p.user.iter().position(|s| *s == song) {
             p.user.remove(i)
         } else {
-            let j = i - p.user.len();
+            let j = p.rest.iter().position(|s| *s == song).unwrap();
             p.rest.remove(j)
         };
         let at = to_index.min(p.user.len());
         p.user.insert(at, k);
-        self.log.lock().push(format!("move {i} {to_index}"));
+        self.log.lock().push(format!("move {song} {to_index}"));
         Ok(())
     }
 }
@@ -1216,4 +1216,22 @@ async fn a_guest_who_doesnt_take_invites_in_platter_says_so_and_failures_show() 
     assert_eq!(h.listen.offer_server(&id).await.unwrap_err().kind(), "invalid");
     // Only the host offers.
     assert_eq!(g.listen.offer_server("host").await.unwrap_err().kind(), "invalid");
+}
+
+#[test]
+fn a_guest_move_lands_where_it_was_dropped_on_the_host() {
+    use super::move_steps;
+    let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    // One queued song, then three from the playlist. The guest drags the
+    // last one between the second and third: it plays after c1, not after u1.
+    let items = ids(&["u1", "c1", "c2", "c3"]);
+    let steps = move_steps(&items, 1, 3, 2).unwrap();
+    assert_eq!(steps, vec![("c1".to_string(), usize::MAX), ("c3".to_string(), 2)]);
+    // Inside the queued part nothing else moves.
+    let items = ids(&["u1", "u2", "c1"]);
+    assert_eq!(move_steps(&items, 2, 1, 0).unwrap(), vec![("u2".to_string(), 0)]);
+    // A queued song dragged down among the rest.
+    let items = ids(&["u1", "c1", "c2"]);
+    assert_eq!(move_steps(&items, 1, 0, 1).unwrap(), vec![("c1".to_string(), usize::MAX), ("u1".to_string(), 1)]);
+    assert!(move_steps(&items, 1, 7, 0).is_none());
 }

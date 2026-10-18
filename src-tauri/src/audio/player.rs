@@ -2072,6 +2072,12 @@ impl Actor {
                 let _ = reply.send(Ok(()));
             }
             Cmd::QueueJump(id, reply) => {
+                // The row clicked became the playing song a moment ago (the
+                // window's list was one step old): it keeps playing.
+                if self.queue.current().is_some_and(|c| c.item_id == id) {
+                    let _ = reply.send(Ok(()));
+                    return;
+                }
                 if self.queue.find(&id).is_none() {
                     let _ = reply.send(Err(AppError::NotFound(format!("queue item {id}"))));
                     return;
@@ -2125,6 +2131,12 @@ impl Actor {
                 let _ = reply.send(r);
             }
             Cmd::JumpAt(id, ms, play, reply) => {
+                // Already the playing song: only the place and play state change.
+                if self.queue.current().is_some_and(|c| c.item_id == id) {
+                    let r = self.do_seek(ms).and_then(|_| if play { self.do_resume() } else { self.do_pause() });
+                    let _ = reply.send(r);
+                    return;
+                }
                 if self.queue.find(&id).is_none() {
                     let _ = reply.send(Err(AppError::NotFound(format!("queue item {id}"))));
                     return;
