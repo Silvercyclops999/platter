@@ -1,6 +1,6 @@
 [package]
 name = "platter"
-version = "0.2.27"
+version = "0.2.28"
 description = "Platter — a desktop music player for your Plex library"
 authors = ["Adam"]
 edition = "2024"
