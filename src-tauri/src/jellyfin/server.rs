@@ -726,34 +726,55 @@ async fn entries(core: &Core, playlist_id: &str) -> AppResult<Vec<PlaylistEntry>
 
 #[async_trait]
 impl RemoteSearch for Core {
-    async fn search(&self, query: &str, _section_id: Option<&str>, limit: u32) -> AppResult<RemoteHits> {
+    /// Each kind is asked on its own, so many matching songs don't crowd
+    /// out the artists and albums, and only in the included libraries
+    /// (`section_id`, or every included one). Playlists live outside the
+    /// libraries.
+    async fn search(&self, query: &str, section_id: Option<&str>, limit: u32) -> AppResult<RemoteHits> {
         let uid = self.uid()?;
-        let limit = limit.max(1).to_string();
+        let n = limit.max(1) as usize;
+        let limit = n.to_string();
         let fields = format!("{TRACK_FIELDS},ChildCount");
-        let r: QueryResult = self
-            .get(
-                "/Items",
-                &[
+        let parents: Vec<Option<String>> = match (section_id, self.include()) {
+            (Some(s), _) => vec![Some(s.to_string())],
+            (None, None) => vec![None],
+            (None, Some(_)) => {
+                let views = self.included_views();
+                if views.is_empty() { vec![None] } else { views.into_iter().map(|v| Some(v.id)).collect() }
+            }
+        };
+        let mut hits = RemoteHits::default();
+        for kind in ["MusicArtist", "MusicAlbum", "Audio", "Playlist"] {
+            let under: &[Option<String>] = if kind == "Playlist" { &[None] } else { &parents };
+            for parent in under {
+                let mut q: Vec<(&str, &str)> = vec![
                     ("userId", &uid),
                     ("searchTerm", query),
-                    ("IncludeItemTypes", "MusicArtist,MusicAlbum,Audio,Playlist"),
+                    ("IncludeItemTypes", kind),
                     ("Recursive", "true"),
                     ("Limit", &limit),
                     ("Fields", &fields),
                     ("EnableUserData", "true"),
-                ],
-            )
-            .await?;
-        let mut hits = RemoteHits::default();
-        for it in r.items {
-            match it.kind.as_deref() {
-                Some("MusicArtist") => hits.artists.push(map::artist(&self.tag, &it)),
-                Some("MusicAlbum") => hits.albums.push(map::album(&self.tag, &it)),
-                Some("Audio") => hits.tracks.push(self.track_of(&it)),
-                Some("Playlist") if map::is_audio_playlist(&it) => hits.playlists.push(map::playlist(&self.tag, &it)),
-                _ => {}
+                ];
+                if let Some(p) = parent {
+                    q.push(("ParentId", p));
+                }
+                let r: QueryResult = self.get("/Items", &q).await?;
+                for it in r.items {
+                    match it.kind.as_deref() {
+                        Some("MusicArtist") => hits.artists.push(map::artist(&self.tag, &it)),
+                        Some("MusicAlbum") => hits.albums.push(map::album(&self.tag, &it)),
+                        Some("Audio") => hits.tracks.push(self.track_of(&it)),
+                        Some("Playlist") if map::is_audio_playlist(&it) => hits.playlists.push(map::playlist(&self.tag, &it)),
+                        _ => {}
+                    }
+                }
             }
         }
+        hits.artists.truncate(n);
+        hits.albums.truncate(n);
+        hits.tracks.truncate(n);
+        hits.playlists.truncate(n);
         Ok(hits)
     }
 }

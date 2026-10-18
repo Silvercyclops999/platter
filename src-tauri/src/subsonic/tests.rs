@@ -720,6 +720,18 @@ async fn a_sync_knows_how_many_songs_and_albums_to_expect() {
     assert_eq!(lib.count("1", ItemKind::Album).await.unwrap(), 2);
 }
 
+#[tokio::test]
+async fn server_search_stays_in_the_included_folders() {
+    let s = subsonic(Some(all_ext()), true).await;
+    let core = open_core(&s);
+    core.load_views().await.unwrap();
+    core.set_include(Some(vec!["2".into()]));
+    let hits = RemoteSearch::search(core.as_ref(), "song", None, 5).await.unwrap();
+    assert_eq!(hits.tracks.len(), 2);
+    let l = log(&s).await;
+    assert!(l.contains(&"search3 albumCount=5&artistCount=5&musicFolderId=2&query=song&songCount=5".to_string()), "{l:?}");
+}
+
 /// `search3` over a long list where every tenth entry is a video.
 struct LongSearch;
 

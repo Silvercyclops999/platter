@@ -861,17 +861,29 @@ pub fn reorder(songs: &[String], from: usize, after: Option<usize>) -> Vec<Strin
 
 #[async_trait]
 impl RemoteSearch for Core {
+    /// In `section_id`, or in each included folder when only some are.
     async fn search(&self, query: &str, section_id: Option<&str>, limit: u32) -> AppResult<RemoteHits> {
-        let n = limit.max(1).to_string();
-        let mut q = p(&[("query", query), ("artistCount", &n), ("albumCount", &n), ("songCount", &n)]);
-        q.extend(Core::folder(section_id.unwrap_or_default()));
-        let r: Found = self.get("search3", &q, "searchResult3").await?;
-        Ok(RemoteHits {
-            artists: r.artist.iter().map(|a| map::artist(&self.tag, a)).collect(),
-            albums: r.album.iter().map(|a| map::album(&self.tag, a)).collect(),
-            tracks: r.song.iter().filter(|s| map::is_song(s)).map(|s| map::track(&self.tag, s)).collect(),
-            playlists: Vec::new(),
-        })
+        let size = limit.max(1) as usize;
+        let n = size.to_string();
+        let folders: Vec<String> = match (section_id, self.include()) {
+            (Some(s), _) => vec![s.to_string()],
+            (None, Some(_)) => self.included_views().into_iter().map(|v| v.id).collect(),
+            (None, None) => Vec::new(),
+        };
+        let folders: Vec<&str> = if folders.is_empty() { vec![""] } else { folders.iter().map(String::as_str).collect() };
+        let mut hits = RemoteHits::default();
+        for folder in folders {
+            let mut q = p(&[("query", query), ("artistCount", &n), ("albumCount", &n), ("songCount", &n)]);
+            q.extend(Core::folder(folder));
+            let r: Found = self.get("search3", &q, "searchResult3").await?;
+            hits.artists.extend(r.artist.iter().map(|a| map::artist(&self.tag, a)));
+            hits.albums.extend(r.album.iter().map(|a| map::album(&self.tag, a)));
+            hits.tracks.extend(r.song.iter().filter(|s| map::is_song(s)).map(|s| map::track(&self.tag, s)));
+        }
+        hits.artists.truncate(size);
+        hits.albums.truncate(size);
+        hits.tracks.truncate(size);
+        Ok(hits)
     }
 }
 

@@ -686,9 +686,17 @@ async fn lyrics_mix_details_activity_and_files() {
     assert!(lines.contains(&req("GET", "/Audio/t1/Lyrics", &[])));
     assert!(lines.contains(&req("GET", "/Items/t1/InstantMix", &[("userId", "u1"), ("Limit", "25"), ("EnableImages", "false")])));
     assert!(lines.contains(&req("GET", "/Sessions", &[("ActiveWithinSeconds", "960")])));
+    // Each kind on its own, in the included library; playlists anywhere.
+    let fields = "MediaSources,ProviderIds,Genres,DateCreated,Path,SortName,ChildCount";
+    for kind in ["MusicArtist", "MusicAlbum", "Audio"] {
+        assert!(lines.contains(&req("GET", "/Items", &[
+            ("userId", "u1"), ("searchTerm", "rec"), ("IncludeItemTypes", kind), ("Recursive", "true"),
+            ("Limit", "10"), ("Fields", fields), ("EnableUserData", "true"), ("ParentId", "v1")
+        ])), "{kind}: {lines:?}");
+    }
     assert!(lines.contains(&req("GET", "/Items", &[
-        ("userId", "u1"), ("searchTerm", "rec"), ("IncludeItemTypes", "MusicArtist,MusicAlbum,Audio,Playlist"), ("Recursive", "true"),
-        ("Limit", "10"), ("Fields", "MediaSources,ProviderIds,Genres,DateCreated,Path,SortName,ChildCount"), ("EnableUserData", "true")
+        ("userId", "u1"), ("searchTerm", "rec"), ("IncludeItemTypes", "Playlist"), ("Recursive", "true"),
+        ("Limit", "10"), ("Fields", fields), ("EnableUserData", "true")
     ])));
     token_only_in_headers(&s).await;
 }
