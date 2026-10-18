@@ -813,3 +813,27 @@ fn live_is_a_version_note_not_a_word_of_the_name() {
     assert_eq!(stage("l"), Some(Stage::Live));
     assert_eq!(stage("x"), Some(Stage::Live));
 }
+
+#[test]
+fn refreshing_one_artist_keeps_groups_shared_with_another_artist_whole() {
+    let (_d, c) = db();
+    album(&c, "a", "Alpha", "Glass", true, Some("album"), &[], None);
+    song(&c, "a1", "a", "Glass", "Alpha", "Song", 200_000, None, 1);
+    tags(&c, "a1", None, None, None, Some("glass"));
+    album_tag(&c, "a", None, Some("glass"), None);
+    album(&c, "b", "Beta", "Glass Sessions", false, None, &[], None);
+    song(&c, "b1", "b", "Glass Sessions", "Beta", "Song", 210_000, None, 1);
+    tags(&c, "b1", Some("session"), None, None, Some("glass"));
+    album_tag(&c, "b", Some("session"), Some("glass"), None);
+    refresh(&c);
+    assert_eq!(group_of(&c, "a1"), group_of(&c, "b1"), "one group across both artists");
+    let full = (group_of(&c, "a1"), status_of(&c, "b1"));
+
+    // Something of Beta's changes: only Beta asked for, Alpha comes along.
+    album(&c, "b2", "Beta", "Other", true, Some("album"), &[], None);
+    song(&c, "b9", "b2", "Other", "Beta", "Elsewhere", 100_000, None, 1);
+    crate::identity::index::refresh_artists(&c, &["ar:Beta".into()]).unwrap();
+    versions::refresh_artists(&c, &["ar:Beta".into()]).unwrap();
+    assert_eq!(group_of(&c, "b1"), group_of(&c, "a1"));
+    assert_eq!((group_of(&c, "a1"), status_of(&c, "b1")), full, "named as a full rebuild names it");
+}

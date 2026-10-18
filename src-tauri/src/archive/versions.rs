@@ -277,23 +277,50 @@ pub fn rebuild(c: &Connection) -> AppResult<usize> {
     write(c, &songs, &facts)
 }
 
+/// Artists whose songs can join a group with these artists' songs: the
+/// same artist name (a song's own artist can be another album artist), a
+/// group they already share (recording ids and the like, as of the last
+/// build), or albums with the same ARCHIVE_GROUP. Every query runs on an
+/// index, so the tag scan can call this after each batch.
+const LINKED_ARTISTS: &[&str] = &[
+    "SELECT DISTINCT s2.artist_id FROM song_index s1 JOIN song_index s2 ON s2.artist_fold = s1.artist_fold
+     WHERE s1.artist_id IN (SELECT value FROM json_each(?1)) AND s1.artist_fold <> ''",
+    "SELECT DISTINCT v2.artist_id FROM versions v1 JOIN versions v2 ON v2.group_key = v1.group_key
+     WHERE v1.artist_id IN (SELECT value FROM json_each(?1))",
+    "SELECT DISTINCT al2.artist_id FROM albums al1
+     JOIN album_tags a1 ON a1.album_id = al1.id
+     JOIN album_tags a2 ON a2.grp = a1.grp
+     JOIN albums al2 ON al2.id = a2.album_id
+     WHERE al1.artist_id IN (SELECT value FROM json_each(?1)) AND trim(coalesce(a1.grp, '')) <> ''",
+];
+
+/// More artists than this linked together: the whole table is rebuilt.
+const MAX_LINKED: usize = 400;
+
 /// Rebuild the rows of these album artists' songs, and of every artist
-/// whose songs go by one of the same names (a song's own artist can be
-/// another album artist), so their groups come out whole.
+/// linked to them (followed until no more turn up), so their groups come
+/// out whole and named as a full rebuild names them.
 pub fn refresh_artists(c: &Connection, artist_ids: &[String]) -> AppResult<usize> {
-    let list = serde_json::to_string(artist_ids).unwrap_or_else(|_| "[]".into());
     let mut ids: Vec<String> = artist_ids.to_vec();
-    {
-        let mut st = c.prepare_cached(
-            "SELECT DISTINCT s2.artist_id FROM song_index s1 JOIN song_index s2 ON s2.artist_fold = s1.artist_fold
-             WHERE s1.artist_id IN (SELECT value FROM json_each(?1)) AND s1.artist_fold <> ''",
-        )?;
-        for id in st.query_map([&list], |r| r.get::<_, String>(0))? {
-            let id = id?;
-            if !ids.contains(&id) {
-                ids.push(id);
+    let mut seen: HashSet<String> = ids.iter().cloned().collect();
+    let mut fresh = ids.clone();
+    while !fresh.is_empty() {
+        let list = serde_json::to_string(&fresh).unwrap_or_else(|_| "[]".into());
+        let mut next = Vec::new();
+        for sql in LINKED_ARTISTS {
+            let mut st = c.prepare_cached(sql)?;
+            for id in st.query_map([&list], |r| r.get::<_, String>(0))? {
+                let id = id?;
+                if seen.insert(id.clone()) {
+                    next.push(id);
+                }
             }
         }
+        ids.extend(next.iter().cloned());
+        if ids.len() > MAX_LINKED {
+            return rebuild(c);
+        }
+        fresh = next;
     }
     let all = serde_json::to_string(&ids).unwrap_or_else(|_| "[]".into());
     c.execute("DELETE FROM versions WHERE artist_id IN (SELECT value FROM json_each(?1))", [&all])?;
