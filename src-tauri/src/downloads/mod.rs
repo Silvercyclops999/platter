@@ -778,9 +778,10 @@ impl Downloads {
             return;
         }
         let Ok((rows, items, tracks)) = self.inner.db.read(|c| {
-            let mut st = c.prepare("SELECT f.track_id, t.thumb FROM download_files f LEFT JOIN tracks t ON t.id = f.track_id")?;
+            let mut st =
+                c.prepare("SELECT f.track_id, t.thumb, t.id IS NOT NULL FROM download_files f LEFT JOIN tracks t ON t.id = f.track_id")?;
             let rows = st
-                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))?
+                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, bool>(2)?)))?
                 .collect::<Result<Vec<_>, _>>()?;
             let items: i64 = c.query_row("SELECT COUNT(*) FROM download_items", [], |r| r.get(0))?;
             let tracks: i64 = c.query_row("SELECT COUNT(*) FROM tracks", [], |r| r.get(0))?;
@@ -792,7 +793,7 @@ impl Downloads {
             return;
         }
         self.retry_pending_deletes();
-        let stems: std::collections::HashSet<String> = rows.iter().map(|(id, _)| file_stem(id)).collect();
+        let stems: std::collections::HashSet<String> = rows.iter().map(|(id, _, _)| file_stem(id)).collect();
         let mut failed = Vec::new();
         for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
@@ -801,13 +802,14 @@ impl Downloads {
             }
         }
         self.queue_pending(&dir, failed);
-        // A song with no cover known (not in the library yet, or mid
-        // resync) means which covers are used isn't known: keep them all.
-        if tracks == 0 || rows.iter().any(|(_, t)| t.is_none()) {
+        // A downloaded song the library doesn't have (not in it yet, or
+        // mid resync) means which covers are used isn't known: keep them
+        // all. A song that simply has no cover needs none.
+        if tracks == 0 || rows.iter().any(|(_, _, known)| !known) {
             return;
         }
         let keep: std::collections::HashSet<String> =
-            rows.iter().filter_map(|(_, t)| t.as_deref()).map(art::file_name).collect();
+            rows.iter().filter_map(|(_, t, _)| t.as_deref()).map(art::file_name).collect();
         for e in std::fs::read_dir(dir.join(art::ART_DIR)).into_iter().flatten().flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
             if art::is_art_name(&name) && !keep.contains(&name) && e.path().is_file() {

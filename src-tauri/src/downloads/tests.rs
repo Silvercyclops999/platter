@@ -1296,8 +1296,9 @@ async fn the_art_sweep_keeps_what_isnt_a_cover_it_kept_and_waits_on_an_unknown_l
     std::fs::write(&mine, b"mine").unwrap();
     let old_art = art::path(&r.dir, "/library/metadata/999/thumb/1");
     std::fs::write(&old_art, b"img").unwrap();
-    // A song whose cover isn't known yet: which covers are used isn't known.
-    r.db.write(|c| Ok(c.execute("UPDATE tracks SET thumb = NULL WHERE id = 'a2'", [])?)).unwrap();
+    // A downloaded song the library doesn't have (mid resync): which
+    // covers are used isn't known.
+    r.db.write(|c| Ok(c.execute("DELETE FROM tracks WHERE id = 'a2'", [])?)).unwrap();
     r.d.sweep();
     assert!(old_art.exists() && mine.exists());
     // The library mid resync, empty.
@@ -1316,6 +1317,12 @@ async fn the_art_sweep_keeps_what_isnt_a_cover_it_kept_and_waits_on_an_unknown_l
     .unwrap();
     r.d.sweep();
     assert!(!old_art.exists() && mine.exists());
+    // A song that simply has no cover doesn't stop the sweep.
+    let unused = art::path(&r.dir, "/library/metadata/998/thumb/1");
+    std::fs::write(&unused, b"img").unwrap();
+    r.db.write(|c| Ok(c.execute("UPDATE tracks SET thumb = NULL WHERE id = 'a2'", [])?)).unwrap();
+    r.d.sweep();
+    assert!(!unused.exists() && mine.exists());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
