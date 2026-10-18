@@ -1,0 +1,202 @@
+/* Platter's own looks: Studio and Studio Black (data-identity="studio") and
+   Sleeve (data-identity="sleeve"), set on <html> by themes/index.ts. The
+   tokens carry the colours; this file adds the materials: panels like the
+   front of rack gear with a faint top highlight, engraved dividers, paper
+   grain on Sleeve, display type for page titles, the record sleeve on album
+   pages, engraved hi-fi plates and the needle drop on empty pages. Classic
+   and the other themes never see any of it. */
+
+:root[data-identity] {
+  /* An engraved line: a dark cut with a lit edge under it. */
+  --engrave-dark: color-mix(in srgb, #000 38%, transparent);
+  --engrave-light: color-mix(in srgb, var(--color-ink) 6%, transparent);
+  /* The faint highlight along the top edge of a raised panel. */
+  --panel-highlight: inset 0 1px 0 color-mix(in srgb, var(--color-ink) 7%, transparent);
+  --panel-sheen: linear-gradient(180deg, color-mix(in srgb, var(--color-ink) 3.5%, transparent) 0, transparent 160px);
+  --font-weight-display: 600;
+}
+:root[data-identity="sleeve"] {
+  --engrave-dark: color-mix(in srgb, var(--color-ink) 16%, transparent);
+  --engrave-light: rgba(255, 255, 255, 0.7);
+  --panel-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 1px 2px rgba(43, 33, 23, 0.06);
+  --panel-sheen: none;
+  /* Paper grain: fine noise, drawn once and tiled. */
+  --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.17 0 0 0 0 0.13 0 0 0 0 0.09 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ---------------------------------------------------------------- Panels */
+:root[data-identity] :is(.main, .sidebar__block, .np-panel, .queue-panel, .output-panel) {
+  background-image: var(--panel-sheen);
+  box-shadow: var(--panel-highlight);
+}
+:root[data-identity="sleeve"] :is(.app, .main, .sidebar__block, .np-panel, .queue-panel, .output-panel) {
+  background-image: var(--paper-grain);
+}
+/* The player bar sits on the base like a transport strip, with a cut line above it. */
+:root[data-identity] .player-bar {
+  box-shadow: 0 -1px 0 var(--engrave-light) inset;
+  border-top: 1px solid var(--engrave-dark);
+}
+
+/* ---------------------------------------------------------------- Type */
+/* Page titles in the display face, sentence case and not giant. */
+:root[data-identity] :is(h1, h2, .detail-header__title, .shelf__title, .home__greeting, .empty-state__title) {
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+:root[data-identity] .detail-header__title[data-step="1"] { font-size: 56px; line-height: 1.04; }
+:root[data-identity] .detail-header__title[data-step="2"] { font-size: 48px; line-height: 1.06; }
+:root[data-identity] .detail-header__title[data-step="3"] { font-size: 40px; }
+:root[data-identity] .empty-state__title { font-size: var(--font-size-2xl); }
+/* Times, bitrates and counts never jiggle. */
+:root[data-identity] :is(.track-row__duration, .track-row__num, .seek__time, .badge, .hifi-mark, .stats-strip, .queue-row__dur) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- Accent use */
+/* Brass is for on, primary and playing. A chosen filter chip is "on". */
+:root[data-identity] .chip.is-selected { background: var(--color-accent); color: var(--color-text-on-accent); }
+:root[data-identity] .chip.is-selected:hover { background: var(--color-accent-hover); }
+
+/* ---------------------------------------------------------------- Dividers */
+:root[data-identity] :is(.settings-row + .settings-row, .track-list__head, .sidebar__footer, .np-card + .np-card) {
+  border-color: var(--engrave-dark);
+}
+:root[data-identity] .track-list__head { box-shadow: 0 1px 0 var(--engrave-light); }
+
+/* ---------------------------------------------------------------- Album header: the sleeve */
+/* No colour band: a quiet tint from the cover on the panel, the cover as the
+   sleeve, and the record half out of it in the cover's colour. */
+:root[data-identity] .detail-header {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tint-shade) 55%, var(--color-bg-raised)) 0%, color-mix(in srgb, var(--tint-shade) 28%, var(--color-bg-raised)) 100%);
+  box-shadow: inset 0 -1px 0 var(--engrave-dark), 0 1px 0 var(--engrave-light);
+}
+:root[data-identity="sleeve"] .detail-header {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tint) 16%, var(--color-bg-raised)) 0%, color-mix(in srgb, var(--tint) 7%, var(--color-bg-raised)) 100%);
+}
+:root[data-identity] .detail-header ~ .detail-body { background: none; }
+:root[data-identity] .detail-header__art .art { box-shadow: 0 10px 28px rgba(0, 0, 0, 0.42); border-radius: 2px; }
+:root[data-identity="sleeve"] .detail-header__art .art { box-shadow: 0 8px 22px rgba(43, 33, 23, 0.28); }
+
+.sleeve-disc { display: none; }
+:root[data-identity] .detail-header__art:has(.sleeve-disc) {
+  position: relative;
+  isolation: isolate;
+  /* Room for the half of the record that is out of the sleeve. */
+  margin-right: 104px;
+}
+:root[data-identity] .detail-header--compact .detail-header__art:has(.sleeve-disc) { margin-right: 58px; }
+:root[data-identity] .sleeve-disc {
+  display: block;
+  position: absolute;
+  z-index: -1;
+  top: 4%;
+  left: 46%;
+  width: 92%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, var(--color-bg-raised) 0 2.2%, color-mix(in srgb, var(--tint) 85%, #000) 2.6% 31%, #0b0b0b 31.4% 32.4%, transparent 32.8%),
+    repeating-radial-gradient(circle, #131313 0 1.1px, #1d1d1d 1.1px 2.2px),
+    #151515;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  animation: sleeve-slide var(--motion-long) var(--motion-easing) both;
+}
+@keyframes sleeve-slide {
+  from { translate: calc(-40% * var(--motion-move)) 0; opacity: 0; }
+}
+
+/* ---------------------------------------------------------------- Expanded now playing */
+/* With the record player, the room is graphite with a quiet pool of the
+   cover's colour under the platter; no blurred art behind it. */
+:root[data-identity] .fw--artwork:has(.turntable) {
+  background:
+    radial-gradient(ellipse 60% 55% at 50% 42%, color-mix(in srgb, var(--fw-tint, #3a3128) 38%, transparent), transparent 75%),
+    #171513;
+}
+:root[data-identity="studio"][data-theme="studioBlack"] .fw--artwork:has(.turntable) {
+  background:
+    radial-gradient(ellipse 60% 55% at 50% 42%, color-mix(in srgb, var(--fw-tint, #3a3128) 30%, transparent), transparent 75%),
+    #000;
+}
+:root[data-identity] .fw--artwork:has(.turntable) :is(.fw__bg, .fw__shade) { display: none; }
+:root[data-identity] .fw__now--turntable .fw__title { font-family: var(--font-headings, var(--font-family)); font-weight: 600; }
+
+/* ---------------------------------------------------------------- Hi-fi plates */
+/* Quality badges as small engraved plates, like labels on gear. */
+:root[data-identity] :is(.badge--quality, .badge--hires) {
+  border: 0;
+  border-radius: 2px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--color-ink) 10%, transparent), color-mix(in srgb, var(--color-ink) 4%, transparent));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-ink) 10%, transparent), inset 0 -1px 0 var(--engrave-dark);
+  color: var(--color-text-secondary);
+  letter-spacing: 0.06em;
+}
+:root[data-identity] .badge--hires { color: var(--color-accent); }
+:root[data-identity="sleeve"] :is(.badge--quality, .badge--hires) {
+  background: linear-gradient(180deg, #fbf8f1, #e6dece);
+  box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 var(--engrave-dark), 0 0 0 1px var(--engrave-dark);
+}
+
+/* ---------------------------------------------------------------- Mix covers */
+/* The mix's name on a small printed label rather than a coloured band. */
+:root[data-identity] .mix-art__strip {
+  left: 10px;
+  right: auto;
+  top: 10px;
+  bottom: auto;
+  max-width: calc(100% - 20px);
+  min-height: 0;
+  padding: 5px 9px 5px 11px;
+  border-radius: 2px;
+  background: #efe7d6;
+  box-shadow: inset 3px 0 0 var(--mix-color), 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+:root[data-identity] .mix-art__name { color: #1c1712; font-size: clamp(11px, 8cqi, 15px); font-weight: var(--font-weight-semibold); }
+
+/* ---------------------------------------------------------------- Home */
+/* The hover wash stays, but quieter: a hint of the cover, not a band. */
+:root[data-identity] .home__wash {
+  height: 260px;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--home-wash) 26%, transparent) 0%, transparent 100%);
+}
+
+/* ---------------------------------------------------------------- Empty pages: the needle drop */
+/* A small record, and the stylus dropping onto it once when the page shows. */
+:root[data-identity] .empty-state { position: relative; }
+:root[data-identity] .empty-state > svg:first-child { display: none; }
+:root[data-identity] .empty-state::before {
+  content: "";
+  width: 56px;
+  height: 56px;
+  margin-bottom: var(--space-2);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, var(--color-bg-raised) 0 5%, var(--color-accent) 5.5% 30%, transparent 31%),
+    repeating-radial-gradient(circle, color-mix(in srgb, var(--color-ink) 10%, transparent) 0 1px, transparent 1px 3px),
+    color-mix(in srgb, var(--color-ink) 12%, var(--color-bg-raised));
+  box-shadow: 0 0 0 1px var(--engrave-dark);
+}
+:root[data-identity] .empty-state::after {
+  content: "";
+  position: absolute;
+  top: var(--space-12);
+  left: calc(50% + 22px);
+  width: 3px;
+  height: 34px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--color-text-secondary) 0 78%, var(--color-accent) 78%);
+  transform-origin: 50% 2px;
+  transform: rotate(22deg);
+  animation: needle-drop 900ms var(--motion-easing-in-out) both;
+}
+@keyframes needle-drop {
+  0% { transform: rotate(-12deg) translateY(-3px); }
+  70% { transform: rotate(22deg) translateY(-3px); }
+  100% { transform: rotate(22deg) translateY(0); }
+}
+@keyframes identity-fade {
+  from { opacity: 0; }
+}
+:root[data-reduced-motion="true"][data-identity] .empty-state::after,
+:root[data-reduced-motion="true"][data-identity] .sleeve-disc { animation: identity-fade var(--motion-medium) ease both; }

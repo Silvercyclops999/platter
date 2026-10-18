@@ -55,7 +55,8 @@ afterAll(() => disconnect());
 
 beforeEach(async () => {
   if (typeof window.matchMedia !== "function") window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;
-  await backend.settingsSet({ ...DEFAULT_SETTINGS });
+  // The builder starts from the look in use; these start from Classic dark.
+  await backend.settingsSet({ ...DEFAULT_SETTINGS, theme: "dark", accent: "ivory", followSystem: false });
   useSettings.setState({ settings: null });
   useToasts.setState({ toasts: [] });
   useLooks.setState({ builder: null, pick: false, folderVersion: 0 });
@@ -358,11 +359,23 @@ describe("look builder", () => {
 describe("ready-made looks and first run", () => {
   it("shows the built-in themes and the data looks as cards; one click applies", async () => {
     const user = userEvent.setup();
+    await act(() => updateSettings({ theme: "studio", followSystem: false }));
     render(<LookCards />);
     const cards = screen.getAllByRole("radio");
-    expect(cards.map((c) => c.getAttribute("aria-label"))).toEqual(["Dark", "Light", "Midnight", "Forest", "Sand", "High contrast", "OLED black"]);
-    expect(screen.getByRole("radio", { name: "Dark" })).toHaveAttribute("aria-checked", "true");
-    await user.click(screen.getByRole("radio", { name: "Light" }));
+    expect(cards.map((c) => c.getAttribute("aria-label"))).toEqual([
+      "Studio",
+      "Studio Black",
+      "Sleeve",
+      "Classic",
+      "Classic light",
+      "Midnight",
+      "Forest",
+      "Sand",
+      "High contrast",
+      "OLED black",
+    ]);
+    expect(screen.getByRole("radio", { name: "Studio" })).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("radio", { name: "Classic light" }));
     await waitFor(() => expect(useSettings.getState().settings?.theme).toBe("light"));
     await user.click(screen.getByRole("radio", { name: "High contrast" }));
     await waitFor(() => expect(useSettings.getState().settings?.themeFile?.name).toBe("High contrast"));
@@ -415,7 +428,7 @@ describe("settings", () => {
   it("Appearance has Look, Make your own, Layout and Show Make your own, with defaults", async () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
-    expect(row("Look").getAllByRole("radio")).toHaveLength(7);
+    expect(row("Look").getAllByRole("radio")).toHaveLength(10);
     expect(row("Layout").getByText("Classic layout.")).toBeInTheDocument();
     expect(row("Layout").getByRole("button", { name: "Revert to default layout" })).toBeDisabled();
     expect(row("Show Make your own").getByRole("switch")).toHaveAttribute("aria-checked", "true");

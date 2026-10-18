@@ -20,6 +20,7 @@ import type {
   DownloadQuality,
   PopularSource,
   ReduceMotion,
+  RecordMotion,
   ServerInfo,
   Settings,
   StreamQuality,
@@ -96,7 +97,7 @@ const SUBSONIC_CHECK_OPTIONS = [
   { value: "60", label: "1 hour" },
 ];
 import { useTheme } from "../stores/theme";
-import { AccentPicker, ThemeFileControl, ThemeFileProblems, ThemeSelect, themeNote, useThemeFolder } from "./ThemeSettings";
+import { AccentPicker, ThemeFileControl, ThemeFileProblems, ThemeSelect, followNote, themeNote, useThemeFolder } from "./ThemeSettings";
 import { LookCards } from "./looks/LookCards";
 import { looks } from "../stores/looks";
 import { CLASSIC_LAYOUT, type Layout } from "../design/themes";
@@ -204,6 +205,11 @@ const MOTION = [
   { value: "on", label: "On" },
   { value: "off", label: "Off" },
 ] as const satisfies SelectOption<ReduceMotion>[];
+const RECORD_MOTION = [
+  { value: "full", label: "Expanded view" },
+  { value: "both", label: "Expanded view and side panel" },
+  { value: "off", label: "Off" },
+] as const satisfies SelectOption<RecordMotion>[];
 const LIKED_MEANS = [
   { value: "five", label: "5 stars" },
   { value: "fourUp", label: "4 stars or more" },
@@ -1516,23 +1522,31 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       key: "theme",
       section: "Appearance",
       title: "Theme",
-      description: "Dark, Light, Match system, or Midnight, Forest and Sand.",
-      more: "Dark, Light, or Match system to follow your computer's light or dark mode. Midnight, Forest and Sand are other built-in themes.",
-      note: themeNote(s),
+      description: "Studio, Studio Black or Sleeve, Platter's own; or Classic and the other themes.",
+      more: "Studio is warm graphite with a brass accent, Studio Black puts it on true black for OLED screens, and Sleeve is cream paper and ink. Classic is the look Platter had before, with Classic light, Midnight, Forest and Sand.",
+      note: themeNote(s) ?? followNote(s, theme.name),
       control: (ids) => (s ? <ThemeSelect s={s} ids={ids} /> : loading),
+    },
+    {
+      key: "followSystem",
+      section: "Appearance",
+      title: "Follow system light or dark",
+      description: "Switches between a theme's light and dark partner with your computer's mode.",
+      more: "When your computer is in light mode a dark theme shows its light partner, and the other way round: Studio and Studio Black pair with Sleeve, the other themes with Classic or Classic light.",
+      control: (ids) => toggle(s, "followSystem", ids),
     },
     {
       key: "accent",
       section: "Appearance",
       title: "Accent colour",
-      description: "The colour of play buttons, switches and sliders.",
-      more: "The colour of play buttons, switches and sliders. Ivory is each theme's own. A custom colour needs at least 3:1 contrast with the background.",
+      description: "The colour of play buttons, switches and the playing song.",
+      more: "The colour of play buttons, switches and the playing song. Brass is Studio's own and Ivory is Classic's. A custom colour needs at least 3:1 contrast with the background.",
       note: rowNote(
         accentIssue
           ? { text: accentIssue, error: true }
           : theme.accentNote
             ? { text: theme.accentNote }
-            : theme.fileAccent && s?.accent === "ivory"
+            : theme.fileAccent && (s?.accent === "ivory" || s?.accent === "brass")
               ? { text: "Your theme file sets its own accent. Pick a colour here to replace it." }
               : undefined,
       ),
@@ -1574,6 +1588,21 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       description: "Turns off sliding and scaling. Fades stay.",
       more: "Turns off movement like sliding and scaling. Fades stay. Match system follows your computer's setting.",
       control: (ids) => select(s, (x) => x.reduceMotion, MOTION, ids, (v) => updateSettings({ reduceMotion: v })),
+    },
+    {
+      key: "recordMotion",
+      section: "Appearance",
+      title: "Record player",
+      description: "A spinning record with a tonearm in now playing.",
+      more: "Expanded now playing shows the cover as the label of a record that spins up when music plays and stops on pause, with a tonearm that lowers and lifts. It can turn the side panel's cover too. Reduce motion keeps it still.",
+      control: (ids) => select(s, (x) => x.recordMotion, RECORD_MOTION, ids, (v) => updateSettings({ recordMotion: v })),
+    },
+    {
+      key: "tonearmSeek",
+      section: "Appearance",
+      title: "Tonearm seek bar",
+      description: "The seek bar is a stylus on a groove line. It works the same.",
+      control: (ids) => toggle(s, "tonearmSeek", ids),
     },
     {
       key: "upNextLine",

@@ -51,6 +51,7 @@ import { startCurate } from "../stores/curate";
 import { DeckActions } from "./DeckActions";
 import { DeckPairPrompt } from "./DeckPairPrompt";
 import { backend } from "../lib/backend";
+import { NewLookOffer } from "./NewLookOffer";
 import { LazyLookBuilderHost, LazyLyricsEditorHost, LazyPickLookHost, LazyPlexEditDialogs, LazyShareCardHost, LazySmartEditorHost, LazyStatsDialogHost, LazyTagEditDialogs } from "./lazyHosts";
 import { LazyGuideHost, LazyHelpPanel, LazyWrappedHost, LazyWrongLyricsHost } from "./lazyHosts";
 import { LookDrop } from "./LookDrop";
@@ -247,6 +248,7 @@ export function AppShell() {
       <RemoteStrip />
       <ListenStrip />
       <PlayerBar />
+      <NewLookOffer />
       <CommandPalette />
       <LazyGuideHost />
       <WhatsNewDialog />

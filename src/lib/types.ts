@@ -795,7 +795,10 @@ export type PopularSource = "global" | "myPlays";
 export type ReduceMotion = "system" | "on" | "off";
 
 /** The Theme setting: a built-in theme, or follow the computer's light or dark mode. */
-export type ThemeSetting = "dark" | "light" | "system" | "midnight" | "forest" | "sand";
+export type ThemeSetting = "dark" | "light" | "system" | "midnight" | "forest" | "sand" | "studio" | "studioBlack" | "sleeve";
+
+/** Record-player motion: full screen now playing only, the side panel too, or none. */
+export type RecordMotion = "full" | "both" | "off";
 
 /** A theme or look file that passed the checks (also what the `themeFile` setting holds). */
 export type ThemeFile = UserTheme;
@@ -1276,10 +1279,18 @@ export interface Settings {
   showPhysicalCollection: boolean;
   /** "Missing from the shelf": albums played most that aren't owned. */
   shelfMissingList: boolean;
-  /** Dark, Light, Match system, or another built-in theme. */
+  /** Studio (the default), Studio Black, Sleeve, Classic or another built-in look. */
   theme: ThemeSetting;
-  /** A preset id ("ivory" is the default) or a custom colour as #RRGGBB. */
+  /** A preset id ("brass" is the default) or a custom colour as #RRGGBB. */
   accent: string;
+  /** Swap the look for its light or dark partner with the computer's mode. */
+  followSystem: boolean;
+  /** The one-time "Try Platter's new look" offer was shown or not needed. */
+  newLookOffered: boolean;
+  /** Spinning record and tonearm: full screen only, the side panel too, or off. */
+  recordMotion: RecordMotion;
+  /** The seek bar is a needle on a groove line. */
+  tonearmSeek: boolean;
   /** The theme file in use, carried whole so it travels in the sync file. */
   themeFile: ThemeFile | null;
   /** Layout options (Classic by default). */
@@ -1745,8 +1756,12 @@ export const DEFAULT_SETTINGS: Settings = {
   getAlbumsKinds: ["studio"],
   showPhysicalCollection: true,
   shelfMissingList: false,
-  theme: "dark",
-  accent: "ivory",
+  theme: "studio",
+  accent: "brass",
+  followSystem: true,
+  newLookOffered: true,
+  recordMotion: "full",
+  tonearmSeek: true,
   themeFile: null,
   layout: CLASSIC_LAYOUT,
   showLookBuilder: true,

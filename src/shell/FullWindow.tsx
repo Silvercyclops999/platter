@@ -16,6 +16,7 @@ import { actionableNotice, useLyrics } from "./lyrics";
 import { LyricsPane, useLyricsBackground } from "./LyricsView";
 import { contextRoute, useNowPlayingDetails } from "./nowPlaying";
 import { SEEK_KEY_STEP } from "./PlayerBar";
+import { Turntable } from "./Turntable";
 import { VOLUME_KEY_STEP } from "./useShortcuts";
 import "./full-window.css";
 
@@ -150,6 +151,8 @@ function FullWindowView() {
   const { lyrics, loading: lyricsLoading, info: lyricsInfo } = useLyrics(track?.id);
   const { details } = useNowPlayingDetails(track?.id);
   const mode = useFullWindow((s) => s.mode);
+  const turntable = useSettings((s) => (s.settings?.recordMotion ?? "off") !== "off");
+  const playing = usePlayer((s) => s.state?.status === "playing");
   const osFull = useFullWindow((s) => s.osFullscreen);
   const hideControls = useSettings((s) => s.settings?.fullWindowHideControls ?? true);
   const idle = useIdle(hideControls, CONTROLS_HIDE_MS);
@@ -222,10 +225,14 @@ function FullWindowView() {
     );
   else
     stage = (
-      <div className="fw__now" key={track.id}>
-        <div className="fw__cover">
-          <Art path={track.thumb} fluid requestSize={COVER_ART} />
-        </div>
+      <div className={`fw__now ${turntable ? "fw__now--turntable" : ""}`} key={track.id}>
+        {turntable ? (
+          <Turntable thumb={track.thumb} playing={playing} requestSize={COVER_ART} />
+        ) : (
+          <div className="fw__cover">
+            <Art path={track.thumb} fluid requestSize={COVER_ART} />
+          </div>
+        )}
         <Meta track={track} />
       </div>
     );

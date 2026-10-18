@@ -6,7 +6,7 @@
  * surfaces are light or dark.
  */
 import { accentColour, accentProblem, accentTokens } from "./accent";
-import { BUILTIN_THEMES, baseTheme, type BuiltinThemeId } from "./builtins";
+import { BUILTIN_THEMES, baseTheme, isStudioLook, partnerFor, type BuiltinThemeId } from "./builtins";
 import { THEME_TOKEN_NAMES, tokenValueProblem, type ThemeBase, type UserTheme } from "./validate";
 
 export * from "./accent";
@@ -20,6 +20,14 @@ export interface ThemeChoice {
   theme: ThemeSetting;
   accent: string;
   themeFile: UserTheme | null;
+  /** Swap a built-in for its light or dark partner with the computer's mode. */
+  followSystem?: boolean;
+}
+
+/** "studio" for Studio and Studio Black, "sleeve" for Sleeve, "" otherwise: CSS adds their surfaces. */
+export function identityOf(id: string): "studio" | "sleeve" | "" {
+  if (!isStudioLook(id)) return "";
+  return id === "sleeve" ? "sleeve" : "studio";
 }
 
 export interface ResolvedTheme {
@@ -35,7 +43,7 @@ export interface ResolvedTheme {
   fileAccent: boolean;
 }
 
-export const DEFAULT_CHOICE: ThemeChoice = { theme: "dark", accent: "ivory", themeFile: null };
+export const DEFAULT_CHOICE: ThemeChoice = { theme: "studio", accent: "brass", themeFile: null, followSystem: true };
 
 /** Work out the tokens for a choice. `systemDark` is the computer's mode. */
 export function resolveTheme(choice: ThemeChoice, systemDark: boolean): ResolvedTheme {
@@ -44,6 +52,7 @@ export function resolveTheme(choice: ThemeChoice, systemDark: boolean): Resolved
   let base: ThemeBase;
   let tokens: Record<string, string>;
   let fileAccent = false;
+  let ownAccent: string = "ivory";
   if (choice.themeFile) {
     const f = choice.themeFile;
     const start = baseTheme(f.base);
@@ -55,13 +64,19 @@ export function resolveTheme(choice: ThemeChoice, systemDark: boolean): Resolved
     name = f.name;
     base = f.base;
   } else {
-    const builtin = choice.theme === "system" ? (systemDark ? BUILTIN_THEMES.dark : BUILTIN_THEMES.light) : (BUILTIN_THEMES[choice.theme] ?? BUILTIN_THEMES.dark);
+    let builtinId: BuiltinThemeId =
+      choice.theme === "system" ? (systemDark ? "dark" : "light") : choice.theme in BUILTIN_THEMES ? choice.theme : "dark";
+    if (choice.followSystem && choice.theme !== "system") builtinId = partnerFor(builtinId, systemDark);
+    const builtin = BUILTIN_THEMES[builtinId];
     ({ id, name, base } = builtin);
     tokens = { ...builtin.tokens };
+    ownAccent = builtin.ownAccent;
   }
   let accentNote: string | null = null;
-  // Ivory is each theme's own accent (or the theme file's, when it sets one).
-  const colour = choice.accent === "ivory" ? null : accentColour(choice.accent, base);
+  // A theme's own accent sets nothing. A theme file that sets an accent
+  // keeps it while the setting is one of the default accents.
+  const own = choice.accent === ownAccent || (fileAccent && (choice.accent === "ivory" || choice.accent === "brass"));
+  const colour = own ? null : accentColour(choice.accent, base);
   if (colour) {
     if (accentProblem(colour, tokens)) accentNote = "Your colour is too close to this theme's background, so the theme's own accent is used.";
     else Object.assign(tokens, accentTokens(colour, base, tokens));
@@ -77,6 +92,9 @@ export function applyTheme(t: Pick<ResolvedTheme, "id" | "base" | "tokens">, doc
   const root = doc.documentElement;
   root.dataset.theme = t.id;
   root.dataset.themeBase = t.base;
+  const identity = identityOf(t.id);
+  if (identity) root.dataset.identity = identity;
+  else delete root.dataset.identity;
   // index.html's first-paint colour has done its job once a theme is on.
   doc.getElementById("first-paint-bg")?.remove();
   const overrides: Record<string, string> = {};
@@ -105,7 +123,11 @@ export function applyCachedTheme(doc: Document = document): void {
   } catch {
     return;
   }
-  if (!raw) return;
+  // A first start on this computer: new installs open on Studio.
+  if (!raw) {
+    applyTheme(BUILTIN_THEMES.studio, doc);
+    return;
+  }
   try {
     const c = JSON.parse(raw) as { id?: string; base?: string; tokens?: Record<string, unknown> };
     const tokens: Record<string, string> = { ...DARK };

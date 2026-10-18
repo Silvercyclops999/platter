@@ -249,6 +249,45 @@
 .slider.is-disabled { cursor: default; opacity: 0.5; }
 .slider.is-disabled .slider__thumb { display: none; }
 
+/* Tonearm seek bar: a thin groove line with fainter grooves either side, and
+   a stylus that always shows where the song is. Still a plain slider. */
+.slider--tonearm .slider__track {
+  height: 2px;
+  background: color-mix(in srgb, var(--color-ink) 26%, transparent);
+  box-shadow:
+    0 -3px 0 color-mix(in srgb, var(--color-ink) 6%, transparent),
+    0 3px 0 color-mix(in srgb, var(--color-ink) 6%, transparent);
+}
+.slider--tonearm .slider__fill { background: color-mix(in srgb, var(--color-text-primary) 80%, transparent); }
+.slider--tonearm:hover .slider__fill,
+.slider--tonearm:focus-visible .slider__fill,
+.slider--tonearm.is-dragging .slider__fill { background: var(--color-text-primary); }
+.slider--tonearm .slider__thumb {
+  width: 2px;
+  height: 14px;
+  margin: -12px 0 0 -1px;
+  border-radius: 1px;
+  background: var(--color-text-secondary);
+  box-shadow: none;
+  opacity: 1;
+  transform-origin: 50% 100%;
+}
+/* The headshell: a small brass block at the top of the stylus. */
+.slider--tonearm .slider__thumb::before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: -3px;
+  width: 8px;
+  height: 5px;
+  border-radius: 1px;
+  background: var(--color-accent);
+}
+.slider--tonearm:hover .slider__thumb,
+.slider--tonearm:focus-visible .slider__thumb,
+.slider--tonearm.is-dragging .slider__thumb { background: var(--color-text-primary); }
+.slider--tonearm.is-dragging .slider__thumb { transform: scaleY(0.85); }
+
 /* ---------------------------------------------------------------- Context menu */
 .context-menu {
   position: fixed;

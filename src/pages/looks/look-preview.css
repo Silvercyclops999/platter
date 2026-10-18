@@ -93,7 +93,9 @@
 }
 .lp-art--round { border-radius: 50% !important; }
 .lp[data-look-cover-shape="rounded"] { --lp-radius-art: 10px; }
-.lp[data-look-cover-shape="circle"] { --lp-radius-art: 50%; }
+.lp[data-look-cover-shape="circle"],
+.lp[data-look-cover-shape="vinyl"] { --lp-radius-art: 50%; }
+.lp[data-look-cover-shape="sleeve"] { --lp-radius-art: 2px; }
 
 /* Main */
 .lp-main { flex: 1; min-width: 0; }

@@ -15,6 +15,9 @@ export interface LookParts {
 
 export const DEFAULT_PARTS: LookParts = { style: DEFAULT_STYLE, fonts: DEFAULT_FONTS, layout: CLASSIC_LAYOUT };
 
+/** Studio, Studio Black and Sleeve: Inter for the interface, Fraunces for page titles. */
+export const STUDIO_FONTS: LookFonts = { text: "inter", headings: "fraunces" };
+
 /** Data attributes and custom properties for a look, as plain maps. */
 export function lookAttributes(p: LookParts): { data: Record<string, string>; vars: Record<string, string> } {
   const { style, fonts, layout } = p;

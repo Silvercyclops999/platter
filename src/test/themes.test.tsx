@@ -22,8 +22,12 @@ import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS } from "../lib/types";
 import { SettingsPage } from "../pages/SettingsPage";
 import { loadSettings, updateSettings, useSettings } from "../stores/settings";
-import { installTheme, useTheme } from "../stores/theme";
+import { choiceFrom, installTheme, lookPartsFrom, useTheme } from "../stores/theme";
 import { useToasts } from "../stores/toasts";
+import { STUDIO_IDS } from "../design/themes/builtins";
+import type { ThemeSetting } from "../lib/types";
+import { newLookOfferDue, themePatch } from "../stores/looks";
+import { NewLookOffer } from "../shell/NewLookOffer";
 
 const mock = backend as MockBackend;
 const root = () => document.documentElement;
@@ -54,12 +58,16 @@ function resetDocument() {
   for (const n of THEME_TOKEN_NAMES) root().style.removeProperty(`--${n}`);
   delete root().dataset.theme;
   delete root().dataset.themeBase;
+  delete root().dataset.identity;
   localStorage.clear();
 }
 
+/** Settings of someone who used Platter before Studio: Classic dark, ivory, not following the computer. */
+const CLASSIC = { theme: "dark", accent: "ivory", followSystem: false, newLookOffered: false, recordMotion: "off", tonearmSeek: false } as const;
+
 beforeEach(async () => {
   if (typeof window.matchMedia !== "function") window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never;
-  await backend.settingsSet({ ...DEFAULT_SETTINGS });
+  await backend.settingsSet({ ...DEFAULT_SETTINGS, ...CLASSIC });
   useSettings.setState({ settings: null });
   useToasts.setState({ toasts: [] });
   resetDocument();
@@ -71,8 +79,8 @@ afterEach(() => {
 });
 
 describe("built-in themes", () => {
-  it("has five, each setting every theme token", () => {
-    expect(BUILTIN_IDS).toEqual(["dark", "light", "midnight", "forest", "sand"]);
+  it("has Platter's three own looks and the five Classic ones, each setting every theme token", () => {
+    expect(BUILTIN_IDS).toEqual(["studio", "studioBlack", "sleeve", "dark", "light", "midnight", "forest", "sand"]);
     for (const id of BUILTIN_IDS) {
       const t = BUILTIN_THEMES[id].tokens;
       expect(Object.keys(t).sort(), id).toEqual([...THEME_TOKEN_NAMES].sort());
@@ -121,8 +129,8 @@ describe("built-in themes", () => {
 });
 
 describe("accent colours", () => {
-  it("has ivory and six presets that work on every built-in theme", () => {
-    expect(ACCENT_PRESETS.map((p) => p.id)).toEqual(["ivory", "sage", "sky", "lilac", "amber", "rose", "teal"]);
+  it("has ivory, brass and six presets that work on every built-in theme", () => {
+    expect(ACCENT_PRESETS.map((p) => p.id)).toEqual(["ivory", "brass", "sage", "sky", "lilac", "amber", "rose", "teal"]);
     for (const id of BUILTIN_IDS) {
       const theme = BUILTIN_THEMES[id];
       for (const p of ACCENT_PRESETS) {
@@ -256,9 +264,19 @@ describe("theme settings", () => {
     render(<SettingsPage />);
     const theme = screen.getByRole("combobox", { name: "Theme" });
     expect(theme).toHaveValue("dark");
-    expect(within(theme).getAllByRole("option").map((o) => o.textContent)).toEqual(["Dark", "Light", "Match system", "Midnight", "Forest", "Sand"]);
+    expect(within(theme).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Studio",
+      "Studio Black",
+      "Sleeve",
+      "Classic",
+      "Classic light",
+      "Classic, match system",
+      "Midnight",
+      "Forest",
+      "Sand",
+    ]);
     expect(row("Accent colour").getByRole("radio", { name: "Ivory" })).toHaveAttribute("aria-checked", "true");
-    expect(row("Accent colour").getAllByRole("radio")).toHaveLength(7);
+    expect(row("Accent colour").getAllByRole("radio")).toHaveLength(8);
     expect(row("Accent colour").getByLabelText("Custom colour")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("combobox", { name: "Your looks and theme files" })).toHaveValue(""));
     // The rows sit in Appearance.
@@ -337,5 +355,142 @@ describe("theme settings", () => {
       backend.settingsSet({ themeFile: { file: "x.json", name: "X", base: "dark", tokens: { "color-bg-base": "url(x)" } } }),
     ).rejects.toMatchObject({ kind: "invalid" });
     expect(mock).toBeTruthy();
+  });
+});
+
+describe("Platter's own looks", () => {
+  const row = (title: string) => {
+    const el = screen.getByText(title, { selector: ".setting-row__title" }).closest(".setting-row");
+    if (!el) throw new Error(`no row ${title}`);
+    return within(el as HTMLElement);
+  };
+
+  it("new installs start on Studio with brass, following the computer, with the record player and tonearm seek bar", () => {
+    expect([DEFAULT_SETTINGS.theme, DEFAULT_SETTINGS.accent, DEFAULT_SETTINGS.followSystem]).toEqual(["studio", "brass", true]);
+    expect([DEFAULT_SETTINGS.recordMotion, DEFAULT_SETTINGS.tonearmSeek, DEFAULT_SETTINGS.newLookOffered]).toEqual(["full", true, true]);
+    const dark = resolveTheme(choiceFrom(DEFAULT_SETTINGS), true);
+    expect([dark.id, dark.name, dark.accentNote]).toEqual(["studio", "Studio", null]);
+    expect(dark.tokens["color-accent"]).toBe(BUILTIN_THEMES.studio.tokens["color-accent"]);
+    expect(resolveTheme(choiceFrom(DEFAULT_SETTINGS), false).id).toBe("sleeve");
+    expect(lookPartsFrom(DEFAULT_SETTINGS).fonts).toEqual({ text: "inter", headings: "fraunces" });
+    expect(lookPartsFrom({ ...DEFAULT_SETTINGS, ...CLASSIC }).fonts.headings).toBe("inter");
+  });
+
+  it("brass passes AA on every surface of Studio, Studio Black and Sleeve, with a darker brass on Sleeve", () => {
+    for (const id of STUDIO_IDS) {
+      const t = BUILTIN_THEMES[id].tokens;
+      for (const s of ["color-bg-base", "color-bg-raised", "color-bg-raised2", "color-bg-overlay"]) {
+        expect(ratio(t["color-accent"], t[s]), `${id} brass on ${s}`).toBeGreaterThanOrEqual(4.5);
+        expect(ratio(t["color-playing"], t[s]), `${id} playing on ${s}`).toBeGreaterThanOrEqual(4.5);
+        expect(ratio(t["color-text-muted"], t[s]), `${id} muted on ${s}`).toBeGreaterThanOrEqual(4.5);
+      }
+      expect(ratio(t["color-text-on-accent"], t["color-accent"]), `${id} text on brass`).toBeGreaterThanOrEqual(4.5);
+      expect(t["color-playing"]).toBe(t["color-accent"]);
+    }
+    const lum = (hex: string) => rgb(hex).reduce((a, b) => a + b, 0);
+    expect(lum(BUILTIN_THEMES.sleeve.tokens["color-accent"])).toBeLessThan(lum(BUILTIN_THEMES.studio.tokens["color-accent"]));
+    // The brass preset is the same colour, so picking it on Studio changes nothing.
+    const brass = ACCENT_PRESETS.find((p) => p.id === "brass")!;
+    expect([brass.dark, brass.light]).toEqual([BUILTIN_THEMES.studio.tokens["color-accent"], BUILTIN_THEMES.sleeve.tokens["color-accent"]]);
+  });
+
+  it("follow system swaps a look for its light or dark partner", () => {
+    const shown = (theme: ThemeSetting, systemDark: boolean) => resolveTheme({ theme, accent: "brass", themeFile: null, followSystem: true }, systemDark).id;
+    expect([shown("studio", false), shown("studioBlack", false), shown("studioBlack", true), shown("sleeve", true)]).toEqual(["sleeve", "sleeve", "studioBlack", "studio"]);
+    expect([shown("midnight", false), shown("sand", true), shown("light", false)]).toEqual(["light", "dark", "light"]);
+    // Off, the look picked is the look shown.
+    expect(resolveTheme({ theme: "studio", accent: "brass", themeFile: null, followSystem: false }, false).id).toBe("studio");
+  });
+
+  it("brass on Classic and ivory on Studio are applied as accents", () => {
+    const classic = resolveTheme({ theme: "dark", accent: "brass", themeFile: null }, true);
+    expect(classic.tokens["color-accent"]).toBe("#CDAE6E");
+    const studio = resolveTheme({ theme: "studio", accent: "ivory", themeFile: null }, true);
+    expect(studio.tokens["color-accent"]).toBe(ACCENT_PRESETS[0].dark);
+  });
+
+  it("marks Studio and Sleeve on the document for their surfaces; Classic has none", async () => {
+    fakeScheme(true);
+    await act(() => updateSettings({ theme: "studio", accent: "brass", followSystem: true }));
+    const un = installTheme();
+    expect([root().dataset.theme, root().dataset.identity]).toEqual(["studio", "studio"]);
+    await act(() => updateSettings({ theme: "sleeve", followSystem: false }));
+    expect([root().dataset.theme, root().dataset.identity, root().dataset.themeBase]).toEqual(["sleeve", "sleeve", "light"]);
+    await act(() => updateSettings({ theme: "dark" }));
+    expect(root().dataset.identity).toBeUndefined();
+    un();
+  });
+
+  it("a first start with nothing cached opens on Studio before settings load", () => {
+    applyCachedTheme();
+    expect(root().dataset.theme).toBe("studio");
+    expect(root().style.getPropertyValue("--color-bg-base")).toBe(BUILTIN_THEMES.studio.tokens["color-bg-base"]);
+  });
+
+  it("picking a look the computer's mode would swap away turns Follow system off", () => {
+    const s = { ...DEFAULT_SETTINGS };
+    expect(themePatch("sleeve", s, true)).toEqual({ theme: "sleeve", followSystem: false });
+    expect(themePatch("studioBlack", s, true)).toEqual({ theme: "studioBlack" });
+    expect(themePatch("sleeve", { ...s, followSystem: false }, true)).toEqual({ theme: "sleeve" });
+  });
+
+  it("existing users keep their look and get a one-time offer to try Studio, with Undo", async () => {
+    const user = userEvent.setup();
+    await act(() => updateSettings({ lookStepDone: true }));
+    expect(newLookOfferDue(useSettings.getState().settings)).toBe(true);
+    render(<NewLookOffer />);
+    expect(useSettings.getState().settings?.theme).toBe("dark");
+    const offer = screen.getByRole("region", { name: "Try Platter's new look" });
+    await user.click(within(offer).getByRole("button", { name: "Try it" }));
+    await waitFor(() =>
+      expect(useSettings.getState().settings).toMatchObject({ theme: "studio", accent: "brass", followSystem: true, recordMotion: "full", tonearmSeek: true, newLookOffered: true }),
+    );
+    expect(screen.queryByRole("region", { name: "Try Platter's new look" })).toBeNull();
+    const undo = useToasts.getState().toasts.at(-1);
+    expect(undo?.message).toBe("Switched to Studio.");
+    act(() => undo?.action?.run());
+    await waitFor(() => expect(useSettings.getState().settings).toMatchObject({ theme: "dark", accent: "ivory", followSystem: false, newLookOffered: true }));
+    // Once answered it never comes back.
+    expect(newLookOfferDue(useSettings.getState().settings)).toBe(false);
+  });
+
+  it("Not now dismisses the offer for good; Studio users and first runs never see it", async () => {
+    const user = userEvent.setup();
+    await act(() => updateSettings({ lookStepDone: false }));
+    const { unmount } = render(<NewLookOffer />);
+    expect(screen.queryByRole("region", { name: "Try Platter's new look" })).toBeNull();
+    await act(() => updateSettings({ lookStepDone: true }));
+    await user.click(await screen.findByRole("button", { name: "Not now" }));
+    await waitFor(() => expect(useSettings.getState().settings?.newLookOffered).toBe(true));
+    expect(useSettings.getState().settings?.theme).toBe("dark");
+    expect(screen.queryByRole("region", { name: "Try Platter's new look" })).toBeNull();
+    unmount();
+    expect(newLookOfferDue({ ...DEFAULT_SETTINGS, newLookOffered: false })).toBe(false);
+  });
+
+  it("Appearance has Follow system, Record player and Tonearm seek bar, each with its default and saved when changed", async () => {
+    await backend.settingsSet({ ...DEFAULT_SETTINGS });
+    await loadSettings();
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+    expect(screen.getByRole("combobox", { name: "Theme" })).toHaveValue("studio");
+    expect(row("Accent colour").getByRole("radio", { name: "Brass" })).toHaveAttribute("aria-checked", "true");
+    const follow = row("Follow system light or dark").getByRole("switch");
+    expect(follow).toBeChecked();
+    const motion = screen.getByRole("combobox", { name: "Record player" });
+    expect(motion).toHaveValue("full");
+    expect(within(motion).getAllByRole("option").map((o) => o.textContent)).toEqual(["Expanded view", "Expanded view and side panel", "Off"]);
+    const tonearm = row("Tonearm seek bar").getByRole("switch");
+    expect(tonearm).toBeChecked();
+    expect(screen.getByRole("combobox", { name: "Reduce motion" })).toHaveValue("system");
+
+    await user.click(follow);
+    await user.selectOptions(motion, "both");
+    await user.click(tonearm);
+    const saved = await backend.settingsGet();
+    expect([saved.followSystem, saved.recordMotion, saved.tonearmSeek]).toEqual([false, "both", false]);
+    // Both spins the side panel's record too; Off stops it even when a look asks for it.
+    expect(lookPartsFrom(saved).layout.spinRecord).toBe(true);
+    expect(lookPartsFrom({ ...saved, recordMotion: "off", layout: { ...saved.layout, spinRecord: true } }).layout.spinRecord).toBe(false);
   });
 });

@@ -5,6 +5,7 @@
  */
 import { validateThemeText, checkHeldTheme, layoutProblem, isLook, lookText, LOOK_EXT } from "../../design/themes/validate";
 import { ACCENT_IDS, isCustomAccent } from "../../design/themes/accent";
+import contract from "../../design/themes/contract.json";
 import type { Settings, ThemeFile, ThemeFolder } from "../types";
 
 export const MOCK_THEMES_FOLDER = "C:\\Users\\listener\\AppData\\Roaming\\Platter\\themes";
@@ -120,7 +121,7 @@ export class MockThemes {
 
 /** The core's checks on the theme settings. Throws an invalid error. */
 export function checkThemePatch(patch: Partial<Settings>): void {
-  if (patch.theme !== undefined && !["dark", "light", "system", "midnight", "forest", "sand"].includes(patch.theme))
+  if (patch.theme !== undefined && !(contract.themes as string[]).includes(patch.theme))
     throw invalid("That isn't one of the themes.");
   if (patch.accent !== undefined && !ACCENT_IDS.includes(patch.accent as never) && !isCustomAccent(patch.accent))
     throw invalid("Accent colours are a preset or a colour like #A1B2C3.");

@@ -56,7 +56,7 @@ export interface Layout {
   quickAccess: 4 | 6 | 8;
   headerStyle: "bigArt" | "banner" | "minimal";
   trackColumns: TrackColumn[];
-  coverShape: "square" | "rounded" | "circle";
+  coverShape: "square" | "rounded" | "circle" | "vinyl" | "sleeve";
   spinRecord: boolean;
   motion: "full" | "reduced" | "off";
 }

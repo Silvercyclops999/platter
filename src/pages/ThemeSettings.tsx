@@ -6,13 +6,13 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import { Button } from "../components/Button";
 import { Select, type SelectOption } from "../components/Select";
 import { Skeleton } from "../components/Skeleton";
-import { ACCENT_PRESETS, accentColour, accentProblem, isCustomAccent } from "../design/themes";
+import { ACCENT_PRESETS, BUILTIN_THEMES, accentColour, accentProblem, isCustomAccent, type BuiltinThemeId } from "../design/themes";
 import { backend } from "../lib/backend";
 import type { Settings, ThemeFile, ThemeFolder, ThemeSetting } from "../lib/types";
 import { updateSettings } from "../stores/settings";
 import { useTheme } from "../stores/theme";
 import { toast } from "../stores/toasts";
-import { lookPatch, useLooks } from "../stores/looks";
+import { lookPatch, themePatch, useLooks } from "../stores/looks";
 import "./theme-settings.css";
 import { failText } from "../lib/errorText";
 
@@ -20,20 +20,24 @@ type Ids = { title: string; desc: string };
 
 
 export const THEMES: SelectOption<ThemeSetting>[] = [
-  { value: "dark", label: "Dark" },
-  { value: "light", label: "Light" },
-  { value: "system", label: "Match system" },
+  { value: "studio", label: "Studio" },
+  { value: "studioBlack", label: "Studio Black" },
+  { value: "sleeve", label: "Sleeve" },
+  { value: "dark", label: "Classic" },
+  { value: "light", label: "Classic light" },
+  { value: "system", label: "Classic, match system" },
   { value: "midnight", label: "Midnight" },
   { value: "forest", label: "Forest" },
   { value: "sand", label: "Sand" },
 ];
 
 export function ThemeSelect({ s, ids }: { s: Settings; ids: Ids }) {
+  const systemDark = useTheme((t) => t.systemDark);
   return (
     <Select
       value={s.theme ?? "dark"}
       options={THEMES}
-      onChange={(v) => void updateSettings({ theme: v })}
+      onChange={(v) => void updateSettings(themePatch(v, s, systemDark))}
       labelledBy={ids.title}
       describedBy={ids.desc}
       disabled={!!s.themeFile}
@@ -44,6 +48,14 @@ export function ThemeSelect({ s, ids }: { s: Settings; ids: Ids }) {
 /** The Theme row's note while a theme file is in use. */
 export function themeNote(s: Settings | null): string | undefined {
   return s?.themeFile ? `The theme file ${s.themeFile.name} is in use. Set Theme file to None to pick one of these.` : undefined;
+}
+
+/** The Theme row's note while Follow system shows a different theme than the one picked. */
+export function followNote(s: Settings | null, shown: string): string | undefined {
+  if (!s || s.themeFile || !s.followSystem || s.theme === "system") return undefined;
+  const picked = BUILTIN_THEMES[s.theme as BuiltinThemeId];
+  if (!picked || picked.name === shown) return undefined;
+  return `Following your computer: ${shown} while it's in ${picked.base === "dark" ? "light" : "dark"} mode.`;
 }
 
 /** Swatches for ivory and the presets, plus a custom colour. */

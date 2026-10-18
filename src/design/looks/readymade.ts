@@ -3,9 +3,9 @@
  * Adding a ready-made look is only adding a data file there; it is checked
  * with the same rules as any other look file (one that fails is skipped).
  */
-import { BUILTIN_THEMES, baseTheme, type BuiltinThemeId } from "../themes/builtins";
+import { BUILTIN_THEMES, baseTheme, isStudioLook, type BuiltinThemeId } from "../themes/builtins";
 import { validateThemeText, type ThemeBase, type UserTheme } from "../themes/validate";
-import { DEFAULT_PARTS, type LookParts } from "./apply";
+import { DEFAULT_PARTS, STUDIO_FONTS, type LookParts } from "./apply";
 
 export interface ReadyLook {
   id: string;
@@ -51,7 +51,7 @@ export function readyLooks(files: Record<string, string> = DATA): ReadyLook[] {
     base: t.base,
     tokens: t.tokens,
     style: DEFAULT_PARTS.style,
-    fonts: DEFAULT_PARTS.fonts,
+    fonts: isStudioLook(t.id) ? STUDIO_FONTS : DEFAULT_PARTS.fonts,
     source: { kind: "builtin", theme: t.id },
   }));
   return [...builtins, ...dataLooks(files)];

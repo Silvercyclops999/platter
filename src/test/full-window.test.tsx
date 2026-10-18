@@ -266,7 +266,7 @@ describe("modes", () => {
     render(<FullWindow />);
     act(() => fullWindow.open());
     expect(toggle("Artwork")).toHaveAttribute("aria-pressed", "true");
-    expect(document.querySelector(".fw__now .fw__cover")).not.toBeNull();
+    expect(document.querySelector(".fw__now .turntable")).not.toBeNull();
 
     await waitFor(() => expect(toggle("Artist image")).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(toggle("Artist image"));
@@ -288,7 +288,7 @@ describe("modes", () => {
     act(() => fullWindow.open());
     await waitFor(() => expect(toggle("Artist image")).toHaveAttribute("aria-pressed", "true"));
     expect(view()).toHaveClass("fw--artwork");
-    expect(document.querySelector(".fw__now .fw__cover")).not.toBeNull();
+    expect(document.querySelector(".fw__now .turntable")).not.toBeNull();
   });
 
   it("synced lyrics follow playback and seek on a click", async () => {

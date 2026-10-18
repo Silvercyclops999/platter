@@ -5,10 +5,14 @@
     "system",
     "midnight",
     "forest",
-    "sand"
+    "sand",
+    "studio",
+    "studioBlack",
+    "sleeve"
   ],
   "accents": [
     "ivory",
+    "brass",
     "sage",
     "sky",
     "lilac",
@@ -100,7 +104,9 @@
       "coverShape": [
         "square",
         "rounded",
-        "circle"
+        "circle",
+        "vinyl",
+        "sleeve"
       ],
       "motion": [
         "full",

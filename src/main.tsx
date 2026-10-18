@@ -8,6 +8,7 @@ import "./components/components.css";
 import "./shell/shell.css";
 import "./pages/pages.css";
 import "./design/looks/looks.css";
+import "./design/identity.css";
 
 applyCachedTheme();
 applyCachedLook();

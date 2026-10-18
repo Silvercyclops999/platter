@@ -1,0 +1,26 @@
+/* The one-time "Try Platter's new look" offer: a small card over the
+   bottom right of the main view, above the player bar. */
+.new-look {
+  position: fixed;
+  right: var(--space-4);
+  bottom: calc(88px + var(--space-4));
+  z-index: var(--z-popover);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: min(380px, calc(100vw - var(--space-8)));
+  padding: var(--space-4) var(--space-4) var(--space-4) var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--color-bg-overlay);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 color-mix(in srgb, var(--color-ink) 8%, transparent);
+  animation: new-look-in var(--motion-medium) var(--motion-easing);
+}
+@keyframes new-look-in {
+  from { opacity: 0; translate: 0 calc(8px * var(--motion-move)); }
+}
+.new-look__mark { flex: none; display: inline-flex; }
+.new-look__text { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding-right: var(--space-4); }
+.new-look__title { margin: 0; font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.new-look__line { margin: 0; font-size: var(--font-size-sm); line-height: 1.45; color: var(--color-text-secondary); }
+.new-look__actions { display: flex; gap: var(--space-2); margin-top: var(--space-1); }
+.new-look__close { position: absolute; top: var(--space-2); right: var(--space-2); }

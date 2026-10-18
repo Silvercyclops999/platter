@@ -1,0 +1,97 @@
+/* The record player in expanded now playing (Turntable.tsx). A square box:
+   the platter and record sit to the left, the tonearm pivots at the top
+   right. Sizes are percentages of the box so it scales with the view. */
+.turntable {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  container-type: inline-size;
+}
+.turntable__platter,
+.turntable__record {
+  position: absolute;
+  left: 2%;
+  top: 7%;
+  width: 86%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+}
+/* The platter's rim shows a little past the record, like machined metal. */
+.turntable__platter {
+  left: 0.5%;
+  top: 5.5%;
+  width: 89%;
+  background:
+    radial-gradient(circle, transparent 0 66%, rgba(0, 0, 0, 0.35) 70%, transparent 71%),
+    conic-gradient(from 20deg, #3b3833, #57534c, #34312d, #4c4842, #3b3833);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+/* The record: black vinyl with grooves, a run-out ring and a sheen that
+   stays put while the record turns (drawn on ::after of the box, not the record). */
+.turntable__record {
+  background:
+    radial-gradient(circle, transparent 0 22%, #0b0b0b 22.4% 23.2%, transparent 23.6%),
+    repeating-radial-gradient(circle, #121212 0 1.1px, #1b1b1b 1.1px 2.2px),
+    #141414;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  will-change: transform;
+}
+.turntable::after {
+  content: "";
+  position: absolute;
+  left: 2%;
+  top: 7%;
+  width: 86%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  pointer-events: none;
+  background: conic-gradient(from 300deg, transparent 0 8%, rgba(255, 255, 255, 0.07) 14%, transparent 22% 58%, rgba(255, 255, 255, 0.05) 64%, transparent 72%);
+}
+/* The label is the cover, cut round. */
+.turntable__label {
+  position: absolute;
+  inset: 29%;
+  border-radius: 50%;
+  overflow: hidden;
+}
+.turntable__label .art { width: 100%; height: 100%; border-radius: 50%; }
+.turntable__spindle {
+  position: absolute;
+  left: calc(2% + 43% - 1%);
+  top: calc(7% + 43% - 1%);
+  width: 2%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #d9d3c8, #7d776d);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+/* The tonearm: pivot at the top right. Lifted it rests off the record; on
+   play it swings in and lowers (the shadow tightens), eased like a motor. */
+.turntable__arm {
+  position: absolute;
+  left: 79.6%;
+  top: 0;
+  width: 20.7%;
+  transform-origin: 50% 13.3%;
+  transform: rotate(-14deg);
+  filter: drop-shadow(6px 10px 6px rgba(0, 0, 0, 0.45));
+  transition:
+    transform 1s var(--motion-easing-in-out),
+    filter 1s var(--motion-easing-in-out);
+}
+.turntable[data-state="playing"] .turntable__arm {
+  transform: rotate(9deg);
+  filter: drop-shadow(2px 3px 2px rgba(0, 0, 0, 0.55));
+}
+.turntable__arm svg { display: block; width: 100%; height: auto; overflow: visible; }
+.turntable__pivot { fill: #3d3a35; stroke: rgba(255, 255, 255, 0.12); stroke-width: 1.5; }
+.turntable__pivot-cap { fill: var(--tt-metal, #cfc8bb); }
+.turntable__tube { fill: none; stroke: var(--tt-metal, #cfc8bb); stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; }
+.turntable__head { fill: var(--color-accent); }
+
+/* Reduced motion: the arm doesn't swing; it is drawn again in its place and fades in. */
+@keyframes tt-fade {
+  from { opacity: 0; }
+}
+:root[data-reduced-motion="true"] .turntable__arm { animation: tt-fade var(--motion-medium) ease; }

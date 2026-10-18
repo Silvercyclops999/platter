@@ -336,6 +336,8 @@ function LayoutEditor({ d, change }: { d: Draft; change: (key: string, fn: (d: D
             { id: "square", label: "Square" },
             { id: "rounded", label: "Rounded" },
             { id: "circle", label: "Circle" },
+            { id: "vinyl", label: "Vinyl" },
+            { id: "sleeve", label: "Sleeve" },
           ]}
           onChange={(v) => set("coverShape", v)}
         />

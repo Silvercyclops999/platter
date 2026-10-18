@@ -88,13 +88,45 @@ pub enum ReduceMotion {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ThemeMode {
-    #[default]
+    /// Classic dark (the default before Studio).
     Dark,
     Light,
     System,
     Midnight,
     Forest,
     Sand,
+    /// Platter's own look: warm graphite with a brass accent.
+    #[default]
+    Studio,
+    /// Studio on true black, for OLED screens.
+    StudioBlack,
+    /// Studio's light look: cream paper and ink.
+    Sleeve,
+}
+
+/// Theme for settings saved before Studio existed (they were on Classic dark).
+fn legacy_theme() -> ThemeMode {
+    ThemeMode::Dark
+}
+
+/// Accent for settings saved before Studio existed.
+fn legacy_accent() -> String {
+    "ivory".into()
+}
+
+/// Record-player motion for settings saved before Studio: off, so a kept look stays as it was.
+fn legacy_record_motion() -> RecordMotion {
+    RecordMotion::Off
+}
+
+/// What record-player motion is on: full screen now playing only, also the side panel, or none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RecordMotion {
+    #[default]
+    Full,
+    Both,
+    Off,
 }
 
 /// Deserialize a field that can be absent (leave alone) or null (clear).
@@ -232,9 +264,27 @@ pub struct Settings {
     /// Album and artist headers tint from artwork.
     pub artwork_colours: bool,
     pub reduce_motion: ReduceMotion,
+    /// Studio for new installs; settings saved without it were on Classic dark.
+    #[serde(default = "legacy_theme")]
     pub theme: ThemeMode,
-    /// Accent colour: a preset id ("ivory" is the default) or #RRGGBB.
+    /// Accent colour: a preset id ("brass" for new installs) or #RRGGBB.
+    #[serde(default = "legacy_accent")]
     pub accent: String,
+    /// Swap the look for its light or dark partner with the computer's mode.
+    /// On for new installs; off for settings saved before it existed.
+    #[serde(default)]
+    pub follow_system: bool,
+    /// The one-time "Try Platter's new look" offer was shown or not needed.
+    /// Done for new installs; settings saved before Studio get the offer.
+    #[serde(default)]
+    pub new_look_offered: bool,
+    /// The spinning record and tonearm (off for settings saved before Studio).
+    #[serde(default = "legacy_record_motion")]
+    pub record_motion: RecordMotion,
+    /// The seek bar in now playing is a needle on a groove line (off for
+    /// settings saved before Studio).
+    #[serde(default)]
+    pub tonearm_seek: bool,
     /// The theme file in use, held whole so it travels in the sync file.
     pub theme_file: Option<crate::themes::ThemeFile>,
     /// Layout options (Classic by default).
@@ -851,8 +901,12 @@ impl Default for Settings {
             art_cache_mb: 2048,
             artwork_colours: true,
             reduce_motion: ReduceMotion::System,
-            theme: ThemeMode::Dark,
-            accent: "ivory".into(),
+            theme: ThemeMode::Studio,
+            accent: "brass".into(),
+            follow_system: true,
+            new_look_offered: true,
+            record_motion: RecordMotion::Full,
+            tonearm_seek: true,
             theme_file: None,
             layout: crate::themes::Layout::default(),
             show_look_builder: true,
@@ -1107,6 +1161,9 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "reduceMotion",
     "theme",
     "accent",
+    "followSystem",
+    "recordMotion",
+    "tonearmSeek",
     "themeFile",
     "layout",
     "showLookBuilder",
@@ -1266,6 +1323,7 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "allowAutomation",
     "translationService",
     "lookStepDone",
+    "newLookOffered",
     "volume",
     "precacheCount",
     "artCacheMb",
@@ -1366,6 +1424,10 @@ pub struct SettingsPatch {
     pub reduce_motion: Option<ReduceMotion>,
     pub theme: Option<ThemeMode>,
     pub accent: Option<String>,
+    pub follow_system: Option<bool>,
+    pub new_look_offered: Option<bool>,
+    pub record_motion: Option<RecordMotion>,
+    pub tonearm_seek: Option<bool>,
     /// Null clears it.
     #[serde(default, deserialize_with = "some_or_null")]
     pub theme_file: Option<Option<crate::themes::ThemeFile>>,
@@ -1674,6 +1736,10 @@ impl Settings {
         set(&mut self.artwork_colours, p.artwork_colours);
         set(&mut self.reduce_motion, p.reduce_motion);
         set(&mut self.theme, p.theme);
+        set(&mut self.follow_system, p.follow_system);
+        set(&mut self.new_look_offered, p.new_look_offered);
+        set(&mut self.record_motion, p.record_motion);
+        set(&mut self.tonearm_seek, p.tonearm_seek);
         if let Some(a) = &p.accent {
             self.accent = crate::themes::accent_value(a)
                 .ok_or_else(|| AppError::Invalid("Accent colours are a preset or a colour like #A1B2C3.".into()))?;
@@ -4375,10 +4441,31 @@ mod tests {
     }
 
     #[test]
+    fn settings_saved_before_studio_keep_their_look_and_get_the_offer() {
+        let old: Settings = serde_json::from_str(r#"{"volume":0.5}"#).unwrap();
+        assert_eq!((old.theme, old.accent.as_str()), (ThemeMode::Dark, "ivory"));
+        assert!(!old.follow_system && !old.new_look_offered && !old.tonearm_seek);
+        assert_eq!(old.record_motion, RecordMotion::Off);
+        let old: Settings = serde_json::from_str(r#"{"theme":"midnight","accent":"sage"}"#).unwrap();
+        assert_eq!((old.theme, old.accent.as_str(), old.new_look_offered), (ThemeMode::Midnight, "sage", false));
+        // A fresh install is on Studio and is never offered it.
+        let new = Settings::default();
+        assert_eq!(new.theme, ThemeMode::Studio);
+        assert!(new.new_look_offered);
+        assert!(DEVICE_SETTINGS.contains(&"newLookOffered"));
+        let p: SettingsPatch = serde_json::from_str(r#"{"theme":"studioBlack","recordMotion":"both","tonearmSeek":false}"#).unwrap();
+        let mut s = Settings::default();
+        s.apply(&p).unwrap();
+        assert_eq!((s.theme, s.record_motion, s.tonearm_seek), (ThemeMode::StudioBlack, RecordMotion::Both, false));
+    }
+
+    #[test]
     fn theme_settings_default_validate_and_sync() {
         let s = Settings::default();
-        assert_eq!((s.theme, s.accent.as_str(), s.theme_file.is_none()), (ThemeMode::Dark, "ivory", true));
-        for k in ["theme", "accent", "themeFile"] {
+        assert_eq!((s.theme, s.accent.as_str(), s.theme_file.is_none()), (ThemeMode::Studio, "brass", true));
+        assert!(s.follow_system && s.new_look_offered && s.tonearm_seek);
+        assert_eq!(s.record_motion, RecordMotion::Full);
+        for k in ["theme", "accent", "themeFile", "followSystem", "recordMotion", "tonearmSeek"] {
             assert!(SYNCED_SETTINGS.contains(&k), "{k}");
         }
 

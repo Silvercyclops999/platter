@@ -4,7 +4,8 @@
  */
 import { create } from "zustand";
 import { DEFAULT_CHOICE, applyTheme, resolveTheme, safeLayout, type Layout, type ResolvedTheme, type ThemeBase, type ThemeChoice } from "../design/themes";
-import { DEFAULT_PARTS, applyLook, cacheLook, type LookParts } from "../design/looks/apply";
+import { DEFAULT_PARTS, STUDIO_FONTS, applyLook, cacheLook, type LookParts } from "../design/looks/apply";
+import { isStudioLook } from "../design/themes/builtins";
 import type { Settings } from "../lib/types";
 import { useSettings } from "./settings";
 
@@ -23,14 +24,20 @@ export const useTheme = create<ThemeStore>()(() => ({
 
 export function choiceFrom(s: Settings | null): ThemeChoice {
   if (!s) return DEFAULT_CHOICE;
-  return { theme: s.theme ?? "dark", accent: s.accent ?? "ivory", themeFile: s.themeFile ?? null };
+  return { theme: s.theme ?? "dark", accent: s.accent ?? "ivory", themeFile: s.themeFile ?? null, followSystem: s.followSystem ?? false };
 }
 
 /** The look's style, fonts and layout from the settings. */
 export function lookPartsFrom(s: Settings | null): LookParts {
   if (!s) return DEFAULT_PARTS;
   const f = s.themeFile;
-  return { style: f?.style ?? DEFAULT_PARTS.style, fonts: f?.fonts ?? DEFAULT_PARTS.fonts, layout: safeLayout(s.layout) };
+  // Platter's own looks set page titles in their display face.
+  const own = !f && isStudioLook(s.theme) ? STUDIO_FONTS : DEFAULT_PARTS.fonts;
+  const layout = safeLayout(s.layout);
+  // Record-player motion "both" also spins the side panel's record; "off" stops it.
+  const motion = s.recordMotion ?? "off";
+  const spinRecord = motion === "off" ? false : layout.spinRecord || motion === "both";
+  return { style: f?.style ?? DEFAULT_PARTS.style, fonts: f?.fonts ?? own, layout: spinRecord === layout.spinRecord ? layout : { ...layout, spinRecord } };
 }
 
 function update(doc: Document) {
@@ -54,12 +61,23 @@ export function installTheme(win: Window = window): () => void {
   useTheme.setState({ systemDark: mq ? mq.matches : true });
   let last: ThemeChoice | null = null;
   let lastLayout: unknown = null;
+  let lastMotion: unknown = null;
   const onSettings = (s: Settings | null) => {
     if (!s) return;
     const c = choiceFrom(s);
-    if (last && last.theme === c.theme && last.accent === c.accent && last.themeFile === c.themeFile && lastLayout === s.layout) return;
+    if (
+      last &&
+      last.theme === c.theme &&
+      last.accent === c.accent &&
+      last.themeFile === c.themeFile &&
+      last.followSystem === c.followSystem &&
+      lastLayout === s.layout &&
+      lastMotion === s.recordMotion
+    )
+      return;
     last = c;
     lastLayout = s.layout;
+    lastMotion = s.recordMotion;
     update(doc);
   };
   onSettings(useSettings.getState().settings);

@@ -59,6 +59,7 @@ export function SeekBar() {
   const trackId = usePlayer((s) => s.state?.track?.id ?? null);
   const hasTrack = trackId !== null;
   const loopOn = useSettings((s) => s.settings?.abLoopHandles ?? true);
+  const tonearm = useSettings((s) => s.settings?.tonearmSeek ?? false);
   const loop = usePlayer((s) => s.state?.abLoop ?? null);
   // The time held while dragging, for the song it was dragged on.
   const [held, setHeld] = useState<{ v: number; id: string | null } | null>(null);
@@ -99,6 +100,7 @@ export function SeekBar() {
       <div className="seek__bar">
         <Slider
           label={hasTrack ? "Seek" : "Seek, nothing playing"}
+          className={tonearm ? "slider--tonearm" : ""}
           value={Math.min(shown, durationMs)}
           max={Math.max(durationMs, 1)}
           step={SEEK_KEY_STEP}

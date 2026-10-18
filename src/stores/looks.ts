@@ -5,9 +5,11 @@
  */
 import { create } from "zustand";
 import type { ReadyLook } from "../design/looks/readymade";
+import { BUILTIN_THEMES, isStudioLook } from "../design/themes/builtins";
 import { LOOK_EXT } from "../design/themes/validate";
 import { backend } from "../lib/backend";
-import type { Settings, ThemeFile } from "../lib/types";
+import type { Settings, ThemeFile, ThemeSetting } from "../lib/types";
+import { useTheme } from "./theme";
 import { updateSettings, useSettings } from "./settings";
 import { toast, useToasts } from "./toasts";
 import { failText } from "../lib/errorText";
@@ -53,15 +55,50 @@ export function lookPatch(look: ThemeFile): Partial<Settings> {
   return held.layout ? { themeFile: held, layout: held.layout } : { themeFile: held };
 }
 
+/**
+ * The settings change for picking a theme. Picking one the computer's mode
+ * would swap away (a light theme while it's dark) turns Follow system off,
+ * so the theme picked is the one shown.
+ */
+export function themePatch(theme: ThemeSetting, s: Settings | null, systemDark: boolean): Partial<Settings> {
+  if (theme === "system" || !s?.followSystem) return { theme };
+  const dark = BUILTIN_THEMES[theme].base === "dark";
+  return dark === systemDark ? { theme } : { theme, followSystem: false };
+}
+
 /** Use a ready-made look. */
 export function applyReadyLook(r: ReadyLook): Promise<unknown> {
-  if (r.source.kind === "builtin") return updateSettings({ theme: r.source.theme, themeFile: null });
+  if (r.source.kind === "builtin")
+    return updateSettings({ ...themePatch(r.source.theme, useSettings.getState().settings, useTheme.getState().systemDark), themeFile: null });
   return updateSettings(lookPatch(r.source.look));
+}
+
+/**
+ * Try Platter's new look: Studio with its brass accent, following the
+ * computer's light or dark mode, with the record player and tonearm seek bar.
+ */
+export const NEW_LOOK_PATCH: Partial<Settings> = {
+  theme: "studio",
+  accent: "brass",
+  themeFile: null,
+  followSystem: true,
+  recordMotion: "full",
+  tonearmSeek: true,
+  newLookOffered: true,
+};
+
+/**
+ * The one-time offer of the new look is due: settings from before Studio
+ * that aren't on one of its looks and haven't seen the offer.
+ */
+export function newLookOfferDue(s: Settings | null): boolean {
+  if (!s || s.newLookOffered) return false;
+  return !(!s.themeFile && isStudioLook(s.theme));
 }
 
 /** True when the ready-made look is the one in use. */
 export function isReadyLookInUse(r: ReadyLook, s: Settings | null): boolean {
-  if (!s) return r.source.kind === "builtin" && r.source.theme === "dark";
+  if (!s) return r.source.kind === "builtin" && r.source.theme === "studio";
   if (r.source.kind === "builtin") return !s.themeFile && s.theme === r.source.theme;
   return !!s.themeFile && s.themeFile.file === r.source.look.file && s.themeFile.name === r.source.look.name;
 }

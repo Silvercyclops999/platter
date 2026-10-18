@@ -62,6 +62,44 @@ h2,
 :root[data-look-cover-shape="rounded"] :is(.np-art, .np-art .art) { border-radius: 16px; }
 :root[data-look-cover-shape="circle"] .art { border-radius: 50%; }
 :root[data-look-cover-shape="circle"] :is(.np-art, .np-art .art, .player-bar__art) { border-radius: 50%; }
+/* Vinyl: a circle with a spindle hole in the middle. */
+:root[data-look-cover-shape="vinyl"] .art { border-radius: 50%; }
+:root[data-look-cover-shape="vinyl"] :is(.np-art, .np-art .art, .player-bar__art) { border-radius: 50%; }
+:root[data-look-cover-shape="vinyl"] .art:not(.art--round)::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 7%;
+  min-width: 4px;
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  border-radius: 50%;
+  background: var(--color-bg-base);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+/* Sleeve: the cover as a square sleeve with the record's edge showing at its
+   right. Only on cards, where there's room; small art stays square. */
+:root[data-look-cover-shape="sleeve"] .card .art:not(.art--round) { overflow: visible; background: none; border-radius: 0; }
+:root[data-look-cover-shape="sleeve"] .card .art:not(.art--round)::before {
+  content: "";
+  position: absolute;
+  top: 8%;
+  left: 18%;
+  width: 80%;
+  height: 80%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, transparent 0 30%, #0b0b0b 30.5% 31.5%, transparent 32%),
+    repeating-radial-gradient(circle, #141414 0 1px, #1e1e1e 1px 2px);
+}
+:root[data-look-cover-shape="sleeve"] .card .art:not(.art--round) :is(img, .art__fallback, .art__skeleton) {
+  inset: 6% 12% 6% 0;
+  width: 88%;
+  height: 88%;
+  border-radius: 2px;
+  box-shadow: 2px 0 6px rgba(0, 0, 0, 0.4);
+}
 
 /* Spinning record: the now playing cover becomes a record that turns while
    music plays (never under reduced motion). */

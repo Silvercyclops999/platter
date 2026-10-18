@@ -1,5 +1,6 @@
 /**
- * Accent colours: ivory (the default), six presets and a custom colour.
+ * Accent colours: brass (Studio's own), ivory (Classic's own), six more
+ * presets and a custom colour.
  * Every preset has a tone for dark themes and one for light themes. A custom
  * colour must keep at least 3:1 contrast with the theme's background, or the
  * buttons it colours would get lost.
@@ -10,7 +11,7 @@ export { parseColour };
 import contract from "./contract.json";
 import type { ThemeBase } from "./validate";
 
-export type AccentPresetId = "ivory" | "sage" | "sky" | "lilac" | "amber" | "rose" | "teal";
+export type AccentPresetId = "ivory" | "brass" | "sage" | "sky" | "lilac" | "amber" | "rose" | "teal";
 
 export interface AccentPreset {
   id: AccentPresetId;
@@ -21,6 +22,7 @@ export interface AccentPreset {
 
 export const ACCENT_PRESETS: AccentPreset[] = [
   { id: "ivory", label: "Ivory", dark: "#ECE4D3", light: "#5E574D" },
+  { id: "brass", label: "Brass", dark: "#CDAE6E", light: "#7A5A1C" },
   { id: "sage", label: "Sage", dark: "#A9C8A0", light: "#3D6A38" },
   { id: "sky", label: "Sky", dark: "#9CC6F2", light: "#1F5F99" },
   { id: "lilac", label: "Lilac", dark: "#C6B3F0", light: "#5B43A3" },

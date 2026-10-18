@@ -922,10 +922,13 @@ mod tests {
             crate::settings::ThemeMode::Midnight,
             crate::settings::ThemeMode::Forest,
             crate::settings::ThemeMode::Sand,
+            crate::settings::ThemeMode::Studio,
+            crate::settings::ThemeMode::StudioBlack,
+            crate::settings::ThemeMode::Sleeve,
         ] {
             let name = serde_json::to_value(mode).unwrap();
             assert!(ids.iter().any(|i| Some(i.as_str()) == name.as_str()), "{name}");
         }
-        assert_eq!(ids.len(), 6);
+        assert_eq!(ids.len(), 9);
     }
 }

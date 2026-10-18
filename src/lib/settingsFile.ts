@@ -15,6 +15,7 @@ export const NOT_EXPORTED: readonly string[] = [
   "outputDevice",
   "eqLastOutput",
   "lookStepDone",
+  "newLookOffered",
   "libraries",
   "serverView",
 ];

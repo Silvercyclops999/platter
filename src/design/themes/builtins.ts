@@ -1,18 +1,30 @@
 /**
  * Built-in themes. Each is only a set of token values (the names in
- * contract.json); nothing else about the app changes between them. Dark is
- * the values in tokens.ts / tokens.css, so it needs no overrides.
+ * contract.json); nothing else about the app changes between them. Classic
+ * (id "dark") is the values in tokens.ts / tokens.css, so it needs no
+ * overrides. Studio, Studio Black and Sleeve are Platter's own looks: they
+ * share a brass accent, and CSS adds their surfaces (data-identity on <html>).
  */
 import { color, radius } from "../tokens";
 import { THEME_TOKEN_NAMES, type ThemeBase } from "./validate";
 
-export type BuiltinThemeId = "dark" | "light" | "midnight" | "forest" | "sand";
+export type BuiltinThemeId = "dark" | "light" | "midnight" | "forest" | "sand" | "studio" | "studioBlack" | "sleeve";
 
 export interface BuiltinTheme {
   id: BuiltinThemeId;
   name: string;
   base: ThemeBase;
   tokens: Record<string, string>;
+  /** The accent preset that is this theme's own (no accent tokens are set for it). */
+  ownAccent: "ivory" | "brass";
+}
+
+/** Platter's own looks, which share the brass accent and the record-player motif. */
+export const STUDIO_IDS: readonly BuiltinThemeId[] = ["studio", "studioBlack", "sleeve"];
+
+/** True for Studio, Studio Black and Sleeve. */
+export function isStudioLook(id: string | null | undefined): boolean {
+  return !!id && (STUDIO_IDS as readonly string[]).includes(id);
 }
 
 const kebab = (s: string) => s.replace(/[A-Z]/g, (m) => "-" + m.toLowerCase());
@@ -82,12 +94,88 @@ const IVORY_ON_LIGHT = {
   "color-text-on-accent": "#FFFDF8",
 };
 
+/** Brass on the Studio surfaces: the accent, the playing row and focus. */
+const BRASS_ON_DARK = {
+  "color-accent": "#CDAE6E",
+  "color-accent-hover": "#DCC28A",
+  "color-accent-pressed": "#B4955A",
+  "color-focus-ring": "#E2CB95",
+  "color-text-on-accent": "#1A1610",
+};
+
+/** Studio: warm graphite, like the front of rack gear. */
+const STUDIO: Record<string, string> = {
+  "color-bg-base": "#1A1816",
+  "color-bg-raised": "#211F1C",
+  "color-bg-raised2": "#2A2724",
+  "color-bg-overlay": "#33302C",
+  "color-border": "#3A3632",
+  "color-ink": "#FFF3E0",
+  "color-text-primary": "#F2EDE4",
+  "color-text-secondary": "#BDB4A7",
+  "color-text-muted": "#A39A8D",
+  ...BRASS_ON_DARK,
+  "color-accent-strong": "#6B5C3E",
+  "color-state-hover": "rgba(255, 243, 224, 0.06)",
+  "color-state-pressed": "rgba(255, 243, 224, 0.10)",
+  "color-state-selected": "rgba(255, 243, 224, 0.12)",
+  ...DARK_SIGNALS,
+  "color-playing": "#CDAE6E",
+  "color-error-surface": "#3A1D1C",
+  "radius-row": "4px",
+  "radius-card": "6px",
+  "radius-pill": "999px",
+};
+
+/** Studio Black: the same, on true black for OLED screens. */
+const STUDIO_BLACK: Record<string, string> = {
+  ...STUDIO,
+  "color-bg-base": "#000000",
+  "color-bg-raised": "#0D0C0B",
+  "color-bg-raised2": "#171614",
+  "color-bg-overlay": "#201E1B",
+  "color-border": "#2A2724",
+  "color-accent-strong": "#5E5034",
+  "color-error-surface": "#2E1514",
+};
+
+/** Sleeve: cream paper and ink, with a darker brass that reads on paper. */
+const SLEEVE: Record<string, string> = {
+  "color-bg-base": "#EEE7D8",
+  "color-bg-raised": "#F6F1E6",
+  "color-bg-raised2": "#E7DFCD",
+  "color-bg-overlay": "#FBF8F1",
+  "color-border": "#D6CBB4",
+  "color-ink": "#2B2117",
+  "color-text-primary": "#1C1712",
+  "color-text-secondary": "#4B4237",
+  "color-text-muted": "#5C5346",
+  "color-accent": "#7A5A1C",
+  "color-accent-hover": "#664A15",
+  "color-accent-pressed": "#563F12",
+  "color-focus-ring": "#563F12",
+  "color-text-on-accent": "#FFFBF2",
+  "color-accent-strong": "#C9B58A",
+  "color-state-hover": "rgba(43, 33, 23, 0.06)",
+  "color-state-pressed": "rgba(43, 33, 23, 0.10)",
+  "color-state-selected": "rgba(43, 33, 23, 0.09)",
+  ...LIGHT_SIGNALS,
+  "color-playing": "#7A5A1C",
+  "radius-row": "4px",
+  "radius-card": "6px",
+  "radius-pill": "999px",
+};
+
 export const BUILTIN_THEMES: Record<BuiltinThemeId, BuiltinTheme> = {
-  dark: { id: "dark", name: "Dark", base: "dark", tokens: DARK },
+  studio: { id: "studio", name: "Studio", base: "dark", tokens: STUDIO, ownAccent: "brass" },
+  studioBlack: { id: "studioBlack", name: "Studio Black", base: "dark", tokens: STUDIO_BLACK, ownAccent: "brass" },
+  sleeve: { id: "sleeve", name: "Sleeve", base: "light", tokens: SLEEVE, ownAccent: "brass" },
+  dark: { id: "dark", name: "Classic", base: "dark", tokens: DARK, ownAccent: "ivory" },
   light: {
     id: "light",
-    name: "Light",
+    name: "Classic light",
     base: "light",
+    ownAccent: "ivory",
     tokens: {
       "color-bg-base": "#E4DED3",
       "color-bg-raised": "#F7F4EE",
@@ -112,6 +200,7 @@ export const BUILTIN_THEMES: Record<BuiltinThemeId, BuiltinTheme> = {
     id: "midnight",
     name: "Midnight",
     base: "dark",
+    ownAccent: "ivory",
     tokens: {
       "color-bg-base": "#0A0D13",
       "color-bg-raised": "#111620",
@@ -137,6 +226,7 @@ export const BUILTIN_THEMES: Record<BuiltinThemeId, BuiltinTheme> = {
     id: "forest",
     name: "Forest",
     base: "dark",
+    ownAccent: "ivory",
     tokens: {
       "color-bg-base": "#0B100D",
       "color-bg-raised": "#121914",
@@ -162,6 +252,7 @@ export const BUILTIN_THEMES: Record<BuiltinThemeId, BuiltinTheme> = {
     id: "sand",
     name: "Sand",
     base: "light",
+    ownAccent: "ivory",
     tokens: {
       "color-bg-base": "#E5D9C6",
       "color-bg-raised": "#F4ECDF",
@@ -189,4 +280,17 @@ export const BUILTIN_IDS = Object.keys(BUILTIN_THEMES) as BuiltinThemeId[];
 /** The built-in a theme file starts from. */
 export function baseTheme(base: ThemeBase): BuiltinTheme {
   return base === "light" ? BUILTIN_THEMES.light : BUILTIN_THEMES.dark;
+}
+
+/**
+ * The look shown for a choice while following the computer's light or dark
+ * mode: the choice itself when its base matches, otherwise its partner.
+ * Studio and Studio Black pair with Sleeve; the other dark themes pair with
+ * Classic light, and the light ones with Classic.
+ */
+export function partnerFor(id: BuiltinThemeId, systemDark: boolean): BuiltinThemeId {
+  const t = BUILTIN_THEMES[id];
+  if ((t.base === "dark") === systemDark) return id;
+  if (isStudioLook(id)) return systemDark ? "studio" : "sleeve";
+  return systemDark ? "dark" : "light";
 }
