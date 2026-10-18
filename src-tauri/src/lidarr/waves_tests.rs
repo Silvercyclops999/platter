@@ -80,6 +80,7 @@ pub(super) async fn setup(practice: bool, patch: serde_json::Value) -> Setup {
         notifier: told.clone(),
         day_of: Arc::new(move |_| *d.lock()),
         hidden: Arc::new(Vec::new),
+        utc_offset: None,
     });
     Setup { r, w, told, day }
 }
@@ -222,7 +223,7 @@ async fn the_user_can_pause_and_progress_survives_a_restart() {
     assert!(t.w.pass().await.unwrap().requested.is_empty(), "paused by the user");
     // A new Waves on the same database (Platter restarted) picks up there.
     let d = t.day.clone();
-    let w2 = Waves::new(WavesDeps { lidarr: t.r.lidarr.clone(), notifier: t.told.clone(), day_of: Arc::new(move |_| *d.lock()), hidden: Arc::new(Vec::new) });
+    let w2 = Waves::new(WavesDeps { lidarr: t.r.lidarr.clone(), notifier: t.told.clone(), day_of: Arc::new(move |_| *d.lock()), hidden: Arc::new(Vec::new), utc_offset: None });
     assert!(w2.status().unwrap().user_paused);
     w2.set_paused(false).unwrap();
     let out = w2.pass().await.unwrap();
@@ -244,7 +245,7 @@ async fn albums_asked_for_by_hand_or_hidden_are_skipped() {
     t.r.lidarr.request(super::request_tests::input(RG_SECOND, "Second Wind", None)).await.unwrap();
     let d = t.day.clone();
     let hidden = vec![crate::import::played::hide_key_for("album", "Northlight", "Small Hours").unwrap()];
-    let w = Waves::new(WavesDeps { lidarr: t.r.lidarr.clone(), notifier: t.told.clone(), day_of: Arc::new(move |_| *d.lock()), hidden: Arc::new(move || hidden.clone()) });
+    let w = Waves::new(WavesDeps { lidarr: t.r.lidarr.clone(), notifier: t.told.clone(), day_of: Arc::new(move |_| *d.lock()), hidden: Arc::new(move || hidden.clone()), utc_offset: None });
     let out = w.pass().await.unwrap();
     assert!(out.requested.is_empty(), "{out:?}");
     assert_eq!(t.r.lidarr.requests().len(), 1);

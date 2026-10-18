@@ -165,6 +165,7 @@ impl Bridge {
                 notifier: Arc::new(LogNotifier),
                 day_of: Arc::new(move |at| crate::lidarr::waves::local_day(&day_db, at)),
                 hidden: Arc::new(Vec::new),
+                utc_offset: None,
             },
             Arc::new(PlanAlbums { db: p.db.clone() }),
         );
@@ -606,7 +607,9 @@ pub fn build(env: Env) -> AppResult<Parts> {
         // Each album a wave asks for is checked on MusicBrainz first, as on a desktop.
         mb: Arc::new(crate::lidarr::mbpick::MbCached {
             http: Arc::new(crate::artistinfo::http::ReqwestHttp::new()?),
-            limiter: Arc::new(crate::artistinfo::limit::Limiter::per_second(1.0)),
+            // Half MusicBrainz's one a second: a desktop at home shares the
+            // same address and has its own limiter, so together they stay near it.
+            limiter: Arc::new(crate::artistinfo::limit::Limiter::per_second(0.5)),
             db: db.clone(),
             clock: Arc::new(crate::db::queries::now_s),
             ttl: crate::lidarr::mbpick::CACHE_TTL,

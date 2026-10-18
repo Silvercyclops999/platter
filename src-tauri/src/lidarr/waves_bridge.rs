@@ -21,7 +21,6 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::status::RequestState;
 use super::waves::{AlbumSource, NeedsYou, Practiced, WaveAlbum, WaveState, Waves, clean_waves, key_of};
 use crate::db::DbHandle;
 use crate::db::store::{kv_get, kv_set};
@@ -35,6 +34,9 @@ const PLAN_KEY: &str = "lidarr.bringIn.plan";
 const LEASE_KEY: &str = "lidarr.bringIn.bridge";
 /// Bridges that didn't answer a handover, and until when they're left be.
 const REFUSED_KEY: &str = "lidarr.bringIn.bridgeRefused";
+/// Plans taken back from a Bridge that may not know yet, by link: the
+/// Bridge is told to stop whenever it's heard from.
+const REVOKED_KEY: &str = "lidarr.bringIn.bridgeRevoked";
 /// Release groups the desktop picked, by album key.
 const GROUPS_KEY: &str = "lidarr.bringIn.groups";
 /// Most albums in one plan (the rest follow as these are done).
@@ -99,6 +101,14 @@ pub struct WavesPlan {
     pub progress: Option<WaveState>,
     #[serde(default)]
     pub edits: Vec<PlanEdit>,
+    /// The desktop heard the Bridge take this plan. Until then the Bridge
+    /// waits, so a handover whose answer got lost never runs on both sides.
+    #[serde(default)]
+    pub confirmed: bool,
+    /// The desktop's offset from UTC (seconds), so both sides count the
+    /// same days against one daily pace.
+    #[serde(default)]
+    pub utc_offset: Option<i64>,
 }
 
 /// What the Bridge sends back.
@@ -140,6 +150,8 @@ struct Kept {
     run: bool,
     albums: Vec<PlanAlbum>,
     requested: Vec<String>,
+    confirmed: bool,
+    utc_offset: Option<i64>,
 }
 
 fn read<T: serde::de::DeserializeOwned + Default>(db: &DbHandle, key: &str) -> T {
@@ -268,6 +280,10 @@ impl Waves {
             refused.insert(l.link.clone(), self.now() + RETRY_AFTER);
             write(&self.l().inner.db, REFUSED_KEY, &refused)?;
         }
+        // The Bridge may still be running it: it's told to stop when next heard from.
+        let mut revoked: HashMap<String, String> = read(&self.l().inner.db, REVOKED_KEY);
+        revoked.insert(l.link.clone(), l.plan_id.clone());
+        write(&self.l().inner.db, REVOKED_KEY, &revoked)?;
         self.save_lease(None)?;
         self.save(st)?;
         tracing::info!(bridge = %l.name, "Bring in my listening: back on this computer");
@@ -356,6 +372,8 @@ impl Waves {
             requested: Vec::new(),
             progress: None,
             edits: Vec::new(),
+            confirmed: true,
+            utc_offset: None,
         };
         if !s.bring_in {
             // Off: this computer keeps what the Bridge did, and the Bridge stops.
@@ -376,8 +394,12 @@ impl Waves {
         };
         if l.plan_id.is_empty() {
             if !self.may_hand_to(link) {
-                return Ok(None);
+                // Not handed over again yet, but a plan taken back from it
+                // is stopped there, so the waves never run on both sides.
+                let revoked: HashMap<String, String> = read(&self.l().inner.db, REVOKED_KEY);
+                return Ok(revoked.get(link).map(|id| stop(id.clone())));
             }
+            self.forget_revoked(link)?;
             l = Lease { link: link.to_string(), name: name.to_string(), plan_id: uuid::Uuid::new_v4().to_string(), handed_at: self.now(), summary_day: st.summary_day, ..Default::default() };
             tracing::info!(bridge = %name, "Bring in my listening: handing the waves to the Bridge");
         }
@@ -387,7 +409,7 @@ impl Waves {
             merge_progress(&mut seen, m);
         }
         let albums = self.plan_albums(&waves, &seen)?;
-        let requested: Vec<String> = self.l().records().into_iter().filter(|r| r.state != RequestState::Failed).map(|r| r.release_group_id).collect();
+        let requested: Vec<String> = self.l().asked_groups();
         let progress = (!l.acked).then(|| {
             let mut p = st.clone();
             p.queued.clear();
@@ -410,6 +432,8 @@ impl Waves {
             requested,
             progress,
             edits: l.edits.clone(),
+            confirmed: l.acked,
+            utc_offset: self.inner.utc_offset.as_ref().map(|f| f(self.now())),
         };
         self.save_lease(Some(&l))?;
         Ok(Some(plan))
@@ -443,10 +467,22 @@ impl Waves {
     pub async fn bridge_progress(&self, link: &str, p: WavesProgress) -> AppResult<bool> {
         let _g = self.lock.lock().await;
         let Some(mut l) = self.lease().filter(|l| l.link == link && l.plan_id == p.plan_id) else {
+            let revoked: HashMap<String, String> = read(&self.l().inner.db, REVOKED_KEY);
+            if revoked.get(link) == Some(&p.plan_id) {
+                // A plan taken back: what the Bridge did since joins this
+                // computer's progress, and it's told to stop (again).
+                let mut st = self.state();
+                merge_progress(&mut st, &p.state);
+                self.save(&st)?;
+                if !p.running {
+                    self.forget_revoked(link)?;
+                }
+            }
             return Ok(p.running);
         };
         let now = self.now();
-        if !l.acked {
+        let first = !l.acked;
+        if first {
             tracing::info!(bridge = %l.name, running = p.running, "Bring in my listening: the Bridge took the waves");
         }
         l.acked = true;
@@ -465,9 +501,20 @@ impl Waves {
             // The Bridge stopped on its own: the waves come back here.
             let mut st = self.state();
             self.take_back_with(&mut st, true)?;
+            self.forget_revoked(link)?;
             self.poke();
+            return Ok(false);
         }
-        Ok(false)
+        // The first answer: the Bridge hears at once that it may start.
+        Ok(first)
+    }
+
+    fn forget_revoked(&self, link: &str) -> AppResult<()> {
+        let mut revoked: HashMap<String, String> = read(&self.l().inner.db, REVOKED_KEY);
+        if revoked.remove(link).is_some() {
+            write(&self.l().inner.db, REVOKED_KEY, &revoked)?;
+        }
+        Ok(())
     }
 
     // ------------------------------------------------------------ Bridge
@@ -523,13 +570,31 @@ impl Waves {
         self.save(&st)?;
         let requested = plan.requested.iter().map(|r| r.trim().to_ascii_lowercase()).filter(|r| crate::artistinfo::is_mbid(r)).collect();
         let albums = plan.albums.iter().take(MAX_PLAN).cloned().collect();
-        write(db, PLAN_KEY, &Kept { id: plan.id.clone(), run: true, albums, requested })?;
+        // Once confirmed, a plan stays confirmed (a resend never undoes it).
+        let was = kept.id == plan.id && kept.confirmed;
+        let confirmed = plan.confirmed || was;
+        if confirmed && !was {
+            tracing::info!("Bring in my listening: the desktop confirmed the handover");
+        }
+        write(db, PLAN_KEY, &Kept { id: plan.id.clone(), run: true, albums, requested, confirmed, utc_offset: plan.utc_offset })?;
         Ok(())
     }
 
     /// On the Bridge: whether it has the waves to run.
     pub fn plan_running(&self) -> bool {
         read::<Kept>(&self.l().inner.db, PLAN_KEY).run
+    }
+
+    /// On the Bridge: a plan it took that the desktop hasn't confirmed yet.
+    pub(super) fn plan_waiting(&self) -> bool {
+        let k: Kept = read(&self.l().inner.db, PLAN_KEY);
+        k.run && !k.confirmed
+    }
+
+    /// On the Bridge: the desktop's offset from UTC, while it runs its plan.
+    pub(super) fn plan_utc_offset(&self) -> Option<i64> {
+        let k: Kept = read(&self.l().inner.db, PLAN_KEY);
+        k.utc_offset.filter(|_| k.run)
     }
 
     /// On the Bridge: progress for the desktops.

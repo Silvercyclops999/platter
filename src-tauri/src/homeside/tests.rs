@@ -385,6 +385,7 @@ async fn bring_in_my_listening_goes_to_the_bridge_sealed_and_comes_back() {
         notifier: Arc::new(Quiet),
         day_of: Arc::new(|at| at / 86_400),
         hidden: Arc::new(Vec::new),
+        utc_offset: None,
     });
     let desk = Desktop::new(DesktopDeps {
         db: d.db.clone(),

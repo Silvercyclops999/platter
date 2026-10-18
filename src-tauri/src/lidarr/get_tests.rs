@@ -171,6 +171,7 @@ fn waves(r: &super::request_tests::Rig) -> Waves {
         notifier: Arc::new(Quiet),
         day_of: Arc::new(|at| at / 86_400),
         hidden: Arc::new(Vec::new),
+        utc_offset: None,
     })
 }
 
@@ -226,6 +227,34 @@ async fn get_albums_puts_a_refused_album_under_needs_you_and_carries_on() {
     assert_eq!(st.queued.len(), 1);
     let st = w.unqueue(&[]).unwrap();
     assert!(st.queued.is_empty());
+}
+
+#[tokio::test]
+async fn get_albums_doesnt_count_a_request_that_failed_or_is_still_waiting() {
+    let r = rig();
+    r.web.st.lock().free_space = Some(400_000_000_000);
+    r.lidarr.check().await.unwrap();
+    let w = waves(&r);
+    // Lidarr is still reading the new artist: the request waits to send.
+    r.web.st.lock().refresh_polls = 1_000_000;
+    w.enqueue(vec![queued(RG_SECOND, "Second Wind")], "Northlight").unwrap();
+    let out = w.pass().await.unwrap();
+    assert!(out.requested.is_empty(), "{out:?}");
+    assert_eq!(r.lidarr.requests()[0].state, RequestState::Queued);
+    // Lidarr switches the edition before the search: failed, so it needs you.
+    {
+        let mut st = r.web.st.lock();
+        st.refresh_polls = 0;
+        st.album_reads = 0;
+        st.switch_after = Some(1);
+    }
+    w.enqueue(vec![queued(RG_EP, "Small Hours")], "Northlight").unwrap();
+    let out = w.pass().await.unwrap();
+    assert!(out.requested.is_empty(), "{out:?}");
+    assert_eq!(out.needs_you, ["Small Hours"]);
+    let st = w.status().unwrap();
+    assert_eq!((st.today, st.requested_total), (0, 0), "neither counts as requested");
+    assert!(st.needs_you[0].reason.contains("14-track"), "{}", st.needs_you[0].reason);
 }
 
 #[tokio::test]

@@ -29,7 +29,7 @@ struct Pair {
 fn bridge_waves(t: &Setup, bl: &Lidarr, bdb: &DbHandle, told: Arc<Told>) -> Waves {
     let d = t.day.clone();
     Waves::with_albums(
-        WavesDeps { lidarr: bl.clone(), notifier: told, day_of: Arc::new(move |_| *d.lock()), hidden: Arc::new(Vec::new) },
+        WavesDeps { lidarr: bl.clone(), notifier: told, day_of: Arc::new(move |_| *d.lock()), hidden: Arc::new(Vec::new), utc_offset: None },
         Arc::new(PlanAlbums { db: bdb.clone() }),
     )
 }
@@ -46,11 +46,16 @@ async fn pair(practice: bool, patch: Value) -> Pair {
 }
 
 impl Pair {
-    /// The desktop sends a plan, the Bridge takes it and answers.
+    /// The desktop sends a plan, the Bridge takes it and answers, and the
+    /// desktop confirms it at once.
     async fn hand(&self) -> WavesPlan {
         let plan = self.t.w.bridge_plan(LINK, NAME).await.unwrap().expect("a plan");
+        assert!(!plan.confirmed, "a new handover waits for the Bridge's answer");
         self.br.take_plan(&plan).await.unwrap();
-        self.t.w.bridge_progress(LINK, self.br.progress()).await.unwrap();
+        assert!(self.t.w.bridge_progress(LINK, self.br.progress()).await.unwrap(), "the first answer gets a confirmation");
+        let confirmed = self.t.w.bridge_plan(LINK, NAME).await.unwrap().expect("a plan");
+        assert!(confirmed.confirmed && confirmed.id == plan.id);
+        self.br.take_plan(&confirmed).await.unwrap();
         plan
     }
 
@@ -121,6 +126,7 @@ async fn the_bridge_runs_while_the_desktop_is_off_and_progress_comes_back() {
         notifier: p.t.told.clone(),
         day_of: { let d = p.t.day.clone(); Arc::new(move |_| *d.lock()) },
         hidden: Arc::new(Vec::new),
+        utc_offset: None,
     });
     w2.bridge_progress(LINK, p.br.progress()).await.unwrap();
     let st = w2.status().unwrap();
@@ -262,6 +268,7 @@ async fn both_sides_keep_the_handover_through_a_restart() {
         notifier: p.t.told.clone(),
         day_of: { let d = p.t.day.clone(); Arc::new(move |_| *d.lock()) },
         hidden: Arc::new(Vec::new),
+        utc_offset: None,
     });
     assert_eq!(w2.status().unwrap().bridge.as_deref(), Some(NAME));
     assert!(w2.pass().await.unwrap().requested.is_empty());
@@ -302,7 +309,8 @@ async fn a_bridge_that_never_answers_a_handover_is_left_be_for_a_while() {
     assert!(p.t.w.pass().await.unwrap().requested.is_empty(), "waiting for the Bridge to answer");
     p.advance(HANDOVER_WAIT + 1);
     assert_eq!(p.t.w.pass().await.unwrap().requested, vec!["Second Wind"]);
-    assert!(p.t.w.bridge_plan(LINK, NAME).await.unwrap().is_none(), "not handed over again yet");
+    let again = p.t.w.bridge_plan(LINK, NAME).await.unwrap().expect("a stop for the plan taken back");
+    assert!(!again.run && again.albums.is_empty(), "not handed over again yet");
     assert!(!p.t.w.may_hand_to(LINK));
     p.advance(RETRY_AFTER);
     assert!(p.t.w.may_hand_to(LINK));
@@ -321,4 +329,77 @@ fn progress_merges_without_losing_either_side() {
     let later = WaveState { day: 11, today: 1, ..Default::default() };
     super::waves_bridge::merge_progress(&mut a, &later);
     assert_eq!((a.day, a.today), (11, 1));
+}
+
+#[tokio::test]
+async fn a_handover_whose_answer_got_lost_never_runs_on_both_sides() {
+    let p = pair(false, json!({"bringInPerDay": 1})).await;
+    let plan = p.t.w.bridge_plan(LINK, NAME).await.unwrap().unwrap();
+    // The Bridge takes it, but its answer never reaches the desktop.
+    p.br.take_plan(&plan).await.unwrap();
+    assert!(p.br.plan_running());
+    assert_eq!(p.br.pass().await.unwrap(), PassOutcome::default(), "not confirmed: the Bridge waits");
+    // The desktop takes the waves back and carries on.
+    p.advance(HANDOVER_WAIT + 1);
+    assert_eq!(p.t.w.pass().await.unwrap().requested, vec!["Second Wind"]);
+    *p.t.day.lock() += 1;
+    assert!(p.br.pass().await.unwrap().requested.is_empty(), "still not confirmed");
+    // Heard from again: the Bridge is told to stop, though it isn't handed the waves again yet.
+    assert!(p.t.w.bridge_progress(LINK, p.br.progress()).await.unwrap());
+    let stop = p.t.w.bridge_plan(LINK, NAME).await.unwrap().expect("a stop");
+    assert!(!stop.run);
+    p.br.take_plan(&stop).await.unwrap();
+    assert!(!p.br.plan_running());
+    assert!(!p.t.w.bridge_progress(LINK, p.br.progress()).await.unwrap());
+    assert!(p.t.w.bridge_plan(LINK, NAME).await.unwrap().is_none(), "stopped: nothing more to send until it may be handed over");
+    assert!(p.bl.requests().is_empty(), "the Bridge asked for nothing");
+    assert_eq!(p.in_lidarr(RG_SECOND), 1);
+}
+
+#[tokio::test]
+async fn a_bridge_on_utc_and_a_desktop_seven_hours_behind_share_one_daily_pace() {
+    const OFF: i64 = -7 * 3600;
+    let t = super::waves_tests::setup(false, json!({"bringInPerDay": 1})).await;
+    // 03:00 UTC: on the desktop it's still the evening before.
+    *t.r.now.lock() = 1_799_971_200 + 86_400 + 3 * 3600;
+    let desk = Waves::new(WavesDeps {
+        lidarr: t.r.lidarr.clone(),
+        notifier: t.told.clone(),
+        day_of: Arc::new(|at| (at + OFF).div_euclid(86_400)),
+        hidden: Arc::new(Vec::new),
+        utc_offset: Some(Arc::new(|_| OFF)),
+    });
+    let (_dir, bdb, bl) = t.r.bridge();
+    super::shared::tests::sync(&t.r.lidarr.inner.shared, &bl.inner.shared);
+    bl.check().await.unwrap();
+    let br = Waves::with_albums(
+        WavesDeps { lidarr: bl.clone(), notifier: Arc::new(Told::default()), day_of: Arc::new(|at| at.div_euclid(86_400)), hidden: Arc::new(Vec::new), utc_offset: None },
+        Arc::new(PlanAlbums { db: bdb.clone() }),
+    );
+    assert_eq!(desk.pass().await.unwrap().requested, vec!["Second Wind"]);
+    let plan = desk.bridge_plan(LINK, NAME).await.unwrap().unwrap();
+    assert_eq!(plan.utc_offset, Some(OFF));
+    br.take_plan(&plan).await.unwrap();
+    assert!(desk.bridge_progress(LINK, br.progress()).await.unwrap());
+    br.take_plan(&desk.bridge_plan(LINK, NAME).await.unwrap().unwrap()).await.unwrap();
+    // The Bridge's UTC day is a day ahead, but it counts the desktop's day: today's one is used.
+    assert!(br.pass().await.unwrap().requested.is_empty());
+    desk.bridge_progress(LINK, br.progress()).await.unwrap();
+    assert_eq!(desk.status().unwrap().today, 1);
+    // The desktop's next day (02:00 there): one more, on the Bridge.
+    *t.r.now.lock() += 6 * 3600;
+    assert_eq!(br.pass().await.unwrap().requested, vec!["Small Hours"]);
+    desk.bridge_progress(LINK, br.progress()).await.unwrap();
+    let st = desk.status().unwrap();
+    assert_eq!((st.today, st.requested_total), (1, 2));
+}
+
+#[tokio::test]
+async fn the_daily_count_isnt_reset_when_the_day_goes_back() {
+    let t = super::waves_tests::setup(false, json!({"bringInPerDay": 1})).await;
+    assert_eq!(t.w.pass().await.unwrap().requested, vec!["Second Wind"]);
+    // A time zone change puts the clock a day back: today's one stays used.
+    *t.day.lock() -= 1;
+    assert!(t.w.pass().await.unwrap().requested.is_empty());
+    assert_eq!(t.w.status().unwrap().today, 1);
 }

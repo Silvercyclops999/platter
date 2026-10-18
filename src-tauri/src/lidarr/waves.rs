@@ -283,6 +283,9 @@ pub struct WavesDeps {
     pub notifier: Arc<dyn Notifier>,
     /// The local day number of a unix time (seconds).
     pub day_of: Arc<dyn Fn(i64) -> i64 + Send + Sync>,
+    /// On a desktop: seconds east of UTC at a unix time. A Bridge is handed
+    /// it, so both sides count the same days against one daily pace.
+    pub utc_offset: Option<Arc<dyn Fn(i64) -> i64 + Send + Sync>>,
     /// Hide keys of rows the user hid from "Played a lot".
     pub hidden: Arc<dyn Fn() -> Vec<String> + Send + Sync>,
 }
@@ -312,6 +315,18 @@ enum Sent {
     Refused(String),
     /// Something else went wrong.
     Failed(String),
+    /// Asked for long ago (it has left the request list): nothing sent.
+    Asked,
+}
+
+/// What a request that went through came to, for the pacing: Lidarr was
+/// asked (counts), it's waiting to send (doesn't count), or it failed.
+fn outcome(rec: &RequestRecord) -> Result<bool, String> {
+    match rec.state {
+        RequestState::Failed => Err(rec.message.clone().unwrap_or_else(|| "Lidarr didn't take the request.".into())),
+        RequestState::Queued => Ok(false),
+        _ => Ok(!rec.already_in_lidarr && rec.auto),
+    }
 }
 
 impl Waves {
@@ -350,6 +365,15 @@ impl Waves {
 
     pub(super) fn now(&self) -> i64 {
         (self.l().inner.clock)()
+    }
+
+    /// The day number the daily pace counts by: the desktop's day on a
+    /// Bridge it handed the waves to, else this device's own.
+    pub(super) fn day(&self, at: i64) -> i64 {
+        match self.plan_utc_offset() {
+            Some(off) => (at + off).div_euclid(86_400),
+            None => (self.inner.day_of)(at),
+        }
     }
 
     /// Run a pass soon (a setting changed, the user resumed it).
@@ -410,7 +434,8 @@ impl Waves {
             Some(t) => self.albums.first(t, &self.skip_keys(&st))?.1,
             None => 0,
         };
-        let today = if st.day == (self.inner.day_of)(self.now()) { st.today } else { 0 };
+        // A day that went backwards (a time zone change) keeps the count.
+        let today = if st.day >= self.day(self.now()) { st.today } else { 0 };
         Ok(WavesStatus {
             on: s.bring_in,
             practice: self.l().practice_active(),
@@ -437,14 +462,14 @@ impl Waves {
     /// Albums already queued, or asked for before (and not failed), are
     /// left out. Returns how many were added.
     pub fn enqueue(&self, albums: Vec<QueuedGet>, artist: &str) -> AppResult<usize> {
-        let records = self.l().records();
+        let asked = self.l().asked_groups();
         let mut st = self.state();
         let mut added = 0;
         for a in albums {
             let rg = a.release_group_id.trim().to_ascii_lowercase();
             if !crate::artistinfo::is_mbid(&rg)
                 || st.queued.iter().any(|q| q.release_group_id.eq_ignore_ascii_case(&rg))
-                || records.iter().any(|r| r.release_group_id == rg && r.state != RequestState::Failed)
+                || asked.contains(&rg)
             {
                 continue;
             }
@@ -554,6 +579,8 @@ impl Waves {
 
     fn resume(&self, st: &mut WaveState) -> AppResult<()> {
         if let Some(was) = st.paused.take() {
+            // A fresh start: one failure after a pause doesn't pause it again.
+            st.fails = 0;
             tracing::info!("Bring in my listening carried on");
             self.l().log_change("Bring in my listening carried on", &was, "Clear again", false, None)?;
         }
@@ -594,6 +621,9 @@ impl Waves {
         if let Some(r) = l.records().into_iter().find(|r| r.release_group_id == rgid && r.state != RequestState::Failed) {
             return Sent::Done(Box::new(r));
         }
+        if l.asked_before(&rgid) {
+            return Sent::Asked;
+        }
         let rec = l.new_record(&input, rgid, true);
         match l.send(rec).await {
             Ok(r) => match l.upsert(&r) {
@@ -612,9 +642,15 @@ impl Waves {
         let mut st = self.state();
         let mut out = PassOutcome::default();
         let now = self.now();
-        let today = (self.inner.day_of)(now);
+        let today = self.day(now);
         let practice = self.l().practice_active();
-        if st.day != today {
+        // On a Bridge: a handover this computer hasn't confirmed yet doesn't run.
+        if self.plan_waiting() {
+            return Ok(out);
+        }
+        // Counts reset only when the day moves on, never when it goes back
+        // (a time zone change, summer time).
+        if today > st.day {
             let day = st.day;
             self.summary(&mut st, day, practice);
             st.day = today;
@@ -705,7 +741,7 @@ impl Waves {
         // Asked for before (by hand or by a wave).
         let fa = fold_artist(&row.artist);
         let fal = fold_album(&row.album);
-        if self.l().records().iter().any(|r| r.state != RequestState::Failed && fold_artist(&r.artist) == fa && fold_album(&r.title) == fal) {
+        if self.l().asked_all().iter().any(|r| r.state != RequestState::Failed && fold_artist(&r.artist) == fa && fold_album(&r.title) == fal) {
             st.done.push(row.key.clone());
             return Ok(true);
         }
@@ -745,7 +781,7 @@ impl Waves {
             typed: None,
         };
         let elsewhere = self.albums.requested();
-        if self.l().records().iter().any(|r| r.release_group_id.eq_ignore_ascii_case(&group_id) && r.state != RequestState::Failed)
+        if self.l().asked_before(&group_id)
             || elsewhere.iter().any(|g| g.eq_ignore_ascii_case(&group_id))
         {
             st.done.push(row.key.clone());
@@ -770,9 +806,13 @@ impl Waves {
         }
         match self.send(input).await {
             Sent::Done(rec) => {
+                let counts = match outcome(&rec) {
+                    Ok(c) => c,
+                    Err(why) => return self.after_error(Sent::Refused(why), st, out, needs),
+                };
                 st.done.push(row.key.clone());
                 st.fails = 0;
-                if !rec.already_in_lidarr && rec.auto {
+                if counts {
                     st.today += 1;
                     st.requested_total += 1;
                     out.requested.push(rec.title.clone());
@@ -780,6 +820,10 @@ impl Waves {
                     self.l().log_change(&format!("Requested {} by {} (Bring in my listening)", rec.title, rec.artist), "", &to, false, None)?;
                     tracing::info!(album = %rec.title, "Bring in my listening: requested");
                 }
+                Ok(true)
+            }
+            Sent::Asked => {
+                st.done.push(row.key.clone());
                 Ok(true)
             }
             other => self.after_error(other, st, out, needs),
@@ -814,14 +858,22 @@ impl Waves {
         } else {
             match self.send(q.input()).await {
                 Sent::Done(rec) => {
+                    let counts = match outcome(&rec) {
+                        Ok(c) => c,
+                        Err(why) => return self.after_error(Sent::Refused(why), st, out, needs),
+                    };
                     take(st);
                     st.fails = 0;
-                    if !rec.already_in_lidarr && rec.auto {
+                    if counts {
                         st.today += 1;
                         out.requested.push(rec.title.clone());
                         let to = rec.destination.clone().unwrap_or_default();
                         self.l().log_change(&format!("Requested {} by {} (Get albums)", rec.title, rec.artist), "", &to, false, None)?;
                     }
+                    Ok(true)
+                }
+                Sent::Asked => {
+                    take(st);
                     Ok(true)
                 }
                 other => self.after_error(other, st, out, needs),
@@ -838,6 +890,7 @@ impl Waves {
     ) -> AppResult<bool> {
         match sent {
             Sent::Done(_) => Ok(true),
+            Sent::Asked => Ok(true),
             Sent::Pause(why) => {
                 self.pause(st, why)?;
                 Ok(false)
@@ -894,6 +947,12 @@ pub async fn watch(w: Waves) {
             _ = w.wake.notified() => {}
         }
     }
+}
+
+/// Seconds east of UTC at a unix time, from SQLite's local time.
+pub fn local_offset(db: &crate::db::DbHandle, at: i64) -> i64 {
+    db.read(|c| Ok(c.query_row("SELECT CAST(strftime('%s', datetime(?1, 'unixepoch', 'localtime')) AS INTEGER) - ?1", [at], |r| r.get(0))?))
+        .unwrap_or(0)
 }
 
 /// The local day number of a unix time, from SQLite's local time.

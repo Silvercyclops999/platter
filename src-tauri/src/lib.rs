@@ -777,11 +777,12 @@ pub fn run() {
             tauri::async_runtime::spawn(lidarr::request::watch(lidarr_service.clone()));
             // Bring in my listening: albums from Played a lot, a few a day.
             let bring_in = {
-                let (day_db, hidden_store) = (db.clone(), sync_store.clone());
+                let (day_db, offset_db, hidden_store) = (db.clone(), db.clone(), sync_store.clone());
                 lidarr::waves::Waves::new(lidarr::waves::WavesDeps {
                     lidarr: lidarr_service.clone(),
                     notifier: Arc::new(social::commands::OsNotifier(app.handle().clone())),
                     day_of: Arc::new(move |at| lidarr::waves::local_day(&day_db, at)),
+                    utc_offset: Some(Arc::new(move |at| lidarr::waves::local_offset(&offset_db, at))),
                     hidden: Arc::new(move || {
                         hidden_store.list(&sync::store::PLAYED_HIDDEN).map(|v| v.into_iter().map(|(k, _)| k).collect()).unwrap_or_default()
                     }),
