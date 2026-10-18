@@ -78,6 +78,8 @@ where
 const POSITION_REFRESH: Duration = Duration::from_secs(5);
 /// A position this far from where we expect it is a seek: push it at once.
 const SEEK_JUMP_MS: u64 = 1_500;
+/// After the OS refused a session, ask again on a player change this much later.
+const ATTACH_RETRY: Duration = Duration::from_secs(30);
 
 /// The text and duration of a track, as the OS will show it.
 pub fn now_playing_for(state: &PlayerState) -> Option<NowPlaying> {
@@ -112,6 +114,8 @@ pub struct Controller {
     playback: Playback,
     /// The last position sent and when.
     pushed: Option<(Instant, u64)>,
+    /// When a session was last asked for and refused.
+    refused_at: Option<Instant>,
 }
 
 impl Controller {
@@ -126,6 +130,7 @@ impl Controller {
             now: None,
             playback: Playback::Stopped,
             pushed: None,
+            refused_at: None,
         }
     }
 
@@ -148,26 +153,54 @@ impl Controller {
             return;
         }
         self.enabled = on;
+        self.refused_at = None;
         if !on {
             if self.session.take().is_some() {
                 tracing::debug!("media session detached");
             }
             return;
         }
+        self.attach(Instant::now());
+    }
+
+    /// Asks the OS for a session. When it refuses, the app carries on
+    /// without one and asks again on a later player change.
+    fn attach(&mut self, at: Instant) -> bool {
         let cb = self.on_command.clone();
         match self.factory.create(Box::new(move |c| cb(c))) {
             Ok(s) => {
                 self.session = Some(s);
+                self.refused_at = None;
                 tracing::debug!("media session attached");
-                self.push_all(Instant::now());
+                self.push_all(at);
+                true
             }
             // The app works without it; the user sees nothing.
-            Err(e) => tracing::warn!("the OS refused the media session, carrying on without it: {e}"),
+            Err(e) => {
+                if self.refused_at.is_none() {
+                    tracing::warn!("the OS refused the media session, carrying on without it: {e}");
+                }
+                self.refused_at = Some(at);
+                false
+            }
         }
     }
 
     /// A `player://state` event.
     pub fn on_state(&mut self, state: &PlayerState, at: Instant) {
+        let retry = self.enabled
+            && self.session.is_none()
+            && self.refused_at.is_none_or(|t| at.saturating_duration_since(t) >= ATTACH_RETRY);
+        if retry {
+            // Remember the state first, so a new session starts with it.
+            self.track_id = state.track.as_ref().map(|t| t.id.clone());
+            self.thumb = state.track.as_ref().and_then(|t| t.thumb.clone());
+            self.now = now_playing_for(state);
+            self.playback = playback_for(state.status, self.track_id.is_some(), state.position_ms);
+            if self.attach(at) {
+                return;
+            }
+        }
         let id = state.track.as_ref().map(|t| t.id.clone());
         let playback = playback_for(state.status, id.is_some(), state.position_ms);
         if id != self.track_id {
@@ -440,6 +473,36 @@ pub(crate) mod tests {
         assert_eq!(log.meta.lock().len(), n);
         c.set_enabled(true);
         assert_eq!(log.created.load(Ordering::SeqCst), 2);
+        assert_eq!(log.meta.lock().last().unwrap().title, "Song 2");
+        assert_eq!(log.playback.lock().last(), Some(&Playback::Playing(0)));
+    }
+
+    #[test]
+    fn a_refused_session_is_asked_for_again_later() {
+        let log = Arc::new(Log::default());
+        let refusals = Arc::new(AtomicUsize::new(2));
+        let (l, r) = (log.clone(), refusals.clone());
+        let factory = move |_cb: CommandFn| -> Result<Box<dyn MediaSession>, String> {
+            if r.load(Ordering::SeqCst) > 0 {
+                r.fetch_sub(1, Ordering::SeqCst);
+                return Err("not yet".into());
+            }
+            l.created.fetch_add(1, Ordering::SeqCst);
+            Ok(Box::new(Fake(l.clone())))
+        };
+        let mut c = Controller::new(Box::new(factory), Arc::new(|_| {}));
+        let t0 = Instant::now();
+        c.set_enabled(true);
+        assert!(!c.is_attached());
+        // Not on every update...
+        c.on_state(&state(Some(track("1")), PlayerStatus::Playing, 0), t0 + Duration::from_secs(1));
+        assert_eq!(refusals.load(Ordering::SeqCst), 1, "too soon to ask again");
+        // ...but a while later, and with what's playing now.
+        c.on_state(&state(Some(track("1")), PlayerStatus::Paused, 1_000), t0 + ATTACH_RETRY + Duration::from_secs(1));
+        assert!(!c.is_attached(), "refused once more");
+        c.on_state(&state(Some(track("2")), PlayerStatus::Playing, 0), t0 + ATTACH_RETRY * 2 + Duration::from_secs(2));
+        assert!(c.is_attached());
+        assert_eq!(log.created.load(Ordering::SeqCst), 1);
         assert_eq!(log.meta.lock().last().unwrap().title, "Song 2");
         assert_eq!(log.playback.lock().last(), Some(&Playback::Playing(0)));
     }
