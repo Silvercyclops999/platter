@@ -15,7 +15,7 @@ use super::doc::{Ctx, Doc};
 use super::editor::{Options, PlexSide, TagEditor};
 use super::fields::Field;
 use super::paths::Mapping;
-use super::write::NoHooks;
+use super::write::{Hooks, NoHooks};
 use crate::db::DbHandle;
 use crate::error::{AppError, AppResult};
 
@@ -53,6 +53,11 @@ pub struct Lib {
 
 impl Lib {
     pub fn new() -> Self {
+        Self::with_hooks(Arc::new(NoHooks))
+    }
+
+    /// A library whose writes go through `hooks` (to make them fail).
+    pub fn with_hooks(hooks: Arc<dyn Hooks>) -> Self {
         let music = tempfile::tempdir().unwrap();
         let db_dir = tempfile::tempdir().unwrap();
         let db = DbHandle::open(db_dir.path().join("t.db")).unwrap();
@@ -65,7 +70,7 @@ impl Lib {
         })
         .unwrap();
         let plex = Arc::new(FakePlex::default());
-        let editor = TagEditor::new(db.clone(), plex.clone(), Arc::new(NoHooks), Some(db_dir.path().join("tag-edits.json")));
+        let editor = TagEditor::new(db.clone(), plex.clone(), hooks, Some(db_dir.path().join("tag-edits.json")));
         let lib = Self { music, _db_dir: db_dir, db, plex, editor };
         lib.editor.set_options(Options { mapping: Some(lib.mapping()), rescan: true });
         lib

@@ -353,3 +353,48 @@ fn a_folder_another_program_just_changed_is_busy() {
     assert!(!write::folder_busy(d.path(), far, &Recent::default()));
 }
 
+
+#[test]
+fn several_artists_and_genres_are_written_as_separate_values() {
+    use lofty::file::TaggedFileExt;
+    use lofty::tag::ItemKey;
+    for name in ["song.flac", "song-v24.mp3", "song.m4a", "song.ogg"] {
+        let d = tempfile::tempdir().unwrap();
+        let p = fixture(d.path(), name);
+        let (_, s) = read(&p);
+        let e = edits(&[(Field::Artist, "Demo Artist; Guest Artist"), (Field::Genre, "Hip Hop; Jazz")]);
+        write::write_file(&p, &s, &e, &ctx(), &NoHooks).unwrap().unwrap();
+        let (after, _) = read(&p);
+        assert_eq!(after.get(&Field::Artist).map(String::as_str), Some("Demo Artist; Guest Artist"), "{name}");
+        assert_eq!(after.get(&Field::Genre).map(String::as_str), Some("Hip Hop; Jazz"), "{name}");
+        // Stored as two values, the way the format keeps them.
+        let f = lofty::read_from_path(&p).unwrap();
+        let tag = f.primary_tag().unwrap();
+        let artists: Vec<&str> = tag.get_strings(ItemKey::TrackArtist).collect();
+        let genres: Vec<&str> = tag.get_strings(ItemKey::Genre).collect();
+        assert_eq!(artists, vec!["Demo Artist", "Guest Artist"], "{name}");
+        assert_eq!(genres, vec!["Hip Hop", "Jazz"], "{name}");
+    }
+    // ID3v2.3 has no rule for several values: the text stays joined.
+    let d = tempfile::tempdir().unwrap();
+    let p = fixture(d.path(), "song-v23.mp3");
+    let (_, s) = read(&p);
+    write::write_file(&p, &s, &edits(&[(Field::Artist, "Demo Artist; Guest Artist")]), &ctx(), &NoHooks).unwrap().unwrap();
+    assert_eq!(read(&p).0.get(&Field::Artist).map(String::as_str), Some("Demo Artist; Guest Artist"));
+}
+
+#[test]
+fn a_path_that_leads_out_of_the_music_folder_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let inner = fixture(root.path(), "song.flac");
+    let outer = fixture(other.path(), "song.flac");
+    assert_eq!(write::inside(root.path(), &inner).unwrap(), std::fs::canonicalize(&inner).unwrap());
+    // Through "..", the way a link would lead out.
+    let sneaky = root.path().join("..").join(other.path().file_name().unwrap()).join("song.flac");
+    assert!(sneaky.exists());
+    let r = write::inside(root.path(), &sneaky).unwrap_err();
+    assert_eq!(r.why, Refusal::Gone);
+    assert!(r.message.contains("outside the music folder"), "{}", r.message);
+    assert!(write::inside(root.path(), &outer).is_err());
+}

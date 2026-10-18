@@ -5,10 +5,20 @@
 //! 2. Copy it to a temp file in the same folder and write the tags there.
 //! 3. Read the copy back: the tags must be what was asked and its length
 //!    the original's.
-//! 4. Check the original once more, then replace it with the copy.
+//! 4. Check the original once more, then replace it with the copy. The
+//!    original is kept as a hidden backup until the whole save is done.
 //!
-//! Any failure leaves the original as it was and removes the copy. The
-//! file keeps its name and folder.
+//! Any failure leaves the original as it was and removes the copy. A save
+//! of several files writes every copy first and replaces the originals
+//! only when all of them checked out; if a replace still fails, the files
+//! already replaced get their originals back. The file keeps its name and
+//! folder.
+//!
+//! The replace is a rename, so the file Platter writes is the real file a
+//! path points to: a link inside the music folder is followed and left in
+//! place, and a path that leads outside the music folder is refused.
+//! Owner, ACLs and extended attributes on the share aren't carried over,
+//! only the basic permissions.
 
 use std::collections::{BTreeMap, HashMap};
 use std::io;
@@ -129,9 +139,10 @@ impl Recent {
     }
 }
 
-/// A temp file this module made (left behind only if Platter was closed mid-write).
+/// A temp or backup file this module made (left behind only if Platter
+/// was closed mid-write).
 pub fn is_temp(name: &str) -> bool {
-    name.starts_with('.') && name.contains(".platter-tmp-")
+    name.starts_with('.') && (name.contains(".platter-tmp-") || name.contains(".platter-bak-"))
 }
 
 /// Whether another program changed a file in this folder within
@@ -176,11 +187,27 @@ fn name_of(path: &Path) -> String {
     path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.display().to_string())
 }
 
-fn temp_path(path: &Path) -> PathBuf {
+fn side_path(path: &Path, kind: &str) -> PathBuf {
     let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
     let ext = path.extension().map(|s| format!(".{}", s.to_string_lossy())).unwrap_or_default();
     let tag = uuid::Uuid::new_v4().simple().to_string();
-    path.with_file_name(format!(".{stem}.platter-tmp-{}{ext}", &tag[..8]))
+    path.with_file_name(format!(".{stem}.platter-{kind}-{}{ext}", &tag[..8]))
+}
+
+fn temp_path(path: &Path) -> PathBuf {
+    side_path(path, "tmp")
+}
+
+/// The real file `path` names, when it's inside the music folder `root`:
+/// links are followed, and one that leads out of the folder is refused.
+pub fn inside(root: &Path, path: &Path) -> Result<PathBuf, Refused> {
+    let name = name_of(path);
+    let real = std::fs::canonicalize(path).map_err(|e| refusal_for(&e, &name))?;
+    let root = std::fs::canonicalize(root).map_err(|e| refusal_for(&e, &name))?;
+    if !real.starts_with(&root) {
+        return Err(Refused::new(Refusal::Gone, format!("{name} links to a file outside the music folder, so it wasn't changed.")));
+    }
+    Ok(real)
 }
 
 /// The length of a file's audio, in ms.
@@ -192,6 +219,115 @@ fn length_ms(path: &Path) -> Option<u128> {
 /// Writes `edits` to the file at `path` when it's still as `expected` says.
 /// Returns Ok(None) when nothing would change.
 pub fn write_file(path: &Path, expected: &str, edits: &Edits, ctx: &Ctx, hooks: &dyn Hooks) -> Result<Option<Written>, Refused> {
+    let Some(p) = prepare(path, expected, edits, ctx, hooks)? else { return Ok(None) };
+    let done = p.commit(ctx, hooks)?;
+    Ok(Some(done.finish()))
+}
+
+/// A file whose new tags are written to a checked copy, ready to replace it.
+pub struct Prepared {
+    path: PathBuf,
+    temp: PathBuf,
+    expected: String,
+    before: BTreeMap<Field, Option<String>>,
+    want: Values,
+}
+
+/// A file replaced by its copy, its original kept aside until the save is done.
+pub struct Committed {
+    path: PathBuf,
+    backup: PathBuf,
+    written: Written,
+}
+
+impl Prepared {
+    /// Drops the copy; the original stays as it was.
+    pub fn discard(self) {
+        let _ = std::fs::remove_file(&self.temp);
+    }
+
+    /// Replaces the original with the copy when it's still as expected,
+    /// moving the original aside first.
+    pub fn commit(self, ctx: &Ctx, hooks: &dyn Hooks) -> Result<Committed, Refused> {
+        let path = self.path.clone();
+        let name = name_of(&path);
+        let fail = |r: Refused| {
+            let _ = std::fs::remove_file(&self.temp);
+            r
+        };
+        // Last look at the original before it's replaced.
+        let again = Doc::read(&path).map(|d| d.values(ctx)).ok().and_then(|v| stamp(&path, &v).ok());
+        if again.as_deref() != Some(self.expected.as_str()) {
+            return Err(fail(Refused::new(Refusal::Changed, format!("{name} changed while saving. Nothing was written to it."))));
+        }
+        let backup = side_path(&path, "bak");
+        hooks.at(Stage::Replace, &self.temp).and_then(|_| replace(&self.temp, &path, &backup)).map_err(|e| fail(refusal_for(&e, &name)))?;
+        RECENT.note(&path);
+        let after = stamp(&path, &self.want);
+        let after = match after {
+            Ok(s) => s,
+            Err(e) => {
+                let r = refusal_for(&e, &name);
+                let _ = restore(&backup, &path);
+                return Err(r);
+            }
+        };
+        Ok(Committed { path, backup, written: Written { before: self.before, after: self.want, stamp: after } })
+    }
+}
+
+impl Committed {
+    /// The save went through: the original's backup goes.
+    pub fn finish(self) -> Written {
+        let _ = std::fs::remove_file(&self.backup);
+        self.written
+    }
+
+    /// Puts the original back in place of the new file.
+    pub fn roll_back(self) -> io::Result<()> {
+        restore(&self.backup, &self.path)
+    }
+
+    pub fn written(&self) -> &Written {
+        &self.written
+    }
+}
+
+fn restore(backup: &Path, path: &Path) -> io::Result<()> {
+    std::fs::rename(backup, path)?;
+    RECENT.note(path);
+    Ok(())
+}
+
+/// Replaces every prepared file, or none: when one fails, the files already
+/// replaced get their originals back and the rest keep theirs. The error
+/// names the file (by index) that failed.
+pub fn commit_all(prepared: Vec<Prepared>, ctx: &Ctx, hooks: &dyn Hooks) -> Result<Vec<Written>, (usize, Refused)> {
+    let mut done: Vec<Committed> = Vec::with_capacity(prepared.len());
+    let mut rest = prepared.into_iter().enumerate();
+    while let Some((i, p)) = rest.next() {
+        match p.commit(ctx, hooks) {
+            Ok(c) => done.push(c),
+            Err(r) => {
+                for (_, p) in rest {
+                    p.discard();
+                }
+                for c in done.into_iter().rev() {
+                    let path = c.path.clone();
+                    if let Err(e) = c.roll_back() {
+                        tracing::warn!("tag edit: couldn't put back {}: {e}", path.display());
+                    }
+                }
+                return Err((i, r));
+            }
+        }
+    }
+    Ok(done.into_iter().map(Committed::finish).collect())
+}
+
+/// Steps 1 to 3 for one file: checks it, writes the copy and reads it back.
+/// Ok(None) when nothing would change.
+pub fn prepare(path: &Path, expected: &str, edits: &Edits, ctx: &Ctx, hooks: &dyn Hooks) -> Result<Option<Prepared>, Refused> {
     let name = name_of(path);
     let mut doc = match Doc::read(path) {
         Ok(d) => d,
@@ -247,24 +383,27 @@ pub fn write_file(path: &Path, expected: &str, edits: &Edits, ctx: &Ctx, hooks: 
     if length_ms(&temp) != length_ms(path) {
         return Err(cleanup(Refused::new(Refusal::Failed, format!("{name} wasn't saved: the copy's length didn't match."))));
     }
-
-    // Last look at the original before it's replaced.
-    let again = Doc::read(path).map(|d| d.values(ctx)).ok().and_then(|v| stamp(path, &v).ok());
-    if again.as_deref() != Some(expected) {
-        return Err(cleanup(Refused::new(Refusal::Changed, format!("{name} changed while saving. Nothing was written to it."))));
-    }
-    hooks.at(Stage::Replace, &temp).and_then(|_| replace(&temp, path)).map_err(|e| cleanup(refusal_for(&e, &name)))?;
-    RECENT.note(path);
-    let stamp = stamp(path, &want).map_err(|e| refusal_for(&e, &name))?;
-    Ok(Some(Written { before, after: want, stamp }))
+    Ok(Some(Prepared { path: path.to_path_buf(), temp, expected: expected.to_string(), before, want }))
 }
 
-/// Moves the temp file over the original, keeping its permissions.
-fn replace(temp: &Path, path: &Path) -> io::Result<()> {
+/// Keeps the original as `backup` (a hard link where the share allows it,
+/// else a copy), then moves the temp file over it in one step, keeping its
+/// permissions. The original's name never stops pointing at a whole file.
+fn replace(temp: &Path, path: &Path, backup: &Path) -> io::Result<()> {
     if let Ok(m) = std::fs::metadata(path) {
         let _ = std::fs::set_permissions(temp, m.permissions());
     }
-    std::fs::rename(temp, path)
+    if std::fs::hard_link(path, backup).is_err()
+        && let Err(e) = std::fs::copy(path, backup)
+    {
+        let _ = std::fs::remove_file(backup);
+        return Err(e);
+    }
+    if let Err(e) = std::fs::rename(temp, path) {
+        let _ = std::fs::remove_file(backup);
+        return Err(e);
+    }
+    Ok(())
 }
 
 /// Reads a file for the editor: its fields and stamp.

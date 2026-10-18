@@ -447,12 +447,22 @@ impl TagEditor {
     }
 
     /// Puts back what an edit replaced, on the files still as it left them.
+    /// The edit leaves the log only once the undo went through.
     pub async fn undo(&self, id: &str) -> AppResult<SaveResult> {
-        let entry = self.log.lock().take(id).ok_or_else(|| AppError::NotFound("That edit can't be undone any more.".into()))?;
+        let entry = self.log.lock().get(id).ok_or_else(|| AppError::NotFound("That edit can't be undone any more.".into()))?;
         let this = self.clone_parts();
-        let (mut result, folders) = tokio::task::spawn_blocking(move || this.undo_blocking(entry))
-            .await
-            .map_err(|e| AppError::Internal(e.to_string()))??;
+        let (mut result, folders, done) = tokio::task::spawn_blocking(move || {
+            let r = this.undo_blocking(&entry);
+            if let Ok((_, _, true)) = &r {
+                this.log.lock().take(&entry.id);
+            }
+            r
+        })
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))??;
+        if !done {
+            result.undo_id = Some(id.to_string());
+        }
         self.rescan(&mut result, folders).await;
         Ok(result)
     }
@@ -519,6 +529,14 @@ impl Parts {
                 continue;
             };
             let refuse = |r: Refused| FileProblem { track_id: t.id.clone(), file_name: name.clone(), why: r.why, message: r.message };
+            // The real file, which must be inside the music folder.
+            let local = match write::inside(Path::new(&mapping.local), Path::new(&local)) {
+                Ok(p) => p.to_string_lossy().to_string(),
+                Err(r) => {
+                    problems.push(refuse(r));
+                    continue;
+                }
+            };
             let dir = server_folder(&local);
             let is_busy = *busy
                 .entry(dir.clone())
@@ -544,15 +562,7 @@ impl Parts {
             }
         }
         if !problems.is_empty() {
-            let first = problems[0].message.clone();
-            let message = if problems.iter().all(|p| p.why == Refusal::Busy) {
-                write::BUSY_MESSAGE.to_string()
-            } else if problems.len() == 1 {
-                format!("Nothing was saved. {first}")
-            } else {
-                format!("Nothing was saved: {} can't be written. {first}", files(problems.len()))
-            };
-            return Ok((SaveResult { problems, message, ..Default::default() }, Folders::new()));
+            return Ok((nothing_saved(problems), Folders::new()));
         }
 
         // The album's way of keeping totals, for files that have none yet.
@@ -562,18 +572,38 @@ impl Parts {
         let mut folders = Folders::new();
         let mut cache: Vec<(String, Values)> = Vec::new();
         let stamps: HashMap<&str, &str> = req.files.iter().map(|f| (f.track_id.as_str(), f.stamp.as_str())).collect();
+        // Every copy is written and checked before any original is replaced.
+        let mut prepared = Vec::new();
+        let mut meta: Vec<(TrackRow, String, String)> = Vec::new();
         for (t, server, local, e) in plan {
-            let name = file_name(&server);
-            match write::write_file(Path::new(&local), stamps[t.id.as_str()], &e, &ctx, self.hooks.as_ref()) {
-                Ok(Some(w)) => {
-                    result.saved += 1;
-                    folders.insert((t.src.clone(), server_folder(&server)), t.id.clone());
-                    cache.push((t.part_key.clone(), w.after.clone()));
-                    undo.push(UndoFile { track_id: t.id.clone(), server_path: server, local_path: local, before: w.before, stamp: w.stamp });
+            match write::prepare(Path::new(&local), stamps[t.id.as_str()], &e, &ctx, self.hooks.as_ref()) {
+                Ok(Some(p)) => {
+                    prepared.push(p);
+                    meta.push((t, server, local));
                 }
                 Ok(None) => result.unchanged += 1,
-                Err(r) => result.problems.push(FileProblem { track_id: t.id.clone(), file_name: name, why: r.why, message: r.message }),
+                Err(r) => {
+                    for p in prepared {
+                        p.discard();
+                    }
+                    let problem = FileProblem { track_id: t.id.clone(), file_name: file_name(&server), why: r.why, message: r.message };
+                    return Ok((nothing_saved(vec![problem]), Folders::new()));
+                }
             }
+        }
+        let written = match write::commit_all(prepared, &ctx, self.hooks.as_ref()) {
+            Ok(w) => w,
+            Err((i, r)) => {
+                let (t, server, _) = &meta[i];
+                let problem = FileProblem { track_id: t.id.clone(), file_name: file_name(server), why: r.why, message: r.message };
+                return Ok((nothing_saved(vec![problem]), Folders::new()));
+            }
+        };
+        for (w, (t, server, local)) in written.into_iter().zip(meta) {
+            result.saved += 1;
+            folders.insert((t.src.clone(), server_folder(&server)), t.id.clone());
+            cache.push((t.part_key.clone(), w.after.clone()));
+            undo.push(UndoFile { track_id: t.id.clone(), server_path: server, local_path: local, before: w.before, stamp: w.stamp });
         }
         if let Err(e) = update_cache(&self.db, &cache) {
             tracing::warn!("tag cache after an edit: {e}");
@@ -598,7 +628,10 @@ impl Parts {
         Ok((result, folders))
     }
 
-    fn undo_blocking(&self, entry: UndoEntry) -> AppResult<(SaveResult, Folders)> {
+    /// Puts the files back, all together: files changed since the edit are
+    /// kept as they are; any other failure puts nothing back and the edit
+    /// stays in the log to try again (the flag is false).
+    fn undo_blocking(&self, entry: &UndoEntry) -> AppResult<(SaveResult, Folders, bool)> {
         let ctx = Ctx { custom_key: entry.custom_key.clone(), slash_numbers: false };
         let mut result = SaveResult::default();
         let mut folders = Folders::new();
@@ -609,26 +642,53 @@ impl Parts {
             .into_iter()
             .map(|r| (r.id, (r.part_key, r.src)))
             .collect();
+        let mut prepared = Vec::new();
+        let mut meta: Vec<&UndoFile> = Vec::new();
+        let give_up = |prepared: Vec<write::Prepared>, f: &UndoFile, local: &str, r: Refused| {
+            for p in prepared {
+                p.discard();
+            }
+            let problem = FileProblem { track_id: f.track_id.clone(), file_name: file_name(local), why: r.why, message: r.message };
+            let message = format!("Nothing was undone. {}", problem.message);
+            (SaveResult { problems: vec![problem], message, ..Default::default() }, Folders::new(), false)
+        };
         for f in &entry.files {
             // Where the file is now, if the music folder moved.
             let local = self.options.mapping.as_ref().and_then(|m| m.to_local(&f.server_path)).unwrap_or_else(|| f.local_path.clone());
+            let local = match &self.options.mapping {
+                Some(m) => match write::inside(Path::new(&m.local), Path::new(&local)) {
+                    Ok(p) => p.to_string_lossy().to_string(),
+                    Err(r) => return Ok(give_up(prepared, f, &local, r)),
+                },
+                None => local,
+            };
             let edits: Edits = f.before.iter().map(|(k, v)| (*k, v.clone().unwrap_or_default())).collect();
-            match write::write_file(Path::new(&local), &f.stamp, &edits, &ctx, self.hooks.as_ref()) {
-                Ok(Some(w)) => {
-                    result.saved += 1;
-                    let (pk, src) = part_keys.get(&f.track_id).cloned().unwrap_or_default();
-                    folders.insert((src, server_folder(&f.server_path)), f.track_id.clone());
-                    if !pk.is_empty() {
-                        cache.push((pk, w.after));
-                    }
+            match write::prepare(Path::new(&local), &f.stamp, &edits, &ctx, self.hooks.as_ref()) {
+                Ok(Some(p)) => {
+                    prepared.push(p);
+                    meta.push(f);
                 }
                 Ok(None) => result.unchanged += 1,
-                Err(mut r) => {
-                    if r.why == Refusal::Changed {
-                        r.message = format!("{} changed after the edit, so it was kept as it is.", file_name(&local));
-                    }
+                Err(mut r) if r.why == Refusal::Changed => {
+                    r.message = format!("{} changed after the edit, so it was kept as it is.", file_name(&local));
                     result.problems.push(FileProblem { track_id: f.track_id.clone(), file_name: file_name(&local), why: r.why, message: r.message });
                 }
+                Err(r) => return Ok(give_up(prepared, f, &local, r)),
+            }
+        }
+        let written = match write::commit_all(prepared, &ctx, self.hooks.as_ref()) {
+            Ok(w) => w,
+            Err((i, r)) => {
+                let f = meta[i];
+                return Ok(give_up(Vec::new(), f, &f.local_path, r));
+            }
+        };
+        for (w, f) in written.into_iter().zip(meta) {
+            result.saved += 1;
+            let (pk, src) = part_keys.get(&f.track_id).cloned().unwrap_or_default();
+            folders.insert((src, server_folder(&f.server_path)), f.track_id.clone());
+            if !pk.is_empty() {
+                cache.push((pk, w.after));
             }
         }
         if let Err(e) = update_cache(&self.db, &cache) {
@@ -640,8 +700,21 @@ impl Parts {
             (0, p) => format!("Nothing was undone: {} changed since.", files(p)),
             (n, p) => format!("Undid the edit on {}. {} changed since and kept as they are.", files(n), files(p)),
         };
-        Ok((result, folders))
+        Ok((result, folders, true))
     }
+}
+
+/// The result when a save stops before writing anything.
+fn nothing_saved(problems: Vec<FileProblem>) -> SaveResult {
+    let first = problems[0].message.clone();
+    let message = if problems.iter().all(|p| p.why == Refusal::Busy) {
+        write::BUSY_MESSAGE.to_string()
+    } else if problems.len() == 1 {
+        format!("Nothing was saved. {first}")
+    } else {
+        format!("Nothing was saved: {} can't be written. {first}", files(problems.len()))
+    };
+    SaveResult { problems, message, ..Default::default() }
 }
 
 /// The tag cache takes what was written, so badges and the archive follow
@@ -654,18 +727,31 @@ pub fn update_cache(db: &DbHandle, written: &[(String, Values)]) -> AppResult<()
     db.write(|c| {
         crate::archive::in_tx(c, |c| {
             for (part_key, values) in written {
-                let old = crate::tags::store::get(c, part_key)?;
-                let mut t = crate::tags::FileTags::for_read();
+                // What the cache had (credits, ids, tags the editor doesn't
+                // show) stays; every field the editor knows takes the file's
+                // new value, or is cleared when the file no longer has it.
+                let mut t = match crate::tags::store::get(c, part_key)? {
+                    Some((status, mut old)) if status == "ok" => {
+                        old.sleeve = crate::tags::store::sleeve(c, part_key)?;
+                        old
+                    }
+                    _ => crate::tags::FileTags::for_read(),
+                };
+                t.custom_key = custom.clone();
+                for f in Field::ALL {
+                    clear_cached(&mut t, f);
+                }
                 for (f, v) in values {
                     let key = match f {
                         Field::CustomStatus => custom.clone(),
+                        // The editor's "explicit" / "clean" read as EXPLICIT does.
+                        Field::Explicit => Some("EXPLICIT".to_string()),
                         _ => f.vorbis_key().map(str::to_string),
                     };
                     if let Some(k) = key {
                         t.set(&k, v);
                     }
                 }
-                t.recording_mbid = old.and_then(|(_, o)| o.recording_mbid);
                 crate::tags::store::save(c, part_key, crate::tags::store::Status::Ok, &t, now_ms() / 1000)?;
             }
             crate::tags::store::refresh_albums(c)?;
@@ -673,6 +759,37 @@ pub fn update_cache(db: &DbHandle, written: &[(String, Values)]) -> AppResult<()
             crate::archive::refresh_all(c)
         })
     })
+}
+
+/// Clears the cached slot an editor field fills.
+fn clear_cached(t: &mut crate::tags::FileTags, f: Field) {
+    match f {
+        Field::AlbumArtist => t.album_artist = None,
+        Field::Album => t.album = None,
+        Field::Year => t.year = None,
+        Field::ReleaseType => t.mb_type = None,
+        Field::Edition => t.edition = None,
+        Field::Group => t.group = None,
+        Field::Era => t.era = None,
+        Field::Quality => t.quality = None,
+        Field::Explicit => t.explicit = None,
+        Field::ArchiveVersion => t.version = None,
+        Field::Status => t.status_tag = None,
+        Field::PicardStatus => t.mb_status = None,
+        Field::CustomStatus => t.custom_status = None,
+        Field::VersionNote => t.version_note = None,
+        Field::ArchiveDate => t.date = None,
+        Field::Source => t.source = None,
+        Field::Flags => t.flags = None,
+        Field::Isrc => t.isrc = None,
+        Field::Genre
+        | Field::TrackNumber
+        | Field::TrackTotal
+        | Field::DiscNumber
+        | Field::DiscTotal
+        | Field::Title
+        | Field::Artist => {}
+    }
 }
 
 /// Values the files share, for the album fields: Some(value) when every

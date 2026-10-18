@@ -75,6 +75,10 @@ impl UndoLog {
         self.save();
     }
 
+    pub fn get(&self, id: &str) -> Option<UndoEntry> {
+        self.entries.iter().find(|e| e.id == id).cloned()
+    }
+
     pub fn take(&mut self, id: &str) -> Option<UndoEntry> {
         let i = self.entries.iter().position(|e| e.id == id)?;
         let e = self.entries.remove(i);

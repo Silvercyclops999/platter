@@ -185,13 +185,27 @@ editor opened it, or another program changed a file in its folder in the last
 minute, nothing is saved. Each file is copied to a temp file in its own
 folder, the tags are written to the copy, the copy is read back (its tags must
 be what was asked and its length the original's), and only then does it
-replace the original. Any failure leaves the original as it was. Platter
-never renames or moves a file.
+replace the original. Every copy is checked before any original is replaced,
+and if replacing one still fails, the files already replaced get their
+originals back, so a save changes all of its files or none. Any failure
+leaves the original as it was. Platter never renames or moves a file.
+
+Artist, album artist and genre can hold several values, shown joined with
+`; `. They are written as separate values: one comment each in FLAC and Ogg,
+one ID3v2.4 frame split by NUL, one MP4 data item each. ID3v2.3 has no rule
+for several values, so there they stay as one joined text.
+
+The new file replaces the old one under the same name, so the owner, ACLs and
+extended attributes a NAS keeps on the old file aren't carried over, only its
+basic permissions. A song that's a link to another file has the real file
+written and the link left as it is, and a link that leads out of the music
+folder is refused.
 
 After saving, Plex rescans just those folders (Settings, Rescan in Plex after
 saving) and Platter's own tag cache takes the new values. The last 20 edits
 keep what they replaced: "Undo" puts it back on every file that hasn't changed
-since. A save of more than 50 files asks first (Settings).
+since. An undo that can't finish puts nothing back and stays in the list to
+try again. A save of more than 50 files asks first (Settings).
 
 "Mark as explicit" and "Mark as clean" on an album, or on an era's page, set
 explicit on every song after showing the changes.

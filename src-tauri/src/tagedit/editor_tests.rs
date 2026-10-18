@@ -234,3 +234,150 @@ fn the_ui_requests_read_as_sent() {
     let k: super::fixes::FixKind = serde_json::from_value(serde_json::json!("discTags")).unwrap();
     assert_eq!(k, super::fixes::FixKind::DiscTags);
 }
+
+/// Fails the replace of files whose copy is named with `needle`, while on.
+struct FailReplace {
+    needle: &'static str,
+    on: std::sync::atomic::AtomicBool,
+}
+impl super::write::Hooks for FailReplace {
+    fn at(&self, stage: super::write::Stage, temp: &std::path::Path) -> std::io::Result<()> {
+        let hit = stage == super::write::Stage::Replace
+            && self.on.load(std::sync::atomic::Ordering::SeqCst)
+            && temp.to_string_lossy().contains(self.needle);
+        if hit { Err(std::io::Error::from_raw_os_error(32)) } else { Ok(()) }
+    }
+}
+
+fn failing_lib() -> (Lib, std::sync::Arc<FailReplace>) {
+    let hooks = std::sync::Arc::new(FailReplace { needle: "Other Song", on: std::sync::atomic::AtomicBool::new(true) });
+    let lib = Lib::with_hooks(hooks.clone());
+    lib.add("t1", "al1", "Demo Album", &format!("{ALBUM}/01 Demo Song.flac"), "song.flac", 1, 1, "Demo Song");
+    lib.add("t2", "al1", "Demo Album", &format!("{ALBUM}/02 Other Song.flac"), "song.flac", 1, 2, "Other Song");
+    (lib, hooks)
+}
+
+fn listing(dir: &std::path::Path) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+    v.sort();
+    v
+}
+
+#[test]
+fn a_replace_failing_mid_save_puts_the_files_already_written_back() {
+    let (lib, _hooks) = failing_lib();
+    let p1 = lib.local(&format!("{ALBUM}/01 Demo Song.flac"));
+    let p2 = lib.local(&format!("{ALBUM}/02 Other Song.flac"));
+    let (b1, b2) = (std::fs::read(&p1).unwrap(), std::fs::read(&p2).unwrap());
+    let before = listing(p1.parent().unwrap());
+    let d = lib.editor.open(Some("al1"), &[]).unwrap();
+    let r = rt().block_on(lib.editor.save(SaveRequest { label: "x".into(), files: spread(&d.files, &edits(&[(Field::Genre, "Pop")])) })).unwrap();
+    assert_eq!(r.saved, 0);
+    assert_eq!(r.problems.len(), 1);
+    assert_eq!(r.problems[0].why, Refusal::Locked);
+    assert!(r.message.starts_with("Nothing was saved."), "{}", r.message);
+    assert_eq!(std::fs::read(&p1).unwrap(), b1, "the first file, already replaced, has its original back");
+    assert_eq!(std::fs::read(&p2).unwrap(), b2);
+    assert_eq!(listing(p1.parent().unwrap()), before, "no copies or backups left");
+    assert!(lib.editor.history().is_empty());
+    assert!(lib.plex.refreshed.lock().is_empty(), "nothing to rescan");
+}
+
+#[test]
+fn an_undo_that_fails_stays_in_the_log_to_try_again() {
+    let (lib, hooks) = failing_lib();
+    let p1 = lib.local(&format!("{ALBUM}/01 Demo Song.flac"));
+    let p2 = lib.local(&format!("{ALBUM}/02 Other Song.flac"));
+    let (b1, b2) = (values(&p1), values(&p2));
+    hooks.on.store(false, std::sync::atomic::Ordering::SeqCst);
+    let d = lib.editor.open(Some("al1"), &[]).unwrap();
+    let r = rt().block_on(lib.editor.save(SaveRequest { label: "x".into(), files: spread(&d.files, &edits(&[(Field::Genre, "Pop")])) })).unwrap();
+    assert_eq!(r.saved, 2);
+    let id = r.undo_id.unwrap();
+    let (a1, a2) = (values(&p1), values(&p2));
+
+    hooks.on.store(true, std::sync::atomic::Ordering::SeqCst);
+    let u = rt().block_on(lib.editor.undo(&id)).unwrap();
+    assert_eq!(u.saved, 0);
+    assert!(u.message.starts_with("Nothing was undone."), "{}", u.message);
+    assert_eq!(u.undo_id.as_deref(), Some(id.as_str()), "the edit can still be undone");
+    assert_eq!((values(&p1), values(&p2)), (a1, a2), "both files keep the edit");
+    assert_eq!(lib.editor.history().len(), 1);
+
+    hooks.on.store(false, std::sync::atomic::Ordering::SeqCst);
+    let u = rt().block_on(lib.editor.undo(&id)).unwrap();
+    assert_eq!(u.saved, 2, "{}", u.message);
+    assert_eq!((values(&p1), values(&p2)), (b1, b2));
+    assert!(lib.editor.history().is_empty());
+}
+
+#[test]
+fn an_edit_keeps_what_the_cache_had_that_the_editor_doesnt_show() {
+    let lib = lib2();
+    let part = "/library/parts/t1/1/file";
+    lib.db
+        .write(|c| {
+            let mut t = crate::tags::FileTags::for_read();
+            t.set("PRODUCER", "Demo Producer");
+            t.set("MUSICBRAINZ_TRACKID", "0a1b2c3d-0000-4000-8000-000000000001");
+            t.set("ARCHIVE_ERA", "Old Era");
+            crate::tags::store::save(c, part, crate::tags::store::Status::Ok, &t, 1)
+        })
+        .unwrap();
+    let d = lib.editor.open(Some("al1"), &[]).unwrap();
+    let files: Vec<SaveFile> = spread(&d.files, &edits(&[(Field::Genre, "Pop"), (Field::Explicit, "explicit")]));
+    rt().block_on(lib.editor.save(SaveRequest { label: "x".into(), files })).unwrap();
+    let (cached, sleeve) = lib.db.read(|c| Ok((crate::tags::store::get(c, part)?.unwrap().1, crate::tags::store::sleeve(c, part)?))).unwrap();
+    assert_eq!(sleeve.credits.len(), 1, "credits stay");
+    assert_eq!(cached.recording_mbid.as_deref(), Some("0a1b2c3d-0000-4000-8000-000000000001"));
+    assert_eq!(cached.explicit, Some(true), "explicit as the file now says");
+    assert_eq!(cached.era, None, "a field the file doesn't have isn't kept from before");
+    assert_eq!(cached.version.as_deref(), Some("leak"), "fields the file has come from the file");
+}
+
+fn link(target: &std::path::Path, at: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    return std::os::unix::fs::symlink(target, at);
+    #[cfg(windows)]
+    return std::os::windows::fs::symlink_file(target, at);
+}
+
+#[test]
+fn a_link_to_a_file_outside_the_music_folder_is_refused() {
+    let lib = lib2();
+    let outside = tempfile::tempdir().unwrap();
+    let target = outside.path().join("elsewhere.flac");
+    let at = lib.local(&format!("{ALBUM}/02 Other Song.flac"));
+    std::fs::copy(&at, &target).unwrap();
+    std::fs::remove_file(&at).unwrap();
+    if link(&target, &at).is_err() {
+        // Making links needs a privilege this account may not have.
+        eprintln!("skipped: can't make a link here");
+        return;
+    }
+    let bytes = std::fs::read(&target).unwrap();
+    let d = lib.editor.open(Some("al1"), &[]).unwrap();
+    let r = rt().block_on(lib.editor.save(SaveRequest { label: "x".into(), files: spread(&d.files, &edits(&[(Field::Genre, "Pop")])) })).unwrap();
+    assert_eq!(r.saved, 0);
+    assert!(r.problems[0].message.contains("outside the music folder"), "{}", r.message);
+    assert_eq!(std::fs::read(&target).unwrap(), bytes, "the file outside wasn't touched");
+    assert!(std::fs::symlink_metadata(&at).unwrap().file_type().is_symlink(), "the link stays a link");
+}
+
+#[test]
+fn a_link_inside_the_music_folder_writes_the_real_file_and_stays_a_link() {
+    let lib = lib2();
+    let real = lib.local("Shared/02 Other Song.flac");
+    std::fs::create_dir_all(real.parent().unwrap()).unwrap();
+    let at = lib.local(&format!("{ALBUM}/02 Other Song.flac"));
+    std::fs::rename(&at, &real).unwrap();
+    if link(&real, &at).is_err() {
+        eprintln!("skipped: can't make a link here");
+        return;
+    }
+    let d = lib.editor.open(Some("al1"), &[]).unwrap();
+    let r = rt().block_on(lib.editor.save(SaveRequest { label: "x".into(), files: spread(&d.files, &edits(&[(Field::Genre, "Pop")])) })).unwrap();
+    assert_eq!(r.saved, 2, "{}", r.message);
+    assert!(std::fs::symlink_metadata(&at).unwrap().file_type().is_symlink());
+    assert_eq!(values(&real).get(&Field::Genre).map(String::as_str), Some("Pop"));
+}
