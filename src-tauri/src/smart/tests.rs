@@ -548,3 +548,80 @@ async fn a_declined_prompt_says_so() {
     r.web.route("api.anthropic.com", None, 401, "{}");
     assert_eq!(r.smart.prompt("x").await.unwrap_err().kind(), "auth");
 }
+
+#[test]
+fn a_song_without_a_year_only_matches_is_not() {
+    let mut rows = rows();
+    rows[0].year = None;
+    let run = |r: Rule| ids(eval::evaluate(&rows, &SmartRules { rules: vec![r], ..Default::default() }, NOW, 10.0, 0));
+    assert_eq!(run(rule(Field::Year, Op::Lt, "1990")), ["2"], "no year isn't year 0");
+    assert_eq!(run(rule(Field::Year, Op::Gt, "1990")), ["3", "4"]);
+    assert_eq!(run(rule(Field::Year, Op::Is, "0")), Vec::<&str>::new());
+    assert_eq!(run(rule(Field::Year, Op::IsNot, "1975")), ["1", "3", "4"]);
+}
+
+#[tokio::test]
+async fn daily_playlists_turn_over_at_local_midnight() {
+    let r = rig();
+    // Ten hours east of UTC.
+    r.smart.set_tz(600);
+    let offset = 600 * 60;
+    let rules = SmartRules { rules: vec![rule(Field::PlayCount, Op::Gt, "0")], update: Update::Daily, ..Default::default() };
+    let saved = r.smart.save(req(rules)).await.unwrap();
+    let first = r.smart.page(&saved.id).await.unwrap();
+    let local = NOW + offset;
+    let midnight = local - local.rem_euclid(DAY) + DAY - offset;
+    assert_eq!(first.playlist.next_update_at, Some(midnight));
+    r.db.write(|c| {
+        c.execute("UPDATE tracks SET view_count = 1 WHERE id = '2'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    *r.now.lock() = midnight - 1;
+    assert_eq!(r.smart.page(&saved.id).await.unwrap().tracks.len(), 3, "still the same local day");
+    *r.now.lock() = midnight;
+    assert_eq!(r.smart.page(&saved.id).await.unwrap().tracks.len(), 4, "a new local day");
+}
+
+/// Counts writes to the store.
+struct Counting(SyncSmart, Arc<Mutex<usize>>);
+impl SmartStore for Counting {
+    fn list(&self) -> AppResult<Vec<SmartPlaylist>> {
+        self.0.list()
+    }
+    fn save(&self, all: &[SmartPlaylist]) -> AppResult<()> {
+        *self.1.lock() += 1;
+        self.0.save(all)
+    }
+}
+
+#[tokio::test]
+async fn opening_a_live_playlist_writes_only_when_its_songs_change() {
+    let r = rig();
+    let saves = Arc::new(Mutex::new(0usize));
+    let now = r.now.clone();
+    let smart = Smart::new(SmartDeps {
+        db: r.db.clone(),
+        store: Arc::new(Counting(SyncSmart { store: crate::sync::SyncStore::new(r.db.clone(), "dev1"), db: r.db.clone() }, saves.clone())),
+        remote: r.plex.clone(),
+        ai: Arc::new(Anthropic::new(r.web.clone(), r.keys.clone())),
+        events: Arc::new(NoEvents),
+        clock: Arc::new(move || *now.lock()),
+    });
+    let rules = SmartRules { rules: vec![rule(Field::PlayCount, Op::Gt, "0")], ..Default::default() };
+    let saved = smart.save(SaveRequest { platter: true, ..req(rules) }).await.unwrap();
+    smart.page(&saved.id).await.unwrap();
+    let after_first = *saves.lock();
+    for _ in 0..3 {
+        *r.now.lock() += 60;
+        smart.page(&saved.id).await.unwrap();
+    }
+    assert_eq!(*saves.lock(), after_first, "the same songs: nothing written");
+    r.db.write(|c| {
+        c.execute("UPDATE tracks SET view_count = 1 WHERE id = '2'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(smart.page(&saved.id).await.unwrap().tracks.len(), 4);
+    assert_eq!(*saves.lock(), after_first + 1);
+}

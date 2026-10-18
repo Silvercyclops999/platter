@@ -398,17 +398,28 @@ impl Smart {
         let ids: Vec<String> = match (p.rules.update.period_s(), &p.snapshot, p.snapshot_at) {
             (Some(period), Some(snap), Some(at)) if now < at + period => snap.clone(),
             (period, _, _) => {
-                let slot = now / period.unwrap_or(24 * 3600);
+                // Daily and weekly updates line up on whole local days.
+                let offset = self.tz() as i64 * 60;
+                let local = now + offset;
+                let slot = local.div_euclid(period.unwrap_or(24 * 3600));
                 let rows = self.rows().await?;
                 let ids: Vec<String> = self.songs(&rows, &p.rules, &p.picks, seed_of(&p.id, slot)).into_iter().map(|(id, _)| id).collect();
                 let p = &mut all[i];
-                p.snapshot = Some(ids.clone());
-                // Daily and weekly updates line up on whole periods.
-                p.snapshot_at = Some(match period {
-                    Some(period) => now - now.rem_euclid(period),
+                let at = match period {
+                    Some(period) => local - local.rem_euclid(period) - offset,
                     None => now,
-                });
-                self.inner.store.save(&all)?;
+                };
+                // A live playlist is saved only when its songs change, so
+                // opening it doesn't rewrite the store (and the sync file).
+                let changed = match period {
+                    Some(_) => p.snapshot.as_ref() != Some(&ids) || p.snapshot_at != Some(at),
+                    None => p.snapshot.as_ref() != Some(&ids),
+                };
+                if changed {
+                    p.snapshot = Some(ids.clone());
+                    p.snapshot_at = Some(at);
+                    self.inner.store.save(&all)?;
+                }
                 ids
             }
         };
