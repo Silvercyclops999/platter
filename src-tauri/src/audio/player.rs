@@ -189,6 +189,8 @@ enum Cmd {
     QueueAdd(Vec<Track>, AddAt, Reply<()>),
     QueueRemove(String, Reply<()>),
     QueueMove(String, usize, Reply<()>),
+    /// Several moves, all or none.
+    QueueMoves(Vec<(String, usize)>, Reply<()>),
     QueueClear(Reply<()>),
     QueueJump(String, Reply<()>),
     Output(oneshot::Sender<OutputState>),
@@ -752,6 +754,10 @@ impl PlayerHandle {
     }
     pub async fn queue_move(&self, item_id: String, to_index: usize) -> AppResult<()> {
         self.call(|r| Cmd::QueueMove(item_id, to_index, r)).await
+    }
+    /// Several queue moves, all or none.
+    pub async fn queue_moves(&self, steps: Vec<(String, usize)>) -> AppResult<()> {
+        self.call(|r| Cmd::QueueMoves(steps, r)).await
     }
     pub async fn queue_clear(&self) -> AppResult<()> {
         self.call(Cmd::QueueClear).await
@@ -2111,6 +2117,12 @@ impl Actor {
             }
             Cmd::QueueMove(id, to, reply) => {
                 let r = self.queue.move_item(&id, to);
+                self.update_next();
+                self.mark_dirty();
+                let _ = reply.send(r);
+            }
+            Cmd::QueueMoves(steps, reply) => {
+                let r = self.queue.move_items(&steps);
                 self.update_next();
                 self.mark_dirty();
                 let _ = reply.send(r);

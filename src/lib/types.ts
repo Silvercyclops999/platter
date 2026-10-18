@@ -4129,6 +4129,21 @@ export interface SubsonicCheck {
   insecure?: boolean;
 }
 
+/** An API key, or a user name and password, typed for a Subsonic server. */
+export interface SubsonicCreds {
+  apiKey?: string;
+  user?: string;
+  password?: string;
+}
+
+/** What the user said about an address, for the core's checks. */
+export interface SubsonicConfirm {
+  /** "I'm sure this is the same server": for when Platter can't tell. */
+  sameServer?: boolean;
+  /** "Use this http address anyway". */
+  allowInsecure?: boolean;
+}
+
 /** A queue another app saved on a server (`resume_queues`). */
 export interface ResumeOffer {
   tag: string;

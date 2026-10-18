@@ -136,18 +136,26 @@ impl ListenPlayer for FakePlayer {
         self.p.lock().user.clear();
         Ok(())
     }
-    async fn queue_move(&self, item_id: String, to_index: usize) -> AppResult<()> {
+    async fn queue_moves(&self, steps: Vec<(String, usize)>) -> AppResult<()> {
+        // All or none, like the real queue: work on a copy.
         let mut p = self.p.lock();
-        let song = item_id.trim_start_matches("i:").to_string();
-        let k = if let Some(i) = p.user.iter().position(|s| *s == song) {
-            p.user.remove(i)
-        } else {
-            let j = p.rest.iter().position(|s| *s == song).unwrap();
-            p.rest.remove(j)
-        };
-        let at = to_index.min(p.user.len());
-        p.user.insert(at, k);
-        self.log.lock().push(format!("move {song} {to_index}"));
+        let (mut user, mut rest) = (p.user.clone(), p.rest.clone());
+        let mut done = Vec::new();
+        for (item_id, to_index) in steps {
+            let song = item_id.trim_start_matches("i:").to_string();
+            let k = if let Some(i) = user.iter().position(|s| *s == song) {
+                user.remove(i)
+            } else if let Some(j) = rest.iter().position(|s| *s == song) {
+                rest.remove(j)
+            } else {
+                return Err(crate::error::AppError::NotFound(format!("queue item {item_id}")));
+            };
+            let at = to_index.min(user.len());
+            user.insert(at, k);
+            done.push(format!("move {song} {to_index}"));
+        }
+        (p.user, p.rest) = (user, rest);
+        self.log.lock().extend(done);
         Ok(())
     }
 }
@@ -1234,4 +1242,31 @@ fn a_guest_move_lands_where_it_was_dropped_on_the_host() {
     let items = ids(&["u1", "c1", "c2"]);
     assert_eq!(move_steps(&items, 1, 0, 1).unwrap(), vec![("c1".to_string(), usize::MAX), ("u1".to_string(), 1)]);
     assert!(move_steps(&items, 1, 7, 0).is_none());
+    // A drop far down queues at most MOVE_SPAN songs in all; past that
+    // the song goes to the end of the queued ones.
+    let long: Vec<String> = std::iter::once("u1".to_string()).chain((0..200).map(|i| format!("c{i}"))).collect();
+    assert_eq!(move_steps(&long, 1, 0, super::MOVE_SPAN - 1).unwrap().len(), super::MOVE_SPAN);
+    assert_eq!(move_steps(&long, 1, 0, super::MOVE_SPAN).unwrap().len(), 1);
+    assert_eq!(move_steps(&long, 1, 0, 150).unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_long_guest_move_counts_each_step_and_is_all_or_nothing() {
+    let relay = FakeNtfy::start().await;
+    let h = peer("Sam", &relay);
+    let rest: Vec<String> = (0..40).map(|i| format!("c{i}")).collect();
+    let rest_refs: Vec<&str> = rest.iter().map(String::as_str).collect();
+    h.player.set("t0", 0, true, &rest_refs);
+    // The deepest drop that still lands where it was dropped: MOVE_SPAN
+    // steps, which is the whole budget.
+    assert_eq!(super::MOVE_SPAN, GUEST_OPS, "one long move can use the budget, never more");
+    h.listen.run_op("g1", Op::Move { from: 30, to: super::MOVE_SPAN - 1 }).await.unwrap();
+    assert_eq!(h.player.user().len(), super::MOVE_SPAN);
+    assert_eq!(h.player.user().last().map(String::as_str), Some("c30"));
+    // That used the budget: the next request waits, and nothing moved.
+    let before = h.player.user();
+    let e = h.listen.run_op("g1", Op::Move { from: 25, to: 0 }).await.unwrap_err();
+    assert!(e.contains("Too many requests"), "{e}");
+    assert_eq!(h.player.user(), before);
+    assert_eq!(h.player.log.lock().iter().filter(|l| l.starts_with("move ")).count(), super::MOVE_SPAN, "one sequence ran");
 }

@@ -66,7 +66,46 @@ pub struct ServerRecord {
     pub extensions: Vec<String>,
 }
 
+/// The longest text kept from what a server says about itself (its product
+/// and each extension's name).
+pub const SERVER_TEXT_MAX: usize = 64;
+/// The most extensions kept for one server.
+pub const EXTENSIONS_MAX: usize = 64;
+
+/// A server's word about itself as kept: trimmed, one line, at most
+/// [`SERVER_TEXT_MAX`] characters. None when nothing is left.
+pub fn server_text(s: &str) -> Option<String> {
+    let t: String = s.trim().chars().filter(|c| !c.is_control()).take(SERVER_TEXT_MAX).collect();
+    let t = t.trim().to_string();
+    (!t.is_empty()).then_some(t)
+}
+
+/// A server's extension names as kept: each capped, sorted, no repeats, at
+/// most [`EXTENSIONS_MAX`] of them.
+pub fn server_list(names: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut v: Vec<String> = names.into_iter().filter_map(|n| server_text(&n)).collect();
+    v.sort();
+    v.dedup();
+    v.truncate(EXTENSIONS_MAX);
+    v
+}
+
+/// The same product, as servers name themselves (case doesn't matter).
+pub fn same_product(a: &str, b: &str) -> bool {
+    match (server_text(a), server_text(b)) {
+        (Some(a), Some(b)) => a.eq_ignore_ascii_case(&b),
+        _ => false,
+    }
+}
+
 impl ServerRecord {
+    /// What came from the server, capped (see [`server_text`]).
+    fn capped(mut self) -> Self {
+        self.product = self.product.as_deref().and_then(server_text);
+        self.extensions = server_list(std::mem::take(&mut self.extensions));
+        self
+    }
+
     pub fn new(tag: &str, kind: BackendKind, name: &str) -> Self {
         Self {
             tag: tag.into(),
@@ -125,8 +164,23 @@ impl ServersFile {
     }
 
     /// Add or replace the record with this tag. True when anything changed.
+    /// What the server said about itself is capped, and a product once kept
+    /// never changes: a server naming itself differently isn't this one,
+    /// and callers check for that before they get here.
     pub fn upsert(&mut self, r: ServerRecord) -> bool {
+        let mut r = r.capped();
         match self.servers.iter_mut().find(|s| s.tag == r.tag) {
+            Some(s) if s.product.is_some() && r.product != s.product => {
+                if r.product.as_deref().zip(s.product.as_deref()).is_some_and(|(a, b)| !same_product(a, b)) {
+                    tracing::warn!("a server's product changed; the one kept stays");
+                }
+                r.product = s.product.clone();
+                if *s == r {
+                    return false;
+                }
+                *s = r;
+                true
+            }
             Some(s) if *s == r => false,
             Some(s) => {
                 *s = r;
@@ -227,6 +281,35 @@ mod tests {
         assert!(f.remove(&crate::sid::tag("m2")));
         assert_eq!(f.primary.as_deref(), Some(crate::sid::tag("m1").as_str()));
         assert!(!f.remove("ffffffff"));
+    }
+
+    #[test]
+    fn what_a_server_says_about_itself_is_capped_and_its_product_kept() {
+        let tag = BackendKind::Subsonic.tag("http://music.example");
+        let mut f = ServersFile::default();
+        let long = "x".repeat(500);
+        let mut r = ServerRecord::new(&tag, BackendKind::Subsonic, "Music");
+        r.product = Some(format!("navidrome{long}"));
+        r.extensions = (0..1000).map(|i| format!("ext{i:04}{long}")).chain(["  ".to_string()]).collect();
+        f.upsert(r.clone());
+        let kept = f.get(&tag).unwrap().clone();
+        assert_eq!(kept.product.as_ref().unwrap().chars().count(), SERVER_TEXT_MAX);
+        assert_eq!(kept.extensions.len(), EXTENSIONS_MAX);
+        assert!(kept.extensions.iter().all(|e| e.chars().count() <= SERVER_TEXT_MAX && !e.trim().is_empty()));
+
+        // Another product never overwrites the kept one; nor does none.
+        let mut other = kept.clone();
+        other.product = Some("gonic".into());
+        other.name = "Renamed".into();
+        assert!(f.upsert(other));
+        assert_eq!(f.get(&tag).unwrap().product, kept.product);
+        assert_eq!(f.get(&tag).unwrap().name, "Renamed", "the rest still changes");
+        let mut none = kept.clone();
+        none.product = None;
+        f.upsert(none);
+        assert_eq!(f.get(&tag).unwrap().product, kept.product);
+        assert!(same_product("Navidrome", " navidrome "));
+        assert!(!same_product("navidrome", "gonic") && !same_product("", ""));
     }
 
     #[test]

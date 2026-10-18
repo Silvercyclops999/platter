@@ -116,8 +116,8 @@ impl ListenPlayer for PlayerHandle {
         PlayerHandle::queue_clear(self).await
     }
 
-    async fn queue_move(&self, item_id: String, to_index: usize) -> AppResult<()> {
-        PlayerHandle::queue_move(self, item_id, to_index).await
+    async fn queue_moves(&self, steps: Vec<(String, usize)>) -> AppResult<()> {
+        PlayerHandle::queue_moves(self, steps).await
     }
 }
 

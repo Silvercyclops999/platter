@@ -1,15 +1,15 @@
 import { Server } from "lucide-react";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { Skeleton } from "../components/Skeleton";
 import { Switch } from "../components/Switch";
 import { backend } from "../lib/backend";
-import type { AppError, SavedServer, ServerLibrary, ServerState } from "../lib/types";
+import type { AppError, SavedServer, ServerLibrary, ServerState, SubsonicCheck } from "../lib/types";
 import { useApp } from "../stores/app";
 import { useToasts } from "../stores/toasts";
 import { useUi } from "../stores/ui";
-import { AddServerFlow, type AddressKind } from "./AddServer";
+import { AddServerFlow, type AddressKind, CANT_TELL, InsecureConsent, SameServerConsent, isDowngrade } from "./AddServer";
 import "./add-server.css";
 import "./library-sources.css";
 
@@ -71,32 +71,176 @@ function Libraries({ server }: { server: SavedServer }) {
 
 /**
  * A Subsonic server at a new address (https now, another port, a proxy in
- * front of it). The core checks it's the same server, so its songs,
- * downloads, likes and history stay.
+ * front of it). The address is checked first; then the API key or password
+ * is typed again, because the saved one never goes to a new address. The
+ * core checks it's the same server, so its songs, downloads, likes and
+ * history stay.
  */
 function EditAddress({ server, onDone, onCancel }: { server: SavedServer; onDone: () => void; onCancel: () => void }) {
   const [url, setUrl] = useState(server.url ?? "");
+  const [checked, setChecked] = useState<SubsonicCheck | null>(null);
+  const [useKey, setUseKey] = useState(true);
+  const [apiKey, setApiKey] = useState("");
+  const [user, setUser] = useState(server.user ?? "");
+  const [password, setPassword] = useState("");
+  const [allowInsecure, setAllowInsecure] = useState(false);
+  const [sameServer, setSameServer] = useState(false);
+  const [unsure, setUnsure] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const id = useId();
-  const save = async () => {
+  const first = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (checked) first.current?.focus();
+  }, [checked, useKey]);
+
+  const check = async () => {
     setBusy(true);
     setError(null);
     try {
-      await backend.subsonicChangeAddress(server.tag, url.trim());
-      onDone();
+      const c = await backend.subsonicCheck(url.trim());
+      if (c.url === server.url) {
+        onDone();
+        return;
+      }
+      setUrl(c.url);
+      setUseKey(c.apiKeys);
+      setAllowInsecure(false);
+      setSameServer(false);
+      setUnsure(false);
+      setChecked(c);
     } catch (e) {
-      setError((e as AppError)?.message || "Couldn't change the address.");
+      setError((e as AppError)?.message || "Platter couldn't check that address.");
     } finally {
       setBusy(false);
     }
   };
+
+  const save = async () => {
+    if (!checked) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const creds = useKey ? { apiKey } : { user, password };
+      await backend.subsonicChangeAddress(server.tag, checked.url, creds, { allowInsecure, sameServer });
+      setApiKey("");
+      setPassword("");
+      onDone();
+    } catch (e) {
+      const m = (e as AppError)?.message || "Couldn't change the address.";
+      if (m === CANT_TELL) setUnsure(true);
+      setError(m);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const errorLine = error && (
+    <p className="add-server__error" id={`${id}-err`} role="alert">
+      {error}
+    </p>
+  );
+
+  if (checked) {
+    const downgrade = isDowngrade(server.url, checked.url);
+    const consented = (!checked.insecure && !downgrade) || allowInsecure;
+    const ready = (useKey ? !!apiKey.trim() : !!user.trim() && !!password) && consented && (!unsure || sameServer);
+    return (
+      <form
+        className="add-server"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (ready && !busy) void save();
+        }}
+      >
+        <p className="add-server__hint">
+          Platter doesn't send this server's saved {useKey ? "API key" : "password"} to a new address. Type it again for {checked.url}.
+        </p>
+        <InsecureConsent insecure={checked.insecure} downgrade={downgrade} checked={allowInsecure} onChange={setAllowInsecure} />
+        {useKey ? (
+          <div>
+            <label className="add-server__label" htmlFor={`${id}-key`}>
+              API key
+            </label>
+            <input
+              ref={first}
+              id={`${id}-key`}
+              className="add-server__input"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              value={apiKey}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? `${id}-err` : undefined}
+              onChange={(e) => setApiKey(e.target.value)}
+            />
+          </div>
+        ) : (
+          <>
+            <div>
+              <label className="add-server__label" htmlFor={`${id}-user`}>
+                User name
+              </label>
+              <input
+                id={`${id}-user`}
+                className="add-server__input"
+                type="text"
+                autoComplete="username"
+                spellCheck={false}
+                value={user}
+                onChange={(e) => setUser(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="add-server__label" htmlFor={`${id}-pw`}>
+                Password
+              </label>
+              <input
+                ref={first}
+                id={`${id}-pw`}
+                className="add-server__input"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? `${id}-err` : undefined}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+          </>
+        )}
+        {errorLine}
+        {unsure && <SameServerConsent checked={sameServer} onChange={setSameServer} />}
+        <div className="add-server__actions">
+          {checked.apiKeys && (
+            <Button
+              variant="ghost"
+              type="button"
+              onClick={() => {
+                setError(null);
+                setUseKey(!useKey);
+              }}
+            >
+              {useKey ? "Use a password instead" : "Use an API key instead"}
+            </Button>
+          )}
+          <Button variant="secondary" type="button" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button variant="primary" type="submit" disabled={!ready || busy}>
+            {busy ? "Checking…" : "Save"}
+          </Button>
+        </div>
+      </form>
+    );
+  }
+
   return (
     <form
       className="add-server"
       onSubmit={(e) => {
         e.preventDefault();
-        if (url.trim() && !busy) void save();
+        if (url.trim() && !busy) void check();
       }}
     >
       <div>
@@ -121,17 +265,13 @@ function EditAddress({ server, onDone, onCancel }: { server: SavedServer; onDone
         Use this when the same server moved: https instead of http, another port, or a proxy in front of it. Its songs, downloads,
         likes and history stay as they are.
       </p>
-      {error && (
-        <p className="add-server__error" id={`${id}-err`} role="alert">
-          {error}
-        </p>
-      )}
+      {errorLine}
       <div className="add-server__actions">
         <Button variant="ghost" type="button" onClick={onCancel}>
           Cancel
         </Button>
         <Button variant="primary" type="submit" disabled={!url.trim() || busy}>
-          {busy ? "Checking…" : "Save"}
+          {busy ? "Checking…" : "Continue"}
         </Button>
       </div>
     </form>

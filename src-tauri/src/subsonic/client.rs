@@ -218,17 +218,9 @@ impl SubsonicClient {
         Url::parse(&format!("{}/rest/{method}", self.base)).map_err(|e| AppError::Internal(format!("url: {e}")))
     }
 
-    /// Remove the secret from text built from an answer.
+    /// Remove the sign-in from text built from an answer.
     pub fn scrub(&self, text: String) -> String {
-        let mut t = text;
-        if let Some(s) = &self.secret {
-            for v in s.values() {
-                if !v.is_empty() {
-                    t = t.replace(v, "<redacted>");
-                }
-            }
-        }
-        t
+        redact(&text, self.secret.as_ref())
     }
 
     /// Send a method call; a failed answer comes back as the app's errors.
@@ -358,16 +350,75 @@ pub fn check_status(s: &Status, secret: Option<&Secret>) -> AppResult<()> {
 /// A server's error message as it can be shown: short, one line, with no
 /// part of the sign-in in it.
 fn server_words(message: Option<&str>, secret: Option<&Secret>) -> Option<String> {
-    let mut m: String = message?.split_whitespace().collect::<Vec<_>>().join(" ");
+    let m: String = message?.split_whitespace().collect::<Vec<_>>().join(" ");
+    let m: String = redact(&m, secret).chars().take(160).collect();
+    (!m.is_empty()).then_some(m)
+}
+
+/// The query parameters that carry a sign-in.
+const SIGN_IN_PARAMS: [&str; 5] = ["t", "s", "u", "p", "apikey"];
+
+/// Secrets shorter than this aren't searched for: blanking every "a" or
+/// "12" would wreck the text and hide nothing.
+const SECRET_MIN: usize = 4;
+
+/// A word that is or holds an address (with a scheme, `www.`, or a query).
+fn address_like(word: &str) -> bool {
+    let w = word.to_ascii_lowercase();
+    w.contains("://") || w.trim_start_matches(|c: char| !c.is_alphanumeric()).starts_with("www.") || w.find('?').is_some_and(|q| w[q..].contains('='))
+}
+
+/// A `key=value` part whose key is one of the sign-in parameters.
+fn sign_in_pair(part: &str) -> bool {
+    let p = part.trim_start_matches(|c: char| !c.is_alphanumeric());
+    p.split_once('=').is_some_and(|(k, _)| SIGN_IN_PARAMS.iter().any(|s| k.eq_ignore_ascii_case(s)))
+}
+
+/// Text from or about a server, safe for a toast or a log line: addresses
+/// dropped, sign-in parameters (`t`, `s`, `u`, `p`, `apiKey`) taken out, and
+/// the secret itself replaced wherever it shows.
+pub fn redact(text: &str, secret: Option<&Secret>) -> String {
+    let mut text = text.to_string();
     if let Some(s) = secret {
         for v in s.values() {
-            if !v.is_empty() {
-                m = m.replace(v, "<redacted>");
+            if v.chars().count() >= SECRET_MIN {
+                text = text.replace(v, "<redacted>");
             }
         }
     }
-    let m: String = m.chars().take(160).collect();
-    (!m.is_empty()).then_some(m)
+    let mut out = String::with_capacity(text.len());
+    let mut word = String::new();
+    let flush = |word: &mut String, out: &mut String| {
+        if word.is_empty() {
+            return;
+        }
+        if address_like(word) {
+            out.push_str("<address>");
+        } else if word.contains('=') {
+            let parts: Vec<&str> = word.split(['&', ';']).collect();
+            let kept: Vec<&str> = parts.iter().copied().filter(|p| !sign_in_pair(p)).collect();
+            if kept.len() == parts.len() {
+                out.push_str(word);
+            } else if kept.iter().all(|p| p.is_empty()) {
+                out.push_str("<redacted>");
+            } else {
+                out.push_str(&kept.join("&"));
+            }
+        } else {
+            out.push_str(word);
+        }
+        word.clear();
+    };
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            flush(&mut word, &mut out);
+            out.push(ch);
+        } else {
+            word.push(ch);
+        }
+    }
+    flush(&mut word, &mut out);
+    out
 }
 
 /// Status codes as the app's errors.
@@ -471,5 +522,30 @@ mod tests {
         let e = check_status(&said("bad key sekrit-key"), Some(&key)).unwrap_err().to_string();
         assert!(!e.contains("sekrit-key"), "{e}");
         assert_eq!(check_status(&said("  "), None).unwrap_err().to_string(), "server: The server answered with error 0.");
+    }
+
+    #[test]
+    fn server_text_loses_sign_in_parameters_and_addresses() {
+        let said = |m: &str, s: Option<&Secret>| server_words(Some(m), s).unwrap();
+        // The salted token, salt, user and API key, wherever they sit.
+        let e = said("bad request u=me&t=feedface&s=c19b2d&f=json", None);
+        assert!(!e.contains("feedface") && !e.contains("c19b2d") && !e.contains("u=me"), "{e}");
+        assert!(e.contains("f=json"), "{e}");
+        let e = said("refused apiKey=AbCd123 and p=enc:6f70656e", None);
+        assert!(!e.contains("AbCd123") && !e.contains("6f70656e"), "{e}");
+        // Addresses, with or without the sign-in in them.
+        let e = said("see http://10.20.30.40:4533/rest/ping?u=me&t=x for more", None);
+        assert_eq!(e, "see <address> for more");
+        let e = said("go to www.music.example now or /rest/ping.view?id=3", None);
+        assert_eq!(e, "go to <address> now or <address>");
+        // Words that only look a bit like a parameter stay.
+        assert_eq!(said("menu=open status=busy", None), "menu=open status=busy");
+        // A short secret doesn't blank the message; a long one is hidden.
+        let short = Secret::Password { user: "me".into(), password: Token::new("a").unwrap() };
+        assert_eq!(said("a scan is running", Some(&short)), "a scan is running");
+        let long = Secret::Password { user: "me".into(), password: Token::new("open sesame").unwrap() };
+        assert_eq!(said("wrong: open sesame", Some(&long)), "wrong: <redacted>");
+        let c = SubsonicClient::new(reqwest::Client::new(), "http://music.example").unwrap().signed_in(long);
+        assert_eq!(c.scrub("error sending request for url (https://music.example/rest/x?apiKey=k)".into()), "error sending request for url <address>");
     }
 }

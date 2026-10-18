@@ -2,7 +2,7 @@
  * Navidrome and other Subsonic servers in the mock, with hooks to fake each
  * way adding or using one can go wrong.
  */
-import type { AppError, Caps, ResumeOffer, SavedServer, ServerCaps, ServerLibrary, SubsonicCheck } from "../types";
+import type { AppError, Caps, ResumeOffer, SavedServer, ServerCaps, ServerLibrary, SubsonicCheck, SubsonicConfirm, SubsonicCreds } from "../types";
 import { ALL_CAPS } from "../caps";
 
 /** Ways the fake server can fail. */
@@ -17,6 +17,11 @@ export const KEY_REFUSED = "The server didn't accept that API key. Make a new on
 export const NO_API_KEYS = "This server doesn't take API keys. Sign in with your user name and password instead.";
 export const NOT_THIS_SERVER =
   "The server at that address isn't this one: it doesn't have this server's songs. Check the address, or add it as a new server.";
+export const CANT_TELL =
+  "Platter can't tell whether the server at that address is this one. If you're sure it is, tick \"I'm sure this is the same server\" and try again.";
+export const TYPE_SECRET = "Type this server's API key, or your password, for the new address.";
+export const INSECURE_ADDRESS =
+  "That address is plain http, so your sign-in could be read on its way to the server. Use the server's https address, or tick \"Use this http address anyway\".";
 
 /** What a Subsonic server can do, as the core reports it. */
 export function subsonicCaps(open: boolean): Caps {
@@ -32,6 +37,8 @@ export class MockSubsonic {
   failure: SubsonicFailure = null;
   /** Addresses that answer as another server (tests). */
   others = new Set<string>();
+  /** Addresses Platter can't tell apart from this server: nothing to compare (tests). */
+  unsure = new Set<string>();
   /** The account's rights on servers added from now on. */
   canDownload = true;
   servers: SavedServer[] = [];
@@ -54,33 +61,59 @@ export class MockSubsonic {
     return { url: tidy, name: open ? `Navidrome on ${host}` : host, version: open ? "0.58.0" : null, openSubsonic: open, apiKeys: open, insecure };
   }
 
-  signIn(url: string, creds: { apiKey?: string; user?: string; password?: string }, tag?: string): SavedServer {
-    const c = this.check(url);
+  /** Like the core: plain http on the internet, or http for a server saved at https, needs the user's say-so. */
+  private insecureCheck(c: SubsonicCheck, saved: string | null | undefined, confirm?: SubsonicConfirm) {
+    if (confirm?.allowInsecure) return;
+    const downgrade = !!saved?.startsWith("https://") && c.url.startsWith("http://");
+    if (c.insecure || downgrade) throw err("invalid", INSECURE_ADDRESS);
+  }
+
+  /** The typed key or password, checked the way the fake server checks it. Returns the user name. */
+  private creds(c: SubsonicCheck, creds: SubsonicCreds): string {
     if (creds.apiKey) {
       if (!c.apiKeys) throw err("invalid", NO_API_KEYS);
       if (this.failure === "keyRefused" || creds.apiKey !== "good-key") throw err("auth", KEY_REFUSED);
-      return this.add(c, "me", tag);
+      return "me";
     }
     if (!creds.user?.trim()) throw err("invalid", "Type your user name.");
     if (creds.password !== "right") throw err("auth", WRONG_PASSWORD);
-    return this.add(c, creds.user.trim(), tag);
+    return creds.user.trim();
   }
 
-  /** Like the core: the same server at a new address keeps its tag. */
-  changeAddress(tag: string, url: string): SavedServer {
+  /** Like the core: a new address must be this server, or the user must be sure when it can't be told. */
+  private sameCheck(c: SubsonicCheck, confirm?: SubsonicConfirm) {
+    if (this.others.has(c.url)) throw err("invalid", NOT_THIS_SERVER);
+    if (this.unsure.has(c.url) && !confirm?.sameServer) throw err("invalid", CANT_TELL);
+  }
+
+  signIn(url: string, creds: SubsonicCreds, tag?: string, confirm?: SubsonicConfirm): SavedServer {
+    const c = this.check(url);
+    const saved = tag ? this.servers.find((s) => s.tag === tag) : undefined;
+    this.insecureCheck(c, saved?.url, confirm);
+    if (!creds.apiKey && !creds.password) throw err("invalid", "Type an API key, or your user name and password.");
+    const user = this.creds(c, creds);
+    return this.add(c, user, tag, confirm);
+  }
+
+  /** Like the core: the same server at a new address keeps its tag, signed in with what was typed for it. */
+  changeAddress(tag: string, url: string, creds: SubsonicCreds, confirm?: SubsonicConfirm): SavedServer {
     const s = this.servers.find((x) => x.tag === tag);
     if (!s) throw err("notFound", "That server isn't in Platter any more.");
+    if (!creds.apiKey && !creds.password) throw err("invalid", TYPE_SECRET);
     const c = this.check(url);
-    if (this.others.has(c.url)) throw err("invalid", NOT_THIS_SERVER);
+    if (c.url === s.url) return s;
+    this.insecureCheck(c, s.url, confirm);
+    this.creds(c, { ...creds, user: creds.user || s.user || undefined });
+    this.sameCheck(c, confirm);
     s.url = c.url;
     s.state = "online";
     return s;
   }
 
-  private add(c: SubsonicCheck, user: string, keep?: string): SavedServer {
+  private add(c: SubsonicCheck, user: string, keep?: string, confirm?: SubsonicConfirm): SavedServer {
     const again = keep ? this.servers.find((s) => s.tag === keep) : undefined;
     if (again) {
-      if (this.others.has(c.url)) throw err("invalid", NOT_THIS_SERVER);
+      if (again.url !== c.url) this.sameCheck(c, confirm);
       again.url = c.url;
       again.state = "online";
       return again;
@@ -136,6 +169,8 @@ export class MockSubsonic {
 
   reset() {
     this.failure = null;
+    this.others.clear();
+    this.unsure.clear();
     this.canDownload = true;
     this.servers = [];
     this.libraries = {};

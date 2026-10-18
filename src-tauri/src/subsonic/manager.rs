@@ -16,6 +16,7 @@ use tokio::sync::watch;
 use super::client::{NO_API_KEYS, OFFLINE, Secret, SubsonicClient};
 use super::server::{Core, Features, SubsonicServer, ext};
 use super::types::{TokenInfo, User};
+use crate::backend::registry::{same_product, server_list, server_text};
 use crate::backend::{BackendKind, Backends, ServerRecord};
 use crate::bridge::StreamPrefs;
 use crate::db::DbHandle;
@@ -29,8 +30,68 @@ pub const WRONG_URL: &str = "Platter can't reach a server at that address. Check
 /// A new address that answers as another server.
 pub const NOT_THIS_SERVER: &str =
     "The server at that address isn't this one: it doesn't have this server's songs. Check the address, or add it as a new server.";
+/// A new address Platter has nothing to check against (no songs synced yet,
+/// or a server that doesn't name its software). The user can say it's the
+/// same server.
+pub const CANT_TELL: &str =
+    "Platter can't tell whether the server at that address is this one. If you're sure it is, tick \"I'm sure this is the same server\" and try again.";
+/// A new address that needs the key or password typed again.
+pub const TYPE_SECRET: &str = "Type this server's API key, or your password, for the new address.";
+/// Plain http where it isn't safe, without the user saying it's fine.
+pub const INSECURE_ADDRESS: &str =
+    "That address is plain http, so your sign-in could be read on its way to the server. Use the server's https address, or tick \"Use this http address anyway\".";
 /// Songs from the cache asked for at a new address, to tell it's the same server.
-const KNOWN_SONGS: usize = 3;
+const KNOWN_SONGS: usize = 4;
+/// Of those, how many must come back the same (or all, when fewer are cached).
+const KNOWN_MATCHES: usize = 2;
+
+/// What the user said about a new address.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Confirm {
+    /// "I'm sure this is the same server": go on when there's nothing to
+    /// compare. A server that is plainly another one is still refused.
+    pub same_server: bool,
+    /// "Use this http address anyway".
+    pub allow_insecure: bool,
+}
+
+/// An address the sign-in may go to: plain http on the internet, or http
+/// where the server was saved at https, needs the user's say-so.
+pub fn address_allowed(saved: Option<&str>, new: &str, allow_insecure: bool) -> AppResult<()> {
+    if allow_insecure {
+        return Ok(());
+    }
+    let scheme = |u: &str| url::Url::parse(u).ok().map(|u| u.scheme().to_string());
+    let downgrade = saved.and_then(scheme).as_deref() == Some("https") && scheme(new).as_deref() == Some("http");
+    if downgrade || crate::web::plain_http_warning(new).is_some() {
+        return Err(AppError::Invalid(INSECURE_ADDRESS.into()));
+    }
+    Ok(())
+}
+
+/// A song as the cache has it, to compare with the server's answer.
+#[derive(Debug, Clone)]
+struct KnownSong {
+    id: String,
+    title: String,
+    artist: String,
+    duration_ms: u64,
+}
+
+fn fold(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+impl KnownSong {
+    /// The server's song is this one: same id, title, artist and length.
+    fn matches(&self, tag: &str, s: &super::types::Song) -> bool {
+        let t = super::map::track(tag, s);
+        t.id == self.id
+            && fold(&t.title) == fold(&self.title)
+            && fold(&t.artist_title) == fold(&self.artist)
+            && t.duration_ms.abs_diff(self.duration_ms) <= 2000
+    }
+}
 /// How often a server is checked for changes, by default (Settings).
 pub const DEFAULT_POLL_MINUTES: u32 = 5;
 pub const POLL_MINUTES_MIN: u32 = 1;
@@ -110,6 +171,38 @@ fn spawn(f: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>) {
         tokio::spawn(f);
     } else {
         tauri::async_runtime::spawn(f);
+    }
+}
+
+/// The key or password the user typed. None when nothing was typed.
+fn typed_secret(user: Option<String>, api_key: Option<String>, password: Option<String>) -> AppResult<Option<Secret>> {
+    match (api_key.filter(|k| !k.trim().is_empty()), password.filter(|p| !p.is_empty())) {
+        (Some(k), _) => Ok(Some(Secret::ApiKey(Token::new(k)?))),
+        (None, Some(pw)) => {
+            let Some(u) = user.filter(|u| !u.trim().is_empty()) else { return Err(AppError::Invalid("Type your user name.".into())) };
+            Ok(Some(Secret::Password { user: u, password: Token::new(pw)? }))
+        }
+        (None, None) => Ok(None),
+    }
+}
+
+/// An API key goes only to a server that takes them.
+fn usable_secret(secret: Secret, features: &Features) -> AppResult<Secret> {
+    if secret.is_key() && !features.has(ext::API_KEY) {
+        return Err(AppError::Invalid(NO_API_KEYS.into()));
+    }
+    Ok(secret)
+}
+
+/// A new address names itself as the software this server was. Another
+/// product is another server; a server (then or now) that doesn't say
+/// can't be told apart, so only the user's say-so lets it through.
+fn product_check(record: &ServerRecord, now: Option<&str>, confirmed: bool) -> AppResult<()> {
+    match (record.product.as_deref(), now) {
+        (Some(was), Some(now)) if same_product(was, now) => Ok(()),
+        (Some(_), Some(_)) => Err(AppError::Invalid(NOT_THIS_SERVER.into())),
+        _ if confirmed => Ok(()),
+        _ => Err(AppError::Invalid(CANT_TELL.into())),
     }
 }
 
@@ -236,8 +329,17 @@ impl Subsonic {
     pub async fn read_features(&self, core: &Arc<Core>) -> bool {
         let Ok(c) = core.client() else { return false };
         let Ok(status) = c.ping().await else { return false };
+        let tag = core.tag().to_string();
+        // Other software answering at the address isn't this server: what
+        // it says it can do isn't kept.
+        if let (Some(was), Some(now)) = (self.inner.backends.records().get(&tag).and_then(|r| r.product.clone()), status.kind.as_deref())
+            && !same_product(&was, now)
+        {
+            tracing::warn!("a music server answered as other software; its features weren't read");
+            return false;
+        }
         let open = status.open_subsonic.unwrap_or(false);
-        let names: Vec<String> = c.extensions().await.into_iter().map(|e| e.name).collect();
+        let names = server_list(c.extensions().await.into_iter().map(|e| e.name));
         core.mark_features_read();
         core.set_features(Features::new(open, names.clone()));
         // The form posts need the extension list.
@@ -246,12 +348,10 @@ impl Subsonic {
         {
             core.sign_in(c, &name, core.user().unwrap_or_default());
         }
-        let tag = core.tag().to_string();
         let saved = self.inner.backends.edit_records(|f| {
             if let Some(mut r) = f.get(&tag).cloned() {
                 r.open_subsonic = Some(open);
                 r.extensions = names.clone();
-                r.extensions.sort();
                 f.upsert(r);
             }
         });
@@ -293,7 +393,7 @@ impl Subsonic {
             let exts = c.extensions().await;
             return Ok(SubsonicCheck {
                 url: c.base().to_string(),
-                name: server_name(status.kind.as_deref(), c.base()),
+                name: server_name(status.kind.as_deref().and_then(server_text).as_deref(), c.base()),
                 version: status.server_version.or(status.version),
                 open_subsonic: status.open_subsonic.unwrap_or(false),
                 api_keys: exts.iter().any(|e| e.name == ext::API_KEY),
@@ -306,7 +406,7 @@ impl Subsonic {
     /// Sign in with an API key (preferred) or a user name and password, and
     /// add the server (or sign in to it again).
     pub async fn sign_in(&self, url: &str, user: Option<String>, api_key: Option<String>, password: Option<String>) -> AppResult<SavedServer> {
-        self.sign_in_to(None, url, user, api_key, password).await
+        self.sign_in_to(None, url, user, api_key, password, Confirm::default()).await
     }
 
     /// Like [`Self::sign_in`]; `keep` is the server being signed in to
@@ -320,26 +420,31 @@ impl Subsonic {
         user: Option<String>,
         api_key: Option<String>,
         password: Option<String>,
+        confirm: Confirm,
     ) -> AppResult<SavedServer> {
         let keep = keep.filter(|t| self.owns(t));
         let c = self.unsigned(url)?;
-        let status = c.probe().await.map_err(wrong_url)?;
-        let names: Vec<String> = c.extensions().await.into_iter().map(|e| e.name).collect();
-        let features = Features::new(status.open_subsonic.unwrap_or(false), names);
+        let saved = keep.and_then(|t| self.inner.backends.records().get(t).cloned());
+        address_allowed(saved.as_ref().and_then(|r| r.url.as_deref()), c.base(), confirm.allow_insecure)?;
         let user = user.map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
-        let secret = match (api_key.filter(|k| !k.trim().is_empty()), password.filter(|p| !p.is_empty())) {
-            (Some(k), _) => {
-                if !features.has(ext::API_KEY) {
-                    return Err(AppError::Invalid(NO_API_KEYS.into()));
-                }
-                Secret::ApiKey(Token::new(k)?)
-            }
-            (None, Some(pw)) => {
-                let Some(u) = user.clone() else { return Err(AppError::Invalid("Type your user name.".into())) };
-                Secret::Password { user: u, password: Token::new(pw)? }
-            }
-            (None, None) => return Err(AppError::Invalid("Type an API key, or your user name and password.".into())),
-        };
+        let typed = typed_secret(user.clone(), api_key, password)?
+            .ok_or_else(|| AppError::Invalid("Type an API key, or your user name and password.".into()))?;
+        let status = c.probe().await.map_err(wrong_url)?;
+        let kind = status.kind.as_deref().and_then(server_text);
+        // Signing in again at another address: it must name itself as the
+        // same software before the sign-in goes there.
+        let moving = saved.as_ref().filter(|r| r.url.as_deref() != Some(c.base()));
+        if let Some(r) = moving {
+            product_check(r, kind.as_deref(), confirm.same_server)?;
+        } else if let Some(r) = saved.clone().or_else(|| self.inner.backends.records().get(&BackendKind::Subsonic.tag(c.base())).cloned())
+            && let (Some(was), Some(now)) = (r.product.as_deref(), kind.as_deref())
+            && !same_product(was, now)
+        {
+            // The same address, but other software answers there now.
+            return Err(AppError::Invalid(NOT_THIS_SERVER.into()));
+        }
+        let features = self.features_at(&c, &status).await;
+        let secret = usable_secret(typed, &features)?;
         let signed = c.clone().signed_in(secret.clone()).with_form_post(features.has(ext::FORM_POST));
         signed.ping().await.map_err(wrong_url)?;
         // Who the key belongs to.
@@ -360,24 +465,24 @@ impl Subsonic {
         };
         let tag = match keep {
             Some(t) => {
-                self.same_server(t, status.kind.as_deref(), &signed).await?;
+                if let Some(r) = moving {
+                    self.same_server_as(r, kind.as_deref(), &signed, confirm.same_server).await?;
+                }
                 t.to_string()
             }
             None => BackendKind::Subsonic.tag(c.base()),
         };
         self.inner.store.set(&key_account(&tag), &secret.stored()?)?;
-        let name = server_name(status.kind.as_deref(), c.base());
+        let name = server_name(kind.as_deref(), c.base());
         let existing = self.inner.backends.records().get(&tag).cloned();
         let moved = existing.as_ref().is_some_and(|r| r.url.as_deref() != Some(c.base()));
-        let mut extensions: Vec<String> = features.names.iter().cloned().collect();
-        extensions.sort();
         let record = ServerRecord {
             url: Some(c.base().to_string()),
             user: (!username.is_empty()).then(|| username.clone()),
             user_id: None,
             open_subsonic: Some(features.open),
-            extensions,
-            product: status.kind.clone().or(existing.as_ref().and_then(|r| r.product.clone())),
+            extensions: server_list(features.names.iter().cloned()),
+            product: existing.as_ref().and_then(|r| r.product.clone()).or(kind.clone()),
             libraries: existing.and_then(|r| r.libraries),
             ..ServerRecord::new(&tag, BackendKind::Subsonic, &name)
         };
@@ -396,13 +501,31 @@ impl Subsonic {
         self.saved_one(&tag).ok_or_else(|| AppError::Internal("server not saved".into()))
     }
 
+    /// The server's extensions at an address, as kept (capped).
+    async fn features_at(&self, c: &SubsonicClient, status: &super::types::Status) -> Features {
+        let names = server_list(c.extensions().await.into_iter().map(|e| e.name));
+        Features::new(status.open_subsonic.unwrap_or(false), names)
+    }
+
     /// Use a saved server at a new address (http or https, another host,
     /// port or path, a proxy in front of it). It keeps its tag, so its
-    /// songs, downloads, likes, playlists and history stay as they are. The
-    /// new address must be the same server: it signs in with the saved key
-    /// or password, names itself the same kind of server, and has the songs
-    /// this server had.
-    pub async fn change_address(&self, tag: &str, url: &str) -> AppResult<SavedServer> {
+    /// songs, downloads, likes, playlists and history stay as they are.
+    ///
+    /// The saved key or password never goes to the new address: the user
+    /// types it again (`user`, `api_key`, `password`), and it's sent only
+    /// after the address answers, unsigned, as the same kind of server.
+    /// Then the songs this server had must be there, the same songs; when
+    /// there's nothing to compare, only the user's "I'm sure" lets it
+    /// through.
+    pub async fn change_address(
+        &self,
+        tag: &str,
+        url: &str,
+        user: Option<String>,
+        api_key: Option<String>,
+        password: Option<String>,
+        confirm: Confirm,
+    ) -> AppResult<SavedServer> {
         let record = self
             .inner
             .backends
@@ -411,35 +534,42 @@ impl Subsonic {
             .filter(|r| r.kind == BackendKind::Subsonic)
             .cloned()
             .ok_or_else(|| AppError::NotFound("That server isn't in Platter any more.".into()))?;
+        // Nothing goes anywhere without a typed key or password.
+        let user = user.map(|u| u.trim().to_string()).filter(|u| !u.is_empty()).or(record.user.clone());
+        let typed = typed_secret(user, api_key, password)?.ok_or_else(|| AppError::Invalid(TYPE_SECRET.into()))?;
         let c = self.unsigned(url)?;
-        let status = c.probe().await.map_err(wrong_url)?;
         if record.url.as_deref() == Some(c.base()) {
             return self.saved_one(tag).ok_or_else(|| AppError::Internal("server not saved".into()));
         }
-        let names: Vec<String> = c.extensions().await.into_iter().map(|e| e.name).collect();
-        let features = Features::new(status.open_subsonic.unwrap_or(false), names);
-        let stored = self.inner.store.get(&key_account(tag))?;
-        let secret = stored
-            .as_ref()
-            .and_then(|t| Secret::from_stored(t, record.user.as_deref()))
-            .ok_or_else(|| AppError::Auth("Sign in to this server again, then change its address.".into()))?;
+        address_allowed(record.url.as_deref(), c.base(), confirm.allow_insecure)?;
+        let status = c.probe().await.map_err(wrong_url)?;
+        let kind = status.kind.as_deref().and_then(server_text);
+        product_check(&record, kind.as_deref(), confirm.same_server)?;
+        let features = self.features_at(&c, &status).await;
+        let secret = usable_secret(typed, &features)?;
         let signed = c.clone().signed_in(secret.clone()).with_form_post(features.has(ext::FORM_POST));
         signed.ping().await.map_err(wrong_url)?;
-        self.same_server_as(&record, status.kind.as_deref(), &signed).await?;
+        self.same_server_as(&record, kind.as_deref(), &signed, confirm.same_server).await?;
+        // The typed sign-in worked here: it's the one kept now.
+        self.inner.store.set(&key_account(tag), &secret.stored()?)?;
         let base = c.base().to_string();
-        let product = status.kind.clone().or(record.product.clone());
-        let mut extensions: Vec<String> = features.names.iter().cloned().collect();
-        extensions.sort();
+        let product = record.product.clone().or(kind.clone());
+        let extensions = server_list(features.names.iter().cloned());
+        let username = match &secret {
+            Secret::Password { user, .. } => Some(user.clone()),
+            Secret::ApiKey(_) => record.user.clone(),
+        };
         self.inner.backends.edit_records(|f| {
             if let Some(mut r) = f.get(tag).cloned() {
                 r.url = Some(base.clone());
                 r.product = product.clone();
                 r.open_subsonic = Some(features.open);
                 r.extensions = extensions.clone();
+                r.user = username.clone();
                 f.upsert(r);
             }
         })?;
-        let username = record.user.clone().unwrap_or_default();
+        let username = username.unwrap_or_default();
         let account = self.core(tag).and_then(|c| c.user()).unwrap_or_default();
         self.forget_core(tag);
         let core = self.core_for(tag, &record.name, &base)?;
@@ -453,47 +583,50 @@ impl Subsonic {
         self.saved_one(tag).ok_or_else(|| AppError::Internal("server not saved".into()))
     }
 
-    async fn same_server(&self, tag: &str, kind: Option<&str>, signed: &SubsonicClient) -> AppResult<()> {
-        let Some(record) = self.inner.backends.records().get(tag).cloned() else { return Ok(()) };
-        if record.url.as_deref() == Some(signed.base()) {
-            return Ok(());
-        }
-        self.same_server_as(&record, kind, signed).await
-    }
-
     /// The server at a new address is the one `record` names: the same
-    /// kind of server, and songs this one had are there.
-    async fn same_server_as(&self, record: &ServerRecord, kind: Option<&str>, signed: &SubsonicClient) -> AppResult<()> {
-        if let (Some(was), Some(now)) = (record.product.as_deref(), kind)
-            && !was.eq_ignore_ascii_case(now)
-        {
-            return Err(AppError::Invalid(NOT_THIS_SERVER.into()));
-        }
+    /// kind of server, and the songs this one had are there as the same
+    /// songs (id, title, artist and length), at least [`KNOWN_MATCHES`] of
+    /// them, or all when fewer are cached. With nothing to compare it's
+    /// refused unless the user said it's the same server.
+    async fn same_server_as(&self, record: &ServerRecord, kind: Option<&str>, signed: &SubsonicClient, confirmed: bool) -> AppResult<()> {
+        product_check(record, kind, confirmed)?;
         let known = self.known_songs(&record.tag).await;
         if known.is_empty() {
-            return Ok(());
+            return if confirmed { Ok(()) } else { Err(AppError::Invalid(CANT_TELL.into())) };
         }
-        for id in &known {
-            let r: AppResult<super::types::Song> = signed.get("getSong", &[("id", crate::sid::key(id).to_string())], Some("song")).await;
+        let need = KNOWN_MATCHES.min(known.len());
+        let mut same = 0;
+        for k in &known {
+            let r: AppResult<super::types::Song> = signed.get("getSong", &[("id", crate::sid::key(&k.id).to_string())], Some("song")).await;
             match r {
-                Ok(_) => return Ok(()),
-                Err(AppError::NotFound(_)) => {}
+                Ok(s) if k.matches(&record.tag, &s) => same += 1,
+                Ok(_) | Err(AppError::NotFound(_)) => {}
                 Err(e) => return Err(wrong_url(e)),
+            }
+            if same >= need {
+                return Ok(());
             }
         }
         Err(AppError::Invalid(NOT_THIS_SERVER.into()))
     }
 
-    /// A few song ids the cache has from this server.
-    async fn known_songs(&self, tag: &str) -> Vec<String> {
+    /// A few songs the cache has from this server.
+    async fn known_songs(&self, tag: &str) -> Vec<KnownSong> {
         let Some(db) = self.inner.db.clone() else { return Vec::new() };
         let like = format!("{tag}:%");
         db.read_async(move |c| {
-            let mut st = c.prepare("SELECT id FROM tracks WHERE id LIKE ?1 LIMIT ?2")?;
-            let ids = st
-                .query_map(rusqlite::params![like, KNOWN_SONGS as i64], |r| r.get::<_, String>(0))?
+            let mut st = c.prepare("SELECT id, title, artist_title, duration_ms FROM tracks WHERE id LIKE ?1 ORDER BY id LIMIT ?2")?;
+            let songs = st
+                .query_map(rusqlite::params![like, KNOWN_SONGS as i64], |r| {
+                    Ok(KnownSong {
+                        id: r.get(0)?,
+                        title: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                        artist: r.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                        duration_ms: r.get::<_, Option<i64>>(3)?.unwrap_or(0).max(0) as u64,
+                    })
+                })?
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(ids)
+            Ok(songs)
         })
         .await
         .unwrap_or_default()
@@ -643,6 +776,28 @@ mod tests {
         assert_eq!(server_name(Some(" "), "https://music.example"), "music.example");
         assert_eq!(poll_minutes(0), 1);
         assert_eq!(poll_minutes(5), 5);
+    }
+
+    #[test]
+    fn the_refusals_name_the_boxes_the_settings_page_shows() {
+        // The UI shows these boxes and matches CANT_TELL word for word.
+        assert!(CANT_TELL.contains("\"I'm sure this is the same server\""));
+        assert!(INSECURE_ADDRESS.contains("\"Use this http address anyway\""));
+        assert!(!CANT_TELL.contains('\u{2014}') && !INSECURE_ADDRESS.contains('\u{2014}') && !TYPE_SECRET.contains('\u{2014}'));
+    }
+
+    #[test]
+    fn product_and_typed_sign_in_checks() {
+        let mut r = ServerRecord::new("t", BackendKind::Subsonic, "S");
+        assert!(product_check(&r, Some("navidrome"), false).is_err(), "nothing kept to compare");
+        assert!(product_check(&r, Some("navidrome"), true).is_ok());
+        r.product = Some("navidrome".into());
+        assert!(product_check(&r, Some("Navidrome"), false).is_ok());
+        assert!(product_check(&r, None, false).is_err(), "a server that doesn't say");
+        assert!(product_check(&r, Some("gonic"), true).is_err(), "another product even when sure");
+        assert!(typed_secret(None, None, None).unwrap().is_none());
+        assert!(typed_secret(None, None, Some("pw".into())).is_err(), "a password needs a user");
+        assert!(typed_secret(None, Some("  ".into()), None).unwrap().is_none());
     }
 
     #[test]

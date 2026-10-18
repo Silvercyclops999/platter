@@ -167,9 +167,11 @@ pub struct PlayerNow {
     pub up_next_items: Vec<String>,
 }
 
-/// Songs a guest's move may turn into queued songs to land where it was
-/// dropped. Past this the song goes to the end of the queued songs.
-const MOVE_SPAN: usize = 100;
+/// The most queue moves one guest move may take (the songs it turns into
+/// queued songs to land where it was dropped, and the song itself). Past
+/// this the song goes to the end of the queued songs. Each one counts
+/// against the guest's request budget.
+pub const MOVE_SPAN: usize = 20;
 
 /// The queue moves that put the song at `from` of `items` (the user queue,
 /// `user_len` long, then the rest) at `to` of the list without it, as a
@@ -182,7 +184,7 @@ pub fn move_steps(items: &[String], user_len: usize, from: usize, to: usize) -> 
     let queued = if from < user_len { user_len - 1 } else { user_len.min(rest.len()) };
     let to = to.min(rest.len());
     let mut steps = Vec::new();
-    if to > queued && to - queued <= MOVE_SPAN {
+    if to > queued && to - queued < MOVE_SPAN {
         steps.extend(rest[queued..to].iter().map(|id| ((*id).clone(), usize::MAX)));
     }
     steps.push((item, to));
@@ -204,7 +206,9 @@ pub trait ListenPlayer: Send + Sync {
     async fn queue_add(&self, ids: Vec<String>) -> AppResult<()>;
     /// Empty the user queue.
     async fn queue_clear(&self) -> AppResult<()>;
-    async fn queue_move(&self, item_id: String, to_index: usize) -> AppResult<()>;
+    /// Queue moves (item id, user queue index), all or none: when one
+    /// can't be made the queue is left as it was.
+    async fn queue_moves(&self, steps: Vec<(String, usize)>) -> AppResult<()>;
 }
 
 /// The Plex server this computer plays from.
@@ -1351,6 +1355,11 @@ impl ListenAlong {
     /// Do what a guest asked. Err: why not, in words for them.
     /// A guest's request fits the rate: [`GUEST_OPS`] per [`GUEST_OPS_WINDOW`].
     fn guest_op_allowed(&self, gid: &str) -> bool {
+        self.guest_ops_take(gid, 1)
+    }
+
+    /// Take `n` requests from a guest's budget, all or none.
+    fn guest_ops_take(&self, gid: &str, n: usize) -> bool {
         let now = std::time::Instant::now();
         let mut rate = self.inner.op_rate.lock();
         if rate.len() > 256 {
@@ -1358,10 +1367,10 @@ impl ListenAlong {
         }
         let times = rate.entry(gid.to_string()).or_default();
         times.retain(|t| now.duration_since(*t) < GUEST_OPS_WINDOW);
-        if times.len() >= GUEST_OPS {
+        if times.len() + n > GUEST_OPS {
             return false;
         }
-        times.push(now);
+        times.extend(std::iter::repeat_n(now, n));
         true
     }
 
@@ -1409,10 +1418,11 @@ impl ListenAlong {
                 let now = p.now().await.map_err(failed)?;
                 let steps = move_steps(&now.up_next_items, now.user_queue.len(), from, to)
                     .ok_or_else(|| "That song isn't in the queue anymore.".to_string())?;
-                for (item, at) in steps {
-                    p.queue_move(item, at).await.map_err(failed)?;
+                // Each step is a request: the one already counted, and the rest.
+                if gid != HOST_ID && !self.guest_ops_take(gid, steps.len().saturating_sub(1)) {
+                    return Err("Too many requests at once. Try again in a moment.".into());
                 }
-                Ok(())
+                p.queue_moves(steps).await.map_err(failed)
             }
         }
     }

@@ -969,6 +969,17 @@ impl Queue {
         Ok(())
     }
 
+    /// Several [`Self::move_item`]s, all or none: when one fails the
+    /// queue is left as it was.
+    pub fn move_items(&mut self, steps: &[(String, usize)]) -> AppResult<()> {
+        let mut next = self.clone();
+        for (id, to) in steps {
+            next.move_item(id, *to)?;
+        }
+        *self = next;
+        Ok(())
+    }
+
     /// Clears the user queue only.
     pub fn clear_user(&mut self) {
         self.user.clear();
@@ -1714,6 +1725,21 @@ mod tests {
         let current = q.current().unwrap().item_id.clone();
         assert!(q.remove(&current).is_err());
         assert!(q.move_item(&current, 0).is_err());
+    }
+
+    #[test]
+    fn several_moves_are_all_or_none() {
+        let mut q = Queue::with_seed(1);
+        q.set_context(ctx(), tracks(4), Some(0), Some(false));
+        let v = q.view();
+        let (t1, t2) = (v.next_up[0].item_id.clone(), v.next_up[1].item_id.clone());
+        // The second step can't be made: the first is undone.
+        assert!(q.move_items(&[(t1.clone(), usize::MAX), ("gone".into(), 0)]).is_err());
+        let v = q.view();
+        assert!(v.user_queue.is_empty());
+        assert_eq!(ids(&v.next_up), vec!["t1", "t2", "t3"]);
+        q.move_items(&[(t1, usize::MAX), (t2, 0)]).unwrap();
+        assert_eq!(ids(&q.view().user_queue), vec!["t2", "t1"]);
     }
 
     #[test]

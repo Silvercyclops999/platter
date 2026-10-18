@@ -15,7 +15,7 @@ use wiremock::{Match, Mock, MockServer, Request, ResponseTemplate};
 use super::client::{
     self, KEY_REFUSED, NO_API_KEYS, NOT_SUBSONIC, Secret, SubsonicClient, WRONG_PASSWORD, token_for,
 };
-use super::manager::{Deps, Subsonic, WRONG_URL, key_account};
+use super::manager::{Confirm, Deps, Subsonic, WRONG_URL, address_allowed, key_account};
 use super::server::{Core, Features, NO_DOWNLOAD, SubsonicLibrary, SubsonicServer, ext};
 use super::types::User;
 use crate::audio::source::TrackResolver;
@@ -180,6 +180,7 @@ async fn subsonic(extensions: Option<Vec<&str>>, download: bool) -> MockServer {
     on(&s, "getArtistInfo2", json!({"artistInfo2": {"similarArtist": [{"id": "ar9", "name": "Others"}, {"name": "Not here"}]}})).await;
     on(&s, "getArtist", json!({"artist": {"id": "ar1", "name": "Band", "musicBrainzId": "mb-artist"}})).await;
     on(&s, "getSong", json!({"song": song("s1", 1)})).await;
+    Mock::given(path("/rest/getSong")).and(Authed).and(IdIs("s2")).respond_with(ok(json!({"song": song("s2", 2)}))).with_priority(2).mount(&s).await;
     on(&s, "getLyricsBySongId", json!({"lyricsList": {"structuredLyrics": [{"lang": "en", "synced": true, "line": [{"start": 1000, "value": "La"}]}]}})).await;
     on(&s, "getSonicSimilarTracks", json!({"sonicMatch": [{"entry": song("s2", 2), "similarity": 0.9}]})).await;
     on(&s, "getSimilarSongs", json!({"similarSongs": {"song": [song("s2", 2), song("s9", 9)]}})).await;
@@ -217,6 +218,15 @@ struct TypeIs(&'static str);
 impl Match for TypeIs {
     fn matches(&self, r: &Request) -> bool {
         one(&params(r), "type") == Some(self.0)
+    }
+}
+
+/// A call for one id.
+struct IdIs(&'static str);
+
+impl Match for IdIs {
+    fn matches(&self, r: &Request) -> bool {
+        one(&params(r), "id") == Some(self.0)
     }
 }
 
@@ -473,15 +483,23 @@ async fn without_download_rights_downloads_say_why() {
     assert!(core.stream(&t).await.is_ok());
 }
 
-/// Like [`manager`], with a cache that has songs from the server at `tag`.
+/// Like [`manager`], with a cache that has songs s1 and s2 (as the fake
+/// server has them) from the server at `tag`.
 fn manager_with_songs(dir: &std::path::Path, store: Arc<MemoryStore>, tag: &str) -> (Subsonic, Backends) {
+    manager_with(dir, store, tag, &["s1", "s2"])
+}
+
+fn manager_with(dir: &std::path::Path, store: Arc<MemoryStore>, tag: &str, songs: &[&str]) -> (Subsonic, Backends) {
     let db = crate::db::DbHandle::open(dir.join("t.db")).unwrap();
-    db.write(|c| {
-        c.execute(
-            "INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, track_number,
-               disc_number, duration_ms, part_key) VALUES (?1, 'Song 1', 'a', 'A', 'r', 'R', 1, 1, 1000, '/p')",
-            [format!("{tag}:s1")],
-        )?;
+    let rows: Vec<(String, String)> = songs.iter().map(|s| (format!("{tag}:{s}"), format!("Song {}", &s[1..]))).collect();
+    db.write(move |c| {
+        for (id, title) in &rows {
+            c.execute(
+                "INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, track_number,
+                   disc_number, duration_ms, part_key) VALUES (?1, ?2, 'a', 'Record', 'r', 'Band', 1, 1, 200000, '/p')",
+                [id, title],
+            )?;
+        }
         Ok(())
     })
     .unwrap();
@@ -511,18 +529,85 @@ async fn a_new_address_for_the_same_server_keeps_everything() {
     os.sign_in(&home.uri(), None, Some(KEY.into()), None).await.unwrap();
     assert_eq!(backends.records().get(&tag).unwrap().product.as_deref(), Some("navidrome"));
 
-    let saved = os.change_address(&tag, &away.uri()).await.unwrap();
+    let saved = os.change_address(&tag, &away.uri(), None, Some(KEY.into()), None, Confirm::default()).await.unwrap();
     assert_eq!(saved.tag, tag, "same tag, so the same songs, downloads and history");
     assert_eq!(saved.url.as_deref(), Some(away.uri().as_str()));
     assert_eq!(backends.records().servers.len(), 1, "no second server");
     assert_eq!(os.core(&tag).unwrap().base(), away.uri());
     assert!(store.get(&key_account(&tag)).unwrap().is_some(), "the key stays");
-    assert!(log(&away).await.iter().any(|l| l == "getSong id=s1"), "it asked for a song this server had");
+    let asked = log(&away).await;
+    assert!(asked.iter().any(|l| l == "getSong id=s1") && asked.iter().any(|l| l == "getSong id=s2"), "it compared two songs: {asked:?}");
 
     // Signing in again at another address keeps the tag too.
-    let saved = os.sign_in_to(Some(&tag), &home.uri(), None, Some(KEY.into()), None).await.unwrap();
+    let saved = os.sign_in_to(Some(&tag), &home.uri(), None, Some(KEY.into()), None, Confirm::default()).await.unwrap();
     assert_eq!(saved.tag, tag);
     assert_eq!(backends.records().servers.len(), 1);
+}
+
+fn is(e: &AppError, msg: &str) -> bool {
+    matches!(e, AppError::Invalid(m) if m == msg)
+}
+
+/// Every request a server saw, as text: address and body.
+async fn seen(s: &MockServer) -> Vec<String> {
+    s.received_requests().await.unwrap().iter().map(|r| format!("{} {}", r.url, String::from_utf8_lossy(&r.body))).collect()
+}
+
+#[tokio::test]
+async fn the_saved_sign_in_never_goes_to_a_new_address() {
+    let home = subsonic(Some(all_ext()), true).await;
+    let d = tempfile::tempdir().unwrap();
+    let store = Arc::new(MemoryStore::new());
+    let tag = tag_of(&home);
+    let (os, backends) = manager_with_songs(d.path(), store.clone(), &tag);
+    os.sign_in(&home.uri(), None, Some(KEY.into()), None).await.unwrap();
+
+    // Any address, asked to sign in with what's saved: refused before a
+    // single request goes out.
+    let catcher = MockServer::start().await;
+    Mock::given(any()).respond_with(ok(json!({}))).mount(&catcher).await;
+    let e = os.change_address(&tag, &catcher.uri(), None, None, None, Confirm { same_server: true, allow_insecure: true }).await.unwrap_err();
+    assert!(is(&e, super::manager::TYPE_SECRET), "{e:?}");
+    assert!(catcher.received_requests().await.unwrap().is_empty(), "nothing sent");
+
+    // A typed key goes there; the saved one never does.
+    let _ = os.change_address(&tag, &catcher.uri(), None, Some("typed-key".into()), None, Confirm { same_server: true, allow_insecure: true }).await;
+    for r in seen(&catcher).await {
+        assert!(!r.contains(KEY), "the saved key went to the new address: {r}");
+    }
+    assert_eq!(backends.records().get(&tag).unwrap().url.as_deref(), Some(home.uri().as_str()));
+    assert_eq!(store.get(&key_account(&tag)).unwrap().unwrap().expose(), format!("apikey:{KEY}"), "the saved key stays");
+
+    // A typed password is checked by the server it was typed for, with a
+    // salted token (it isn't the saved key).
+    let away = subsonic(Some(all_ext()), true).await;
+    let saved = os.change_address(&tag, &away.uri(), Some(USER.into()), None, Some(PW.into()), Confirm::default()).await.unwrap();
+    assert_eq!(saved.url.as_deref(), Some(away.uri().as_str()));
+    assert_eq!(store.get(&key_account(&tag)).unwrap().unwrap().expose(), format!("password:{PW}"), "the typed sign-in is kept");
+    password_never_sent(&away).await;
+    for r in seen(&away).await {
+        assert!(!r.contains(KEY), "{r}");
+    }
+}
+
+#[tokio::test]
+async fn the_sign_in_waits_until_the_address_names_itself_the_same_software() {
+    let home = subsonic(Some(all_ext()), true).await;
+    // Another product at the new address.
+    let other = MockServer::start().await;
+    let mut body = envelope(true, json!({}));
+    body["subsonic-response"]["type"] = json!("gonic");
+    Mock::given(path("/rest/ping")).respond_with(ResponseTemplate::new(200).set_body_json(body)).mount(&other).await;
+    Mock::given(any()).respond_with(ok(json!({}))).with_priority(10).mount(&other).await;
+    let d = tempfile::tempdir().unwrap();
+    let tag = tag_of(&home);
+    let (os, _) = manager_with_songs(d.path(), Arc::new(MemoryStore::new()), &tag);
+    os.sign_in(&home.uri(), None, Some(KEY.into()), None).await.unwrap();
+    let e = os.change_address(&tag, &other.uri(), None, Some(KEY.into()), None, Confirm { same_server: true, allow_insecure: false }).await.unwrap_err();
+    assert!(is(&e, super::manager::NOT_THIS_SERVER), "{e:?}");
+    for r in seen(&other).await {
+        assert!(!r.contains(KEY), "a typed key waits for the product check: {r}");
+    }
 }
 
 #[tokio::test]
@@ -535,11 +620,115 @@ async fn a_new_address_that_is_another_server_is_refused() {
     let tag = tag_of(&home);
     let (os, backends) = manager_with_songs(d.path(), store, &tag);
     os.sign_in(&home.uri(), None, Some(KEY.into()), None).await.unwrap();
-    let e = os.change_address(&tag, &other.uri()).await.unwrap_err();
-    assert!(matches!(&e, AppError::Invalid(m) if m == super::manager::NOT_THIS_SERVER), "{e:?}");
+    let e = os.change_address(&tag, &other.uri(), None, Some(KEY.into()), None, Confirm::default()).await.unwrap_err();
+    assert!(is(&e, super::manager::NOT_THIS_SERVER), "{e:?}");
     assert_eq!(backends.records().get(&tag).unwrap().url.as_deref(), Some(home.uri().as_str()), "nothing changed");
-    // Nor can signing in again move it there.
-    assert!(os.sign_in_to(Some(&tag), &other.uri(), None, Some(KEY.into()), None).await.is_err());
+    // Nor can signing in again move it there, even with "I'm sure".
+    let e = os.sign_in_to(Some(&tag), &other.uri(), None, Some(KEY.into()), None, Confirm { same_server: true, allow_insecure: false }).await.unwrap_err();
+    assert!(is(&e, super::manager::NOT_THIS_SERVER), "{e:?}");
+    assert_eq!(backends.records().get(&tag).unwrap().url.as_deref(), Some(home.uri().as_str()));
+}
+
+#[tokio::test]
+async fn one_song_that_answers_is_not_enough_and_ids_are_checked() {
+    let home = subsonic(Some(all_ext()), true).await;
+    let d = tempfile::tempdir().unwrap();
+    let tag = tag_of(&home);
+    let (os, backends) = manager_with_songs(d.path(), Arc::new(MemoryStore::new()), &tag);
+    os.sign_in(&home.uri(), None, Some(KEY.into()), None).await.unwrap();
+
+    // Only s1 is the same song; s2 answers as something else.
+    let half = subsonic(Some(all_ext()), true).await;
+    let mut wrong = song("s2", 2);
+    wrong["title"] = json!("Not this one");
+    Mock::given(path("/rest/getSong")).and(IdIs("s2")).respond_with(ok(json!({"song": wrong}))).with_priority(1).mount(&half).await;
+    let e = os.change_address(&tag, &half.uri(), None, Some(KEY.into()), None, Confirm::default()).await.unwrap_err();
+    assert!(is(&e, super::manager::NOT_THIS_SERVER), "{e:?}");
+
+    // Every id answers with one song of another id.
+    let any_id = subsonic(Some(all_ext()), true).await;
+    Mock::given(path("/rest/getSong")).respond_with(ok(json!({"song": song("x9", 1)}))).with_priority(1).mount(&any_id).await;
+    let e = os.change_address(&tag, &any_id.uri(), None, Some(KEY.into()), None, Confirm::default()).await.unwrap_err();
+    assert!(is(&e, super::manager::NOT_THIS_SERVER), "{e:?}");
+
+    // Same title and artist, another length.
+    let longer = subsonic(Some(all_ext()), true).await;
+    let mut s1 = song("s1", 1);
+    s1["duration"] = json!(320);
+    Mock::given(path("/rest/getSong")).and(IdIs("s1")).respond_with(ok(json!({"song": s1}))).with_priority(1).mount(&longer).await;
+    let e = os.change_address(&tag, &longer.uri(), None, Some(KEY.into()), None, Confirm::default()).await.unwrap_err();
+    assert!(is(&e, super::manager::NOT_THIS_SERVER), "{e:?}");
+    assert_eq!(backends.records().get(&tag).unwrap().url.as_deref(), Some(home.uri().as_str()));
+}
+
+#[tokio::test]
+async fn with_nothing_to_compare_only_the_user_can_say_it_is_the_same_server() {
+    let home = subsonic(Some(all_ext()), true).await;
+    let away = subsonic(Some(all_ext()), true).await;
+    let d = tempfile::tempdir().unwrap();
+    let tag = tag_of(&home);
+    // No songs synced yet.
+    let (os, backends) = manager(d.path(), Arc::new(MemoryStore::new()));
+    os.sign_in(&home.uri(), None, Some(KEY.into()), None).await.unwrap();
+    let e = os.change_address(&tag, &away.uri(), None, Some(KEY.into()), None, Confirm::default()).await.unwrap_err();
+    assert!(is(&e, super::manager::CANT_TELL), "{e:?}");
+    // Signing in again elsewhere can't take the server over either.
+    let e = os.sign_in_to(Some(&tag), &away.uri(), None, Some(KEY.into()), None, Confirm::default()).await.unwrap_err();
+    assert!(is(&e, super::manager::CANT_TELL), "{e:?}");
+    assert_eq!(backends.records().get(&tag).unwrap().url.as_deref(), Some(home.uri().as_str()));
+    let sure = Confirm { same_server: true, allow_insecure: false };
+    let saved = os.change_address(&tag, &away.uri(), None, Some(KEY.into()), None, sure).await.unwrap();
+    assert_eq!(saved.url.as_deref(), Some(away.uri().as_str()));
+
+    // A server that doesn't name its software can't be told apart, even
+    // with songs to compare.
+    let plain = subsonic(None, true).await;
+    let plain_tag = tag_of(&plain);
+    let d2 = tempfile::tempdir().unwrap();
+    let (os2, _) = manager_with_songs(d2.path(), Arc::new(MemoryStore::new()), &plain_tag);
+    os2.sign_in(&plain.uri(), Some(USER.into()), None, Some(PW.into())).await.unwrap();
+    let plain_away = subsonic(None, true).await;
+    let e = os2.change_address(&plain_tag, &plain_away.uri(), Some(USER.into()), None, Some(PW.into()), Confirm::default()).await.unwrap_err();
+    assert!(is(&e, super::manager::CANT_TELL), "{e:?}");
+    assert!(os2.change_address(&plain_tag, &plain_away.uri(), Some(USER.into()), None, Some(PW.into()), sure).await.is_ok());
+}
+
+#[tokio::test]
+async fn plain_http_on_the_internet_needs_the_user_s_say_so() {
+    let home = subsonic(Some(all_ext()), true).await;
+    let d = tempfile::tempdir().unwrap();
+    let tag = tag_of(&home);
+    let (os, _) = manager_with_songs(d.path(), Arc::new(MemoryStore::new()), &tag);
+    os.sign_in(&home.uri(), None, Some(KEY.into()), None).await.unwrap();
+    // Refused before anything is sent (this address isn't even reachable).
+    let e = os.change_address(&tag, "http://music.example:4533", None, Some(KEY.into()), None, Confirm::default()).await.unwrap_err();
+    assert!(is(&e, super::manager::INSECURE_ADDRESS), "{e:?}");
+    let e = os.sign_in("http://music.example:4533", None, Some(KEY.into()), None).await.unwrap_err();
+    assert!(is(&e, super::manager::INSECURE_ADDRESS), "{e:?}");
+    // Saved at https: http at home is a downgrade, so it needs it too.
+    assert!(address_allowed(Some("https://music.example"), "http://10.20.30.40:4533", false).is_err());
+    assert!(address_allowed(Some("https://music.example"), "http://10.20.30.40:4533", true).is_ok());
+    assert!(address_allowed(Some("http://10.20.30.40:4533"), "http://10.20.30.41:4533", false).is_ok());
+    assert!(address_allowed(None, "https://music.example", false).is_ok());
+    assert!(address_allowed(None, "http://music.example", false).is_err());
+}
+
+#[tokio::test]
+async fn other_software_at_a_saved_address_is_not_this_server() {
+    let s = subsonic(Some(all_ext()), true).await;
+    let d = tempfile::tempdir().unwrap();
+    let (os, backends) = manager(d.path(), Arc::new(MemoryStore::new()));
+    let saved = os.sign_in(&s.uri(), None, Some(KEY.into()), None).await.unwrap();
+    // The address now answers as other software.
+    s.reset().await;
+    let mut body = envelope(true, json!({}));
+    body["subsonic-response"]["type"] = json!("gonic");
+    Mock::given(path("/rest/ping")).respond_with(ResponseTemplate::new(200).set_body_json(body)).mount(&s).await;
+    let e = os.sign_in(&s.uri(), None, Some(KEY.into()), None).await.unwrap_err();
+    assert!(is(&e, super::manager::NOT_THIS_SERVER), "{e:?}");
+    let core = os.core(&saved.tag).unwrap();
+    assert!(!os.read_features(&core).await, "what it says it can do isn't kept");
+    assert_eq!(backends.records().get(&saved.tag).unwrap().product.as_deref(), Some("navidrome"));
 }
 
 #[tokio::test]

@@ -25,12 +25,64 @@ const message = (e: unknown, fallback: string) => (e as AppError)?.message || fa
 export const INSECURE =
   "This address is plain http on the internet, so your sign-in can be read on its way to the server. Use the server's https address if it has one.";
 
+/** Said before signing in at http to a server that was saved at https. */
+export const DOWNGRADE =
+  "This server was saved at an https address, and this one is plain http, so your sign-in can be read on its way to the server.";
+
+/** The core's words when it can't tell a new address is the same server. */
+export const CANT_TELL =
+  "Platter can't tell whether the server at that address is this one. If you're sure it is, tick \"I'm sure this is the same server\" and try again.";
+
+/** An https address given up for an http one. */
+export function isDowngrade(saved: string | null | undefined, next: string): boolean {
+  return /^https:\/\//i.test(saved ?? "") && /^http:\/\//i.test(next);
+}
+
 function Insecure({ on }: { on?: boolean }) {
   return on ? (
     <p className="add-server__warn" role="note">
       {INSECURE}
     </p>
   ) : null;
+}
+
+/**
+ * The warning before a Subsonic sign-in over plain http, and the box that says
+ * it's fine anyway. The core refuses such an address without it.
+ */
+export function InsecureConsent({
+  insecure,
+  downgrade,
+  checked,
+  onChange,
+}: {
+  insecure?: boolean;
+  downgrade?: boolean;
+  checked: boolean;
+  onChange: (on: boolean) => void;
+}) {
+  if (!insecure && !downgrade) return null;
+  return (
+    <>
+      <p className="add-server__warn" role="note">
+        {downgrade ? DOWNGRADE : INSECURE}
+      </p>
+      <label className="add-server__check">
+        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+        Use this http address anyway
+      </label>
+    </>
+  );
+}
+
+/** Shown once the core can't tell a new address is the same server. */
+export function SameServerConsent({ checked, onChange }: { checked: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <label className="add-server__check">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      I'm sure this is the same server
+    </label>
+  );
 }
 
 interface Props {
@@ -67,6 +119,9 @@ export function AddServerFlow({ choose = false, kind = "jellyfin", plexSignedIn 
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [allowInsecure, setAllowInsecure] = useState(false);
+  const [sameServer, setSameServer] = useState(false);
+  const [unsure, setUnsure] = useState(false);
   const id = useId();
   const first = useRef<HTMLInputElement>(null);
   const done = useRef(onDone);
@@ -158,6 +213,9 @@ export function AddServerFlow({ choose = false, kind = "jellyfin", plexSignedIn 
     try {
       const server = await backend.subsonicCheck(url);
       setUrl(server.url);
+      setAllowInsecure(false);
+      setSameServer(false);
+      setUnsure(false);
       setStep({ kind: "osSignIn", server, useKey: server.apiKeys });
     } catch (e) {
       setError(message(e, "Platter couldn't check that address."));
@@ -173,13 +231,15 @@ export function AddServerFlow({ choose = false, kind = "jellyfin", plexSignedIn 
     // The key or password goes to the core, which keeps it in the keychain.
     const creds = step.useKey ? { apiKey } : { user, password };
     try {
-      const server = await backend.subsonicSignIn(step.server.url, creds, tag);
+      const server = await backend.subsonicSignIn(step.server.url, creds, tag, { allowInsecure, sameServer });
       // Only once it worked: a failed try keeps what was typed to fix.
       setApiKey("");
       setPassword("");
       onDone(server);
     } catch (e) {
-      setError(message(e, "Platter couldn't sign in."));
+      const m = message(e, "Platter couldn't sign in.");
+      if (m === CANT_TELL) setUnsure(true);
+      setError(m);
     } finally {
       setBusy(false);
     }
@@ -318,7 +378,9 @@ export function AddServerFlow({ choose = false, kind = "jellyfin", plexSignedIn 
 
   if (step.kind === "osSignIn") {
     const { server, useKey } = step;
-    const ready = useKey ? !!apiKey.trim() : !!user.trim() && !!password;
+    const downgrade = !!tag && isDowngrade(initialUrl, server.url);
+    const consented = (!server.insecure && !downgrade) || allowInsecure;
+    const ready = (useKey ? !!apiKey.trim() : !!user.trim() && !!password) && consented && (!unsure || sameServer);
     return (
       <form
         className="add-server"
@@ -327,7 +389,7 @@ export function AddServerFlow({ choose = false, kind = "jellyfin", plexSignedIn 
           if (ready && !busy) void osSignIn();
         }}
       >
-        <Insecure on={server.insecure} />
+        <InsecureConsent insecure={server.insecure} downgrade={downgrade} checked={allowInsecure} onChange={setAllowInsecure} />
         {!server.apiKeys && <p className="add-server__hint">This server doesn't take API keys, so sign in with your user name and password.</p>}
         {useKey ? (
           <div>
@@ -389,6 +451,7 @@ export function AddServerFlow({ choose = false, kind = "jellyfin", plexSignedIn 
               : "These servers check your password on every request, so Platter keeps it in this computer's keychain and sends only a scrambled check made from it."}
         </p>
         {errorLine}
+        {unsure && <SameServerConsent checked={sameServer} onChange={setSameServer} />}
         <div className="add-server__actions">
           {server.apiKeys && (
             <Button

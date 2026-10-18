@@ -152,8 +152,8 @@ be added to it.
 | `jellyfin_quick_cancel` | – | – |
 | `jellyfin_sign_in_password` | `{ url, user, password }` | `SavedServer` |
 | `subsonic_check` | `{ url }` | `SubsonicCheck { url, name, version?, openSubsonic, apiKeys }` |
-| `subsonic_sign_in` | `{ url, user?, apiKey?, password?, tag? }` | `SavedServer` |
-| `subsonic_change_address` | `{ tag, url }` | `SavedServer` |
+| `subsonic_sign_in` | `{ url, user?, apiKey?, password?, tag?, sameServer?, allowInsecure? }` | `SavedServer` |
+| `subsonic_change_address` | `{ tag, url, user?, apiKey?, password?, sameServer?, allowInsecure? }` | `SavedServer` |
 | `resume_queues` | – | `ResumeOffer[]` |
 | `resume_queue_play` | `{ tag }` | – |
 | `resume_queue_save` | – | `boolean` (false when the playing song's server keeps no queue) |
@@ -199,12 +199,22 @@ count), and each finished play is scrobbled once with the time it happened.
 A Subsonic server's tag is made from the address it was first added at and
 then kept. `subsonic_change_address` moves a saved server to a new address
 (http to https, another host, port or path, a proxy in front of it) and keeps
-its tag, so its songs, downloads, likes, playlists and history stay. It signs
-in at the new address with the saved key or password and checks it is the
-same server first: it must name itself the same kind of server, and a few
-songs the cache has from it must be there. Otherwise it fails with `invalid`
-and nothing changes. `subsonic_sign_in` with `tag` (signing in again) keeps
-that server's tag the same way, with the same check when the address differs.
+its tag, so its songs, downloads, likes, playlists and history stay. The saved
+key or password never goes to the new address: the user types it again, and
+the call fails with `invalid` when nothing was typed. It is sent only after
+the address answers, unsigned, as the same kind of server. Then a few songs
+the cache has from the server must come back the same (id, title, artist and
+length): at least two, or all when fewer are cached. When there's nothing to
+compare (no songs synced yet, or a server that doesn't name its software) it
+fails with `invalid` unless `sameServer` is true, which the app sends only
+when the user ticks "I'm sure this is the same server". A server naming other
+software is refused either way. `subsonic_sign_in` with `tag` (signing in
+again) keeps that server's tag the same way, with the same checks when the
+address differs. Both refuse plain http on the internet, and http for a
+server saved at https, unless `allowInsecure` is true (the user ticked "Use
+this http address anyway"). The product a server names, and its extension
+names, are kept at 64 characters each and 64 extensions at most, and a kept
+product never changes.
 
 `ResumeOffer = { tag, serverName, trackCount, currentId, positionMs, changedBy?, changedAt? }`:
 a queue another app saved on a server with `resumeQueue`. While "Keep my

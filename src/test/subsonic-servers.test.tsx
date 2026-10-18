@@ -10,9 +10,19 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
-import { KEY_REFUSED, NO_API_KEYS, NOT_SUBSONIC, NOT_THIS_SERVER, WRONG_PASSWORD, WRONG_URL } from "../lib/mock/subsonic";
+import {
+  CANT_TELL,
+  INSECURE_ADDRESS,
+  KEY_REFUSED,
+  NO_API_KEYS,
+  NOT_SUBSONIC,
+  NOT_THIS_SERVER,
+  TYPE_SECRET,
+  WRONG_PASSWORD,
+  WRONG_URL,
+} from "../lib/mock/subsonic";
 import { DEFAULT_SETTINGS } from "../lib/types";
-import { AddServerFlow, INSECURE } from "../pages/AddServer";
+import { AddServerFlow, CANT_TELL as UI_CANT_TELL, DOWNGRADE, INSECURE } from "../pages/AddServer";
 import { SettingsPage } from "../pages/SettingsPage";
 import { ResumeFrom, offerLine } from "../shell/ResumeFrom";
 import { useApp } from "../stores/app";
@@ -84,7 +94,9 @@ describe("adding a Navidrome or other Subsonic server", () => {
     expect(screen.getByLabelText("Password")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Use an API key instead" })).toBeNull();
     expect(screen.getByText(/keeps it in this computer's keychain/)).not.toHaveTextContent("An API key is safer");
-    await expect(mock.subsonicSignIn("music.example:4040", { apiKey: "good-key" })).rejects.toMatchObject({ message: NO_API_KEYS });
+    await expect(mock.subsonicSignIn("music.example:4040", { apiKey: "good-key" }, undefined, { allowInsecure: true })).rejects.toMatchObject({
+      message: NO_API_KEYS,
+    });
   });
 
   it.each([
@@ -99,12 +111,19 @@ describe("adding a Navidrome or other Subsonic server", () => {
     expect(screen.getByLabelText("Server address")).toHaveAttribute("aria-invalid", "true");
   });
 
-  it("warns before signing in over plain http on the internet", async () => {
+  it("warns before signing in over plain http on the internet, and needs a tick for it", async () => {
     const user = userEvent.setup();
-    flow();
+    const added = flow();
     await typeAddress(user, "http://music.example.com:4533");
     expect(await screen.findByRole("note")).toHaveTextContent(INSECURE);
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.type(screen.getByLabelText(/API key/), "good-key");
+    const signIn = screen.getByRole("button", { name: "Sign in" });
+    expect(signIn).toBeDisabled();
+    await user.click(screen.getByLabelText("Use this http address anyway"));
+    await user.click(signIn);
+    await waitFor(() => expect(added).toHaveLength(1));
+    // Without the tick the core says no.
+    await expect(mock.subsonicSignIn("http://music2.example.com", { apiKey: "good-key" })).rejects.toMatchObject({ message: INSECURE_ADDRESS });
   });
 
   it("says nothing about an address at home", async () => {
@@ -174,9 +193,7 @@ describe("Settings with a Subsonic server", () => {
     spy.mockRestore();
   });
 
-  it("edits its address, and refuses an address that's another server", async () => {
-    const user = userEvent.setup();
-    mock.subsonic.others.add("http://other.local:4533");
+  async function editAddress(user: ReturnType<typeof userEvent.setup>, to: string) {
     const { list } = await serversRow();
     const os = within(list).getAllByRole("listitem").find((li) => li.getAttribute("data-server") === "5ab50001")!;
     await user.click(within(os).getByRole("button", { name: "Edit address" }));
@@ -184,15 +201,90 @@ describe("Settings with a Subsonic server", () => {
     const address = within(dialog).getByLabelText("Server address");
     expect(address).toHaveValue("http://navidrome.local:4533");
     await user.clear(address);
-    await user.type(address, "other.local:4533");
-    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await user.type(address, to);
+    await user.click(within(dialog).getByRole("button", { name: "Continue" }));
+    return dialog;
+  }
+
+  it("edits its address with the key typed again, and refuses an address that's another server", async () => {
+    const user = userEvent.setup();
+    const spy = vi.spyOn(backend, "subsonicChangeAddress");
+    mock.subsonic.others.add("http://other.local:4533");
+    const dialog = await editAddress(user, "other.local:4533");
+    // The saved key isn't sent anywhere: it's typed again for the new address.
+    expect(await within(dialog).findByText(/doesn't send this server's saved API key to a new address/)).toBeInTheDocument();
+    const save = within(dialog).getByRole("button", { name: "Save" });
+    expect(save).toBeDisabled();
+    await user.type(within(dialog).getByLabelText("API key"), "good-key");
+    await user.click(save);
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(NOT_THIS_SERVER);
-    await user.clear(address);
-    await user.type(address, "https://music.example.com");
+    expect(spy.mock.calls[0][2]).toEqual({ apiKey: "good-key" });
+    expect(mock.subsonic.servers[0].url).toBe("http://navidrome.local:4533");
+    spy.mockRestore();
+    // The core refuses a call with nothing typed.
+    await expect(mock.subsonicChangeAddress("5ab50001", "https://music.example.com", {})).rejects.toMatchObject({ message: TYPE_SECRET });
+  });
+
+  it("moves to a new address once the key is typed for it", async () => {
+    const user = userEvent.setup();
+    const dialog = await editAddress(user, "https://music.example.com");
+    await user.type(await within(dialog).findByLabelText("API key"), "good-key");
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: /Edit the address/ })).toBeNull());
     expect(mock.subsonic.servers).toHaveLength(1);
     expect(mock.subsonic.servers[0]).toMatchObject({ tag: "5ab50001", url: "https://music.example.com" });
+  });
+
+  it("asks the user to be sure when Platter can't tell it's the same server", async () => {
+    expect(UI_CANT_TELL).toBe(CANT_TELL);
+    const user = userEvent.setup();
+    mock.subsonic.unsure.add("https://music.example.com");
+    const dialog = await editAddress(user, "https://music.example.com");
+    await user.type(await within(dialog).findByLabelText("API key"), "good-key");
+    expect(within(dialog).queryByLabelText("I'm sure this is the same server")).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(CANT_TELL);
+    const save = within(dialog).getByRole("button", { name: "Save" });
+    expect(save).toBeDisabled();
+    await user.click(within(dialog).getByLabelText("I'm sure this is the same server"));
+    await user.click(save);
+    await waitFor(() => expect(mock.subsonic.servers[0].url).toBe("https://music.example.com"));
+  });
+
+  it("warns before moving to plain http on the internet, and needs a tick for it", async () => {
+    const user = userEvent.setup();
+    const dialog = await editAddress(user, "http://music.example.com:4533");
+    expect(await within(dialog).findByRole("note")).toHaveTextContent(INSECURE);
+    await user.type(within(dialog).getByLabelText("API key"), "good-key");
+    const save = within(dialog).getByRole("button", { name: "Save" });
+    expect(save).toBeDisabled();
+    await user.click(within(dialog).getByLabelText("Use this http address anyway"));
+    await user.click(save);
+    await waitFor(() => expect(mock.subsonic.servers[0].url).toBe("http://music.example.com:4533"));
+    // Without the tick the core says no.
+    await expect(mock.subsonicChangeAddress("5ab50001", "http://music2.example.com", { apiKey: "good-key" })).rejects.toMatchObject({
+      message: INSECURE_ADDRESS,
+    });
+  });
+
+  it("never drops a server saved at https to http without saying so", async () => {
+    const user = userEvent.setup();
+    mock.subsonic.servers[0].url = "https://navidrome.local";
+    useApp.setState({ servers: await mock.serversSaved() });
+    const { list } = await serversRow();
+    const os = within(list).getAllByRole("listitem").find((li) => li.getAttribute("data-server") === "5ab50001")!;
+    await user.click(within(os).getByRole("button", { name: "Edit address" }));
+    const dialog = await screen.findByRole("dialog", { name: /Edit the address of Navidrome/ });
+    const address = within(dialog).getByLabelText("Server address");
+    await user.clear(address);
+    await user.type(address, "http://navidrome.local:4533");
+    await user.click(within(dialog).getByRole("button", { name: "Continue" }));
+    expect(await within(dialog).findByRole("note")).toHaveTextContent(DOWNGRADE);
+    await user.type(within(dialog).getByLabelText("API key"), "good-key");
+    expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
+    await expect(mock.subsonicChangeAddress("5ab50001", "http://navidrome.local:4533", { apiKey: "good-key" })).rejects.toMatchObject({
+      message: INSECURE_ADDRESS,
+    });
   });
 
   it("says when the account can't download songs", async () => {

@@ -84,6 +84,8 @@ import type {
   SavedServer,
   ServerCheck,
   SubsonicCheck,
+  SubsonicConfirm,
+  SubsonicCreds,
   ServerLibrary,
   EventMap,
   EventName,
@@ -340,9 +342,13 @@ export interface Backend {
   subsonicCheck(url: string): Promise<SubsonicCheck>;
   /** Signs in with an API key, or a user name and password (kept in the keychain). */
   /** `tag`: signing in again to that server (it keeps its tag at a new address, once checked to be the same server). */
-  subsonicSignIn(url: string, creds: { apiKey?: string; user?: string; password?: string }, tag?: string): Promise<SavedServer>;
-  /** A saved Subsonic server at a new address; refused when the address is another server. */
-  subsonicChangeAddress(tag: string, url: string): Promise<SavedServer>;
+  subsonicSignIn(url: string, creds: SubsonicCreds, tag?: string, confirm?: SubsonicConfirm): Promise<SavedServer>;
+  /**
+   * A saved Subsonic server at a new address, with its key or password typed again (the saved one
+   * never goes to a new address); refused when the address is another server, or can't be told apart
+   * without `confirm.sameServer`.
+   */
+  subsonicChangeAddress(tag: string, url: string, creds: SubsonicCreds, confirm?: SubsonicConfirm): Promise<SavedServer>;
   /** Queues other apps saved on servers that keep one. */
   resumeQueues(): Promise<ResumeOffer[]>;
   /** Plays the queue saved on this server, from where it was. */
@@ -1278,9 +1284,26 @@ export function createTauriBackend(): Backend {
     jellyfinQuickCancel: () => call("jellyfin_quick_cancel"),
     jellyfinSignInPassword: (url, user, password) => call("jellyfin_sign_in_password", { url, user, password }),
     subsonicCheck: (url) => call("subsonic_check", { url }),
-    subsonicSignIn: (url, creds, tag) =>
-      call("subsonic_sign_in", { url, user: creds.user ?? null, apiKey: creds.apiKey ?? null, password: creds.password ?? null, tag: tag ?? null }),
-    subsonicChangeAddress: (tag, url) => call("subsonic_change_address", { tag, url }),
+    subsonicSignIn: (url, creds, tag, confirm) =>
+      call("subsonic_sign_in", {
+        url,
+        user: creds.user ?? null,
+        apiKey: creds.apiKey ?? null,
+        password: creds.password ?? null,
+        tag: tag ?? null,
+        sameServer: confirm?.sameServer ?? false,
+        allowInsecure: confirm?.allowInsecure ?? false,
+      }),
+    subsonicChangeAddress: (tag, url, creds, confirm) =>
+      call("subsonic_change_address", {
+        tag,
+        url,
+        user: creds.user ?? null,
+        apiKey: creds.apiKey ?? null,
+        password: creds.password ?? null,
+        sameServer: confirm?.sameServer ?? false,
+        allowInsecure: confirm?.allowInsecure ?? false,
+      }),
     resumeQueues: () => call("resume_queues"),
     resumeQueuePlay: (tag) => call("resume_queue_play", { tag }),
     resumeQueueSave: () => call("resume_queue_save"),
