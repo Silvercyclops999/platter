@@ -33,6 +33,7 @@ side for the stuff that never got an official release.
 - A queue with drag and drop, a Recently played tab, an A-B loop and a "Next:" hint near the end of a song.
 - Smart shuffle mixes similar songs from your library into a playlist or album, marked so you can tell them apart.
 - Downloads of albums, playlists, Liked Songs and mixes, in original quality or as smaller MP3s, that keep playing with no server.
+- A miniplayer with its own queue, side by side when the window is wide.
 - Go Offline stops all network use, and a dropped server dims what isn't on this computer instead of breaking.
 - Works with media keys and the Windows media flyout, and has a Mac menu bar, a miniplayer, close to tray and start at sign-in.
 
@@ -94,6 +95,7 @@ The tagging rules are in [docs/TAGGING.md](docs/TAGGING.md).
 
 - A Stats page for any range, with minutes, top songs, artists, albums and genres, streaks and your busiest hours.
 - A Profile page with your top artists and tracks this month, your playlists and your friends.
+- On this day and Time travel shelves on Home, built from your plays and any listening history you import.
 - Artist and album pages show your plays, first and last listen and all-time rank.
 - Monthly recap cards and song share cards you can save as images.
 - Your Plex play history, Tautulli and Last.fm scrobbles can count too, each play once.
