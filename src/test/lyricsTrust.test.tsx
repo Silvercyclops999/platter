@@ -332,6 +332,8 @@ describe("timing", () => {
     render(<LyricsPane />);
     const first = mockLyrics(lines)!.timed!.find((t) => t.text)!;
     const [line] = await screen.findAllByRole("button", { name: first.text });
+    // Each line follows its own text direction (right-to-left lyrics align right).
+    expect(line.getAttribute("dir")).toBe("auto");
     // A check landing or a nudge asks again: no skeleton, no remount.
     act(() => lyricsChanged(lines.id));
     expect(screen.getAllByRole("button", { name: first.text })[0]).toBe(line);

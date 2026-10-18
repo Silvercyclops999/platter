@@ -163,6 +163,7 @@ function SyncedLyrics({
                   ref={(el) => {
                     lineEls.current[i] = el;
                   }}
+                  dir="auto"
                   className={`lyrics__line is-${state} ${l.text ? "" : "lyrics__line--gap"} ${picking && picked.includes(i) ? "is-picked" : ""}`}
                   aria-current={state === "current" ? "true" : undefined}
                   aria-label={l.text || "Instrumental"}

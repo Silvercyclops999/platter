@@ -57,7 +57,7 @@
   padding: var(--space-1) 0;
   border: 0;
   background: none;
-  text-align: left;
+  text-align: start;
   font: inherit;
   font-weight: 700;
   font-size: var(--font-size-3xl);
