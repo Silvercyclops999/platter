@@ -203,6 +203,7 @@ import type { CompareSummary, StatsItemKind, StatsRange, StatsTopKind } from "..
 import { MockArchive } from "./archive";
 import { MockDoctor } from "./doctor";
 import { MockPhysical } from "./physical";
+import { MockSleeve } from "./sleeve";
 import { MockAutomix } from "./automix";
 import { MockDevices } from "./devices";
 import { MockSoundMap } from "./soundmap";
@@ -390,6 +391,8 @@ export class MockBackend implements Backend {
   readonly catalogue: MockCatalogue;
   /** The physical collection and the faked Discogs (test hooks: refuse, fail, reset). */
   readonly physical: MockPhysical;
+  /** Sleeve notes and credit pages (made up from the mock credits). */
+  readonly sleeve: MockSleeve;
   /** Mixed playlists and made-up tempos (test hook: reset). */
   readonly automix: MockAutomix;
   /** Sync to a device (test hooks: plugged, fail, stepMs, reset). */
@@ -437,6 +440,8 @@ export class MockBackend implements Backend {
   private infoKeys: MockInfoKeys = { keys: {}, rejected: new Set() };
   private infoFetched = new Set<string>();
   private albumCreditsFetched = new Set<string>();
+  /** Albums whose sleeve notes lookups have "landed" (browser timelines only). */
+  private sleeveFetched = new Set<string>();
   /** Artists whose global Popular list has "arrived" (browser timelines only). */
   private popularFetched = new Set<string>();
 
@@ -525,6 +530,7 @@ export class MockBackend implements Backend {
     );
     this.doctor = new MockDoctor(this.fx, () => this.settings);
     this.physical = new MockPhysical(this.fx, () => this.settings, () => this.later(0, () => this.emit("physical://changed", {})));
+    this.sleeve = new MockSleeve(this.fx, () => this.settings, () => this.physical.status().saved);
     this.automix = new MockAutomix(
       (id) => this.trackById(id) ?? undefined,
       () => this.later(0, () => this.emit("syncstore://changed", { namespaces: ["mixedPlaylists"], remote: false })),
@@ -2998,6 +3004,36 @@ export class MockBackend implements Backend {
       return answer;
     });
   }
+  sleeveNotes(id: string) {
+    return this.delay(() => {
+      const album = this.fx.albums.find((a) => a.id === id) ?? this.notFound("Album");
+      // In the browser the first open has tags and Plex only, then the lookups land, like the core.
+      const fetched = !this.opts.timelines || this.sleeveFetched.has(id);
+      const notes = this.sleeve.notes(album, fetched);
+      if (!fetched && notes.lookups.online && !notes.lookups.unreleased) {
+        this.sleeveFetched.add(id);
+        this.later(800, () => this.emit("sleeve://changed", { id }));
+        return { ...notes, looking: true };
+      }
+      return notes;
+    });
+  }
+  songCredits(id: string) {
+    return this.delay(() => {
+      const track = this.fx.tracks.find((t) => t.id === id) ?? this.notFound("Song");
+      const fetched = !this.opts.timelines || this.sleeveFetched.has(track.albumId);
+      const out = this.sleeve.song(track, fetched);
+      if (!fetched && out.lookups.online && !out.lookups.unreleased) {
+        this.sleeveFetched.add(track.albumId);
+        this.later(800, () => this.emit("sleeve://changed", { id: track.albumId }));
+        return { ...out, looking: true };
+      }
+      return out;
+    });
+  }
+  creditPage(name: string) {
+    return this.delay(() => this.sleeve.creditPage(name));
+  }
   albumReleaseStatus(id: string) {
     return this.delay(() => {
       const album = this.fx.albums.find((a) => a.id === id) ?? this.notFound("Album");
@@ -3215,6 +3251,7 @@ export class MockBackend implements Backend {
       const n = this.infoFetched.size;
       this.infoFetched.clear();
       this.albumCreditsFetched.clear();
+      this.sleeveFetched.clear();
       this.popularFetched.clear();
       return n;
     });

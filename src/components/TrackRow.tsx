@@ -22,6 +22,7 @@ import { useSettings } from "../stores/settings";
 import { likeMenuLabel, toggleLiked } from "../stores/likes";
 import { lyricsEditLabel, openLyricsEditor } from "../stores/lyricsEditor";
 import { openWrongLyrics } from "../stores/wrongLyrics";
+import { creditsItem } from "../stores/songCredits";
 import { lyricsSeen } from "../shell/lyrics";
 import { nav, useRouter } from "../stores/router";
 import { player } from "../stores/player";
@@ -104,6 +105,7 @@ export function trackMenuItems(
     { label: "Go to song radio", onSelect: () => nav.go({ name: "radio", seed: `track:${track.id}` }) },
     ...otherVersionsItem(track),
     ...lineageItem(track),
+    creditsItem(track),
     bookmarkTrackItem(track),
     yourStatsItem("song", track.id, track.title, track.otherVersions ?? 0),
     dontPlayArtistItem({ id: track.artistId, title: track.artistTitle }),

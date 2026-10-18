@@ -37,6 +37,7 @@ const ProfilePage = lazy(() => import("../pages/ProfilePage").then((m) => ({ def
 const TopSongsPage = lazy(() => import("../pages/TopSongsPage").then((m) => ({ default: m.TopSongsPage })));
 const WhatsNewPage = lazy(() => import("../pages/WhatsNewPage").then((m) => ({ default: m.WhatsNewPage })));
 const ReleaseRadarPage = lazy(() => import("../pages/ReleaseRadar").then((m) => ({ default: m.ReleaseRadarPage })));
+const CreditPage = lazy(() => import("../pages/CreditPage").then((m) => ({ default: m.CreditPage })));
 const LineagePage = lazy(() => import("../pages/LineagePage").then((m) => ({ default: m.LineagePage })));
 const EraPage = lazy(() => import("../pages/EraPage").then((m) => ({ default: m.EraPage })));
 const DoctorPage = lazy(() => import("../pages/DoctorPage").then((m) => ({ default: m.DoctorPage })));
@@ -172,7 +173,7 @@ function Page({ route }: { route: Route }) {
     case "discography":
       return <DiscographyPage id={route.id} type={route.type} />;
     case "album":
-      return <AlbumPage id={route.id} />;
+      return <AlbumPage id={route.id} tab={route.tab} />;
     case "catalogueArtist":
       return <ArtistPage id={route.mbid} catalogue />;
     case "catalogueAlbum":
@@ -183,6 +184,8 @@ function Page({ route }: { route: Route }) {
       return <OnThisDayPage />;
     case "shelf":
       return <ShelfPage />;
+    case "credits":
+      return <CreditPage key={route.person} person={route.person} />;
     case "playlist":
       // A Platter smart playlist has its own page.
       if (route.id.startsWith("blend:")) return <BlendPage key={route.id} id={route.id} />;

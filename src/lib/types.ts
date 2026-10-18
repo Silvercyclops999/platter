@@ -1281,6 +1281,10 @@ export interface Settings {
   showPhysicalCollection: boolean;
   /** "Missing from the shelf": albums played most that aren't owned. */
   shelfMissingList: boolean;
+  /** A Sleeve notes tab on album pages and Credits in song menus. */
+  showSleeveNotes: boolean;
+  /** Sleeve notes look credits up on MusicBrainz (and Discogs with a token). */
+  sleeveLookups: boolean;
   /** Studio (the default), Studio Black, Sleeve, Classic or another built-in look. */
   theme: ThemeSetting;
   /** A preset id ("brass" is the default) or a custom colour as #RRGGBB. */
@@ -1759,6 +1763,8 @@ export const DEFAULT_SETTINGS: Settings = {
   getAlbumsKinds: ["studio"],
   showPhysicalCollection: true,
   shelfMissingList: false,
+  showSleeveNotes: true,
+  sleeveLookups: true,
   theme: "studio",
   accent: "brass",
   followSystem: true,
@@ -3475,6 +3481,116 @@ export interface AlbumReleaseStatus {
   mixed?: boolean;
 }
 
+// ---------------------------------------------------------------- sleeve notes
+
+/** Where a sleeve notes fact came from, in the order they win. */
+export type SleeveSource = "tags" | "plex" | "musicbrainz" | "discogs";
+
+/** One fact and the sources that agree on it, the winning source first. */
+export interface SleeveFact {
+  value: string;
+  sources: SleeveSource[];
+}
+
+/** One person in a role group; `key` opens their credit page. */
+export interface SleevePerson {
+  name: string;
+  key: string;
+  artistId: string | null;
+  /** Instruments, for performers. */
+  details: string[];
+  sources: SleeveSource[];
+}
+
+/** Everyone credited with one role ("producer", "writer", "performer"...). */
+export interface SleeveRoleGroup {
+  role: string;
+  people: SleevePerson[];
+}
+
+export interface SleeveStudio {
+  name: string;
+  /** "recorded", "mixed" or "mastered". */
+  role: string;
+  sources: SleeveSource[];
+}
+
+export interface SleeveTrack {
+  trackId: string;
+  title: string;
+  disc: number;
+  number: number;
+  groups: SleeveRoleGroup[];
+  recorded: SleeveFact | null;
+}
+
+/** Which lookups are on, so an empty tab can say how to get more. */
+export interface SleeveLookups {
+  online: boolean;
+  musicbrainz: boolean;
+  discogs: boolean;
+  /** Unreleased albums are never looked up online. */
+  unreleased: boolean;
+}
+
+/** `sleeve_notes`: an album's liner notes from every source. */
+export interface SleeveNotes {
+  albumId: string;
+  /** Lookups are running; `sleeve://changed` follows. */
+  looking: boolean;
+  lookups: SleeveLookups;
+  released: SleeveFact | null;
+  editionDate: SleeveFact | null;
+  /** "1996-11" or a span "1996-11/1997-02". */
+  recorded: SleeveFact | null;
+  label: SleeveFact | null;
+  catalogue: SleeveFact | null;
+  country: SleeveFact | null;
+  barcode: SleeveFact | null;
+  format: SleeveFact | null;
+  edition: SleeveFact | null;
+  /** "released", "unreleased", "leaked" or "alternate" (from the files' tags). */
+  status: SleeveFact | null;
+  /** Where an archive file came from. */
+  origin: SleeveFact | null;
+  /** The release's own notes. */
+  notes: SleeveFact | null;
+  studios: SleeveStudio[];
+  /** How this edition differs from the library's other editions. */
+  editionNotes: SleeveFact[];
+  groups: SleeveRoleGroup[];
+  tracks: SleeveTrack[];
+  links: { source: SleeveSource; url: string }[];
+}
+
+/** `song_credits`: one song's part of its album's notes. */
+export interface SongCredits {
+  trackId: string;
+  albumId: string;
+  looking: boolean;
+  lookups: SleeveLookups;
+  song: SleeveTrack | null;
+  links: { source: SleeveSource; url: string }[];
+}
+
+/** `credit_page`: everything in the library a person is credited on, by role. */
+export interface CreditPage {
+  key: string;
+  name: string;
+  artistId: string | null;
+  groups: {
+    role: string;
+    albums: {
+      album: Album;
+      /** Credited on the album itself, or on every song. */
+      whole: boolean;
+      songs: { id: string; title: string }[];
+      details: string[];
+      sources: SleeveSource[];
+    }[];
+  }[];
+}
+
 /** An album's original release date, label and credits from MusicBrainz. */
 export interface AlbumCredits {
   albumId: string;
@@ -3833,6 +3949,8 @@ export interface EventMap {
   "artistinfo://popular": { id: string };
   /** An album's MusicBrainz credits were looked up (found or not). */
   "albumcredits://changed": { id: string };
+  /** Lookups an album's sleeve notes started have finished (ask sleeveNotes again). */
+  "sleeve://changed": { id: string };
   "releasestatus://changed": { id: string };
   /** Release marks or the user's sections changed on another device. */
   "archive://changed": Record<string, never>;

@@ -1,7 +1,10 @@
 //! MusicBrainz details: an artist's members and relationships, and a
 //! release's dates and credits (producer, writer, composer, lyricist,
-//! featured artists, mixing, engineering, mastering). Pure parsing of the
-//! lookup answers, so the rules are easy to test against fixtures.
+//! featured artists, mixing, engineering, mastering, players and their
+//! instruments, arrangers, conductors), plus what the sleeve notes show:
+//! catalogue number, country, barcode, format, studios, recording dates and
+//! the release's annotation. Pure parsing of the lookup answers, so the rules
+//! are easy to test against fixtures.
 
 use std::collections::HashMap;
 
@@ -11,7 +14,17 @@ use serde_json::Value;
 use super::{fold_name, is_mbid};
 
 /// Credit roles kept, in the order a person's roles are listed.
-pub const ROLES: [&str; 8] = ["producer", "writer", "composer", "lyricist", "featured", "mixer", "engineer", "mastering"];
+pub const ROLES: [&str; 11] =
+    ["producer", "writer", "composer", "lyricist", "featured", "mixer", "engineer", "mastering", "performer", "arranger", "conductor"];
+
+/// Raised when [`parse_release`] starts keeping something new, so releases
+/// cached by an older build are looked up again.
+/// 2: catalogue number, country, barcode, formats, studios, recording dates,
+/// annotation and players with their instruments.
+pub const PARSE_VERSION: u32 = 2;
+
+/// Longest annotation kept (characters).
+pub const ANNOTATION_MAX: usize = 2000;
 
 /// What MusicBrainz says about an artist (cached per artist).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -51,6 +64,18 @@ pub struct MbCredit {
     pub name: String,
     pub mbid: Option<String>,
     pub roles: Vec<String>,
+    /// What a performer plays or sings ("guitar", "lead vocals").
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub instruments: Vec<String>,
+}
+
+/// A studio a release or recording names: where it was recorded, mixed or mastered.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MbPlace {
+    pub name: String,
+    /// "recorded", "mixed" or "mastered".
+    pub role: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -60,6 +85,9 @@ pub struct MbTrack {
     pub position: u32,
     pub title: String,
     pub credits: Vec<MbCredit>,
+    /// When it was recorded: "1996-11" or a span "1996-11/1997-02".
+    pub recorded: Option<String>,
+    pub places: Vec<MbPlace>,
 }
 
 /// A release, as the album page needs it (cached per album).
@@ -77,6 +105,22 @@ pub struct MbRelease {
     /// Credits on the release itself.
     pub credits: Vec<MbCredit>,
     pub tracks: Vec<MbTrack>,
+    pub catalogue: Option<String>,
+    /// ISO country code ("GB", "XW" for worldwide).
+    pub country: Option<String>,
+    pub barcode: Option<String>,
+    /// This edition's name ("2011 remaster", "deluxe edition").
+    pub disambiguation: Option<String>,
+    pub status: Option<String>,
+    pub packaging: Option<String>,
+    /// Each medium's format in order ("CD", "Vinyl").
+    pub formats: Vec<String>,
+    /// Studios named on the release itself.
+    pub places: Vec<MbPlace>,
+    /// The release's annotation, as plain text.
+    pub annotation: Option<String>,
+    /// [`PARSE_VERSION`] of the build that read it (0: before versions).
+    pub parsed: u32,
 }
 
 fn s<'a>(v: &'a Value, k: &str) -> Option<&'a str> {
@@ -200,6 +244,9 @@ fn role_for(kind: &str, attributes: &[Value]) -> Option<&'static str> {
         return None;
     }
     Some(match kind {
+        "instrument" | "vocal" | "performer" | "programming" => "performer",
+        "arranger" | "instrument arranger" | "vocal arranger" | "orchestrator" => "arranger",
+        "conductor" => "conductor",
         "producer" => "producer",
         "writer" => "writer",
         "composer" => "composer",
@@ -212,8 +259,34 @@ fn role_for(kind: &str, attributes: &[Value]) -> Option<&'static str> {
     })
 }
 
+/// Attributes that describe a performance rather than what was played.
+const NOT_INSTRUMENTS: &[&str] = &["guest", "additional", "solo", "minor", "co", "executive", "associate", "instrument", "vocal"];
+
+/// What a performer relation says was played or sung.
+fn instruments_for(kind: &str, attributes: &[Value]) -> Vec<String> {
+    let mut out: Vec<String> = attributes
+        .iter()
+        .filter_map(Value::as_str)
+        .map(|a| a.trim().to_lowercase())
+        .filter(|a| !a.is_empty() && !NOT_INSTRUMENTS.contains(&a.as_str()))
+        .collect();
+    if out.is_empty() {
+        match kind {
+            "vocal" => out.push("vocals".into()),
+            "programming" => out.push("programming".into()),
+            _ => {}
+        }
+    }
+    out
+}
+
 /// Add a role for a person, keeping each person once.
 fn add(credits: &mut Vec<MbCredit>, name: &str, mbid: Option<&str>, role: &str) {
+    add_with(credits, name, mbid, role, &[]);
+}
+
+/// [`add`] with the instruments a performer played.
+fn add_with(credits: &mut Vec<MbCredit>, name: &str, mbid: Option<&str>, role: &str, instruments: &[String]) {
     let key = fold_name(name);
     let found = credits.iter_mut().find(|c| match (&c.mbid, mbid) {
         (Some(a), Some(b)) => a == b,
@@ -222,12 +295,17 @@ fn add(credits: &mut Vec<MbCredit>, name: &str, mbid: Option<&str>, role: &str) 
     let c = match found {
         Some(c) => c,
         None => {
-            credits.push(MbCredit { name: name.to_owned(), mbid: mbid.map(str::to_owned), roles: vec![] });
+            credits.push(MbCredit { name: name.to_owned(), mbid: mbid.map(str::to_owned), roles: vec![], instruments: vec![] });
             credits.last_mut().expect("just pushed")
         }
     };
     if !c.roles.iter().any(|r| r == role) {
         c.roles.push(role.to_owned());
+    }
+    for i in instruments {
+        if !c.instruments.contains(i) {
+            c.instruments.push(i.clone());
+        }
     }
 }
 
@@ -243,11 +321,80 @@ fn relation_credits(v: &Value, out: &mut Vec<MbCredit>) {
         if s(r, "target-type") != Some("artist") {
             continue;
         }
-        let Some(role) = s(r, "type").and_then(|k| role_for(k, arr(r, "attributes"))) else { continue };
+        let kind = s(r, "type").unwrap_or_default();
+        let Some(role) = role_for(kind, arr(r, "attributes")) else { continue };
         if let Some((name, id)) = target_artist(r) {
-            add(out, &name, id.as_deref(), role);
+            let inst = if role == "performer" { instruments_for(kind, arr(r, "attributes")) } else { vec![] };
+            add_with(out, &name, id.as_deref(), role, &inst);
         }
     }
+}
+
+/// Studios from an entity's place relations ("recorded at", "mixed at", "mastered at").
+fn places(v: &Value, out: &mut Vec<MbPlace>) {
+    for r in arr(v, "relations") {
+        if s(r, "target-type") != Some("place") {
+            continue;
+        }
+        let role = match s(r, "type") {
+            Some("recorded at") => "recorded",
+            Some("mixed at") => "mixed",
+            Some("mastered at") => "mastered",
+            _ => continue,
+        };
+        let Some(name) = r.get("place").and_then(|p| s(p, "name")) else { continue };
+        if !out.iter().any(|p| p.name == name && p.role == role) {
+            out.push(MbPlace { name: name.to_owned(), role: role.to_owned() });
+        }
+    }
+}
+
+/// When a recording was made: the earliest begin and latest end over its
+/// relations (studio sessions, players), as "1996-11" or "1996-11/1997-02".
+fn recorded(rec: &Value) -> Option<String> {
+    let rels = arr(rec, "relations");
+    let begin = rels.iter().filter_map(|r| s(r, "begin")).min();
+    let end = rels.iter().filter_map(|r| s(r, "end")).max();
+    match (begin, end) {
+        (Some(b), Some(e)) if b != e => Some(format!("{b}/{e}")),
+        (Some(b), _) => Some(b.to_owned()),
+        (None, Some(e)) => Some(e.to_owned()),
+        (None, None) => None,
+    }
+}
+
+/// An annotation as plain text: wiki links and bold or italic marks dropped.
+pub fn plain_annotation(a: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut rest = a;
+    while let Some(i) = rest.find('[') {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + 1..];
+        match after.find(']') {
+            Some(j) => {
+                let inner = &after[..j];
+                // [url|text] keeps the text; [url] keeps the url.
+                out.push_str(inner.split_once('|').map(|(_, t)| t).unwrap_or(inner));
+                rest = &after[j + 1..];
+            }
+            None => {
+                out.push('[');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    let out = out.replace(&"'".repeat(3), "").replace(&"'".repeat(2), "");
+    let out = out.trim();
+    if out.is_empty() {
+        return None;
+    }
+    Some(if out.chars().count() > ANNOTATION_MAX {
+        let cut: String = out.chars().take(ANNOTATION_MAX).collect();
+        format!("{}…", cut.trim_end())
+    } else {
+        out.to_owned()
+    })
 }
 
 /// Whether a join phrase brings in featured artists ("feat.", "ft.", "featuring").
@@ -298,7 +445,9 @@ pub fn parse_release(v: &Value) -> Option<MbRelease> {
                 }
             }
             sort_roles(&mut c);
-            tracks.push(MbTrack { disc, position, title, credits: c });
+            let mut ps = Vec::new();
+            places(rec, &mut ps);
+            tracks.push(MbTrack { disc, position, title, credits: c, recorded: recorded(rec), places: ps });
         }
     }
     Some(MbRelease {
@@ -308,6 +457,24 @@ pub fn parse_release(v: &Value) -> Option<MbRelease> {
         date: s(v, "date").map(str::to_owned),
         first_release_date: rg.and_then(|g| s(g, "first-release-date")).map(str::to_owned),
         label: arr(v, "label-info").iter().find_map(|l| l.get("label").and_then(|x| s(x, "name"))).map(str::to_owned),
+        catalogue: arr(v, "label-info")
+            .iter()
+            .find_map(|l| s(l, "catalog-number"))
+            .filter(|c| !c.eq_ignore_ascii_case("[none]"))
+            .map(str::to_owned),
+        country: s(v, "country").map(str::to_owned),
+        barcode: s(v, "barcode").map(str::to_owned),
+        disambiguation: s(v, "disambiguation").map(str::to_owned),
+        status: s(v, "status").map(str::to_owned),
+        packaging: s(v, "packaging").filter(|p| !p.eq_ignore_ascii_case("none")).map(str::to_owned),
+        formats: arr(v, "media").iter().filter_map(|m| s(m, "format")).map(str::to_owned).collect(),
+        places: {
+            let mut ps = Vec::new();
+            places(v, &mut ps);
+            ps
+        },
+        annotation: s(v, "annotation").and_then(plain_annotation),
+        parsed: PARSE_VERSION,
         credits,
         tracks,
     })

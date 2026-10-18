@@ -128,6 +128,7 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "likeControlRows",
   "shelfMissingList",
   "shelfOpen",
+  "sleeveLookups",
   "showFanEdits",
   "groupEditions",
   "showDescribePlaylist",
@@ -320,6 +321,8 @@ const BY_KEY: Record<string, HelpRef> = {
   listenGuestsControl: ["listening-together", "what-guests-hear-and-do"],
   listenRelay: ["listening-together", "the-relay"],
   artistInfoSources: ["privacy", "off-until-you-turn-them-on"],
+  showSleeveNotes: ["getting-started", "sleeve-notes"],
+  sleeveLookups: ["getting-started", "where-the-facts-come-from"],
   nowPlayingFeed: ["privacy", "off-until-you-turn-them-on"],
 };
 

@@ -38,6 +38,7 @@ pub mod scrobble;
 pub mod settings;
 pub mod share;
 pub mod sid;
+pub mod sleeve;
 pub mod smart;
 pub mod soundmap;
 pub mod social;
@@ -1136,7 +1137,7 @@ pub fn run() {
 
             // The physical collection: owned albums in the sync store, and the
             // optional Discogs import (token in the keychain).
-            app.manage(physical::commands::Physical::new(
+            let physical = physical::commands::Physical::new(
                 db.clone(),
                 sync_store.clone(),
                 Arc::new(plex::keychain::KeyringStore::new()),
@@ -1146,7 +1147,16 @@ pub fn run() {
                 },
                 Arc::new(plex::state::TauriSink(app.handle().clone())),
                 Arc::new(db::queries::now_s),
-            ));
+            );
+            app.manage(physical.clone());
+
+            // Sleeve notes: the files' tags, Plex, and with lookups on,
+            // MusicBrainz (paced with the artist info) and Discogs.
+            let sleeve = sleeve::service::SleeveService::new(db.clone(), artist_info.clone(), live.sleeve.clone());
+            sleeve.set_discogs(Arc::new(physical));
+            sleeve.set_plex(Arc::new(sleeve::commands::PlexSongCredits(plex.clone())));
+            sleeve.set_events(Arc::new(app.handle().clone()));
+            app.manage(sleeve);
 
             // Lyrics: the song's server first, then LRCLIB when its setting is on.
             let lyrics_service = lyrics::LyricsService::new(
@@ -1609,6 +1619,9 @@ pub fn run() {
             themes::themes_export,
             artistinfo::commands::artist_info,
             artistinfo::commands::album_credits,
+            sleeve::commands::sleeve_notes,
+            sleeve::commands::song_credits,
+            sleeve::commands::credit_page,
             artistinfo::commands::album_release_status,
             archive::commands::release_mark_set,
             archive::commands::track_versions,

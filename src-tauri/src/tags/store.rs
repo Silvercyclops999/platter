@@ -53,9 +53,9 @@ pub fn save(c: &Connection, part_key: &str, status: Status, t: &FileTags, now: i
         "INSERT OR REPLACE INTO file_tags
              (part_key, status, explicit, version, era, quality, date, edition, grp, source, flags, scanned_at,
               isrc, recording_mbid, ver, album, album_artist, year,
-              tag_status, version_note, mb_status, mb_type, custom_status, custom_key, release, provenance)
+              tag_status, version_note, mb_status, mb_type, custom_status, custom_key, release, provenance, sleeve)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
-                 ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+                 ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
         params![
             part_key,
             status.key(),
@@ -82,10 +82,38 @@ pub fn save(c: &Connection, part_key: &str, status: Status, t: &FileTags, now: i
             t.custom_status,
             t.custom_key.as_deref().unwrap_or(""),
             p.status.map(FileRelease::key),
-            p.note
+            p.note,
+            (!t.sleeve.is_empty()).then(|| serde_json::to_string(&t.sleeve).ok()).flatten()
         ],
     )?;
+    save_credits(c, part_key, &t.sleeve)?;
     Ok(())
+}
+
+/// The people a file credits, for credit pages (replaces what was there).
+fn save_credits(c: &Connection, part_key: &str, s: &super::sleeve::TagSleeve) -> AppResult<()> {
+    c.execute("DELETE FROM tag_credits WHERE part_key = ?1", [part_key])?;
+    let mut st = c.prepare_cached(
+        "INSERT OR IGNORE INTO tag_credits (part_key, person_key, name, role, detail) VALUES (?1, ?2, ?3, ?4, ?5)",
+    )?;
+    for cr in &s.credits {
+        let key = crate::artistinfo::fold_name(&cr.name);
+        if key.is_empty() {
+            continue;
+        }
+        st.execute(params![part_key, key, cr.name, cr.role, cr.detail.as_deref().unwrap_or("")])?;
+    }
+    Ok(())
+}
+
+/// What a file carries for the sleeve notes (empty when nothing or not read).
+pub fn sleeve(c: &Connection, part_key: &str) -> AppResult<super::sleeve::TagSleeve> {
+    let json: Option<String> = c
+        .prepare_cached("SELECT sleeve FROM file_tags WHERE part_key = ?1 AND status = 'ok'")?
+        .query_row([part_key], |r| r.get(0))
+        .optional()?
+        .flatten();
+    Ok(json.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default())
 }
 
 /// The file tags kept for working out a file's status again.
@@ -211,7 +239,9 @@ pub fn pending(c: &Connection, limit: usize) -> AppResult<Vec<Pending>> {
 
 /// Drops rows for files no longer in the library (or changed: new key).
 pub fn prune(c: &Connection) -> AppResult<usize> {
-    Ok(c.execute("DELETE FROM file_tags WHERE part_key NOT IN (SELECT part_key FROM tracks)", [])?)
+    let n = c.execute("DELETE FROM file_tags WHERE part_key NOT IN (SELECT part_key FROM tracks)", [])?;
+    c.execute("DELETE FROM tag_credits WHERE part_key NOT IN (SELECT part_key FROM file_tags)", [])?;
+    Ok(n)
 }
 
 /// Scan progress: tracks read (any outcome), all tracks, reads that failed.

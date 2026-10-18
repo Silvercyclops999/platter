@@ -18,6 +18,7 @@ pub mod fetch;
 pub mod parse;
 pub mod provenance;
 pub mod scan;
+pub mod sleeve;
 pub mod store;
 pub mod view;
 
@@ -72,6 +73,8 @@ pub struct FileTags {
     pub custom_status: Option<String>,
     /// The custom tag name this read looked for (upper case); None for Auto.
     pub custom_key: Option<String>,
+    /// Credits and release facts for the sleeve notes.
+    pub sleeve: sleeve::TagSleeve,
 }
 
 /// Raised whenever the parsers start keeping something new, so files read
@@ -79,7 +82,8 @@ pub struct FileTags {
 /// 1: ISRC and the MusicBrainz recording id.
 /// 2: album, album artist and year (the library doctor compares them).
 /// 3: STATUS, VERSION and Picard's release status and type.
-pub const CACHE_VERSION: i64 = 3;
+/// 4: credits and release facts for the sleeve notes.
+pub const CACHE_VERSION: i64 = 4;
 
 const KEYS: &[&str] = &[
     "ARCHIVE_VERSION",
@@ -116,7 +120,7 @@ impl FileTags {
     /// Whether a tag name is one we keep (any case).
     pub fn wants(key: &str) -> bool {
         let k = key.trim();
-        KEYS.iter().any(|w| w.eq_ignore_ascii_case(k))
+        KEYS.iter().chain(sleeve::KEYS).any(|w| w.eq_ignore_ascii_case(k))
     }
 
     /// Empty tags for a read that looks for the custom status tag in effect.
@@ -203,7 +207,9 @@ impl FileTags {
                 "0" | "false" | "no" | "clean" => self.set_explicit(Some(false)),
                 _ => {}
             },
-            _ => {}
+            _ => {
+                self.sleeve.take(&key, v);
+            }
         }
     }
 

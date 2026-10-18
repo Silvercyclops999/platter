@@ -243,6 +243,12 @@ fn frames(s: &Sparse, start: u64, end: u64, ver: u8, ext: bool, frame_unsync: bo
             b"TALB" | b"TAL" => Some(Frame::Text("ALBUM")),
             b"TPE2" | b"TP2" => Some(Frame::Text("ALBUMARTIST")),
             b"TDRC" | b"TYER" | b"TYE" => Some(Frame::Text("YEAR")),
+            b"TCOM" | b"TCM" => Some(Frame::Text("COMPOSER")),
+            b"TEXT" | b"TXT" => Some(Frame::Text("LYRICIST")),
+            b"TPUB" | b"TPB" => Some(Frame::Text("LABEL")),
+            b"TDOR" | b"TORY" | b"TOR" => Some(Frame::Text("ORIGINALDATE")),
+            b"TIPL" | b"IPLS" | b"IPL" => Some(Frame::Pairs(false)),
+            b"TMCL" => Some(Frame::Pairs(true)),
             _ => None,
         };
         if let Some(kind) = kind {
@@ -263,6 +269,7 @@ fn frames(s: &Sparse, start: u64, end: u64, ver: u8, ext: bool, frame_unsync: bo
                     Frame::Isrc => text_frame(d, "ISRC", tags),
                     Frame::Ufid => ufid(d, tags),
                     Frame::Text(key) => text_frame(d, key, tags),
+                    Frame::Pairs(musicians) => pairs_frame(d, musicians, tags),
                 }
             }
         }
@@ -324,6 +331,15 @@ enum Frame {
     Ufid,
     /// A standard text frame kept under this name (album, album artist, year).
     Text(&'static str),
+    /// A paired list: TIPL (role, name), or TMCL (instrument, name) when true.
+    Pairs(bool),
+}
+
+/// A paired list frame (encoding byte, then role and name values in turn).
+fn pairs_frame(d: &[u8], musicians: bool, tags: &mut FileTags) {
+    let Some((&enc, rest)) = d.split_first() else { return };
+    let values: Vec<String> = split_terminated(enc, rest).into_iter().map(|v| decode(enc, v)).collect();
+    tags.sleeve.pairs(&values, musicians);
 }
 
 /// A standard text frame (encoding byte, then one or more values) stored as `key`.
@@ -431,13 +447,14 @@ fn mp4(s: &Sparse, tags: &mut FileTags) -> R<()> {
                 }
             }
             // Album, album artist and date: plain text in a data child.
-            b"\xa9alb" | b"aART" | b"\xa9day" => {
+            b"\xa9alb" | b"aART" | b"\xa9day" | b"\xa9wrt" => {
                 if let Some(d) = find_child(s, item.body, item.end, b"data")? {
                     let v = need(s, d.body, ((d.end - d.body) as usize).min(1024))?;
                     let value = String::from_utf8_lossy(v.get(8..).unwrap_or(&[])).into_owned();
                     let key = match &item.kind {
                         b"aART" => "ALBUMARTIST",
                         b"\xa9day" => "YEAR",
+                        b"\xa9wrt" => "COMPOSER",
                         _ => "ALBUM",
                     };
                     tags.set(key, &value);

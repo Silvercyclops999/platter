@@ -1963,6 +1963,23 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
           </Button>
         ),
     },
+    // Library: sleeve notes
+    {
+      key: "showSleeveNotes",
+      section: "Library",
+      title: "Show sleeve notes",
+      description: "A Sleeve notes tab on album pages, and Credits in every song's menu.",
+      more: "Album pages get a Sleeve notes tab next to the songs: who produced, wrote, played on, engineered, mixed and mastered each song, when and where it was recorded, the label, catalogue number, country, barcode, format and edition, and the release's own notes. Each fact is marked with where it came from: your files' tags, Plex, MusicBrainz or Discogs. Names open a page with everything in your library they're credited on.",
+      control: (ids) => toggle(s, "showSleeveNotes", ids),
+    },
+    {
+      key: "sleeveLookups",
+      section: "Library",
+      title: "Look up credits online",
+      description: "Sleeve notes ask MusicBrainz, and Discogs once you've added a token.",
+      more: "When you open an album's sleeve notes, Platter looks the release up on MusicBrainz (by its MusicBrainz id, or its artist and title when there's none) and, if you've added a Discogs token, on Discogs. Answers are kept on this computer, so offline you still see what was found. Unreleased music is never looked up. Off: only your files' tags and Plex.",
+      control: (ids) => (s?.showSleeveNotes === false ? null : toggle(s, "sleeveLookups", ids)),
+    },
     {
       key: "likeControlRows",
       section: "Library",

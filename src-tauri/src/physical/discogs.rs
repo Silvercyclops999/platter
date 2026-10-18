@@ -181,6 +181,23 @@ impl DiscogsClient {
         Ok(name)
     }
 
+    /// Releases matching an artist and album title (the first page, five at most).
+    pub async fn search(&self, token: &Token, artist: &str, title: &str) -> AppResult<serde_json::Value> {
+        let enc = |s: &str| utf8_percent_encode(s.trim(), NON_ALPHANUMERIC).to_string();
+        let url = format!("{API}/database/search?type=release&artist={}&release_title={}&per_page=5", enc(artist), enc(title));
+        self.get(&url, token).await?.json()
+    }
+
+    /// One release with its credits, labels, formats and notes; None when
+    /// Discogs doesn't have it.
+    pub async fn release(&self, token: &Token, id: u64) -> AppResult<Option<serde_json::Value>> {
+        match self.get(&format!("{API}/releases/{id}"), token).await {
+            Ok(r) => Ok(Some(r.json()?)),
+            Err(AppError::NotFound(_)) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     /// Every item in the user's collection (the "All" folder).
     pub async fn collection(&self, token: &Token, username: &str) -> AppResult<Vec<DiscogsItem>> {
         let user = utf8_percent_encode(username, NON_ALPHANUMERIC).to_string();

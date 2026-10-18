@@ -794,6 +794,10 @@ pub struct Settings {
     pub show_physical_collection: bool,
     /// "Missing from the shelf": albums played most that aren't owned.
     pub shelf_missing_list: bool,
+    /// A Sleeve notes tab on album pages and Credits in song menus.
+    pub show_sleeve_notes: bool,
+    /// Sleeve notes look credits up on MusicBrainz (and Discogs with a token).
+    pub sleeve_lookups: bool,
     /// List DLNA / UPnP renderers under Listen on (SSDP searches only while on).
     pub show_dlna_devices: bool,
     /// platter:// command links, scripts and the command line can control playback (through the local control API).
@@ -1131,6 +1135,8 @@ impl Default for Settings {
             get_albums_kinds: crate::discover::DEFAULT_GET_KINDS.iter().map(|k| k.to_string()).collect(),
             show_physical_collection: true,
             shelf_missing_list: false,
+            show_sleeve_notes: true,
+            sleeve_lookups: true,
             show_dlna_devices: true,
             allow_automation: false,
             translate_to: "en".into(),
@@ -1307,6 +1313,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "getAlbumsKinds",
     "showPhysicalCollection",
     "shelfMissingList",
+    "showSleeveNotes",
+    "sleeveLookups",
     "showDlnaDevices",
     "translateTo",
     "showPronunciation",
@@ -1649,6 +1657,8 @@ pub struct SettingsPatch {
     pub get_albums_kinds: Option<Vec<String>>,
     pub show_physical_collection: Option<bool>,
     pub shelf_missing_list: Option<bool>,
+    pub show_sleeve_notes: Option<bool>,
+    pub sleeve_lookups: Option<bool>,
     pub show_dlna_devices: Option<bool>,
     pub allow_automation: Option<bool>,
     pub translate_to: Option<String>,
@@ -2006,6 +2016,8 @@ impl Settings {
         }
         set(&mut self.show_physical_collection, p.show_physical_collection);
         set(&mut self.shelf_missing_list, p.shelf_missing_list);
+        set(&mut self.show_sleeve_notes, p.show_sleeve_notes);
+        set(&mut self.sleeve_lookups, p.sleeve_lookups);
         set(&mut self.show_friend_activity, p.show_friend_activity);
         set(&mut self.share_activity, p.share_activity);
         set(&mut self.whats_new_announcements, p.whats_new_announcements);
@@ -2522,6 +2534,8 @@ pub struct Live {
     pub subsonic_check_minutes: Arc<std::sync::atomic::AtomicU32>,
     /// Keep the queue on servers that hold one.
     pub save_queue_on_server: Arc<AtomicBool>,
+    /// Sleeve notes: shown, and looked up online.
+    pub sleeve: crate::sleeve::service::SleeveSwitches,
 }
 
 /// Push settings to the tracker, stream requests, Popular and the art cache.
@@ -2580,6 +2594,8 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.notify_track_change.store(s.notify_track_change, Ordering::Relaxed);
     live.share_public_links.store(s.share_public_links && on, Ordering::Relaxed);
     live.lyrics_lrclib.store(s.lyrics_lrclib && on, Ordering::Relaxed);
+    live.sleeve.show.store(s.show_sleeve_notes, Ordering::Relaxed);
+    live.sleeve.online.store(s.show_sleeve_notes && s.sleeve_lookups && on, Ordering::Relaxed);
     live.lyrics_prefer_own.store(s.lyrics_prefer_own, Ordering::Relaxed);
     live.lyrics_show_auto.store(s.show_auto_lyrics, Ordering::Relaxed);
     live.sync_transcriptions.store(s.sync_transcriptions, Ordering::Relaxed);
@@ -4675,6 +4691,31 @@ mod tests {
         assert!(s.apply(&serde_json::from_value(serde_json::json!({"catalogueSource": "elsewhere"})).unwrap()).is_err());
         s.apply(&serde_json::from_value(serde_json::json!({"getAlbumsKinds": []})).unwrap()).unwrap();
         assert_eq!(s.get_albums_kinds, ["studio"], "none ticked means studio albums");
+    }
+
+    #[test]
+    fn sleeve_notes_settings_are_on_synced_and_reach_the_service() {
+        let mut s = Settings::default();
+        assert!(s.show_sleeve_notes && s.sleeve_lookups, "both on");
+        for k in ["showSleeveNotes", "sleeveLookups"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
+        }
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(old.show_sleeve_notes && old.sleeve_lookups, "older settings files get the defaults");
+        let (db, _d) = db();
+        let live = Live::default();
+        publish(&s, &live, &db);
+        assert!(live.sleeve.show.load(Ordering::Relaxed) && live.sleeve.online.load(Ordering::Relaxed));
+        s.apply(&serde_json::from_str(r#"{"sleeveLookups":false}"#).unwrap()).unwrap();
+        publish(&s, &live, &db);
+        assert!(live.sleeve.show.load(Ordering::Relaxed) && !live.sleeve.online.load(Ordering::Relaxed));
+        // Go offline stops the lookups whatever the setting says.
+        s.apply(&serde_json::from_str(r#"{"sleeveLookups":true,"goOffline":true}"#).unwrap()).unwrap();
+        publish(&s, &live, &db);
+        assert!(!live.sleeve.online.load(Ordering::Relaxed));
+        s.apply(&serde_json::from_str(r#"{"goOffline":false,"showSleeveNotes":false}"#).unwrap()).unwrap();
+        publish(&s, &live, &db);
+        assert!(!live.sleeve.show.load(Ordering::Relaxed) && !live.sleeve.online.load(Ordering::Relaxed), "hidden notes look nothing up");
     }
 
     #[test]

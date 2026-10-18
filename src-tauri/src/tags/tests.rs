@@ -275,6 +275,72 @@ fn ids_that_are_not_ids_are_left_out() {
     assert_eq!(super::clean_mbid(" 4F3C2B1A-0D9E-4C8B-A7F6-5E4D3C2B1A09\0").as_deref(), Some(REC));
 }
 
+// ------------------------------------------------------------------ sleeve credits
+
+fn credits(t: &FileTags) -> Vec<(String, String, Option<String>)> {
+    t.sleeve.credits.iter().map(|c| (c.role.clone(), c.name.clone(), c.detail.clone())).collect()
+}
+
+#[test]
+fn flac_keeps_credits_and_release_facts() {
+    let f = flac(&[
+        streaminfo(),
+        (4, vorbis(&["PRODUCER=Ada Moss", "COMPOSER=Cal Rowe", "PERFORMER=Cy Hart (guitar)", "LABEL=Low Tide", "CATALOGNUMBER=LT-001", "ORIGINALDATE=1997-05-21"])),
+    ]);
+    let t = run(&f, Some("flac")).0;
+    assert_eq!(
+        credits(&t),
+        [
+            ("producer".into(), "Ada Moss".into(), None),
+            ("composer".into(), "Cal Rowe".into(), None),
+            ("performer".into(), "Cy Hart".into(), Some("guitar".into()))
+        ]
+    );
+    assert_eq!((t.sleeve.label.as_deref(), t.sleeve.catalogue.as_deref()), (Some("Low Tide"), Some("LT-001")));
+    assert_eq!(t.sleeve.original_date.as_deref(), Some("1997-05-21"));
+}
+
+#[test]
+fn id3_keeps_tcom_text_tpub_and_the_paired_lists() {
+    let text = |v: &str| [&[3u8][..], v.as_bytes()].concat();
+    let pairs = |vs: &[&str]| [&[3u8][..], vs.join("\0").as_bytes()].concat();
+    let f = [
+        id3(
+            4,
+            &[
+                (b"TCOM", text("Cal Rowe")),
+                (b"TEXT", text("Dee Lin")),
+                (b"TPUB", text("Low Tide")),
+                (b"TIPL", pairs(&["producer", "Ada Moss", "mix", "Mo Fader"])),
+                (b"TMCL", pairs(&["bass", "Eli Stone"])),
+                (b"TXXX", txxx(0, "CATALOGNUMBER", "LT-001")),
+            ],
+        ),
+        vec![0xff; 400],
+    ]
+    .concat();
+    let t = run(&f, Some("mp3")).0;
+    assert_eq!(
+        credits(&t),
+        [
+            ("composer".into(), "Cal Rowe".into(), None),
+            ("lyricist".into(), "Dee Lin".into(), None),
+            ("producer".into(), "Ada Moss".into(), None),
+            ("mixer".into(), "Mo Fader".into(), None),
+            ("performer".into(), "Eli Stone".into(), Some("bass".into()))
+        ]
+    );
+    assert_eq!((t.sleeve.label.as_deref(), t.sleeve.catalogue.as_deref()), (Some("Low Tide"), Some("LT-001")));
+}
+
+#[test]
+fn mp4_keeps_the_composer_and_freeform_credits() {
+    let f = mp4(&[atom(b"\xa9wrt", &data_atom(1, b"Cal Rowe")), freeform("PRODUCER", "Ada Moss"), freeform("LABEL", "Low Tide")], false, 1000, true);
+    let t = run(&f, Some("mp4")).0;
+    assert_eq!(credits(&t), [("composer".into(), "Cal Rowe".into(), None), ("producer".into(), "Ada Moss".into(), None)]);
+    assert_eq!(t.sleeve.label.as_deref(), Some("Low Tide"));
+}
+
 // ------------------------------------------------------------------ parsers
 
 #[test]

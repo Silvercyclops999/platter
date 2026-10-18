@@ -59,6 +59,7 @@ import { QueuePanel } from "./QueuePanel";
 import { WhatsNewDialog } from "../help/WhatsNewDialog";
 import { ArchiveDialogs } from "../components/ArchiveDialogs";
 import { PhysicalDialogHost } from "../components/PhysicalDialog";
+import { SongCreditsHost } from "../components/SongCreditsDialog";
 import { ResizeHandle } from "./ResizeHandle";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -263,6 +264,7 @@ export function AppShell() {
       <CircleDialogs />
       <ArchiveDialogs />
       <PhysicalDialogHost />
+      <SongCreditsHost />
       <LazyPlexEditDialogs />
       <LazyTagEditDialogs />
       <LazySmartEditorHost />

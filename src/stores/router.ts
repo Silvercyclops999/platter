@@ -24,7 +24,8 @@ export type Route =
   | { name: "lineage"; id: string }
   /** One era of an artist (ARCHIVE_ERA). */
   | { name: "era"; id: string; era: string }
-  | { name: "album"; id: string }
+  /** An album; `tab: "sleeve"` opens its Sleeve notes. */
+  | { name: "album"; id: string; tab?: "sleeve" }
   | { name: "playlist"; id: string }
   /** Liked Songs. */
   | { name: "liked" }
@@ -73,7 +74,9 @@ export type Route =
   /** Albums owned on vinyl, CD or cassette, and what a Discogs import found. */
   | { name: "shelf" }
   /** Create a Blend: pick people to combine tastes with. */
-  | { name: "blendNew" };
+  | { name: "blendNew" }
+  /** Everything in the library a person is credited on (from sleeve notes and file tags). */
+  | { name: "credits"; person: string };
 
 export interface HistoryEntry {
   key: number;

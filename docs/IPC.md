@@ -492,7 +492,7 @@ default) fill `listeners` and `scrobbles` when Last.fm has none, with
 `listenersFrom` saying which one they came from.
 
 `AlbumCredits = { albumId, state: "off"|"pending"|"none"|"found", released?, editionDate?, label?, credits: CreditRow[], tracks: { trackId, credits: CreditRow[] }[], url? }`
-with `CreditRow = { name, artistId?, roles: ("producer"|"writer"|"composer"|"lyricist"|"featured"|"mixer"|"engineer"|"mastering")[] }`.
+with `CreditRow = { name, artistId?, roles: ("producer"|"writer"|"composer"|"lyricist"|"featured"|"mixer"|"engineer"|"mastering"|"performer"|"arranger"|"conductor")[] }`.
 
 `album_credits` answers from the same cache at once. A missing or month-old
 entry is `pending` and is looked up in the background, then
@@ -2782,6 +2782,31 @@ Albums the user owns on vinyl, CD, cassette or another format, with notes on eac
 `DiscogsReport = { username, importedAt, total, matched, added, unmatched: { releaseId, artist, title, year, format, thumb, links }[] }`.
 
 An import matches each collection item to a library album: a Discogs release already linked to an album stays with it, then the folded artist and title (`identity::fold`, Discogs' " (2)" and "*" taken off, the first credited artist when the whole credit doesn't match). Unreleased albums never match. Copies added by hand stay, a Discogs copy keeps the user's edits, and copies of records no longer in the collection go. Marks on albums the library doesn't list right now are left alone, and an empty library refuses to import. `physical://changed` fires after any change; `syncstore://changed` names `physical` when another device changed the marks. Settings: `showPhysicalCollection` (on) and `shelfMissingList` (off), both synced.
+
+## Sleeve notes
+
+An album's liner notes from every source Platter reads, each fact with where it came from. The album page asks for them when its Sleeve notes tab opens; a song's Credits item asks for one song.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `sleeve_notes` | `{ id }` (album) | `SleeveNotes` |
+| `song_credits` | `{ id }` (song) | `SongCredits` |
+| `credit_page` | `{ name }` (a person's name, any case) | `CreditPage`, or null when nothing in the library credits them |
+
+`SleeveNotes = { albumId, looking, lookups: { online, musicbrainz, discogs, unreleased }, released?, editionDate?, recorded?, label?, catalogue?, country?, barcode?, format?, edition?, status?, origin?, notes?, studios: { name, role: "recorded"|"mixed"|"mastered", sources }[], editionNotes: Fact[], groups: RoleGroup[], tracks: { trackId, title, disc, number, groups: RoleGroup[], recorded? }[], links: { source, url }[] }`
+with `Fact = { value, sources: Source[] }`, `Source = "tags"|"plex"|"musicbrainz"|"discogs"`, `RoleGroup = { role, people: { name, key, artistId?, details: string[], sources: Source[] }[] }`.
+`SongCredits = { trackId, albumId, looking, lookups, song?, links }`, `song` being that song's entry in `tracks`.
+`CreditPage = { key, name, artistId?, groups: { role, albums: { album: Album, whole, songs: { id, title }[], details: string[], sources: Source[] }[] }[] }`.
+
+Roles, in the order groups come: `producer`, `writer`, `composer`, `lyricist`, `arranger`, `performer` (with the instruments in `details`), `featured`, `conductor`, `engineer`, `mixer`, `mastering`. Album `groups` hold everyone on the album and its songs except featured artists, who stay with their songs. Dates are "1997", "1997-05", "1997-05-21" or a span "1996-11/1997-02". `status` is the files' release status (`released`, `unreleased`, `leaked`, `alternate`), `origin` their `ARCHIVE_SOURCE`, and `editionNotes` say how the album differs from the library's other editions (albums sharing its `ARCHIVE_GROUP`) by their songs. `key` is the person's folded name; `artistId` is a library artist with that name.
+
+Sources and precedence: the files' own tags (credit tags such as `PRODUCER`, `COMPOSER`, `LYRICIST`, `ENGINEER`, `MIXER`, `PERFORMER` "Name (instrument)", ID3 `TCOM`, `TEXT`, `TIPL` and `TMCL`, and `LABEL`, `CATALOGNUMBER`, `BARCODE`, `RELEASECOUNTRY`, `ORIGINALDATE`, read by the file tag scan), then Plex (the album's release date and label, and the composer, writer, lyricist and producer Plex keeps on each song), then MusicBrainz (the release and its recordings' relations, studios and annotation), then Discogs (the release's credits, label, format and notes). Values that agree add their source to the fact; a date that agrees keeps its most precise form. When values disagree the earlier source wins.
+
+`sleeve_notes` answers from the cache at once and starts one background refresh for the album when something is missing or stale; `looking` is then true and `sleeve://changed` fires with `{ id }` when it's done. The refresh asks Plex for the songs' credits (60 songs at most, kept 7 days), then, while `sleeveLookups` is on and the app isn't offline, MusicBrainz through the artist info cache and its one-request-a-second pacing (needs `infoMusicbrainz` on; a release read by an older build is read again) and Discogs when a token is saved (the release of an owned Discogs copy, else a database search by artist and title taking only a result with the same folded artist and title; kept 30 days, a miss 7). Unreleased albums are never looked up online. A failed lookup waits ten minutes before it's tried again. Offline, the cached answers show.
+
+Each time an album's notes are put together, the people the other sources credit are kept for credit pages (`sleeve_credits`); credit tags in files are kept as the files are read (`tag_credits`), so `credit_page` covers the whole library's tags and every album whose notes were opened. Albums with a cached MusicBrainz or Discogs release are added the first time a credit page opens.
+
+Settings: `showSleeveNotes` (on) shows the tab and the Credits item; `sleeveLookups` (on) allows the online lookups. Both synced.
 
 ## Sync, folders and keys
 

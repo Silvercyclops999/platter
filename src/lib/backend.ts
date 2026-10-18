@@ -53,6 +53,9 @@ import type {
   ArtistName,
   ArtistInfo,
   AlbumCredits,
+  CreditPage,
+  SleeveNotes,
+  SongCredits,
   AlbumReleaseStatus,
   EraPage,
   DoctorKind,
@@ -602,6 +605,12 @@ export interface Backend {
   artistInfo(id: string): Promise<ArtistInfo>;
   /** An album's MusicBrainz date and credits; `albumcredits://changed` fires when a lookup finishes. */
   albumCredits(id: string): Promise<AlbumCredits>;
+  /** An album's sleeve notes from the cache; `sleeve://changed` fires when lookups it started finish. */
+  sleeveNotes(id: string): Promise<SleeveNotes>;
+  /** One song's credits (its album's notes for that song). */
+  songCredits(id: string): Promise<SongCredits>;
+  /** Everything in the library a person is credited on, by role; null when nothing credits them. */
+  creditPage(name: string): Promise<CreditPage | null>;
   /** Whether an album counts as released and why; `releasestatus://changed` fires when it changes. */
   albumReleaseStatus(id: string): Promise<AlbumReleaseStatus>;
 
@@ -1385,6 +1394,9 @@ export function createTauriBackend(): Backend {
     updateInstallOnRestart: () => call("update_install_on_restart"),
     artistInfo: (id) => call("artist_info", { id }),
     albumCredits: (id) => call("album_credits", { id }),
+    sleeveNotes: (id) => call("sleeve_notes", { id }),
+    songCredits: (id) => call("song_credits", { id }),
+    creditPage: (name) => call("credit_page", { name }),
     albumReleaseStatus: (id) => call("album_release_status", { id }),
     releaseMarkSet: (kind, id, mark) => call("release_mark_set", { kind, id, mark }),
     trackVersions: (id) => call("track_versions", { id }),

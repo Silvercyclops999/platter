@@ -138,6 +138,9 @@ const CALLS: [string, (b: ReturnType<typeof createTauriBackend>) => Promise<unkn
   ["plex_edit_refresh", (b) => b.plexEditRefresh("7", "artist"), { id: "7", kind: "artist" }],
   ["plex_edit_undo", (b) => b.plexEditUndo("c1"), { changeId: "c1" }],
   ["plex_edit_history", (b) => b.plexEditHistory("5"), { id: "5" }],
+  ["sleeve_notes", (b) => b.sleeveNotes("5"), { id: "5" }],
+  ["song_credits", (b) => b.songCredits("9"), { id: "9" }],
+  ["credit_page", (b) => b.creditPage("Ada Moss"), { name: "Ada Moss" }],
 ];
 
 const EVENTS = [

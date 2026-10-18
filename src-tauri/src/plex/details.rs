@@ -600,6 +600,17 @@ pub async fn fetch(client: &PlexClient, track_id: &str) -> AppResult<NowPlayingD
     })
 }
 
+/// Only the credits Plex keeps on a track (composer, writer, lyricist,
+/// producer): one request, for the sleeve notes.
+pub async fn fetch_credits(client: &PlexClient, track_id: &str) -> AppResult<Vec<Contributor>> {
+    let key = client.raw(track_id)?;
+    if !valid_id(key) {
+        return Err(AppError::Invalid("track id".into()));
+    }
+    let body = client.get_bytes(&format!("/library/metadata/{key}"), &[]).await?;
+    Ok(track_extras(first_meta(&body)?).credits)
+}
+
 /// Only the track's lyrics from Plex: None when the track has no lyrics
 /// stream or the stream can't be read or has no words. Errors only when the
 /// track itself can't be read.

@@ -942,7 +942,9 @@ impl ArtistInfoService {
                 (AlbumCredits::empty(album_id, CreditsState::Pending), true)
             });
         };
-        let stale = row.stale(now) && !self.inner.album_failed.lock().get(album_id).is_some_and(|t| now - t < ALBUM_RETRY_S);
+        // A release read by an older build is looked up again for what it left out.
+        let old = row.parse::<MbRelease>().is_some_and(|r| r.parsed < mbdetails::PARSE_VERSION);
+        let stale = (row.stale(now) || old) && !self.inner.album_failed.lock().get(album_id).is_some_and(|t| now - t < ALBUM_RETRY_S);
         let out = match row.parse::<MbRelease>() {
             Some(r) => mbdetails::album_credits(album_id, &r, &subject.tracks, &library),
             None => AlbumCredits::empty(album_id, CreditsState::None),

@@ -94,6 +94,12 @@ describe("album credit rules", () => {
 });
 
 describe("album page credits", () => {
+  // With sleeve notes on, credits move into their tab; this is the page without it.
+  beforeEach(async () => {
+    await backend.settingsSet({ showSleeveNotes: false });
+    await loadSettings();
+  });
+
   it("lists producers and writers under the tracklist, with library artists linked and the source", async () => {
     const user = userEvent.setup();
     const open = vi.spyOn(backend, "openInfoLink");

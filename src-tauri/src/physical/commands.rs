@@ -185,6 +185,39 @@ impl Physical {
         self.status().await
     }
 
+    /// Whether a Discogs token is saved (the sleeve notes look releases up with it).
+    pub async fn has_discogs_token(&self) -> bool {
+        let me = self.clone();
+        tokio::task::spawn_blocking(move || me.token().is_some()).await.unwrap_or(false)
+    }
+
+    /// The Discogs release of an owned copy that came from a Discogs import.
+    pub async fn discogs_release_of(&self, album_id: &str) -> Option<u64> {
+        let id = album_id.to_owned();
+        let owned = self.inner.store.run(move |st| super::get(st, &id)).await.ok().flatten()?;
+        owned.copies.iter().find_map(|c| c.discogs.map(|d| d.release_id))
+    }
+
+    /// A Discogs database search for releases (needs the token).
+    pub async fn discogs_search(&self, artist: &str, title: &str) -> AppResult<serde_json::Value> {
+        let token = self.saved_token().await?;
+        self.inner.client.search(&token, artist, title).await
+    }
+
+    /// One Discogs release; None when Discogs doesn't have it.
+    pub async fn discogs_release(&self, id: u64) -> AppResult<Option<serde_json::Value>> {
+        let token = self.saved_token().await?;
+        self.inner.client.release(&token, id).await
+    }
+
+    async fn saved_token(&self) -> AppResult<Token> {
+        let me = self.clone();
+        tokio::task::spawn_blocking(move || me.token())
+            .await
+            .map_err(blocking_err)?
+            .ok_or_else(|| AppError::Invalid("Add your Discogs token in Settings first.".into()))
+    }
+
     /// Read the Discogs collection and mark the albums the library has.
     pub async fn import(&self) -> AppResult<DiscogsReport> {
         let me = self.clone();

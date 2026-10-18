@@ -19,6 +19,7 @@ import { downloadMenuItems } from "../stores/downloads";
 import { sendToDeviceItem } from "../components/DeviceMenu";
 import { Shelf, ShelfItem } from "../components/Shelf";
 import { Skeleton } from "../components/Skeleton";
+import { Tabs } from "../components/Tabs";
 import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
 import { backend } from "../lib/backend";
 import { formatDuration, formatLongDuration, plural, releaseTypeLabel } from "../lib/format";
@@ -52,14 +53,21 @@ import { CatalogueAction, MissingButton, NOT_IN_LIBRARY, StoreLinks, catalogueKi
 import { useLidarrReady } from "./lidarrShared";
 import { LookForBetterDialog, UpgradeCard, upgradeMenuItems, useAlbumUpgrade } from "./LidarrUpgrade";
 import { useRouter } from "../stores/router";
+import { useSettings } from "../stores/settings";
 import type { CatTrack } from "../lib/types";
+import { SleeveNotesPanel } from "./SleeveNotes";
 
-/** An album page; `catalogue`: `id` is a MusicBrainz release group the library doesn't have. */
-export function AlbumPage({ id, catalogue }: { id: string; catalogue?: boolean }) {
-  return catalogue ? <CatalogueAlbumView key={`mb:${id}`} rgid={id} /> : <LibraryAlbumView id={id} />;
+type AlbumPane = "songs" | "sleeve";
+
+/**
+ * An album page; `catalogue`: `id` is a MusicBrainz release group the
+ * library doesn't have. `tab: "sleeve"` opens on the Sleeve notes.
+ */
+export function AlbumPage({ id, catalogue, tab }: { id: string; catalogue?: boolean; tab?: "sleeve" }) {
+  return catalogue ? <CatalogueAlbumView key={`mb:${id}`} rgid={id} /> : <LibraryAlbumView id={id} tab={tab} />;
 }
 
-function LibraryAlbumView({ id }: { id: string }) {
+function LibraryAlbumView({ id, tab }: { id: string; tab?: "sleeve" }) {
   const { data, error, retry } = useLoad(() => backend.albumPage(id), [id]);
   const album = data?.album;
   useArtTint(album?.tint, album?.thumb);
@@ -79,6 +87,13 @@ function LibraryAlbumView({ id }: { id: string }) {
   const upgrade = useAlbumUpgrade(album ? id : null);
   const [lookingForBetter, setLookingForBetter] = useState(false);
   const [view, setView] = useState<AlbumView>(loadAlbumView);
+  // Songs or Sleeve notes; switching editions keeps the tab.
+  const sleeveOn = useSettings((s) => s.settings?.showSleeveNotes !== false);
+  const [pane, setPane] = useState<AlbumPane>(tab === "sleeve" ? "sleeve" : "songs");
+  useEffect(() => {
+    if (tab === "sleeve") setPane("sleeve");
+  }, [tab, id]);
+  const showSleeve = sleeveOn && pane === "sleeve";
   const chooseView = (v: AlbumView) => {
     setView(v);
     saveAlbumView(v);
@@ -225,16 +240,18 @@ function LibraryAlbumView({ id }: { id: string }) {
               )
             }
           />
-          <button
-            type="button"
-            className="pl-sort"
-            aria-haspopup="menu"
-            aria-label={`View as: ${ALBUM_VIEW_LABEL[view]}`}
-            onClick={(e) => viewMenu(e.currentTarget)}
-          >
-            <span>{ALBUM_VIEW_LABEL[view]}</span>
-            {view === "list" ? <List size={16} aria-hidden="true" /> : <Rows3 size={16} aria-hidden="true" />}
-          </button>
+          {!showSleeve && (
+            <button
+              type="button"
+              className="pl-sort"
+              aria-haspopup="menu"
+              aria-label={`View as: ${ALBUM_VIEW_LABEL[view]}`}
+              onClick={(e) => viewMenu(e.currentTarget)}
+            >
+              <span>{ALBUM_VIEW_LABEL[view]}</span>
+              {view === "list" ? <List size={16} aria-hidden="true" /> : <Rows3 size={16} aria-hidden="true" />}
+            </button>
+          )}
         </div>
 
         <UpgradeCard upgrade={upgrade} onChanged={upgrade.reload} />
@@ -253,43 +270,68 @@ function LibraryAlbumView({ id }: { id: string }) {
           />
         )}
         <StatsStrip kind="album" id={id} />
-        <div className={`album-tracks album-tracks--${view}`}>
-          <TrackList label={album ? `${album.title} songs` : "Songs"} showAlbum={false} showPlays>
-            {data
-              ? discGroups(data.tracks).map((g) => (
-                  <Fragment key={g.disc ?? "all"}>
-                    {g.disc !== null && (
-                      <div className="album-disc" role="row" aria-label={`Disc ${g.disc}`}>
-                        <span className="album-disc__cell" role="gridcell">
-                          <span className="album-disc__icon">
-                            <Disc3 size={16} aria-hidden="true" />
-                          </span>
-                          <span className="album-disc__label">Disc {g.disc}</span>
-                        </span>
-                      </div>
-                    )}
-                    {g.tracks.map((t) => (
-                      <TrackRow
-                        key={t.id}
-                        track={t}
-                        index={t.trackNumber}
-                        showAlbum={false}
-                        showPlays
-                        showArtist={view === "list" && (!!t.trackArtist || t.artistId !== album!.artistId)}
-                        active={t.id === nowTrackId}
-                        playing={t.id === nowTrackId && status === "playing"}
-                        onPlay={() => player.playAlbum(id, t.id)}
-                      />
-                    ))}
-                  </Fragment>
-                ))
-              : Array.from({ length: 8 }, (_, i) => <TrackRowSkeleton key={i} showAlbum={false} showPlays />)}
-          </TrackList>
+        {sleeveOn && (
+          <Tabs<AlbumPane>
+            label={album ? `${album.title}: songs or sleeve notes` : "Songs or sleeve notes"}
+            idPrefix="album-pane"
+            className="album-tabs"
+            value={pane}
+            onChange={setPane}
+            items={[
+              { id: "songs", label: "Songs" },
+              { id: "sleeve", label: "Sleeve notes" },
+            ]}
+          />
+        )}
+        <div
+          {...(sleeveOn ? { role: "tabpanel", id: "album-pane-panel", "aria-labelledby": `album-pane-tab-${pane}` } : {})}
+          className="album-pane"
+        >
+          {showSleeve && album ? (
+            <SleeveNotesPanel albumId={id} title={album.title} />
+          ) : (
+            <>
+              <div className={`album-tracks album-tracks--${view}`}>
+                <TrackList label={album ? `${album.title} songs` : "Songs"} showAlbum={false} showPlays>
+                  {data
+                    ? discGroups(data.tracks).map((g) => (
+                        <Fragment key={g.disc ?? "all"}>
+                          {g.disc !== null && (
+                            <div className="album-disc" role="row" aria-label={`Disc ${g.disc}`}>
+                              <span className="album-disc__cell" role="gridcell">
+                                <span className="album-disc__icon">
+                                  <Disc3 size={16} aria-hidden="true" />
+                                </span>
+                                <span className="album-disc__label">Disc {g.disc}</span>
+                              </span>
+                            </div>
+                          )}
+                          {g.tracks.map((t) => (
+                            <TrackRow
+                              key={t.id}
+                              track={t}
+                              index={t.trackNumber}
+                              showAlbum={false}
+                              showPlays
+                              showArtist={view === "list" && (!!t.trackArtist || t.artistId !== album!.artistId)}
+                              active={t.id === nowTrackId}
+                              playing={t.id === nowTrackId && status === "playing"}
+                              onPlay={() => player.playAlbum(id, t.id)}
+                            />
+                          ))}
+                        </Fragment>
+                      ))
+                    : Array.from({ length: 8 }, (_, i) => <TrackRowSkeleton key={i} showAlbum={false} showPlays />)}
+                </TrackList>
+              </div>
+
+              {album && <AlbumFooter released={releaseDateFor(data!.released, mb)} studio={data!.studio || mb?.label} year={album.year} />}
+
+              {/* With sleeve notes on, the credits live in their tab. */}
+              {mb && !sleeveOn && <AlbumCreditsSection credits={mb} />}
+            </>
+          )}
         </div>
-
-        {album && <AlbumFooter released={releaseDateFor(data!.released, mb)} studio={data!.studio || mb?.label} year={album.year} />}
-
-        {mb && <AlbumCreditsSection credits={mb} />}
 
         {album && data!.moreByArtist.length > 0 && (
           <div className="detail-more">

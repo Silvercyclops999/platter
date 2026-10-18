@@ -51,6 +51,18 @@ Settings, Integrations, Discord, Show what you're playing on Discord is off unti
 
 <!-- TODO: Settings says Discord status isn't available in builds made without a Discord application id. Check whether release builds always have it. -->
 
+## Sleeve notes
+
+An album page has two tabs under its buttons: Songs and Sleeve notes. Sleeve notes is the back of the record: when and where it was recorded, the label, catalogue number, format, edition, country and barcode, the release's own notes, and who made it. Credits are listed for the whole album (produced by, written by, the musicians and what they played, engineered, mixed and mastered by) and then song by song.
+
+Every name is a link. It opens a page with everything in your library that person is credited on, grouped by what they did. A song's menu has **Credits** too, for that one song, in the expanded view as well.
+
+### Where the facts come from
+
+Each fact has small marks for where it came from: **Tags** for your files' own tags, **Plex**, **MB** for MusicBrainz and **Discogs**. When sources agree, every one is marked. When they disagree, your files' tags win, then Plex, then MusicBrainz, then Discogs.
+
+Settings, Library, Look up credits online asks MusicBrainz (when MusicBrainz is on, Settings, Integrations, Artist info) and Discogs (once you've added a Discogs token) when you open the tab. What they say is kept on your computer, so offline you still see it. Unreleased albums are never looked up. Turn off Show sleeve notes to hide the tab and the Credits item.
+
 ## First steps
 
 - Press **Home** in the sidebar to see what you played lately and the mixes made for you.

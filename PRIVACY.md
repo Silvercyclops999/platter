@@ -47,6 +47,16 @@ and your own Plex server.
   their MusicBrainz id) and an album's release date and credits (the album's
   MusicBrainz release id, or its artist and title when Plex has no id).
   Unreleased albums are never looked up.
+- Sleeve notes, when you open an album's Sleeve notes tab with "Look up
+  credits online" on (Settings > Library). MusicBrainz is asked only while
+  MusicBrainz is on in Settings: it gets the album's MusicBrainz release id,
+  or its artist and album title when there's no id, and answers with the
+  release, its recordings and their credits. Discogs is asked only once you
+  save a Discogs token: it gets the artist and album title (a search) and
+  then the Discogs release id it found, with your token in a request header.
+  An album you own through a Discogs import is looked up by its release id
+  alone. Answers are kept on your computer. Unreleased albums are never
+  looked up. Song credits Plex keeps come from your own server.
 - AcoustID, only if you turn on "Identify songs by sound" in Settings (it is
   off by default). Platter makes an audio fingerprint of a song on your
   computer and sends the fingerprint and the song's length in seconds,

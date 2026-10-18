@@ -40,19 +40,19 @@ describe("track menu", () => {
     useRouter.getState().reset({ name: "album", id: t1.albumId });
     fireEvent.contextMenu(row(), { clientX: 10, clientY: 10 });
     await screen.findByRole("menu");
-    expect(labels()).toEqual(["Add to playlist", "Add to Liked Songs", "Add to queue", "Start a listening session", `Go to ${t1.artistTitle}`, "Go to song radio", "Bookmark", "Your stats", "Don't play this artist", "Add lyrics", "Share", "Copy song title", "Edit tags…"]);
+    expect(labels()).toEqual(["Add to playlist", "Add to Liked Songs", "Add to queue", "Start a listening session", `Go to ${t1.artistTitle}`, "Go to song radio", "Credits", "Bookmark", "Your stats", "Don't play this artist", "Add lyrics", "Share", "Copy song title", "Edit tags…"]);
   });
 
   it("keeps 'Go to album' everywhere else, including another album's page", async () => {
     useRouter.getState().reset({ name: "album", id: `${t1.albumId}-other` });
     fireEvent.contextMenu(row(), { clientX: 10, clientY: 10 });
     await screen.findByRole("menu");
-    expect(labels()).toEqual(["Add to playlist", "Add to Liked Songs", "Add to queue", "Start a listening session", `Go to ${t1.artistTitle}`, "Go to album", "Go to song radio", "Bookmark", "Your stats", "Don't play this artist", "Add lyrics", "Share", "Copy song title", "Edit tags…"]);
+    expect(labels()).toEqual(["Add to playlist", "Add to Liked Songs", "Add to queue", "Start a listening session", `Go to ${t1.artistTitle}`, "Go to album", "Go to song radio", "Credits", "Bookmark", "Your stats", "Don't play this artist", "Add lyrics", "Share", "Copy song title", "Edit tags…"]);
   });
 
   it("queue items put 'Remove from queue' right after 'Add to queue'", () => {
     const items = trackMenuItems(t1, { afterQueue: [{ label: "Remove from queue" }] });
-    expect(items.map((i) => i.label)).toEqual(["Add to playlist", "Add to Liked Songs", "Add to queue", "Remove from queue", "Start a listening session", "Add to the session's queue", `Go to ${t1.artistTitle}`, "Go to album", "Go to song radio", "Bookmark", "Your stats", "Don't play this artist", "Add lyrics", "Wrong lyrics?", "Share", "Copy song title", "Edit tags…"]);
+    expect(items.map((i) => i.label)).toEqual(["Add to playlist", "Add to Liked Songs", "Add to queue", "Remove from queue", "Start a listening session", "Add to the session's queue", `Go to ${t1.artistTitle}`, "Go to album", "Go to song radio", "Credits", "Bookmark", "Your stats", "Don't play this artist", "Add lyrics", "Wrong lyrics?", "Share", "Copy song title", "Edit tags…"]);
   });
 
   it("the options button opens the menu aligned to the button", async () => {
@@ -112,7 +112,7 @@ describe("now-playing menu", () => {
     fireEvent.contextMenu(screen.getByRole("link", { name: t1.title }), { clientX: 20, clientY: 700 });
     const menu = await screen.findByRole("menu", { name: `Options for ${t1.title}` });
     expect(menu).toBeInTheDocument();
-    expect(labels()).toEqual(["Add to playlist", "Add to Liked Songs", "Add to queue", "Start a listening session", `Go to ${t1.artistTitle}`, "Go to album", "Go to song radio", "Bookmark", "Your stats", "Don't play this artist", "Add lyrics", "Share", "Copy song title", "Edit tags…"]);
+    expect(labels()).toEqual(["Add to playlist", "Add to Liked Songs", "Add to queue", "Start a listening session", `Go to ${t1.artistTitle}`, "Go to album", "Go to song radio", "Credits", "Bookmark", "Your stats", "Don't play this artist", "Add lyrics", "Share", "Copy song title", "Edit tags…"]);
   });
 });
 

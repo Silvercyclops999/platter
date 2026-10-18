@@ -123,9 +123,10 @@ pub fn pick_release_group(v: &Value, artist: &str, title: &str) -> Option<String
 pub const RELEASE_API: &str = "https://musicbrainz.org/ws/2/release/";
 /// What a release lookup includes: the release group (original date), credit
 /// lines, label, tracks, and artist relations on the release, its
-/// recordings and their works (producer, writer and so on).
+/// recordings and their works (producer, writer and so on), studios (place
+/// relations) and the release's annotation.
 pub const RELEASE_INC: &str =
-    "release-groups+artist-credits+labels+recordings+artist-rels+recording-level-rels+work-rels+work-level-rels";
+    "release-groups+artist-credits+labels+recordings+artist-rels+recording-level-rels+work-rels+work-level-rels+place-rels+annotation";
 
 pub fn release_url(release_id: &str) -> String {
     format!("{RELEASE_API}{release_id}?inc={RELEASE_INC}&fmt=json")

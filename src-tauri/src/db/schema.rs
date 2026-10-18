@@ -1297,6 +1297,34 @@ CREATE TABLE IF NOT EXISTS lyrics_official_check (
     checked_at INTEGER NOT NULL
 ) WITHOUT ROWID;
 "#,
+    // v43: sleeve notes (sleeve::). file_tags keeps each file's credits and
+    // release facts as JSON (read again at tags::CACHE_VERSION 4), and
+    // tag_credits lists its people for credit pages. sleeve_credits is what
+    // the other sources (Plex, MusicBrainz, Discogs) credited on an album, as
+    // last shown in its sleeve notes: track_id '' for the album itself.
+    r#"
+ALTER TABLE file_tags ADD COLUMN sleeve TEXT;
+CREATE TABLE IF NOT EXISTS tag_credits (
+    part_key   TEXT NOT NULL,
+    person_key TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    role       TEXT NOT NULL,
+    detail     TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (part_key, person_key, role, detail)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS tag_credits_person ON tag_credits (person_key);
+CREATE TABLE IF NOT EXISTS sleeve_credits (
+    album_id   TEXT NOT NULL,
+    track_id   TEXT NOT NULL,
+    person_key TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    role       TEXT NOT NULL,
+    detail     TEXT NOT NULL DEFAULT '',
+    sources    TEXT NOT NULL,
+    PRIMARY KEY (album_id, track_id, person_key, role, detail)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS sleeve_credits_person ON sleeve_credits (person_key);
+"#,
 ];
 
 #[cfg(test)]
