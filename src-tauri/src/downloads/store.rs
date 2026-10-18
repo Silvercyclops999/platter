@@ -344,6 +344,13 @@ pub fn done_files(c: &Connection) -> AppResult<Vec<(String, String)>> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Every file row: (track id, file name if it has one).
+pub fn row_files(c: &Connection) -> AppResult<Vec<(String, Option<String>)>> {
+    let mut st = c.prepare_cached("SELECT track_id, file FROM download_files")?;
+    let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 pub fn used_bytes(c: &Connection) -> AppResult<u64> {
     let n: i64 = c.query_row("SELECT COALESCE(SUM(size), 0) FROM download_files WHERE state = 'done'", [], |r| r.get(0))?;
     Ok(n.max(0) as u64)
@@ -449,6 +456,37 @@ pub fn remove_all(c: &Connection) -> AppResult<Vec<Gone>> {
     };
     c.execute_batch("DELETE FROM download_item_tracks; DELETE FROM download_items; DELETE FROM download_files;")?;
     Ok(files)
+}
+
+/// Whether the library cache lists every song of an album or mix it knows.
+/// A mix lists songs the tracks table may not hold yet, and an album may
+/// have fewer songs than it says while the library is read again: a list
+/// with songs missing would drop downloaded ones, so it waits.
+pub fn library_list_complete(c: &Connection, key: &ItemKey) -> AppResult<bool> {
+    match key.kind {
+        ItemKind::Album => {
+            let (want, have): (i64, i64) = c
+                .query_row(
+                    "SELECT a.track_count, (SELECT COUNT(*) FROM tracks t WHERE t.album_id = a.id)
+                     FROM albums a WHERE a.id = ?1",
+                    [&key.id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?
+                .unwrap_or((0, 0));
+            Ok(have >= want)
+        }
+        ItemKind::Mix => {
+            let (listed, known): (i64, i64) = c.query_row(
+                "SELECT COUNT(*), COUNT(t.id) FROM mix_tracks mt LEFT JOIN tracks t ON t.id = mt.track_id
+                 WHERE mt.mix_id = ?1",
+                [&key.id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            Ok(listed == known)
+        }
+        ItemKind::Playlist | ItemKind::Liked => Ok(true),
+    }
 }
 
 /// An album's, playlist's, Liked Songs' or mix's songs now, from the library

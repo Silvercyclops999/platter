@@ -17,7 +17,14 @@ pub const ART_DIR: &str = "art";
 /// The size kept (big enough for the album page header).
 const SIZE: u32 = 640;
 
-fn name(thumb: &str) -> String {
+/// Whether `n` is a name [`file_name`] gives.
+pub fn is_art_name(n: &str) -> bool {
+    n.strip_suffix(".img")
+        .is_some_and(|h| h.len() == 16 && h.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+}
+
+/// The file name a cover is kept under.
+pub fn file_name(thumb: &str) -> String {
     // FNV-1a of the Plex art path (as kept before paths carried their server).
     let mut h: u64 = 0xcbf29ce484222325;
     for b in crate::sid::storage_form(thumb).as_bytes() {
@@ -28,7 +35,7 @@ fn name(thumb: &str) -> String {
 }
 
 pub fn path(dir: &Path, thumb: &str) -> PathBuf {
-    dir.join(ART_DIR).join(name(thumb))
+    dir.join(ART_DIR).join(file_name(thumb))
 }
 
 /// Fetches and keeps the cover once.

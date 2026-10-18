@@ -327,9 +327,87 @@ fn part_name(name: &str, part_key: &str) -> String {
     format!("{name}.{}.part", short_hash(part_key))
 }
 
+fn is_lower_hex(s: &str, len: usize) -> bool {
+    s.len() == len && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// Whether `s` is something [`file_stem`] can make: the id as it is (up to
+/// 64 safe characters), or the cleaned id plus a dash and its hash.
+fn is_stem(s: &str) -> bool {
+    let safe = |t: &str| t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if s.is_empty() || !safe(s) {
+        return false;
+    }
+    if s.len() <= 64 {
+        return true;
+    }
+    s.len() <= 73 && s.rsplit_once('-').is_some_and(|(clean, h)| clean.len() <= 64 && is_lower_hex(h, 8))
+}
+
+/// Whether `s` is something [`extension`] can give.
+fn is_ext(s: &str) -> bool {
+    (1..=5).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+}
+
+/// The stem of a partial file this app made (`{stem}.{ext}.{hash}.part`, as
+/// [`file_stem`], [`extension`] and [`part_name`] make it). None for any
+/// other name, so files that aren't ours are never taken for ours.
+fn part_stem(file: &str) -> Option<&str> {
+    let rest = file.strip_suffix(".part")?;
+    let (rest, hash) = rest.rsplit_once('.')?;
+    let (stem, ext) = rest.rsplit_once('.')?;
+    (is_lower_hex(hash, 8) && is_ext(ext) && is_stem(stem)).then_some(stem)
+}
+
 /// Whether `file` is a partial file of the song stored as `stem`.
 fn is_part_of(file: &str, stem: &str) -> bool {
-    file.ends_with(".part") && file.strip_prefix(stem).is_some_and(|rest| rest.starts_with('.'))
+    part_stem(file) == Some(stem)
+}
+
+/// Whether a stored file name is one plain name in the folder (no folders,
+/// `..`, drive or root), so joining it to the folder stays in the folder.
+fn is_plain_name(name: &str) -> bool {
+    use std::path::Component;
+    if name.is_empty() || name.contains(['/', '\\', ':']) {
+        return false;
+    }
+    let mut parts = Path::new(name).components();
+    matches!((parts.next(), parts.next()), (Some(Component::Normal(n)), None) if n == name)
+}
+
+/// The file in `dir` a stored name stands for, or None (and a warning) for a
+/// name that isn't one plain name.
+fn stored_path(dir: &Path, name: &str) -> Option<PathBuf> {
+    if is_plain_name(name) {
+        Some(dir.join(name))
+    } else {
+        tracing::warn!("ignoring a stored download name that isn't a plain file name");
+        None
+    }
+}
+
+/// Left in a downloads folder this app made or uses. Nothing in a folder
+/// without it is ever swept.
+pub const MARKER: &str = ".platter-downloads";
+
+fn has_marker(dir: &Path) -> bool {
+    dir.join(MARKER).is_file()
+}
+
+fn write_marker(dir: &Path) {
+    if let Err(e) = std::fs::write(dir.join(MARKER), b"Platter keeps its downloads in this folder.\n") {
+        tracing::warn!("could not mark the downloads folder: {e}");
+    }
+}
+
+/// Makes the folder if it isn't there, marking it as ours when it is new.
+fn ensure_dir(dir: &Path) -> std::io::Result<()> {
+    if dir.is_dir() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(dir)?;
+    write_marker(dir);
+    Ok(())
 }
 
 /// File extension for a downloaded song.
@@ -337,14 +415,14 @@ fn extension(track: &Track, quality: DownloadQuality) -> String {
     if quality.kbps().is_some() {
         return "mp3".into();
     }
+    let clean = |e: &str| Some(e.to_ascii_lowercase()).filter(|e| is_ext(e));
     let from_part = Path::new(track.part_key.split('?').next().unwrap_or(""))
         .extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-        .filter(|e| e.len() <= 5 && e.chars().all(|c| c.is_ascii_alphanumeric()));
+        .and_then(clean);
     from_part
-        .or_else(|| track.container.clone().map(|c| c.to_ascii_lowercase()))
-        .or_else(|| track.codec.clone().map(|c| c.to_ascii_lowercase()))
+        .or_else(|| track.container.as_deref().and_then(clean))
+        .or_else(|| track.codec.as_deref().and_then(clean))
         .unwrap_or_else(|| "audio".into())
 }
 
@@ -356,7 +434,7 @@ pub fn estimate_bytes(track: &Track, quality: DownloadQuality) -> u64 {
 
 impl Downloads {
     pub fn new(deps: Deps) -> Self {
-        let _ = std::fs::create_dir_all(&deps.dir);
+        let _ = ensure_dir(&deps.dir);
         let me = Self {
             inner: Arc::new(Inner {
                 db: deps.db,
@@ -381,7 +459,17 @@ impl Downloads {
             }),
         };
         me.reload_files();
+        me.adopt_folder();
         me
+    }
+
+    /// A folder from before folders were marked is taken as ours once one of
+    /// the files this app saved there is found in it.
+    fn adopt_folder(&self) {
+        let dir = self.dir();
+        if dir.is_dir() && !has_marker(&dir) && self.inner.files.read().values().any(|p| p.is_file()) {
+            write_marker(&dir);
+        }
     }
 
     pub fn set_events(&self, events: Arc<dyn DownloadEvents>) {
@@ -442,7 +530,8 @@ impl Downloads {
     fn reload_files(&self) {
         let dir = self.dir();
         let files = self.inner.db.read(store::done_files).unwrap_or_default();
-        *self.inner.files.write() = files.into_iter().map(|(id, f)| (id, dir.join(f))).collect();
+        *self.inner.files.write() =
+            files.into_iter().filter_map(|(id, f)| Some((id, stored_path(&dir, &f)?))).collect();
     }
 
     /// Ids of every downloaded song. None while the folder can't be reached
@@ -471,7 +560,7 @@ impl Downloads {
                     // A mix follows its stored songs (what resync reads too);
                     // a radio, which isn't stored, keeps the page's.
                     (ItemKind::Mix, ids) => match store::tracks_of_library_item(c, &k, liked_min)? {
-                        Some(t) if !t.is_empty() => t,
+                        Some(t) if !t.is_empty() && (ids.is_none() || store::library_list_complete(c, &k)?) => t,
                         _ => ids.ok_or_else(|| AppError::Invalid("A mix needs its songs.".into()))?,
                     },
                     // The library's list wins; the page's own list when it
@@ -519,16 +608,28 @@ impl Downloads {
         let deleted = self.inner.db.write_async(|c| store::remove_all(c)).await?;
         self.inner.epoch.fetch_add(1, Ordering::SeqCst);
         self.delete_files(deleted);
-        // Leftover partial files and art.
+        // Leftover partial files and art, only in a folder that is ours and
+        // only by the names this app gives them.
         let dir = self.dir();
-        if let Ok(rd) = std::fs::read_dir(&dir) {
-            for e in rd.flatten() {
-                if e.path().extension().is_some_and(|x| x == "part") {
-                    let _ = std::fs::remove_file(e.path());
+        if has_marker(&dir) {
+            let mut failed = Vec::new();
+            for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if part_stem(&name).is_some() && e.path().is_file() {
+                    remove_logged(&e.path(), &name, &mut failed);
                 }
             }
+            let art_dir = dir.join(art::ART_DIR);
+            for e in std::fs::read_dir(&art_dir).into_iter().flatten().flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if art::is_art_name(&name) && e.path().is_file() {
+                    remove_logged(&e.path(), &name, &mut Vec::new());
+                }
+            }
+            // Only goes when empty: anything else in it stays.
+            let _ = std::fs::remove_dir(&art_dir);
+            self.queue_pending(&dir, failed);
         }
-        let _ = std::fs::remove_dir_all(dir.join(art::ART_DIR));
         self.retry_pending_deletes();
         self.files_changed();
         Ok(before)
@@ -546,106 +647,171 @@ impl Downloads {
         self.inner.db.read_async(move |c| store::has_item(c, &key)).await
     }
 
+    /// File names and stems some row still uses, which no delete may touch.
+    fn in_use(&self) -> AppResult<InUse> {
+        let rows = self.inner.db.read(store::row_files)?;
+        let mut used = InUse::default();
+        for (id, file) in rows {
+            used.stems.insert(file_stem(&id));
+            if let Some(f) = file {
+                used.names.insert(f);
+            }
+        }
+        Ok(used)
+    }
+
     /// Deletes the files of rows no item needs: the finished file and any
     /// partial ones. A file that can't be deleted now (in use) is tried again
-    /// later ([`Self::retry_pending_deletes`]).
+    /// later ([`Self::retry_pending_deletes`]). Names a row uses again are
+    /// left alone.
     fn delete_files(&self, gone: Vec<store::Gone>) {
         if gone.is_empty() {
             return;
         }
+        let used = match self.in_use() {
+            Ok(u) => u,
+            Err(e) => {
+                tracing::warn!("downloads: not deleting, the library can't be read: {e}");
+                return;
+            }
+        };
         let dir = self.dir();
         let mut failed = Vec::new();
         for g in &gone {
             if let Some(n) = &g.file
-                && let Err(e) = std::fs::remove_file(dir.join(n))
-                && e.kind() != std::io::ErrorKind::NotFound
+                && !used.names.contains(n)
+                && let Some(p) = stored_path(&dir, n)
             {
-                tracing::warn!("could not delete download {n}: {e}");
-                failed.push(n.clone());
+                remove_logged(&p, n, &mut failed);
             }
         }
-        let stems: Vec<String> = gone.iter().map(|g| file_stem(&g.track_id)).collect();
-        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            if stems.iter().any(|s| is_part_of(&name, s)) {
-                let _ = std::fs::remove_file(e.path());
+        let stems: std::collections::HashSet<String> =
+            gone.iter().map(|g| file_stem(&g.track_id)).filter(|s| !used.stems.contains(s)).collect();
+        if !stems.is_empty() {
+            for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if part_stem(&name).is_some_and(|s| stems.contains(s)) && e.path().is_file() {
+                    remove_logged(&e.path(), &name, &mut failed);
+                }
             }
         }
-        if !failed.is_empty() {
-            let _ = self.inner.db.write(|c| {
-                let mut pending = pending_deletes(c)?;
-                pending.extend(failed);
-                pending.sort();
-                pending.dedup();
-                crate::db::store::kv_set(c, KEY_PENDING_DELETE, &serde_json::to_string(&pending).unwrap_or_default())
-            });
+        self.queue_pending(&dir, failed);
+    }
+
+    /// Keeps names whose delete failed, with their folder, for later.
+    fn queue_pending(&self, dir: &Path, names: Vec<String>) {
+        if names.is_empty() {
+            return;
+        }
+        let folder = dir.to_string_lossy().into_owned();
+        let res = self.inner.db.write(move |c| {
+            let mut pending = pending_deletes(c)?;
+            pending.extend(names.into_iter().map(|name| PendingDelete { dir: folder.clone(), name }));
+            pending.sort();
+            pending.dedup();
+            crate::db::store::kv_set(c, KEY_PENDING_DELETE, &pending_json(&pending))
+        });
+        if let Err(e) = res {
+            tracing::warn!("downloads: could not note files to delete later: {e}");
         }
     }
 
-    /// Tries again to delete files whose delete failed, unless a song uses
-    /// that file name again. Returns how many are still left.
+    /// Tries again to delete files whose delete failed, each in the folder it
+    /// was in, unless a song uses that name again. Returns how many are
+    /// still left. When the library can't be read nothing is deleted.
     pub fn retry_pending_deletes(&self) -> usize {
-        let Ok(pending) = self.inner.db.read(pending_deletes) else { return 0 };
+        let pending = match self.inner.db.read(pending_deletes) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("downloads: files to delete later can't be read: {e}");
+                return 0;
+            }
+        };
         if pending.is_empty() {
             return 0;
         }
-        let dir = self.dir();
-        if !dir.is_dir() {
-            return pending.len();
-        }
-        let in_use: std::collections::HashSet<String> =
-            self.inner.db.read(store::done_files).unwrap_or_default().into_iter().map(|(_, f)| f).collect();
-        let left: Vec<String> = pending
+        let used = match self.in_use() {
+            Ok(u) => u,
+            Err(e) => {
+                tracing::warn!("downloads: not deleting, the library can't be read: {e}");
+                return pending.len();
+            }
+        };
+        let left: Vec<PendingDelete> = pending
             .into_iter()
-            .filter(|n| {
-                if in_use.contains(n) {
+            .filter(|p| {
+                if used.names.contains(&p.name) || part_stem(&p.name).is_some_and(|s| used.stems.contains(s)) {
                     return false;
                 }
-                match std::fs::remove_file(dir.join(n)) {
+                let dir = PathBuf::from(&p.dir);
+                if !dir.is_dir() {
+                    // Its drive is away: try again when it is back.
+                    return true;
+                }
+                let Some(path) = stored_path(&dir, &p.name) else { return false };
+                match std::fs::remove_file(path) {
                     Ok(()) => false,
                     Err(e) => e.kind() != std::io::ErrorKind::NotFound,
                 }
             })
             .collect();
         let n = left.len();
-        let _ = self.inner.db.write(move |c| {
-            crate::db::store::kv_set(c, KEY_PENDING_DELETE, &serde_json::to_string(&left).unwrap_or_default())
-        });
+        let res = self.inner.db.write(move |c| crate::db::store::kv_set(c, KEY_PENDING_DELETE, &pending_json(&left)));
+        if let Err(e) = res {
+            tracing::warn!("downloads: could not note files to delete later: {e}");
+        }
         n
     }
 
     /// At startup: partial files no row needs (from an item removed before
     /// they finished, or an older version), deletes left over, and album art
-    /// no downloaded song uses.
+    /// no downloaded song uses. Runs only in a folder that is ours, only on
+    /// names this app gives, and not at all while the library holds no
+    /// downloads (a new, reset or restored library knows nothing of them).
     pub fn sweep(&self) {
         let dir = self.dir();
         if !dir.is_dir() {
             return;
         }
-        self.retry_pending_deletes();
-        let Ok((ids, thumbs)) = self.inner.db.read(|c| {
+        if !has_marker(&dir) {
+            tracing::info!("downloads folder isn't marked as Platter's; not sweeping it");
+            return;
+        }
+        let Ok((rows, items, tracks)) = self.inner.db.read(|c| {
             let mut st = c.prepare("SELECT f.track_id, t.thumb FROM download_files f LEFT JOIN tracks t ON t.id = f.track_id")?;
             let rows = st
                 .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))?
                 .collect::<Result<Vec<_>, _>>()?;
-            let (ids, thumbs): (Vec<String>, Vec<Option<String>>) = rows.into_iter().unzip();
-            Ok((ids, thumbs))
+            let items: i64 = c.query_row("SELECT COUNT(*) FROM download_items", [], |r| r.get(0))?;
+            let tracks: i64 = c.query_row("SELECT COUNT(*) FROM tracks", [], |r| r.get(0))?;
+            Ok((rows, items, tracks))
         }) else {
             return;
         };
-        let stems: std::collections::HashSet<String> = ids.iter().map(|id| file_stem(id)).collect();
+        if rows.is_empty() && items == 0 {
+            return;
+        }
+        self.retry_pending_deletes();
+        let stems: std::collections::HashSet<String> = rows.iter().map(|(id, _)| file_stem(id)).collect();
+        let mut failed = Vec::new();
         for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
-            let Some(stem) = name.strip_suffix(".part").and_then(|n| n.split('.').next()) else { continue };
-            if !stems.contains(stem) && e.path().is_file() {
-                let _ = std::fs::remove_file(e.path());
+            if part_stem(&name).is_some_and(|s| !stems.contains(s)) && e.path().is_file() {
+                remove_logged(&e.path(), &name, &mut failed);
             }
         }
-        let keep: std::collections::HashSet<std::path::PathBuf> =
-            thumbs.into_iter().flatten().map(|t| art::path(&dir, &t)).collect();
+        self.queue_pending(&dir, failed);
+        // A song with no cover known (not in the library yet, or mid
+        // resync) means which covers are used isn't known: keep them all.
+        if tracks == 0 || rows.iter().any(|(_, t)| t.is_none()) {
+            return;
+        }
+        let keep: std::collections::HashSet<String> =
+            rows.iter().filter_map(|(_, t)| t.as_deref()).map(art::file_name).collect();
         for e in std::fs::read_dir(dir.join(art::ART_DIR)).into_iter().flatten().flatten() {
-            if !keep.contains(&e.path()) {
-                let _ = std::fs::remove_file(e.path());
+            let name = e.file_name().to_string_lossy().into_owned();
+            if art::is_art_name(&name) && !keep.contains(&name) && e.path().is_file() {
+                remove_logged(&e.path(), &name, &mut Vec::new());
             }
         }
     }
@@ -665,8 +831,11 @@ impl Downloads {
                     // An empty answer is far more likely a half-read library
                     // than an item the user emptied, so its files stay until
                     // the library lists songs for it again.
+                    // A list with songs missing (the library read again
+                    // halfway) waits too.
                     if let Some(now_ids) = store::tracks_of_library_item(&tx, &item.key, liked_min)?
                         && !now_ids.is_empty()
+                        && store::library_list_complete(&tx, &item.key)?
                         && now_ids != store::item_tracks(&tx, &item.key)?
                     {
                         store::set_tracks(&tx, &item.key, &now_ids)?;
@@ -738,14 +907,25 @@ impl Downloads {
         let res = async {
             // Waits for a song being fetched to stop (keep_going says no).
             let _step = self.inner.step_lock.lock().await;
-            std::fs::create_dir_all(&to)?;
-            let mut names: Vec<String> =
-                self.inner.db.read_async(store::done_files).await?.into_iter().map(|(_, f)| f).collect();
+            ensure_dir(&to)?;
+            let mut names: Vec<String> = self
+                .inner
+                .db
+                .read_async(store::done_files)
+                .await?
+                .into_iter()
+                .map(|(_, f)| f)
+                .filter(|f| is_plain_name(f))
+                .collect();
             names.sort();
             let (f2, t2) = (from.clone(), to.clone());
             tokio::task::spawn_blocking(move || move_all(&f2, &t2, &names))
                 .await
                 .map_err(|e| AppError::Internal(e.to_string()))??;
+            // The folder the user picked holds the downloads from now on.
+            if !has_marker(&to) {
+                write_marker(&to);
+            }
             *self.inner.dir.write() = to;
             self.inner.epoch.fetch_add(1, Ordering::SeqCst);
             Ok(())
@@ -755,6 +935,25 @@ impl Downloads {
         self.files_changed();
         self.inner.wake.notify_one();
         res
+    }
+
+    /// Moves the files to `to`, then saves the new folder with `save`. When
+    /// saving fails the files go back, so the saved folder and the files
+    /// never part ways.
+    pub async fn move_and_save<F, Fut>(&self, to: PathBuf, save: F) -> AppResult<()>
+    where
+        F: FnOnce(String) -> Fut,
+        Fut: std::future::Future<Output = AppResult<()>>,
+    {
+        let before = self.dir();
+        self.move_to(to.clone()).await?;
+        if let Err(e) = save(to.to_string_lossy().into_owned()).await {
+            if let Err(back) = self.move_to(before).await {
+                tracing::warn!("downloads not moved back after the folder couldn't be saved: {back}");
+            }
+            return Err(e);
+        }
+        Ok(())
     }
 
     // ---------------------------------------------------------------- status
@@ -855,7 +1054,7 @@ impl Downloads {
             return Some(PauseReason::Offline);
         }
         let dir = self.dir();
-        if !dir.is_dir() && std::fs::create_dir_all(&dir).is_err() {
+        if !dir.is_dir() && ensure_dir(&dir).is_err() {
             return Some(PauseReason::FolderMissing);
         }
         None
@@ -1066,8 +1265,12 @@ impl Downloads {
         // can't be continued, and a transcode always starts over.
         for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
             let n = e.file_name().to_string_lossy().into_owned();
-            if is_part_of(&n, &stem) && (n != part_file || !fetch.resumable) {
-                let _ = tokio::fs::remove_file(e.path()).await;
+            if is_part_of(&n, &stem)
+                && (n != part_file || !fetch.resumable)
+                && let Err(err) = tokio::fs::remove_file(e.path()).await
+                && err.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::warn!("could not delete download {n}: {err}");
             }
         }
         let epoch = self.inner.epoch.load(Ordering::SeqCst);
@@ -1103,11 +1306,13 @@ impl Downloads {
                 }
                 let (pk, q, n) = (track.part_key.clone(), prefs.quality.as_str().to_string(), name.clone());
                 let id_for_old = id.clone();
-                let old = self
-                    .inner
-                    .db
-                    .write_async(move |c| store::mark_done(c, &id, &pk, &q, &n, size, now()))
-                    .await?;
+                let done = move |c: &mut rusqlite::Connection| store::mark_done(c, &id, &pk, &q, &n, size, now());
+                let mut old = self.inner.db.write_async(done.clone()).await?;
+                // Removed while it downloaded, then turned on again before
+                // the file was let go: the new row takes the file.
+                if old.as_deref() == Some(name.as_str()) && self.still_wanted(&id_for_old) {
+                    old = self.inner.db.write_async(done).await?;
+                }
                 if let Some(old) = old {
                     self.delete_files(vec![store::Gone { track_id: id_for_old, file: Some(old) }]);
                 }
@@ -1173,10 +1378,46 @@ fn shortest_transcode(track: &Track, quality: DownloadQuality) -> Option<u64> {
     Some(kbps * 1000 / 8 * track.duration_ms / 1000 * 7 / 10)
 }
 
-fn pending_deletes(c: &rusqlite::Connection) -> AppResult<Vec<String>> {
-    Ok(crate::db::store::kv_get(c, KEY_PENDING_DELETE)?
-        .and_then(|v| serde_json::from_str(&v).ok())
-        .unwrap_or_default())
+/// A file whose delete failed, with the folder it is in.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+struct PendingDelete {
+    dir: String,
+    name: String,
+}
+
+/// File names and track stems the download rows still use.
+#[derive(Default)]
+struct InUse {
+    names: std::collections::HashSet<String>,
+    stems: std::collections::HashSet<String>,
+}
+
+/// The list of files to delete later. An older list held bare names with no
+/// folder; those are dropped, since which folder they were in isn't known.
+fn pending_deletes(c: &rusqlite::Connection) -> AppResult<Vec<PendingDelete>> {
+    let Some(v) = crate::db::store::kv_get(c, KEY_PENDING_DELETE)? else { return Ok(Vec::new()) };
+    match serde_json::from_str(&v) {
+        Ok(list) => Ok(list),
+        Err(_) => {
+            tracing::info!("downloads: dropping an older list of files to delete later");
+            Ok(Vec::new())
+        }
+    }
+}
+
+fn pending_json(list: &[PendingDelete]) -> String {
+    serde_json::to_string(list).unwrap_or_else(|_| "[]".into())
+}
+
+/// Deletes one file. A failure other than "already gone" is logged and its
+/// name kept in `failed`.
+fn remove_logged(path: &Path, name: &str, failed: &mut Vec<String>) {
+    if let Err(e) = std::fs::remove_file(path)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!("could not delete download {name}: {e}");
+        failed.push(name.to_string());
+    }
 }
 
 /// What one step of the queue did.
@@ -1212,6 +1453,10 @@ fn move_all(from: &Path, to: &Path, names: &[String]) -> AppResult<()> {
         result = std::fs::create_dir_all(&art_to).map_err(AppError::from);
         if result.is_ok() {
             for e in std::fs::read_dir(&art_from).into_iter().flatten().flatten() {
+                // Only the covers this app kept; anything else stays put.
+                if !art::is_art_name(&e.file_name().to_string_lossy()) {
+                    continue;
+                }
                 if let Err(err) = go(e.path(), art_to.join(e.file_name()), &mut moved) {
                     result = Err(AppError::Io(format!("Couldn't move album art: {err}")));
                     break;
@@ -1231,7 +1476,7 @@ fn move_all(from: &Path, to: &Path, names: &[String]) -> AppResult<()> {
     // Half-fetched songs carry on in the new folder; losing one only means
     // fetching it again.
     for e in std::fs::read_dir(from).into_iter().flatten().flatten() {
-        if e.path().extension().is_some_and(|x| x == "part") {
+        if part_stem(&e.file_name().to_string_lossy()).is_some() && e.path().is_file() {
             let _ = move_file(&e.path(), &to.join(e.file_name()));
         }
     }

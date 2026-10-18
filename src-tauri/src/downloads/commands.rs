@@ -181,13 +181,16 @@ pub async fn downloads_choose_folder(
     };
     let dir = picked.into_path().map_err(|e| AppError::Io(format!("folder: {e}")))?;
     let dir = dir.join("Platter downloads");
-    downloads.move_to(dir.clone()).await?;
     let saved = dir.to_string_lossy().into_owned();
-    let s2 = saved.clone();
-    settings
-        .modify(move |s| {
-            s.download_folder = s2;
-            Ok(true)
+    downloads
+        .move_and_save(dir, |folder| async move {
+            settings
+                .modify(move |s| {
+                    s.download_folder = folder;
+                    Ok(true)
+                })
+                .await
+                .map(|_| ())
         })
         .await?;
     Ok(Some(saved))

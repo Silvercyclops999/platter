@@ -1045,9 +1045,20 @@ async fn removing_an_item_deletes_its_partial_files() {
     // Another song whose id starts the same way keeps its own.
     let other = r.dir.join(part_name("a10.flac", "/x"));
     std::fs::write(&other, b"half").unwrap();
+    // Files that only start like a1's aren't its partial files.
+    let foreign: Vec<PathBuf> = ["a1.flac.notes.part", "a1.part", "a1.flac.part", "a1.flac.1234ABCD.part"]
+        .iter()
+        .map(|n| r.dir.join(n))
+        .collect();
+    for f in &foreign {
+        std::fs::write(f, b"mine").unwrap();
+    }
     r.d.remove(key(ItemKind::Album, "a")).await.unwrap();
     assert!(!part.exists() && !mp3.exists());
     assert!(other.exists());
+    for f in &foreign {
+        assert!(f.exists(), "{} kept", f.display());
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1076,6 +1087,7 @@ async fn startup_sweeps_leftover_partial_files_and_unused_art() {
     std::fs::create_dir_all(r.dir.join(art::ART_DIR)).unwrap();
     let wanted = r.dir.join(part_name("a1.flac", "/library/parts/a1/1/file.flac"));
     let orphan = r.dir.join(part_name("zz.flac", "/library/parts/zz/1/file.flac"));
+    // Not the form this app gives (a browser's partial download looks like it).
     let legacy = r.dir.join("qq.flac.part");
     let not_ours = r.dir.join("notes.txt");
     for p in [&wanted, &orphan, &legacy, &not_ours] {
@@ -1087,8 +1099,8 @@ async fn startup_sweeps_leftover_partial_files_and_unused_art() {
     std::fs::write(&used_art, b"img").unwrap();
     std::fs::write(&old_art, b"img").unwrap();
     r.d.sweep();
-    assert!(wanted.exists() && used_art.exists() && not_ours.exists());
-    assert!(!orphan.exists() && !legacy.exists() && !old_art.exists());
+    assert!(wanted.exists() && used_art.exists() && not_ours.exists() && legacy.exists());
+    assert!(!orphan.exists() && !old_art.exists());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1146,4 +1158,329 @@ async fn a_transcode_that_ends_early_is_tried_again_not_kept() {
     let (url, _) = raw_server(move |_| response("200 OK", &[], &body)).await;
     let fetch = Fetch { src: StreamSource { url, ..Default::default() }, resumable: false, session: None };
     assert_eq!(transfer::fetch_file(&ctx, &fetch, &part).await, transfer::Outcome::Done(BODY as u64));
+}
+
+// ---- never deleting what isn't ours ---------------------------------------------
+
+#[test]
+fn only_the_partial_file_form_this_app_gives_is_taken_for_ours() {
+    let made = part_name(&format!("{}.flac", file_stem("a1")), "/library/parts/a1/1/file.flac");
+    assert_eq!(part_stem(&made), Some("a1"));
+    let odd = file_stem("12/../34");
+    let made = part_name(&format!("{odd}.mp3"), "/x");
+    assert_eq!(part_stem(&made), Some(odd.as_str()));
+    let long = file_stem(&"x".repeat(70));
+    assert_eq!(part_stem(&part_name(&format!("{long}.audio"), "/x")), Some(long.as_str()));
+    for n in [
+        "a1.flac.part",
+        "holiday.mp4.part",
+        "a1.flac.1234ABCD.part",
+        "a1.flac.1234abc.part",
+        "a1.flac.1234abcde.part",
+        "a1.FLAC.1234abcd.part",
+        "a1.toolong.1234abcd.part",
+        "my song.flac.1234abcd.part",
+        ".flac.1234abcd.part",
+        "a1.flac.1234abcd.part.txt",
+        "a.b.flac.1234abcd.part",
+    ] {
+        assert_eq!(part_stem(n), None, "{n}");
+    }
+    assert!(!is_part_of("a10.flac.1234abcd.part", "a1"));
+    assert!(art::is_art_name(&art::file_name("/library/metadata/1/thumb/1")));
+    for n in ["cover.jpg", "0123456789abcdef.jpg", "0123456789ABCDEF.img", "0123456789abcde.img"] {
+        assert!(!art::is_art_name(n), "{n}");
+    }
+}
+
+#[test]
+fn a_stored_name_must_be_one_plain_name() {
+    assert!(is_plain_name("a1.flac"));
+    for n in ["", ".", "..", "../a1.flac", "x/a1.flac", "x\\a1.flac", "/etc/passwd", "C:\\a1.flac", "C:a1.flac"] {
+        assert!(!is_plain_name(n), "{n:?}");
+    }
+}
+
+/// Files that aren't ours, some looking a little like ours.
+fn foreign_files(dir: &Path) -> Vec<PathBuf> {
+    let names = ["holiday.mp4.part", "notes.txt", "a1.flac.part", "zz.flac.1234ABCD.part", "my song.flac.1234abcd.part"];
+    names
+        .iter()
+        .map(|n| {
+            let p = dir.join(n);
+            std::fs::write(&p, b"not Platter's").unwrap();
+            p
+        })
+        .collect()
+}
+
+/// A partial file of a song no row holds.
+fn orphan_part(dir: &Path) -> PathBuf {
+    let p = dir.join(part_name("zz.flac", "/library/parts/zz/1/file.flac"));
+    std::fs::write(&p, b"half").unwrap();
+    p
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_startup_sweep_only_deletes_partial_files_by_the_name_this_app_gives() {
+    let r = rig().await;
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    let foreign = foreign_files(&r.dir);
+    let orphan = orphan_part(&r.dir);
+    r.d.sweep();
+    assert!(!orphan.exists());
+    for f in &foreign {
+        assert!(f.exists(), "{} kept", f.display());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_folder_without_the_marker_is_never_swept() {
+    let r = rig().await;
+    assert!(r.dir.join(MARKER).is_file(), "the folder this app made is marked");
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    std::fs::remove_file(r.dir.join(MARKER)).unwrap();
+    let orphan = orphan_part(&r.dir);
+    std::fs::create_dir_all(r.dir.join(art::ART_DIR)).unwrap();
+    let old_art = art::path(&r.dir, "/library/metadata/999/thumb/1");
+    std::fs::write(&old_art, b"img").unwrap();
+    r.d.sweep();
+    assert!(orphan.exists() && old_art.exists());
+    r.d.remove_all().await.unwrap();
+    assert!(orphan.exists() && old_art.exists(), "no bulk delete either");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_folder_from_before_the_marker_is_adopted_when_it_holds_our_files() {
+    let r = rig().await;
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    drain(&r.d).await;
+    std::fs::remove_file(r.dir.join(MARKER)).unwrap();
+    let again = |dir: PathBuf| {
+        Downloads::new(Deps {
+            db: r.db.clone(),
+            dir,
+            source: r.src.clone(),
+            free_space: Arc::new(|_| None),
+            art: None,
+        })
+    };
+    let _d = again(r.dir.clone());
+    assert!(r.dir.join(MARKER).is_file());
+    // A folder that holds none of them stays unmarked.
+    let other = r.dir.with_file_name("someone else's");
+    std::fs::create_dir_all(&other).unwrap();
+    let _d = again(other.clone());
+    assert!(!other.join(MARKER).exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_library_with_no_downloads_sweeps_nothing() {
+    // A new, reset or restored library knows nothing of the files.
+    let r = rig().await;
+    let orphan = orphan_part(&r.dir);
+    std::fs::create_dir_all(r.dir.join(art::ART_DIR)).unwrap();
+    let old_art = art::path(&r.dir, "/library/metadata/999/thumb/1");
+    std::fs::write(&old_art, b"img").unwrap();
+    r.d.sweep();
+    assert!(orphan.exists() && old_art.exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_art_sweep_keeps_what_isnt_a_cover_it_kept_and_waits_on_an_unknown_library() {
+    let r = rig().await;
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    let art_dir = r.dir.join(art::ART_DIR);
+    std::fs::create_dir_all(&art_dir).unwrap();
+    let mine = art_dir.join("cover.jpg");
+    std::fs::write(&mine, b"mine").unwrap();
+    let old_art = art::path(&r.dir, "/library/metadata/999/thumb/1");
+    std::fs::write(&old_art, b"img").unwrap();
+    // A song whose cover isn't known yet: which covers are used isn't known.
+    r.db.write(|c| Ok(c.execute("UPDATE tracks SET thumb = NULL WHERE id = 'a2'", [])?)).unwrap();
+    r.d.sweep();
+    assert!(old_art.exists() && mine.exists());
+    // The library mid resync, empty.
+    r.db.write(|c| Ok(c.execute("DELETE FROM tracks", [])?)).unwrap();
+    r.d.sweep();
+    assert!(old_art.exists() && mine.exists());
+    // Known again: the unused cover goes, the other file stays.
+    let (a, b, tracks) = albums();
+    r.db.write(move |c| {
+        let tx = c.transaction()?;
+        upsert_albums(&tx, &[a, b], 2)?;
+        upsert_tracks(&tx, &tracks, 2)?;
+        tx.commit()?;
+        Ok(())
+    })
+    .unwrap();
+    r.d.sweep();
+    assert!(!old_art.exists() && mine.exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn delete_everything_keeps_files_that_arent_ours_and_their_folder() {
+    let r = rig().await;
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    drain(&r.d).await;
+    let foreign = foreign_files(&r.dir);
+    let orphan = orphan_part(&r.dir);
+    let art_dir = r.dir.join(art::ART_DIR);
+    std::fs::create_dir_all(&art_dir).unwrap();
+    let mine = art_dir.join("cover.jpg");
+    std::fs::write(&mine, b"mine").unwrap();
+    let kept = art::path(&r.dir, "/library/metadata/999/thumb/1");
+    std::fs::write(&kept, b"img").unwrap();
+    r.d.remove_all().await.unwrap();
+    assert!(!orphan.exists() && !kept.exists() && !r.dir.join("a1.flac").exists());
+    assert!(mine.exists(), "the art folder keeps what isn't ours");
+    for f in &foreign {
+        assert!(f.exists(), "{} kept", f.display());
+    }
+    // With only ours in it, the art folder goes.
+    std::fs::remove_file(&mine).unwrap();
+    std::fs::write(&kept, b"img").unwrap();
+    r.d.remove_all().await.unwrap();
+    assert!(!art_dir.exists());
+}
+
+/// Makes a1's delete fail once, so it waits in the list, then lets go of it.
+async fn pending_a1(r: &Rig) -> PathBuf {
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    drain(&r.d).await;
+    let a1 = r.dir.join("a1.flac");
+    std::fs::remove_file(&a1).unwrap();
+    std::fs::create_dir_all(a1.join("held")).unwrap();
+    r.d.remove(key(ItemKind::Album, "a")).await.unwrap();
+    std::fs::remove_dir_all(&a1).unwrap();
+    std::fs::write(&a1, b"x").unwrap();
+    a1
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_library_that_cant_be_read_deletes_nothing_waiting() {
+    let r = rig().await;
+    let a1 = pending_a1(&r).await;
+    r.db.write(|c| Ok(c.execute_batch("DROP TABLE download_files;")?)).unwrap();
+    assert_eq!(r.d.retry_pending_deletes(), 1, "kept for later");
+    assert!(a1.exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_waiting_delete_happens_only_in_its_own_folder() {
+    let r = rig().await;
+    let a1 = pending_a1(&r).await;
+    // The folder moves on; a file of the same name in the new one isn't it.
+    let to = r.dir.with_file_name("elsewhere");
+    r.d.move_to(to.clone()).await.unwrap();
+    std::fs::write(to.join("a1.flac"), b"someone else's").unwrap();
+    assert_eq!(r.d.retry_pending_deletes(), 0);
+    assert!(!a1.exists(), "deleted where it was");
+    assert!(to.join("a1.flac").exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_waiting_delete_spares_a_name_any_row_uses() {
+    let r = rig().await;
+    let a1 = pending_a1(&r).await;
+    // a1 is back, marked missing rather than finished: still its file.
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    r.db.write(|c| {
+        Ok(c.execute("UPDATE download_files SET state = 'missing', file = 'a1.flac' WHERE track_id = 'a1'", [])?)
+    })
+    .unwrap();
+    assert_eq!(r.d.retry_pending_deletes(), 0);
+    assert!(a1.exists());
+}
+
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_partial_file_that_cant_be_deleted_waits_for_later() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let r = rig().await;
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    let part = r.dir.join(part_name("a1.flac", "/library/parts/a1/1/file.flac"));
+    std::fs::write(&part, b"half").unwrap();
+    // Held open with no sharing, so it can't be deleted.
+    let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&part).unwrap();
+    r.d.remove(key(ItemKind::Album, "a")).await.unwrap();
+    assert!(part.exists());
+    assert_eq!(r.d.retry_pending_deletes(), 1);
+    drop(held);
+    assert_eq!(r.d.retry_pending_deletes(), 0);
+    assert!(!part.exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stored_name_reaching_outside_the_folder_is_never_deleted() {
+    let r = rig().await;
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    drain(&r.d).await;
+    let victim = r.dir.with_file_name("victim.txt");
+    std::fs::write(&victim, b"someone else's").unwrap();
+    r.db.write(|c| Ok(c.execute("UPDATE download_files SET file = '../victim.txt' WHERE track_id = 'a1'", [])?))
+        .unwrap();
+    r.d.remove(key(ItemKind::Album, "a")).await.unwrap();
+    assert!(victim.exists());
+    // Nor later, from the list of deletes to try again.
+    let dir = r.dir.to_string_lossy().into_owned();
+    r.db.write(move |c| {
+        let list = serde_json::json!([{ "dir": dir, "name": "../victim.txt" }]).to_string();
+        crate::db::store::kv_set(c, KEY_PENDING_DELETE, &list)
+    })
+    .unwrap();
+    r.d.retry_pending_deletes();
+    assert!(victim.exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_mix_read_back_with_songs_missing_keeps_its_downloads() {
+    let r = rig().await;
+    store_mix(&r.db, "daily:1", &["a1", "b1"]);
+    r.d.add(key(ItemKind::Mix, "daily:1"), "Daily Mix 1".into(), None).await.unwrap();
+    drain(&r.d).await;
+    assert_eq!(r.d.downloaded_ids(), ["a1", "b1"]);
+    // The library is read again and b1 isn't back yet.
+    r.db.write(|c| Ok(c.execute("DELETE FROM tracks WHERE id = 'b1'", [])?)).unwrap();
+    r.d.resync().await.unwrap();
+    assert!(r.dir.join("b1.flac").exists());
+    assert_eq!(r.d.downloaded_ids(), ["a1", "b1"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_album_read_back_with_songs_missing_keeps_its_downloads() {
+    let r = rig().await;
+    r.db.write(|c| Ok(c.execute("UPDATE albums SET track_count = 2 WHERE id = 'a'", [])?)).unwrap();
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    drain(&r.d).await;
+    r.db.write(|c| Ok(c.execute("DELETE FROM tracks WHERE id = 'a2'", [])?)).unwrap();
+    r.d.resync().await.unwrap();
+    assert!(r.dir.join("a2.flac").exists());
+    assert_eq!(r.d.downloaded_ids(), ["a1", "a2"]);
+    // The album really has one song now.
+    r.db.write(|c| Ok(c.execute("UPDATE albums SET track_count = 1 WHERE id = 'a'", [])?)).unwrap();
+    r.d.resync().await.unwrap();
+    assert_eq!(r.d.downloaded_ids(), ["a1"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_folder_that_cant_be_saved_moves_the_files_back() {
+    let r = rig().await;
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    drain(&r.d).await;
+    let to = r.dir.with_file_name("elsewhere");
+    let res = r.d.move_and_save(to.clone(), |_| async { Err(AppError::Io("settings can't be saved".into())) }).await;
+    assert!(res.is_err());
+    assert_eq!(r.d.dir(), r.dir);
+    assert!(r.dir.join("a1.flac").is_file() && !to.join("a1.flac").exists());
+    let saved = Arc::new(Mutex::new(None));
+    let s2 = saved.clone();
+    r.d.move_and_save(to.clone(), |f| async move {
+        *s2.lock() = Some(f);
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(saved.lock().clone(), Some(to.to_string_lossy().into_owned()));
+    assert!(to.join("a1.flac").is_file());
 }
