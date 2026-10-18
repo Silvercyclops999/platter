@@ -362,6 +362,10 @@ pub struct FakeResolver {
     pub unreachable: Mutex<std::collections::HashSet<String>>,
     /// Contexts starting with this track id take this long to look up.
     pub slow_context: Mutex<Option<(String, std::time::Duration)>>,
+    /// `more` takes this long to answer.
+    pub slow_more: Mutex<Option<std::time::Duration>>,
+    /// This many `more` calls fail (network) before answering.
+    pub more_fails: AtomicUsize,
 }
 
 impl FakeResolver {
@@ -377,6 +381,8 @@ impl FakeResolver {
             hidden: Mutex::new(None),
             unreachable: Mutex::new(std::collections::HashSet::new()),
             slow_context: Mutex::new(None),
+            slow_more: Mutex::new(None),
+            more_fails: AtomicUsize::new(0),
         })
     }
 }
@@ -441,6 +447,14 @@ impl TrackLookup for FakeResolver {
     }
     async fn more(&self, req: &super::source::MoreRequest) -> AppResult<Vec<Track>> {
         self.more_calls.lock().push(req.clone());
+        let slow = *self.slow_more.lock();
+        if let Some(wait) = slow {
+            tokio::time::sleep(wait).await;
+        }
+        if self.more_fails.load(Ordering::SeqCst) > 0 {
+            self.more_fails.fetch_sub(1, Ordering::SeqCst);
+            return Err(AppError::Network("lookup failed".into()));
+        }
         let ids = {
             let mut b = self.more_batches.lock();
             if b.is_empty() { Vec::new() } else { b.remove(0) }

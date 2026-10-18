@@ -76,6 +76,9 @@ pub const PREVIOUS_RESTART_MS: u64 = 3_000;
 pub const MIN_LOOP_MS: u64 = 1_000;
 /// Songs a radio refill or a keep-playing batch asks for.
 pub const REFILL_BATCH: usize = 20;
+/// A refill lookup that fails is tried again after these waits (the
+/// first try has none).
+const REFILL_RETRY: [Duration; 3] = [Duration::ZERO, Duration::from_millis(500), Duration::from_secs(2)];
 /// A radio refills when fewer songs than this are left.
 pub const RADIO_LOW: usize = 5;
 /// Smart shuffle puts a suggestion after every this many playlist songs.
@@ -219,7 +222,8 @@ enum Cmd {
     /// Songs from a refill (`TrackLookup::more`) for the context `key` names.
     Extend {
         key: String,
-        tracks: Vec<Track>,
+        /// None: the lookup failed (not the same as finding nothing).
+        tracks: Option<Vec<Track>>,
         source: ItemSource,
     },
     /// Automix settings.
@@ -374,6 +378,7 @@ impl PlayerHandle {
             self_tx: tx.downgrade(),
             refilling: None,
             refill_dead: None,
+            next_on_refill: false,
             smart_built: true,
             smart_gen: 0,
             dsp: config.dsp,
@@ -897,6 +902,9 @@ struct Actor {
     refilling: Option<String>,
     /// A context state a refill found nothing for (not asked again).
     refill_dead: Option<String>,
+    /// Next (or the last song's end) came while a refill was in flight:
+    /// play its first song when it comes back instead of stopping.
+    next_on_refill: bool,
     /// Smart shuffle suggestions were asked for in this run of the context
     /// (they're a fixed list, built once and not refilled).
     smart_built: bool,
@@ -1389,13 +1397,19 @@ impl Actor {
         let source = if radio { ItemSource::Context } else { ItemSource::Autoplay };
         let lookup = self.lookup.clone();
         tokio::spawn(async move {
-            let tracks = match lookup.more(&req).await {
-                Ok(t) => t,
-                Err(e) => {
-                    tracing::debug!("no more songs for {:?}: {e}", req.kind);
-                    Vec::new()
+            let mut tracks = None;
+            for (i, wait) in REFILL_RETRY.iter().enumerate() {
+                if i > 0 {
+                    tokio::time::sleep(*wait).await;
                 }
-            };
+                match lookup.more(&req).await {
+                    Ok(t) => {
+                        tracks = Some(t);
+                        break;
+                    }
+                    Err(e) => tracing::debug!("no more songs for {:?}: {e}", req.kind),
+                }
+            }
             let _ = tx.send(Cmd::Extend { key, tracks, source });
         });
     }
@@ -1648,6 +1662,7 @@ impl Actor {
 
     /// Loads the queue's current entry into the engine.
     fn start_current(&mut self, play: bool, start_ms: u64) -> AppResult<()> {
+        self.next_on_refill = false;
         let Some(item) = self.queue.current().cloned() else {
             self.engine.stop();
             self.cur_key = None;
@@ -1823,7 +1838,7 @@ impl Actor {
                 let r = match self.queue.next_manual() {
                     Some(_) => self.start_current(true, 0),
                     None => {
-                        self.end_of_queue();
+                        self.end_or_wait_for_refill();
                         Ok(())
                     }
                 };
@@ -2006,20 +2021,46 @@ impl Actor {
                 let _ = reply.send(Ok(()));
             }
             Cmd::Extend { key, tracks, source } => {
+                let waiting = std::mem::take(&mut self.next_on_refill);
                 if self.refilling.as_deref() == Some(key.as_str()) {
                     self.refilling = None;
                 }
-                // The context changed while the songs were found.
+                // The context changed while the songs were found: the new
+                // one may need its own refill, skipped while this one ran.
                 if self.refill_key().as_deref() != Some(key.as_str()) {
+                    self.update_next();
+                    self.emit_state();
                     return;
                 }
-                if tracks.is_empty() {
-                    self.refill_dead = Some(key);
-                    return;
+                match tracks {
+                    Some(tracks) if !tracks.is_empty() => {
+                        self.queue.extend_context(tracks, source);
+                        if waiting {
+                            match self.queue.next_manual() {
+                                Some(_) => {
+                                    let _ = self.start_current(true, 0);
+                                }
+                                None => self.end_of_queue(),
+                            }
+                        } else {
+                            self.update_next();
+                        }
+                        self.mark_dirty();
+                    }
+                    found => {
+                        // Nothing found: not asked again for this state. A
+                        // lookup that failed (already tried a few times) is
+                        // asked again at the next song change.
+                        if found.is_some() {
+                            self.refill_dead = Some(key);
+                        }
+                        if waiting {
+                            self.end_of_queue();
+                        } else {
+                            return;
+                        }
+                    }
                 }
-                self.queue.extend_context(tracks, source);
-                self.update_next();
-                self.mark_dirty();
             }
             Cmd::SetPrecacheCount(n, reply) => {
                 self.config.precache_count = n.max(1);
@@ -2282,7 +2323,26 @@ impl Actor {
 
     /// Nothing more to play. With repeat off the context rewinds to its
     /// first track, paused at 0:00, with the rest listed as upcoming.
+    /// Past the last song: when more songs for this context are being
+    /// looked up, stop and wait for them (the first plays when they come);
+    /// otherwise stop at the end of the queue.
+    fn end_or_wait_for_refill(&mut self) {
+        let pending = self.refilling.is_some() && self.refilling == self.refill_key();
+        if !pending || self.queue.repeat() != Repeat::Off {
+            self.end_of_queue();
+            return;
+        }
+        self.ab = None;
+        self.engine.stop();
+        self.cur_key = None;
+        self.next_key = None;
+        self.next_on_refill = true;
+        self.status = PlayerStatus::Loading;
+        self.mark_dirty();
+    }
+
     fn end_of_queue(&mut self) {
+        self.next_on_refill = false;
         self.ab = None;
         self.engine.stop();
         self.cur_key = None;
@@ -2477,7 +2537,7 @@ impl Actor {
     /// there): start the next playable entry, or stop at the end.
     fn continue_after_gap(&mut self) {
         let Some(next) = self.pick_next() else {
-            self.end_of_queue();
+            self.end_or_wait_for_refill();
             return;
         };
         if self.queue.advance_auto_to(&next.item_id) {

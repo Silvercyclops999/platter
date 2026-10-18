@@ -1328,6 +1328,47 @@ async fn similar_music_follows_the_last_song_when_keep_playing_is_on() {
 }
 
 #[tokio::test]
+async fn next_on_the_last_song_waits_for_similar_music_being_found() {
+    let r = rig(&["a", "b", "c", "d"], 30.0, true, PlayerConfig::default()).await;
+    *r.resolver.more_batches.lock() = vec![vec!["c".into(), "d".into()]];
+    *r.resolver.slow_more.lock() = Some(Duration::from_millis(300));
+    r.player.play_context(ctx(&["a", "b"]), Some("b".into()), Some(false)).await.unwrap();
+    wait_state(&r.player, |_| !r.resolver.more_calls.lock().is_empty()).await;
+    // Next before the answer: no rewind to the first song.
+    r.player.next().await.unwrap();
+    let s = r.player.state().await.unwrap();
+    assert_ne!(tid(&s.track), "a", "the context isn't rewound while songs are found");
+    let s = wait_state(&r.player, |s| tid(&s.track) == "c" && s.status == super::events::PlayerStatus::Playing).await;
+    assert_eq!(next_ids(&s), vec!["d"]);
+}
+
+#[tokio::test]
+async fn a_failed_similar_music_lookup_is_tried_again() {
+    let r = rig(&["a", "b", "c", "d"], 30.0, true, PlayerConfig::default()).await;
+    *r.resolver.more_batches.lock() = vec![vec!["c".into(), "d".into()]];
+    r.resolver.more_fails.store(1, std::sync::atomic::Ordering::SeqCst);
+    r.player.play_context(ctx(&["a", "b"]), Some("b".into()), Some(false)).await.unwrap();
+    wait_state(&r.player, |_| !r.resolver.more_calls.lock().is_empty()).await;
+    // One network blip: the lookup is tried again, not given up on.
+    let s = wait_state(&r.player, |s| s.queue.next_up.len() == 2).await;
+    assert_eq!(next_ids(&s), vec!["c", "d"]);
+    assert_eq!(r.resolver.more_calls.lock().len(), 2);
+}
+
+#[tokio::test]
+async fn a_late_refill_for_a_context_left_lets_the_new_one_refill() {
+    let r = rig(&["a", "b", "c", "d", "e"], 30.0, true, PlayerConfig::default()).await;
+    *r.resolver.more_batches.lock() = vec![vec!["d".into()], vec!["e".into()]];
+    *r.resolver.slow_more.lock() = Some(Duration::from_millis(300));
+    r.player.play_context(radio(&["a"]), None, Some(false)).await.unwrap();
+    wait_state(&r.player, |_| !r.resolver.more_calls.lock().is_empty()).await;
+    // A one-song context while the radio's refill is out.
+    r.player.play_context(ctx(&["c"]), None, Some(false)).await.unwrap();
+    let s = wait_state(&r.player, |s| tid(&s.track) == "c" && s.queue.next_up.len() == 1).await;
+    assert_eq!(next_ids(&s), vec!["e"]);
+}
+
+#[tokio::test]
 async fn stop_at_the_end_asks_for_nothing() {
     let r = rig(&["a", "b"], 30.0, true, PlayerConfig { autoplay: false, ..Default::default() }).await;
     r.player.play_context(ctx(&["a", "b"]), Some("b".into()), Some(false)).await.unwrap();
