@@ -187,16 +187,12 @@ function FrameNav({ rail, withSearch, place }: { rail: boolean; withSearch: bool
           </span>
         )}
       </div>
-      {withSearch &&
-        (rail ? (
-          <div className="frame-nav__search frame-nav__search--rail">
-            <IconButton label="Search" tooltipPlacement="right" icon={<Search size={18} />} onClick={() => nav.go({ name: "search" })} />
-          </div>
-        ) : (
-          <div className="frame-nav__search">
-            <SearchBox />
-          </div>
-        ))}
+      {/* On the rail, the Search section is the way to search. */}
+      {withSearch && !rail && (
+        <div className="frame-nav__search">
+          <SearchBox />
+        </div>
+      )}
       <div className="frame-nav__scroll">
         <ul className="frame-nav__list" aria-label="Sections">
           {main.map((s) => (
@@ -413,6 +409,8 @@ export function FrameShell({ children }: { children: ReactNode }) {
           ) : (
             <MainView />
           )}
+          {/* The drawer opens over the page only, so the strip and sections stay in reach. */}
+          {place === "drawer" && view && <Drawer view={view} swap={slot.swap} />}
         </div>
         <RemoteStrip />
         <ListenStrip />
@@ -423,7 +421,6 @@ export function FrameShell({ children }: { children: ReactNode }) {
           <Panel view={view} />
         </div>
       )}
-      {place === "drawer" && view && <Drawer view={view} swap={slot.swap} />}
       {children}
     </div>
   );

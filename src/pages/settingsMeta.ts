@@ -181,6 +181,7 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "volumePercent",
   "followSystem",
   "tonearmSeek",
+  "layoutOffered",
   "homeRecordsFirst",
   "homeColourWash",
   "homeOnThisDay",

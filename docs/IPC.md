@@ -3578,6 +3578,19 @@ save write only the look's own fields, so nothing else from this computer
 goes into a shared file. A look held in the `themeFile` setting must have
 nothing left out.
 
+A layout's `frame` is `classic`, `index`, `deck`, `turntable`, `gatefold`,
+`console` or `custom`; a layout without one is Classic. `transport` (`top` or
+`bottom`) places Index's player strip. A custom frame uses `regions`: an
+object with `top`, `left`, `main`, `right`, `bottom` and `overlay`, each a
+list of components (`navigation`, `search`, `transport`, `nowPlaying`,
+`queue`, `lyrics`, `signal`, `credits`, `filters`, `library`). The contract's
+`slots` table says which regions each component may go in; each component
+goes in one region at most, and `library`, `navigation`, `search`,
+`transport`, `nowPlaying` and `queue` must all be placed. An unknown region
+or component, one in a region it doesn't fit, or a missing one refuses the
+file with the reason. `leftSize` and `rightSize` are `small`, `medium` or
+`large`.
+
 ## Settings and tracking
 | Command | Args |
 | --- | --- |
@@ -3628,7 +3641,8 @@ The rest of the fields, with their defaults:
 | `recordMotion` | `"full"` (default), `"both"`, `"off"` | The record player in now playing: the spinning record and tonearm in the expanded view, there and on the side panel's cover, or neither. `"off"` for settings saved before it existed. |
 | `tonearmSeek` | bool, true | The player bar's seek bar is drawn as a stylus on a groove line. It is the same slider either way. False for settings saved before it existed. |
 | `themeFile` | `ThemeFile` or null | The theme or look file in use, held whole so it travels in the sync file. Checked like a file in the folder; a bad one is refused. Null clears it. |
-| `layout` | `Layout`, Classic | Layout options: `sidebarSide`, `sidebarCollapsed`, `sidebarSections`, `nowPlaying`, `playerStyle`, `playerButtons`, `homeShelves`, `homeGreeting`, `quickAccess`, `headerStyle`, `trackColumns`, `coverShape`, `spinRecord`, `motion`. Checked like a look's layout; a bad one is refused, and a hand-edited bad one goes back to Classic. See Themes and looks. |
+| `layoutOffered` | bool, true | The one-time offer to try the Index layout was shown, or wasn't needed. False for settings saved before frames existed. This device only. |
+| `layout` | `Layout`, Index | Index for new installs; settings saved without a layout, or with one that has no `frame`, are Classic. Layout options: `frame`, `transport`, `regions`, `leftSize`, `rightSize`, `sidebarSide`, `sidebarCollapsed`, `sidebarSections`, `nowPlaying`, `playerStyle`, `playerButtons`, `homeShelves`, `homeGreeting`, `quickAccess`, `headerStyle`, `trackColumns`, `coverShape`, `spinRecord`, `motion`. Checked like a look's layout; a bad one is refused, and a hand-edited bad one goes back to Classic. See Themes and looks. |
 | `showLookBuilder` | bool, true | Appearance shows Make your own. |
 | `lookStepDone` | bool, false | The first-run Pick a look step was shown or skipped. This device only. |
 | `outputDevice` | device id or null, null | Read only here. Set with `output_select`; null follows the system default. |

@@ -63,8 +63,10 @@
   min-height: 0;
   overflow-y: auto;
   padding: var(--space-1) var(--space-2) var(--space-3);
-  scrollbar-width: thin;
+  scrollbar-width: none;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent);
 }
+.frame-nav__scroll:hover, .frame-nav__scroll:focus-within { scrollbar-width: thin; }
 .frame-nav__foot {
   flex: none;
   display: flex;
@@ -193,11 +195,11 @@
 .frame-right > * { flex: 1; width: auto; }
 .frame-right.right-swap { animation-name: frame-fade-in; }
 
-/* The drawer over the page, from the right edge, under the window row. */
+/* The drawer over the page (not the strip or the sections), from its right edge. */
 .frame-drawer {
-  position: fixed;
-  inset: 44px 0 0 0;
-  z-index: calc(var(--z-topbar) + 1);
+  position: absolute;
+  inset: 0;
+  z-index: 5;
   display: flex;
   justify-content: flex-end;
   pointer-events: none;
@@ -205,17 +207,18 @@
 .frame-drawer__scrim {
   position: absolute;
   inset: 0;
-  background: color-mix(in srgb, var(--color-bg-base) 40%, transparent);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--color-bg-base) 25%, transparent);
   pointer-events: auto;
   animation: frame-fade-in var(--motion-medium) var(--motion-easing);
 }
 .frame-drawer__panel {
   position: relative;
   display: flex;
-  width: min(var(--frame-right), calc(100vw - 48px));
-  margin: 0 var(--space-2) var(--space-2) 0;
+  width: min(var(--frame-right), calc(100% - 48px));
+  margin: 0;
   border-radius: var(--radius-card);
-  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.35);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.28);
   pointer-events: auto;
   animation: frame-panel-in var(--motion-medium) var(--motion-easing);
 }

@@ -98,6 +98,10 @@
   }
   .transport-strip--bare { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-areas: ". deck extras" "line line line"; }
 }
+/* Too narrow to centre the keys between equal sides: they sit after the title. */
+@container frame-edge (max-width: 820px) {
+  .transport-strip { grid-template-columns: minmax(0, 1fr) auto auto; }
+}
 @container frame-edge (max-width: 620px) {
   .ts-extras .volume__slider { width: 64px; }
   .ts-now__meta .player-bar__artist { display: none; }
