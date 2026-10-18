@@ -53,6 +53,14 @@ struct LayoutContract {
     player_buttons: Vec<String>,
     home_shelves: Vec<String>,
     track_columns: Vec<String>,
+    frame: Vec<String>,
+    transport: Vec<String>,
+    region_size: Vec<String>,
+    regions: Vec<String>,
+    /// Each component and the regions it may go in.
+    slots: BTreeMap<String, Vec<String>>,
+    /// Components every arrangement must place somewhere.
+    required: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -112,11 +120,67 @@ impl Default for LookFonts {
     }
 }
 
+/// Which components go in each region of a custom frame. Main always holds
+/// the library view; the slot table in the contract says what may go where.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Regions {
+    pub top: Vec<String>,
+    pub left: Vec<String>,
+    pub main: Vec<String>,
+    pub right: Vec<String>,
+    pub bottom: Vec<String>,
+    pub overlay: Vec<String>,
+}
+
+impl Default for Regions {
+    /// The Index arrangement: a custom frame starts from it.
+    fn default() -> Self {
+        let v = |xs: &[&str]| xs.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        Self {
+            top: v(&["transport", "nowPlaying", "signal"]),
+            left: v(&["search", "navigation"]),
+            main: v(&["library"]),
+            right: v(&["queue", "lyrics", "credits"]),
+            bottom: Vec::new(),
+            overlay: Vec::new(),
+        }
+    }
+}
+
+impl Regions {
+    fn get_mut(&mut self, name: &str) -> Option<&mut Vec<String>> {
+        match name {
+            "top" => Some(&mut self.top),
+            "left" => Some(&mut self.left),
+            "main" => Some(&mut self.main),
+            "right" => Some(&mut self.right),
+            "bottom" => Some(&mut self.bottom),
+            "overlay" => Some(&mut self.overlay),
+            _ => None,
+        }
+    }
+
+    fn all(&self) -> [(&'static str, &Vec<String>); 6] {
+        [("top", &self.top), ("left", &self.left), ("main", &self.main), ("right", &self.right), ("bottom", &self.bottom), ("overlay", &self.overlay)]
+    }
+}
+
 /// The layout options. The default is Classic, the layout Platter has always
-/// had. Lists hold the shown items in order; an item left out is hidden.
+/// had (a stored layout without a frame is Classic). Lists hold the shown
+/// items in order; an item left out is hidden.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Layout {
+    /// The shell's frame: classic, index, ... or custom (uses `regions`).
+    pub frame: String,
+    /// Index: the transport strip at the top or the bottom of the page.
+    pub transport: String,
+    /// A custom frame's arrangement.
+    pub regions: Regions,
+    /// A custom frame's left and right region widths, as presets.
+    pub left_size: String,
+    pub right_size: String,
     pub sidebar_side: String,
     pub sidebar_collapsed: bool,
     pub sidebar_sections: Vec<String>,
@@ -137,6 +201,11 @@ impl Default for Layout {
     fn default() -> Self {
         let c = &CONTRACT.look.layout;
         Self {
+            frame: "classic".into(),
+            transport: "top".into(),
+            regions: Regions::default(),
+            left_size: "medium".into(),
+            right_size: "medium".into(),
             sidebar_side: "left".into(),
             sidebar_collapsed: false,
             sidebar_sections: c.sidebar_sections.clone(),
@@ -152,6 +221,13 @@ impl Default for Layout {
             spin_record: false,
             motion: "full".into(),
         }
+    }
+}
+
+impl Layout {
+    /// Index, the layout new installs start on.
+    pub fn index() -> Self {
+        Self { frame: "index".into(), ..Self::default() }
     }
 }
 
@@ -453,10 +529,49 @@ fn parse_layout(v: &Value, notes: &mut Vec<String>) -> Result<Layout, String> {
             "coverShape" => l.cover_shape = pick(&f, val, &c.cover_shape)?,
             "spinRecord" => l.spin_record = flag(&f, val)?,
             "motion" => l.motion = pick(&f, val, &c.motion)?,
+            "frame" => l.frame = pick(&f, val, &c.frame)?,
+            "transport" => l.transport = pick(&f, val, &c.transport)?,
+            "leftSize" => l.left_size = pick(&f, val, &c.region_size)?,
+            "rightSize" => l.right_size = pick(&f, val, &c.region_size)?,
+            "regions" => l.regions = parse_regions(val)?,
             _ => notes.push(format!("Left out layout.{}: Platter doesn't know it.", shown_key(k))),
         }
     }
     Ok(l)
+}
+
+/// A frame's arrangement: only known regions, each component once and only
+/// where the slot table allows it, and every required component placed.
+/// One that breaks a rule is refused, never repaired.
+fn parse_regions(v: &Value) -> Result<Regions, String> {
+    let c = &CONTRACT.look.layout;
+    let components: Vec<String> = c.slots.keys().cloned().collect();
+    let mut r = Regions { top: Vec::new(), left: Vec::new(), main: Vec::new(), right: Vec::new(), bottom: Vec::new(), overlay: Vec::new() };
+    let mut seen: Vec<String> = Vec::new();
+    for (k, val) in object("layout.regions", v)? {
+        let f = format!("layout.regions.{}", shown_key(k));
+        let Some(list) = r.get_mut(k) else {
+            return Err(format!("\"{f}\" isn't a region. Regions are: {}.", c.regions.join(", ")));
+        };
+        let items = id_list(&f, val, &components)?;
+        for id in &items {
+            let allowed = c.slots.get(id).map(Vec::as_slice).unwrap_or_default();
+            if !allowed.iter().any(|a| a == k) {
+                return Err(format!("\"{id}\" can't go in {k}. It fits in: {}.", allowed.join(", ")));
+            }
+            if seen.contains(id) {
+                return Err(format!("\"{id}\" is in two regions."));
+            }
+            seen.push(id.clone());
+        }
+        *list = items;
+    }
+    for need in &c.required {
+        if !r.all().iter().any(|(_, l)| l.contains(need)) {
+            return Err(format!("A layout needs \"{need}\" in one of its regions."));
+        }
+    }
+    Ok(r)
 }
 
 /// Why a layout can't be used, or None when it can.

@@ -134,6 +134,7 @@ import type {
   DiaryQuery,
 } from "../types";
 import { DEFAULT_SETTINGS } from "../types";
+import { layoutProblem } from "../../design/themes/validate";
 import { MockCrates } from "./crates";
 import { exportSettings, importSettings, type SettingsFile } from "../settingsFile";
 
@@ -2818,6 +2819,10 @@ export class MockBackend implements Backend {
       }
       if (patch.subsonicCheckMinutes !== undefined && ![1, 5, 15, 30, 60].includes(patch.subsonicCheckMinutes)) {
         throw { kind: "invalid", message: "Pick one of the times offered." };
+      }
+      if (patch.layout !== undefined) {
+        const why = layoutProblem(patch.layout);
+        if (why) throw { kind: "invalid", message: why };
       }
       if (patch.doctorChecks !== undefined) next.doctorChecks = { ...DEFAULT_SETTINGS.doctorChecks, ...patch.doctorChecks };
       if (patch.listenRelay !== undefined) {

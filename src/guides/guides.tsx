@@ -17,7 +17,8 @@ import { openInvite, startSession, useSocial } from "../stores/social";
 import { GUIDE_TITLES, type GuideId } from "../stores/guides";
 import { LibrarySourceList } from "../pages/LibrarySourceSettings";
 import { ThemeSelect } from "../pages/ThemeSettings";
-import { LookCards } from "../pages/looks/LookCards";
+import { FIRST_RUN_FRAMES, LookCards } from "../pages/looks/LookCards";
+import { FrameCards } from "../pages/looks/LayoutCards";
 import { discordNote, useDiscordStatus } from "../pages/DiscordSettings";
 import { LidarrCheckButton, LidarrFindings, LidarrKeyControl, LidarrUrlField, useLidarr } from "../pages/LidarrSettings";
 import { StagingFolderField } from "../pages/LidarrUpgrade";
@@ -102,6 +103,7 @@ function PickTheme() {
   if (!s) return null;
   return (
     <>
+      <FrameCards frames={FIRST_RUN_FRAMES} />
       <LookCards />
       <Labelled label="Light or dark">{(i) => <ThemeSelect s={s} ids={i} />}</Labelled>
     </>
@@ -298,7 +300,7 @@ export const GUIDES: Guide[] = [
     steps: [
       { id: "signIn", title: "Sign in", text: "Platter plays the music on your Plex server, so it needs your Plex sign-in.", Body: SignedIn, help: ["getting-started", "signing-in-with-plex"] },
       { id: "libraries", title: "Pick your music", text: "Choose which music libraries Platter shows. You can change this any time in Settings.", Body: PickLibraries, help: ["getting-started", "picking-libraries"] },
-      { id: "theme", title: "Choose a look", text: "Pick a ready-made look, then light or dark. Settings has more, and you can make your own.", Body: PickTheme, help: ["getting-started", "picking-a-look"] },
+      { id: "theme", title: "Choose a look", text: "Pick a layout and a ready-made look, then light or dark. Settings has more, and you can make your own.", Body: PickTheme, help: ["getting-started", "picking-a-look"] },
       { id: "discord", title: "Discord", text: "Discord can show friends what you're playing. It's off until you turn it on.", Body: DiscordStep, help: ["getting-started", "discord"] },
       {
         id: "lookups",

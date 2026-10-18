@@ -11,7 +11,8 @@
 import { Clock3, Heart, ListMusic, Maximize2, Mic2, MonitorSpeaker, PictureInPicture2, Play, Repeat, Search, Shuffle, SkipBack, SkipForward, Volume2 } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
 import { lookProps, type LookParts } from "../../design/looks/apply";
-import type { HomeShelfKey, PlayerButton, SidebarSection, ThemeBase, TrackColumn } from "../../design/themes";
+import type { HomeShelfKey, PlayerButton, Regions, SidebarSection, ThemeBase, TrackColumn } from "../../design/themes";
+import { sketchRegions } from "../../shell/frames";
 import "./look-preview.css";
 
 export type ReorderList = "sidebarSections" | "homeShelves" | "playerButtons" | "trackColumns";
@@ -329,6 +330,163 @@ function NowPlaying() {
   );
 }
 
+// ---------------------------------------------------------------- frames
+
+const NAV_ROWS = ["Home", "Search", "What's new"];
+const LIB_ROWS = ["Recently added", "Artists", "Albums", "Liked songs"];
+
+/** Sections, your library and playlists, with search at the top. */
+function FrameNav({ search }: { search: boolean }) {
+  return (
+    <div className="lp-fnav">
+      {search && (
+        <span className="lp-fnav__search">
+          <Search size={12} aria-hidden="true" /> Search
+        </span>
+      )}
+      {NAV_ROWS.map((r, i) => (
+        <span key={r} className={`lp-fnav__row ${i === 0 ? "is-on" : ""}`}>
+          <span className="lp-fnav__icon" />
+          {r}
+        </span>
+      ))}
+      <span className="lp-fnav__head">Your library</span>
+      {LIB_ROWS.map((r) => (
+        <span key={r} className="lp-fnav__row">
+          <span className="lp-fnav__icon" />
+          {r}
+        </span>
+      ))}
+      <span className="lp-fnav__head">Playlists</span>
+      {["Late night", "Sunday slow", "Road trip"].map((r) => (
+        <span key={r} className="lp-fnav__row lp-fnav__row--plain">
+          {r}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** The transport strip: cover, title, keys, then the tonearm line between time plates. */
+function Strip({ now, plates }: { now: boolean; plates: boolean }) {
+  const a = ALBUMS[0];
+  return (
+    <div className="lp-strip">
+      <div className="lp-strip__row">
+        {now ? (
+          <span className="lp-strip__now">
+            <Cover hue={a.hue} className="lp-strip__art" />
+            <span className="lp-player__meta">
+              <span className="lp-line lp-line--title">{TRACKS[1]}</span>
+              <span className="lp-line lp-line--sub">{a.artist}</span>
+            </span>
+          </span>
+        ) : (
+          <span />
+        )}
+        <span className="lp-player__controls">
+          <Shuffle size={13} aria-hidden="true" />
+          <SkipBack size={14} aria-hidden="true" />
+          <span className="lp-play lp-play--small lp-play--ink">
+            <Play size={12} fill="currentColor" aria-hidden="true" />
+          </span>
+          <SkipForward size={14} aria-hidden="true" />
+          <Repeat size={13} aria-hidden="true" />
+        </span>
+        <span className="lp-strip__extras">
+          <ListMusic size={14} aria-hidden="true" />
+          <MonitorSpeaker size={14} aria-hidden="true" />
+          <Volume2 size={14} aria-hidden="true" />
+          <span className="lp-volume" />
+        </span>
+      </div>
+      <div className="lp-strip__line">
+        <span className="lp-plate">1:42</span>
+        <span className="lp-tonearm">
+          <span className="lp-tonearm__fill" />
+        </span>
+        <span className="lp-plate">-2:16</span>
+        {plates && <span className="lp-plate lp-plate--format">FLAC 24/96</span>}
+      </div>
+    </div>
+  );
+}
+
+/** A record as the player (a frame that puts the transport down the left). */
+function PlatterColumn({ now }: { now: boolean }) {
+  const a = ALBUMS[0];
+  return (
+    <div className="lp-fplatter">
+      <span className="lp-fplatter__disc">
+        <Cover hue={a.hue} round className="lp-fplatter__label" />
+      </span>
+      {now && (
+        <span className="lp-fplatter__meta">
+          <span className="lp-line lp-line--big">{TRACKS[1]}</span>
+          <span className="lp-line lp-line--sub">{a.artist}</span>
+        </span>
+      )}
+      <span className="lp-tonearm">
+        <span className="lp-tonearm__fill" />
+      </span>
+      <span className="lp-player__controls">
+        <SkipBack size={14} aria-hidden="true" />
+        <span className="lp-play lp-play--small lp-play--ink">
+          <Play size={12} fill="currentColor" aria-hidden="true" />
+        </span>
+        <SkipForward size={14} aria-hidden="true" />
+      </span>
+    </div>
+  );
+}
+
+function NavKeys() {
+  return (
+    <div className="lp-keys">
+      {["Home", "Search", "Library", "Crates", "Playlists"].map((k, i) => (
+        <span key={k} className={`lp-key ${i === 0 ? "is-on" : ""}`}>
+          {k}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function Edge({ items }: { items: string[] }) {
+  return (
+    <div className="lp-fedge">
+      {items.includes("navigation") && <NavKeys />}
+      {items.includes("transport") && <Strip now={items.includes("nowPlaying")} plates={items.includes("signal")} />}
+    </div>
+  );
+}
+
+/** Any frame but Classic, drawn from its arrangement. */
+function FrameBody({ parts, regions, page, drag }: { parts: LookParts; regions: Regions; page: "home" | "album"; drag: ReturnType<typeof useDrag> }) {
+  const { top, left, right, bottom, main } = regions;
+  return (
+    <div className="lp-fbody">
+      {left.length > 0 && (
+        <div className="lp-fleft">
+          {left.includes("navigation") && <FrameNav search={left.includes("search")} />}
+          {left.includes("transport") ? <PlatterColumn now={left.includes("nowPlaying")} /> : left.includes("nowPlaying") && <NowPlaying />}
+        </div>
+      )}
+      <div className="lp-fcenter">
+        {top.length > 0 && <Edge items={top} />}
+        {main.includes("search") && (
+          <span className="lp-top__search lp-top__search--main">
+            <Search size={12} aria-hidden="true" /> Search
+          </span>
+        )}
+        <div className="lp-main">{page === "album" ? <Album parts={parts} drag={drag} /> : <Home parts={parts} drag={drag} />}</div>
+        {bottom.length > 0 && <Edge items={bottom} />}
+      </div>
+      {right.length > 0 && <NowPlaying />}
+    </div>
+  );
+}
+
 /** The picture itself. Its size comes from its parent (it scales to fit). */
 export function LookPreview({ base, tokens, parts, page = "home", onReorder, label = "Preview" }: LookPreviewProps) {
   const drag = useDrag(onReorder);
@@ -336,6 +494,14 @@ export function LookPreview({ base, tokens, parts, page = "home", onReorder, lab
   const vars: Record<string, string> = { ...style };
   for (const [k, v] of Object.entries(tokens)) vars[`--${k}`] = v;
   const { layout } = parts;
+  const regions = sketchRegions(layout.frame ?? "classic", layout);
+  if (regions) {
+    return (
+      <div className="lp lp--frame" role={onReorder ? "group" : "img"} aria-label={label} data-theme-base={base} {...attrs} style={vars as CSSProperties}>
+        <FrameBody parts={parts} regions={regions} page={page} drag={drag} />
+      </div>
+    );
+  }
   return (
     <div className="lp" role={onReorder ? "group" : "img"} aria-label={label} data-theme-base={base} {...attrs} style={vars as CSSProperties}>
       <div className="lp-top">

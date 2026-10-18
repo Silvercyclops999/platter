@@ -6,7 +6,7 @@
 import { create } from "zustand";
 import type { ReadyLook } from "../design/looks/readymade";
 import { BUILTIN_THEMES, isStudioLook } from "../design/themes/builtins";
-import { LOOK_EXT } from "../design/themes/validate";
+import { CLASSIC_LAYOUT, LOOK_EXT, type Frame, type Layout } from "../design/themes/validate";
 import { backend } from "../lib/backend";
 import type { Settings, ThemeFile, ThemeSetting } from "../lib/types";
 import { useTheme } from "./theme";
@@ -124,6 +124,27 @@ export async function importLookText(text: string): Promise<ThemeFile | null> {
     toast.error(failText(`Couldn't add that look`, e));
     return null;
   }
+}
+
+// ---------------------------------------------------------------- layouts
+
+/** A layout on another frame, keeping the rest of its options. */
+export function framePatch(frame: Frame, s: Settings | null): Partial<Settings> {
+  const layout: Layout = { ...structuredClone(s?.layout ?? CLASSIC_LAYOUT), frame };
+  return { layout, layoutOffered: true };
+}
+
+/** The first-run step's Skip: Index in Studio. */
+export function skipPatch(s: Settings | null, systemDark: boolean): Partial<Settings> {
+  return { ...framePatch("index", s), ...themePatch("studio", s, systemDark), accent: "brass", themeFile: null };
+}
+
+/**
+ * The one-time offer of the Index layout is due: someone on Classic from
+ * before frames who hasn't seen it, once the first-run step is behind them.
+ */
+export function layoutOfferDue(s: Settings | null): boolean {
+  return !!s && !s.layoutOffered && s.lookStepDone && s.layout?.frame === "classic";
 }
 
 /**

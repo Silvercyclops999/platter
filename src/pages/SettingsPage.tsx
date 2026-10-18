@@ -99,6 +99,8 @@ const SUBSONIC_CHECK_OPTIONS = [
 import { useTheme } from "../stores/theme";
 import { AccentPicker, ThemeFileControl, ThemeFileProblems, ThemeSelect, followNote, themeNote, useThemeFolder } from "./ThemeSettings";
 import { LookCards } from "./looks/LookCards";
+import { LayoutSettings } from "./looks/LayoutCards";
+import { frameInfo } from "../shell/frames";
 import { looks } from "../stores/looks";
 import { CLASSIC_LAYOUT, identityOf, type Layout } from "../design/themes";
 import type { AiProvider, CapName, PlayHistorySource, ReleaseSection, UnreleasedSharing } from "../lib/types";
@@ -139,9 +141,12 @@ import { failText } from "../lib/errorText";
 
 const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "");
 
-/** True when a layout is Classic, the default. */
-function layoutIsClassic(l: Layout | undefined): boolean {
-  return !l || JSON.stringify(l) === JSON.stringify(CLASSIC_LAYOUT);
+/** The Layout row's note: the frame, and whether its options were changed. */
+function layoutNote(l: Layout | undefined): string {
+  const frame = l?.frame ?? "classic";
+  const name = frameInfo(frame).name;
+  const plain = !l || JSON.stringify({ ...CLASSIC_LAYOUT, ...l }) === JSON.stringify({ ...CLASSIC_LAYOUT, frame });
+  return plain ? `${name} layout.` : `${name} layout, with your own options.`;
 }
 
 // ------------------------------------------------------------------ options
@@ -1570,19 +1575,27 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       key: "layout",
       section: "Appearance",
       title: "Layout",
-      description: "Where panels go, the player bar, Home's shelves and more. Classic is the default.",
-      more: "Where the sidebar and now playing panel go, the player bar's style and buttons, Home's shelves, page headers, song list columns, cover shape and motion. Classic is the default.",
-      note: s && layoutIsClassic(s.layout) ? "Classic layout." : s ? "Your own layout." : undefined,
+      description: "How the window is arranged: where the player, your sections and the queue go. Synced.",
+      more: "Pick a frame: Index puts sections down the left and the player strip across the top, Classic is the layout Platter had before, and Custom lets you choose what goes where. Change layout covers the finer options: the player's buttons, Home's shelves, page headers, song list columns, cover shape and motion.",
+      note: s ? layoutNote(s.layout) : undefined,
       control: () => (
-        <>
-          <Button size="sm" onClick={() => looks.openBuilder("layout")}>
-            Change layout
-          </Button>
-          <Button size="sm" disabled={!s || layoutIsClassic(s.layout)} onClick={() => void updateSettings({ layout: structuredClone(CLASSIC_LAYOUT) })}>
-            Revert to default layout
-          </Button>
-        </>
+        <Button size="sm" onClick={() => looks.openBuilder("layout")}>
+          Change layout
+        </Button>
       ),
+      block: () => <LayoutSettings />,
+    },
+    {
+      key: "layoutOffered",
+      section: "Appearance",
+      title: "Show the layout offer",
+      description: "The one-time card offering Index to someone on Classic. Off once it's been seen. This device only.",
+      control: (ids) =>
+        s ? (
+          <Switch checked={!s.layoutOffered} onChange={(v) => void updateSettings({ layoutOffered: !v })} labelledBy={ids.title} describedBy={ids.desc} />
+        ) : (
+          loading
+        ),
     },
     {
       key: "showLookBuilder",

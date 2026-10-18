@@ -147,6 +147,90 @@
         "album",
         "info",
         "duration"
+      ],
+      "frame": [
+        "classic",
+        "index",
+        "deck",
+        "turntable",
+        "gatefold",
+        "console",
+        "custom"
+      ],
+      "transport": [
+        "top",
+        "bottom"
+      ],
+      "regionSize": [
+        "small",
+        "medium",
+        "large"
+      ],
+      "regions": [
+        "top",
+        "left",
+        "main",
+        "right",
+        "bottom",
+        "overlay"
+      ],
+      "slots": {
+        "navigation": [
+          "left",
+          "top"
+        ],
+        "search": [
+          "top",
+          "left",
+          "main"
+        ],
+        "transport": [
+          "top",
+          "bottom",
+          "left"
+        ],
+        "nowPlaying": [
+          "top",
+          "left",
+          "right",
+          "bottom",
+          "overlay"
+        ],
+        "queue": [
+          "right",
+          "overlay",
+          "main"
+        ],
+        "lyrics": [
+          "right",
+          "overlay",
+          "main"
+        ],
+        "signal": [
+          "top",
+          "bottom",
+          "right"
+        ],
+        "credits": [
+          "right",
+          "main",
+          "overlay"
+        ],
+        "filters": [
+          "main",
+          "left"
+        ],
+        "library": [
+          "main"
+        ]
+      },
+      "required": [
+        "library",
+        "navigation",
+        "search",
+        "transport",
+        "nowPlaying",
+        "queue"
       ]
     }
   }

@@ -1363,8 +1363,13 @@ export interface Settings {
   tonearmSeek: boolean;
   /** The theme file in use, carried whole so it travels in the sync file. */
   themeFile: ThemeFile | null;
-  /** Layout options (Classic by default). */
+  /**
+   * Layout options. New installs start on Index (the core's default);
+   * settings saved before frames load as Classic.
+   */
   layout: Layout;
+  /** The one-time "Try the Index layout" offer was shown or not needed. */
+  layoutOffered: boolean;
   /** Appearance shows the "Make your own" look builder. */
   showLookBuilder: boolean;
   /** The "Pick a look" step was shown or skipped on this computer. */
@@ -1849,7 +1854,11 @@ export const DEFAULT_SETTINGS: Settings = {
   recordMotion: "full",
   tonearmSeek: true,
   themeFile: null,
+  // The mock starts where an existing install is (Classic), so the shell's
+  // tests cover the layout people have used all along; the first-run step
+  // and the core start new installs on Index.
   layout: CLASSIC_LAYOUT,
+  layoutOffered: true,
   showLookBuilder: true,
   lookStepDone: false,
 };

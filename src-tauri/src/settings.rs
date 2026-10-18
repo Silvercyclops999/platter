@@ -105,6 +105,10 @@ pub enum ThemeMode {
 }
 
 /// Theme for settings saved before Studio existed (they were on Classic dark).
+fn legacy_layout() -> crate::themes::Layout {
+    crate::themes::Layout::default()
+}
+
 fn legacy_theme() -> ThemeMode {
     ThemeMode::Dark
 }
@@ -289,8 +293,14 @@ pub struct Settings {
     pub tonearm_seek: bool,
     /// The theme file in use, held whole so it travels in the sync file.
     pub theme_file: Option<crate::themes::ThemeFile>,
-    /// Layout options (Classic by default).
+    /// Layout options: Index for new installs; settings saved without one
+    /// were on Classic (and a stored layout without a frame is Classic).
+    #[serde(default = "legacy_layout")]
     pub layout: crate::themes::Layout,
+    /// The one-time "Try the Index layout" offer was shown or not needed.
+    /// Done for new installs; settings saved before layouts get the offer.
+    #[serde(default)]
+    pub layout_offered: bool,
     /// Appearance shows the "Make your own" look builder.
     pub show_look_builder: bool,
     /// The "Pick a look" step was shown or skipped on this computer.
@@ -951,7 +961,8 @@ impl Default for Settings {
             record_motion: RecordMotion::Full,
             tonearm_seek: true,
             theme_file: None,
-            layout: crate::themes::Layout::default(),
+            layout: crate::themes::Layout::index(),
+            layout_offered: true,
             show_look_builder: true,
             look_step_done: false,
             output_device: None,
@@ -1398,6 +1409,7 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "translationService",
     "lookStepDone",
     "newLookOffered",
+    "layoutOffered",
     "volume",
     "precacheCount",
     "artCacheMb",
@@ -1507,6 +1519,7 @@ pub struct SettingsPatch {
     #[serde(default, deserialize_with = "some_or_null")]
     pub theme_file: Option<Option<crate::themes::ThemeFile>>,
     pub layout: Option<crate::themes::Layout>,
+    pub layout_offered: Option<bool>,
     pub show_look_builder: Option<bool>,
     pub look_step_done: Option<bool>,
     pub home_shortcuts: Option<bool>,
@@ -1847,6 +1860,7 @@ impl Settings {
             }
             self.layout = l.clone();
         }
+        set(&mut self.layout_offered, p.layout_offered);
         set(&mut self.show_look_builder, p.show_look_builder);
         set(&mut self.look_step_done, p.look_step_done);
         set(&mut self.home_shortcuts, p.home_shortcuts);
@@ -3103,6 +3117,7 @@ pub const NOT_EXPORTED: &[&str] = &[
     "outputDevice",
     "eqLastOutput",
     "lookStepDone",
+    "layoutOffered",
     "libraries",
     "serverView",
 ];
@@ -4667,9 +4682,27 @@ mod tests {
     }
 
     #[test]
+    fn new_installs_start_on_index_and_older_settings_stay_classic() {
+        let new = Settings::default();
+        assert_eq!(new.layout.frame, "index");
+        assert!(new.layout_offered, "a new install isn't offered what it already has");
+        // Settings saved before layouts had frames: Classic, with the one-time offer.
+        let old: Settings = serde_json::from_str(r#"{"volume":0.5}"#).unwrap();
+        assert_eq!(old.layout, crate::themes::Layout::default());
+        assert_eq!(old.layout.frame, "classic");
+        assert!(!old.layout_offered);
+        let old: Settings = serde_json::from_str(r#"{"layout":{"sidebarSide":"right"}}"#).unwrap();
+        assert_eq!((old.layout.frame.as_str(), old.layout.sidebar_side.as_str()), ("classic", "right"));
+        assert!(DEVICE_SETTINGS.contains(&"layoutOffered") && NOT_EXPORTED.contains(&"layoutOffered"));
+        let mut s = old;
+        s.apply(&serde_json::from_str(r#"{"layoutOffered":true}"#).unwrap()).unwrap();
+        assert!(s.layout_offered);
+    }
+
+    #[test]
     fn layout_and_look_settings() {
         let mut s = Settings::default();
-        assert_eq!(s.layout, crate::themes::Layout::default());
+        assert_eq!(s.layout, crate::themes::Layout::index());
         assert!(s.show_look_builder && !s.look_step_done);
         assert!(SYNCED_SETTINGS.contains(&"layout") && SYNCED_SETTINGS.contains(&"showLookBuilder"));
         assert!(DEVICE_SETTINGS.contains(&"lookStepDone"));
@@ -4687,6 +4720,13 @@ mod tests {
         )
         .unwrap();
         assert!(s.apply(&p).is_err());
+        // Frames: a known one is taken, an unknown one refused.
+        let p: SettingsPatch = serde_json::from_str(r#"{"layout":{"frame":"index","transport":"bottom"}}"#).unwrap();
+        s.apply(&p).unwrap();
+        assert_eq!((s.layout.frame.as_str(), s.layout.transport.as_str()), ("index", "bottom"));
+        let p: SettingsPatch = serde_json::from_str(r#"{"layout":{"frame":"cinema"}}"#).unwrap();
+        assert!(matches!(s.apply(&p), Err(AppError::Invalid(m)) if m.contains("layout.frame")));
+        assert_eq!(s.layout.frame, "index");
         // A hand-edited layout falls back to Classic.
         let mut s: Settings = serde_json::from_str(r#"{"layout":{"headerStyle":"huge"}}"#).unwrap();
         s.clamp();

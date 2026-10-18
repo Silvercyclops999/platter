@@ -43,8 +43,44 @@ export type PlayerButton = "like" | "lyrics" | "queue" | "devices" | "volume" | 
 export type HomeShelfKey = "madeForYou" | "recentlyPlayed" | "mixMoods" | "mixGenres" | "jumpBackIn" | "playlists" | "recentlyAdded" | "topArtists";
 export type TrackColumn = "album" | "info" | "duration";
 
+/** The shell's frame. Custom builds one from `regions`. */
+export type Frame = "classic" | "index" | "deck" | "turntable" | "gatefold" | "console" | "custom";
+export type RegionName = "top" | "left" | "main" | "right" | "bottom" | "overlay";
+/** The fixed set of things a frame places. */
+export type FrameComponent = "navigation" | "search" | "transport" | "nowPlaying" | "queue" | "lyrics" | "signal" | "credits" | "filters" | "library";
+export type RegionSize = "small" | "medium" | "large";
+/** What goes in each region, in order. An empty region isn't there. */
+export type Regions = Record<RegionName, FrameComponent[]>;
+
+export const FRAMES = LOOK.layout.frame as Frame[];
+export const REGION_NAMES = LOOK.layout.regions as RegionName[];
+/** Each component and the regions it may go in. */
+export const SLOTS = LOOK.layout.slots as Record<FrameComponent, RegionName[]>;
+export const FRAME_COMPONENTS = Object.keys(SLOTS) as FrameComponent[];
+/** Every arrangement places these somewhere (navigation carries Settings). */
+export const REQUIRED_COMPONENTS = LOOK.layout.required as FrameComponent[];
+
+/** The Index arrangement, which a custom frame starts from. */
+export const DEFAULT_REGIONS: Regions = {
+  top: ["transport", "nowPlaying", "signal"],
+  left: ["search", "navigation"],
+  main: ["library"],
+  right: ["queue", "lyrics", "credits"],
+  bottom: [],
+  overlay: [],
+};
+
 /** Layout options. Lists hold the shown items in order; one left out is hidden. */
 export interface Layout {
+  /** The shell's frame. A stored layout without one is Classic. */
+  frame: Frame;
+  /** Index: the transport strip at the top or the bottom of the page. */
+  transport: "top" | "bottom";
+  /** A custom frame's arrangement. */
+  regions: Regions;
+  /** A custom frame's left and right region widths, as presets. */
+  leftSize: RegionSize;
+  rightSize: RegionSize;
   sidebarSide: "left" | "right";
   sidebarCollapsed: boolean;
   sidebarSections: SidebarSection[];
@@ -66,6 +102,11 @@ export const DEFAULT_FONTS: LookFonts = { text: "inter", headings: "inter" };
 
 /** Classic: the layout Platter has always had, and the default. */
 export const CLASSIC_LAYOUT: Layout = {
+  frame: "classic",
+  transport: "top",
+  regions: structuredClone(DEFAULT_REGIONS),
+  leftSize: "medium",
+  rightSize: "medium",
   sidebarSide: "left",
   sidebarCollapsed: false,
   sidebarSections: [...LOOK.layout.sidebarSections] as SidebarSection[],
@@ -81,6 +122,9 @@ export const CLASSIC_LAYOUT: Layout = {
   spinRecord: false,
   motion: "full",
 };
+
+/** Index: the layout new installs start on. */
+export const INDEX_LAYOUT: Layout = { ...structuredClone(CLASSIC_LAYOUT), frame: "index" };
 
 /** A validated theme or look file (also what the Theme file setting holds). */
 export interface UserTheme {
@@ -215,6 +259,41 @@ function parseFonts(v: unknown, notes: string[]): LookFonts {
   return f;
 }
 
+/**
+ * A frame's arrangement: only known regions, each component once and only
+ * where the slot table allows it, and every required component placed. One
+ * that breaks a rule is refused, never repaired.
+ */
+function parseRegions(v: unknown): Regions {
+  const r: Regions = { top: [], left: [], main: [], right: [], bottom: [], overlay: [] };
+  const seen = new Set<FrameComponent>();
+  for (const [k, val] of Object.entries(object("layout.regions", v))) {
+    const f = `layout.regions.${shownKey(k)}`;
+    if (!(REGION_NAMES as string[]).includes(k)) throw new Refused(`"${f}" isn't a region. Regions are: ${REGION_NAMES.join(", ")}.`);
+    const items = idList<FrameComponent>(f, val, FRAME_COMPONENTS);
+    for (const id of items) {
+      const allowed = SLOTS[id];
+      if (!allowed.includes(k as RegionName)) throw new Refused(`"${id}" can't go in ${k}. It fits in: ${allowed.join(", ")}.`);
+      if (seen.has(id)) throw new Refused(`"${id}" is in two regions.`);
+      seen.add(id);
+    }
+    r[k as RegionName] = items;
+  }
+  for (const need of REQUIRED_COMPONENTS) if (!seen.has(need)) throw new Refused(`A layout needs "${need}" in one of its regions.`);
+  return r;
+}
+
+/** Why an arrangement can't be used, or null when it can. */
+export function regionsProblem(r: unknown): string | null {
+  try {
+    parseRegions(r);
+    return null;
+  } catch (e) {
+    if (e instanceof Refused) return e.message;
+    throw e;
+  }
+}
+
 function parseLayout(v: unknown, notes: string[]): Layout {
   const c = LOOK.layout;
   const l: Layout = structuredClone(CLASSIC_LAYOUT);
@@ -263,6 +342,21 @@ function parseLayout(v: unknown, notes: string[]): Layout {
         break;
       case "motion":
         l.motion = pick(f, val, c.motion);
+        break;
+      case "frame":
+        l.frame = pick(f, val, c.frame);
+        break;
+      case "transport":
+        l.transport = pick(f, val, c.transport);
+        break;
+      case "leftSize":
+        l.leftSize = pick(f, val, c.regionSize);
+        break;
+      case "rightSize":
+        l.rightSize = pick(f, val, c.regionSize);
+        break;
+      case "regions":
+        l.regions = parseRegions(val);
         break;
       default:
         notes.push(`Left out layout.${shownKey(k)}: Platter doesn't know it.`);
@@ -382,7 +476,7 @@ export function lookText(t: UserTheme): string {
   o.tokens = Object.fromEntries(Object.entries(t.tokens).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
   if (t.style) o.style = { density: t.style.density, shadow: t.style.shadow, blur: t.style.blur, border: t.style.border };
   if (t.fonts) o.fonts = { text: t.fonts.text, headings: t.fonts.headings };
-  if (t.layout) o.layout = { ...t.layout };
+  if (t.layout) o.layout = { ...t.layout, regions: { ...t.layout.regions } };
   return JSON.stringify(o, null, 2);
 }
 

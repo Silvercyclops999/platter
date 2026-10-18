@@ -125,7 +125,26 @@ describe("look files", () => {
 
   it("the contract lists every layout option the app draws, and fonts are bundled only", () => {
     expect(Object.keys(contract.look.layout).sort()).toEqual(
-      ["coverShape", "headerStyle", "homeShelves", "motion", "nowPlaying", "playerButtons", "playerStyle", "quickAccess", "sidebarSections", "sidebarSide", "trackColumns"].sort(),
+      [
+        "coverShape",
+        "headerStyle",
+        "homeShelves",
+        "motion",
+        "nowPlaying",
+        "playerButtons",
+        "playerStyle",
+        "quickAccess",
+        "sidebarSections",
+        "sidebarSide",
+        "trackColumns",
+        // Frames: the frame, Index's strip place, and a custom frame's regions, slot table and sizes.
+        "frame",
+        "transport",
+        "regionSize",
+        "regions",
+        "slots",
+        "required",
+      ].sort(),
     );
     expect(FONTS.map((f) => f.id)).toEqual(LOOK.fonts);
     expect(FONTS.every((f) => !/url|http/i.test(f.family))).toBe(true);
@@ -402,11 +421,11 @@ describe("ready-made looks and first run", () => {
     }
   });
 
-  it("first run offers Pick a look once; skipping remembers it on this computer", async () => {
+  it("first run offers Pick a layout and a look once; skipping remembers it on this computer", async () => {
     const user = userEvent.setup();
     render(<PickLookDialog />);
     offerLookStep();
-    await screen.findByRole("dialog", { name: "Pick a look" });
+    await screen.findByRole("dialog", { name: "Pick a layout and a look" });
     await user.click(screen.getByRole("button", { name: "Done" }));
     await waitFor(() => expect(useSettings.getState().settings?.lookStepDone).toBe(true));
     offerLookStep();
@@ -430,7 +449,7 @@ describe("settings", () => {
     render(<SettingsPage />);
     expect(row("Look").getAllByRole("radio")).toHaveLength(10);
     expect(row("Layout").getByText("Classic layout.")).toBeInTheDocument();
-    expect(row("Layout").getByRole("button", { name: "Revert to default layout" })).toBeDisabled();
+    expect(row("Layout").getByRole("button", { name: "Reset layout" })).toBeDisabled();
     expect(row("Show Make your own").getByRole("switch")).toHaveAttribute("aria-checked", "true");
     await user.click(row("Make your own").getByRole("button", { name: "Make your own" }));
     expect(useLooks.getState().builder).toBe("colours");

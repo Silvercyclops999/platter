@@ -1,0 +1,68 @@
+/* Layout cards, the frame's options and the region editor (Settings >
+   Appearance > Layout and the first-run step). The chosen card carries the
+   only accent; frames still to come sit back a step. */
+
+.frame-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-3) var(--space-4); width: 100%; }
+.frame-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border-radius: var(--radius-card);
+  text-align: left;
+  transition: background-color var(--motion-quick) var(--motion-easing);
+}
+.frame-card:hover:not(.is-soon) { background: var(--color-state-hover); }
+.frame-card .lp-frame { margin-bottom: var(--space-1); box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-ink) 10%, transparent); }
+.frame-card.is-on .lp-frame { box-shadow: 0 0 0 2px var(--color-accent); }
+.frame-card .lp, .frame-card .lp * { pointer-events: none; }
+.frame-card__name { display: flex; align-items: center; gap: var(--space-2); font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.frame-card__name svg { color: var(--color-accent); }
+.frame-card__line { font-size: var(--font-size-xs); line-height: 1.45; color: var(--color-text-secondary); }
+.frame-card.is-soon { cursor: default; }
+.frame-card.is-soon .lp-frame { opacity: 0.55; filter: saturate(0.4); }
+.frame-card.is-soon .frame-card__name { color: var(--color-text-secondary); }
+.frame-card__soon {
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.02em;
+  color: var(--color-text-muted);
+}
+
+.layout-settings { display: grid; gap: var(--space-4); width: 100%; }
+.layout-settings__note { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+.layout-settings__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+.layout-choice { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.layout-choice__label { min-width: 96px; font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.layout-choice__options { display: inline-flex; padding: 2px; border-radius: var(--radius-pill); background: var(--color-bg-raised2); }
+.layout-choice__option {
+  height: 28px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  transition: background-color var(--motion-quick) var(--motion-easing), color var(--motion-quick) var(--motion-easing);
+}
+.layout-choice__option:hover { color: var(--color-text-primary); }
+.layout-choice__option.is-on { background: var(--color-bg-overlay); color: var(--color-text-primary); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); }
+.layout-choice__option:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 1px; }
+
+.region-editor { display: grid; gap: var(--space-3); max-width: 560px; }
+.region-editor__lead { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.region-editor__list { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.region-editor__row { display: grid; grid-template-columns: minmax(0, 1fr) 160px; align-items: center; gap: var(--space-3); min-height: 36px; }
+.region-editor__name { font-size: var(--font-size-sm); color: var(--color-text-primary); }
+.region-editor__problem { margin: 0; font-size: var(--font-size-sm); color: var(--color-error-text); }
+.region-editor__sizes { display: grid; gap: var(--space-2); }
+
+/* The first-run step: layouts first, then looks. */
+.pick-look__section { display: grid; gap: var(--space-3); }
+.pick-look__heading { margin: 0; font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.pick-look__more { justify-self: start; }
+.pick-look__body { max-height: calc(100vh - 96px); overflow-y: auto; }
+.pick-look .frame-cards { grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); }

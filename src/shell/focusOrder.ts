@@ -10,11 +10,11 @@ import { useEffect, type RefObject } from "react";
 /** Regions in Tab order. Anything not in one keeps the browser's own order. */
 export const FOCUS_REGIONS = [
   ".skip-link",
-  ".topbar",
-  ".sidebar, .resize-handle--sidebar",
-  ".remote-strip, .player-bar",
-  ".main",
-  ".resize-handle--right, .queue-panel, .np-panel, .output-panel, .right-strip",
+  ".topbar, .frame-bar",
+  ".sidebar, .resize-handle--sidebar, .frame-left, .frame-edge__row",
+  ".remote-strip, .player-bar, .transport-strip",
+  ".frame-page__search, .main, .frame-page__panel",
+  ".resize-handle--right, .queue-panel, .np-panel, .output-panel, .right-strip, .frame-right, .frame-drawer",
 ] as const;
 
 const TABBABLE = 'a[href], button, input, select, textarea, [tabindex], [contenteditable="true"]';

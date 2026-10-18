@@ -1,5 +1,5 @@
 import { PanelRightOpen } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ContextMenuHost } from "../components/ContextMenu";
 import { DragAnnouncer } from "../components/DragAnnouncer";
 import { LinkAskDialog } from "../components/LinkAskDialog";
@@ -52,6 +52,8 @@ import { DeckActions } from "./DeckActions";
 import { DeckPairPrompt } from "./DeckPairPrompt";
 import { backend } from "../lib/backend";
 import { NewLookOffer } from "./NewLookOffer";
+import { LayoutOffer } from "./LayoutOffer";
+import { FrameShell } from "./FrameShell";
 import { LazyLookBuilderHost, LazyLyricsEditorHost, LazyPickLookHost, LazyPlexEditDialogs, LazyShareCardHost, LazySmartEditorHost, LazyStatsDialogHost, LazyTagEditDialogs } from "./lazyHosts";
 import { LazyGuideHost, LazyHelpPanel, LazyWrappedHost, LazyWrongLyricsHost } from "./lazyHosts";
 import { LookDrop } from "./LookDrop";
@@ -93,28 +95,11 @@ function useSidebarDefault(collapsed: boolean) {
   }, [collapsed]);
 }
 
-/** Top bar over sidebar | main | right panel, over the player bar. */
-export function AppShell() {
-  useShortcuts();
-  useEffect(() => connectMenuBar(), []);
-  useOpenNowPlayingOnStart();
-  useLyricsAutoShow();
-  useEffect(() => void loadOwnLyricsIds(), []);
-  // Not needed for the first screen: wait until it has painted.
-  useEffect(() => afterFirstPaint(() => void startTranscribe()), []);
-  useEffect(() => afterFirstPaint(() => void startLyricsTrust()), []);
-  useEffect(() => void startDownloads(), []);
-  // Once, on first connect: Plex's library settings, if they'd fight the tags.
-  useEffect(
-    () =>
-      afterFirstPaint(() => {
-        if (backend.kind === "tauri") void import("../pages/TagEditorSettings").then((m) => m.firstConnectLibraryCheck());
-      }),
-    [],
-  );
-  useEffect(() => afterFirstPaint(() => void startSocial().then(() => startSharing())), []);
-  useEffect(() => afterFirstPaint(() => void startCircle()), []);
-  useEffect(() => void startCurate(), []);
+/**
+ * Classic: top bar over sidebar | main | right panel, over the player bar.
+ * The shell Platter has always had, unchanged.
+ */
+function ClassicShell({ children }: { children: ReactNode }) {
   const queueOpen = useUi((s) => s.queueOpen);
   const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);
   const outputOpen = useUi((s) => s.outputOpen);
@@ -249,7 +234,17 @@ export function AppShell() {
       <RemoteStrip />
       <ListenStrip />
       <PlayerBar />
+      {children}
+    </div>
+  );
+}
+
+/** Dialogs, menus and hosts every frame carries. */
+function ShellHosts() {
+  return (
+    <>
       <NewLookOffer />
+      <LayoutOffer />
       <CommandPalette />
       <LazyGuideHost />
       <WhatsNewDialog />
@@ -282,6 +277,37 @@ export function AppShell() {
       <LazyLookBuilderHost />
       <LazyPickLookHost />
       <LookDrop />
-    </div>
+    </>
   );
+}
+
+/**
+ * The app's shell. Start-up work runs here once, whichever frame is in use;
+ * Classic keeps its own shell and every other frame is drawn by the region
+ * host from its arrangement.
+ */
+export function AppShell() {
+  useShortcuts();
+  useEffect(() => connectMenuBar(), []);
+  useOpenNowPlayingOnStart();
+  useLyricsAutoShow();
+  useEffect(() => void loadOwnLyricsIds(), []);
+  // Not needed for the first screen: wait until it has painted.
+  useEffect(() => afterFirstPaint(() => void startTranscribe()), []);
+  useEffect(() => afterFirstPaint(() => void startLyricsTrust()), []);
+  useEffect(() => void startDownloads(), []);
+  // Once, on first connect: Plex's library settings, if they'd fight the tags.
+  useEffect(
+    () =>
+      afterFirstPaint(() => {
+        if (backend.kind === "tauri") void import("../pages/TagEditorSettings").then((m) => m.firstConnectLibraryCheck());
+      }),
+    [],
+  );
+  useEffect(() => afterFirstPaint(() => void startSocial().then(() => startSharing())), []);
+  useEffect(() => afterFirstPaint(() => void startCircle()), []);
+  useEffect(() => void startCurate(), []);
+  const frame = useLayout().frame ?? "classic";
+  const hostsEl = <ShellHosts />;
+  return frame === "classic" ? <ClassicShell>{hostsEl}</ClassicShell> : <FrameShell>{hostsEl}</FrameShell>;
 }

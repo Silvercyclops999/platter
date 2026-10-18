@@ -1,0 +1,104 @@
+/* The transport strip: one row on a raised panel. Cover and title, the
+   transport, the tonearm line with its engraved time and format plates,
+   then volume, output and the panels. Brass marks only what's on: the play
+   key is ink, shuffle or repeat turned on and bit-perfect playback are brass.
+   It folds to two rows when its region is narrow (container query on the
+   region, frames.css). Colours come from the look's tokens only. */
+
+.transport-strip {
+  position: relative;
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto minmax(240px, 1.7fr) auto;
+  grid-template-areas: "now deck line extras";
+  align-items: center;
+  column-gap: var(--space-6);
+  row-gap: var(--space-3);
+  min-height: 72px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--color-bg-raised);
+}
+.transport-strip--bare { grid-template-columns: auto minmax(240px, 1fr) auto; grid-template-areas: "deck line extras"; }
+
+/* Cover, title and artist. */
+.ts-now { grid-area: now; display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.ts-now__art { flex: none; border-radius: var(--radius-row); }
+.ts-now__art .art { box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-ink) 10%, transparent), 0 2px 6px rgba(0, 0, 0, 0.35); }
+.ts-now__meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ts-now__title { font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.ts-now__meta .player-bar__artist { font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.ts-now__empty { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+
+/* The transport keys: smaller than the bar's, with the play key in ink. */
+.ts-deck { grid-area: deck; }
+.ts-deck .player-bar__controls { display: flex; align-items: center; gap: var(--space-1); }
+.transport-strip .player-bar__play {
+  width: 40px;
+  height: 40px;
+  background: var(--color-text-primary);
+  color: var(--color-bg-base);
+}
+.transport-strip .player-bar__play:hover:not([aria-disabled="true"]) { background: color-mix(in srgb, var(--color-text-primary) 86%, var(--color-bg-base)); }
+.transport-strip .player-bar__play:active:not([aria-disabled="true"]) { background: color-mix(in srgb, var(--color-text-primary) 74%, var(--color-bg-base)); }
+
+/* The line: times in engraved plates either side of the tonearm. */
+.ts-line { grid-area: line; min-width: 0; }
+.seek--strip::before { display: none; }
+.seek--strip { gap: var(--space-3); }
+.seek--strip .seek__time {
+  flex: none;
+  min-width: 52px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  box-shadow: inset 0 1px 0 var(--engrave-dark, transparent), 0 1px 0 var(--engrave-light, transparent);
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.03em;
+  line-height: 14px;
+  color: var(--color-text-secondary);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.seek--strip .seek__bar { flex: 1; min-width: 80px; }
+.seek--strip .signal-badge { width: auto; max-width: 132px; height: 22px; padding: 0 7px; }
+.ts-line .player-bar__fold { display: inline-flex; }
+
+/* Volume, output and panels. */
+.ts-extras { grid-area: extras; display: flex; align-items: center; justify-content: flex-end; gap: var(--space-1); min-width: 0; }
+.ts-extras .volume__slider { width: 84px; }
+/* The miniplayer and expanded view live in More here, as on a narrow bar. */
+.ts-extras .player-bar__fold { display: none; }
+.ts-extras .player-bar__more { display: inline-flex; }
+
+/* A strip at the top opens its pop-ups downwards. */
+.transport-strip--top .signal-panel { top: 132px; bottom: auto; }
+.transport-strip--top .volume .volume__bar { top: calc(100% + var(--space-2)); bottom: auto; }
+
+/* In a left column (a custom frame): stacked, cover above the keys. */
+.transport-strip--left {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "now" "line" "deck" "extras";
+  justify-items: stretch;
+  padding: var(--space-4);
+}
+.transport-strip--left .ts-deck,
+.transport-strip--left .ts-extras { justify-self: center; }
+.transport-strip--left .seek--strip .signal-badge { display: none; }
+
+/* Most windows: two rows, the tonearm line running the strip's full width
+   under the keys. One row only when the region is wide. */
+@container frame-edge (max-width: 1239px) {
+  .transport-strip {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    grid-template-areas: "now deck extras" "line line line";
+    column-gap: var(--space-4);
+    padding-bottom: var(--space-2);
+  }
+  .transport-strip--bare { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-areas: ". deck extras" "line line line"; }
+}
+@container frame-edge (max-width: 620px) {
+  .ts-extras .volume__slider { width: 64px; }
+  .ts-now__meta .player-bar__artist { display: none; }
+}

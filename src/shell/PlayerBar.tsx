@@ -56,13 +56,17 @@ import { AudioLines } from "lucide-react";
 export const SEEK_KEY_STEP = 5_000;
 export const SEEK_PAGE_STEP = 25_000;
 
-export function SeekBar() {
+/**
+ * The seek line with its times and format plate. `strip` is the transport
+ * strip's version: always the tonearm line, times in engraved plates.
+ */
+export function SeekBar({ strip = false }: { strip?: boolean } = {}) {
   const positionMs = usePlayer((s) => s.positionMs);
   const durationMs = usePlayer((s) => s.durationMs);
   const trackId = usePlayer((s) => s.state?.track?.id ?? null);
   const hasTrack = trackId !== null;
   const loopOn = useSettings((s) => s.settings?.abLoopHandles ?? true);
-  const tonearm = useSettings((s) => s.settings?.tonearmSeek ?? false);
+  const tonearm = useSettings((s) => s.settings?.tonearmSeek ?? false) || strip;
   const loop = usePlayer((s) => s.state?.abLoop ?? null);
   // The time held while dragging, for the song it was dragged on.
   const [held, setHeld] = useState<{ v: number; id: string | null } | null>(null);
@@ -95,7 +99,7 @@ export function SeekBar() {
   };
   const showLoop = loopOn && hasTrack;
   return (
-    <div className="seek">
+    <div className={strip ? "seek seek--strip" : "seek"}>
       {showLoop && loop && <LoopChip onClear={clearLoop} />}
       <span className="seek__time tabular" aria-hidden="true">
         {formatDuration(shown)}
@@ -218,7 +222,7 @@ export function Volume() {
 }
 
 /** Shown while a private session is on; opens Settings. */
-function PrivateSession() {
+export function PrivateSession() {
   const on = useSettings((s) => s.settings?.privateSession ?? false);
   if (!on) return null;
   return (
@@ -290,7 +294,7 @@ export function PlayControls() {
  * with a tooltip when the song has none (but live while lyrics show, so
  * there's always a way out).
  */
-function LyricsButton() {
+export function LyricsButton() {
   const trackId = usePlayer((s) => s.state?.track?.id ?? null);
   const { lyrics, loading, info } = useLyrics(trackId);
   const on = useFullWindow((s) => s.open && s.mode === "lyrics");
@@ -311,7 +315,7 @@ function LyricsButton() {
 }
 
 /** Opens the expanded view in the mode last used, or closes it. */
-function ExpandButton({ disabled }: { disabled: boolean }) {
+export function ExpandButton({ disabled }: { disabled: boolean }) {
   const open = useFullWindow((s) => s.open);
   return (
     <IconButton
@@ -326,7 +330,7 @@ function ExpandButton({ disabled }: { disabled: boolean }) {
 }
 
 /** Opens the miniplayer window, or closes it while it's open. */
-function MiniplayerButton() {
+export function MiniplayerButton() {
   const open = useMiniplayer((s) => s.open);
   return (
     <IconButton
@@ -343,7 +347,7 @@ function MiniplayerButton() {
  * menu (the CSS shows one or the other), so the right side never runs over
  * the play controls.
  */
-function MoreButton({ buttons, hasTrack }: { buttons: readonly string[]; hasTrack: boolean }) {
+export function MoreButton({ buttons, hasTrack }: { buttons: readonly string[]; hasTrack: boolean }) {
   const ref = useRef<HTMLSpanElement>(null);
   const folds = buttons.filter((b) => b === "miniplayer" || b === "fullWindow");
   if (!folds.length) return null;
@@ -370,7 +374,7 @@ function MoreButton({ buttons, hasTrack }: { buttons: readonly string[]; hasTrac
 }
 
 /** The queue button; songs dropped on it go to the end of the queue. */
-function QueueButton() {
+export function QueueButton() {
   const queueOpen = useUi((s) => s.queueOpen);
   const toggleQueue = useUi((s) => s.toggleQueue);
   const drop = useSongDrop("queue", "the queue", () => "ok", (songs) => dropOnQueue(songs, "end"));
@@ -385,7 +389,7 @@ function QueueButton() {
  * A polite "Now playing: <title> by <artist>" line for screen readers when
  * the song changes (not on first load, which would talk over the app).
  */
-function NowPlayingAnnouncer({ text }: { text: string | null }) {
+export function NowPlayingAnnouncer({ text }: { text: string | null }) {
   const [said, setSaid] = useState("");
   const first = useRef(true);
   useEffect(() => {
@@ -406,7 +410,7 @@ function NowPlayingAnnouncer({ text }: { text: string | null }) {
  * While a smart shuffle suggestion plays: take it out (skips it and picks new
  * suggestions) or add it to the playlist for good.
  */
-function SuggestionButtons() {
+export function SuggestionButtons() {
   const state = usePlayer((s) => s.state);
   const remote = usePlayer((s) => !!s.remote);
   const s = remote ? null : playingSuggestion(state);

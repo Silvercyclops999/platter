@@ -358,7 +358,7 @@ function LayoutEditor({ d, change }: { d: Draft; change: (key: string, fn: (d: D
         <p className="lb-note">Your computer's reduce motion setting is always respected.</p>
       </section>
       <div className="lb-actions">
-        <Button size="sm" icon={<RotateCcw size={14} />} onClick={() => change("layout.reset", (x) => ({ ...x, layout: structuredClone(CLASSIC_LAYOUT) }))}>
+        <Button size="sm" icon={<RotateCcw size={14} />} onClick={() => change("layout.reset", (x) => ({ ...x, layout: { ...structuredClone(CLASSIC_LAYOUT), frame: x.layout.frame ?? "classic", transport: x.layout.transport ?? "top", regions: x.layout.regions ?? structuredClone(CLASSIC_LAYOUT.regions) } }))}>
           Revert to default layout
         </Button>
         <Button

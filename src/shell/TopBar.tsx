@@ -50,7 +50,7 @@ function useWindowWidth() {
 }
 
 /** Minimise / maximise / close for the undecorated Windows window. */
-function WindowControls() {
+export function WindowControls() {
   const [win, setWin] = useState<AppWindow | null>(null);
   const [maximized, setMaximized] = useState(false);
 
