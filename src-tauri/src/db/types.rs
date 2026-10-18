@@ -73,6 +73,42 @@ pub struct LibraryItem {
     /// Songs on the album (albums only), for spine width.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track_count: Option<u32>,
+    /// Release year (albums only), for the decade filter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub year: Option<i32>,
+    /// Release section ("albums", "singlesEps", "live", "demos"...), albums
+    /// only, for the type filter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section: Option<String>,
+    /// What the album's files are (albums only), for the format filter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quality: Option<AudioQuality>,
+}
+
+/// An album's files, as the format filter sees them: every song lossless,
+/// and hi-res when one is past CD quality (more than 16 bits or 48 kHz).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AudioQuality {
+    Lossy,
+    Lossless,
+    HiRes,
+}
+
+/// Codecs Plex reports for lossless files.
+pub const LOSSLESS_CODECS: &[&str] = &["flac", "alac", "pcm", "wav", "aiff", "ape", "wavpack", "dsd", "dsf", "dff", "tta"];
+
+impl AudioQuality {
+    /// From an album's songs: how many aren't lossless, the most bits and the highest rate.
+    pub fn from_tracks(lossy: i64, max_bits: i64, max_rate: i64) -> AudioQuality {
+        if lossy > 0 {
+            AudioQuality::Lossy
+        } else if max_bits > 16 || max_rate > 48_000 {
+            AudioQuality::HiRes
+        } else {
+            AudioQuality::Lossless
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -306,4 +342,18 @@ pub struct SearchResults {
     /// The query the results are for when the typo fallback changed a word.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub corrected: Option<String>,
+}
+
+#[cfg(test)]
+mod quality_tests {
+    use super::AudioQuality;
+
+    #[test]
+    fn album_quality_from_its_songs() {
+        assert_eq!(AudioQuality::from_tracks(1, 24, 96_000), AudioQuality::Lossy, "one lossy song makes the album lossy");
+        assert_eq!(AudioQuality::from_tracks(0, 16, 44_100), AudioQuality::Lossless);
+        assert_eq!(AudioQuality::from_tracks(0, 0, 0), AudioQuality::Lossless, "no depth or rate reported");
+        assert_eq!(AudioQuality::from_tracks(0, 24, 48_000), AudioQuality::HiRes);
+        assert_eq!(AudioQuality::from_tracks(0, 16, 96_000), AudioQuality::HiRes);
+    }
 }

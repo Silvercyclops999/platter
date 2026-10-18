@@ -1,3 +1,4 @@
+import { useLibraryChips } from "../lib/libraryChips";
 import { ChevronLeft, ChevronRight, MoreHorizontal, RotateCcw, Server } from "lucide-react";
 import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Button } from "../components/Button";
@@ -803,6 +804,7 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
   const s = useSettings((x) => x.settings);
   const [sidebarArt, setSidebarArt] = useSidebarArt();
   const rememberMode = useFullWindow((x) => x.prefs.remember);
+  const rememberChips = useLibraryChips((x) => x.remember);
   const auth = useApp((x) => x.auth);
   const healthConn = useApp((x) => x.health?.connection);
   const syncing = useApp((x) => !!x.sync && x.sync.phase !== "idle");
@@ -1191,6 +1193,16 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       description: "Every name in a song's artist line opens a page, featured artists too.",
       more: "Every name in a song's artist line opens a page, including featured artists who have no albums in your library. Their pages show the songs that credit them.",
       control: (ids) => toggle(s, "linkFeatured", ids),
+    },
+    {
+      key: "libraryChipsRemember",
+      section: "Library",
+      title: "Remember library filters",
+      description: "Albums, artists and songs open with the filters you used last. This device only.",
+      more: "Albums, artists and songs keep the filter chips you chose last (type, lossless or hi-res, decade, added recently) when you come back or restart Platter. Off, they open unfiltered each time Platter starts. This device only.",
+      control: (ids) => (
+        <Switch checked={rememberChips} onChange={(v) => useLibraryChips.getState().setRemember(v)} labelledBy={ids.title} describedBy={ids.desc} />
+      ),
     },
     {
       key: "downloadsStorage",

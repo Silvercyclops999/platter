@@ -362,7 +362,7 @@ from the artist's detail, not from sync: `artist_page` answers with what's
 cached and, when that is missing or a week old, fetches it in the background
 and then emits `artist://changed` with `{ id }` so the page can ask again.
 
-`LibraryItem = { kind: "playlist"|"album"|"artist", id, title, sortTitle, creator?, creatorId?, thumb?, smart, format?, addedAt?, playedAt?, tint?, trackCount? }`
+`LibraryItem = { kind: "playlist"|"album"|"artist", id, title, sortTitle, creator?, creatorId?, thumb?, smart, format?, addedAt?, playedAt?, tint?, trackCount?, year?, section?, quality? }`
 feeds the library sidebar, which sorts and filters it in the UI. `creator` is
 the album artist and `creatorId` its id (albums only). `addedAt` is Plex's addedAt for albums and the
 earliest of an artist's albums for artists; playlists have none. `playedAt` is
@@ -370,7 +370,11 @@ the latest play in Plex history or the local listen log (and Plex's
 lastViewedAt) for albums, an artist's newest album play, and the latest local
 play started from a playlist. Times are unix seconds. `tint` (the server's cover
 colour) and `trackCount` come with albums only and colour and size the
-spines in the library's Shelf view.
+spines in the library's Shelf view. `year`, `section` (the release section,
+such as `albums`, `singlesEps`, `live` or `demos`) and `quality` also come with
+albums only, for the library's filter chips. `quality` is `lossy` when any song
+on the album isn't lossless, `hiRes` when every song is lossless and one is
+past 16 bits or 48 kHz, and `lossless` otherwise.
 `SyncStatus = { phase: "idle"|"artists"|"albums"|"tracks"|"incremental", done, total, lastSyncAt? }`
 Event `sync://progress` → `SyncStatus`; event `library://changed` (no payload)
 after any sync writes, so open pages refetch.

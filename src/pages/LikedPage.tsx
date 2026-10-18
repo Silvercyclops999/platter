@@ -35,6 +35,10 @@ import {
   type LikedView,
 } from "./liked";
 import "./liked.css";
+import { FacetChips, FacetsEmpty, facetSongs, songFacts, useAlbumFacts, useFacets } from "../shell/FacetChips";
+import { NO_CHIPS, chipOptions, chipsOn } from "../lib/libraryChips";
+import { useLibraryView } from "../stores/library";
+import { useLibraryLoader } from "../shell/useLibrary";
 import { LoadError } from "../components/LoadError";
 
 export const LIKED_ID = "liked";
@@ -120,9 +124,18 @@ export function LikedPage() {
   }, [data, ghosts]);
   const chips = useMemo(() => likedChips(data?.tracks ?? []), [data]);
   const activeChip = chip && chips.some((c) => c.tag === chip) ? chip : null;
-  const rows = useMemo(() => likedRows(all, { sort: prefs.sort, chip: activeChip, query }), [all, prefs.sort, activeChip, query]);
+  // Filter chips (type, files, decade, added recently), from each song's album.
+  useLibraryLoader();
+  const libItems = useLibraryView((s) => s.items);
+  const facts = useAlbumFacts(libItems);
+  const [facets, setFacets] = useFacets("songs");
+  const facetOpts = useMemo(() => chipOptions(all.map((t) => songFacts(t, facts.byAlbum)), Math.floor(Date.now() / 1000)), [all, facts]);
+  const rows = useMemo(
+    () => facetSongs(likedRows(all, { sort: prefs.sort, chip: activeChip, query }), facets, facts.byAlbum),
+    [all, prefs.sort, activeChip, query, facets, facts],
+  );
   const counted = activeChip ? rows.filter((t) => liked.has(t.id)) : (data?.tracks ?? []);
-  const narrowed = prefs.sort !== "added" || !!activeChip || !!query.trim();
+  const narrowed = prefs.sort !== "added" || !!activeChip || !!query.trim() || chipsOn(facets);
   const empty = !!data && data.tracks.length === 0 && ghosts.size === 0;
 
   const playFrom = (trackId?: string) => {
@@ -261,6 +274,7 @@ export function LikedPage() {
             )}
           </ChipRow>
         )}
+        {!empty && <FacetChips view="songs" options={facetOpts} chips={facets} onChange={setFacets} />}
         {empty ? (
           <div className="empty-state liked__empty">
             <Heart size={40} strokeWidth={1.5} aria-hidden="true" />
@@ -270,6 +284,8 @@ export function LikedPage() {
               Find songs
             </Button>
           </div>
+        ) : data && rows.length === 0 && chipsOn(facets) && !query.trim() && !activeChip ? (
+          <FacetsEmpty view="songs" onClear={() => setFacets(NO_CHIPS)} />
         ) : data && rows.length === 0 ? (
           <div className="empty-state liked__none" role="status">
             <h2 className="empty-state__title">{query.trim() ? `Couldn't find "${query.trim()}"` : "No liked songs here"}</h2>

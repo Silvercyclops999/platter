@@ -710,12 +710,29 @@ pub fn library_items(c: &Connection) -> AppResult<Vec<LibraryItem>> {
         }
     }
 
+    // Per album: songs that aren't lossless, the most bits and highest rate.
+    let mut album_quality: HashMap<String, AudioQuality> = HashMap::new();
+    {
+        let codecs = LOSSLESS_CODECS.iter().map(|c| format!("'{c}'")).collect::<Vec<_>>().join(",");
+        let mut st = c.prepare_cached(&format!(
+            "SELECT album_id,
+                    sum(CASE WHEN lower(coalesce(codec, '')) IN ({codecs}) THEN 0 ELSE 1 END),
+                    max(coalesce(bit_depth, 0)), max(coalesce(sample_rate, 0))
+             FROM tracks GROUP BY album_id"
+        ))?;
+        let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?)))?;
+        for row in rows {
+            let (id, lossy, bits, rate) = row?;
+            album_quality.insert(id, AudioQuality::from_tracks(lossy, bits, rate));
+        }
+    }
+
     let mut out = Vec::new();
     // Per artist: earliest album added, latest album played.
     let mut artist_dates: HashMap<String, (Option<i64>, Option<i64>)> = HashMap::new();
     {
         let mut st = c.prepare_cached(
-            "SELECT id, title, sort_title, artist_id, artist_title, thumb, format, added_at, last_viewed_at, tint, track_count FROM albums",
+            "SELECT id, title, sort_title, artist_id, artist_title, thumb, format, added_at, last_viewed_at, tint, track_count, year, section FROM albums",
         )?;
         let rows = st.query_map([], |r| {
             Ok((
@@ -730,10 +747,13 @@ pub fn library_items(c: &Connection) -> AppResult<Vec<LibraryItem>> {
                 r.get::<_, Option<i64>>(8)?,
                 r.get::<_, Option<String>>(9)?,
                 r.get::<_, i64>(10)?,
+                r.get::<_, Option<i32>>(11)?,
+                r.get::<_, Option<String>>(12)?,
             ))
         })?;
         for row in rows {
-            let (id, title, sort_title, artist_id, artist_title, thumb, format, added, viewed, tint, tracks) = row?;
+            let (id, title, sort_title, artist_id, artist_title, thumb, format, added, viewed, tint, tracks, year, section) = row?;
+            let quality = album_quality.get(&id).copied();
             let played = match (viewed, album_played.get(&id).copied()) {
                 (Some(a), Some(b)) => Some(a.max(b)),
                 (a, b) => a.or(b),
@@ -759,6 +779,9 @@ pub fn library_items(c: &Connection) -> AppResult<Vec<LibraryItem>> {
                 played_at: played,
                 tint,
                 track_count: u32::try_from(tracks).ok().filter(|n| *n > 0),
+                year,
+                section,
+                quality,
             });
         }
     }
@@ -784,6 +807,9 @@ pub fn library_items(c: &Connection) -> AppResult<Vec<LibraryItem>> {
                 played_at,
                 tint: None,
                 track_count: None,
+                year: None,
+                section: None,
+                quality: None,
             });
         }
     }
@@ -809,6 +835,9 @@ pub fn library_items(c: &Connection) -> AppResult<Vec<LibraryItem>> {
                 played_at: r.get(4)?,
                 tint: None,
                 track_count: None,
+                year: None,
+                section: None,
+                quality: None,
             })
         })?;
         for row in rows {

@@ -1,0 +1,47 @@
+/* The library's filter chips: small keys in one row, quieter than the type
+   chips above them. A chosen one is "on": the accent, which is brass in
+   Platter's own looks. */
+.facets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 var(--space-3) var(--space-4);
+}
+.facet {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--engrave-dark, var(--color-border));
+  border-radius: var(--radius-row);
+  background: transparent;
+  box-shadow: inset 0 1px 0 var(--engrave-light, transparent);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+  transition:
+    background-color var(--motion-quick) var(--motion-easing),
+    color var(--motion-quick) var(--motion-easing),
+    border-color var(--motion-quick) var(--motion-easing);
+}
+.facet:hover { background: var(--color-state-hover); color: var(--color-text-primary); }
+.facet:active { background: var(--color-state-pressed); }
+.facet:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+.facet.is-on { border-color: transparent; background: var(--color-accent); color: var(--color-text-on-accent); box-shadow: none; }
+.facet.is-on:hover { background: var(--color-accent-hover); }
+.facet--menu svg { margin-right: calc(-1 * var(--space-1)); opacity: 0.8; }
+.facet--clear { border-color: transparent; box-shadow: none; padding: 0 var(--space-2); color: var(--color-text-secondary); }
+.facet--clear:hover { color: var(--color-text-primary); }
+
+.facets-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin: var(--space-6) var(--space-3);
+}
+.facets-empty__text { margin: 0; font-size: var(--font-size-md); color: var(--color-text-secondary); }

@@ -1,8 +1,10 @@
 import { ChevronLeft, Minimize2 } from "lucide-react";
-import { useLayoutEffect, useState } from "react";
+import { useLayoutEffect, useMemo, useState } from "react";
 import { IconButton } from "../components/Button";
 import { LibraryCollection, LibraryTableHead } from "../shell/LibraryCollection";
 import { LibraryChips, LibrarySearch, LibrarySortView } from "../shell/LibraryControls";
+import { FacetChips, FacetsEmpty, facetEntries, facetOptions, useAlbumFacts, useFacets } from "../shell/FacetChips";
+import { NO_CHIPS, chipsOn, type ChipView } from "../lib/libraryChips";
 import { useLibraryLoader, useLibraryModel, useLibraryRecents } from "../shell/useLibrary";
 import { WIDE_VIEWS, useLibraryView, type LibKind } from "../stores/library";
 import { nav, useRouter, type LibraryTab } from "../stores/router";
@@ -25,16 +27,25 @@ export function minimizeLibrary() {
  * sidebar; its own view setting (with the record shelf as an extra view),
  * and a table in the list views.
  */
-export function LibraryPage({ tab }: { tab?: LibraryTab }) {
+export function LibraryPage({ tab, archive = false }: { tab?: LibraryTab; archive?: boolean }) {
   const entryKey = useRouter((s) => s.entries[s.index].key);
   const view = useLibraryView((s) => s.wideView);
   const showArt = useUi((s) => s.sidebarArt);
   const [query, setQuery] = useState("");
   useLibraryLoader();
   useLibraryRecents();
-  const model = useLibraryModel(query);
+  const base = useLibraryModel(query);
+  const items = useLibraryView((s) => s.items);
+  const facts = useAlbumFacts(items);
+  // Filter chips for albums and artists; playlists and the mixed view have none.
+  const chipView: ChipView | null = archive ? "archive" : base.filter === "album" ? "albums" : base.filter === "artist" ? "artists" : null;
+  const [chips, setChips] = useFacets(chipView ?? "albums");
+  const active = useMemo(() => (archive ? { ...chips, type: "archive" as const } : chipView ? chips : NO_CHIPS), [archive, chips, chipView]);
+  const model = useMemo(() => ({ ...base, shown: facetEntries(base.shown, active, facts) }), [base, active, facts]);
+  const options = useMemo(() => (chipView ? facetOptions(chipView, facts) : null), [chipView, facts]);
 
-  // Arriving with a type (e.g. "Show all" albums) filters to it.
+  // Arriving with a type (e.g. "Show all" albums) filters to it. The archive
+  // is the albums whose type is demos and unreleased, with chips of its own.
   useLayoutEffect(() => {
     if (tab) useLibraryView.getState().setFilter(TAB_KIND[tab]);
     // Once per history entry.
@@ -51,15 +62,19 @@ export function LibraryPage({ tab }: { tab?: LibraryTab }) {
             <span className="lib-head__back-name">{model.drill.name}</span>
           </button>
         ) : (
-          <h1 className="library-wide__title">Your Library</h1>
+          <h1 className="library-wide__title">{archive ? "Archive" : "Your Library"}</h1>
         )}
         <IconButton label="Minimize Your Library" icon={<Minimize2 size={18} />} onClick={minimizeLibrary} />
       </div>
-      <LibraryChips filter={model.filter} sub={model.sub} kinds={model.kinds} downloaded={model.downloaded} shelf={model.shelf} />
+      {!archive && <LibraryChips filter={model.filter} sub={model.sub} kinds={model.kinds} downloaded={model.downloaded} shelf={model.shelf} />}
       <div className="lib-tools lib-tools--wide">
         <LibrarySearch query={query} setQuery={setQuery} filter={model.filter} alwaysOpen />
         <LibrarySortView filter={model.filter} sort={model.sort} view={view} views={WIDE_VIEWS} setView={(v) => useLibraryView.getState().setWideView(v)} />
       </div>
+      {chipView && options && <FacetChips view={chipView} options={options} chips={chips} onChange={setChips} />}
+      {chipView && chipsOn(archive ? chips : active) && !model.loading && model.shown.length === 0 && !query ? (
+        <FacetsEmpty view={chipView} onClear={() => setChips(NO_CHIPS)} />
+      ) : (
       <LibraryCollection
         model={model}
         view={view}
@@ -68,6 +83,7 @@ export function LibraryPage({ tab }: { tab?: LibraryTab }) {
         showArt={showArt}
         header={list && !model.loading && model.shown.length > 0 ? <LibraryTableHead compact={view === "compactList"} /> : null}
       />
+      )}
     </div>
   );
 }

@@ -401,6 +401,11 @@ async fn library_items_list_everything_with_added_and_played_dates() {
     let get = |k: LibraryKind, id: &str| items.iter().find(|i| i.kind == k && i.id == id).unwrap().clone();
 
     let a1 = get(LibraryKind::Album, &first.id);
+    // Year, section and the files' quality ride along for the library's filter chips.
+    assert_eq!(a1.year, first.year);
+    assert_eq!(a1.section.as_deref(), Some("albums"));
+    assert_eq!(a1.quality, Some(super::types::AudioQuality::Lossless), "flac at CD quality");
+    assert_eq!(get(LibraryKind::Artist, &first.artist_id).quality, None);
     assert_eq!(a1.creator.as_deref(), Some(first.artist_title.as_str()));
     assert_eq!(a1.creator_id.as_deref(), Some(first.artist_id.as_str()));
     assert_eq!(a1.added_at, Some(first.added_at));

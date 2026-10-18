@@ -145,7 +145,16 @@ export interface LibraryItem {
   tint?: string | null;
   /** Songs on the album (albums only). */
   trackCount?: number | null;
+  /** Release year (albums only). */
+  year?: number | null;
+  /** Release section, such as "albums", "singlesEps" or "demos" (albums only). */
+  section?: ReleaseSection | null;
+  /** The album's files: every song lossless, past CD quality, or not (albums only). */
+  quality?: AudioQuality | null;
 }
+
+/** An album's files, as the library's format filter sees them. */
+export type AudioQuality = "lossy" | "lossless" | "hiRes";
 
 // ---------------------------------------------------------------- errors
 
