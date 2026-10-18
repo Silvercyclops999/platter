@@ -531,7 +531,50 @@ impl Core {
         Ok(page)
     }
 
+    /// The cache's songs from this server, by album.
+    async fn cached_album_tracks(&self) -> Option<HashMap<String, Vec<String>>> {
+        let db = self.db.clone()?;
+        let like = format!("{}:%", self.tag);
+        db.read_async(move |c| {
+            let mut st = c.prepare("SELECT id, album_id FROM tracks WHERE id LIKE ?1 ORDER BY album_id, disc_number, track_number")?;
+            let mut out: HashMap<String, Vec<String>> = HashMap::new();
+            for row in st.query_map([like], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
+                let (id, album) = row?;
+                out.entry(album).or_default().push(id);
+            }
+            Ok(out)
+        })
+        .await
+        .ok()
+    }
+
+    /// Every song id, for a server whose search can't list them: albums
+    /// whose song count matches the cache keep the cache's ids; only the
+    /// others are read. None without a cache.
+    async fn track_ids_by_album(&self, section: &str) -> AppResult<Option<Vec<String>>> {
+        let Some(cached) = self.cached_album_tracks().await else { return Ok(None) };
+        let mut out = Vec::new();
+        for a in self.all_albums(section).await? {
+            let here = cached.get(&qualify_any(&self.tag, &a.id));
+            match (here, a.song_count) {
+                (Some(ids), Some(n)) if ids.len() as u64 == n => out.extend(ids.iter().cloned()),
+                _ => {
+                    let full = self.album(&a.id).await?;
+                    out.extend(full.song.iter().filter(|s| map::is_song(s)).map(|s| map::track(&self.tag, s).id));
+                }
+            }
+        }
+        Ok(Some(out))
+    }
+
     async fn all_track_ids(&self, section: &str) -> AppResult<Vec<String>> {
+        // Search can't list them: compare album by album with the cache
+        // rather than read every album again.
+        if *self.search_lists_all.lock() == Some(false)
+            && let Some(ids) = self.track_ids_by_album(section).await?
+        {
+            return Ok(ids);
+        }
         let mut out = Vec::new();
         loop {
             let page = self.tracks_page(section, out.len() as u64, PAGE).await?;

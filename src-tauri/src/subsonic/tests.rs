@@ -864,6 +864,39 @@ async fn a_server_whose_search_lists_nothing_gives_songs_album_by_album() {
 }
 
 #[tokio::test]
+async fn a_server_whose_search_lists_nothing_is_checked_for_deletions_by_album_counts() {
+    let s = subsonic(Some(all_ext()), true).await;
+    Mock::given(path("/rest/search3")).and(Authed).respond_with(ok(json!({"searchResult3": {}}))).with_priority(1).mount(&s).await;
+    let d = tempfile::tempdir().unwrap();
+    let db = crate::db::DbHandle::open(d.path().join("t.db")).unwrap();
+    let t = tag_of(&s);
+    db.write(|c| {
+        for (id, n) in [("s1", 1), ("s2", 2)] {
+            c.execute(
+                "INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, track_number,
+                   disc_number, duration_ms, part_key) VALUES (?1, 'Song', ?2, 'Record', 'r', 'R', ?3, 1, 1000, '/p')",
+                rusqlite::params![format!("{t}:{id}"), format!("{t}:al1"), n],
+            )?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    let http = client::http();
+    let unsigned = SubsonicClient::new(http.clone(), &s.uri()).unwrap();
+    let core = Arc::new(Core::new(&t, "Navidrome", unsigned, Arc::new(StreamPrefs::new(None, None)), Some(db)));
+    core.set_features(Features::new(true, all_ext().into_iter().map(str::to_string)));
+    core.sign_in(SubsonicClient::new(http, &s.uri()).unwrap().signed_in(Secret::ApiKey(Token::new(KEY).unwrap())), USER, User::default());
+    let lib = SubsonicLibrary::all(core);
+    // The first time finds out search can't list songs.
+    assert_eq!(lib.all_ids("1", ItemKind::Track).await.unwrap().len(), 2);
+    let before = log(&s).await.len();
+    // After that: the album list, and no album read when its count matches.
+    assert_eq!(lib.all_ids("1", ItemKind::Track).await.unwrap(), [format!("{t}:s1"), format!("{t}:s2")]);
+    let after = log(&s).await;
+    assert!(after[before..].iter().all(|l| !l.starts_with("getAlbum ")), "{after:?}");
+}
+
+#[tokio::test]
 async fn change_checks_wait_for_the_scan_and_spot_a_new_index() {
     let s = subsonic(Some(all_ext()), true).await;
     let core = open_core(&s);
