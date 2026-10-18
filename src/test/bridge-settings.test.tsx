@@ -20,6 +20,8 @@ describe("Settings > Bridge", () => {
   });
 
   it("says it's optional, shows a pair code, then the paired Bridge and what it's doing", async () => {
+    // Long enough that a busy machine still sees the code before the Bridge pairs.
+    mock.bridgePairAfterMs = 1500;
     const user = userEvent.setup();
     render(<BridgeSettings />);
     expect(screen.getByTestId("bridge-settings")).toHaveTextContent("Platter works fully without it");
@@ -27,7 +29,7 @@ describe("Settings > Bridge", () => {
     const code = await screen.findByTestId("bridge-code");
     expect(code).toHaveTextContent(/PB1-\S+/);
     expect(code).toHaveTextContent("BRIDGE_PAIR_CODE");
-    const row = await screen.findByTestId("bridge-row");
+    const row = await screen.findByTestId("bridge-row", {}, { timeout: 5000 });
     expect(row).toHaveTextContent("Platter Bridge");
     expect(row).toHaveTextContent("Answering");
     expect(row).toHaveTextContent("read-write");
