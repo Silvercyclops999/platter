@@ -10,7 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
-import { KEY_REFUSED, NO_API_KEYS, NOT_SUBSONIC, WRONG_PASSWORD, WRONG_URL } from "../lib/mock/subsonic";
+import { KEY_REFUSED, NO_API_KEYS, NOT_SUBSONIC, NOT_THIS_SERVER, WRONG_PASSWORD, WRONG_URL } from "../lib/mock/subsonic";
 import { DEFAULT_SETTINGS } from "../lib/types";
 import { AddServerFlow } from "../pages/AddServer";
 import { SettingsPage } from "../pages/SettingsPage";
@@ -135,6 +135,48 @@ describe("Settings with a Subsonic server", () => {
     await user.click(within(os).getByRole("button", { name: "Sign in again" }));
     const dialog = await screen.findByRole("dialog", { name: "Sign in again" });
     expect(within(dialog).getByLabelText("Server address")).toHaveValue("http://navidrome.local:4533");
+  });
+
+  it("signing in again keeps the server, even at an address typed differently", async () => {
+    const spy = vi.spyOn(backend, "subsonicSignIn");
+    const user = userEvent.setup();
+    mock.subsonic.revoke("5ab50001");
+    const { list } = await serversRow();
+    const os = within(list).getAllByRole("listitem").find((li) => li.getAttribute("data-server") === "5ab50001")!;
+    await user.click(within(os).getByRole("button", { name: "Sign in again" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign in again" });
+    const address = within(dialog).getByLabelText("Server address");
+    await user.clear(address);
+    await user.type(address, "https://music.example.com");
+    await user.click(within(dialog).getByRole("button", { name: "Continue" }));
+    await user.type(await within(dialog).findByLabelText(/API key/), "good-key");
+    await user.click(within(dialog).getByRole("button", { name: "Sign in" }));
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(spy.mock.calls[0][2]).toBe("5ab50001");
+    await waitFor(() => expect(mock.subsonic.servers).toHaveLength(1));
+    expect(mock.subsonic.servers[0]).toMatchObject({ tag: "5ab50001", url: "https://music.example.com" });
+    spy.mockRestore();
+  });
+
+  it("edits its address, and refuses an address that's another server", async () => {
+    const user = userEvent.setup();
+    mock.subsonic.others.add("http://other.local:4533");
+    const { list } = await serversRow();
+    const os = within(list).getAllByRole("listitem").find((li) => li.getAttribute("data-server") === "5ab50001")!;
+    await user.click(within(os).getByRole("button", { name: "Edit address" }));
+    const dialog = await screen.findByRole("dialog", { name: /Edit the address of Navidrome/ });
+    const address = within(dialog).getByLabelText("Server address");
+    expect(address).toHaveValue("http://navidrome.local:4533");
+    await user.clear(address);
+    await user.type(address, "other.local:4533");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(NOT_THIS_SERVER);
+    await user.clear(address);
+    await user.type(address, "https://music.example.com");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Edit the address/ })).toBeNull());
+    expect(mock.subsonic.servers).toHaveLength(1);
+    expect(mock.subsonic.servers[0]).toMatchObject({ tag: "5ab50001", url: "https://music.example.com" });
   });
 
   it("says when the account can't download songs", async () => {

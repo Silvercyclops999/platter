@@ -15,6 +15,7 @@ pub async fn subsonic_check(os: State<'_, Subsonic>, url: String) -> AppResult<S
 
 /// An API key, or a user name and password. The key or password is kept in
 /// the keychain (Subsonic signs every request with it), never logged.
+/// `tag`: signing in again to that server, which keeps its tag.
 #[tauri::command]
 pub async fn subsonic_sign_in(
     os: State<'_, Subsonic>,
@@ -22,6 +23,13 @@ pub async fn subsonic_sign_in(
     user: Option<String>,
     api_key: Option<String>,
     password: Option<String>,
+    tag: Option<String>,
 ) -> AppResult<SavedServer> {
-    os.sign_in(&url, user, api_key, password).await
+    os.sign_in_to(tag.as_deref(), &url, user, api_key, password).await
+}
+
+/// A saved server at a new address, checked to be the same server first.
+#[tauri::command]
+pub async fn subsonic_change_address(os: State<'_, Subsonic>, tag: String, url: String) -> AppResult<SavedServer> {
+    os.change_address(&tag, &url).await
 }

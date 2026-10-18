@@ -35,6 +35,8 @@ interface Props {
   onCancel?: () => void;
   /** Signing in again: the address to use. */
   url?: string;
+  /** Signing in again: the server's tag, which it keeps even at a new address. */
+  tag?: string;
   pollMs?: number;
 }
 
@@ -45,7 +47,7 @@ interface Props {
  * and password used once). Subsonic: its address, then an API key (where
  * the server takes them) or a user name and password.
  */
-export function AddServerFlow({ choose = false, kind = "jellyfin", plexSignedIn = false, onPlex, onDone, onCancel, url: initialUrl, pollMs = QUICK_POLL_MS }: Props) {
+export function AddServerFlow({ choose = false, kind = "jellyfin", plexSignedIn = false, onPlex, onDone, onCancel, url: initialUrl, tag, pollMs = QUICK_POLL_MS }: Props) {
   const [step, setStep] = useState<Step>(choose ? { kind: "choose" } : kind === "subsonic" ? { kind: "osAddress" } : { kind: "address" });
   const [apiKey, setApiKey] = useState("");
   const [url, setUrl] = useState(initialUrl ?? "");
@@ -159,7 +161,7 @@ export function AddServerFlow({ choose = false, kind = "jellyfin", plexSignedIn 
     // The key or password goes to the core, which keeps it in the keychain.
     const creds = step.useKey ? { apiKey } : { user, password };
     try {
-      const server = await backend.subsonicSignIn(step.server.url, creds);
+      const server = await backend.subsonicSignIn(step.server.url, creds, tag);
       // Only once it worked: a failed try keeps what was typed to fix.
       setApiKey("");
       setPassword("");

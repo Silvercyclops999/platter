@@ -15,6 +15,8 @@ export const NOT_SUBSONIC = "That address doesn't answer like a Navidrome or oth
 export const WRONG_PASSWORD = "That user name and password didn't work.";
 export const KEY_REFUSED = "The server didn't accept that API key. Make a new one on the server and try again.";
 export const NO_API_KEYS = "This server doesn't take API keys. Sign in with your user name and password instead.";
+export const NOT_THIS_SERVER =
+  "The server at that address isn't this one: it doesn't have this server's songs. Check the address, or add it as a new server.";
 
 /** What a Subsonic server can do, as the core reports it. */
 export function subsonicCaps(open: boolean): Caps {
@@ -28,6 +30,8 @@ export function subsonicCaps(open: boolean): Caps {
 export class MockSubsonic {
   /** The next check or sign-in fails this way. */
   failure: SubsonicFailure = null;
+  /** Addresses that answer as another server (tests). */
+  others = new Set<string>();
   /** The account's rights on servers added from now on. */
   canDownload = true;
   servers: SavedServer[] = [];
@@ -49,19 +53,37 @@ export class MockSubsonic {
     return { url: tidy, name: open ? `Navidrome on ${host}` : host, version: open ? "0.58.0" : null, openSubsonic: open, apiKeys: open };
   }
 
-  signIn(url: string, creds: { apiKey?: string; user?: string; password?: string }): SavedServer {
+  signIn(url: string, creds: { apiKey?: string; user?: string; password?: string }, tag?: string): SavedServer {
     const c = this.check(url);
     if (creds.apiKey) {
       if (!c.apiKeys) throw err("invalid", NO_API_KEYS);
       if (this.failure === "keyRefused" || creds.apiKey !== "good-key") throw err("auth", KEY_REFUSED);
-      return this.add(c, "me");
+      return this.add(c, "me", tag);
     }
     if (!creds.user?.trim()) throw err("invalid", "Type your user name.");
     if (creds.password !== "right") throw err("auth", WRONG_PASSWORD);
-    return this.add(c, creds.user.trim());
+    return this.add(c, creds.user.trim(), tag);
   }
 
-  private add(c: SubsonicCheck, user: string): SavedServer {
+  /** Like the core: the same server at a new address keeps its tag. */
+  changeAddress(tag: string, url: string): SavedServer {
+    const s = this.servers.find((x) => x.tag === tag);
+    if (!s) throw err("notFound", "That server isn't in Platter any more.");
+    const c = this.check(url);
+    if (this.others.has(c.url)) throw err("invalid", NOT_THIS_SERVER);
+    s.url = c.url;
+    s.state = "online";
+    return s;
+  }
+
+  private add(c: SubsonicCheck, user: string, keep?: string): SavedServer {
+    const again = keep ? this.servers.find((s) => s.tag === keep) : undefined;
+    if (again) {
+      if (this.others.has(c.url)) throw err("invalid", NOT_THIS_SERVER);
+      again.url = c.url;
+      again.state = "online";
+      return again;
+    }
     const known = this.servers.find((s) => s.url === c.url);
     if (known) {
       known.state = "online";

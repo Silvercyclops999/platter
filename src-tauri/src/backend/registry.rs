@@ -52,11 +52,16 @@ pub struct ServerRecord {
     /// (Plex libraries are kept in Settings.)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub libraries: Option<Vec<String>>,
+    /// The server software as it names itself (an OpenSubsonic server's
+    /// `type`, such as navidrome), to tell it's the same server at a new
+    /// address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub product: Option<String>,
 }
 
 impl ServerRecord {
     pub fn new(tag: &str, kind: BackendKind, name: &str) -> Self {
-        Self { tag: tag.into(), kind, name: name.into(), url: None, user: None, user_id: None, libraries: None }
+        Self { tag: tag.into(), kind, name: name.into(), url: None, user: None, user_id: None, libraries: None, product: None }
     }
 }
 
@@ -173,6 +178,7 @@ mod tests {
             user: Some("me".into()),
             user_id: Some("u1".into()),
             libraries: None,
+            product: None,
         };
         assert!(f.upsert(jf.clone()));
         assert_eq!(f.primary.as_deref(), Some(crate::sid::tag("m1").as_str()), "the first added");

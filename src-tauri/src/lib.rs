@@ -1488,6 +1488,7 @@ pub fn run() {
             jellyfin::commands::jellyfin_sign_in_password,
             subsonic::commands::subsonic_check,
             subsonic::commands::subsonic_sign_in,
+            subsonic::commands::subsonic_change_address,
             backend::resume::resume_queues,
             backend::resume::resume_queue_play,
             backend::resume::resume_queue_save,

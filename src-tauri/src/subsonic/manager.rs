@@ -26,6 +26,11 @@ use crate::plex::keychain::TokenStore;
 use crate::plex::token::Token;
 
 pub const WRONG_URL: &str = "Platter can't reach a server at that address. Check it and try again.";
+/// A new address that answers as another server.
+pub const NOT_THIS_SERVER: &str =
+    "The server at that address isn't this one: it doesn't have this server's songs. Check the address, or add it as a new server.";
+/// Songs from the cache asked for at a new address, to tell it's the same server.
+const KNOWN_SONGS: usize = 3;
 /// How often a server is checked for changes, by default (Settings).
 pub const DEFAULT_POLL_MINUTES: u32 = 5;
 pub const POLL_MINUTES_MIN: u32 = 1;
@@ -249,6 +254,22 @@ impl Subsonic {
     /// Sign in with an API key (preferred) or a user name and password, and
     /// add the server (or sign in to it again).
     pub async fn sign_in(&self, url: &str, user: Option<String>, api_key: Option<String>, password: Option<String>) -> AppResult<SavedServer> {
+        self.sign_in_to(None, url, user, api_key, password).await
+    }
+
+    /// Like [`Self::sign_in`]; `keep` is the server being signed in to
+    /// again. It keeps its tag (and so its songs, downloads, likes and
+    /// history) even when its address was typed differently, once the
+    /// address is checked to be the same server.
+    pub async fn sign_in_to(
+        &self,
+        keep: Option<&str>,
+        url: &str,
+        user: Option<String>,
+        api_key: Option<String>,
+        password: Option<String>,
+    ) -> AppResult<SavedServer> {
+        let keep = keep.filter(|t| self.owns(t));
         let c = self.unsigned(url)?;
         let status = c.probe().await.map_err(wrong_url)?;
         let names: Vec<String> = c.extensions().await.into_iter().map(|e| e.name).collect();
@@ -285,18 +306,29 @@ impl Subsonic {
         } else {
             signed.get("getUser", &[("username", username.clone())], Some("user")).await.unwrap_or_default()
         };
-        let tag = BackendKind::Subsonic.tag(c.base());
+        let tag = match keep {
+            Some(t) => {
+                self.same_server(t, status.kind.as_deref(), &signed).await?;
+                t.to_string()
+            }
+            None => BackendKind::Subsonic.tag(c.base()),
+        };
         self.inner.store.set(&key_account(&tag), &secret.stored()?)?;
         let name = server_name(status.kind.as_deref(), c.base());
         let existing = self.inner.backends.records().get(&tag).cloned();
+        let moved = existing.as_ref().is_some_and(|r| r.url.as_deref() != Some(c.base()));
         let record = ServerRecord {
             url: Some(c.base().to_string()),
             user: (!username.is_empty()).then(|| username.clone()),
             user_id: None,
+            product: status.kind.clone().or(existing.as_ref().and_then(|r| r.product.clone())),
             libraries: existing.and_then(|r| r.libraries),
             ..ServerRecord::new(&tag, BackendKind::Subsonic, &name)
         };
         self.inner.backends.edit_records(|f| f.upsert(record.clone()))?;
+        if moved {
+            self.forget_core(&tag);
+        }
         let core = self.core_for(&tag, &name, c.base())?;
         core.set_include(record.libraries.clone());
         core.set_features(features);
@@ -305,6 +337,113 @@ impl Subsonic {
         self.start(core);
         self.refresh_libraries();
         self.saved_one(&tag).ok_or_else(|| AppError::Internal("server not saved".into()))
+    }
+
+    /// Use a saved server at a new address (http or https, another host,
+    /// port or path, a proxy in front of it). It keeps its tag, so its
+    /// songs, downloads, likes, playlists and history stay as they are. The
+    /// new address must be the same server: it signs in with the saved key
+    /// or password, names itself the same kind of server, and has the songs
+    /// this server had.
+    pub async fn change_address(&self, tag: &str, url: &str) -> AppResult<SavedServer> {
+        let record = self
+            .inner
+            .backends
+            .records()
+            .get(tag)
+            .filter(|r| r.kind == BackendKind::Subsonic)
+            .cloned()
+            .ok_or_else(|| AppError::NotFound("That server isn't in Platter any more.".into()))?;
+        let c = self.unsigned(url)?;
+        let status = c.probe().await.map_err(wrong_url)?;
+        if record.url.as_deref() == Some(c.base()) {
+            return self.saved_one(tag).ok_or_else(|| AppError::Internal("server not saved".into()));
+        }
+        let names: Vec<String> = c.extensions().await.into_iter().map(|e| e.name).collect();
+        let features = Features::new(status.open_subsonic.unwrap_or(false), names);
+        let stored = self.inner.store.get(&key_account(tag))?;
+        let secret = stored
+            .as_ref()
+            .and_then(|t| Secret::from_stored(t, record.user.as_deref()))
+            .ok_or_else(|| AppError::Auth("Sign in to this server again, then change its address.".into()))?;
+        let signed = c.clone().signed_in(secret.clone()).with_form_post(features.has(ext::FORM_POST));
+        signed.ping().await.map_err(wrong_url)?;
+        self.same_server_as(&record, status.kind.as_deref(), &signed).await?;
+        let base = c.base().to_string();
+        let product = status.kind.clone().or(record.product.clone());
+        self.inner.backends.edit_records(|f| {
+            if let Some(mut r) = f.get(tag).cloned() {
+                r.url = Some(base.clone());
+                r.product = product.clone();
+                f.upsert(r);
+            }
+        })?;
+        let username = record.user.clone().unwrap_or_default();
+        let account = self.core(tag).and_then(|c| c.user()).unwrap_or_default();
+        self.forget_core(tag);
+        let core = self.core_for(tag, &record.name, &base)?;
+        core.set_include(record.libraries.clone());
+        core.set_features(features);
+        core.sign_in(c.signed_in(secret), &username, account);
+        let _ = core.load_views().await;
+        self.start(core);
+        self.refresh_libraries();
+        self.saved_one(tag).ok_or_else(|| AppError::Internal("server not saved".into()))
+    }
+
+    async fn same_server(&self, tag: &str, kind: Option<&str>, signed: &SubsonicClient) -> AppResult<()> {
+        let Some(record) = self.inner.backends.records().get(tag).cloned() else { return Ok(()) };
+        if record.url.as_deref() == Some(signed.base()) {
+            return Ok(());
+        }
+        self.same_server_as(&record, kind, signed).await
+    }
+
+    /// The server at a new address is the one `record` names: the same
+    /// kind of server, and songs this one had are there.
+    async fn same_server_as(&self, record: &ServerRecord, kind: Option<&str>, signed: &SubsonicClient) -> AppResult<()> {
+        if let (Some(was), Some(now)) = (record.product.as_deref(), kind)
+            && !was.eq_ignore_ascii_case(now)
+        {
+            return Err(AppError::Invalid(NOT_THIS_SERVER.into()));
+        }
+        let known = self.known_songs(&record.tag).await;
+        if known.is_empty() {
+            return Ok(());
+        }
+        for id in &known {
+            let r: AppResult<super::types::Song> = signed.get("getSong", &[("id", crate::sid::key(id).to_string())], Some("song")).await;
+            match r {
+                Ok(_) => return Ok(()),
+                Err(AppError::NotFound(_)) => {}
+                Err(e) => return Err(wrong_url(e)),
+            }
+        }
+        Err(AppError::Invalid(NOT_THIS_SERVER.into()))
+    }
+
+    /// A few song ids the cache has from this server.
+    async fn known_songs(&self, tag: &str) -> Vec<String> {
+        let Some(db) = self.inner.db.clone() else { return Vec::new() };
+        let like = format!("{tag}:%");
+        db.read_async(move |c| {
+            let mut st = c.prepare("SELECT id FROM tracks WHERE id LIKE ?1 LIMIT ?2")?;
+            let ids = st
+                .query_map(rusqlite::params![like, KNOWN_SONGS as i64], |r| r.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(ids)
+        })
+        .await
+        .unwrap_or_default()
+    }
+
+    /// Drop a server's live parts (they hold its address) so they're made
+    /// again; its record and keychain entry stay.
+    fn forget_core(&self, tag: &str) {
+        if let Some(stop) = self.inner.stops.lock().remove(tag) {
+            let _ = stop.send(true);
+        }
+        self.inner.cores.lock().remove(tag);
     }
 
     // ---- the saved servers -------------------------------------------------------------

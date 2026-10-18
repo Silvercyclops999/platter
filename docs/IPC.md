@@ -152,7 +152,8 @@ be added to it.
 | `jellyfin_quick_cancel` | – | – |
 | `jellyfin_sign_in_password` | `{ url, user, password }` | `SavedServer` |
 | `subsonic_check` | `{ url }` | `SubsonicCheck { url, name, version?, openSubsonic, apiKeys }` |
-| `subsonic_sign_in` | `{ url, user?, apiKey?, password? }` | `SavedServer` |
+| `subsonic_sign_in` | `{ url, user?, apiKey?, password?, tag? }` | `SavedServer` |
+| `subsonic_change_address` | `{ tag, url }` | `SavedServer` |
 | `resume_queues` | – | `ResumeOffer[]` |
 | `resume_queue_play` | `{ tag }` | – |
 | `resume_queue_save` | – | `boolean` (false when the playing song's server keeps no queue) |
@@ -194,6 +195,16 @@ can't say what changed since a time, so it's asked every few minutes
 did; edits to music already in the cache arrive with the weekly full sync.
 Plays are shown with `playbackReport` where the server has it (told not to
 count), and each finished play is scrobbled once with the time it happened.
+
+A Subsonic server's tag is made from the address it was first added at and
+then kept. `subsonic_change_address` moves a saved server to a new address
+(http to https, another host, port or path, a proxy in front of it) and keeps
+its tag, so its songs, downloads, likes, playlists and history stay. It signs
+in at the new address with the saved key or password and checks it is the
+same server first: it must name itself the same kind of server, and a few
+songs the cache has from it must be there. Otherwise it fails with `invalid`
+and nothing changes. `subsonic_sign_in` with `tag` (signing in again) keeps
+that server's tag the same way, with the same check when the address differs.
 
 `ResumeOffer = { tag, serverName, trackCount, currentId, positionMs, changedBy?, changedAt? }`:
 a queue another app saved on a server with `resumeQueue`. While "Keep my

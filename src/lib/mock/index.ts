@@ -1118,9 +1118,16 @@ export class MockBackend implements Backend {
   subsonicCheck(url: string) {
     return this.delay(() => this.subsonic.check(url));
   }
-  subsonicSignIn(url: string, creds: { apiKey?: string; user?: string; password?: string }) {
+  subsonicSignIn(url: string, creds: { apiKey?: string; user?: string; password?: string }, tag?: string) {
     return this.delay(() => {
-      const s = this.subsonic.signIn(url, creds);
+      const s = this.subsonic.signIn(url, creds, tag);
+      this.serversChanged();
+      return s;
+    });
+  }
+  subsonicChangeAddress(tag: string, url: string) {
+    return this.delay(() => {
+      const s = this.subsonic.changeAddress(tag, url);
       this.serversChanged();
       return s;
     });

@@ -464,6 +464,75 @@ async fn without_download_rights_downloads_say_why() {
     assert!(core.stream(&t).await.is_ok());
 }
 
+/// Like [`manager`], with a cache that has songs from the server at `tag`.
+fn manager_with_songs(dir: &std::path::Path, store: Arc<MemoryStore>, tag: &str) -> (Subsonic, Backends) {
+    let db = crate::db::DbHandle::open(dir.join("t.db")).unwrap();
+    db.write(|c| {
+        c.execute(
+            "INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, track_number,
+               disc_number, duration_ms, part_key) VALUES (?1, 'Song 1', 'a', 'A', 'r', 'R', 1, 1, 1000, '/p')",
+            [format!("{tag}:s1")],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let backends = Backends::empty();
+    backends.keep_records_in(dir.to_path_buf());
+    let os = Subsonic::new(Deps {
+        backends: backends.clone(),
+        db: Some(db),
+        store,
+        http: client::http(),
+        prefs: Arc::new(StreamPrefs::new(None, None)),
+        offline: Arc::default(),
+        poll_minutes: Arc::new(AtomicU32::new(5)),
+        live: false,
+    });
+    (os, backends)
+}
+
+#[tokio::test]
+async fn a_new_address_for_the_same_server_keeps_everything() {
+    let home = subsonic(Some(all_ext()), true).await;
+    let away = subsonic(Some(all_ext()), true).await;
+    let d = tempfile::tempdir().unwrap();
+    let store = Arc::new(MemoryStore::new());
+    let tag = tag_of(&home);
+    let (os, backends) = manager_with_songs(d.path(), store.clone(), &tag);
+    os.sign_in(&home.uri(), None, Some(KEY.into()), None).await.unwrap();
+    assert_eq!(backends.records().get(&tag).unwrap().product.as_deref(), Some("navidrome"));
+
+    let saved = os.change_address(&tag, &away.uri()).await.unwrap();
+    assert_eq!(saved.tag, tag, "same tag, so the same songs, downloads and history");
+    assert_eq!(saved.url.as_deref(), Some(away.uri().as_str()));
+    assert_eq!(backends.records().servers.len(), 1, "no second server");
+    assert_eq!(os.core(&tag).unwrap().base(), away.uri());
+    assert!(store.get(&key_account(&tag)).unwrap().is_some(), "the key stays");
+    assert!(log(&away).await.iter().any(|l| l == "getSong id=s1"), "it asked for a song this server had");
+
+    // Signing in again at another address keeps the tag too.
+    let saved = os.sign_in_to(Some(&tag), &home.uri(), None, Some(KEY.into()), None).await.unwrap();
+    assert_eq!(saved.tag, tag);
+    assert_eq!(backends.records().servers.len(), 1);
+}
+
+#[tokio::test]
+async fn a_new_address_that_is_another_server_is_refused() {
+    let home = subsonic(Some(all_ext()), true).await;
+    let other = subsonic(Some(all_ext()), true).await;
+    Mock::given(path("/rest/getSong")).respond_with(failed(70, "Song not found")).with_priority(1).mount(&other).await;
+    let d = tempfile::tempdir().unwrap();
+    let store = Arc::new(MemoryStore::new());
+    let tag = tag_of(&home);
+    let (os, backends) = manager_with_songs(d.path(), store, &tag);
+    os.sign_in(&home.uri(), None, Some(KEY.into()), None).await.unwrap();
+    let e = os.change_address(&tag, &other.uri()).await.unwrap_err();
+    assert!(matches!(&e, AppError::Invalid(m) if m == super::manager::NOT_THIS_SERVER), "{e:?}");
+    assert_eq!(backends.records().get(&tag).unwrap().url.as_deref(), Some(home.uri().as_str()), "nothing changed");
+    // Nor can signing in again move it there.
+    assert!(os.sign_in_to(Some(&tag), &other.uri(), None, Some(KEY.into()), None).await.is_err());
+}
+
 #[tokio::test]
 async fn a_revoked_sign_in_asks_to_sign_in_again() {
     let s = MockServer::start().await;

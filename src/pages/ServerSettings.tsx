@@ -1,5 +1,5 @@
 import { Server } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { Skeleton } from "../components/Skeleton";
@@ -69,7 +69,86 @@ function Libraries({ server }: { server: SavedServer }) {
   );
 }
 
-function ServerRow({ s, onSignInAgain, onRemove }: { s: SavedServer; onSignInAgain: () => void; onRemove: () => void }) {
+/**
+ * A Subsonic server at a new address (https now, another port, a proxy in
+ * front of it). The core checks it's the same server, so its songs,
+ * downloads, likes and history stay.
+ */
+function EditAddress({ server, onDone, onCancel }: { server: SavedServer; onDone: () => void; onCancel: () => void }) {
+  const [url, setUrl] = useState(server.url ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const id = useId();
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await backend.subsonicChangeAddress(server.tag, url.trim());
+      onDone();
+    } catch (e) {
+      setError((e as AppError)?.message || "Couldn't change the address.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form
+      className="add-server"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (url.trim() && !busy) void save();
+      }}
+    >
+      <div>
+        <label className="add-server__label" htmlFor={`${id}-url`}>
+          Server address
+        </label>
+        <input
+          id={`${id}-url`}
+          className="add-server__input"
+          type="text"
+          inputMode="url"
+          autoComplete="url"
+          spellCheck={false}
+          value={url}
+          autoFocus
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? `${id}-err` : `${id}-hint`}
+          onChange={(e) => setUrl(e.target.value)}
+        />
+      </div>
+      <p className="add-server__hint" id={`${id}-hint`}>
+        Use this when the same server moved: https instead of http, another port, or a proxy in front of it. Its songs, downloads,
+        likes and history stay as they are.
+      </p>
+      {error && (
+        <p className="add-server__error" id={`${id}-err`} role="alert">
+          {error}
+        </p>
+      )}
+      <div className="add-server__actions">
+        <Button variant="ghost" type="button" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button variant="primary" type="submit" disabled={!url.trim() || busy}>
+          {busy ? "Checking…" : "Save"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function ServerRow({
+  s,
+  onSignInAgain,
+  onEditAddress,
+  onRemove,
+}: {
+  s: SavedServer;
+  onSignInAgain: () => void;
+  onEditAddress: () => void;
+  onRemove: () => void;
+}) {
   const byAddress = s.kind !== "plex";
   return (
     <li className="library-source" data-server={s.tag}>
@@ -98,6 +177,11 @@ function ServerRow({ s, onSignInAgain, onRemove }: { s: SavedServer; onSignInAga
             Sign in again
           </Button>
         )}
+        {s.kind === "subsonic" && (
+          <Button size="sm" variant="ghost" onClick={onEditAddress}>
+            Edit address
+          </Button>
+        )}
         {byAddress && (
           <Button size="sm" variant="ghost" onClick={onRemove}>
             Remove
@@ -116,7 +200,8 @@ function ServerRow({ s, onSignInAgain, onRemove }: { s: SavedServer; onSignInAga
 export function ServerList() {
   const servers = useApp((s) => s.servers);
   const plexSignedIn = useApp((s) => s.auth?.state === "signedIn");
-  const [adding, setAdding] = useState<{ url?: string; kind?: AddressKind } | null>(null);
+  const [adding, setAdding] = useState<{ url?: string; kind?: AddressKind; tag?: string } | null>(null);
+  const [editing, setEditing] = useState<SavedServer | null>(null);
   const [removing, setRemoving] = useState<SavedServer | null>(null);
   const reload = useCallback(() => {
     backend.serversSaved().then((l) => useApp.getState().setServers(l), () => {});
@@ -137,7 +222,13 @@ export function ServerList() {
       ) : (
         <ul className="server-rows" aria-label="Music servers">
           {servers.map((s) => (
-            <ServerRow key={s.tag} s={s} onSignInAgain={() => setAdding({ url: s.url ?? undefined, kind: s.kind === "subsonic" ? "subsonic" : "jellyfin" })} onRemove={() => setRemoving(s)} />
+            <ServerRow
+              key={s.tag}
+              s={s}
+              onSignInAgain={() => setAdding({ url: s.url ?? undefined, kind: s.kind === "subsonic" ? "subsonic" : "jellyfin", tag: s.tag })}
+              onEditAddress={() => setEditing(s)}
+              onRemove={() => setRemoving(s)}
+            />
           ))}
         </ul>
       )}
@@ -153,6 +244,7 @@ export function ServerList() {
             choose={!adding.url}
             url={adding.url}
             kind={adding.kind}
+            tag={adding.tag}
             plexSignedIn={plexSignedIn}
             onPlex={() => {
               setAdding(null);
@@ -160,6 +252,19 @@ export function ServerList() {
             }}
             onDone={done}
             onCancel={() => setAdding(null)}
+          />
+        )}
+      </Dialog>
+      <Dialog open={!!editing} onClose={() => setEditing(null)} label={`Edit the address of ${editing?.name ?? ""}`} className="confirm">
+        <h2 className="confirm__title">Edit address</h2>
+        {editing && (
+          <EditAddress
+            server={editing}
+            onCancel={() => setEditing(null)}
+            onDone={() => {
+              setEditing(null);
+              reload();
+            }}
           />
         )}
       </Dialog>
