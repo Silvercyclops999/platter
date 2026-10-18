@@ -179,5 +179,5 @@ pub fn decode_text(bytes: &[u8]) -> String {
 
 /// Whether the bytes hold any well-formed multi-byte UTF-8 character.
 fn has_utf8_sequences(bytes: &[u8]) -> bool {
-    bytes.utf8_chunks().any(|c| c.valid().chars().any(|ch| !ch.is_ascii()))
+    bytes.utf8_chunks().any(|c| !c.valid().is_ascii())
 }
