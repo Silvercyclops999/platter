@@ -6,7 +6,7 @@
  */
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextMenuHost, placeSubmenu } from "../components/ContextMenu";
 import { PlaylistDialogs } from "../components/PlaylistDialogs";
 import { editablePlaylists } from "../components/PlaylistPicker";
@@ -336,6 +336,24 @@ describe("reorder", () => {
     await user.click(body(screen.getAllByRole("row"))[0].querySelector(".track-row__title")!);
     await user.keyboard("{Alt>}{Shift>}{ArrowDown}{/Shift}{/Alt}");
     expect(await tracksOf(p.id)).toEqual(stored);
+  });
+});
+
+describe("play order", () => {
+  it("a playlist sorted on screen plays in the order shown", async () => {
+    const user = userEvent.setup();
+    const p = await makePlaylist("Play sorted", 3);
+    page(p.id);
+    await waitFor(() => expect(body(screen.getAllByRole("row"))).toHaveLength(3));
+    await user.click(screen.getByRole("button", { name: "Sort songs: Custom order" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "Title" }));
+    const shown = body(screen.getAllByRole("row")).map((r) => r.querySelector(".track-row__title")!.textContent);
+    const spy = vi.spyOn(backend, "playContext").mockResolvedValue(undefined);
+    await user.click(screen.getByRole("button", { name: "Play Play sorted" }));
+    const sent = spy.mock.calls[0][0].context.trackIds!;
+    const titles = sent.map((id) => mock.fx.tracks.find((t) => t.id === id)?.title);
+    spy.mockRestore();
+    expect(titles).toEqual(shown);
   });
 });
 

@@ -250,8 +250,9 @@ export const player = {
     play({ context: { kind: "album", id }, startTrackId, shuffle }).catch(report),
   /** One side of a record: only its songs, still playing from the album. */
   playSide: (albumId: string, trackIds: string[]) => play({ context: { kind: "album", id: albumId, trackIds } }).catch(report),
-  playPlaylist: (id: string, startTrackId?: string, shuffle?: boolean) =>
-    play({ context: { kind: "playlist", id }, startTrackId, shuffle }).catch(report),
+  /** A playlist; `trackIds` plays it in the page's order (a sort). */
+  playPlaylist: (id: string, startTrackId?: string, shuffle?: boolean, trackIds?: string[]) =>
+    play({ context: { kind: "playlist", id, trackIds }, startTrackId, shuffle }).catch(report),
   /** Liked Songs; `trackIds` plays them in the page's order (a sort or filter). */
   playLiked: (startTrackId?: string, trackIds?: string[], shuffle?: boolean) =>
     play({ context: { kind: "liked", id: "liked", trackIds }, startTrackId, shuffle }).catch(report),

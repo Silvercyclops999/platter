@@ -127,7 +127,7 @@ export function PlaylistPage({ id }: { id: string }) {
   const status = usePlayer((s) => s.state?.status);
   const { isContext: isThis, playing: isThisPlaying } = useContextState("playlist", id);
   const pinned = usePins((s) => s.isPinned("playlist", id));
-  const play = () => (isThis ? player.toggle() : player.playPlaylist(id));
+  const play = () => (isThis ? player.toggle() : player.playPlaylist(id, undefined, undefined, sortedIds()));
   usePageBar(pl?.title, isThisPlaying, play);
   const { header, column, step, compact } = useTitleStep(pl?.title);
   const empty = !!shown && shown.tracks.length === 0;
@@ -154,6 +154,8 @@ export function PlaylistPage({ id }: { id: string }) {
   );
   const view = useMemo(() => sortRows(rows, sort === "addedBy" && !shared ? "custom" : sort, (r) => info?.addedBy[r.itemId]?.name ?? ""), [rows, sort, shared, info]);
   const order = rows.map((r) => r.itemId);
+  // Sorted on screen: play in the order shown, not the playlist's own.
+  const sortedIds = () => (view === rows ? undefined : view.map((r) => r.track.id));
   const have = useMemo(() => new Set(rows.map((r) => r.track.id)), [rows]);
   const canDrag = own && sort === "custom" && rows.length > 1;
   // Mix: on here, its switch (asking first when sorted), shuffle asking
@@ -444,7 +446,7 @@ export function PlaylistPage({ id }: { id: string }) {
                         showArt
                         active={r.track.id === nowTrackId}
                         playing={r.track.id === nowTrackId && status === "playing"}
-                        onPlay={() => player.playPlaylist(id, r.track.id)}
+                        onPlay={() => player.playPlaylist(id, r.track.id, undefined, sortedIds())}
                         menuItems={rowMenu(r)}
                         addedBy={shared ? (info?.addedBy[r.itemId] ?? null) : undefined}
                         notes={mixed ? bpmNote(automix, r.track.id) : undefined}

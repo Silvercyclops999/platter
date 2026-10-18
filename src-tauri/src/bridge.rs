@@ -54,6 +54,17 @@ struct AlbumTags {
 const TAG_FIELDS: [&str; 4] = ["format", "subformat", "style", "mood"];
 const TAG_LISTS_AT_ONCE: usize = 4;
 
+/// `tracks` in the order of `ids` (a sorted or filtered page). Each id
+/// takes the next unused copy, so a song listed twice plays twice; ids not
+/// in `tracks` are left out.
+fn in_order(tracks: Vec<crate::model::Track>, ids: &[String]) -> Vec<crate::model::Track> {
+    let mut pool: HashMap<String, std::collections::VecDeque<crate::model::Track>> = HashMap::new();
+    for t in tracks {
+        pool.entry(t.id.clone()).or_default().push_back(t);
+    }
+    ids.iter().filter_map(|id| pool.get_mut(id).and_then(|q| q.pop_front())).collect()
+}
+
 fn merge_tags(into: &mut Vec<String>, more: Option<&Vec<String>>) {
     for t in more.into_iter().flatten() {
         if !into.iter().any(|x| x.eq_ignore_ascii_case(t)) {
@@ -780,7 +791,13 @@ impl CacheLookup {
                     }
                     ContextKind::Playlist => {
                         let page = queries::playlist_page(c, &id)?;
-                        ResolvedContext { tracks: page.tracks, title: Some(page.playlist.title) }
+                        // The page's own order when it sends one (a sort or
+                        // filter); a song in it twice keeps both copies.
+                        let tracks = match &ctx.track_ids {
+                            Some(ids) => in_order(page.tracks, ids),
+                            None => page.tracks,
+                        };
+                        ResolvedContext { tracks, title: Some(page.playlist.title) }
                     }
                     ContextKind::Artist => {
                         let page = queries::artist_page_with(c, &id, popular, hidden_ids.as_deref())?;
@@ -1043,5 +1060,23 @@ mod tests {
         assert_eq!(h.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["2", "3"]);
         assert_eq!(h.playlists.len(), 1);
         assert_eq!(h.albums[0].id, "6");
+    }
+}
+
+#[cfg(test)]
+mod in_order_tests {
+    use super::in_order;
+
+    fn t(id: &str, n: u32) -> crate::model::Track {
+        crate::audio::testutil::track(id, "Artist", &format!("/p/{n}"))
+    }
+
+    #[test]
+    fn a_sorted_page_plays_in_its_order_with_both_copies_of_a_repeat() {
+        let tracks = vec![t("a", 1), t("b", 2), t("a", 3), t("c", 4)];
+        let ids: Vec<String> = ["c", "a", "b", "a", "gone"].iter().map(|s| s.to_string()).collect();
+        let out = in_order(tracks, &ids);
+        let got: Vec<(&str, &str)> = out.iter().map(|t| (t.id.as_str(), t.part_key.as_str())).collect();
+        assert_eq!(got, vec![("c", "/p/4"), ("a", "/p/1"), ("b", "/p/2"), ("a", "/p/3")]);
     }
 }
