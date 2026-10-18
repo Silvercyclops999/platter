@@ -22,6 +22,7 @@ pub const BATCH_WINDOW: Duration = Duration::from_secs(2);
 pub const MAX_BATCH: usize = 200;
 
 /// Plex timeline states (`TimelineEntry.state`).
+const STATE_CREATED: i64 = 0;
 const STATE_DONE: i64 = 5;
 const STATE_DELETED: i64 = 9;
 
@@ -53,9 +54,11 @@ impl From<ItemKindKey> for ItemKind {
 }
 
 /// What a timeline entry means for the cache. Only artists, albums and
-/// tracks in the music section, and only once Plex is done with them
-/// (state 5) or has deleted them (state 9). Entries for items still being
-/// scanned or matched come again when they're done.
+/// tracks in the music section, once Plex has created them (state 0), is
+/// done with them (state 5) or has deleted them (state 9). A new item is
+/// read as soon as it exists, so it shows up even when the server never
+/// says it's done; the done entry or the sync after the scan reads it
+/// again. Entries in between (matching, analysing) are left out.
 pub fn change_from_timeline(
     section_id: Option<&str>,
     item_id: Option<&str>,
@@ -76,7 +79,7 @@ pub fn change_from_timeline(
         _ => return None,
     };
     match state? {
-        STATE_DONE => Some(LiveChange::Upsert(kind, id)),
+        STATE_CREATED | STATE_DONE => Some(LiveChange::Upsert(kind, id)),
         STATE_DELETED => Some(LiveChange::Remove(kind, id)),
         _ => None,
     }
@@ -153,7 +156,7 @@ pub async fn apply(db: &DbHandle, source: &dyn LibrarySource, batch: Batch) -> A
         return Ok(LiveOutcome::NeedsSync);
     };
     let ids = batch.upsert_ids();
-    let changes = if ids.is_empty() {
+    let mut changes = if ids.is_empty() {
         Default::default()
     } else {
         match source.items(&state.section_id, &ids).await? {
@@ -161,6 +164,20 @@ pub async fn apply(db: &DbHandle, source: &dyn LibrarySource, batch: Batch) -> A
             None => return Ok(LiveOutcome::NeedsSync),
         }
     };
+    // A new song's album and a new album's artist: the server may only name
+    // the song (or the album), and pages list albums and artists from their
+    // own rows, so read the ones the cache doesn't have yet.
+    let parents = missing_parents(db, &changes).await?;
+    if !parents.is_empty() {
+        match source.items(&state.section_id, &parents).await? {
+            Some(more) => {
+                let have: HashSet<String> = changes.artists.iter().map(|a| a.id.clone()).chain(changes.albums.iter().map(|a| a.id.clone())).collect();
+                changes.artists.extend(more.artists.into_iter().filter(|a| !have.contains(&a.id)));
+                changes.albums.extend(more.albums.into_iter().filter(|a| !have.contains(&a.id)));
+            }
+            None => return Ok(LiveOutcome::NeedsSync),
+        }
+    }
     // Asked for but not found: gone from the server.
     let found: HashSet<&str> = changes
         .artists
@@ -216,6 +233,44 @@ pub async fn apply(db: &DbHandle, source: &dyn LibrarySource, batch: Batch) -> A
         ev.library_changed();
     }
     Ok(LiveOutcome::Applied { updated, removed, new_albums })
+}
+
+/// Albums and artists the fetched items belong to that are neither in the
+/// fetch nor in the cache.
+async fn missing_parents(db: &DbHandle, changes: &super::source::Changes) -> AppResult<Vec<String>> {
+    let fetched: HashSet<&str> =
+        changes.artists.iter().map(|a| a.id.as_str()).chain(changes.albums.iter().map(|a| a.id.as_str())).collect();
+    let mut albums: BTreeSet<String> = BTreeSet::new();
+    let mut artists: BTreeSet<String> = BTreeSet::new();
+    for t in &changes.tracks {
+        albums.insert(t.album_id.clone());
+        artists.insert(t.artist_id.clone());
+    }
+    for a in &changes.albums {
+        artists.insert(a.artist_id.clone());
+    }
+    albums.retain(|id| !id.is_empty() && !fetched.contains(id.as_str()));
+    artists.retain(|id| !id.is_empty() && !fetched.contains(id.as_str()));
+    if albums.is_empty() && artists.is_empty() {
+        return Ok(Vec::new());
+    }
+    db.read_async(move |c| {
+        let mut out = Vec::new();
+        let mut al = c.prepare_cached("SELECT 1 FROM albums WHERE id = ?1")?;
+        for id in albums {
+            if !al.exists([&id])? {
+                out.push(id);
+            }
+        }
+        let mut ar = c.prepare_cached("SELECT 1 FROM artists WHERE id = ?1")?;
+        for id in artists {
+            if !ar.exists([&id])? {
+                out.push(id);
+            }
+        }
+        Ok(out)
+    })
+    .await
 }
 
 #[cfg(test)]
@@ -279,8 +334,11 @@ mod tests {
             change_from_timeline(Some("7"), Some("9"), Some(9), Some(9), m),
             Some(LiveChange::Remove(ItemKindKey::Album, "9".into()))
         );
-        // Still being scanned, another library, not music, no id.
-        assert_eq!(change_from_timeline(Some("7"), Some("10"), Some(10), Some(0), m), None);
+        // Just created: read it now.
+        assert_eq!(change_from_timeline(Some("7"), Some("10"), Some(10), Some(0), m), Some(up(ItemKindKey::Track, "10")));
+        // Being matched or analysed, another library, not music, no id.
+        assert_eq!(change_from_timeline(Some("7"), Some("10"), Some(10), Some(2), m), None);
+        assert_eq!(change_from_timeline(Some("7"), Some("10"), Some(10), Some(6), m), None);
         assert_eq!(change_from_timeline(Some("2"), Some("10"), Some(10), Some(5), m), None);
         assert_eq!(change_from_timeline(Some("7"), Some("10"), Some(1), Some(5), m), None);
         assert_eq!(change_from_timeline(Some("7"), None, Some(10), Some(5), m), None);
@@ -329,6 +387,70 @@ mod tests {
         // One fetch for the whole batch, and no paging (no sync ran).
         assert_eq!(t.src.item_calls.lock().len(), 1);
         assert_eq!(t.src.page_calls.lock().len(), pages);
+    }
+
+    /// The changes in notification frames as the server sends them.
+    fn from_frames(frames: &[String]) -> Batch {
+        use crate::plex::notifications::{PlexEvent, parse};
+        let mut b = Batch::default();
+        for f in frames {
+            for ev in parse(f) {
+                if let PlexEvent::LibraryUpdate { section_id, item_id, item_type, state } = ev
+                    && let Some(c) = change_from_timeline(section_id.as_deref(), item_id.as_deref(), item_type, state, Some("1"))
+                {
+                    b.add(c);
+                }
+            }
+        }
+        b
+    }
+
+    fn timeline(id: &str, kind: i64, state: i64) -> String {
+        format!(
+            r#"{{"NotificationContainer":{{"type":"timeline","size":1,"TimelineEntry":[
+            {{"identifier":"com.plexapp.plugins.library","sectionID":"1","itemID":"{id}","type":{kind},"title":"x","state":{state}}}]}}}}"#
+        )
+    }
+
+    #[tokio::test]
+    async fn a_new_album_by_a_new_artist_shows_when_the_server_only_names_its_songs() {
+        let t = synced().await;
+        let section = t.db.read(store::sync_state).unwrap().unwrap().section_id;
+        assert_eq!(section, "1", "the fake library's music section");
+        {
+            let mut l = t.src.lib.lock();
+            let artist = fake::artist("new-artist", "Brand New Band");
+            let mut album = fake::album("new-album", "Debut", &artist, 2026, Some("album"), &[]);
+            album.added_at = 2_000_000_000;
+            l.tracks.push(fake::track("new-1", "Opener", &album, 1, 1));
+            l.tracks.push(fake::track("new-2", "Closer", &album, 1, 2));
+            l.albums.push(album);
+            l.artists.push(artist);
+        }
+        // Only the songs, created and then done, plus noise from elsewhere.
+        let frames = [
+            timeline("new-1", 10, 0),
+            timeline("new-2", 10, 0),
+            timeline("new-1", 10, 2),
+            timeline("new-1", 10, 5),
+            timeline("new-2", 10, 5),
+            r#"{"NotificationContainer":{"type":"activity","ActivityNotification":[{"event":"started","uuid":"u","Activity":{"type":"library.update.section"}}]}}"#.to_string(),
+        ];
+        let b = from_frames(&frames);
+        assert_eq!(b.upsert_ids(), ["new-1", "new-2"]);
+        let out = apply(&t.db, t.src.as_ref(), b).await.unwrap();
+        assert_eq!(out, LiveOutcome::Applied { updated: 4, removed: 0, new_albums: vec!["new-album".into()] });
+        assert_eq!(*t.ev.0.lock(), 1, "pages hear library://changed");
+        // The album and its artist are in the lists the pages read.
+        assert_eq!(title(&t.db, "albums", "new-album").as_deref(), Some("Debut"));
+        assert_eq!(title(&t.db, "artists", "new-artist").as_deref(), Some("Brand New Band"));
+        let recent = t.db.read(|c| crate::db::queries::recently_added(c, 5)).unwrap();
+        assert_eq!(recent[0].id, "new-album");
+        let page = t.db.read(|c| crate::db::queries::artist_page(c, "new-artist")).unwrap();
+        assert_eq!(page.artist.title, "Brand New Band");
+        // Two reads: the songs, then the album and artist they belong to.
+        let calls = t.src.item_calls.lock().clone();
+        assert_eq!(calls, vec![vec!["new-1".to_string(), "new-2".into()], vec!["new-album".into(), "new-artist".into()]]);
     }
 
     #[tokio::test]

@@ -1189,6 +1189,17 @@ export class MockBackend implements Backend {
     };
     tick();
   }
+  /**
+   * The server added an album (and maybe its artist) while the app is open:
+   * it lands in the library and pages hear `library://changed`, as a live
+   * update does in the core.
+   */
+  libraryAdded(album: Album, artist?: Artist) {
+    if (artist && !this.fx.artists.some((a) => a.id === artist.id)) this.fx.artists.push(artist);
+    this.fx.albums.push(album);
+    if (!this.fx.tracksByAlbum.has(album.id)) this.fx.tracksByAlbum.set(album.id, []);
+    this.emit("library://changed", null);
+  }
   home() {
     return this.delay(() => new MockHome(this.fx, this.contextPlays, this.listens).home());
   }

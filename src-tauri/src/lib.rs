@@ -79,9 +79,13 @@ use crate::plex::notifications::PlexEvent;
 ///   scan ending run the usual incremental sync once things are quiet for
 ///   `QUIET`.
 /// - While the socket is down, an incremental sync runs every
-///   `FALLBACK_EVERY` instead, since no events arrive.
+///   `FALLBACK_EVERY` instead, since no events arrive. While it is up, one
+///   runs every `SAFETY_EVERY` anyway: a server can keep the socket open
+///   and still not send library events (to an account that isn't its
+///   owner, say).
 const QUIET: Duration = Duration::from_secs(5);
 const FALLBACK_EVERY: Duration = Duration::from_secs(15 * 60);
+const SAFETY_EVERY: Duration = Duration::from_secs(60 * 60);
 
 fn watch_library(app: tauri::AppHandle, plex: PlexState, db: DbHandle) {
     // When the last relevant change arrived; None = nothing pending.
@@ -147,9 +151,9 @@ fn watch_library(app: tauri::AppHandle, plex: PlexState, db: DbHandle) {
         let mut last_fallback = std::time::Instant::now();
         loop {
             let down = !socket_up.load(std::sync::atomic::Ordering::Acquire);
-            if down && last_fallback.elapsed() >= FALLBACK_EVERY {
+            if last_fallback.elapsed() >= if down { FALLBACK_EVERY } else { SAFETY_EVERY } {
                 last_fallback = std::time::Instant::now();
-                tracing::debug!("notification socket down; periodic sync");
+                tracing::debug!(down, "periodic sync");
                 *pending.lock() = std::time::Instant::now().checked_sub(QUIET);
             }
             let due = matches!(*pending.lock(), Some(at) if at.elapsed() >= QUIET);
@@ -168,32 +172,28 @@ fn watch_library(app: tauri::AppHandle, plex: PlexState, db: DbHandle) {
                 }
             }
             let age = pending.lock().map(|at| at.elapsed());
-            // Nothing pending and the socket up: sleep until an event arrives.
-            match library_wait(age, down, last_fallback.elapsed(), blocked) {
-                Some(wait) => {
-                    tokio::select! {
-                        _ = tokio::time::sleep(wait) => {}
-                        _ = wake.notified() => {}
-                    }
-                }
-                None => wake.notified().await,
+            let wait = library_wait(age, down, last_fallback.elapsed(), blocked);
+            tokio::select! {
+                _ = tokio::time::sleep(wait) => {}
+                _ = wake.notified() => {}
             }
         }
     });
 }
 
-/// How long the library watcher sleeps: until a pending change has been
-/// quiet long enough, until the next fallback sync while the socket is down,
-/// a short retry when a due sync couldn't start, or (None) until woken.
-fn library_wait(pending_age: Option<Duration>, socket_down: bool, since_fallback: Duration, blocked: bool) -> Option<Duration> {
+/// How long the library watcher sleeps (an event wakes it sooner): until a
+/// pending change has been quiet long enough, a short retry when a due sync
+/// couldn't start, else until the next periodic sync.
+fn library_wait(pending_age: Option<Duration>, socket_down: bool, since_fallback: Duration, blocked: bool) -> Duration {
     const RETRY: Duration = Duration::from_secs(5);
     if blocked {
-        return Some(RETRY);
+        return RETRY;
     }
     if let Some(age) = pending_age {
-        return Some(QUIET.saturating_sub(age).max(Duration::from_millis(100)));
+        return QUIET.saturating_sub(age).max(Duration::from_millis(100));
     }
-    socket_down.then(|| FALLBACK_EVERY.saturating_sub(since_fallback).max(Duration::from_secs(1)))
+    let every = if socket_down { FALLBACK_EVERY } else { SAFETY_EVERY };
+    every.saturating_sub(since_fallback).max(Duration::from_secs(1))
 }
 
 /// Gather live changes for a moment, then write them into the cache. While
@@ -1992,16 +1992,17 @@ mod watch_tests {
     }
 
     #[test]
-    fn library_watcher_sleeps_until_woken_when_nothing_is_pending() {
+    fn the_watcher_syncs_now_and_then_even_with_the_socket_up() {
         let s = Duration::from_secs;
-        // Socket up, nothing pending: no timer at all.
-        assert_eq!(library_wait(None, false, s(0), false), None);
-        // A change waits out the quiet period.
-        assert_eq!(library_wait(Some(s(2)), false, s(0), false), Some(s(3)));
-        // Socket down: the next fallback sync, not a 1 s poll.
-        assert_eq!(library_wait(None, true, s(60), false), Some(FALLBACK_EVERY - s(60)));
-        // A due sync that couldn't start retries in seconds, not per tick.
-        assert_eq!(library_wait(Some(s(10)), false, s(0), true), Some(s(5)));
+        // Socket up, nothing pending: the hourly sync, not a poll.
+        assert_eq!(library_wait(None, false, s(0), false), SAFETY_EVERY);
+        assert_eq!(library_wait(None, true, s(60), false), FALLBACK_EVERY - s(60));
+        assert_eq!(library_wait(None, false, s(60), false), SAFETY_EVERY - s(60));
+        assert_eq!(library_wait(None, false, SAFETY_EVERY * 2, false), s(1));
+        // A change waits out the quiet period; a due sync that couldn't
+        // start retries in seconds.
+        assert_eq!(library_wait(Some(s(2)), false, s(0), false), QUIET - s(2));
+        assert_eq!(library_wait(Some(s(10)), false, s(0), true), s(5));
     }
 
     #[test]

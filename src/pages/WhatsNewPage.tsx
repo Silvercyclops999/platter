@@ -7,6 +7,7 @@ import { Skeleton } from "../components/Skeleton";
 import { backend } from "../lib/backend";
 import { addedLabel } from "../lib/relativeTime";
 import type { Album, NewRelease, WhatsNew } from "../lib/types";
+import { useApp } from "../stores/app";
 import { player } from "../stores/player";
 import { nav } from "../stores/router";
 import { isFollowing, setFollow, startSessionItem } from "../stores/social";
@@ -92,6 +93,8 @@ export function WhatsNewPage() {
   const [data, setData] = useState<WhatsNew | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  // Albums added while the page is open show up (`library://changed`).
+  const libraryVersion = useApp((s) => s.libraryVersion);
   useEffect(() => {
     let alive = true;
     setError(null);
@@ -107,7 +110,7 @@ export function WhatsNewPage() {
     return () => {
       alive = false;
     };
-  }, [attempt]);
+  }, [attempt, libraryVersion]);
 
   return (
     <div className="page-pad whats-new">
