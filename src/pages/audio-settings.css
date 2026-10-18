@@ -11,8 +11,9 @@
   text-align: right;
 }
 
-/* A row whose wide part sits under its text (the EQ editor). */
-.setting-row:has(> .setting-row__block) { flex-wrap: wrap; }
+/* A row whose wide part sits under its text (the EQ editor). A class, not
+   :has(), so restyling a page of rows stays cheap. */
+.setting-row--wide { flex-wrap: wrap; }
 .setting-row__block { flex-basis: 100%; min-width: 0; }
 
 .eq-editor { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-2); }

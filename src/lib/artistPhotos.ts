@@ -53,12 +53,15 @@ export function resetArtistPhotos() {
   known.clear();
 }
 
-/** True once the element has come near the view (at once without IntersectionObserver). */
-export function useNearView(ref: RefObject<HTMLElement | null>, enabled = true): boolean {
-  const [near, setNear] = useState(() => typeof IntersectionObserver === "undefined");
+/**
+ * True once the element has come near the view. Without IntersectionObserver
+ * there's no telling, so it's `withoutObserver` (near at once by default).
+ */
+export function useNearView(ref: RefObject<HTMLElement | null>, enabled = true, withoutObserver = true): boolean {
+  const [near, setNear] = useState(() => withoutObserver && typeof IntersectionObserver === "undefined");
   useEffect(() => {
     const el = ref.current;
-    if (near || !enabled || !el) return;
+    if (near || !enabled || !el || typeof IntersectionObserver === "undefined") return;
     const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && setNear(true), { rootMargin: NEAR });
     io.observe(el);
     return () => io.disconnect();

@@ -7,6 +7,7 @@
  */
 import { CircleAlert, Clock, Download } from "lucide-react";
 import { Suspense, lazy, useCallback, useEffect, useId, useRef, useState } from "react";
+import { useDomId } from "../lib/domId";
 import { Art } from "../components/Art";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
@@ -560,11 +561,11 @@ function BatchDialog({ rows, onClose, onDone }: { rows: PlayedRow[]; onClose: ()
 /** The "Played a lot" settings, inside Settings > Library import. */
 export function PlayedSettings() {
   const s = useSettings((x) => x.settings);
-  const id = useId();
+  const id = useDomId();
   if (!s) return null;
   return (
     <>
-    <div className="setting-row played-settings" data-setting="showPlayedALot">
+    <div className={`setting-row played-settings${s.showPlayedALot ? " setting-row--wide" : ""}`} data-setting="showPlayedALot">
       <div className="setting-row__text">
         <div className="setting-row__head">
           <div id={`${id}-t`} className="setting-row__title">

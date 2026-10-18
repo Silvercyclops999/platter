@@ -1,5 +1,5 @@
 /** Settings page group for editing in Plex. All three travel with the sync file. */
-import { useId } from "react";
+import { useDomId } from "../lib/domId";
 import { Skeleton } from "../components/Skeleton";
 import { Switch } from "../components/Switch";
 import { updateSettings, useSettings } from "../stores/settings";
@@ -36,7 +36,7 @@ export function plexEditMatches(query: string): boolean {
 }
 
 function Row({ k, title, description, s, disabled }: { k: Key; title: string; description: string; s: Settings | null; disabled?: boolean }) {
-  const id = useId();
+  const id = useDomId();
   return (
     <div className="setting-row">
       <div className="setting-row__text">

@@ -3,7 +3,8 @@
  * until you turn it on, with how to get the file. A source that's on gets
  * Choose file / Choose folder, and once imported, its report line.
  */
-import { useId, useState } from "react";
+import { useState } from "react";
+import { useDomId } from "../lib/domId";
 import { Button } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import { Switch } from "../components/Switch";
@@ -35,7 +36,7 @@ function when(ms: number): string {
 }
 
 function SourceRow({ src, on, report }: { src: ImportSourceText; on: boolean | null; report: ImportReport | undefined }) {
-  const id = useId();
+  const id = useDomId();
   const [busy, setBusy] = useState(false);
   const toggle = (v: boolean) => {
     const enabled = useSettings.getState().settings?.importSources ?? [];
@@ -56,7 +57,7 @@ function SourceRow({ src, on, report }: { src: ImportSourceText; on: boolean | n
       (e) => toast.error(failText(`Couldn't remove what was imported from ${src.name}`, e)),
     );
   return (
-    <div className="setting-row import-source" data-setting={`import-${src.id}`}>
+    <div className={`setting-row import-source${on ? " setting-row--wide" : ""}`} data-setting={`import-${src.id}`}>
       <div className="setting-row__text">
         <div className="setting-row__head">
           <div id={`${id}-t`} className="setting-row__title">

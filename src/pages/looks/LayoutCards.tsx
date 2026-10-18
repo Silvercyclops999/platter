@@ -49,7 +49,7 @@ function FrameCard({ frame, on, onPick }: { frame: Frame; on: boolean; onPick: (
       className={`frame-card ${on ? "is-on" : ""} ${info.ready ? "" : "is-soon"}`}
       onClick={() => info.ready && onPick(frame)}
     >
-      <PreviewFrame base={resolved.base} tokens={resolved.tokens} parts={{ ...parts, layout }} label={`${info.name} preview`} />
+      <PreviewFrame card base={resolved.base} tokens={resolved.tokens} parts={{ ...parts, layout }} label={`${info.name} preview`} />
       <span className="frame-card__name">
         {info.name}
         {on && <Check size={14} aria-hidden="true" />}

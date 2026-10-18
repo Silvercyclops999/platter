@@ -812,8 +812,9 @@ export function LookPreview({ base, tokens, parts, page = "home", onReorder, lab
 }
 
 /** Same picture: the cards build fresh objects on every render, so compare what they hold. */
-function samePicture(a: LookPreviewProps, b: LookPreviewProps): boolean {
+function samePicture(a: FrameProps, b: FrameProps): boolean {
   return (
+    a.card === b.card &&
     a.base === b.base &&
     a.page === b.page &&
     a.label === b.label &&
@@ -826,12 +827,14 @@ function samePicture(a: LookPreviewProps, b: LookPreviewProps): boolean {
 /**
  * The picture scaled to fill its frame's width (16:10). Drawn once it comes
  * near the view, and only again when what it shows changes: a page of
- * previews (Settings, the picker) stays quick.
+ * previews (Settings, the picker) stays quick. A card (one of many on a
+ * page) waits for the view even where there's no telling where that is.
  */
-export const PreviewFrame = memo(function PreviewFrame(props: LookPreviewProps) {
+type FrameProps = LookPreviewProps & { card?: boolean };
+export const PreviewFrame = memo(function PreviewFrame({ card = false, ...props }: FrameProps) {
   const [scale, setScale] = useState(0.25);
   const ref = useRef<HTMLDivElement>(null);
-  const near = useNearView(ref);
+  const near = useNearView(ref, true, !card);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;

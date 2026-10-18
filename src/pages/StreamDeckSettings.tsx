@@ -4,7 +4,8 @@
  * same for platter:// command links, scripts and the command line. This
  * device only.
  */
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
+import { useDomId } from "../lib/domId";
 import { GuideButton } from "../guides/GuideButton";
 import { Button } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
@@ -130,7 +131,7 @@ export async function installDeckPlugin(): Promise<boolean> {
 
 /** Install for Stream Deck, Installed with Reinstall, or Update; a download link without the Stream Deck app. */
 export function DeckPluginRow({ status, onChanged }: { status: DeckPluginStatus | null; onChanged: () => void }) {
-  const id = useId();
+  const id = useDomId();
   const [busy, setBusy] = useState(false);
   if (!status) return null;
   if (status.state === "noApp")
@@ -186,7 +187,7 @@ export function StreamDeckSettings() {
   const s = useSettings((x) => x.settings);
   const [status, setStatus] = useDeckStatus();
   const [plugin, refreshPlugin] = useDeckPlugin();
-  const id = useId();
+  const id = useDomId();
   const on = !!s?.allowStreamDeck;
   const revoke = () =>
     backend.deckRevoke().then(
@@ -269,7 +270,7 @@ function AutomationPairing({ status, onRevoke }: { status: DeckStatus | null; on
 export function AutomationSettings() {
   const s = useSettings((x) => x.settings);
   const [status, setStatus] = useDeckStatus();
-  const id = useId();
+  const id = useDomId();
   const on = !!s?.allowAutomation;
   const revoke = () =>
     backend.automationRevoke().then(

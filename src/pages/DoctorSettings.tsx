@@ -2,7 +2,7 @@
  * Library doctor settings: which checks run (each its own switch), the
  * small cover size, and a way to the page with the current count.
  */
-import { useId } from "react";
+import { useDomId } from "../lib/domId";
 import { Switch } from "../components/Switch";
 import type { SelectOption } from "../components/Select";
 import type { DoctorChecks, Settings } from "../lib/types";
@@ -46,7 +46,7 @@ export function DoctorNote({ on }: { on: boolean }) {
 
 /** One switch per check. */
 export function DoctorChecksList({ settings }: { settings: Settings }) {
-  const id = useId();
+  const id = useDomId();
   const checks = settings.doctorChecks ?? DEFAULT_SETTINGS.doctorChecks;
   return (
     <ul className="doctor-checks" aria-label="Library doctor checks">

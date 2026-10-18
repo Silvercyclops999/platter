@@ -3,7 +3,8 @@
  * settings. The waves themselves run in the core, a few albums a day, each
  * through Lidarr's usual checks.
  */
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useDomId } from "../lib/domId";
 import { Button } from "../components/Button";
 import { Select, type SelectOption } from "../components/Select";
 import { Switch } from "../components/Switch";
@@ -218,7 +219,7 @@ export function parseWaves(text: string): number[] | null {
 /** Settings > Library import: "Bring in my listening". */
 export function BringInSettings() {
   const s = useSettings((x) => x.settings);
-  const id = useId();
+  const id = useDomId();
   const [text, setText] = useState("");
   useEffect(
     () => setText((s?.bringInWaves ?? []).join(", ")),
@@ -236,7 +237,7 @@ export function BringInSettings() {
       void updateSettings({ bringInWaves: w });
   };
   return (
-    <div className="setting-row bring-in-settings" data-setting="bringIn">
+    <div className={`setting-row bring-in-settings${s.bringIn ? " setting-row--wide" : ""}`} data-setting="bringIn">
       <div className="setting-row__text">
         <div className="setting-row__head">
           <div id={`${id}-t`} className="setting-row__title">

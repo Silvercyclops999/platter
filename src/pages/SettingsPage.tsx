@@ -1,6 +1,6 @@
 import { useLibraryChips } from "../lib/libraryChips";
 import { ChevronLeft, ChevronRight, MoreHorizontal, RotateCcw, Server } from "lucide-react";
-import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { Fragment, memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { SearchField } from "../components/SearchField";
@@ -10,6 +10,7 @@ import { Switch } from "../components/Switch";
 import { useSidebarArt, useUi } from "../stores/ui";
 import { shortcutLabel } from "../shell/shortcuts";
 import { backend } from "../lib/backend";
+import { useDomId } from "../lib/domId";
 import { SECTION_LABELS, formatBytes } from "../lib/format";
 import { modKey, platform } from "../lib/platform";
 import type {
@@ -435,44 +436,83 @@ export interface RowDef {
 }
 
 function Row({ row }: { row: RowDef }) {
-  const id = useId();
-  const learn = helpFor(row.key);
-  const ids = { title: `${id}-t`, desc: `${id}-d` };
+  const id = useDomId();
+  const ids = useMemo(() => ({ title: `${id}-t`, desc: `${id}-d` }), [id]);
   return (
-    <div className="setting-row" data-setting={row.key}>
-      <div className="setting-row__text">
-        <div className="setting-row__head">
-          <div id={ids.title} className="setting-row__title">
-            {row.title}
-          </div>
-          {row.more && <MoreText title={row.title} text={row.more} />}
-        </div>
-        <p id={ids.desc} className="setting-row__desc">
-          {row.description}
-          {row.note && (
-            <>
-              {" "}
-              <span className="setting-row__note">{row.note}</span>
-            </>
-          )}
-          {learn && (
-            <>
-              {" "}
-              <LearnMore page={learn[0]} anchor={learn[1]} about={row.title} />
-            </>
-          )}
-        </p>
-        {row.footnote && <p className="setting-row__desc">{row.footnote}</p>}
-      </div>
+    <div className={row.block ? "setting-row setting-row--wide" : "setting-row"} data-setting={row.key}>
+      <RowText
+        settingKey={row.key}
+        ids={ids}
+        title={row.title}
+        description={row.description}
+        more={row.more}
+        note={row.note}
+        footnote={row.footnote}
+      />
       <div className="setting-row__control">{row.control(ids)}</div>
       {row.block && <div className="setting-row__block">{row.block()}</div>}
     </div>
   );
 }
 
+/** A row's words. They seldom change, so a change elsewhere on the page skips them. */
+const RowText = memo(function RowText({
+  settingKey,
+  ids,
+  title,
+  description,
+  more,
+  note,
+  footnote,
+}: {
+  settingKey: string;
+  ids: { title: string; desc: string };
+  title: string;
+  description: string;
+  more?: string;
+  note?: ReactNode;
+  footnote?: string;
+}) {
+  const learn = helpFor(settingKey);
+  return (
+    <div className="setting-row__text">
+      <div className="setting-row__head">
+        <div id={ids.title} className="setting-row__title">
+          {title}
+        </div>
+        {more && <MoreText title={title} text={more} />}
+      </div>
+      <p id={ids.desc} className="setting-row__desc">
+        {description}
+        {note && (
+          <>
+            {" "}
+            <span className="setting-row__note">{note}</span>
+          </>
+        )}
+        {learn && (
+          <>
+            {" "}
+            <LearnMore page={learn[0]} anchor={learn[1]} about={title} />
+          </>
+        )}
+      </p>
+      {footnote && <p className="setting-row__desc">{footnote}</p>}
+    </div>
+  );
+});
+
 const loading = <Skeleton width={120} height={32} radius="pill" />;
 
+/** A row's switch for one setting: it follows that setting alone, so changing another leaves it be. */
+const KeySwitch = memo(function KeySwitch({ settingKey, ids }: { settingKey: keyof Settings; ids: { title: string; desc: string } }) {
+  const on = useSettings((x) => (x.settings ? !!x.settings[settingKey] : null));
+  if (on === null) return <Skeleton width={40} height={24} radius="pill" />;
+  return <Switch checked={on} onChange={(v) => void updateSettings({ [settingKey]: v })} labelledBy={ids.title} describedBy={ids.desc} />;
+});
+
 function toggle(s: Settings | null, key: keyof Settings, ids: { title: string; desc: string }, onChange?: (v: boolean) => void) {
+  if (!onChange) return <KeySwitch settingKey={key} ids={ids} />;
   if (!s) return <Skeleton width={40} height={24} radius="pill" />;
   return (
     <Switch

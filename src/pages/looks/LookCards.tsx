@@ -26,7 +26,7 @@ export function LookCards({ labelledBy }: { labelledBy?: string }) {
         const own = r.source.kind === "file" ? r.source.look.layout : undefined;
         return (
           <button key={r.id} type="button" role="radio" aria-checked={on} aria-label={r.name} className={`look-card ${on ? "is-on" : ""}`} onClick={() => void applyReadyLook(r)}>
-            <PreviewFrame base={r.base} tokens={r.tokens} parts={{ style: r.style, fonts: r.fonts, layout: own ?? layout }} label={`${r.name} preview`} />
+            <PreviewFrame card base={r.base} tokens={r.tokens} parts={{ style: r.style, fonts: r.fonts, layout: own ?? layout }} label={`${r.name} preview`} />
             <span className="look-card__name">
               {r.name}
               {on && <Check size={14} aria-hidden="true" />}
