@@ -135,6 +135,8 @@ export function connectPlayer(b: Backend = backend): () => void {
   };
 }
 
+const isNotFound = (e: unknown) => !!e && typeof e === "object" && (e as { kind?: unknown }).kind === "notFound";
+
 const report = (e: unknown) => {
   const msg = e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : "Something went wrong";
   toast.error(msg);
@@ -420,7 +422,8 @@ export const player = {
       const from = q ? [...q.userQueue, ...q.nextUp].findIndex((i) => i.itemId === itemId) : -1;
       return from < 0 ? Promise.resolve() : controlSession({ op: "move", from, to: toIndex });
     }
-    return backend.queueMove(itemId, toIndex).catch(report);
+    // The row started playing while it was dragged: nothing left to move.
+    return backend.queueMove(itemId, toIndex).catch((e: unknown) => (isNotFound(e) ? undefined : report(e)));
   },
   queueClear: () => (guestLive() ? hostOnly() : backend.queueClear().catch(report)),
   queueJump: (itemId: string) =>

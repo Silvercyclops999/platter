@@ -44,3 +44,12 @@ describe("a guest's queue edits", () => {
     expect(toasts()).toContain("Only the host can take songs out");
   });
 });
+
+describe("queue moves", () => {
+  it("a row that started playing while dragged moves quietly", async () => {
+    useSocial.setState({ listen: NO_SESSION });
+    vi.spyOn(backend, "queueMove").mockRejectedValue({ kind: "notFound", message: "queue item q9 not found" });
+    await player.queueMove("q9", 0);
+    expect(toasts()).toBe("");
+  });
+});
