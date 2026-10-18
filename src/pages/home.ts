@@ -79,6 +79,12 @@ export function playableOffline(item: HomeItem, lib: CachedLibrary): boolean {
   }
 }
 
+/** The "On this computer" shelf offline: albums with songs here, less those Recently played shows, one shelf's worth. */
+export function offlineShelfAlbums(lib: CachedLibrary, home: HomeData, max = 12) {
+  const shown = new Set(home.recentlyPlayed.flatMap((i) => (i.kind === "album" ? [i.album.id] : [])));
+  return lib.albums.filter((a) => !shown.has(a.id)).slice(0, max);
+}
+
 /**
  * Home while the server can't be reached: only what can still play. Items
  * with nothing on this computer leave (they come back on reconnect).

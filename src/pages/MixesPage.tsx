@@ -1,16 +1,16 @@
 /**
  * Radio and mixes: every mix Platter made for you, by kind, on one page.
  * Radio starts from any song, album or artist menu, so the page says so.
+ * New mixes show as soon as they are made; offline, only downloaded ones.
  */
-import { useEffect, useState } from "react";
 import { CardSkeleton } from "../components/Card";
 import { LoadError } from "../components/LoadError";
-import { backend } from "../lib/backend";
-import type { MixShelves, MixSummary } from "../lib/types";
+import type { MixSummary } from "../lib/types";
 import { useApp } from "../stores/app";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { MixCard } from "./MixCard";
+import { useMixShelves } from "./mixShelves";
 import "./home.css";
 import "../shell/facets.css";
 
@@ -32,21 +32,8 @@ function MixGrid({ title, mixes }: { title: string; mixes: MixSummary[] }) {
 
 export function MixesPage() {
   const on = useSettings((s) => s.settings?.homeMixes !== false);
-  const libraryVersion = useApp((s) => s.libraryVersion);
-  const [data, setData] = useState<MixShelves | null>(null);
-  const [error, setError] = useState<{ message: string } | null>(null);
-  const [attempt, setAttempt] = useState(0);
-  useEffect(() => {
-    if (!on) return;
-    let alive = true;
-    backend.mixesHome().then(
-      (m) => alive && (setData(m), setError(null)),
-      (e: { message?: string }) => alive && setError({ message: e?.message ?? "Couldn't load your mixes." }),
-    );
-    return () => {
-      alive = false;
-    };
-  }, [on, libraryVersion, attempt]);
+  const cachedOnly = useApp((s) => !!s.health?.cachedOnly);
+  const { data, error, retry } = useMixShelves(on);
 
   const count = data ? data.madeForYou.length + data.moods.length + data.genres.length : 0;
   return (
@@ -62,7 +49,7 @@ export function MixesPage() {
           </button>
         </div>
       ) : error && !data ? (
-        <LoadError what="Your mixes" error={error} onRetry={() => setAttempt((n) => n + 1)} inline />
+        <LoadError what="Your mixes" error={error} onRetry={retry} inline />
       ) : !data ? (
         <div className="shelf-page__grid" aria-busy="true" aria-label="Loading mixes">
           {Array.from({ length: 8 }, (_, i) => (
@@ -70,6 +57,11 @@ export function MixesPage() {
               <CardSkeleton kind="album" />
             </div>
           ))}
+        </div>
+      ) : count === 0 && cachedOnly ? (
+        <div className="empty-state" role="status">
+          <h2 className="empty-state__title">No mixes on this computer</h2>
+          <p className="empty-state__text">Download a mix from its page and it plays here when Platter can't reach your server.</p>
         </div>
       ) : count === 0 ? (
         <div className="empty-state" role="status">

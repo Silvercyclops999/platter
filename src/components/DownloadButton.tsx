@@ -113,8 +113,8 @@ export function DownloadButton({ kind, id, title, trackIds, disabled, size = "lg
       break;
     default:
       icon = <RingGlyph size={px} progress={item!.progress} waiting={item!.state === "queued"} />;
-      label = `${text}. Cancel the download of ${title}`;
-      tooltip = `${text}. Click to cancel.`;
+      label = `${text}. Stop downloading ${title}`;
+      tooltip = `${text}. Click to stop.`;
   }
 
   return (

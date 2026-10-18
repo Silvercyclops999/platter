@@ -256,9 +256,9 @@ describe("wired to the core", () => {
 
   it("entering offline mode loads the cached track list", async () => {
     act(() => mock.setHealth("offline"));
-    await waitFor(() => expect(useApp.getState().cached.size).toBeGreaterThan(0));
+    await waitFor(() => expect(useApp.getState().cached?.size).toBeGreaterThan(0));
     const albums = new Set(mock.fx.albums.slice(0, 2).map((x) => x.id));
-    for (const id of useApp.getState().cached) expect(albums.has(mock.fx.tracks.find((t) => t.id === id)!.albumId)).toBe(true);
+    for (const id of useApp.getState().cached!) expect(albums.has(mock.fx.tracks.find((t) => t.id === id)!.albumId)).toBe(true);
   });
 
   it("server back → toast", async () => {

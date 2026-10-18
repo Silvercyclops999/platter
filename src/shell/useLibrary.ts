@@ -185,7 +185,9 @@ export function useLibraryModel(query: string, drillable = true): LibraryModel {
 
   const all = useMemo(() => {
     if (items === null) return [];
-    const keys = new Set((dlItems ?? []).map((i) => `${i.kind}:${i.kind === "liked" ? "" : i.id}`));
+    // Downloaded means something of it is on this computer: an item still
+    // waiting, or one whose songs all failed, isn't (it can't play offline).
+    const keys = new Set((dlItems ?? []).filter((i) => i.done > 0).map((i) => `${i.kind}:${i.kind === "liked" ? "" : i.id}`));
     const mark = (e: LibEntry): LibEntry => {
       const on = keys.has(e.liked ? "liked:" : `${e.kind}:${e.id}`);
       const followed = e.kind === "artist" && followIds.has(e.id);

@@ -4,7 +4,9 @@ import { backend } from "../lib/backend";
 import type { HomeShelfId } from "../lib/types";
 import { useLoad } from "../lib/useLoad";
 import { AlbumCard, ArtistCard, HomeItemCard, homeItemInfo } from "./cards";
-import { shelfTitle } from "./home";
+import { playableOffline, shelfTitle } from "./home";
+import { useCachedLibrary } from "./cachedLibrary";
+import { useApp } from "../stores/app";
 import { CatalogueArtistCard, useCatalogueFans } from "./catalogue";
 import "./home.css";
 import { LoadError } from "../components/LoadError";
@@ -55,9 +57,13 @@ export function ShowAllGrid({
   );
 }
 
-/** A Home shelf's "Show all". Recently played stays a grid for now. */
+/** A Home shelf's "Show all". Recently played stays a grid for now. Offline, only what can play. */
 export function HomeShelfPage({ shelf }: { shelf: HomeShelfId }) {
-  const { data, error, retry } = useLoad(() => backend.homeShelf(shelf), [shelf]);
+  const { data: full, error, retry } = useLoad(() => backend.homeShelf(shelf), [shelf]);
+  const cachedOnly = useApp((s) => !!s.health?.cachedOnly);
+  const { lib, failed } = useCachedLibrary();
+  // What's on this computer couldn't be read: the whole list, as connected.
+  const data = full && cachedOnly && !failed ? (lib ? full.filter((i) => playableOffline(i, lib)) : undefined) : full;
   return (
     <ShowAllGrid title={shelfTitle(shelf)} error={error} onRetry={retry} empty={data?.length === 0} skeletonKind={shelf === "topArtists" ? "artist" : "album"}>
       {data?.map((item) => (

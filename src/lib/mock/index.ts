@@ -685,6 +685,8 @@ export class MockBackend implements Backend {
         if (kind === "album") return this.fx.tracksByAlbum.get(id)?.map((t) => t.id) ?? null;
         if (kind === "playlist") return this.fx.playlists.some((p) => p.id === id) ? [...(this.fx.playlistTracks.get(id) ?? [])] : null;
         if (kind === "liked") return this.likes.ids();
+        // A mix follows its mix as it is made again (a radio isn't kept).
+        if (kind === "mix") return this.mixes.page(id)?.tracks.map((t) => t.id) ?? null;
         return null;
       },
       durationMs: (id) => this.trackById(id)?.durationMs ?? 200_000,
@@ -2724,6 +2726,11 @@ export class MockBackend implements Backend {
   mixesHome() {
     return this.delay(() => this.mixes.shelves());
   }
+  /** Mixes were made again: the UI hears it, and downloaded mixes follow (as in the core). */
+  mixesChanged() {
+    this.emit("mixes://changed", null);
+    this.downloads.resync();
+  }
   mixPage(id: string, steer?: MixSteer | null) {
     return this.delay(() => this.withoutHidden(this.mixes.page(id, steer ?? null) ?? this.notFound("Mix")));
   }
@@ -2737,7 +2744,7 @@ export class MockBackend implements Backend {
   mixRefresh(id: string) {
     return this.delay(() => {
       const page = this.mixes.refresh(id) ?? this.notFound("Mix");
-      this.emit("mixes://changed", null);
+      this.mixesChanged();
       return page;
     });
   }
@@ -2975,7 +2982,7 @@ export class MockBackend implements Backend {
       const mixKeys = ["mixVariety", "mixExcludeArtists", "mixExcludeGenres", "mixExcludeAlbums", "mixUnreleased", "daylistHours", "explicitContent", "showFanEdits"];
       if (mixKeys.some((k) => k in patch)) {
         this.mixes.invalidate();
-        this.later(0, () => this.emit("mixes://changed", null));
+        this.later(0, () => this.mixesChanged());
       }
       if (patch.smartShuffle !== undefined) {
         // Off takes smart shuffle out everywhere; on builds suggestions again.

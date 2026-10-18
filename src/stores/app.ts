@@ -23,8 +23,8 @@ interface AppStore {
   sync: SyncStatus | null;
   playlists: Playlist[] | null;
   libraryVersion: number;
-  /** Track ids stored on this computer; fetched while only those can play. */
-  cached: Set<string>;
+  /** Track ids stored on this computer; fetched while only those can play. Null until known (nothing is dimmed then). */
+  cached: Set<string> | null;
   /** Library artist names → ids, for the artist links in track lines. */
   artistLookup: ArtistLookup;
   setArtistNames: (names: ArtistName[]) => void;
@@ -44,7 +44,7 @@ export const useApp = create<AppStore>()((set, get) => ({
   sync: null,
   playlists: null,
   libraryVersion: 0,
-  cached: new Set(),
+  cached: null,
   artistLookup: new Map(),
   setArtistNames: (names) => set({ artistLookup: buildArtistLookup(names) }),
   setAuth: (auth) => set({ auth }),
@@ -58,9 +58,9 @@ export const useApp = create<AppStore>()((set, get) => ({
 /** While only cached music can play, this list says which tracks those are. */
 export const CACHED_REFRESH_MS = 30_000;
 
-/** True when a track can't play right now (dimmed in lists). */
+/** True when a track can't play right now (dimmed in lists). Unknown (the list couldn't be read yet) dims nothing. */
 export function isUnavailable(trackId: string, s: Pick<AppStore, "health" | "cached"> = useApp.getState()): boolean {
-  return !!s.health?.cachedOnly && !s.cached.has(trackId);
+  return !!s.health?.cachedOnly && !!s.cached && !s.cached.has(trackId);
 }
 
 export function connectApp(b: Backend = backend): () => void {
@@ -79,9 +79,11 @@ export function connectApp(b: Backend = backend): () => void {
   keep(b.listen("backends://changed", loadServers));
   keep(b.listen("auth://changed", loadServers));
   // Cached-track list: fetched when entering a cached-only state, refreshed
-  // while it lasts.
+  // while it lasts and whenever downloads change. A failed read keeps the
+  // last list (or none: nothing dimmed).
   let cachedTimer: ReturnType<typeof setInterval> | null = null;
   const loadCached = () => b.cachedTracks().then((ids) => alive && useApp.getState().setCached(ids)).catch(() => {});
+  keep(b.listen("downloads://changed", () => useApp.getState().health?.cachedOnly && void loadCached()));
   const onHealth = (h: Health) => {
     const was = !!useApp.getState().health?.cachedOnly;
     useApp.getState().setHealth(h);

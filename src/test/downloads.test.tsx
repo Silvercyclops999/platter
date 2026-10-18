@@ -76,7 +76,7 @@ describe("album download", () => {
     // Downloading: a ring and the percent beside it.
     await waitFor(() => expect(button()).toHaveClass("dl-btn--downloading"));
     expect(within(button()).getByText(/^\d+%$/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Downloading, \d+%\. Cancel the download/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Downloading, \d+%\. Stop downloading/ })).toBeInTheDocument();
     const done = await downloaded(album.title);
     expect(done).toHaveAttribute("aria-pressed", "true");
     expect(toasts()).toContain("Download complete");
@@ -85,7 +85,46 @@ describe("album download", () => {
     expect(screen.getAllByRole("row", { name: /, downloaded/ }).length).toBe(albumTracks.length);
   });
 
-  it("asks before removing, and Cancel keeps it", async () => {
+  it("removes a small download straight away", async () => {
+    mock.downloads.seedDone("album", album.id, album.title);
+    resetDownloads();
+    await startDownloads();
+    render(
+      <>
+        <AlbumPage id={album.id} />
+        <DownloadDialogs />
+      </>,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: `Remove download of ${album.title}` }));
+    await screen.findByRole("button", { name: `Download ${album.title}` });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(mock.downloads.isOn("album", album.id)).toBe(false);
+  });
+
+  it("stopping a download that hasn't finished is Stop downloading, and needs no confirm", async () => {
+    mock.downloads.stepMs = 200;
+    render(
+      <>
+        <AlbumPage id={album.id} />
+        <DownloadDialogs />
+        <ContextMenuHost />
+      </>,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: `Download ${album.title}` }));
+    await userEvent.click(await screen.findByRole("button", { name: `More options for ${album.title}` }));
+    await userEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Stop downloading" }));
+    await screen.findByRole("button", { name: `Download ${album.title}` });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(mock.downloads.isOn("album", album.id)).toBe(false);
+  });
+
+  it("asks before removing one that frees more than 1 GB, and Cancel keeps it", async () => {
+    // A big one (the core counts what removing it frees).
+    const real = mock.downloads.status.bind(mock.downloads);
+    vi.spyOn(mock.downloads, "status").mockImplementation(() => {
+      const s = real();
+      return { ...s, items: s.items.map((i) => ({ ...i, bytes: 2 * 1024 ** 3 })) };
+    });
     mock.downloads.seedDone("album", album.id, album.title);
     resetDownloads();
     await startDownloads();

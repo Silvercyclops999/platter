@@ -11,7 +11,7 @@ export interface MockDownloadsHooks {
   emitStatus: (s: DownloadStatus) => void;
   emitChanged: () => void;
   later: (ms: number, fn: () => void) => void;
-  /** An album's, playlist's or Liked Songs' songs now; null for a mix or something unknown. */
+  /** An album's, playlist's, Liked Songs' or mix's songs now; null for a radio or something unknown. */
   itemTracks: (kind: DownloadKind, id: string) => string[] | null;
   /** Length of a song in ms (sizes are worked out from it). */
   durationMs: (trackId: string) => number;
@@ -179,7 +179,8 @@ export class MockDownloads {
   set(kind: DownloadKind, id: string, on: boolean, title?: string, trackIds?: string[]): DownloadStatus {
     const key = keyOf(kind, id);
     if (on) {
-      const tracks = kind === "mix" ? trackIds : (this.hooks.itemTracks(kind, id) ?? trackIds);
+      const stored = this.hooks.itemTracks(kind, id);
+      const tracks = kind === "mix" && !stored?.length ? trackIds : (stored ?? trackIds);
       if (!tracks) throw { kind: kind === "mix" ? "invalid" : "notFound", message: kind === "mix" ? "A mix needs its songs." : "That isn't in your library." };
       const prev = this.items.get(key);
       this.items.set(key, { kind, id: kind === "liked" ? "" : id, title: title || prev?.title || (kind === "liked" ? "Liked Songs" : ""), tracks: [...new Set(tracks)] });
@@ -197,12 +198,13 @@ export class MockDownloads {
     return this.items.has(keyOf(kind, id));
   }
 
-  /** Playlists and Liked Songs follow the library (on every library or like change, as the core does). */
+  /** Playlists, Liked Songs and mixes follow the library (on every library, like or mix change, as the core does). */
   resync() {
     let changed = false;
     for (const it of this.items.values()) {
-      if (it.kind === "mix") continue;
       const now = this.hooks.itemTracks(it.kind, it.id);
+      // A mix left empty keeps what it has.
+      if (it.kind === "mix" && !now?.length) continue;
       if (now && now.join() !== it.tracks.join()) {
         it.tracks = [...new Set(now)];
         changed = true;

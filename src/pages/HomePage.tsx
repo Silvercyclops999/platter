@@ -1,19 +1,32 @@
 import { Disc3, WifiOff } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Button } from "../components/Button";
 import { Shelf, ShelfItem } from "../components/Shelf";
 import { FilterChips } from "../components/Tabs";
 import { artUrl, backend } from "../lib/backend";
 import { headerColorsFromImageUrl, headerColorsFromServer, lightHeader } from "../lib/color";
 import { useThemeBase } from "../stores/theme";
-import type { CachedLibrary, HomeItem, MixShelves, MixSummary } from "../lib/types";
+import type { HomeItem, MixSummary } from "../lib/types";
 import { useLoad } from "../lib/useLoad";
 import { useApp } from "../stores/app";
 import { useSettings } from "../stores/settings";
 import { useLayout } from "../stores/theme";
 import { nav } from "../stores/router";
 import { HomeItemCard, homeItemInfo } from "./cards";
-import { HOME_FILTERS, HOME_SHELVES, chipsAlpha, gridItems, greeting, offlineHome, showsLikedTile, visibleShelves, type HomeFilter } from "./home";
+import {
+  HOME_FILTERS,
+  HOME_SHELVES,
+  chipsAlpha,
+  gridItems,
+  greeting,
+  offlineHome,
+  offlineShelfAlbums,
+  showsLikedTile,
+  visibleShelves,
+  type HomeFilter,
+} from "./home";
+import { useMixShelves } from "./mixShelves";
+import { useCachedLibrary } from "./cachedLibrary";
 import { LikedTile, ShortcutSkeleton, ShortcutTile } from "./ShortcutTile";
 import { MixCard } from "./MixCard";
 import { RadarShelf } from "./ReleaseRadar";
@@ -85,59 +98,15 @@ function HomeChips({ value, onChange }: { value: HomeFilter; onChange: (f: HomeF
   );
 }
 
-/**
- * While only music on this computer can play, what that covers (refetched
- * as the cached list changes); null otherwise or while it loads.
- */
-function useCachedLibrary(): CachedLibrary | null {
-  const cachedOnly = useApp((s) => !!s.health?.cachedOnly);
+/** Offline: whether any liked song is on this computer (true while that isn't known). */
+function useLikedPlayable(cachedOnly: boolean): boolean {
+  const ids = useLikes((s) => s.ids);
   const cached = useApp((s) => s.cached);
-  const [lib, setLib] = useState<CachedLibrary | null>(null);
-  useEffect(() => {
-    if (!cachedOnly) {
-      setLib(null);
-      return;
-    }
-    let alive = true;
-    backend.cachedLibrary().then(
-      (l) => alive && setLib(l),
-      () => alive && setLib({ albums: [], artistIds: [], playlistIds: [] }),
-    );
-    return () => {
-      alive = false;
-    };
-  }, [cachedOnly, cached]);
-  return cachedOnly ? lib : null;
-}
-
-/** Home's mix shelves, read again when the mixes are made again. Null while off or loading. */
-function useMixShelves(on: boolean): MixShelves | null {
-  const [version, setVersion] = useState(0);
-  useEffect(() => {
-    if (!on) return;
-    let un: (() => void) | undefined;
-    let alive = true;
-    backend.listen("mixes://changed", () => setVersion((v) => v + 1)).then((u) => (alive ? (un = u) : u()));
-    return () => {
-      alive = false;
-      un?.();
-    };
-  }, [on]);
-  // The shelves stay up while new mixes load, so they never blink out.
-  const libraryVersion = useApp((s) => s.libraryVersion);
-  const [data, setData] = useState<MixShelves | null>(null);
-  useEffect(() => {
-    if (!on) return;
-    let alive = true;
-    backend.mixesHome().then(
-      (m) => alive && setData(m),
-      () => {},
-    );
-    return () => {
-      alive = false;
-    };
-  }, [on, version, libraryVersion]);
-  return on ? data : null;
+  return useMemo(() => {
+    if (!cachedOnly || !cached) return true;
+    for (const id of ids) if (cached.has(id)) return true;
+    return false;
+  }, [cachedOnly, cached, ids]);
 }
 
 function MixShelf({ title, mixes }: { title: string; mixes: MixSummary[] }) {
@@ -156,27 +125,32 @@ function MixShelf({ title, mixes }: { title: string; mixes: MixSummary[] }) {
 export function HomePage() {
   const { data: full, error, retry } = useLoad(() => backend.home(), []);
   const cachedOnly = useApp((s) => !!s.health?.cachedOnly);
-  const lib = useCachedLibrary();
+  const { lib, failed: libFailed, retry: retryLib } = useCachedLibrary();
   // Offline: Home keeps to what can still play, and comes back whole on reconnect.
   const data = full && cachedOnly ? (lib ? offlineHome(full, lib) : undefined) : full;
-  const offlineAlbums = cachedOnly && lib ? lib.albums : [];
+  const offlineAlbums = cachedOnly && lib && data ? offlineShelfAlbums(lib, data) : [];
   const [filter, setFilter] = useState<HomeFilter>("all");
   const [hovered, setHovered] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const showGrid = useSettings((s) => s.settings?.homeShortcuts !== false);
   const washOn = useSettings((s) => s.settings?.artworkColours !== false && s.settings?.homeColourWash !== false);
   const mixesOn = useSettings((s) => s.settings?.homeMixes !== false);
-  const mixes = useMixShelves(mixesOn && !cachedOnly);
+  // Offline, only mixes with downloaded songs.
+  const { data: mixes, error: mixesError, retry: retryMixes } = useMixShelves(mixesOn);
   const radarOn = useSettings((s) => s.settings?.releaseRadar !== false);
   const showMixes = !!mixes && filter === "all";
+  // Made for you holds its place while the mixes load (connected only).
+  const mixesLoading = mixesOn && !mixes && !mixesError && !cachedOnly && filter === "all";
   // Platter's own looks lead with records (albums, so on All and Albums).
   const recordsOn = useRecordsLead();
   const records = useRecordHome(recordsOn);
   const recordsLead = recordsOn && hasRecords(records) && (filter === "all" || filter === "albums");
 
-  // Offline, Liked Songs keeps its tile only while something liked can play.
+  // Offline, Liked Songs keeps its tile only while something liked can play
+  // (and while that isn't known yet).
   const likedCount = useLikes((s) => s.ids.size);
-  const liked = !!data && !cachedOnly && showsLikedTile(filter, likedCount, showGrid);
+  const likedPlayable = useLikedPlayable(cachedOnly);
+  const liked = !!data && likedPlayable && showsLikedTile(filter, likedCount, showGrid);
   const look = useLayout();
   // Quick access grid size: Liked Songs takes one of the places.
   const tiles = data ? gridItems(data, filter, showGrid, liked).slice(0, look.quickAccess - (liked ? 1 : 0)) : [];
@@ -209,6 +183,8 @@ export function HomePage() {
       <HomeChips value={filter} onChange={pick} />
       {error && !data ? (
         <LoadError what="Home" error={error} onRetry={retry} inline />
+      ) : libFailed && !data ? (
+        <LoadError what="what's on this computer" onRetry={retryLib} inline />
       ) : libraryEmpty && cachedOnly ? (
         <div className="empty-state" role="status">
           <WifiOff size={40} strokeWidth={1.5} aria-hidden="true" />
@@ -278,7 +254,12 @@ export function HomePage() {
                 .map((s) => <Shelf key={s.id} title={s.title} loading />)
             : // The Layout option picks which shelves show, and their order.
               look.homeShelves.map((key) => {
-                if (key === "madeForYou") return showMixes && <MixShelf key={key} title="Made for you" mixes={mixes.madeForYou} />;
+                if (key === "madeForYou") {
+                  if (mixesError && !mixes && filter === "all")
+                    return <LoadError key={key} what="your mixes" error={mixesError} onRetry={retryMixes} inline />;
+                  if (mixesLoading) return <Shelf key={key} title="Made for you" loading />;
+                  return showMixes && <MixShelf key={key} title="Made for you" mixes={mixes.madeForYou} />;
+                }
                 if (key === "mixMoods") return showMixes && <MixShelf key={key} title="Your mixes by mood" mixes={mixes.moods} />;
                 if (key === "mixGenres") return showMixes && <MixShelf key={key} title="Your genre mixes" mixes={mixes.genres} />;
                 const s = shelves.find((x) => x.id === key);

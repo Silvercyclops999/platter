@@ -2,7 +2,8 @@
  * Downloads as the UI sees them: the core's status (items, progress, the
  * queue's state, storage), kept current from `downloads://status`, and the
  * set of downloaded songs (rows show a mark), reloaded on `downloads://changed`.
- * Removing a download always asks first. An item that finishes says
+ * Removing a download asks first when it frees more than 1 GB; stopping one
+ * that hasn't finished asks the same way. An item that finishes says
  * "Download complete". A downloaded item that gains songs (a playlist edit,
  * a new like) catches up by itself and says "Downloading N songs".
  */
@@ -134,10 +135,14 @@ export async function setDownload(t: DownloadTarget, on: boolean): Promise<boole
   }
 }
 
-/** The download button and menu item: download, or remove (asking first). */
+/** Removing a download that frees more than this asks first. */
+export const CONFIRM_REMOVE_BYTES = 1024 ** 3;
+
+/** The download button and menu item: download, or remove (asking first when it frees a lot). */
 export function toggleDownload(t: DownloadTarget) {
   const item = findItem(useDownloads.getState().status, t.kind, t.id);
   if (!item) return void setDownload(t, true);
+  if (item.bytes <= CONFIRM_REMOVE_BYTES) return void setDownload(t, false);
   useDownloads.setState({ confirming: { target: t, bytes: item.bytes } });
 }
 
@@ -154,7 +159,9 @@ export function downloadMenuItems(t: DownloadTarget): MenuItem[] {
     {
       // Read when the menu shows.
       get label() {
-        return item() ? "Remove download" : "Download";
+        const i = item();
+        if (!i) return "Download";
+        return i.state === "queued" || i.state === "downloading" ? "Stop downloading" : "Remove download";
       },
       onSelect: () => toggleDownload(t),
     },
