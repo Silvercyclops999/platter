@@ -207,8 +207,9 @@ fn text(op: Op, have: &[&str], want: &str) -> bool {
     }
 }
 
+/// A number rule. A song without the number (no year) matches only "is not".
 fn number(op: Op, have: Option<f64>, want: f64) -> bool {
-    let h = have.unwrap_or(0.0);
+    let Some(h) = have else { return op == Op::IsNot };
     match op {
         Op::Is => (h - want).abs() < 1e-9,
         Op::IsNot => (h - want).abs() >= 1e-9,
