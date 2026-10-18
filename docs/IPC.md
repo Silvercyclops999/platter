@@ -1901,17 +1901,23 @@ most four times a second), and `downloads://changed` (no payload) when the set
 of downloaded songs changes; the UI asks `downloaded_tracks` again.
 
 Whole albums, playlists, Liked Songs and mixes download, never single songs.
-Albums, playlists and Liked Songs take their songs from the library cache and
-follow it: right after every `library://changed` or `likes://changed` (live
-library updates, playlist edits, likes), and every 30 seconds besides, new
-songs queue and removed songs' files are deleted unless another downloaded
-item still holds them. The item shows as downloading while it catches up and
-the UI says "Downloading N songs", then "Download complete". Go offline, the
-home network rule and the storage limit hold the new songs like any others. A mix has no list in the cache, so `downloads_set` for a mix needs
-`trackIds`; calling it again with a new list updates it. Liked Songs' id is
-ignored, and turning it on or off also sets `downloadLiked`.
+Albums, playlists, Liked Songs and mixes take their songs from the library
+cache and follow it: right after every `library://changed`, `likes://changed`
+or `mixes://changed` (live library updates, playlist edits, likes, mixes made
+again), and every 30 seconds besides, new songs queue and removed songs' files
+are deleted unless another downloaded item still holds them. The item shows as
+downloading while it catches up and the UI says "Downloading N songs", then
+"Download complete". Go offline, the home network rule and the storage limit
+hold the new songs like any others. A radio isn't kept in the cache, so
+`downloads_set` for one needs `trackIds` (a mix uses them only while it isn't
+made yet). Liked Songs' id is ignored, and turning it on or off also sets
+`downloadLiked`.
 
-Files are named by track id in the downloads folder (the app data folder's
+A song whose file changed on the server (a new part) keeps playing from the
+file already downloaded, and counts as before, until the new file lands.
+
+Files are named by track id (with a short hash when the id has characters a
+file name can't hold) in the downloads folder (the app data folder's
 `downloads`, or the one picked with `downloads_choose_folder`, which moves the
 files). Original quality is the Plex part as it is, fetched with GET and
 resumed with Range; an MP3 quality asks the universal transcoder and stops its
@@ -1921,13 +1927,14 @@ covers are kept beside the files, so they show when the artwork cache has let
 them go. A downloaded file plays before the pre-cache or the server, and counts
 as on this computer for `cached_tracks` and `cached_library`.
 
-The queue waits (`paused`) while the server can't be reached or `goOffline` is
-on (`offline`), away from the home network while `downloadHomeOnly` is on
-(`notHome`; home means the local connection to the server), at the storage
-limit (`full`), or when the disk has no room (`noSpace`). Failed songs retry
+The queue waits (`paused`) while the song's server can't be reached or
+`goOffline` is on (`offline`), away from the home network while
+`downloadHomeOnly` is on (`notHome`; home means the local connection to that
+server), at the storage limit (`full`; a song too big for the room left lets
+smaller ones behind it go first), or when the disk has no room (`noSpace`). Failed songs retry
 after 30 seconds, 2 minutes, 10 minutes and an hour; after five tries the item
 shows `error` until `downloads_retry`. A downloaded file deleted from disk is
-noticed when it would play and at startup, and counts as `missing` until
+noticed when it would play, at startup and once a minute, and counts as `missing` until
 retried. The queue survives restarts.
 
 ## Devices
