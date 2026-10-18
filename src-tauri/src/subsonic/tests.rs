@@ -316,6 +316,7 @@ async fn an_api_key_signs_in_and_only_the_key_is_kept_in_the_keychain() {
     let srv = backends.server(&tag).expect("in use");
     assert_eq!(srv.kind(), BackendKind::Subsonic);
     assert!(srv.caps().has(Caps::LYRICS | Caps::SONIC | Caps::RESUME_QUEUE));
+    assert!(!srv.caps().has(Caps::STAR_RATINGS), "a star is a like, not a rating");
     assert_eq!(backends.main_server().unwrap().tag().await, Some(tag.clone()), "no Plex: it has the main library");
     // An API key went alone, never with a user name.
     for r in s.received_requests().await.unwrap() {

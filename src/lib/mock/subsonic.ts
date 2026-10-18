@@ -21,7 +21,7 @@ export const NOT_THIS_SERVER =
 /** What a Subsonic server can do, as the core reports it. */
 export function subsonicCaps(open: boolean): Caps {
   const c = Object.fromEntries(Object.keys(ALL_CAPS).map((k) => [k, false])) as Caps;
-  for (const k of ["likeDates", "starRatings", "playlistMove", "playlistSummary", "transcode", "serverRadio", "friendActivity", "resumeQueue", "backdatedScrobble"] as const)
+  for (const k of ["likeDates", "playlistMove", "playlistSummary", "transcode", "serverRadio", "friendActivity", "resumeQueue", "backdatedScrobble"] as const)
     c[k] = true;
   for (const k of ["loudness", "releaseTypes", "lyrics", "syncedLyrics"] as const) c[k] = open;
   return c;

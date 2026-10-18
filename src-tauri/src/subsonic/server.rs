@@ -82,8 +82,9 @@ impl Features {
 
 /// What the server can do, from its extension list.
 pub fn subsonic_caps(f: &Features) -> Caps {
+    // Likes are stars; the server's own 1 to 5 ratings aren't read or
+    // set, so star ratings aren't claimed.
     let mut c = Caps::LIKE_DATES
-        | Caps::STAR_RATINGS
         | Caps::PLAYLIST_MOVE
         | Caps::PLAYLIST_SUMMARY
         | Caps::TRANSCODE
@@ -1183,7 +1184,8 @@ pub fn lyrics_of(list: LyricsList) -> Option<crate::plex::details::Lyrics> {
         pick.line
             .iter()
             .filter_map(|l| {
-                let at = (l.start? + offset).clamp(0, u32::MAX as i64) as u32;
+                // A positive offset shows the lines sooner (OpenSubsonic).
+                let at = (l.start? - offset).clamp(0, u32::MAX as i64) as u32;
                 Some(LyricLine { start_ms: at, text: l.value.clone(), words: Vec::new() })
             })
             .collect()
@@ -1462,8 +1464,13 @@ mod tests {
         .unwrap();
         let out = lyrics_of(l).unwrap();
         assert!(out.synced);
-        assert_eq!(out.timed.iter().map(|t| t.start_ms).collect::<Vec<_>>(), [0, 1900]);
+        assert_eq!(out.timed.iter().map(|t| t.start_ms).collect::<Vec<_>>(), [150, 2100], "negative: later");
         assert_eq!(out.lines, ["One", "Two"]);
+        let sooner: LyricsList = serde_json::from_value(serde_json::json!({"structuredLyrics": [
+            {"synced": true, "offset": 500, "line": [{"start": 300, "value": "One"}, {"start": 2000, "value": "Two"}]}
+        ]}))
+        .unwrap();
+        assert_eq!(lyrics_of(sooner).unwrap().timed.iter().map(|t| t.start_ms).collect::<Vec<_>>(), [0, 1500], "positive: sooner");
         let plain: LyricsList = serde_json::from_value(serde_json::json!({"structuredLyrics": [{"synced": false, "line": [{"value": "Words"}]}]})).unwrap();
         let out = lyrics_of(plain).unwrap();
         assert!(!out.synced && out.timed.is_empty());
