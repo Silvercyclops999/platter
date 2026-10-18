@@ -62,7 +62,17 @@ pub fn prepare(c: &Connection, source: &str, parsed: Parsed, ranks: HashMap<Stri
         albums_found.push(album_found(c, &a.artist, &a.album)?);
     }
     let mut plays = Vec::with_capacity(parsed.plays.len());
-    for p in &parsed.plays {
+    let mut kept = SamePlays::default();
+    // Plays with seconds first, so they win over the minute-only copy of
+    // the same play in the short history.
+    let mut order: Vec<&super::PlayIn> = parsed.plays.iter().collect();
+    order.sort_by_key(|p| !has_seconds(p.ended_at));
+    for p in order {
+        let k = crate::db::listens::play_folds(&p.song.title, Some(&p.song.artist), None);
+        if kept.holds(&k.0, &k.1, p.ended_at, p.ms_played) || imported_already(c, &k.0, &k.1, p.ended_at, p.ms_played)? {
+            continue;
+        }
+        kept.add(k.0, k.1, p.ended_at, p.ms_played);
         let o = m.find(&p.song)?;
         plays.push(ImportedPlay {
             source: ImportSource::File,
@@ -78,12 +88,76 @@ pub fn prepare(c: &Connection, source: &str, parsed: Parsed, ranks: HashMap<Stri
     Ok(Prepared { songs, by_key, parsed, albums_found, plays })
 }
 
-/// A play's id within the source: the minute it ended and the folded names.
-/// The short and the extended history of one account log the same play at
-/// the same minute, so importing both counts it once.
+/// A play's id within the source: when it ended (to the second when the
+/// file says, else the minute) and the folded names. A song played twice
+/// within one minute stays two plays.
 pub fn play_id(source: &str, ended_at: i64, s: &SongIn) -> String {
     let t = fold::fold_title(&s.title);
-    format!("{source}:{}:{}:{}", ended_at.div_euclid(60_000), fold::fold_artist(&s.artist), t.title)
+    let when = if has_seconds(ended_at) { format!("{}s", ended_at.div_euclid(1000)) } else { ended_at.div_euclid(60_000).to_string() };
+    format!("{source}:{when}:{}:{}", fold::fold_artist(&s.artist), t.title)
+}
+
+/// The short history logs the minute a play ended; the extended one the
+/// second. A time on a whole minute is taken as minute-only.
+fn has_seconds(ended_at: i64) -> bool {
+    ended_at.rem_euclid(60_000) != 0
+}
+
+/// Whether two logged plays of one song (same folded names) are one play:
+/// the same time played, and ending at the same moment, or one only to
+/// the minute and the other within that minute.
+fn same_play(a_end: i64, a_ms: u64, b_end: i64, b_ms: u64) -> bool {
+    if a_ms.abs_diff(b_ms) > 1_000 {
+        return false;
+    }
+    if a_end == b_end {
+        return true;
+    }
+    let (minute, exact) = match (has_seconds(a_end), has_seconds(b_end)) {
+        (false, true) => (a_end, b_end),
+        (true, false) => (b_end, a_end),
+        _ => return false,
+    };
+    // A second either side for rounding.
+    (minute - 1_000..minute + 61_000).contains(&exact)
+}
+
+/// Plays already kept in this import, by folded artist and title.
+#[derive(Default)]
+struct SamePlays(HashMap<(String, String), Vec<(i64, u64)>>);
+
+impl SamePlays {
+    fn holds(&self, artist: &str, title: &str, end: i64, ms: u64) -> bool {
+        self.0
+            .get(&(artist.to_string(), title.to_string()))
+            .is_some_and(|v| v.iter().any(|(e, m)| same_play(*e, *m, end, ms)))
+    }
+
+    fn add(&mut self, artist: String, title: String, end: i64, ms: u64) {
+        self.0.entry((artist, title)).or_default().push((end, ms));
+    }
+}
+
+/// Whether an earlier import from a file already has this play (from the
+/// other history format, or under an older id).
+fn imported_already(c: &Connection, artist: &str, title: &str, end: i64, ms: u64) -> AppResult<bool> {
+    let start = end - ms as i64;
+    let mut st = c.prepare_cached(
+        "SELECT played_at, ms_played FROM imported_plays
+         WHERE source = ?1 AND played_at BETWEEN ?2 AND ?3 AND artist_fold = ?4 AND title_fold = ?5",
+    )?;
+    let rows = st.query_map(
+        params![ImportSource::File.as_str(), start - 63_000, start + 63_000, artist, title],
+        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?)),
+    )?;
+    for r in rows {
+        let (played_at, ms_played) = r?;
+        let Some(m) = ms_played else { continue };
+        if same_play(played_at + m, m.max(0) as u64, end, ms) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn name_key(name: &str) -> String {

@@ -627,3 +627,30 @@ fn artist_names_with_commas_match_whole_and_several_artists_match_the_first() {
     assert_eq!(song_row(&c, "lists", "Closing Song").1, Some(tid("e1")));
     assert_eq!(song_row(&c, "lists", "Northern Lights").1, Some(tid("k1")), "the first of several artists");
 }
+
+#[test]
+fn the_two_history_formats_count_a_play_once_in_either_order() {
+    // The short history logs the minute, the extended one the second: the
+    // same play ends at 18:04:59.900 in one and "18:04" in the other.
+    let short = r#"[{ "endTime": "2024-03-01 18:04", "artistName": "Low Tide", "trackName": "Golden Hour", "msPlayed": 200000 }]"#;
+    let extended = r#"[
+        { "ts": "2024-03-01T18:04:59.900Z", "master_metadata_track_name": "Golden Hour", "master_metadata_album_artist_name": "Low Tide", "ms_played": 200000 },
+        { "ts": "2024-03-01T18:09:10Z", "master_metadata_track_name": "Golden Hour", "master_metadata_album_artist_name": "Low Tide", "ms_played": 45000 },
+        { "ts": "2024-03-01T18:09:58Z", "master_metadata_track_name": "Golden Hour", "master_metadata_album_artist_name": "Low Tide", "ms_played": 45000 }
+    ]"#;
+    let count = |c: &Connection| -> i64 { c.query_row("SELECT count(*) FROM imported_plays", [], |r| r.get(0)).unwrap() };
+    for first_short in [true, false] {
+        let (_d, mut c) = db();
+        library(&c);
+        let (a, b) = if first_short { (short, extended) } else { (extended, short) };
+        import(&mut c, "streaming", StreamingExport.parse(&[InputFile::new("a.json", a)]).unwrap(), 10);
+        import(&mut c, "streaming", StreamingExport.parse(&[InputFile::new("b.json", b)]).unwrap(), 20);
+        // The full play once, and the two short plays a minute apart stay two.
+        assert_eq!(count(&c), 3, "short first: {first_short}");
+        // Both in one download.
+        let (_d, mut c) = db();
+        library(&c);
+        let both = StreamingExport.parse(&[InputFile::new("a.json", a), InputFile::new("b.json", b)]).unwrap();
+        assert_eq!(import(&mut c, "streaming", both, 10).plays_added, 3);
+    }
+}
