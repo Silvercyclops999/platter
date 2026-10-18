@@ -446,7 +446,7 @@ export function PlaylistPage({ id }: { id: string }) {
                         showArt
                         active={r.track.id === nowTrackId}
                         playing={r.track.id === nowTrackId && status === "playing"}
-                        onPlay={() => player.playPlaylist(id, r.track.id, undefined, sortedIds())}
+                        onPlay={() => player.playPlaylist(id, r.track.id, undefined, sortedIds(), i)}
                         menuItems={rowMenu(r)}
                         addedBy={shared ? (info?.addedBy[r.itemId] ?? null) : undefined}
                         notes={mixed ? bpmNote(automix, r.track.id) : undefined}

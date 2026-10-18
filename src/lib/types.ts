@@ -698,6 +698,8 @@ export interface PlayContext {
 export interface PlayContextArgs {
   context: PlayContext;
   startTrackId?: string;
+  /** The clicked row's place in the context, so a song listed twice starts at that copy. */
+  startIndex?: number;
   shuffle?: boolean;
 }
 

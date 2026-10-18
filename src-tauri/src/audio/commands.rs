@@ -20,9 +20,10 @@ pub async fn play_context(
     player: State<'_, PlayerHandle>,
     context: PlayContext,
     start_track_id: Option<String>,
+    start_index: Option<usize>,
     shuffle: Option<bool>,
 ) -> AppResult<()> {
-    player.play_context(context, start_track_id, shuffle).await
+    player.play_context_from(context, start_track_id, start_index, shuffle).await
 }
 
 #[tauri::command]

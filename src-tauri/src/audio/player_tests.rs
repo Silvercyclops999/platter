@@ -1814,3 +1814,35 @@ async fn a_slow_play_request_never_replaces_a_newer_one() {
     let s = r.player.state().await.unwrap();
     assert_eq!(tid(&s.track), "c", "the album clicked last keeps playing");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_song_listed_twice_starts_at_the_clicked_copy() {
+    let r = rig(&["a", "b", "c"], 2.0, true, PlayerConfig::default()).await;
+    r.player
+        .play_context_from(ctx(&["a", "b", "a", "c"]), Some("a".into()), Some(2), Some(false))
+        .await
+        .unwrap();
+    let s = r.player.state().await.unwrap();
+    assert_eq!(tid(&s.track), "a");
+    let nu: Vec<String> = s.queue.next_up.iter().map(|i| i.track.id.clone()).collect();
+    assert_eq!(nu, vec!["c".to_string()]);
+    // An index that no longer holds the song falls back to its first copy.
+    r.player
+        .play_context_from(ctx(&["a", "b", "a", "c"]), Some("a".into()), Some(1), Some(false))
+        .await
+        .unwrap();
+    let s = r.player.state().await.unwrap();
+    assert_eq!(tid(&s.track), "a");
+    assert_eq!(s.queue.next_up.len(), 3);
+}
+
+#[test]
+fn start_copy_counts_earlier_copies_of_the_song() {
+    use super::player::start_copy_of;
+    let t = |id: &str| track(id, "A", "/p");
+    let list = vec![t("x"), t("y"), t("x"), t("x")];
+    assert_eq!(start_copy_of(&list, Some("x".into()), Some(3)), (Some("x".into()), 2));
+    assert_eq!(start_copy_of(&list, None, Some(1)), (Some("y".into()), 0));
+    assert_eq!(start_copy_of(&list, Some("x".into()), Some(1)), (Some("x".into()), 0));
+    assert_eq!(start_copy_of(&list, Some("x".into()), Some(9)), (Some("x".into()), 0));
+}

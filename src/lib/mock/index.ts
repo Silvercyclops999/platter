@@ -2135,6 +2135,14 @@ export class MockBackend implements Backend {
   private loadContext(args: PlayContextArgs, play: boolean) {
     const resolved = this.contextTracks(args);
     const info = resolved.info;
+    // Like the core: the clicked row picks which copy of a song listed twice starts.
+    let startCopy = 0;
+    const at = args.startIndex;
+    if (at !== undefined && at < resolved.tracks.length && (!args.startTrackId || resolved.tracks[at].id === args.startTrackId)) {
+      const sid = resolved.tracks[at].id;
+      args = { ...args, startTrackId: sid };
+      startCopy = resolved.tracks.slice(0, at).filter((t) => t.id === sid).length;
+    }
     // Like the core: explicit songs (when filtered) and hidden edits leave, with one toast.
     const forPlay = this.tags.forPlay(resolved.tracks);
     const { message } = forPlay;
@@ -2152,6 +2160,7 @@ export class MockBackend implements Backend {
         return;
       }
       tracks = offline.tracks;
+      if (offline.start !== args.startTrackId) startCopy = 0;
       args = { ...args, startTrackId: offline.start ?? undefined };
     }
     if (message && play) this.emit("toast", { kind: "info", message });
@@ -2174,7 +2183,8 @@ export class MockBackend implements Backend {
     if (this.current) this.pushHistory(this.current);
     this.ctxOriginal = tracks.map((t) => this.item(t, "context"));
     this.ctxInfo = info;
-    let first = args.startTrackId ? this.ctxOriginal.find((i) => i.track.id === args.startTrackId) : undefined;
+    const copies = args.startTrackId ? this.ctxOriginal.filter((i) => i.track.id === args.startTrackId) : [];
+    let first = copies[startCopy] ?? copies[0];
     let offset = 0;
     if (!first && this.shuffle) first = this.ctxOriginal[Math.floor(this.rng() * this.ctxOriginal.length)];
     if (!first) {

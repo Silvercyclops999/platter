@@ -355,6 +355,18 @@ describe("play order", () => {
     spy.mockRestore();
     expect(titles).toEqual(shown);
   });
+
+  it("double-clicking a row sends that row's place, so a song listed twice starts at that copy", async () => {
+    const user = userEvent.setup();
+    const p = await makePlaylist("Twice", 3);
+    page(p.id);
+    await waitFor(() => expect(body(screen.getAllByRole("row"))).toHaveLength(3));
+    const spy = vi.spyOn(backend, "playContext").mockResolvedValue(undefined);
+    await user.dblClick(body(screen.getAllByRole("row"))[2].querySelector(".track-row__title")!);
+    const args = spy.mock.calls[0]?.[0];
+    spy.mockRestore();
+    expect(args?.startIndex).toBe(2);
+  });
 });
 
 describe("remove", () => {

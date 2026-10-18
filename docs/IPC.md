@@ -3091,7 +3091,7 @@ dropdown parts off; the UI checks them.
 ## Playback and queue
 | Command | Args |
 | --- | --- |
-| `play_context` | `{ context: { kind: "album"|"playlist"|"artist"|"tracks"|"search"|"liked"|"mix"|"radio", id?, trackIds? }, startTrackId?, shuffle? }` |
+| `play_context` | `{ context: { kind: "album"|"playlist"|"artist"|"tracks"|"search"|"liked"|"mix"|"radio", id?, trackIds? }, startTrackId?, startIndex?, shuffle? }` |
 | `play_toggle`, `play_pause`, `play_resume`, `play_next`, `play_previous` | – |
 | `play_seek` | `{ positionMs }` |
 | `set_volume` | `{ volume: 0..1 }` (linear slider value; core applies the perceptual curve) |
@@ -3118,6 +3118,8 @@ dropdown parts off; the UI checks them.
 `QueueItem = { itemId, track: Track, source: "user"|"context"|"autoplay"|"smart" }` (`autoplay`: similar music after the context ran out; `smart`: put in by smart shuffle)
 
 An `album` context with `trackIds` plays only those of the album's songs, in album order (one side of the record, see "Record sides"); it is still the album that's playing.
+
+`startIndex` is the clicked row's place in the context (in `trackIds` order when they are sent). When that row holds `startTrackId`, playback starts at that copy, so a song that is in a playlist twice starts where it was clicked. When it holds another song, the first copy of `startTrackId` starts.
 
 Shuffle is remembered per album, playlist or artist id; repeat is one global
 setting. `shuffle` is the playing context's state and `shuffledContexts` lists

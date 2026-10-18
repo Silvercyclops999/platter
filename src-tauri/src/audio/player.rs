@@ -57,6 +57,19 @@ pub fn playable_part(tracks: &[Track], start: Option<&str>, ok: &HashSet<String>
     (start.flatten(), left_out)
 }
 
+/// The start song and which copy of it to start at. `index` is the row
+/// that was clicked; it wins when it still holds `start` (or when no start
+/// song was named). Otherwise the first copy of `start` is used.
+pub fn start_copy_of(tracks: &[Track], start: Option<String>, index: Option<usize>) -> (Option<String>, usize) {
+    let Some(i) = index.filter(|&i| i < tracks.len()) else { return (start, 0) };
+    if start.as_deref().is_some_and(|s| s != tracks[i].id) {
+        return (start, 0);
+    }
+    let id = tracks[i].id.clone();
+    let copy = tracks[..i].iter().filter(|t| t.id == id).count();
+    (Some(id), copy)
+}
+
 /// "Previous" restarts the track instead at or past this point.
 pub const PREVIOUS_RESTART_MS: u64 = 3_000;
 /// The shortest A-B loop.
@@ -137,6 +150,9 @@ enum Cmd {
         info: ContextInfo,
         tracks: Vec<Track>,
         start_track_id: Option<String>,
+        /// Which copy of `start_track_id` to start at (0: the first), for a
+        /// song that is in the context more than once.
+        start_copy: usize,
         shuffle: Option<bool>,
         reply: Reply<()>,
     },
@@ -510,13 +526,33 @@ impl PlayerHandle {
         start_track_id: Option<String>,
         shuffle: Option<bool>,
     ) -> AppResult<()> {
+        self.play_context_from(context, start_track_id, None, shuffle).await
+    }
+
+    /// Like [`Self::play_context`], with the row that was clicked:
+    /// `start_index` is the start song's place in the context as the window
+    /// showed it, so a song that is in a playlist twice starts at the copy
+    /// that was clicked. When the index no longer points at
+    /// `start_track_id`, the first copy is used.
+    pub async fn play_context_from(
+        &self,
+        context: PlayContext,
+        start_track_id: Option<String>,
+        start_index: Option<usize>,
+        shuffle: Option<bool>,
+    ) -> AppResult<()> {
         use std::sync::atomic::Ordering;
         let seq = self.play_seq.fetch_add(1, Ordering::SeqCst) + 1;
         let resolved = self.lookup.context(&context).await?;
         if resolved.tracks.is_empty() {
             return Err(AppError::Invalid("nothing to play".into()));
         }
+        let (start_track_id, start_copy) = start_copy_of(&resolved.tracks, start_track_id, start_index);
+        let asked = start_track_id.clone();
         let (tracks, start_track_id) = self.keep_playable(resolved.tracks, start_track_id).await?;
+        // Copies of one song are kept or left out together, so the copy
+        // number still holds unless the start moved to another song.
+        let start_copy = if start_track_id == asked { start_copy } else { 0 };
         // Something else was asked to play while this was being looked up.
         if self.play_seq.load(Ordering::SeqCst) != seq {
             return Ok(());
@@ -531,6 +567,7 @@ impl PlayerHandle {
             info,
             tracks,
             start_track_id,
+            start_copy,
             shuffle,
             reply,
         })
@@ -1733,15 +1770,18 @@ impl Actor {
                 info,
                 tracks,
                 start_track_id,
+                start_copy,
                 shuffle,
                 reply,
             } => {
                 // Remember where the outgoing context was left.
                 self.queue.note_position(self.position_ms());
                 self.end_current_as_skip();
-                let start = start_track_id
-                    .as_ref()
-                    .and_then(|id| tracks.iter().position(|t| &t.id == id));
+                let start = start_track_id.as_ref().and_then(|id| {
+                    let mut at = tracks.iter().enumerate().filter(|(_, t)| &t.id == id).map(|(i, _)| i);
+                    let first = at.clone().next();
+                    at.nth(start_copy).or(first)
+                });
                 self.skip_ids.clear();
                 self.failures_in_row = 0;
                 let at = self
