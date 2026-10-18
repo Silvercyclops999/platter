@@ -141,6 +141,12 @@ pub struct Core {
     /// Change polling: what the server said last time.
     last_modified: Mutex<Option<u64>>,
     last_scan: Mutex<Option<String>>,
+    /// The extension list was read from the server in this run (not only
+    /// remembered from the last one).
+    features_read: std::sync::atomic::AtomicBool,
+    /// Called when the server answers again after being out of reach while
+    /// its extensions haven't been read yet.
+    on_back: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 fn now() -> i64 {
@@ -173,7 +179,23 @@ impl Core {
             song_cursor: Mutex::new(None),
             last_modified: Mutex::new(None),
             last_scan: Mutex::new(None),
+            features_read: std::sync::atomic::AtomicBool::new(false),
+            on_back: Mutex::new(None),
         }
+    }
+
+    /// The extension list came from the server in this run.
+    pub fn features_read(&self) -> bool {
+        self.features_read.load(Ordering::Relaxed)
+    }
+
+    pub fn mark_features_read(&self) {
+        self.features_read.store(true, Ordering::Relaxed);
+    }
+
+    /// What to do when the server answers again with its extensions unread.
+    pub fn on_back(&self, f: Arc<dyn Fn() + Send + Sync>) {
+        *self.on_back.lock() = Some(f);
     }
 
     pub fn tag(&self) -> &str {
@@ -239,6 +261,13 @@ impl Core {
         let before = std::mem::replace(&mut *self.state.lock(), s);
         if before != s && (s == ServerState::SignInAgain || before == ServerState::SignInAgain) {
             self.changed();
+        }
+        // Out of reach at start: what it can do is asked once it answers.
+        if s == ServerState::Online && before != ServerState::Online && !self.features_read() {
+            let f = self.on_back.lock().clone();
+            if let Some(f) = f {
+                f();
+            }
         }
     }
 

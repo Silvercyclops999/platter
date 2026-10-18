@@ -534,6 +534,49 @@ async fn a_new_address_that_is_another_server_is_refused() {
 }
 
 #[tokio::test]
+async fn a_server_out_of_reach_at_start_is_asked_what_it_can_do_once_it_answers() {
+    let s = subsonic(Some(all_ext()), true).await;
+    let d = tempfile::tempdir().unwrap();
+    let store = Arc::new(MemoryStore::new());
+    let tag = tag_of(&s);
+    {
+        let (os, backends) = manager(d.path(), store.clone());
+        os.sign_in(&s.uri(), None, Some(KEY.into()), None).await.unwrap();
+        let r = backends.records().get(&tag).cloned().unwrap();
+        assert_eq!(r.open_subsonic, Some(true));
+        assert!(r.extensions.iter().any(|e| e == ext::LYRICS), "kept for the next start");
+    }
+    // The next start remembers them before asking.
+    let (os, _) = manager(d.path(), store.clone());
+    os.restore();
+    assert!(os.core(&tag).unwrap().caps().has(Caps::LYRICS));
+
+    // A start while it's out of reach: the first ping fails, the next works.
+    let d2 = tempfile::tempdir().unwrap();
+    let (os, backends) = manager(d2.path(), store.clone());
+    backends
+        .edit_records(|f| {
+            f.upsert(crate::backend::ServerRecord {
+                url: Some(s.uri()),
+                ..crate::backend::ServerRecord::new(&tag, BackendKind::Subsonic, "Navidrome")
+            })
+        })
+        .unwrap();
+    Mock::given(path("/rest/ping")).respond_with(ResponseTemplate::new(503)).up_to_n_times(1).with_priority(1).mount(&s).await;
+    os.restore();
+    let core = os.core(&tag).unwrap();
+    for _ in 0..200 {
+        if core.features_read() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(core.features_read(), "asked again once it answered");
+    assert!(core.caps().has(Caps::LYRICS));
+    assert_eq!(backends.records().get(&tag).unwrap().open_subsonic, Some(true));
+}
+
+#[tokio::test]
 async fn a_revoked_sign_in_asks_to_sign_in_again() {
     let s = MockServer::start().await;
     Mock::given(any()).respond_with(failed(44, "Invalid API key")).mount(&s).await;

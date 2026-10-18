@@ -57,11 +57,29 @@ pub struct ServerRecord {
     /// address.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub product: Option<String>,
+    /// What the server said it can do when last asked (a Subsonic server:
+    /// whether it's an OpenSubsonic server, and its extensions), so a start
+    /// while it's out of reach isn't left with the plain feature set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_subsonic: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extensions: Vec<String>,
 }
 
 impl ServerRecord {
     pub fn new(tag: &str, kind: BackendKind, name: &str) -> Self {
-        Self { tag: tag.into(), kind, name: name.into(), url: None, user: None, user_id: None, libraries: None, product: None }
+        Self {
+            tag: tag.into(),
+            kind,
+            name: name.into(),
+            url: None,
+            user: None,
+            user_id: None,
+            libraries: None,
+            product: None,
+            open_subsonic: None,
+            extensions: Vec::new(),
+        }
     }
 }
 
@@ -179,6 +197,8 @@ mod tests {
             user_id: Some("u1".into()),
             libraries: None,
             product: None,
+            open_subsonic: None,
+            extensions: Vec::new(),
         };
         assert!(f.upsert(jf.clone()));
         assert_eq!(f.primary.as_deref(), Some(crate::sid::tag("m1").as_str()), "the first added");

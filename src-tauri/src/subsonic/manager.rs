@@ -161,6 +161,15 @@ impl Subsonic {
         core.set_offline_switch(self.inner.offline.clone());
         let b = self.inner.backends.clone();
         core.on_change(Arc::new(move || b.changed()));
+        let (me, weak) = (self.clone(), Arc::downgrade(&core));
+        core.on_back(Arc::new(move || {
+            let (me, weak) = (me.clone(), weak.clone());
+            spawn(Box::pin(async move {
+                if let Some(core) = weak.upgrade() {
+                    me.read_features(&core).await;
+                }
+            }));
+        }));
         self.inner.cores.lock().insert(tag.to_string(), core.clone());
         self.inner.backends.add(tag, Arc::new(SubsonicServer::new(core.clone())));
         Ok(core)
@@ -180,6 +189,10 @@ impl Subsonic {
                 }
             };
             core.set_include(r.libraries.clone());
+            // What it could do last time, until it's asked again.
+            if let Some(open) = r.open_subsonic {
+                core.set_features(Features::new(open, r.extensions.clone()));
+            }
             let stored = self.inner.store.get(&key_account(&r.tag)).ok().flatten();
             let secret = stored.as_ref().and_then(|t| Secret::from_stored(t, r.user.as_deref()));
             if let (Some(secret), Ok(c)) = (secret, self.unsigned(&url)) {
@@ -195,18 +208,8 @@ impl Subsonic {
         let me = self.clone();
         let c2 = core.clone();
         spawn(Box::pin(async move {
-            if c2.features() == Features::default()
-                && let Ok(c) = c2.client()
-            {
-                let open = c.ping().await.ok().and_then(|s| s.open_subsonic).unwrap_or(false);
-                let names = c.extensions().await.into_iter().map(|e| e.name);
-                c2.set_features(Features::new(open, names));
-                // The form posts need the extension list.
-                if c2.features().has(ext::FORM_POST)
-                    && let (Some(name), Ok(c)) = (c2.username(), c2.client())
-                {
-                    c2.sign_in(c, &name, c2.user().unwrap_or_default());
-                }
+            if !c2.features_read() {
+                me.read_features(&c2).await;
             }
             c2.check().await;
             if c2.load_views().await.is_ok() {
@@ -222,6 +225,37 @@ impl Subsonic {
             }
             spawn(Box::pin(poll_loop(core, db, self.inner.poll_minutes.clone(), self.inner.offline.clone(), rx)));
         }
+    }
+
+    /// Ask the server what it can do (its OpenSubsonic extensions) and keep
+    /// the answer for the next start. False when it didn't answer; it's
+    /// asked again once it does.
+    pub async fn read_features(&self, core: &Arc<Core>) -> bool {
+        let Ok(c) = core.client() else { return false };
+        let Ok(status) = c.ping().await else { return false };
+        let open = status.open_subsonic.unwrap_or(false);
+        let names: Vec<String> = c.extensions().await.into_iter().map(|e| e.name).collect();
+        core.mark_features_read();
+        core.set_features(Features::new(open, names.clone()));
+        // The form posts need the extension list.
+        if core.features().has(ext::FORM_POST)
+            && let (Some(name), Ok(c)) = (core.username(), core.client())
+        {
+            core.sign_in(c, &name, core.user().unwrap_or_default());
+        }
+        let tag = core.tag().to_string();
+        let saved = self.inner.backends.edit_records(|f| {
+            if let Some(mut r) = f.get(&tag).cloned() {
+                r.open_subsonic = Some(open);
+                r.extensions = names.clone();
+                r.extensions.sort();
+                f.upsert(r);
+            }
+        });
+        if let Err(e) = saved {
+            tracing::debug!("server features not kept: {}", e.kind());
+        }
+        true
     }
 
     /// Sync the libraries again with the current list.
@@ -317,10 +351,14 @@ impl Subsonic {
         let name = server_name(status.kind.as_deref(), c.base());
         let existing = self.inner.backends.records().get(&tag).cloned();
         let moved = existing.as_ref().is_some_and(|r| r.url.as_deref() != Some(c.base()));
+        let mut extensions: Vec<String> = features.names.iter().cloned().collect();
+        extensions.sort();
         let record = ServerRecord {
             url: Some(c.base().to_string()),
             user: (!username.is_empty()).then(|| username.clone()),
             user_id: None,
+            open_subsonic: Some(features.open),
+            extensions,
             product: status.kind.clone().or(existing.as_ref().and_then(|r| r.product.clone())),
             libraries: existing.and_then(|r| r.libraries),
             ..ServerRecord::new(&tag, BackendKind::Subsonic, &name)
@@ -331,6 +369,7 @@ impl Subsonic {
         }
         let core = self.core_for(&tag, &name, c.base())?;
         core.set_include(record.libraries.clone());
+        core.mark_features_read();
         core.set_features(features);
         core.sign_in(c.signed_in(secret), &username, account);
         let _ = core.load_views().await;
@@ -371,10 +410,14 @@ impl Subsonic {
         self.same_server_as(&record, status.kind.as_deref(), &signed).await?;
         let base = c.base().to_string();
         let product = status.kind.clone().or(record.product.clone());
+        let mut extensions: Vec<String> = features.names.iter().cloned().collect();
+        extensions.sort();
         self.inner.backends.edit_records(|f| {
             if let Some(mut r) = f.get(tag).cloned() {
                 r.url = Some(base.clone());
                 r.product = product.clone();
+                r.open_subsonic = Some(features.open);
+                r.extensions = extensions.clone();
                 f.upsert(r);
             }
         })?;
@@ -383,6 +426,7 @@ impl Subsonic {
         self.forget_core(tag);
         let core = self.core_for(tag, &record.name, &base)?;
         core.set_include(record.libraries.clone());
+        core.mark_features_read();
         core.set_features(features);
         core.sign_in(c.signed_in(secret), &username, account);
         let _ = core.load_views().await;
