@@ -135,7 +135,8 @@ function SyncedLyrics({
   // Scrolling by hand stops following; the view stays put until Sync.
   const pause = () => setFollowing(false);
   const onKey = (e: KeyboardEvent) => {
-    if (e.target === scroller.current && SCROLL_KEYS.has(e.key)) pause();
+    // From the scroller or a line in it: arrows and page keys scroll by hand.
+    if (e.target instanceof Node && scroller.current?.contains(e.target) && SCROLL_KEYS.has(e.key)) pause();
   };
 
   return (
@@ -169,12 +170,15 @@ function SyncedLyrics({
                   aria-label={l.text || "Instrumental"}
                   aria-pressed={picking && l.text ? picked.includes(i) : undefined}
                   disabled={picking && !l.text}
-                  onClick={() => {
+                  onClick={(e) => {
                     if (picking) return useLyricPick.getState().toggle(i);
                     if (onTap?.(l)) return;
                     jump(l.startMs);
                     resume();
                     void player.seek(l.startMs);
+                    // After a mouse click, focus goes back to the lyrics so
+                    // Space pauses instead of seeking to the line again.
+                    if (e.detail > 0) scroller.current?.focus({ preventScroll: true });
                   }}
                 >
                   {l.text ? (

@@ -239,6 +239,20 @@ describe("plain and missing lyrics", () => {
     expect(screen.queryByRole("button", { name: /^Sync/ })).toBeNull();
   });
 
+  it("a clicked line hands focus back so Space pauses, and arrows on a line stop following", async () => {
+    at(words, 0);
+    vi.spyOn(backend, "playSeek").mockResolvedValue(undefined);
+    render(<LyricsPane />);
+    const view = await screen.findByLabelText("Lyrics", { selector: ".lyrics__scroll" });
+    const line = view.querySelectorAll<HTMLButtonElement>("button.lyrics__line")[2];
+    line.focus();
+    fireEvent.click(line, { detail: 1 });
+    expect(document.activeElement).toBe(view);
+    line.focus();
+    fireEvent.keyDown(line, { key: "ArrowDown" });
+    expect(await screen.findByRole("button", { name: /^Sync/ })).toBeInTheDocument();
+  });
+
   it("synced lyrics have no unsynced note", async () => {
     at(words, 0);
     render(<LyricsPane />);
