@@ -159,6 +159,19 @@ pub enum ExplicitContent {
     Filtered,
 }
 
+/// "Share unreleased music": the rule for demos, leaks and other unreleased
+/// songs leaving this computer. Choosing it in Settings sets each feature's
+/// own switch (those stay the exceptions); stored so the choice shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UnreleasedSharing {
+    Never,
+    /// Platter asks where it can; otherwise each feature's own choice.
+    #[default]
+    Ask,
+    Always,
+}
+
 /// What plays when the queue runs out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -538,6 +551,8 @@ pub struct Settings {
     /// Offer "Let them listen from my server" in a session you host, to
     /// someone who can't hear the song.
     pub share_offer_server: bool,
+    /// "Share unreleased music": Never, Ask each time (the default) or Always.
+    pub unreleased_sharing: UnreleasedSharing,
     /// "Libraries I share by default": section ids on your server, music
     /// libraries only. None chosen at first.
     pub share_default_libraries: Vec<String>,
@@ -975,6 +990,7 @@ impl Default for Settings {
             blends: true,
             share_unreleased: false,
             share_offer_server: true,
+            unreleased_sharing: UnreleasedSharing::Ask,
             share_default_libraries: Vec::new(),
             share_hide_unreleased: true,
             share_allow_downloads: false,
@@ -1170,6 +1186,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "blends",
     "shareUnreleased",
     "shareOfferServer",
+    "unreleasedSharing",
     "shareDefaultLibraries",
     "shareHideUnreleased",
     "shareAllowDownloads",
@@ -1485,6 +1502,7 @@ pub struct SettingsPatch {
     pub blends: Option<bool>,
     pub share_unreleased: Option<bool>,
     pub share_offer_server: Option<bool>,
+    pub unreleased_sharing: Option<UnreleasedSharing>,
     pub share_default_libraries: Option<Vec<String>>,
     pub share_hide_unreleased: Option<bool>,
     pub share_allow_downloads: Option<bool>,
@@ -1926,6 +1944,7 @@ impl Settings {
         set(&mut self.blends, p.blends);
         set(&mut self.share_unreleased, p.share_unreleased);
         set(&mut self.share_offer_server, p.share_offer_server);
+        set(&mut self.unreleased_sharing, p.unreleased_sharing);
         set(&mut self.share_hide_unreleased, p.share_hide_unreleased);
         set(&mut self.share_allow_downloads, p.share_allow_downloads);
         set(&mut self.share_accept_invites, p.share_accept_invites);
@@ -2285,7 +2304,7 @@ pub fn try_load(db: &DbHandle) -> AppResult<Settings> {
 /// because they didn't read (None when everything read).
 fn parse_stored(raw: &str) -> (Settings, Option<String>) {
     let v = match serde_json::from_str::<serde_json::Value>(raw) {
-        Ok(v) => migrate_names(v),
+        Ok(v) => migrate_unreleased(migrate_names(v)),
         Err(e) => return (Settings::default(), Some(format!("(not JSON: {e})"))),
     };
     if let Ok(s) = serde_json::from_value::<Settings>(v.clone()) {
@@ -2321,6 +2340,44 @@ pub fn migrate_names(mut v: serde_json::Value) -> serde_json::Value {
             }
         }
     }
+    v
+}
+
+/// Each feature's own "unreleased" switch, and whether on means it shares.
+const UNRELEASED_SWITCHES: &[(&str, bool)] = &[
+    ("discordShowUnreleased", true),
+    ("discordUnreleasedArt", true),
+    ("mixUnreleased", true),
+    ("scrobbleUnreleased", true),
+    ("listenHideUnreleased", false),
+    ("shareUnreleased", true),
+    ("shareTranscriptionsUnreleased", true),
+];
+
+/// Settings saved before "Share unreleased music" get the rule their own
+/// switches already make: Always when every one shares, Never when none
+/// does, otherwise Ask each time. The switches themselves stay as they are.
+pub fn migrate_unreleased(mut v: serde_json::Value) -> serde_json::Value {
+    let Some(o) = v.as_object_mut() else { return v };
+    if o.contains_key("unreleasedSharing") {
+        return v;
+    }
+    let defaults = serde_json::to_value(Settings::default()).unwrap_or_default();
+    let shares: Vec<bool> = UNRELEASED_SWITCHES
+        .iter()
+        .map(|(k, on_shares)| {
+            let on = o.get(*k).or_else(|| defaults.get(*k)).and_then(serde_json::Value::as_bool).unwrap_or(false);
+            on == *on_shares
+        })
+        .collect();
+    let rule = if shares.iter().all(|x| *x) {
+        "always"
+    } else if shares.iter().all(|x| !*x) {
+        "never"
+    } else {
+        "ask"
+    };
+    o.insert("unreleasedSharing".to_owned(), serde_json::Value::from(rule));
     v
 }
 
@@ -3733,6 +3790,36 @@ mod tests {
             serde_json::from_str(r#"{"statsPage":false,"statsStrip":false,"monthlyStats":false,"statsCompare":true}"#).unwrap();
         s.apply(&p).unwrap();
         assert!(!s.stats_page && !s.stats_strip && !s.monthly_stats && s.stats_compare);
+    }
+
+    #[test]
+    fn unreleased_rule_starts_from_the_switches_already_saved() {
+        assert_eq!(Settings::default().unreleased_sharing, UnreleasedSharing::Ask);
+        assert!(SYNCED_SETTINGS.contains(&"unreleasedSharing"));
+        let (db, _d) = db();
+        // Every switch shares: Always.
+        let all = r#"{"discordShowUnreleased":true,"discordUnreleasedArt":true,"mixUnreleased":true,"scrobbleUnreleased":true,"listenHideUnreleased":false,"shareUnreleased":true,"shareTranscriptionsUnreleased":true}"#;
+        db.write(|c| kv_set(c, KEY, all)).unwrap();
+        let s = load(&db);
+        assert_eq!(s.unreleased_sharing, UnreleasedSharing::Always);
+        assert!(s.scrobble_unreleased && s.share_unreleased, "the switches stay as they were");
+        // None shares: Never.
+        let none = r#"{"discordShowUnreleased":false,"discordUnreleasedArt":false,"mixUnreleased":false,"listenHideUnreleased":true}"#;
+        db.write(|c| kv_set(c, KEY, none)).unwrap();
+        let s = load(&db);
+        assert_eq!(s.unreleased_sharing, UnreleasedSharing::Never);
+        assert!(!s.mix_unreleased && s.listen_hide_unreleased);
+        // A mix (the defaults are one): Ask each time.
+        db.write(|c| kv_set(c, KEY, r#"{"theme":"light"}"#)).unwrap();
+        assert_eq!(load(&db).unreleased_sharing, UnreleasedSharing::Ask);
+        // A rule already saved is kept.
+        db.write(|c| kv_set(c, KEY, r#"{"unreleasedSharing":"never","mixUnreleased":true}"#)).unwrap();
+        let s = load(&db);
+        assert_eq!(s.unreleased_sharing, UnreleasedSharing::Never);
+        assert!(s.mix_unreleased);
+        let p: SettingsPatch = serde_json::from_str(r#"{"unreleasedSharing":"always"}"#).unwrap();
+        assert_eq!(p.unreleased_sharing, Some(UnreleasedSharing::Always));
+        assert!(serde_json::from_str::<SettingsPatch>(r#"{"unreleasedSharing":"sometimes"}"#).is_err());
     }
 
     #[test]

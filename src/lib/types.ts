@@ -1096,6 +1096,8 @@ export interface Settings {
   shareUnreleased: boolean;
   /** Offer "Let them listen from my server" to a guest who can't hear the song (host only). */
   shareOfferServer: boolean;
+  /** "Share unreleased music": the rule; choosing it sets each feature's own unreleased switch. */
+  unreleasedSharing: UnreleasedSharing;
   /** "Libraries I share by default": section ids on your server, music libraries only. None chosen at first. */
   shareDefaultLibraries: string[];
   /** "Hide my unreleased music from people I share with" (a Plex label the share leaves out; needs Plex Pass). */
@@ -1491,6 +1493,9 @@ export interface SettingsImportReport {
   skipped: string[];
 }
 
+/** "Share unreleased music": Never, Ask each time or Always. */
+export type UnreleasedSharing = "never" | "ask" | "always";
+
 export const DEFAULT_SETTINGS: Settings = {
   privateSession: false,
   reportPlays: true,
@@ -1638,6 +1643,7 @@ export const DEFAULT_SETTINGS: Settings = {
   blends: true,
   shareUnreleased: false,
   shareOfferServer: true,
+  unreleasedSharing: "ask",
   shareDefaultLibraries: [],
   shareHideUnreleased: true,
   shareAllowDownloads: false,

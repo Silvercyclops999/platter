@@ -3573,6 +3573,7 @@ The rest of the fields, with their defaults:
 | `listenRelay` | string, `""` | The listen along relay, an ntfy server URL; empty is ntfy.sh. A URL of your own goes in your invites. |
 | `listenHideUnreleased` | bool, false | In a session you host, unreleased songs go to guests without their title and artist. Synced. |
 | `shareOfferServer` | bool, true | Offer "Let them listen from my server" to a guest who can't hear the song (host only). Synced. |
+| `unreleasedSharing` | `never`, `ask` or `always`, `ask` | Share unreleased music. Choosing it in Settings sets the unreleased switches for Discord, mixes, scrobbling, listening sessions, shared playlists and Blends, and public transcriptions, which stay as exceptions. Settings saved before it get the rule their switches make (all share: `always`, none: `never`, else `ask`). Synced. |
 | `shareDefaultLibraries` | string[], [] | Libraries I share by default: section ids on your server, music only. None until picked. Synced. |
 | `shareHideUnreleased` | bool, true | Hide my unreleased music from people I share with (a Plex label the share leaves out; needs Plex Pass). Synced. |
 | `shareAllowDownloads` | bool, false | Allow downloads for people I share with. Synced. |
