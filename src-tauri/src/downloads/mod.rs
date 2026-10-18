@@ -565,9 +565,15 @@ impl Downloads {
                     },
                     // The library's list wins; the page's own list when it
                     // isn't there yet (a playlist not synced).
+                    // Half read (a resync under way): the page's list, else
+                    // what's already downloaded stays as it is.
                     (_, ids) => match store::tracks_of_library_item(c, &k, liked_min)? {
-                        Some(t) => t,
-                        None => ids.ok_or_else(|| AppError::NotFound("That isn't in your library.".into()))?,
+                        Some(t) if !t.is_empty() && store::library_list_complete(c, &k)? => t,
+                        found => match ids {
+                            Some(ids) => ids,
+                            None if store::has_item(c, &k)? => store::item_tracks(c, &k)?,
+                            None => found.ok_or_else(|| AppError::NotFound("That isn't in your library.".into()))?,
+                        },
                     },
                 };
                 let tx = c.transaction()?;
@@ -671,7 +677,11 @@ impl Downloads {
         let used = match self.in_use() {
             Ok(u) => u,
             Err(e) => {
-                tracing::warn!("downloads: not deleting, the library can't be read: {e}");
+                // Not deleted now, not forgotten either: the retry checks
+                // again once the library can be read.
+                tracing::warn!("downloads: not deleting yet, the library can't be read: {e}");
+                let names = gone.iter().filter_map(|g| g.file.clone()).filter(|n| is_plain_name(n)).collect();
+                self.queue_pending(&self.dir(), names);
                 return;
             }
         };

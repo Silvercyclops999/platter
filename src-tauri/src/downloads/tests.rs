@@ -1491,3 +1491,19 @@ async fn a_folder_that_cant_be_saved_moves_the_files_back() {
     assert_eq!(saved.lock().clone(), Some(to.to_string_lossy().into_owned()));
     assert!(to.join("a1.flac").is_file());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn adding_again_while_the_library_is_half_read_keeps_every_downloaded_song() {
+    let r = rig().await;
+    let k = key(ItemKind::Album, "a");
+    r.d.add(k.clone(), "First".into(), None).await.unwrap();
+    drain(&r.d).await;
+    assert!(r.dir.join("a1.flac").exists() && r.dir.join("a2.flac").exists());
+    // A resync under way: the album says two songs, one isn't in the cache yet.
+    r.db.write(|c| Ok(c.execute("UPDATE albums SET track_count = 2 WHERE id = 'a'", [])?)).unwrap();
+    r.db.write(|c| Ok(c.execute("DELETE FROM tracks WHERE id = 'a2'", [])?)).unwrap();
+    r.d.add(k.clone(), "First".into(), None).await.unwrap();
+    let held = r.db.read(|c| store::item_tracks(c, &k)).unwrap();
+    assert_eq!(held, ["a1", "a2"]);
+    assert!(r.dir.join("a1.flac").exists() && r.dir.join("a2.flac").exists());
+}
