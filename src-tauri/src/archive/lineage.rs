@@ -58,6 +58,31 @@ fn has_word(hay: &str, words: &[&str]) -> bool {
         .any(|w| words.contains(&w))
 }
 
+/// The version notes of a title: what's in brackets and what follows " - ".
+fn version_notes(title: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0usize;
+    for ch in title.chars() {
+        match ch {
+            '(' | '[' => {
+                depth += 1;
+                out.push(' ');
+            }
+            ')' | ']' => {
+                depth = depth.saturating_sub(1);
+                out.push(' ');
+            }
+            _ if depth > 0 => out.push(ch),
+            _ => {}
+        }
+    }
+    if let Some((_, after)) = title.split_once(" - ") {
+        out.push(' ');
+        out.push_str(after);
+    }
+    out
+}
+
 /// The stage of a version: its ARCHIVE_VERSION first, then words in its
 /// title, album or edition, then its status.
 pub fn stage_of(v: &VersionItem, album_live: bool) -> Stage {
@@ -75,7 +100,10 @@ pub fn stage_of(v: &VersionItem, album_live: bool) -> Stage {
         return s;
     }
     let text = format!("{} {} {}", v.track.title, v.track.album_title, v.edition.as_deref().unwrap_or(""));
-    if album_live || has_word(&text, &["live"]) {
+    // "Live" counts as a version note ("(Live)", "[Live at ...]", "- Live")
+    // or the edition, never as a word of the name ("Live Forever").
+    let live_note = format!("{} {}", version_notes(&v.track.title), v.edition.as_deref().unwrap_or(""));
+    if album_live || has_word(&live_note, &["live"]) {
         return Stage::Live;
     }
     if has_word(&text, &["remaster", "remastered"]) {

@@ -795,3 +795,21 @@ fn same_name_songs_with_different_featured_artists_are_different_songs() {
     let g = group(&linked);
     assert_eq!(g[0], g[1]);
 }
+
+#[test]
+fn live_is_a_version_note_not_a_word_of_the_name() {
+    use super::lineage::{Stage, lineage_of};
+    let (_d, c) = db();
+    album(&c, "rel", "Artist", "Live Through Glass", true, Some("album"), &[], Some(2019));
+    song(&c, "r", "rel", "Live Through Glass", "Artist", "Live Forever", 214_000, None, 1);
+    album(&c, "bt", "Artist", "Bootleg Tapes", true, Some("album"), &[], Some(2021));
+    song(&c, "l", "bt", "Bootleg Tapes", "Artist", "Live Forever (Live at Home)", 252_000, None, 1);
+    album(&c, "bs", "Artist", "B-Sides", true, Some("album"), &[], Some(2022));
+    song(&c, "x", "bs", "B-Sides", "Artist", "Live Forever - Live", 250_000, None, 1);
+    refresh(&c);
+    let l = lineage_of(&c, "r", false).unwrap();
+    let stage = |id: &str| l.nodes.iter().find(|n| n.item.track.id == id).map(|n| n.stage);
+    assert_eq!(stage("r"), Some(Stage::Release), "\"Live\" in the name and the album title isn't a live version");
+    assert_eq!(stage("l"), Some(Stage::Live));
+    assert_eq!(stage("x"), Some(Stage::Live));
+}
