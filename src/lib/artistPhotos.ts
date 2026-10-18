@@ -32,7 +32,9 @@ function ask(key: string, look: () => Promise<CataloguePhoto>): Promise<Catalogu
       look()
         .then(
           (p) => {
-            known.set(key, p);
+            // Only real photos are kept: an empty answer (offline, a
+            // source down) is asked again next time.
+            if (p.photo) known.set(key, p);
             resolve(p);
           },
           () => resolve({ photo: null, credit: null }),
@@ -72,17 +74,19 @@ export function useNearView(ref: RefObject<HTMLElement | null>, enabled = true):
 export function useArtistPhoto(ref: RefObject<HTMLElement | null>, mbid: string | null | undefined, name: string, given: string | null | undefined): CataloguePhoto {
   const want = !given && !!mbid;
   const near = useNearView(ref, want);
-  const [found, setFound] = useState<CataloguePhoto | null>(() => (mbid ? (known.get(mbid) ?? null) : null));
+  // Kept with the artist it was found for, so a reused card never shows the last artist's photo.
+  const [found, setFound] = useState<{ key: string; p: CataloguePhoto } | null>(null);
   useEffect(() => {
     if (!want || !near || !mbid) return;
     let alive = true;
-    void ask(mbid, () => backend.catalogueArtistPhoto(mbid, name)).then((p) => alive && setFound(p));
+    void ask(mbid, () => backend.catalogueArtistPhoto(mbid, name)).then((p) => alive && setFound({ key: mbid, p }));
     return () => {
       alive = false;
     };
   }, [want, near, mbid, name]);
   if (given) return { photo: given, credit: null };
-  return found ?? { photo: null, credit: null };
+  const hit = mbid ? (found?.key === mbid ? found.p : known.get(mbid)) : undefined;
+  return hit ?? { photo: null, credit: null };
 }
 
 /**
@@ -94,14 +98,16 @@ export function useFeaturedPhoto(ref: RefObject<HTMLElement | null>, id: string 
   const key = id ? `artist:${id}` : null;
   const want = !given && !!id && !!name;
   const near = useNearView(ref, want);
-  const [found, setFound] = useState<string | null>(() => (key ? (known.get(key)?.photo ?? null) : null));
+  const [found, setFound] = useState<{ key: string; photo: string | null } | null>(null);
   useEffect(() => {
-    if (!want || !near || !id) return;
+    if (!want || !near || !key || !id) return;
     let alive = true;
-    void ask(`artist:${id}`, () => backend.featuredArtistPhoto(id, name)).then((p) => alive && setFound(p.photo));
+    void ask(key, () => backend.featuredArtistPhoto(id, name)).then((p) => alive && setFound({ key, photo: p.photo }));
     return () => {
       alive = false;
     };
-  }, [want, near, id, name]);
-  return given ?? found;
+  }, [want, near, key, id, name]);
+  if (given) return given;
+  if (!key) return null;
+  return found?.key === key ? found.photo : (known.get(key)?.photo ?? null);
 }

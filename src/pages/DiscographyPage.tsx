@@ -298,7 +298,6 @@ function SaveRelease({ title, tracks }: { title: string; tracks: Track[] | null 
     <IconButton
       label={all ? `Remove ${title} from Liked Songs` : `Save ${title} to Liked Songs`}
       size="md"
-      pressed={all}
       disabled={!tracks?.length}
       icon={all ? <CircleCheck size={20} /> : <CirclePlus size={20} />}
       onClick={(e) => tracks && void setLiked(tracks, !all, { from: e.currentTarget })}

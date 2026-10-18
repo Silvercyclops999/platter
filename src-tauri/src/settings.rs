@@ -913,12 +913,6 @@ pub fn tautulli_url(u: &str) -> AppResult<String> {
     lidarr_url(u).map_err(|_| AppError::Invalid("Tautulli's address is a web address like http://192.168.x.x:8181.".into()))
 }
 
-/// Safe defaults: anything that sends data off this computer, writes to the
-/// server or opens a network port starts off, and Settings or a setup guide
-/// turns it on (`risky_features_start_off` checks the list). Kept on on
-/// purpose: reporting plays to your own Plex server (it's what a Plex player
-/// does; Private session stops it), looking for speakers on your own network
-/// (nothing about you is sent), and offers that ask before each send.
 /// A discography chip: Popular releases, a release section, or one of the
 /// user's own sections (`custom:<name>`).
 fn discography_chip(c: &str) -> AppResult<String> {
@@ -927,6 +921,12 @@ fn discography_chip(c: &str) -> AppResult<String> {
     if CHIPS.contains(&c) || custom { Ok(c.to_string()) } else { Err(AppError::Invalid("Pick one of the release types.".into())) }
 }
 
+/// Safe defaults: anything that sends data off this computer, writes to the
+/// server or opens a network port starts off, and Settings or a setup guide
+/// turns it on (`risky_features_start_off` checks the list). Kept on on
+/// purpose: reporting plays to your own Plex server (it's what a Plex player
+/// does; Private session stops it), looking for speakers on your own network
+/// (nothing about you is sent), and offers that ask before each send.
 impl Default for Settings {
     fn default() -> Self {
         Self {

@@ -429,7 +429,7 @@ export function SearchPage({ query }: { query: string }) {
         <>
           {filter === "all" && (
             <div className="sr-all">
-              {catTop ? <CatalogueTopResult artist={catTop} /> : res.top && <TopResult hit={res.top} songIds={songIds} owned={!!cat?.inLibrary.has(hitInfo(res.top)?.id ?? "")} />}
+              {catTop ? <CatalogueTopResult artist={catTop} /> : res.top && <TopResult key={hitInfo(res.top)?.id} hit={res.top} songIds={songIds} owned={!!cat?.inLibrary.has(hitInfo(res.top)?.id ?? "")} />}
               {!catTop && res.top?.kind === "track" && res.top.track && !!res.versions?.[res.top.track.id]?.length && (
                 <ul className="sr-list sr-list--top-versions" aria-label={`Other versions of ${res.top.track.title}`}>
                   <VersionsToggle
