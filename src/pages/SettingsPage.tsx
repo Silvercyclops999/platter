@@ -5,6 +5,8 @@ import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { SearchField } from "../components/SearchField";
 import { Select, type SelectOption } from "../components/Select";
+import { usePhoneForm } from "../phone/form";
+import { phoneRows } from "../phone/phoneSettings";
 import { Skeleton } from "../components/Skeleton";
 import { Switch } from "../components/Switch";
 import { useSidebarArt, useUi } from "../stores/ui";
@@ -995,6 +997,7 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
     }
     return rows;
   };
+  const isPhone = usePhoneForm((x) => x.phone);
   const rows: RowDef[] = [
     // Account
     {
@@ -2354,6 +2357,8 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       more: "What your other devices call this computer. Leave it empty to use the computer's own name. This device only.",
       control: (ids) => <ComputerNameSetting ids={ids} />,
     },
+    // On this phone (the phone layout only)
+    ...(isPhone ? phoneRows(s) : []),
     // Transitions
     {
       key: "crossfade",

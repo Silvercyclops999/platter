@@ -89,6 +89,10 @@ const SHOWN_WHEN: Record<string, string> = {
   saveQueueOnServer: "a server that keeps queues (subsonic-servers.test.tsx)",
   lidarrHeaders: "an away address for Lidarr (lidarr.test.tsx)",
   nowPlayingFeedPort: "the widget feed turned on (settings-layout.test.tsx)",
+  phoneMobileDownloads: "the phone layout (phone.test.tsx)",
+  phoneKeepRecent: "the phone layout",
+  phoneMobileQuality: "the phone layout",
+  phoneHaptics: "the phone layout (phone.test.tsx)",
 };
 
 describe("every setting", () => {

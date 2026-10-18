@@ -239,8 +239,8 @@ function ClassicShell({ children }: { children: ReactNode }) {
   );
 }
 
-/** Dialogs, menus and hosts every frame carries. */
-function ShellHosts() {
+/** Dialogs, menus and hosts every frame carries (the phone shell too). */
+export function ShellHosts() {
   return (
     <>
       <NewLookOffer />

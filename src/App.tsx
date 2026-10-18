@@ -5,6 +5,8 @@ import { installOverlayScrollbars } from "./design/scrollbars";
 import { installTheme, motionPreference } from "./stores/theme";
 import { SignInPage, ServerPickPage } from "./pages/SignInPage";
 import { AppShell } from "./shell/AppShell";
+import { PhoneShell } from "./phone/PhoneShell";
+import { checkFormWithCore, usePhoneForm } from "./phone/form";
 import { connectApp, useApp } from "./stores/app";
 import { connectFileTags } from "./stores/fileTags";
 import { connectLikes } from "./stores/likes";
@@ -71,6 +73,8 @@ function MainApp() {
   useEffect(() => connectFileTags(), []);
   useEffect(() => connectMiniplayer(), []);
   useEffect(() => connectSwitching(), []);
+  useEffect(() => void checkFormWithCore(), []);
+  const isPhone = usePhoneForm((s) => s.phone);
   const auth = useApp((s) => s.auth);
   // The window is shown once the page has drawn in the cached look, with
   // the right page (library or sign-in) when the sign-in is known in time.
@@ -103,7 +107,7 @@ function MainApp() {
   if (auth && auth.state !== "signedIn" && servers !== null && ((!auth.reauthRequired && !otherServer) || signInOpen))
     page = <SignInPage onBack={auth.reauthRequired || otherServer ? () => useUi.getState().setSignInOpen(false) : undefined} />;
   else if (auth?.needsServerPick) page = <ServerPickPage />;
-  else page = <AppShell />;
+  else page = isPhone ? <PhoneShell /> : <AppShell />;
   return (
     <>
       {page}

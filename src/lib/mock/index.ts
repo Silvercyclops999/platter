@@ -136,7 +136,7 @@ import type {
   SubsonicConfirm,
   SubsonicCreds,
 } from "../types";
-import { DEFAULT_SETTINGS } from "../types";
+import { DEFAULT_SETTINGS, PHONE_KEEP_RECENT_CHOICES } from "../types";
 import { isLosslessCodec } from "../libraryChips";
 import { FRAMES, layoutProblem, type Frame } from "../../design/themes/validate";
 import { MockCrates } from "./crates";
@@ -2895,6 +2895,9 @@ export class MockBackend implements Backend {
       if (patch.autoRequestCap !== undefined && ![1, 2, 3, 5, 10].includes(patch.autoRequestCap)) {
         throw { kind: "invalid", message: "Pick one of the daily limits offered." };
       }
+      if (patch.phoneKeepRecent !== undefined && !(PHONE_KEEP_RECENT_CHOICES as readonly number[]).includes(patch.phoneKeepRecent)) {
+        throw { kind: "invalid", message: "Keep 0, 25, 50, 100, 250 or 500 recent songs." };
+      }
       if (patch.subsonicCheckMinutes !== undefined && ![1, 5, 15, 30, 60].includes(patch.subsonicCheckMinutes)) {
         throw { kind: "invalid", message: "Pick one of the times offered." };
       }
@@ -3065,7 +3068,7 @@ export class MockBackend implements Backend {
     });
   }
   appInfo() {
-    return this.delay(() => ({ version: "0.1.0", licence: "GPL-3.0-or-later", repoUrl: "https://github.com/Silvercyclops999/platter" }));
+    return this.delay(() => ({ version: "0.1.0", licence: "GPL-3.0-or-later", repoUrl: "https://github.com/Silvercyclops999/platter", form: "desktop" as const }));
   }
   openProjectPage() {
     return this.delay(() => undefined);

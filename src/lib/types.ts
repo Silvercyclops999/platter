@@ -843,6 +843,10 @@ export interface ToastEvent {
 
 /** Streaming quality: the original file or a cap in kbps. */
 export type StreamQuality = "original" | "320" | "256" | "192" | "128";
+/** Phone streaming over mobile data: auto keeps lossless files under 1.5 Mbps, else 320 kbps. */
+export type MobileQuality = "auto" | StreamQuality;
+/** How many recently played songs a phone may keep for offline play (0 is off). */
+export const PHONE_KEEP_RECENT_CHOICES = [0, 25, 50, 100, 250, 500] as const;
 export type PopularSource = "global" | "myPlays";
 export type ReduceMotion = "system" | "on" | "off";
 
@@ -1101,6 +1105,14 @@ export interface Settings {
   downloadLiked: boolean;
   /** No network use at all; only music on this computer plays. This device only. */
   goOffline: boolean;
+  /** Phone: downloads also run over mobile data. This device only. */
+  phoneMobileDownloads: boolean;
+  /** Phone: the last N songs played stay playable offline; 0 is off. This device only. */
+  phoneKeepRecent: number;
+  /** Phone: stream quality over mobile data. This device only. */
+  phoneMobileQuality: MobileQuality;
+  /** Phone: a light tap of feedback on the player's controls. This device only. */
+  phoneHaptics: boolean;
   /** Sync to a device: what songs become on a device without its own format. Synced. */
   deviceFormat: DeviceFormat;
   /** Sync to a device: remove Platter's own files for songs no longer chosen. Synced. */
@@ -1725,6 +1737,10 @@ export const DEFAULT_SETTINGS: Settings = {
   downloadHomeOnly: true,
   downloadLiked: false,
   goOffline: false,
+  phoneMobileDownloads: false,
+  phoneKeepRecent: 50,
+  phoneMobileQuality: "auto",
+  phoneHaptics: true,
   deviceFormat: "original",
   deviceDeleteRemoved: false,
   homeMixes: true,
@@ -4032,6 +4048,8 @@ export interface AppInfo {
   version: string;
   licence: string;
   repoUrl: string;
+  /** "phone" in a phone build; absent from older builds (desktop). */
+  form?: "desktop" | "phone";
 }
 
 // ---------------------------------------------------------------- updates

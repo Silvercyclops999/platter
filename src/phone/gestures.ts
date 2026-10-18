@@ -1,0 +1,116 @@
+/**
+ * The artwork's two gestures on the phone's now playing screen: a sideways
+ * swipe skips (left for the next song, right for the previous one) and a
+ * pull down closes the player. The art follows the finger; letting go short
+ * of the distance, without a flick, snaps it back. Nothing else (no swipe up).
+ */
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+
+/** A swipe past this share of the width skips. */
+export const SKIP_FRACTION = 0.3;
+/** A pull past this share of the height closes. */
+export const CLOSE_FRACTION = 0.25;
+/** A flick at this speed (px per ms) counts however short it was. */
+export const FLICK_SPEED = 0.6;
+/** A flick still has to travel this far, so a tap never skips. */
+export const FLICK_MIN_PX = 24;
+/** The finger has to move this far before the gesture picks a direction. */
+export const AXIS_LOCK_PX = 10;
+/** Pulling up gives this much (rubber band), then stops. */
+export const UP_GIVE_PX = 24;
+
+export type Axis = "x" | "y";
+export type Outcome = "next" | "previous" | "close" | "snap";
+
+/** Which way the gesture goes, once the finger has moved far enough. */
+export function lockAxis(dx: number, dy: number): Axis | null {
+  if (Math.hypot(dx, dy) < AXIS_LOCK_PX) return null;
+  return Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+}
+
+/** What letting go does. Velocities are px per ms, positive right and down. */
+export function release(g: { axis: Axis | null; dx: number; dy: number; vx: number; vy: number; width: number; height: number }): Outcome {
+  if (g.axis === "x") {
+    const far = Math.abs(g.dx) >= g.width * SKIP_FRACTION;
+    const flick = Math.abs(g.vx) >= FLICK_SPEED && Math.abs(g.dx) >= FLICK_MIN_PX && Math.sign(g.vx) === Math.sign(g.dx);
+    if (far || flick) return g.dx < 0 ? "next" : "previous";
+    return "snap";
+  }
+  if (g.axis === "y" && g.dy > 0) {
+    const far = g.dy >= g.height * CLOSE_FRACTION;
+    const flick = g.vy >= FLICK_SPEED && g.dy >= FLICK_MIN_PX;
+    if (far || flick) return "close";
+  }
+  return "snap";
+}
+
+/** Where the art sits while the finger is down: along the locked axis only. */
+export function follow(axis: Axis | null, dx: number, dy: number): { x: number; y: number } {
+  if (axis === "x") return { x: dx, y: 0 };
+  if (axis === "y") return { x: 0, y: dy >= 0 ? dy : Math.max(-UP_GIVE_PX, dy / 3) };
+  return { x: 0, y: 0 };
+}
+
+interface Track {
+  id: number;
+  x0: number;
+  y0: number;
+  axis: Axis | null;
+  last: { x: number; y: number; t: number };
+  v: { x: number; y: number };
+}
+
+/**
+ * Pointer handlers for the artwork, and its offset while dragged. `size`
+ * gives the width (for skips) and the screen height (for the pull).
+ */
+export function useArtGestures(opts: {
+  onNext: () => void;
+  onPrevious: () => void;
+  onClose: () => void;
+  size: () => { width: number; height: number };
+}) {
+  const t = useRef<Track | null>(null);
+  const [offset, setOffset] = useState<{ x: number; y: number; dragging: boolean }>({ x: 0, y: 0, dragging: false });
+  const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+
+  const onPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+    t.current = { id: e.pointerId, x0: e.clientX, y0: e.clientY, axis: null, last: { x: e.clientX, y: e.clientY, t: now() }, v: { x: 0, y: 0 } };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+  const onPointerMove = (e: ReactPointerEvent<HTMLElement>) => {
+    const g = t.current;
+    if (!g || g.id !== e.pointerId) return;
+    const dx = e.clientX - g.x0;
+    const dy = e.clientY - g.y0;
+    g.axis ??= lockAxis(dx, dy);
+    const at = now();
+    const dt = Math.max(1, at - g.last.t);
+    g.v = { x: (e.clientX - g.last.x) / dt, y: (e.clientY - g.last.y) / dt };
+    g.last = { x: e.clientX, y: e.clientY, t: at };
+    if (g.axis) setOffset({ ...follow(g.axis, dx, dy), dragging: true });
+  };
+  const end = (e: ReactPointerEvent<HTMLElement>, cancelled: boolean) => {
+    const g = t.current;
+    if (!g || g.id !== e.pointerId) return;
+    t.current = null;
+    const { width, height } = opts.size();
+    const outcome = cancelled
+      ? "snap"
+      : release({ axis: g.axis, dx: e.clientX - g.x0, dy: e.clientY - g.y0, vx: g.v.x, vy: g.v.y, width, height });
+    setOffset({ x: 0, y: 0, dragging: false });
+    if (outcome === "next") opts.onNext();
+    else if (outcome === "previous") opts.onPrevious();
+    else if (outcome === "close") opts.onClose();
+  };
+  return {
+    offset,
+    handlers: {
+      onPointerDown,
+      onPointerMove,
+      onPointerUp: (e: ReactPointerEvent<HTMLElement>) => end(e, false),
+      onPointerCancel: (e: ReactPointerEvent<HTMLElement>) => end(e, true),
+    },
+  };
+}
