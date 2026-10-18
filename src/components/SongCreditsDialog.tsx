@@ -39,7 +39,7 @@ function SongCreditsDialog({ track }: { track: Track }) {
           <>
             <RoleLines groups={song!.groups} onOpen={closeSongCredits} />
             {song!.recorded && (
-              <p className="sleeve-muted">
+              <p className="sleeve-muted src-row" tabIndex={0}>
                 Recorded {formatSleeveDate(song!.recorded.value)} <SourceMarks sources={song!.recorded.sources} />
               </p>
             )}

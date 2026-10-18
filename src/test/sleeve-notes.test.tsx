@@ -115,8 +115,38 @@ describe("the Sleeve notes tab", () => {
     const credits = screen.getByRole("region", { name: "Credits" });
     expect(within(credits).getAllByText("Produced by")[0].tagName).toBe("DT");
     expect(within(credits).getByRole("heading", { name: "Song by song" })).toBeInTheDocument();
-    expect(screen.getByText(/Marks show where each fact came from/)).toBeInTheDocument();
+    expect(screen.getByText(/Point at a fact to see where it came from/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Open on MusicBrainz/ })).toBeInTheDocument();
+  });
+
+  it("keeps sources out of sight until a fact is pointed at or focused, but always reads them out", async () => {
+    const { full, notes } = await albums();
+    await openSleeveTab(full);
+    const release = await screen.findByRole("region", { name: "The release" });
+    const row = within(release).getByText("Label").closest(".sleeve-facts__row") as HTMLElement;
+    const marks = row.querySelector(".src-marks") as HTMLElement;
+    const otherRow = [...release.querySelectorAll<HTMLElement>(".sleeve-facts__row")].find((r) => r !== row)!;
+    const other = otherRow.querySelector(".src-marks") as HTMLElement;
+    // Announced whatever is shown: the words are in the accessible text.
+    expect(within(row).getByText(`From ${sourcesText(notes.label!.sources)}`)).toHaveClass("sr-only");
+    expect(row).toHaveClass("src-row");
+    expect(getComputedStyle(marks).opacity).toBe("0");
+    // Out of the flow: a long value never pushes them onto a line of their own.
+    expect(getComputedStyle(marks).position).toBe("absolute");
+    // Focus on the fact brings its marks up, and only its own.
+    const value = within(row).getByText(notes.label!.value);
+    value.focus();
+    expect(value).toHaveFocus();
+    expect(getComputedStyle(marks).opacity).toBe("1");
+    expect(getComputedStyle(other).opacity).toBe("0");
+    // A person's sources come up with focus on their name.
+    const credits = screen.getByRole("region", { name: "Credits" });
+    const producer = notes.groups.find((g) => g.role === "producer")!.people[0];
+    const name = within(credits).getAllByRole("button", { name: producer.name })[0];
+    const li = name.closest("li") as HTMLElement;
+    expect(getComputedStyle(li.querySelector(".src-marks")!).opacity).toBe("0");
+    name.focus();
+    expect(getComputedStyle(li.querySelector(".src-marks")!).opacity).toBe("1");
   });
 
   it("a name opens their credit page, listing what they're credited on by role", async () => {

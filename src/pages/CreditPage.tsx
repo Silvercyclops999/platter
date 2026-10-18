@@ -31,7 +31,7 @@ function EntryRow({ e }: { e: Entry }) {
   const a = e.album;
   const sub = [a.artistTitle, a.year, e.details.join(", ")].filter(Boolean).join(" · ");
   return (
-    <li className="credit-row">
+    <li className="credit-row src-row">
       <button type="button" className="credit-row__open" onClick={() => nav.go({ name: "album", id: a.id })}>
         <Art path={a.thumb} size={56} alt="" />
         <span className="credit-row__text">

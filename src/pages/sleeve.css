@@ -71,7 +71,42 @@
 .sleeve-note figcaption { margin-top: var(--space-2); color: var(--color-text-muted); font-size: var(--font-size-xs); }
 
 /* ---------------------------------------------------------------- source marks */
-.src-marks { display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: 1px; white-space: nowrap; }
+/* Out of sight until the fact is pointed at or focused, then a small tag
+   comes up just after it. It's out of the flow, so long values never push
+   it onto a line of its own, and the page reads calm. Screen readers hear
+   the hidden text either way. */
+.src-row { position: relative; }
+.src-row:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; border-radius: 2px; }
+.src-marks {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  margin-top: -11px;
+  z-index: 1;
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 4px;
+  background: var(--color-bg-overlay);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22), 0 0 0 1px color-mix(in srgb, var(--color-ink) 8%, transparent);
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateX(-3px);
+  pointer-events: none;
+  transition:
+    opacity var(--motion-fast, 120ms) ease,
+    transform var(--motion-fast, 120ms) ease;
+}
+/* Each fact is as wide as its text, keeping room at the end for the tag. */
+.sleeve-facts__row dd { position: relative; justify-self: start; max-width: calc(100% - 96px); }
+.sleeve-roles__people li,
+.sleeve-song__line,
+.sleeve-editions li,
+.sleeve-note figcaption,
+.song-credits__body .src-row { width: fit-content; max-width: calc(100% - 96px); }
+.src-row:is(:hover, :focus-within) > .src-marks,
+.src-row:is(:hover, :focus-within) > dd > .src-marks { opacity: 1; transform: none; }
+:root[data-reduced-motion="true"] .src-marks { transition: opacity var(--motion-fast, 120ms) ease; transform: none; }
 .src-mark {
   display: inline-block;
   padding: 0 5px;
@@ -106,7 +141,7 @@
 .sleeve-song__role { color: var(--color-text-muted); }
 
 .sleeve-legend { margin: 0; color: var(--color-text-muted); font-size: var(--font-size-xs); line-height: 20px; }
-.sleeve-legend .src-mark { margin: 0 2px; }
+.sleeve-legend .src-mark { margin: 0 2px; opacity: 0.85; }
 .sleeve-links { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .sleeve-links:empty { display: none; }
 .sleeve-links .btn svg { margin-right: 4px; }
@@ -178,7 +213,8 @@
 .credit-row__title { color: var(--color-text-primary); font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); }
 .credit-row__sub { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 .credit-row__songs { color: var(--color-text-muted); font-size: var(--font-size-sm); }
-.credit-row .src-marks { margin-left: auto; }
+.credit-row .src-marks { left: auto; right: var(--space-2); margin-top: 0; transform: translateY(-50%); }
+.credit-row:is(:hover, :focus-within) > .src-marks { transform: translateY(-50%); }
 
 /* ---------------------------------------------------------------- Platter's own looks */
 /* The release side of the sleeve: a raised panel with the engraved cut

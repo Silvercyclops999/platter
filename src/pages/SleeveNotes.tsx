@@ -1,8 +1,8 @@
 /**
  * The album page's Sleeve notes tab: the release's facts on the left like
- * the back of a sleeve, the credits on the right, then song by song. Every
- * fact carries small marks for where it came from; people open their
- * credit page.
+ * the back of a sleeve, the credits on the right, then song by song. Where
+ * each fact came from shows on hover or focus (and is always read out);
+ * people open their credit page.
  */
 import { ExternalLink } from "lucide-react";
 import { Fragment } from "react";
@@ -19,12 +19,16 @@ import "./sleeve.css";
 /** Opens Settings where a row is. */
 const openSetting = (row: string) => nav.go({ name: "settings", row });
 
-/** Small printed marks naming where a fact came from. */
+/**
+ * Small printed marks naming where a fact came from. They stay out of sight
+ * until the fact around them (a `.src-row`) is hovered or focused, then float
+ * over its end like a tag; screen readers always hear them.
+ */
 export function SourceMarks({ sources }: { sources: SleeveSource[] }) {
   if (!sources.length) return null;
   const text = `From ${sourcesText(sources)}`;
   return (
-    <span className="src-marks" title={text}>
+    <span className="src-marks">
       <span className="sr-only">{text}</span>
       {sources.map((s) => (
         <span key={s} className={`src-mark src-mark--${s}`} aria-hidden="true">
@@ -61,7 +65,7 @@ export function RoleLines({ groups, onOpen, marks = true }: { groups: SleeveRole
           <dd>
             <ul className="sleeve-roles__people">
               {g.people.map((p) => (
-                <li key={p.key}>
+                <li key={p.key} className="src-row">
                   <PersonLink p={p} onOpen={onOpen} />
                   {p.details.length > 0 && <span className="sleeve-person__detail">{p.details.join(", ")}</span>}
                   {marks && <SourceMarks sources={p.sources} />}
@@ -175,10 +179,12 @@ export function SleeveNotesPanel({ albumId, title }: { albumId: string; title: s
         {rows.length > 0 && (
           <dl className="sleeve-facts">
             {rows.map((r) => (
-              <div key={r.key} className="sleeve-facts__row">
+              <div key={r.key} className="sleeve-facts__row src-row">
                 <dt>{r.label}</dt>
                 <dd>
-                  <span className="sleeve-facts__value">{r.text}</span>
+                  <span className="sleeve-facts__value" tabIndex={0}>
+                    {r.text}
+                  </span>
                   <SourceMarks sources={r.fact.sources} />
                 </dd>
               </div>
@@ -188,10 +194,12 @@ export function SleeveNotesPanel({ albumId, title }: { albumId: string; title: s
         {n.studios.length > 0 && (
           <dl className="sleeve-facts sleeve-facts--studios">
             {n.studios.map((s) => (
-              <div key={`${s.role}-${s.name}`} className="sleeve-facts__row">
+              <div key={`${s.role}-${s.name}`} className="sleeve-facts__row src-row">
                 <dt>{STUDIO_LABEL[s.role] ?? s.role}</dt>
                 <dd>
-                  <span className="sleeve-facts__value">{s.name}</span>
+                  <span className="sleeve-facts__value" tabIndex={0}>
+                    {s.name}
+                  </span>
                   <SourceMarks sources={s.sources} />
                 </dd>
               </div>
@@ -201,7 +209,7 @@ export function SleeveNotesPanel({ albumId, title }: { albumId: string; title: s
         {n.editionNotes.length > 0 && (
           <ul className="sleeve-editions" aria-label="Other editions">
             {n.editionNotes.map((e) => (
-              <li key={e.value}>
+              <li key={e.value} className="src-row" tabIndex={0}>
                 {e.value} <SourceMarks sources={e.sources} />
               </li>
             ))}
@@ -210,7 +218,7 @@ export function SleeveNotesPanel({ albumId, title }: { albumId: string; title: s
         {n.notes && (
           <figure className="sleeve-note">
             <blockquote>{n.notes.value}</blockquote>
-            <figcaption>
+            <figcaption className="src-row" tabIndex={0}>
               Release notes <SourceMarks sources={n.notes.sources} />
             </figcaption>
           </figure>
@@ -238,7 +246,7 @@ export function SleeveNotesPanel({ albumId, title }: { albumId: string; title: s
                     <div className="sleeve-song__body">
                       <span className="sleeve-song__title">{t.title}</span>
                       {t.groups.map((g) => (
-                        <p key={g.role} className="sleeve-song__line">
+                        <p key={g.role} className="sleeve-song__line src-row">
                           <span className="sleeve-song__role">{ROLE_LABEL[g.role] ?? roleLabel(g.role)}</span>{" "}
                           {g.people.map((p, j) => (
                             <Fragment key={p.key}>
@@ -251,7 +259,7 @@ export function SleeveNotesPanel({ albumId, title }: { albumId: string; title: s
                         </p>
                       ))}
                       {t.recorded && (
-                        <p className="sleeve-song__line sleeve-muted">
+                        <p className="sleeve-song__line sleeve-muted src-row" tabIndex={0}>
                           Recorded {formatSleeveDate(t.recorded.value)} <SourceMarks sources={t.recorded.sources} />
                         </p>
                       )}
@@ -271,7 +279,7 @@ export function SleeveNotesPanel({ albumId, title }: { albumId: string; title: s
           </p>
         )}
         <p className="sleeve-legend">
-          Marks show where each fact came from: <span className="src-mark src-mark--tags">Tags</span> your files' tags,{" "}
+          Point at a fact to see where it came from: <span className="src-mark src-mark--tags">Tags</span> your files,{" "}
           <span className="src-mark src-mark--plex">Plex</span>, <span className="src-mark src-mark--musicbrainz">MB</span> MusicBrainz,{" "}
           <span className="src-mark src-mark--discogs">Discogs</span>.
         </p>
