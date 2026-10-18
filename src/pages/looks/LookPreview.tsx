@@ -9,7 +9,8 @@
  * track columns can be dragged into a new order right in the picture.
  */
 import { Clock3, Heart, ListMusic, Maximize2, Mic2, MonitorSpeaker, PictureInPicture2, Play, Repeat, Search, Shuffle, SkipBack, SkipForward, Volume2 } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
+import { memo, useEffect, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
+import { useNearView } from "../../lib/artistPhotos";
 import { lookProps, type LookParts } from "../../design/looks/apply";
 import type { HomeShelfKey, PlayerButton, Regions, SidebarSection, ThemeBase, TrackColumn } from "../../design/themes";
 import { sketchRegions } from "../../shell/frames";
@@ -664,10 +665,27 @@ export function LookPreview({ base, tokens, parts, page = "home", onReorder, lab
   );
 }
 
-/** The picture scaled to fill its frame's width (16:10). */
-export function PreviewFrame(props: LookPreviewProps) {
+/** Same picture: the cards build fresh objects on every render, so compare what they hold. */
+function samePicture(a: LookPreviewProps, b: LookPreviewProps): boolean {
+  return (
+    a.base === b.base &&
+    a.page === b.page &&
+    a.label === b.label &&
+    a.onReorder === b.onReorder &&
+    JSON.stringify(a.tokens) === JSON.stringify(b.tokens) &&
+    JSON.stringify(a.parts) === JSON.stringify(b.parts)
+  );
+}
+
+/**
+ * The picture scaled to fill its frame's width (16:10). Drawn once it comes
+ * near the view, and only again when what it shows changes: a page of
+ * previews (Settings, the picker) stays quick.
+ */
+export const PreviewFrame = memo(function PreviewFrame(props: LookPreviewProps) {
   const [scale, setScale] = useState(0.25);
   const ref = useRef<HTMLDivElement>(null);
+  const near = useNearView(ref);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -681,8 +699,8 @@ export function PreviewFrame(props: LookPreviewProps) {
   return (
     <div ref={ref} className="lp-frame">
       <div className="lp-frame__inner" style={{ transform: `scale(${scale})` }}>
-        <LookPreview {...props} />
+        {near && <LookPreview {...props} />}
       </div>
     </div>
   );
-}
+}, samePicture);
