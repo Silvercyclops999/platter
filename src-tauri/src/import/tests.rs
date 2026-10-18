@@ -80,7 +80,7 @@ fn tabs_several_artists_and_a_milliseconds_column() {
     let p = parse_csv(text, "Exported list").unwrap();
     let s = &p.playlists[0].songs[0];
     assert_eq!(p.playlists[0].name, "Exported list", "no playlist column: named after the file");
-    assert_eq!(s.artist, "The Paper Kites");
+    assert_eq!(s.artist, "The Paper Kites, Guest Singer", "kept whole: a comma can be part of one name");
     assert_eq!(s.duration_ms, Some(221_000));
     assert_eq!(s.isrc.as_deref(), Some("QZABC2100001"));
 }
@@ -575,4 +575,55 @@ fn the_sources_setting_keeps_known_sources_once() {
     s.apply(&patch).unwrap();
     assert_eq!(s.import_sources, ["streaming", "lists"]);
     assert!(crate::settings::SYNCED_SETTINGS.contains(&"importSources"));
+}
+
+#[test]
+fn file_names_with_artists_that_start_with_digits() {
+    let text = "#EXTM3U\n\
+                /music/2Pac - First Song.mp3\n\
+                /music/10cc - Second Song.flac\n\
+                /music/50 Cent - Third Song.mp3\n\
+                /music/311 - Fourth Song.mp3\n\
+                /music/01 - 21 Savage - Fifth Song.mp3\n\
+                /music/07_112 - Sixth Song.mp3\n\
+                /music/03. Seventh Song.mp3\n\
+                /music/01 - Eighth Song.mp3\n";
+    let p = parse_m3u(text, "digits");
+    assert_eq!(
+        names(&p.playlists[0].songs),
+        [
+            "2Pac - First Song",
+            "10cc - Second Song",
+            "50 Cent - Third Song",
+            "311 - Fourth Song",
+            "21 Savage - Fifth Song",
+            "112 - Sixth Song",
+        ]
+    );
+    assert_eq!(p.skipped.incomplete_rows, 2, "a track number and a title name no artist");
+}
+
+#[test]
+fn artist_names_with_commas_match_whole_and_several_artists_match_the_first() {
+    let (_d, mut c) = db();
+    album(&c, "t1", "Tyler, The Creator", "First Record", "[]");
+    song(&c, "t1", "t1", "First Record", "Tyler, The Creator", "Opening Song", 200_000);
+    album(&c, "e1", "Earth, Wind & Fire", "Second Record", "[]");
+    song(&c, "e1", "e1", "Second Record", "Earth, Wind & Fire", "Closing Song", 210_000);
+    album(&c, "k1", "The Paper Kites", "Lights Out", "[]");
+    song(&c, "k1", "k1", "Lights Out", "The Paper Kites", "Northern Lights", 221_000);
+    album(&c, "w1", "Tyler", "Other Record", "[]");
+    song(&c, "w1", "w1", "Other Record", "Tyler", "Opening Song", 200_000);
+    index::rebuild(&c).unwrap();
+    let text = "Track Name,Artist Name(s),Album Name\n\
+                Opening Song,\"Tyler, The Creator\",First Record\n\
+                Closing Song,\"Earth, Wind & Fire\",Second Record\n\
+                Northern Lights,\"The Paper Kites, Guest Singer\",Lights Out\n";
+    let p = parse_csv(text, "x").unwrap();
+    assert_eq!(p.playlists[0].songs[0].artist, "Tyler, The Creator");
+    assert_eq!(p.playlists[0].songs[1].artist, "Earth, Wind & Fire");
+    import(&mut c, "lists", p, 1_000);
+    assert_eq!(song_row(&c, "lists", "Opening Song").1, Some(tid("t1")), "the whole name, not \"Tyler\"");
+    assert_eq!(song_row(&c, "lists", "Closing Song").1, Some(tid("e1")));
+    assert_eq!(song_row(&c, "lists", "Northern Lights").1, Some(tid("k1")), "the first of several artists");
 }

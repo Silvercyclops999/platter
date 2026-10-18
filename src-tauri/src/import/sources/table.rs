@@ -270,11 +270,6 @@ pub fn parse_duration(s: &str, ms_column: bool) -> Option<u64> {
     if ms_column || v >= 10_000.0 { Some(v as u64) } else { Some((v * 1000.0) as u64) }
 }
 
-/// The first of several artists in one field ("A, B" or "A; B").
-fn first_artist(s: &str) -> &str {
-    s.split([';', ',']).next().unwrap_or(s).trim()
-}
-
 pub fn parse_csv(text: &str, file_stem: &str) -> AppResult<Parsed> {
     let delim = detect_delimiter(text);
     let mut rows = split_csv(text, delim).into_iter();
@@ -297,7 +292,9 @@ pub fn parse_csv(text: &str, file_stem: &str) -> AppResult<Parsed> {
             out.skipped.incomplete_rows += 1;
             continue;
         };
-        let artist = if cols.artist_many { first_artist(&artist).to_string() } else { artist };
+        // A column of several artists keeps the whole field: a comma can be
+        // part of one name ("Earth, Wind & Fire"). Matching tries the first
+        // of them when the whole name isn't in the library.
         let song = SongIn {
             artist,
             title,
@@ -319,6 +316,29 @@ fn artist_title(s: &str) -> Option<(String, String)> {
     let (a, t) = s.split_once(" - ")?;
     let (a, t) = (a.trim(), t.trim());
     (!a.is_empty() && !t.is_empty()).then(|| (a.to_string(), t.to_string()))
+}
+
+/// A file name's "Artist - Title", setting aside a leading track number
+/// ("01 - ", "1. ", "03_") only when an artist and a title are still left
+/// after it. Names that start with digits ("2Pac", "10cc", "50 Cent",
+/// "311 - Amber") stay whole.
+fn stem_artist_title(stem: &str) -> Option<(String, String)> {
+    let digits = stem.bytes().take_while(u8::is_ascii_digit).count();
+    if (1..=3).contains(&digits) {
+        let rest = stem[digits..].trim_start();
+        if let Some(rest) = rest.strip_prefix(['-', '.', '_']) {
+            let rest = rest.trim_start();
+            if rest.contains(" - ") {
+                return artist_title(rest);
+            }
+            // "01 - Title": a zero-padded number is a track number, not an
+            // artist, and there's no artist left.
+            if stem.starts_with('0') {
+                return None;
+            }
+        }
+    }
+    artist_title(stem)
 }
 
 pub fn parse_m3u(text: &str, file_stem: &str) -> Parsed {
@@ -351,12 +371,8 @@ pub fn parse_m3u(text: &str, file_stem: &str) -> Parsed {
         let from_path = || {
             let base = line.rsplit(['/', '\\']).next().unwrap_or(line);
             let base = percent_encoding::percent_decode_str(base).decode_utf8_lossy().into_owned();
-            let stem = base.rsplit_once('.').map_or(base.as_str(), |(s, _)| s).to_string();
-            // "01 - Artist - Title" and "01. Title" both happen; only take
-            // "Artist - Title" when there are exactly two parts after a
-            // leading track number.
-            let stem = stem.trim_start_matches(|c: char| c.is_ascii_digit()).trim_start_matches(['.', ' ', '-']).trim().to_string();
-            artist_title(&stem)
+            let stem = base.rsplit_once('.').map_or(base.as_str(), |(s, _)| s).trim().to_string();
+            stem_artist_title(&stem)
         };
         match from_label.or_else(from_path) {
             Some((artist, title)) => rows.push((

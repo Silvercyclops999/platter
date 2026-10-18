@@ -155,10 +155,27 @@ impl<'a> Matcher<'a> {
         let key = key_of(s);
         let cands = lookup(self.c, &key, Context::Single, &self.ranks)?;
         let album_known = !key.album_fold.is_empty();
-        let o = decide(&cands, album_known);
+        let mut o = decide(&cands, album_known);
+        // "A, B" may be several artists or one name with a comma in it:
+        // the whole name first, then the first of them.
+        if o.status == Status::Missing
+            && let Some(first) = first_of_several(&s.artist)
+        {
+            let one = SongIn { artist: first.to_string(), ..s.clone() };
+            let key = key_of(&one);
+            let cands = lookup(self.c, &key, Context::Single, &self.ranks)?;
+            o = decide(&cands, album_known);
+        }
         self.seen.insert(sk, o.clone());
         Ok(o)
     }
+}
+
+/// The first artist of a field naming several ("A, B", "A; B"), or None
+/// when it names one.
+pub fn first_of_several(artist: &str) -> Option<&str> {
+    let first = artist.split([';', ',']).next()?.trim();
+    (!first.is_empty() && first.len() < artist.trim().len()).then_some(first)
 }
 
 /// Whether the library has an album by this artist with this title.
