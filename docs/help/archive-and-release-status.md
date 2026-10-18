@@ -43,6 +43,10 @@ Tag songs with `ARCHIVE_ERA`, and `ARCHIVE_DATE` as `2019`, `2019-05` or `2019-0
 
 Artist pages list unreleased albums under Unreleased, and Move to section puts an album in a section of your own.
 
+## The Archive page
+
+The Archive gathers every demo and unreleased album in one place, with chips for lossless, hi-res, decade and added recently. Open it from the sections list in any layout but Classic. In your albums, the Type chip's Demos and unreleased shows the same records. See [Your library](your-library.md#filter-chips).
+
 ## How unreleased music is treated
 
 - Discord: Settings, Sharing and friends has Show unreleased music on Discord and Show unreleased cover art on Discord. Unreleased songs never get a Find this song button.

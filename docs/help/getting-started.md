@@ -24,7 +24,7 @@ You can also use a Jellyfin server, or Navidrome or another Subsonic server, wit
 
 ## Your first library sync
 
-The first time, Platter reads your whole library and keeps a copy on your computer. Progress shows at the top of the window, and you can start playing straight away. After that, Platter picks up changes on its own.
+The first time, Platter reads your whole library and keeps a copy on your computer. Progress shows at the top of the window, and you can start playing straight away. After that, Platter picks up changes on its own, and a new album on a Plex server shows up within seconds (see [New albums](your-library.md#new-albums)).
 
 If something ever looks out of date, use Settings, Library, Resync library.
 
@@ -43,7 +43,9 @@ Right after you sign in for the first time, the Get started guide walks you thro
 
 Studio, Studio Black and Sleeve are Platter's own looks. Studio is warm graphite with a brass accent, Studio Black puts it on true black for OLED screens, and Sleeve is cream paper and ink. Classic is the look Platter had before, and Classic light, Midnight, Forest and Sand are there too. Press **Make your own** to build one with a live preview.
 
-You can change it any time in Settings, Appearance, Theme. Settings, Appearance, Looks has the ready-made looks, your own and theme files. With Settings, Appearance, Follow system light or dark on, Platter switches to a theme's light or dark partner along with your computer: Studio and Studio Black pair with Sleeve, the other themes with Classic or Classic light.
+The same window picks a layout too, which decides where the player, your sections and the queue go. [Layouts](layouts.md) describes all six.
+
+You can change the look any time in Settings, Appearance, Theme. Settings, Appearance, Looks has the ready-made looks, your own and theme files. With Settings, Appearance, Follow system light or dark on, Platter switches to a theme's light or dark partner along with your computer: Studio and Studio Black pair with Sleeve, the other themes with Classic or Classic light.
 
 ## Home
 

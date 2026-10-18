@@ -103,6 +103,11 @@ describe("search", () => {
     expect(searchHelp("safety check")[0]).toMatchObject({ slug: "lidarr", anchor: "the-safety-check" });
     expect(searchHelp("graphics card").some((h) => h.slug === "lyrics-and-transcription")).toBe(true);
     expect(searchHelp("zzzz-nothing")).toEqual([]);
+    expect(searchHelp("making your own")[0]).toMatchObject({ slug: "layouts", anchor: "making-your-own" });
+    expect(searchHelp("page turn").some((h) => h.slug === "layouts")).toBe(true);
+    expect(searchHelp("remember library filters").some((h) => h.slug === "your-library" && h.anchor === "filter-chips")).toBe(true);
+    expect(searchHelp("printed sleeve").some((h) => h.slug === "your-library" && h.anchor === "albums-without-a-cover")).toBe(true);
+    expect(searchHelp("same server").some((h) => h.slug === "connecting" && h.anchor === "jellyfin-and-subsonic-servers")).toBe(true);
   });
 
   it("the main search has a Help chip, and a few help results under All", async () => {

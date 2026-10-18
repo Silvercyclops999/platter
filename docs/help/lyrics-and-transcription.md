@@ -15,6 +15,10 @@ Platter looks in this order:
 
 To show your own lyrics first, turn on Settings, Lyrics, Prefer my own lyrics over Plex's.
 
+### When there are none
+
+If a lyrics source couldn't be reached, the view says Couldn't get lyrics right now. Press **Retry**, or wait: Platter asks again when you're back online. That's different from no lyrics anywhere, and from This song is instrumental, which shows when the title says instrumental or karaoke, or LRCLIB marks the song that way.
+
 ### LRCLIB
 
 Settings, Lyrics, Lyrics from LRCLIB when Plex has none starts off. Platter sends the song's artist, title, album and length, and keeps answers for 30 days. On live versions, found lyrics show without timing unless you turn on Show borrowed timing on live versions.
@@ -23,15 +27,17 @@ Settings, Lyrics, Lyrics from LRCLIB when Plex has none starts off. Platter send
 
 With Settings, Lyrics, Check lyrics against the song on, Platter listens to a short part of the song with the speech model on this computer and skips lyrics that belong to another song. The song never leaves your computer. Until the [speech model](#the-model-download) is downloaded, lyrics show as Not checked.
 
+Lyrics show straight away while the check runs, marked Checking lyrics against the song. If they turn out to belong to another song, Platter moves to a set that matches, or says None of the lyrics found match this song.
+
 ### Timing fixes
 
-Settings, Lyrics, Fix lyrics timing automatically moves checked lyrics that run early, late or drift. To move them yourself, use the minus and plus buttons under the lyrics (or the `-` and `+` keys), or Tap to sync.
+Settings, Lyrics, Fix lyrics timing automatically moves checked lyrics that run early, late or drift. To move them yourself, use the minus and plus buttons under the lyrics (or the `-` and `+` keys), or Tap to sync. Every quick press counts. While the check is still running, the buttons wait, since it may move the timing itself, and they come back as soon as it's done (or if it gets stuck).
 
 Demos and other versions ask before using the released song's lyrics (Use anyway), unless you turn on Use released lyrics for other versions.
 
 ## Wrong lyrics?
 
-Choose Wrong lyrics? under the lyrics or in a song's menu to see every set found and what the check said. Pick another set, or choose Transcribe this song, Write or paste lyrics, or No lyrics for this song. Let Platter pick goes back to automatic.
+Choose Wrong lyrics? under the lyrics or in a song's menu to see every set found and what the check said. Pick another set, or choose Transcribe this song, Write or paste lyrics, or No lyrics for this song. Let Platter pick goes back to automatic. **Look again** asks the lyrics sources again, in case they have the song now.
 
 Your picks and timing win over everything automatic. Settings, Lyrics, Lyrics choices and timing has Reset.
 

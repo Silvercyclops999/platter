@@ -67,4 +67,14 @@ Subsonic servers can't tell Platter when their music changes, so Platter asks ev
 
 Settings, Account and servers, Keep my queue on the server saves your queue on servers that can hold one, so another app signed in to the same account can pick it up. It writes to your server, so it's off until you turn it on.
 
+### Plain http addresses
+
+An address typed without http or https tries https first. When the address is plain http and not on your home network, Platter warns that your sign-in can be read on its way to the server. For a Subsonic server you have to tick Use this http address anyway to go on. Use the server's https address if it has one.
+
+### Edit address
+
+When a Subsonic server moves (https instead of http, another port, or a proxy in front of it), press **Edit address** on it in Settings, Account and servers, Music servers and type the new address. Then type its API key or password again, because Platter never sends the saved one to a new address.
+
+Platter checks the new address is the same server, so its songs, downloads, likes and history stay. If it can't tell, it says so: tick I'm sure this is the same server and press **Save** again. Moving from https to plain http needs the http tick too.
+
 When something goes wrong, see [Troubleshooting](troubleshooting.md).
