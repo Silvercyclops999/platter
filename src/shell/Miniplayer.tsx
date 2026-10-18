@@ -48,6 +48,7 @@ import { setLiked, useIsLiked } from "../stores/likes";
 import { player, usePlayer } from "../stores/player";
 import { copyLinksAt, copyLink } from "../stores/share";
 import { updateSettings, useSettings } from "../stores/settings";
+import { toast } from "../stores/toasts";
 import { Logo } from "./Logo";
 import { useCoverColors } from "./nowPlaying";
 import "./miniplayer.css";
@@ -157,6 +158,12 @@ function VolumePop({ onLeave }: { onLeave: () => void }) {
     setLocal(null);
     void player.volumeCommit(x);
   };
+  // A drag the system took over (a gesture, the window losing the pointer) keeps where it got to.
+  const onCancel = () => {
+    if (local === null) return;
+    setLocal(null);
+    void player.volumeCommit(local);
+  };
   const onKey = (e: KeyboardEvent) => {
     const step = e.key === "ArrowUp" || e.key === "ArrowRight" ? 0.1 : e.key === "ArrowDown" || e.key === "ArrowLeft" ? -0.1 : 0;
     if (!step) return;
@@ -179,6 +186,7 @@ function VolumePop({ onLeave }: { onLeave: () => void }) {
         onPointerDown={onDown}
         onPointerMove={onMove}
         onPointerUp={onUp}
+        onPointerCancel={onCancel}
         onKeyDown={onKey}
       >
         <span className="mini-volume__fill" style={{ height: `${v * 100}%` }} />
@@ -256,7 +264,14 @@ function Controls({ track }: { track: Track }) {
   return (
     <>
       <div className="mini__row">
-        <span className="mini__mute" onPointerEnter={() => setVolumeOpen(true)}>
+        <span
+          className="mini__mute"
+          onPointerEnter={() => setVolumeOpen(true)}
+          onBlur={(e) => {
+            // Focus moving on from the button and the slider closes it.
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setVolumeOpen(false);
+          }}
+        >
           {volumeOpen && <VolumePop onLeave={() => setVolumeOpen(false)} />}
           <IconButton
             label={silent ? "Unmute" : "Mute"}
@@ -474,11 +489,13 @@ function Queue({ userCount, items }: { userCount: number; items: QueueItem[] }) 
     if (to !== null) void player.queueMove(items[from].itemId, to);
     return to;
   };
-  const remove = (i: number) => {
+  const remove = (i: number, undoable = false) => {
     const it = items[i];
     if (!it) return;
     wantFocus.current = true;
     void player.queueRemove(it.itemId);
+    // A key press can remove by accident: it can be put back.
+    if (undoable) toast.undo(`Removed ${it.track.title} from the queue`, () => void player.queueAdd([it.track.id], { index: i }));
   };
   const menu = (i: number, where: { clientX: number; clientY: number } | HTMLElement) => {
     const item = items[i];
@@ -526,7 +543,7 @@ function Queue({ userCount, items }: { userCount: number; items: QueueItem[] }) 
       void player.queueJump(items[i].itemId);
     } else if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
-      remove(i);
+      remove(i, true);
     } else if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
       e.preventDefault();
       menu(i, row);

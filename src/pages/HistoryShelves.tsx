@@ -62,11 +62,34 @@ const LOADERS = {
   timeTravel: () => backend.homeTimeTravel(),
 };
 
-/** Load one of the shelves while its setting is on and the server is there; again as the library changes. */
+/** Today's local date, as "2026-10-17". */
+function localDate(d = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** Today's local date, moving on at midnight and when the window comes back after a while. */
+function useToday(): string {
+  const [today, setToday] = useState(localDate);
+  useEffect(() => {
+    const check = () => setToday(localDate());
+    const now = new Date();
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime() - now.getTime();
+    const t = setTimeout(check, midnight + 1000);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, [today]);
+  return today;
+}
+
+/** Load one of the shelves while its setting is on and the server is there; again as the library changes and each new day. */
 function useHistory<K extends keyof typeof LOADERS>(kind: K, on: boolean): Awaited<ReturnType<(typeof LOADERS)[K]>> | null {
   type T = Awaited<ReturnType<(typeof LOADERS)[K]>>;
   const libraryVersion = useApp((s) => s.libraryVersion);
   const cachedOnly = useApp((s) => !!s.health?.cachedOnly);
+  const today = useToday();
   const [data, setData] = useState<T | null>(null);
   useEffect(() => {
     if (!on || cachedOnly) {
@@ -81,7 +104,7 @@ function useHistory<K extends keyof typeof LOADERS>(kind: K, on: boolean): Await
     return () => {
       alive = false;
     };
-  }, [kind, on, cachedOnly, libraryVersion]);
+  }, [kind, on, cachedOnly, libraryVersion, today]);
   return on && data?.shown ? data : null;
 }
 
@@ -124,7 +147,8 @@ function HistoryCard({
   title: string;
   subtitle: string;
   onPlay: () => void;
-  onOpen: () => void;
+  /** Where the title goes; without one the title is plain text (the play button plays). */
+  onOpen?: () => void;
 }) {
   return (
     <div className="card card--mix" data-testid={testId}>
@@ -142,9 +166,15 @@ function HistoryCard({
           <Play size={20} fill="currentColor" aria-hidden="true" />
         </button>
       </div>
-      <button type="button" className="card__link" onClick={onOpen} title={title}>
-        <span className="card__title truncate">{title}</span>
-      </button>
+      {onOpen ? (
+        <button type="button" className="card__link" onClick={onOpen} title={title}>
+          <span className="card__title truncate">{title}</span>
+        </button>
+      ) : (
+        <span className="card__link" title={title}>
+          <span className="card__title truncate">{title}</span>
+        </span>
+      )}
       <div className="card__subtitle mix-card__subtitle">{subtitle}</div>
     </div>
   );
@@ -204,7 +234,6 @@ export function TimeTravelShelf() {
               title={title}
               subtitle={m.kind === "year" ? "Your most played from the year you listened most." : `Your most played from the ${decadeLabel(m.year)}.`}
               onPlay={play}
-              onOpen={play}
             />
           </ShelfItem>
         );
@@ -264,10 +293,7 @@ function YearSection({ y, today }: { y: OnThisDayYear; today: string }) {
 export function OnThisDayPage() {
   const data = useOnThisDay();
   const on = useSettings((s) => s.settings?.homeOnThisDay !== false);
-  const [today] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  });
+  const today = useToday();
   const date = data?.date ?? today;
   return (
     <div className="page-pad otd-page">

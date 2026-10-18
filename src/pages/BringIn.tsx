@@ -3,7 +3,7 @@
  * settings. The waves themselves run in the core, a few albums a day, each
  * through Lidarr's usual checks.
  */
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Select, type SelectOption } from "../components/Select";
 import { Switch } from "../components/Switch";
@@ -46,17 +46,42 @@ export function whereLine(s: BringInStatus): string | null {
 export function BringInCard() {
   const [s, setS] = useState<BringInStatus | null>(null);
   const [open, setOpen] = useState(false);
+  /** Bumped by every read and every action, so only the newest answer lands. */
+  const seq = useRef(0);
   const load = useCallback(() => {
-    backend.bringInStatus().then(setS, () => setS(null));
+    const mine = ++seq.current;
+    // A read that fails keeps what's shown.
+    backend.bringInStatus().then(
+      (v) => {
+        if (mine === seq.current) setS(v);
+      },
+      () => {},
+    );
   }, []);
   useEffect(() => {
     load();
-    const t = setInterval(load, REFRESH_MS);
-    return () => clearInterval(t);
+    const t = setInterval(() => {
+      if (!document.hidden) load();
+    }, REFRESH_MS);
+    const onShow = () => {
+      if (!document.hidden) load();
+    };
+    document.addEventListener("visibilitychange", onShow);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onShow);
+    };
   }, [load]);
   if (!s || !s.on) return null;
-  const act = (p: Promise<BringInStatus>) =>
-    p.then(setS, (e) => toast.error(errText(e) || "Couldn't change Bring in my listening"));
+  const act = (p: Promise<BringInStatus>) => {
+    const mine = ++seq.current;
+    return p.then(
+      (v) => {
+        if (mine === seq.current) setS(v);
+      },
+      (e) => toast.error(errText(e) || "Couldn't change Bring in my listening"),
+    );
+  };
   return (
     <section className="bring-in" aria-label="Bring in my listening">
       <div className="bring-in__head">

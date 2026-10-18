@@ -123,14 +123,16 @@ describe("On this day", () => {
 });
 
 describe("Time travel", () => {
-  it("shows your year first, then the decades oldest first, and a card click plays", async () => {
+  it("shows your year first, then the decades oldest first, and its play button plays", async () => {
     vi.spyOn(backend, "homeTimeTravel").mockResolvedValue(TRAVEL);
     const play = vi.spyOn(player, "playTracks").mockResolvedValue(undefined);
     const user = userEvent.setup();
     render(<TimeTravelShelf />);
     const cards = await screen.findAllByTestId(/^time-travel-/, {}, SLOW);
     expect(cards.map((c) => c.dataset.testid)).toEqual(["time-travel-year:2022", "time-travel-decade:1960", "time-travel-decade:1990"]);
-    await user.click(within(cards[2]).getByRole("button", { name: "1990s" }));
+    // The title is a name, not a second play button.
+    expect(within(cards[2]).queryByRole("button", { name: "1990s" })).toBeNull();
+    await user.click(within(cards[2]).getByRole("button", { name: "Play 1990s" }));
     expect(play).toHaveBeenCalledWith(["t2", "t1"], "t2");
     await user.click(within(cards[0]).getByRole("button", { name: "Play Your year: 2022" }));
     expect(play).toHaveBeenLastCalledWith(["t3", "t2"], "t3");
