@@ -134,6 +134,16 @@ async fn attempt(ctx: &Ctx<'_>, fetch: &Fetch, part: &Path, permit: &crate::audi
     if !status.is_success() {
         return status_error(status);
     }
+    // An error message in place of the file (Subsonic answers 200 with one).
+    if crate::audio::http::api_answer(resp.headers()) {
+        use crate::audio::http::{ApiError, api_error};
+        let body = resp.bytes().await.unwrap_or_default();
+        return Attempt::Fatal(match api_error(&body) {
+            ApiError::Auth => "The server asked to sign in again.".into(),
+            ApiError::NotFound => "The file isn't on the server any more.".into(),
+            ApiError::Other(m) => m,
+        });
+    }
     let append = status == StatusCode::PARTIAL_CONTENT;
     // A partial answer must start where the file stops.
     if append && range_start(resp.headers()) != Some(have) {

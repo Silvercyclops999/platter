@@ -462,6 +462,52 @@ pub(crate) fn parse_total(h: &HeaderMap) -> Option<u64> {
     v.rsplit('/').next()?.trim().parse().ok()
 }
 
+/// An answer that is an API message, not audio: some servers (Subsonic)
+/// report errors as a 200 with a JSON or XML body, and a proxy may answer
+/// with a web page.
+pub(crate) fn api_answer(h: &HeaderMap) -> bool {
+    let ct = h.get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_ascii_lowercase();
+    ["application/json", "text/json", "application/xml", "text/xml", "text/html"].iter().any(|t| ct.starts_with(t))
+}
+
+/// What an API message in place of audio says went wrong.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ApiError {
+    /// Sign in again (Subsonic codes 40 to 44 and 50).
+    Auth,
+    /// The song isn't there (code 70).
+    NotFound,
+    /// Anything else, with the server's words when it gave some.
+    Other(String),
+}
+
+/// Reads a Subsonic error from a JSON or XML body.
+pub(crate) fn api_error(body: &[u8]) -> ApiError {
+    let text = String::from_utf8_lossy(&body[..body.len().min(64 * 1024)]);
+    let (code, message) = match serde_json::from_str::<serde_json::Value>(&text) {
+        Ok(v) => {
+            let e = &v["subsonic-response"]["error"];
+            (e["code"].as_i64(), e["message"].as_str().map(str::to_owned))
+        }
+        Err(_) => {
+            // XML: <error code="40" message="..."/>
+            let attr = |name: &str| {
+                let key = format!("{name}=\"");
+                text.find("<error").and_then(|i| {
+                    let rest = &text[i..];
+                    rest.find(&key).map(|j| rest[j + key.len()..].split('"').next().unwrap_or("").to_owned())
+                })
+            };
+            (attr("code").and_then(|c| c.parse().ok()), attr("message"))
+        }
+    };
+    match code {
+        Some(40..=44) | Some(50) => ApiError::Auth,
+        Some(70) => ApiError::NotFound,
+        _ => ApiError::Other(message.unwrap_or_else(|| "The server sent a message instead of the song.".into())),
+    }
+}
+
 fn classify(status: StatusCode) -> Option<Fatal> {
     match status.as_u16() {
         404 | 410 => Some(Fatal::NotFound),
@@ -488,7 +534,7 @@ async fn fetch_range(
         .send()
         .await
         .map_err(|e| e.without_url().to_string())?;
-    if resp.status() != StatusCode::PARTIAL_CONTENT {
+    if resp.status() != StatusCode::PARTIAL_CONTENT || api_answer(resp.headers()) {
         return Err(format!("http {}", resp.status().as_u16()));
     }
     let b = resp.bytes().await.map_err(|e| e.without_url().to_string())?;
@@ -628,6 +674,18 @@ async fn transfer(
         tracing::debug!("stream http {}", status.as_u16());
         return Stop::Failed;
     }
+    if api_answer(resp.headers()) {
+        let body = resp.bytes().await.unwrap_or_default();
+        let fatal = match api_error(&body) {
+            ApiError::Auth => Fatal::Auth("server asked to sign in".into()),
+            ApiError::NotFound => Fatal::NotFound,
+            ApiError::Other(m) => Fatal::Server(m),
+        };
+        let mut st = shared.st.lock();
+        st.fatal = Some(fatal);
+        shared.cv.notify_all();
+        return Stop::Exit;
+    }
     // A 200 means the server ignored the range: skip what we have.
     let mut skip = if status == StatusCode::OK { from } else { 0 };
     {
@@ -725,5 +783,35 @@ async fn transfer(
                 return Stop::Failed;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod api_answer_tests {
+    use super::{ApiError, api_answer, api_error};
+    use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
+
+    #[test]
+    fn a_json_or_xml_answer_is_not_audio() {
+        let mut h = HeaderMap::new();
+        h.insert(CONTENT_TYPE, HeaderValue::from_static("application/json; charset=utf-8"));
+        assert!(api_answer(&h));
+        h.insert(CONTENT_TYPE, HeaderValue::from_static("text/xml"));
+        assert!(api_answer(&h));
+        h.insert(CONTENT_TYPE, HeaderValue::from_static("audio/flac"));
+        assert!(!api_answer(&h));
+        assert!(!api_answer(&HeaderMap::new()));
+    }
+
+    #[test]
+    fn subsonic_error_codes_map_to_what_went_wrong() {
+        let json = |code: i64| format!(r#"{{"subsonic-response":{{"status":"failed","error":{{"code":{code},"message":"m{code}"}}}}}}"#);
+        assert_eq!(api_error(json(40).as_bytes()), ApiError::Auth);
+        assert_eq!(api_error(json(44).as_bytes()), ApiError::Auth);
+        assert_eq!(api_error(json(70).as_bytes()), ApiError::NotFound);
+        assert_eq!(api_error(json(0).as_bytes()), ApiError::Other("m0".into()));
+        let xml = r#"<subsonic-response status="failed"><error code="70" message="Song not found"/></subsonic-response>"#;
+        assert_eq!(api_error(xml.as_bytes()), ApiError::NotFound);
+        assert!(matches!(api_error(b"<html>Sign in</html>"), ApiError::Other(_)));
     }
 }
