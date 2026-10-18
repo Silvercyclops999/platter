@@ -664,7 +664,8 @@ impl Upgrades {
     }
 
     /// Clear an upgrade from the list. One with a swap that can be undone stays.
-    pub fn clear(&self, id: &str) -> AppResult<Vec<UpgradeRecord>> {
+    pub async fn clear(&self, id: &str) -> AppResult<Vec<UpgradeRecord>> {
+        let _one = self.lock.lock().await;
         let mut list = self.records();
         if list.iter().any(|r| r.request.id == id && r.last_swap().is_some()) {
             return Err(AppError::Invalid("Undo the swap first, or keep it in the list so it can be undone.".into()));

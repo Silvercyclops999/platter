@@ -97,6 +97,10 @@ pub(super) struct State {
     /// Lidarr moves an album to its other edition after this many reads of it.
     pub(super) switch_after: Option<usize>,
     pub(super) album_reads: usize,
+    /// Reads of this release group's album answer with a server error.
+    pub(super) fail_album: Option<String>,
+    /// Searches answer with a server error.
+    pub(super) fail_search: bool,
 }
 
 /// A faked Lidarr that keeps artists and albums. Logs method, path and body.
@@ -161,6 +165,9 @@ impl FakeLidarr {
             }
             (Method::Get, "/album") => {
                 if let Some(f) = q("foreignAlbumId") {
+                    if st.fail_album.as_deref() == Some(f.as_str()) {
+                        return (500, json!({"message": "Internal error"}));
+                    }
                     return (200, Value::Array(st.albums.iter().filter(|a| a["foreignAlbumId"] == f.as_str()).cloned().collect()));
                 }
                 let aid: i64 = q("artistId").and_then(|a| a.parse().ok()).unwrap_or(-1);
@@ -226,6 +233,7 @@ impl FakeLidarr {
                 }
                 (202, json!([]))
             }
+            (Method::Post, "/command") if st.fail_search => (500, json!({"message": "Internal error"})),
             (Method::Post, "/command") => (201, json!({"id": 1, "name": "AlbumSearch"})),
             (Method::Get, "/command") => {
                 let Some(artist) = st.artists.last().and_then(|a| a["id"].as_i64()) else {
@@ -659,11 +667,11 @@ async fn status_follows_lidarrs_queue_and_history() {
 async fn only_waiting_or_finished_requests_can_be_cancelled() {
     let r = rig();
     let sent = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
-    assert!(r.lidarr.cancel(&sent.id).is_err());
+    assert!(r.lidarr.cancel(&sent.id).await.is_err());
     r.web.st.lock().down = true;
     let waiting = r.lidarr.request(input(RG_EP, "Small Hours", None)).await.unwrap();
     assert_eq!(waiting.state, RequestState::Queued);
-    let left = r.lidarr.cancel(&waiting.id).unwrap();
+    let left = r.lidarr.cancel(&waiting.id).await.unwrap();
     assert_eq!(left.len(), 1);
     assert_eq!(left[0].id, sent.id);
 }

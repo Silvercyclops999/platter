@@ -45,6 +45,8 @@ mod get_tests;
 #[cfg(test)]
 mod modes_tests;
 #[cfg(test)]
+mod request_keep_tests;
+#[cfg(test)]
 mod request_tests;
 #[cfg(test)]
 mod waves_tests;

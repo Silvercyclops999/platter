@@ -31,10 +31,20 @@ const ALLOW_KEY: &str = "lidarr.allowlists";
 /// Set once the user has typed an album's name for their first request.
 const TYPED_KEY: &str = "lidarr.typedConfirmed";
 pub const QUEUED_NOTE: &str = "Sends when Platter can reach Lidarr.";
+/// Monitored in Lidarr, the search not sent yet.
+pub const SEARCH_PENDING: &str = "Lidarr has it marked for download. Platter sends the search shortly.";
 /// Looks for a newly added artist's album before trying again later.
 const ALBUM_TRIES: usize = 30;
-/// Most requests kept in the list.
-const MAX_KEPT: usize = 200;
+/// Most finished requests kept in the list (requests still going are always kept).
+pub(super) const MAX_KEPT: usize = 200;
+/// Release groups of requests that left the list, so they're never asked for again.
+const ASKED_KEY: &str = "lidarr.requests.asked";
+const KEEP_ASKED: usize = 5000;
+/// Most searches again sent in one look, so a long time away doesn't end in a burst.
+pub const MAX_RESEARCH_PER_LOOK: usize = 3;
+/// Tries of a waiting request that keeps going wrong (Lidarr answering with
+/// an error, or still reading a new artist) before it's marked failed.
+pub const MAX_ATTEMPTS: u32 = 12;
 /// How often the background retry runs.
 pub const RETRY_EVERY: Duration = Duration::from_secs(5 * 60);
 
@@ -90,6 +100,19 @@ pub struct RequestRecord {
     /// When Lidarr is asked to search again while nothing was grabbed.
     #[serde(default)]
     pub next_search_at: Option<i64>,
+    /// Tries of a waiting request that went wrong for a passing reason.
+    #[serde(default)]
+    pub attempts: u32,
+}
+
+/// A request that left the list, remembered so it's never asked for again.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Asked {
+    pub release_group_id: String,
+    pub artist: String,
+    pub title: String,
+    pub state: RequestState,
 }
 
 /// When an album nothing was grabbed for is searched again, counted from the
@@ -104,6 +127,31 @@ pub const NOT_FOUND_NOTE: &str = "Nothing turned up on your indexers yet. Search
 /// the schedule is used up.
 pub fn next_search(searched_at: i64, searches: u32) -> Option<i64> {
     RESEARCH_AFTER.get((searches as usize).checked_sub(1)?).map(|d| searched_at + d)
+}
+
+/// The first time on the schedule after `now`, or None when it's used up.
+/// Times missed while Platter was closed are skipped, not caught up on.
+pub fn next_slot_after(searched_at: i64, now: i64) -> Option<i64> {
+    RESEARCH_AFTER.iter().map(|d| searched_at + d).find(|&t| t > now)
+}
+
+/// The list as it's kept: every request still going (waiting here, or one
+/// Lidarr can still change), then the newest finished ones up to
+/// [`MAX_KEPT`] in all. Imported ones leave first, then failed ones, oldest
+/// first. Returns what's kept, newest first, and what left.
+pub(super) fn keep_records(mut list: Vec<RequestRecord>) -> (Vec<RequestRecord>, Vec<RequestRecord>) {
+    list.sort_by_key(|r| std::cmp::Reverse(r.created_at));
+    let Some(over) = list.len().checked_sub(MAX_KEPT).filter(|n| *n > 0) else { return (list, Vec::new()) };
+    let rank = |r: &RequestRecord| match r.state {
+        _ if !r.state.settled() || followed(r) => None,
+        RequestState::Imported => Some(0),
+        RequestState::Failed => Some(1),
+        _ => Some(2),
+    };
+    let mut out: Vec<(u8, i64, String)> = list.iter().filter_map(|r| rank(r).map(|k| (k, r.created_at, r.id.clone()))).collect();
+    out.sort();
+    let gone: std::collections::HashSet<String> = out.into_iter().take(over).map(|(_, _, id)| id).collect();
+    list.into_iter().partition(|r| !gone.contains(&r.id))
 }
 
 /// What one-click Get came to: a request, or why it needs the user.
@@ -300,12 +348,47 @@ impl Lidarr {
         self.inner.db.read(|c| kv_get(c, REQUESTS_KEY)).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
     }
 
-    fn save_records(&self, list: &[RequestRecord]) -> AppResult<()> {
-        let mut list = list.to_vec();
-        list.sort_by_key(|r| std::cmp::Reverse(r.created_at));
-        list.truncate(MAX_KEPT);
+    pub(super) fn save_records(&self, list: &[RequestRecord]) -> AppResult<()> {
+        let (list, gone) = keep_records(list.to_vec());
+        if !gone.is_empty() {
+            let mut asked = self.asked_archive();
+            for r in gone {
+                asked.retain(|a| a.release_group_id != r.release_group_id);
+                asked.push(Asked { release_group_id: r.release_group_id, artist: r.artist, title: r.title, state: r.state });
+            }
+            if asked.len() > KEEP_ASKED {
+                asked.drain(..asked.len() - KEEP_ASKED);
+            }
+            let json = serde_json::to_string(&asked).map_err(|e| AppError::Internal(e.to_string()))?;
+            self.inner.db.write(|c| kv_set(c, ASKED_KEY, &json))?;
+        }
         let json = serde_json::to_string(&list).map_err(|e| AppError::Internal(e.to_string()))?;
         self.inner.db.write(|c| kv_set(c, REQUESTS_KEY, &json))
+    }
+
+    /// Requests that left the list.
+    pub(super) fn asked_archive(&self) -> Vec<Asked> {
+        self.inner.db.read(|c| kv_get(c, ASKED_KEY)).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    }
+
+    /// Everything asked for: the list, and what left it.
+    pub(super) fn asked_all(&self) -> Vec<Asked> {
+        let mut all = self.asked_archive();
+        all.extend(self.records().into_iter().map(|r| Asked { release_group_id: r.release_group_id, artist: r.artist, title: r.title, state: r.state }));
+        all
+    }
+
+    /// Whether a release group was asked for before and didn't fail.
+    pub(super) fn asked_before(&self, rgid: &str) -> bool {
+        self.asked_all().iter().any(|a| a.release_group_id.eq_ignore_ascii_case(rgid.trim()) && a.state != RequestState::Failed)
+    }
+
+    /// Release groups asked for before that didn't fail.
+    pub(super) fn asked_groups(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.asked_all().into_iter().filter(|a| a.state != RequestState::Failed).map(|a| a.release_group_id).collect();
+        v.sort();
+        v.dedup();
+        v
     }
 
     pub(super) fn upsert(&self, r: &RequestRecord) -> AppResult<()> {
@@ -589,6 +672,7 @@ impl Lidarr {
             searched_at: None,
             searches: 0,
             next_search_at: None,
+            attempts: 0,
         }
     }
 
@@ -624,16 +708,49 @@ impl Lidarr {
         if let Some(r) = self.records().into_iter().find(|r| r.release_group_id == rgid) {
             return Ok(r);
         }
+        // Asked for long ago (it has left the list): shown as it ended, not sent.
+        if let Some(a) = self.asked_archive().into_iter().find(|a| a.release_group_id == rgid) {
+            let mut r = self.new_record(&input, rgid, true);
+            r.state = a.state;
+            r.message = Some("Asked for before, so Platter didn't send it again.".into());
+            return Ok(r);
+        }
         let rec = self.new_record(&input, rgid, true);
-        let now = (self.inner.clock)();
         let out = match self.send(rec.clone()).await {
             Ok(r) => r,
             Err(e) if e.kind() == "network" => RequestRecord { destination: self.guessed_destination(&rec.artist), ..rec },
-            Err(e) if e.to_string().contains("red items") => RequestRecord { message: Some(e.to_string()), updated_at: now, ..rec },
-            Err(e) => RequestRecord { state: RequestState::Failed, message: Some(e.to_string()), updated_at: now, ..rec },
+            Err(e) => self.after_send_error(rec, &e),
         };
         self.upsert(&out)?;
         Ok(out)
+    }
+
+    /// A waiting or automatic request whose send went wrong: it keeps
+    /// waiting when the reason may pass (Lidarr out of reach, a red setup
+    /// check, Lidarr answering with an error), and fails when a check
+    /// refused it or it went wrong [`MAX_ATTEMPTS`] times.
+    pub(super) fn after_send_error(&self, rec: RequestRecord, e: &AppError) -> RequestRecord {
+        let now = (self.inner.clock)();
+        let msg = e.to_string();
+        match e.kind() {
+            "network" => RequestRecord { state: RequestState::Queued, message: Some(QUEUED_NOTE.into()), updated_at: now, ..rec },
+            _ if msg.contains("red items") => RequestRecord { state: RequestState::Queued, message: Some(msg), updated_at: now, ..rec },
+            "invalid" | "notFound" => RequestRecord { state: RequestState::Failed, message: Some(msg), updated_at: now, ..rec },
+            _ => self.another_try(rec, msg),
+        }
+    }
+
+    /// One more try that went wrong: waiting again, or failed after [`MAX_ATTEMPTS`].
+    fn another_try(&self, rec: RequestRecord, why: String) -> RequestRecord {
+        let now = (self.inner.clock)();
+        let attempts = rec.attempts + 1;
+        if attempts >= MAX_ATTEMPTS {
+            tracing::info!(title = %rec.title, attempts, "lidarr request: failed after repeated tries");
+            let message = Some(format!("Platter tried {attempts} times and gave up. The last try said: {why} Get it again to try once more."));
+            return RequestRecord { state: RequestState::Failed, attempts, message, updated_at: now, ..rec };
+        }
+        let message = if why.ends_with("shortly.") { why } else { format!("{why} Platter tries again shortly.") };
+        RequestRecord { state: RequestState::Queued, attempts, message: Some(message), updated_at: now, ..rec }
     }
 
     /// Send one request: check MusicBrainz and the whole setup again, then
@@ -868,10 +985,29 @@ impl Lidarr {
         c.writer.monitor(vec![album.id], true).await?;
         tracing::info!(album = album.id, "lidarr request: monitored");
         rec.lidarr_album_id = Some(album.id);
+        if !matches!(dest, Dest::Library) {
+            return self.search_step(&c, rec, album.id, artist_id, planned, protected).await;
+        }
+        // Lidarr has it marked for download now: the request is kept from
+        // here, and a search that doesn't go out is tried again.
+        rec.state = RequestState::Queued;
+        rec.message = Some(SEARCH_PENDING.into());
+        self.upsert(&rec)?;
+        match self.search_step(&c, rec.clone(), album.id, artist_id, planned, protected).await {
+            Ok(r) => Ok(r),
+            Err(e) => {
+                tracing::info!(album = album.id, error = %e, "lidarr request: the search didn't go out; tries again");
+                rec.message = Some(format!("{SEARCH_PENDING} {}", e.message()));
+                Ok(rec)
+            }
+        }
+    }
 
+    /// After the album is monitored: read back, check everything again, and search.
+    async fn search_step(&self, c: &Checked, mut rec: RequestRecord, album_id: i64, artist_id: i64, planned: Option<i64>, protected: bool) -> AppResult<RequestRecord> {
         let after = c.client.albums_of(artist_id).await?;
-        let target_on = after.iter().any(|x| x.id == album.id && x.monitored);
-        let extra = rec.added_artist && after.iter().any(|x| x.id != album.id && x.monitored);
+        let target_on = after.iter().any(|x| x.id == album_id && x.monitored);
+        let extra = rec.added_artist && after.iter().any(|x| x.id != album_id && x.monitored);
         if !target_on || extra {
             rec.state = RequestState::Failed;
             rec.message = Some(if !target_on {
@@ -879,7 +1015,7 @@ impl Lidarr {
             } else {
                 "Lidarr kept other albums by this artist marked for download, so Platter stopped before searching. Check the artist in Lidarr.".into()
             });
-            tracing::info!(album = album.id, reason = rec.message.as_deref().unwrap_or_default(), "lidarr request: failed");
+            tracing::info!(album = album_id, reason = rec.message.as_deref().unwrap_or_default(), "lidarr request: failed");
             return Ok(rec);
         }
         // The whole check again after the writes, before anything is searched.
@@ -889,7 +1025,7 @@ impl Lidarr {
             rec.message = Some(format!("{e} Platter stopped before searching."));
             return Ok(rec);
         }
-        if let Err(e) = self.same_release(&c.client, album.id, planned, "Platter didn't search for it. It's still marked for download in Lidarr.").await {
+        if let Err(e) = self.same_release(&c.client, album_id, planned, "Platter didn't search for it. It's still marked for download in Lidarr.").await {
             if e.kind() == "network" {
                 return Err(e);
             }
@@ -897,8 +1033,8 @@ impl Lidarr {
             rec.message = Some(e.to_string());
             return Ok(rec);
         }
-        c.writer.search(vec![album.id]).await?;
-        tracing::info!(album = album.id, added_artist = rec.added_artist, "lidarr request: search sent");
+        c.writer.search(vec![album_id]).await?;
+        tracing::info!(album = album_id, added_artist = rec.added_artist, "lidarr request: search sent");
         let now = (self.inner.clock)();
         rec.state = RequestState::Searching;
         rec.message = None;
@@ -909,22 +1045,24 @@ impl Lidarr {
     }
 
     /// Send the requests waiting on this device. Each runs the full check.
+    /// The lock is taken for one request at a time, so a status look or a
+    /// cancel isn't held up behind the whole list.
     pub async fn retry_queued(&self) -> AppResult<usize> {
-        let _one = self.lock.lock().await;
-        let waiting: Vec<RequestRecord> = self.records().into_iter().filter(|r| r.state == RequestState::Queued).collect();
+        let waiting: Vec<String> = self.records().into_iter().filter(|r| r.state == RequestState::Queued).map(|r| r.id).collect();
         let mut sent = 0;
-        for rec in waiting {
-            let now = (self.inner.clock)();
+        for id in waiting {
+            let _one = self.lock.lock().await;
+            let Some(rec) = self.records().into_iter().find(|r| r.id == id && r.state == RequestState::Queued) else { continue };
             let next = match self.send(rec.clone()).await {
+                Ok(r) if r.state == RequestState::Queued => {
+                    let why = r.message.clone().unwrap_or_default();
+                    self.another_try(r, why)
+                }
                 Ok(r) => {
-                    if r.state != RequestState::Queued {
-                        sent += 1;
-                    }
+                    sent += 1;
                     r
                 }
-                Err(e) if e.kind() == "network" => RequestRecord { message: Some(QUEUED_NOTE.into()), updated_at: now, ..rec },
-                Err(e) if e.to_string().contains("red items") => RequestRecord { message: Some(e.to_string()), updated_at: now, ..rec },
-                Err(e) => RequestRecord { state: RequestState::Failed, message: Some(e.to_string()), updated_at: now, ..rec },
+                Err(e) => self.after_send_error(rec, &e),
             };
             self.upsert(&next)?;
         }
@@ -947,9 +1085,21 @@ impl Lidarr {
         let queue = client.queue(&ids).await.unwrap_or_default();
         let now = (self.inner.clock)();
         let ready = self.status().ready;
+        // Searches again sent in this look, and the setup check they need
+        // (run once, only when one is due).
+        let mut sent_again = 0;
+        let mut check: Option<Option<CheckReport>> = None;
         for i in live {
             let rgid = list[i].release_group_id.clone();
-            let Some(album) = client.album_by_release_group(&rgid).await? else {
+            let album = match client.album_by_release_group(&rgid).await {
+                Ok(a) => a,
+                Err(e) => {
+                    // One album Lidarr can't answer for doesn't hold up the rest.
+                    tracing::info!(title = %list[i].title, error = %e, "lidarr request: couldn't read the album; looks again later");
+                    continue;
+                }
+            };
+            let Some(album) = album else {
                 list[i].state = RequestState::Failed;
                 list[i].message = Some("The album isn't in Lidarr any more.".into());
                 list[i].updated_at = now;
@@ -958,32 +1108,57 @@ impl Lidarr {
             };
             let history = client.history(album.id).await.unwrap_or_default();
             let mut state = map_status(&album, &queue, &history);
-            let r = &mut list[i];
             // Nothing found yet stays that way until something turns up.
-            if r.state == RequestState::NotFound && state == RequestState::Searching {
+            if list[i].state == RequestState::NotFound && state == RequestState::Searching {
                 continue;
             }
-            if state == RequestState::Searching {
-                if r.searched_at.is_none() {
-                    // A request from before searches again were scheduled.
-                    r.searched_at = Some(r.updated_at.min(now));
-                    r.searches = r.searches.max(1);
-                    r.next_search_at = next_search(r.searched_at.unwrap_or(now), r.searches);
-                }
-                let first = r.searched_at.unwrap_or(now);
-                match r.next_search_at {
-                    Some(at) if now >= at && ready && album.monitored => match writer.search(vec![album.id]).await {
-                        Ok(()) => {
-                            r.searches += 1;
-                            r.next_search_at = next_search(first, r.searches);
-                            r.updated_at = now;
-                            tracing::info!(album = album.id, title = %r.title, searches = r.searches, "lidarr request: nothing grabbed yet, search sent again");
+            // Only albums this request searched for are searched again: never
+            // one Lidarr already had, which is Lidarr's (or another device's) to follow.
+            let ours = !list[i].already_in_lidarr;
+            if state == RequestState::Searching && ours && list[i].searched_at.is_none() {
+                // A request from before searches again were scheduled.
+                let r = &mut list[i];
+                r.searched_at = Some(r.updated_at.min(now));
+                r.searches = r.searches.max(1);
+                r.next_search_at = next_search(r.searched_at.unwrap_or(now), r.searches);
+            }
+            let due = state == RequestState::Searching
+                && ours
+                && list[i].searches >= 1
+                && album.monitored
+                && ready
+                && list[i].next_search_at.is_some_and(|at| now >= at);
+            let mut searched = false;
+            if due && sent_again < MAX_RESEARCH_PER_LOOK {
+                if check.is_none() {
+                    // A recent green check, not the one saved some time ago.
+                    check = Some(match self.check_full().await {
+                        Ok(c) => Some(c.report),
+                        Err(e) => {
+                            tracing::info!(error = %e, "lidarr request: setup check before searching again didn't run; tries on the next look");
+                            None
                         }
-                        Err(e) => tracing::warn!(album = album.id, error = %e, "lidarr request: couldn't search again; tries on the next look"),
-                    },
-                    None if now - first >= GIVE_UP_AFTER => state = RequestState::NotFound,
-                    _ => {}
+                    });
                 }
+                let green = check.as_ref().and_then(|c| c.as_ref()).is_some_and(|c| gate(c, list[i].protected).is_ok());
+                if green {
+                    match writer.search(vec![album.id]).await {
+                        Ok(()) => searched = true,
+                        Err(e) => tracing::warn!(album = album.id, error = %e, "lidarr request: couldn't search again; tries on the next look"),
+                    }
+                }
+            }
+            let r = &mut list[i];
+            if searched {
+                sent_again += 1;
+                r.searches += 1;
+                // Times missed while Platter was closed are skipped.
+                r.next_search_at = next_slot_after(r.searched_at.unwrap_or(now), now);
+                r.updated_at = now;
+                tracing::info!(album = album.id, title = %r.title, searches = r.searches, "lidarr request: nothing grabbed yet, search sent again");
+            }
+            if state == RequestState::Searching && ours && r.next_search_at.is_none() && now - r.searched_at.unwrap_or(now) >= GIVE_UP_AFTER {
+                state = RequestState::NotFound;
             }
             let progress = if state == RequestState::Downloading { super::status::progress(album.id, &queue) } else { None };
             if progress != r.progress {
@@ -1015,9 +1190,13 @@ impl Lidarr {
                     _ => None,
                 };
             }
+            if searched {
+                // Saved at once, so a look that stops part way never sends it twice.
+                self.save_records(&list)?;
+            }
         }
         self.save_records(&list)?;
-        Ok(list)
+        Ok(self.records())
     }
 
     /// "Search again": an AlbumSearch for that one album now, and the
@@ -1061,7 +1240,8 @@ impl Lidarr {
     }
 
     /// Cancel a waiting request, or clear a finished one from the list.
-    pub fn cancel(&self, id: &str) -> AppResult<Vec<RequestRecord>> {
+    pub async fn cancel(&self, id: &str) -> AppResult<Vec<RequestRecord>> {
+        let _one = self.lock.lock().await;
         let mut list = self.records();
         let Some(r) = list.iter().find(|r| r.id == id) else { return Ok(self.requests()) };
         if !(r.state == RequestState::Queued || r.state.settled() || r.already_in_lidarr) {

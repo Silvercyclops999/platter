@@ -95,11 +95,8 @@ pub async fn lidarr_requests(lidarr: State<'_, Lidarr>, refresh: bool) -> AppRes
 #[tauri::command]
 pub async fn lidarr_request_cancel(lidarr: State<'_, Lidarr>, id: String) -> AppResult<Vec<super::grabbed::RequestView>> {
     let l = lidarr.inner().clone();
-    blocking(move || {
-        l.cancel(&id)?;
-        Ok(l.request_views())
-    })
-    .await
+    l.cancel(&id).await?;
+    blocking(move || Ok(l.request_views())).await
 }
 
 /// An artist's official releases the library lacks, for the artist page.
@@ -161,8 +158,7 @@ pub async fn lidarr_upgrade_undo(upgrades: State<'_, Upgrades>, id: String) -> A
 /// Clear an upgrade from the list.
 #[tauri::command]
 pub async fn lidarr_upgrade_clear(upgrades: State<'_, Upgrades>, id: String) -> AppResult<Vec<UpgradeRecord>> {
-    let u = upgrades.inner().clone();
-    blocking(move || u.clear(&id)).await
+    upgrades.clear(&id).await
 }
 
 /// Where this computer reaches the music share (this device only).
