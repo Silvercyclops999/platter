@@ -1695,6 +1695,20 @@ mod peers {
     }
 
     #[tokio::test]
+    async fn a_queue_too_long_to_move_whole_says_so() {
+        let (r, lan) = net().await;
+        {
+            let mut st = r.local.state.lock();
+            st.queue.next_up = (0..crate::remote::peer::MAX_SONGS + 20).map(|i| item(&format!("n{i}"))).collect();
+        }
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let _b = start(&r.server, &lan, idle(), Opts::new("mac", "Studio Mac")).await;
+        a.remote.players().await;
+        a.remote.move_to("mac").await.unwrap();
+        assert_eq!(a.events.toasts(), ["The queue was too long for Studio Mac: the last 20 songs weren't moved."]);
+    }
+
+    #[tokio::test]
     async fn the_queue_follows_the_other_platter_and_edits_reach_it() {
         let (r, lan) = net().await;
         let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;

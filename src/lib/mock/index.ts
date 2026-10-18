@@ -2164,8 +2164,8 @@ export class MockBackend implements Backend {
       args = { ...args, startTrackId: offline.start ?? undefined };
     }
     if (message && play) this.emit("toast", { kind: "info", message });
-    // Like the core: shuffle play leaves out hidden songs and artists, but not the picked one.
-    if (args.shuffle === true) {
+    // Like the core: shuffled play (asked for or the stored choice) leaves out hidden songs and artists, but not the picked one.
+    if (args.shuffle ?? (info.id ? this.shufflePref(info.id) : false)) {
       const kept = tracks.filter((t) => t.id === args.startTrackId || !this.hidden.hides(t));
       if (kept.length) tracks = kept;
     }

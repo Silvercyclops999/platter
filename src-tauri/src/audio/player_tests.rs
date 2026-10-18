@@ -749,6 +749,29 @@ async fn shuffle_play_skips_hidden_songs_and_artists_but_not_the_picked_one() {
     assert_eq!(s.queue.next_up.len(), 5);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn hidden_songs_stay_out_whenever_shuffle_is_on() {
+    let ids = ["a", "b", "c", "d", "e", "f"];
+    let r = rig(&ids, 3.0, true, PlayerConfig::default()).await;
+    let mut hidden = crate::hidden::HiddenSet::default();
+    hidden.tracks.insert("c".into());
+    hidden.tracks.insert("e".into());
+    *r.resolver.hidden.lock() = Some(Arc::new(hidden));
+    let pl = PlayContext { kind: ContextKind::Playlist, id: Some("pl".into()), track_ids: Some(ids.iter().map(|s| s.to_string()).collect()) };
+    // The playlist's stored shuffle choice is on; Play passes none.
+    r.player.set_context_shuffle("pl".into(), true).await.unwrap();
+    r.player.play_context(pl.clone(), Some("a".into()), None).await.unwrap();
+    let s = r.player.state().await.unwrap();
+    assert!(s.shuffle);
+    assert!(s.queue.next_up.iter().all(|i| i.track.id != "c" && i.track.id != "e"), "{:?}", next_ids(&s));
+    // Shuffle turned on while it plays in order.
+    r.player.play_context(pl, Some("a".into()), Some(false)).await.unwrap();
+    assert_eq!(r.player.state().await.unwrap().queue.next_up.len(), 5);
+    r.player.set_shuffle(true).await.unwrap();
+    let s = r.player.state().await.unwrap();
+    assert_eq!(s.queue.next_up.len(), 3, "{:?}", next_ids(&s));
+}
+
 /// A crash never runs the exit flush: the queue file as it was a moment
 /// after the last change must be enough to restore the queue and position.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

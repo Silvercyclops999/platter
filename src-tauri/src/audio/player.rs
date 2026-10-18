@@ -70,6 +70,17 @@ pub fn start_copy_of(tracks: &[Track], start: Option<String>, index: Option<usiz
     (Some(id), copy)
 }
 
+/// Shuffle play leaves out hidden songs and artists, except the song that
+/// was picked. Everything hidden: the context plays as it is.
+fn skip_hidden(lookup: &dyn TrackLookup, tracks: Vec<Track>, start: Option<&str>) -> Vec<Track> {
+    let Some(hidden) = lookup.hidden().filter(|h| !h.is_empty()) else { return tracks };
+    let keep = |t: &Track| Some(t.id.as_str()) == start || !hidden.hides(&t.id, &t.artist_id);
+    if !tracks.iter().any(keep) {
+        return tracks;
+    }
+    tracks.into_iter().filter(keep).collect()
+}
+
 /// "Previous" restarts the track instead at or past this point.
 pub const PREVIOUS_RESTART_MS: u64 = 3_000;
 /// The shortest A-B loop.
@@ -562,7 +573,6 @@ impl PlayerHandle {
         if self.play_seq.load(Ordering::SeqCst) != seq {
             return Ok(());
         }
-        let tracks = if shuffle == Some(true) { self.skip_hidden(tracks, start_track_id.as_deref()) } else { tracks };
         let info = ContextInfo {
             kind: context.kind,
             id: context.id.clone(),
@@ -719,16 +729,6 @@ impl PlayerHandle {
     /// While only music on this computer can play, leaves the rest out (and
     /// tells the lookup how many, for its notice). A start song that can't
     /// play gives way to the next one that can.
-    /// Shuffle play leaves out hidden songs and artists, except the song
-    /// that was picked. Everything hidden: the context plays as it is.
-    fn skip_hidden(&self, tracks: Vec<Track>, start: Option<&str>) -> Vec<Track> {
-        let Some(hidden) = self.lookup.hidden().filter(|h| !h.is_empty()) else { return tracks };
-        let keep = |t: &Track| Some(t.id.as_str()) == start || !hidden.hides(&t.id, &t.artist_id);
-        if !tracks.iter().any(keep) {
-            return tracks;
-        }
-        tracks.into_iter().filter(keep).collect()
-    }
 
     async fn keep_playable(
         &self,
@@ -1792,6 +1792,10 @@ impl Actor {
                 // Remember where the outgoing context was left.
                 self.queue.note_position(self.position_ms());
                 self.end_current_as_skip();
+                // Shuffled (asked for, or the context's stored choice):
+                // hidden songs stay out.
+                let shuffled = shuffle.unwrap_or_else(|| info.id.as_deref().is_some_and(|id| self.queue.shuffle_pref(id)));
+                let tracks = if shuffled { skip_hidden(&*self.lookup, tracks, start_track_id.as_deref()) } else { tracks };
                 let start = start_track_id.as_ref().and_then(|id| {
                     let mut at = tracks.iter().enumerate().filter(|(_, t)| &t.id == id).map(|(i, _)| i);
                     let first = at.clone().next();
@@ -1991,6 +1995,9 @@ impl Actor {
                     self.queue.drop_smart_upcoming();
                 }
                 self.queue.set_shuffle(s);
+                if s {
+                    self.drop_hidden_upcoming();
+                }
                 self.update_next();
                 self.fit_shuffle();
                 self.mark_dirty();
@@ -2001,6 +2008,9 @@ impl Actor {
                     self.queue.drop_smart_upcoming();
                 }
                 self.queue.set_context_shuffle(&id, s);
+                if s && self.queue.context().and_then(|c| c.id.as_deref()) == Some(id.as_str()) {
+                    self.drop_hidden_upcoming();
+                }
                 self.update_next();
                 self.fit_shuffle();
                 self.mark_dirty();
@@ -2323,6 +2333,16 @@ impl Actor {
 
     /// Nothing more to play. With repeat off the context rewinds to its
     /// first track, paused at 0:00, with the rest listed as upcoming.
+    /// Shuffle turned on mid-play: hidden songs and artists still to come
+    /// leave the order, as they would for a shuffle play.
+    fn drop_hidden_upcoming(&mut self) {
+        let Some(hidden) = self.lookup.hidden().filter(|h| !h.is_empty()) else { return };
+        if self.queue.upcoming_iter().all(|i| hidden.hides(&i.track.id, &i.track.artist_id)) {
+            return;
+        }
+        self.queue.drop_upcoming(|i| i.source == ItemSource::Context && hidden.hides(&i.track.id, &i.track.artist_id));
+    }
+
     /// Past the last song: when more songs for this context are being
     /// looked up, stop and wait for them (the first plays when they come);
     /// otherwise stop at the end of the queue.

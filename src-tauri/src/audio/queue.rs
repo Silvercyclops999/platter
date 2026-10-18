@@ -995,6 +995,10 @@ impl Queue {
             self.user.push_back(QueueItem { item_id, track: t, source: ItemSource::User });
         }
         self.shuffle = shuffle;
+        // The page's toggle reads the stored preference: keep them the same.
+        if let Some(id) = self.context_id().map(str::to_owned) {
+            self.store_shuffle_pref(&id, shuffle);
+        }
         self.repeat = repeat;
         first
     }
@@ -1024,7 +1028,12 @@ impl Queue {
             self.order = self.shuffled_order(cur, others);
             self.pos = if cur.is_some() { 0 } else { -1 };
         } else {
-            self.order = (0..n).filter(|i| live.contains(i)).collect();
+            // Smart shuffle suggestions only live in a shuffled order: out
+            // of it they'd sit after the last playlist song and play again.
+            let items = &self.items;
+            self.order = (0..n)
+                .filter(|i| live.contains(i) && (items[*i].source != ItemSource::Smart || Some(*i) == cur))
+                .collect();
             self.pos = match cur {
                 Some(c) => self.order.iter().position(|i| *i == c).map_or(-1, |p| p as isize),
                 None => -1,
@@ -1154,9 +1163,15 @@ impl Queue {
 
     /// Takes the smart shuffle songs still to come out of the play order.
     pub fn drop_smart_upcoming(&mut self) {
+        self.drop_upcoming(|i| i.source == ItemSource::Smart);
+    }
+
+    /// Takes the context entries still to come that `gone` picks out of
+    /// the play order (the user queue is left alone).
+    pub fn drop_upcoming(&mut self, gone: impl Fn(&QueueItem) -> bool) {
         let from = ((self.pos + 1).max(0) as usize).min(self.order.len());
         let items = &self.items;
-        let mut keep: Vec<usize> = self.order[from..].iter().copied().filter(|&i| items[i].source != ItemSource::Smart).collect();
+        let mut keep: Vec<usize> = self.order[from..].iter().copied().filter(|&i| !gone(&items[i])).collect();
         self.order.truncate(from);
         self.order.append(&mut keep);
     }
@@ -1318,6 +1333,30 @@ mod tests {
         q.drop_smart_upcoming();
         q.insert_smart(suggestions(3), 2);
         assert_eq!(next_ids(&q), vec!["2", "3", "s0", "4"]);
+    }
+
+    #[test]
+    fn a_handed_in_queue_keeps_its_shuffle_preference() {
+        let mut q = Queue::with_seed(1);
+        let ts: Vec<Track> = (0..3).map(|i| track(&i.to_string(), "A", "/p")).collect();
+        let info = ContextInfo { kind: ContextKind::Playlist, id: Some("pl".into()), title: None };
+        q.adopt(info.clone(), ts.clone(), Vec::new(), true, Repeat::Off);
+        assert!(q.shuffle_pref("pl"));
+        q.adopt(info, ts, Vec::new(), false, Repeat::Off);
+        assert!(!q.shuffle_pref("pl"));
+    }
+
+    #[test]
+    fn shuffle_off_drops_suggestions_that_already_played() {
+        let mut q = Queue::with_seed(1);
+        let ts: Vec<Track> = (0..5).map(|i| track(&i.to_string(), "A", "/p")).collect();
+        q.set_context(ctx(), ts, Some(0), Some(true));
+        q.insert_smart(suggestions(2), 2);
+        q.advance_auto();
+        assert_eq!(q.advance_auto().unwrap().source, ItemSource::Smart);
+        q.advance_auto();
+        q.set_shuffle(false);
+        assert!(next_ids(&q).iter().all(|id| !id.starts_with('s')), "{:?}", next_ids(&q));
     }
 
     #[test]

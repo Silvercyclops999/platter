@@ -270,6 +270,15 @@ pub fn couldnt_reach(name: &str) -> String {
     format!("Couldn't reach {name}")
 }
 
+/// What to say when a queue was too long to move whole.
+pub fn cut_note(name: &str, left_out: usize) -> Option<String> {
+    match left_out {
+        0 => None,
+        1 => Some(format!("The queue was too long for {name}: the last song wasn't moved.")),
+        n => Some(format!("The queue was too long for {name}: the last {n} songs weren't moved.")),
+    }
+}
+
 fn status_of(state: &str) -> Option<RemoteStatus> {
     match state {
         "playing" => Some(RemoteStatus::Playing),
@@ -433,6 +442,10 @@ impl RemoteService {
 
     fn toast_error(&self, message: String) {
         self.emit(EVENT_TOAST, &Toast { kind: "error".into(), message });
+    }
+
+    fn toast_info(&self, message: String) {
+        self.emit(EVENT_TOAST, &Toast { kind: "info".into(), message });
     }
 
     pub fn state(&self) -> RemoteState {
@@ -965,6 +978,8 @@ impl RemoteService {
             .peer_client()
             .await
             .ok_or_else(|| AppError::Auth("Not signed in.".into()))?;
+        let left_out = st.queue.user_queue.len().saturating_sub(peer::MAX_SONGS)
+            + st.queue.next_up.len().saturating_sub(peer::MAX_SONGS);
         let req = peer::PlayRequest {
             server_id: server.machine_id.clone(),
             current: track.id.clone(),
@@ -1007,6 +1022,9 @@ impl RemoteService {
             && let Err(e) = self.inner.local.pause().await
         {
             tracing::warn!("pausing here after a move failed: {e}");
+        }
+        if let Some(note) = cut_note(&name, left_out) {
+            self.toast_info(note);
         }
         let link = PeerLink { client, base, id: found.player.id.clone(), timeout: self.inner.cfg.timeout };
         let session = RemoteSession {
@@ -1055,6 +1073,9 @@ impl RemoteService {
         ids.extend(st.queue.user_queue.iter().map(|i| i.track.id.clone()));
         ids.extend(st.queue.next_up.iter().map(|i| i.track.id.clone()));
         let pq = playqueue::create(&self.inner.http, &server, &ids, &track.id, st.repeat).await?;
+        if let Some(note) = cut_note(&name, ids.len().saturating_sub(playqueue::MAX_ITEMS)) {
+            self.toast_info(note);
+        }
         let routes = self.routes_for(&found, Some(&server)).await;
         let host = server.base.host_str().unwrap_or_default().to_string();
         let port = server.base.port_or_known_default().unwrap_or(32400).to_string();
