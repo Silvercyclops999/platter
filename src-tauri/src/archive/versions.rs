@@ -481,39 +481,82 @@ fn released_face(c: &Connection, group: &str, hits: &[Track]) -> AppResult<Optio
         .or_else(|| released.into_iter().next()))
 }
 
+/// True when `t` credits `artist` (canonical words, as search reads them):
+/// as its album artist or a name on its artist line.
+fn credits(c: &Connection, t: &Track, artist: &str) -> AppResult<bool> {
+    use crate::db::searchtext::canonical;
+    if canonical(&t.artist_title) == artist {
+        return Ok(true);
+    }
+    let Some(line) = t.track_artist.as_deref() else { return Ok(false) };
+    if canonical(line) == artist {
+        return Ok(true);
+    }
+    Ok(crate::db::popular::line_credits(c, line)?.iter().any(|n| canonical(n) == artist))
+}
+
 /// Search: one row per song, its other versions under it. A group shows as
 /// its released version when it has one (never the newest or a demo, so an
 /// unreleased version can't stand in for the song), with the rest in
 /// `versions` under that song's id. The top result follows the same rule.
-pub fn group_search(c: &Connection, out: &mut SearchResults, show_edits: bool) -> AppResult<()> {
+///
+/// `artist`: the artist the query named, if any. A song of theirs then
+/// shows only the versions they are on, led by one of them: a song they
+/// guest on once isn't shown as another artist's version with that artist's
+/// other releases under it.
+pub fn group_search(c: &Connection, out: &mut SearchResults, show_edits: bool, artist: Option<&str>) -> AppResult<()> {
+    let artist = artist.map(crate::db::searchtext::canonical).filter(|a| !a.is_empty());
     let mut seen: HashSet<String> = HashSet::new();
     let mut songs: Vec<Track> = Vec::with_capacity(out.songs.len());
     let hits = std::mem::take(&mut out.songs);
     let mut face_of: HashMap<String, Track> = HashMap::new();
-    for t in &hits {
-        let Some(g) = group_of(c, &t.id)? else {
+    let groups: Vec<Option<String>> = hits.iter().map(|t| group_of(c, &t.id)).collect::<AppResult<_>>()?;
+    for (t, g) in hits.iter().zip(&groups) {
+        let Some(g) = g.clone() else {
             songs.push(t.clone());
             continue;
         };
         if !seen.insert(g.clone()) {
             continue;
         }
-        let face = match released_face(c, &g, &hits)? {
-            Some(id) if id == t.id => t.clone(),
-            Some(id) => match crate::db::queries::tracks_by_ids(c, &[id])?.into_iter().next() {
-                Some(x) => x,
+        // A hit of this song that credits the named artist.
+        let mut theirs = None;
+        if let Some(a) = artist.as_deref() {
+            for (h, hg) in hits.iter().zip(&groups) {
+                if hg.as_ref() == Some(&g) && credits(c, h, a)? {
+                    theirs = Some(h);
+                    break;
+                }
+            }
+        }
+        let only = theirs.and(artist.as_deref());
+        let face = match (theirs, only) {
+            (Some(h), Some(a)) => credited_face(c, &g, h, &hits, a)?,
+            _ => match released_face(c, &g, &hits)? {
+                Some(id) if id == t.id => t.clone(),
+                Some(id) => crate::db::queries::tracks_by_ids(c, &[id])?.into_iter().next().unwrap_or_else(|| t.clone()),
                 None => t.clone(),
             },
-            None => t.clone(),
         };
-        let others = other_ids(c, &face.id, show_edits)?;
         let mut face = face;
-        if !others.is_empty() {
-            let mut list = crate::db::queries::tracks_by_ids(c, &others)?;
+        let mut list = crate::db::queries::tracks_by_ids(c, &other_ids(c, &face.id, show_edits)?)?;
+        if let Some(a) = only {
+            let mut kept = Vec::with_capacity(list.len());
+            for x in list {
+                if credits(c, &x, a)? {
+                    kept.push(x);
+                }
+            }
+            list = kept;
+        }
+        annotate(c, std::slice::from_mut(&mut face), show_edits)?;
+        if only.is_some() && face.song_status.is_some() {
+            face.other_versions = (!list.is_empty()).then_some(list.len() as u32);
+        }
+        if !list.is_empty() {
             annotate(c, &mut list, show_edits)?;
             out.versions.insert(face.id.clone(), list);
         }
-        annotate(c, std::slice::from_mut(&mut face), show_edits)?;
         face_of.insert(g, face.clone());
         songs.push(face);
     }
@@ -534,4 +577,25 @@ pub fn group_search(c: &Connection, out: &mut SearchResults, show_edits: bool) -
         }
     }
     Ok(())
+}
+
+/// The song a group shows as for a search naming `artist`: their released
+/// version (a hit first, then the most played), else the hit itself.
+fn credited_face(c: &Connection, group: &str, hit: &Track, hits: &[Track], artist: &str) -> AppResult<Track> {
+    let mut st = c.prepare_cached(
+        "SELECT v.track_id FROM versions v JOIN tracks t ON t.id = v.track_id
+         WHERE v.group_key = ?1 AND v.status = 'released' ORDER BY t.view_count DESC, t.id",
+    )?;
+    let released: Vec<String> = st.query_map([group], |r| r.get(0))?.collect::<Result<_, _>>()?;
+    if let Some(h) = hits.iter().find(|h| released.contains(&h.id))
+        && credits(c, h, artist)?
+    {
+        return Ok(h.clone());
+    }
+    for x in crate::db::queries::tracks_by_ids(c, &released)? {
+        if credits(c, &x, artist)? {
+            return Ok(x);
+        }
+    }
+    Ok(hit.clone())
 }

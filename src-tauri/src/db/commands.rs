@@ -253,10 +253,12 @@ pub async fn search(
     let server = db.server_view();
     let f = db.read_async(move |c| super::merge::ViewFilter::load(c, &server)).await?;
     f.search(&mut out);
-    // One row per song, the released version first (archive::versions).
+    // One row per song, the released version first (archive::versions);
+    // for an artist's name, only the versions that artist is on.
     let show = db.tag_view().show_edits;
+    let artist = search::named_artist(&query, &out.artists);
     db.read_async(move |c| {
-        crate::archive::versions::group_search(c, &mut out, show)?;
+        crate::archive::versions::group_search(c, &mut out, show, artist.as_deref())?;
         Ok(out)
     })
     .await

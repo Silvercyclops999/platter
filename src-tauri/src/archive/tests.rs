@@ -442,7 +442,7 @@ fn search_shows_the_released_version_first() {
         top: Some(SearchHit { kind: SearchKind::Track, track: Some(get("t2")), artist: None, album: None, playlist: None }),
         ..Default::default()
     };
-    versions::group_search(&c, &mut out, false).unwrap();
+    versions::group_search(&c, &mut out, false, None).unwrap();
     assert_eq!(out.songs.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["r1", "t3"]);
     assert_eq!(out.songs[0].other_versions, Some(2));
     let mut under: Vec<&str> = out.versions["r1"].iter().map(|t| t.id.as_str()).collect();
@@ -451,9 +451,53 @@ fn search_shows_the_released_version_first() {
     assert_eq!(out.top.unwrap().track.unwrap().id, "r1", "the top result too");
     // Nothing released: the hit stays as it is.
     let mut out = SearchResults { songs: vec![get("t3")], ..Default::default() };
-    versions::group_search(&c, &mut out, false).unwrap();
+    versions::group_search(&c, &mut out, false, None).unwrap();
     assert_eq!(out.songs[0].id, "t3");
     assert!(out.versions.is_empty());
+}
+
+#[test]
+fn search_for_an_artist_shows_only_the_versions_they_are_on() {
+    let (_d, c) = db();
+    album(&c, "a1", "Kane West", "Sky Record", true, Some("album"), &[], Some(2018));
+    album(&c, "a2", "Kane West", "Sky Record (Deluxe)", true, Some("album"), &[], Some(2019));
+    album(&c, "a3", "Kane West", "Hits", true, Some("compilation"), &[], Some(2020));
+    song(&c, "s1", "a1", "Sky Record", "Kane West", "Sky Town", 200_000, None, 1);
+    song(&c, "s2", "a2", "Sky Record (Deluxe)", "Kane West", "Sky Town", 200_000, None, 1);
+    song(&c, "s3", "a3", "Hits", "Kane West", "Sky Town", 200_000, None, 1);
+    c.execute("UPDATE tracks SET track_artist = 'Kane West feat. Kid Rudi' WHERE id = 's2'", []).unwrap();
+    c.execute("UPDATE tracks SET view_count = 50 WHERE id = 's1'", []).unwrap();
+    refresh(&c);
+    let get = |id: &str| crate::db::queries::tracks_by_ids(&c, &[id.into()]).unwrap().remove(0);
+    let hits = || SearchResults {
+        songs: vec![get("s1"), get("s2")],
+        top: Some(SearchHit { kind: SearchKind::Track, track: Some(get("s1")), artist: None, album: None, playlist: None }),
+        ..Default::default()
+    };
+    // Without an artist: one row, the most played release, both others under it.
+    let mut out = hits();
+    versions::group_search(&c, &mut out, false, None).unwrap();
+    assert_eq!(out.songs.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["s1"]);
+    assert_eq!(out.songs[0].other_versions, Some(2));
+    // Named Kid Rudi: the row is the version he's on, with nothing under it.
+    let mut out = hits();
+    versions::group_search(&c, &mut out, false, Some("kid rudi")).unwrap();
+    assert_eq!(out.songs.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["s2"]);
+    assert_eq!(out.songs[0].other_versions, None);
+    assert!(out.versions.is_empty());
+    assert_eq!(out.top.unwrap().track.unwrap().id, "s2", "the top result too");
+    // Named Kane West: every version is his, so the grouping is as before.
+    let mut out = hits();
+    versions::group_search(&c, &mut out, false, Some("Kane West")).unwrap();
+    assert_eq!(out.songs[0].id, "s1");
+    assert_eq!(out.versions["s1"].len(), 2);
+    assert_eq!(out.songs[0].other_versions, Some(2));
+    // A different title stays its own row.
+    song(&c, "s4", "a3", "Hits", "Kane West", "Sky Town Again", 200_000, None, 2);
+    refresh(&c);
+    let mut out = SearchResults { songs: vec![get("s1"), get("s4")], ..Default::default() };
+    versions::group_search(&c, &mut out, false, None).unwrap();
+    assert_eq!(out.songs.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["s1", "s4"]);
 }
 
 #[test]
