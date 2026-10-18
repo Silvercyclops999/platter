@@ -181,8 +181,22 @@ fn a_song_is_in_one_daily_mix_a_day_at_most() {
     }
     // A refresh keeps clear of the others.
     let others: HashSet<u32> = mixes[1..].iter().flat_map(|m| m.tracks.iter().map(|(t, _)| *t)).collect();
-    let again = engine::regenerate_one(&lib, &Ctx { seed: 99, ..ctx() }, "daily:1", &others).unwrap();
+    let again = engine::regenerate_one(&lib, &Ctx { seed: 99, ..ctx() }, "daily:1", &others, &mixes[0].artist_ids).unwrap();
     assert!(again.tracks.iter().all(|(t, _)| !others.contains(t)));
+}
+
+#[test]
+fn a_refreshed_daily_mix_comes_from_the_group_it_was_made_from() {
+    let lib = lib_of(raw(), &opts());
+    let id = |a: usize| lib.artists[a].id.clone();
+    // Three groups; the second was too small, so Daily Mix 2 came from the third.
+    let groups = vec![vec![0u32], vec![1], vec![2, 3]];
+    assert_eq!(engine::daily_group(&lib, &groups, 2, &[id(2), id(3)]), Some(2));
+    assert_eq!(engine::daily_group(&lib, &groups, 2, &[id(3)]), Some(2));
+    // Most shared artists wins; nothing to go by: the n-th group.
+    assert_eq!(engine::daily_group(&lib, &groups, 1, &[id(1), id(2), id(3)]), Some(2));
+    assert_eq!(engine::daily_group(&lib, &groups, 2, &[]), Some(1));
+    assert_eq!(engine::daily_group(&lib, &groups, 9, &[]), None);
 }
 
 #[test]
@@ -589,6 +603,34 @@ async fn shelves_pages_steering_and_refresh() {
     let refreshed = s.refresh("genre:rock".into()).await.unwrap();
     assert_eq!(refreshed.mix.id, "genre:rock");
     assert!(s.page("nope".into(), None).await.is_err());
+}
+
+#[tokio::test]
+async fn a_song_hidden_after_a_mix_was_made_does_not_play_from_it() {
+    use crate::audio::source::{ContextKind, PlayContext, TrackLookup};
+    let (s, db, _d) = service();
+    let ids = crate::hidden::HiddenIds::default();
+    s.set_hidden_ids(ids.clone());
+    // Today's mixes (the shelves make them for the real date).
+    s.shelves().await.unwrap();
+    let stored = db.read(|c| store::tracks(c, "daily:1")).unwrap().0;
+    let gone = stored[2].id.clone();
+    let mut h = crate::hidden::HiddenSet { version: 1, ..Default::default() };
+    h.tracks.insert(gone.clone());
+    ids.set(h);
+    // Play from the page or the card (no song list sent).
+    let lookup = crate::bridge::CacheLookup(db.clone(), None, Default::default(), Some(s.clone()));
+    let mix = lookup
+        .context(&PlayContext { kind: ContextKind::Mix, id: Some("daily:1".into()), track_ids: None })
+        .await
+        .unwrap();
+    assert_eq!(mix.tracks.len() + 1, stored.len());
+    assert!(mix.tracks.iter().all(|t| t.id != gone));
+    // The card counts what plays.
+    let shelves = s.shelves().await.unwrap();
+    let card = shelves.made_for_you.iter().find(|m| m.id == "daily:1").unwrap();
+    assert_eq!(card.track_count as usize, mix.tracks.len());
+    assert_eq!(card.duration_ms, mix.tracks.iter().map(|t| t.duration_ms).sum::<u64>());
 }
 
 #[tokio::test]

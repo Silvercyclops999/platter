@@ -749,12 +749,35 @@ pub fn generate_all(lib: &Lib, ctx: &Ctx) -> Vec<Generated> {
     out
 }
 
+/// Which group a Daily Mix was made from: the one holding most of its
+/// leading artists (`lead`, as stored with the mix). Groups too small for a
+/// mix are skipped when mixes are numbered, so Daily Mix n need not be the
+/// n-th group. Without any lead artist to go by, the n-th group.
+pub fn daily_group(lib: &Lib, groups: &[Vec<u32>], n: usize, lead: &[String]) -> Option<usize> {
+    let lead: HashSet<u32> = lead
+        .iter()
+        .filter_map(|id| lib.artists.iter().position(|a| a.id == *id).map(|a| a as u32))
+        .collect();
+    let best = groups
+        .iter()
+        .enumerate()
+        .map(|(i, g)| (i, g.iter().filter(|a| lead.contains(a)).count()))
+        .filter(|(_, shared)| *shared > 0)
+        .max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)));
+    match best {
+        Some((i, _)) => Some(i),
+        None => n.checked_sub(1).filter(|i| *i < groups.len()),
+    }
+}
+
 /// One mix again with another seed (a Refresh). Daily Mixes keep clear of
-/// the other Daily Mixes' songs.
-pub fn regenerate_one(lib: &Lib, ctx: &Ctx, id: &str, other_daily: &HashSet<u32>) -> Option<Generated> {
+/// the other Daily Mixes' songs and are made from the group they came from
+/// (`lead` is the stored mix's leading artists).
+pub fn regenerate_one(lib: &Lib, ctx: &Ctx, id: &str, other_daily: &HashSet<u32>, lead: &[String]) -> Option<Generated> {
     let taste = Taste::new(lib);
     if let Some(n) = id.strip_prefix("daily:").and_then(|n| n.parse::<usize>().ok()) {
-        let group = clusters(lib, &taste).into_iter().nth(n.checked_sub(1)?)?;
+        let groups = clusters(lib, &taste);
+        let group = groups.get(daily_group(lib, &groups, n, lead)?)?.clone();
         let mut used = other_daily.clone();
         return daily_mix(lib, &taste, ctx, &group, n, ctx.seed ^ str_hash(&format!("daily{n}")), &mut used);
     }

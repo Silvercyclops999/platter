@@ -835,10 +835,15 @@ impl CacheLookup {
                         let title = c
                             .query_row("SELECT title FROM mixes WHERE id = ?1", [&id], |r| r.get::<_, String>(0))
                             .optional()?;
-                        let tracks = match &ctx.track_ids {
+                        let mut tracks = match &ctx.track_ids {
                             Some(ids) => queries::tracks_by_ids(c, ids)?,
                             None => crate::mixes::store::tracks(c, &id)?.0,
                         };
+                        // Songs hidden since the mix was made stay out, as
+                        // they do on its page.
+                        if let Some(h) = &hidden_ids {
+                            tracks.retain(|t| !h.hides(&t.id, &t.artist_id));
+                        }
                         if title.is_none() && ctx.track_ids.is_none() {
                             return Err(crate::error::AppError::NotFound(format!("mix {id}")));
                         }

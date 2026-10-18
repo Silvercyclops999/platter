@@ -314,10 +314,19 @@ impl MixService {
         self.ensure_fresh(now_ms()).await?;
         let db = self.inner.db.clone();
         let next = self.ctx(now_ms(), &self.options()).next_daylist_update();
+        let hidden = self.hidden();
         blocking(move || {
             let mut all = db.read(store::all)?;
-            for (m, _, _) in all.iter_mut().filter(|(m, _, _)| m.kind == MixKind::Daylist) {
-                m.next_update_at = Some(next);
+            for (m, tracks, _) in all.iter_mut() {
+                if m.kind == MixKind::Daylist {
+                    m.next_update_at = Some(next);
+                }
+                // Counted without songs hidden since it was made.
+                if !hidden.is_empty() {
+                    let shown: Vec<&crate::model::Track> = tracks.iter().filter(|t| !hidden.hides(&t.id, &t.artist_id)).collect();
+                    m.track_count = shown.len() as u32;
+                    m.duration_ms = shown.iter().map(|t| t.duration_ms).sum();
+                }
             }
             let mut out = MixShelves::default();
             let mut first: Vec<(u8, usize, super::MixSummary)> = Vec::new();
@@ -372,7 +381,8 @@ impl MixService {
             .into_iter()
             .filter_map(|t| lib.index.get(&t).copied())
             .collect();
-        let g = engine::regenerate_one(&lib, ctx, id, &others).ok_or_else(|| AppError::NotFound(format!("mix {id}")))?;
+        let lead: Vec<String> = db.read(|c| store::one(c, id))?.map(|(m, _, _)| m.artist_ids).unwrap_or_default();
+        let g = engine::regenerate_one(&lib, ctx, id, &others, &lead).ok_or_else(|| AppError::NotFound(format!("mix {id}")))?;
         let stored = Stored::from_generated(&lib, g);
         let ids: Vec<String> = stored.tracks.iter().map(|(t, _)| t.clone()).collect();
         let fam: std::collections::HashMap<&str, bool> = stored.tracks.iter().map(|(t, f)| (t.as_str(), *f)).collect();
