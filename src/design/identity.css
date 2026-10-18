@@ -169,6 +169,11 @@
 :root[data-identity] .fw--artwork:has(.turntable) :is(.fw__bg, .fw__shade) { display: none; }
 :root[data-identity] .fw__now--turntable .fw__title { font-family: var(--font-headings, var(--font-family)); font-weight: 600; }
 
+/* The miniplayer: graphite with a hint of the cover, and the progress line
+   in brass, the playing colour. */
+:root[data-identity] .mini.is-tinted { background-color: color-mix(in srgb, var(--mini-tint) 24%, #171513); }
+:root[data-identity] .mini__edge-fill { background: var(--color-playing); }
+
 /* ---------------------------------------------------------------- Hi-fi plates */
 /* Quality badges as small engraved plates, like labels on gear. */
 :root[data-identity] :is(.badge--quality, .badge--hires) {

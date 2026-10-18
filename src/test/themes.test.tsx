@@ -446,7 +446,8 @@ describe("Platter's own looks", () => {
       expect(useSettings.getState().settings).toMatchObject({ theme: "studio", accent: "brass", followSystem: true, recordMotion: "full", tonearmSeek: true, newLookOffered: true }),
     );
     expect(screen.queryByRole("region", { name: "Try Platter's new look" })).toBeNull();
-    const undo = useToasts.getState().toasts.at(-1);
+    const toasts = useToasts.getState().toasts;
+    const undo = toasts[toasts.length - 1];
     expect(undo?.message).toBe("Switched to Studio.");
     act(() => undo?.action?.run());
     await waitFor(() => expect(useSettings.getState().settings).toMatchObject({ theme: "dark", accent: "ivory", followSystem: false, newLookOffered: true }));

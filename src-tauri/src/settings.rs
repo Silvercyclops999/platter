@@ -4760,7 +4760,8 @@ mod tests {
         let raw = r##"{"theme":"neon","downloadLimitGb":77,"accent":"#A1B2C3","reportToPlex":false}"##;
         stored(&db, raw);
         let s = try_load(&db).unwrap();
-        assert_eq!(s.theme, Settings::default().theme, "the bad one takes its default");
+        // The bad one takes the default for saved settings (Classic dark, as before Studio).
+        assert_eq!(s.theme, ThemeMode::Dark, "the bad one takes its default");
         assert_eq!((s.download_limit_gb, s.accent.as_str(), s.report_plays), (77, "#A1B2C3", false));
         assert_eq!(db.read(|c| kv_get(c, UNREADABLE_KEY)).unwrap().as_deref(), Some(raw));
         // Not JSON at all: defaults, and the raw text is still kept.
