@@ -411,6 +411,9 @@ pub struct Discover {
     new_lock: Arc<tokio::sync::Mutex<()>>,
     /// Search results by kind, source and query, with when they came.
     searches: Arc<parking_lot::Mutex<HashMap<String, (i64, CataloguePart)>>>,
+    /// One lookup per search at a time: a second ask for the same one waits
+    /// for the first and takes its answer.
+    searching: Arc<parking_lot::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
 /// Lidarr's lookup answers, as Discover reads them.
@@ -490,7 +493,7 @@ fn section_of(g: &Group) -> &'static str {
 
 impl Discover {
     pub fn new(deps: DiscoverDeps) -> Self {
-        Self { inner: Arc::new(deps), new_lock: Arc::new(tokio::sync::Mutex::new(())), searches: Default::default() }
+        Self { inner: Arc::new(deps), new_lock: Arc::new(tokio::sync::Mutex::new(())), searches: Default::default(), searching: Default::default() }
     }
 
     fn online(&self) -> bool {
@@ -568,6 +571,8 @@ impl Discover {
         let lidarr = prefs.lidarr_source && part != "songs" && self.inner.lookup.ready();
         let key = format!("{part}|{}|{}", if lidarr { "lidarr" } else { "mb" }, q.to_lowercase());
         let now = (self.inner.clock)();
+        let one = self.searching.lock().entry(key.clone()).or_default().clone();
+        let _one = one.lock().await;
         let hit = self.searches.lock().get(&key).filter(|(at, _)| now - *at < SEARCH_TTL).map(|(_, p)| p.clone());
         if let Some(mut p) = hit {
             // Request states change; the rest holds.
@@ -598,6 +603,9 @@ impl Discover {
             }
         }
         cache.insert(key, (now, fresh.clone()));
+        drop(cache);
+        // Searches nobody is waiting on any more.
+        self.searching.lock().retain(|_, m| Arc::strong_count(m) > 1);
         Ok(fresh)
     }
 
