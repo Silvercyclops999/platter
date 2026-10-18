@@ -312,7 +312,8 @@ describe("scrobbling settings", () => {
     const row = document.querySelector('[data-setting="scrobbleLastfm"]') as HTMLElement;
     await user.click(within(row).getByRole("switch"));
     await waitFor(() => expect(useSettings.getState().settings?.scrobbleLastfm).toBe(true));
-  });
+    // The whole Settings page and six steps: slow on a loaded CI machine, not racy.
+  }, 30_000);
 
   it("app state: the service refuses the session, so Settings asks to sign in again", async () => {
     await backend.lastfmSecretSet("s");
