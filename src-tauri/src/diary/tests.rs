@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use rusqlite::{Connection, params};
 
-use super::detect::{finished_sessions, first_play};
+use super::detect::{LOOKBACK_MS, finished_sessions, first_play};
 use super::export::{self, LocalTime};
 use super::*;
 use crate::db::DbHandle;
@@ -90,7 +90,36 @@ fn an_album_heard_through_is_one_sitting() {
     assert_eq!((f.songs_played, f.songs_total, f.play_id), (10, 10, last));
     assert_eq!(f.started_at, NOW - 2 * HOUR);
     assert_eq!(f.ms_listened, 10 * 240_000);
-    assert_eq!(f.key(), format!("auto:al:{last}"));
+    assert_eq!(f.key(), format!("auto:al:s{}", NOW - 2 * HOUR), "keyed by when the sitting started");
+    assert_eq!(f.legacy_key(), format!("auto:al:{last}"), "the key older builds used");
+}
+
+#[test]
+fn a_sitting_cut_by_the_lookback_is_read_from_its_start() {
+    let c = mem();
+    album(&c, "al", 10);
+    let since = NOW - LOOKBACK_MS;
+    // Started ten minutes before the window: songs 1 to 3 fall outside it.
+    let begun = since - 10 * MIN;
+    through(&c, "al", 1, 10, begun);
+    // An older sitting, well apart, stays out of it.
+    through(&c, "al", 1, 4, begun - 6 * HOUR);
+    let got = finished_sessions(&c, "al", since).unwrap();
+    assert_eq!(got.len(), 1);
+    assert_eq!((got[0].started_at, got[0].songs_played, got[0].ms_listened), (begun, 10, 10 * 240_000));
+}
+
+#[test]
+fn two_devices_sittings_get_different_keys() {
+    // Each computer numbers its own listen log, so the same row id can come
+    // up on both; the sitting's start time tells them apart.
+    let (a, b) = (mem(), mem());
+    album(&a, "al", 3);
+    album(&b, "al", 3);
+    let (la, lb) = (through(&a, "al", 1, 3, NOW - 3 * HOUR), through(&b, "al", 1, 3, NOW - HOUR));
+    assert_eq!(la, lb, "same listen log row on both");
+    let (ka, kb) = (finished_sessions(&a, "al", 0).unwrap()[0].key(), finished_sessions(&b, "al", 0).unwrap()[0].key());
+    assert_ne!(ka, kb);
 }
 
 #[test]
@@ -257,6 +286,25 @@ fn the_output_name_says_headphones_or_speakers_when_it_can() {
     assert_eq!(listened_on("Speakers (Realtek(R) Audio)"), Some(ListenedOn::Speakers));
     assert_eq!(listened_on("KEF LSX Studio Monitors"), Some(ListenedOn::Speakers));
     assert_eq!(listened_on("Topping D90"), None);
+    assert_eq!(listened_on("Galaxy Buds2 Pro"), Some(ListenedOn::Headphones));
+    assert_eq!(listened_on("Moondrop IEMs"), Some(ListenedOn::Headphones));
+    assert_eq!(listened_on("In-Ear Monitors"), Some(ListenedOn::Headphones), "in-ear monitors are worn");
+    assert_eq!(listened_on("Sennheiser HD650"), Some(ListenedOn::Headphones));
+    assert_eq!(listened_on("Headphones (HD 600)"), Some(ListenedOn::Headphones));
+    assert_eq!(listened_on("beyerdynamic DT 770 PRO"), Some(ListenedOn::Headphones));
+}
+
+#[test]
+fn the_output_name_matches_whole_words_only() {
+    // A word inside a longer one isn't the word.
+    assert_eq!(listened_on("Rosebuds Lounge DAC"), None);
+    assert_eq!(listened_on("Siemens Monitor"), Some(ListenedOn::Speakers), "not headphones for the iem in Siemens");
+    assert_eq!(listened_on("Studio Monitor (HD Audio)"), Some(ListenedOn::Speakers));
+    assert_eq!(listened_on("Monitor"), Some(ListenedOn::Speakers));
+    assert_eq!(listened_on("Monitoring Interface"), None);
+    assert_eq!(listened_on("Loudspeakerless Box"), None);
+    assert_eq!(listened_on("NVIDIA High Definition Audio"), None);
+    assert_eq!(listened_on("Earbudsy Thing"), None);
 }
 
 struct Events(Mutex<usize>);
@@ -373,6 +421,90 @@ async fn two_sittings_write_two_entries_and_a_deleted_one_stays_gone() {
 }
 
 #[tokio::test]
+async fn an_entry_or_tombstone_under_an_older_key_still_counts() {
+    let r = rig();
+    let last = r
+        .db
+        .write(|c| {
+            let last = through(c, "al", 1, 4, NOW - 20 * HOUR);
+            through(c, "b", 1, 3, NOW - 2 * HOUR);
+            Ok(last)
+        })
+        .unwrap();
+    // An older build wrote "al" under its listen log row, and deleted "b".
+    let old = DiaryEntry { album_id: "al".into(), at: NOW - 19 * HOUR, auto: true, rating: Some(4.0), ..Default::default() };
+    r.store.put(&DIARY, &format!("auto:al:{last}"), &old).unwrap();
+    let b_last = r.db.read(|c| Ok(c.query_row("SELECT max(id) FROM listen_log", [], |row| row.get::<_, i64>(0))?)).unwrap();
+    r.store.put(&DIARY, &format!("auto:b:{b_last}"), &old).unwrap();
+    r.store.remove(&DIARY, &format!("auto:b:{b_last}")).unwrap();
+    assert_eq!(r.diary.album_played("al").await.unwrap(), 0, "not written twice");
+    assert_eq!(r.diary.album_played("b").await.unwrap(), 0, "a deleted entry stays gone");
+    let list = r.diary.list(&DiaryQuery::default()).await.unwrap();
+    assert_eq!(list.entries.len(), 1);
+    assert_eq!(list.entries[0].entry.rating, Some(4.0), "the old entry reads as before");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn checks_after_plays_never_overlap_or_undo_an_edit() {
+    let r = rig();
+    r.db.write(|c| {
+        through(c, "al", 1, 4, NOW - HOUR);
+        Ok(())
+    })
+    .unwrap();
+    // Two plays ending together: one entry between them.
+    let (a, b) = tokio::join!(r.diary.album_played("al"), r.diary.album_played("al"));
+    assert_eq!(a.unwrap() + b.unwrap(), 1);
+    let id = r.diary.list(&DiaryQuery::default()).await.unwrap().entries[0].id.clone();
+    // A rating saved while another check runs is kept, and a delete holds.
+    for _ in 0..20 {
+        let edit = DiaryEdit { rating: Some(5.0), note: "Kept".into(), at: None };
+        let (played, edited) = tokio::join!(r.diary.album_played("al"), r.diary.edit(&id, edit));
+        assert_eq!(played.unwrap(), 0);
+        edited.unwrap();
+    }
+    let e = &r.diary.list(&DiaryQuery::default()).await.unwrap().entries[0];
+    assert_eq!((e.entry.rating, e.entry.note.as_str()), (Some(5.0), "Kept"));
+    let (played, gone) = tokio::join!(r.diary.album_played("al"), r.diary.delete(&id));
+    assert!(gone.unwrap());
+    assert_eq!(played.unwrap(), 0);
+    assert_eq!(r.diary.album_played("al").await.unwrap(), 0);
+    assert_eq!(r.diary.list(&DiaryQuery::default()).await.unwrap().total, 0);
+}
+
+#[tokio::test]
+async fn the_computer_name_is_asked_for_when_an_entry_is_written() {
+    let r = rig();
+    let name = Arc::new(Mutex::new("Studio Mac".to_owned()));
+    let n = name.clone();
+    let diary = r.diary.clone().with_device_name(Arc::new(move || n.lock().clone()));
+    r.db.write(|c| {
+        through(c, "al", 1, 4, NOW - 5 * HOUR);
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(diary.album_played("al").await.unwrap(), 1);
+    *name.lock() = "  ".into();
+    r.db.write(|c| {
+        through(c, "b", 1, 3, NOW - HOUR);
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(diary.album_played("b").await.unwrap(), 1);
+    let list = diary.list(&DiaryQuery::default()).await.unwrap();
+    let device = |album: &str| list.entries.iter().find(|e| e.entry.album_id == album).unwrap().entry.device.clone();
+    assert_eq!(device("al").as_deref(), Some("Studio Mac"));
+    assert_eq!(device("b"), None, "no blank name");
+}
+
+#[test]
+fn a_failed_export_names_the_file() {
+    let e = super::service::export_error("Listening diary.csv", &std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied"));
+    let text = e.to_string();
+    assert!(text.contains("Listening diary.csv") && text.contains("access denied"), "{text}");
+}
+
+#[tokio::test]
 async fn entries_take_a_rating_a_note_and_a_new_date() {
     let r = rig();
     let logged = r.diary.log("b").await.unwrap();
@@ -390,7 +522,12 @@ async fn entries_take_a_rating_a_note_and_a_new_date() {
     assert_eq!((cleared.entry.rating, cleared.entry.at), (None, NOW - 48 * HOUR));
     assert!(r.diary.edit(&id, DiaryEdit { rating: Some(6.0), ..Default::default() }).await.is_err());
     assert!(r.diary.edit(&id, DiaryEdit { note: "x".repeat(NOTE_MAX + 1), ..Default::default() }).await.is_err());
-    assert!(r.diary.edit(&id, DiaryEdit { at: Some(NOW + 3 * 24 * HOUR), ..Default::default() }).await.is_err(), "not in the future");
+    let future = r.diary.edit(&id, DiaryEdit { at: Some(NOW + 3 * 24 * HOUR), ..Default::default() }).await;
+    assert!(matches!(&future, Err(crate::error::AppError::Invalid(m)) if m.contains("future")), "{future:?}");
+    for bad in [0, -5] {
+        let got = r.diary.edit(&id, DiaryEdit { at: Some(bad), ..Default::default() }).await;
+        assert!(matches!(&got, Err(crate::error::AppError::Invalid(m)) if !m.contains("future")), "{got:?}");
+    }
     assert!(matches!(r.diary.edit("log:nope", DiaryEdit::default()).await, Err(crate::error::AppError::NotFound(_))));
     assert!(r.diary.delete(&id).await.unwrap());
     assert_eq!(r.diary.list(&DiaryQuery::default()).await.unwrap().total, 0);

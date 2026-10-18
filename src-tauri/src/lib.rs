@@ -710,7 +710,15 @@ pub fn run() {
             os.start(app.handle(), player.clone(), art.clone(), cache_dir.join("now-playing"), live.platform.clone());
             // The listening diary: albums played start to finish, kept here
             // (and in the sync file only when its own setting is on).
-            let diary = diary::Diary::new(db.clone(), sync_store.clone(), live.diary.clone(), plex.identity().device_name.clone());
+            // Where an entry was heard: the name set for this computer, or its
+            // own name. Never a server's idea of it, so every backend gets it.
+            let diary = diary::Diary::new(db.clone(), sync_store.clone(), live.diary.clone(), String::new()).with_device_name({
+                let db = db.clone();
+                Arc::new(move || {
+                    let n = settings::load(&db).computer_name;
+                    if n.trim().is_empty() { remote::peer::os_computer_name() } else { n }
+                })
+            });
             diary.set_events(Arc::new(app.handle().clone()));
             diary.set_place(Arc::new(player.clone()));
             app.manage(diary.clone());

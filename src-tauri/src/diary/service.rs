@@ -126,12 +126,16 @@ pub struct Diary {
     store: SyncStore,
     switches: DiarySwitches,
     /// This computer's name, for where an entry was heard.
-    device: String,
+    device: Arc<dyn Fn() -> String + Send + Sync>,
     events: Arc<RwLock<Option<Arc<dyn DiaryEvents>>>>,
     place: Arc<RwLock<Option<Arc<dyn ListenPlace>>>>,
     clock: Arc<dyn Fn() -> i64 + Send + Sync>,
     /// Makes manual keys unique within one millisecond.
     seq: Arc<AtomicU64>,
+    /// Held while entries are written on their own and while one is edited
+    /// or deleted, so a check after a play never writes over an edit or
+    /// brings back a deleted entry.
+    writing: Arc<tokio::sync::Mutex<()>>,
 }
 
 fn system_ms() -> i64 {
@@ -140,16 +144,25 @@ fn system_ms() -> i64 {
 
 impl Diary {
     pub fn new(db: DbHandle, store: SyncStore, switches: DiarySwitches, device: impl Into<String>) -> Self {
+        let device: String = device.into();
         Self {
             db,
             store,
             switches,
-            device: device.into(),
+            device: Arc::new(move || device.clone()),
             events: Arc::default(),
             place: Arc::default(),
             clock: Arc::new(system_ms),
             seq: Arc::default(),
+            writing: Arc::default(),
         }
+    }
+
+    /// Where this computer's name comes from, asked each time an entry is
+    /// written (it can be renamed in Settings).
+    pub fn with_device_name(mut self, name: Arc<dyn Fn() -> String + Send + Sync>) -> Self {
+        self.device = name;
+        self
     }
 
     pub fn with_clock(mut self, clock: Arc<dyn Fn() -> i64 + Send + Sync>) -> Self {
@@ -194,6 +207,9 @@ impl Diary {
         if !self.on() || !self.switches.auto.load(Ordering::Relaxed) {
             return Ok(0);
         }
+        // One check at a time, and never alongside an edit or a delete: the
+        // look for an entry and the write that follows act as one.
+        let _guard = self.writing.lock().await;
         let since = (self.clock)() - detect::LOOKBACK_MS;
         let id = album_id.to_owned();
         let (done, basics) = self
@@ -203,8 +219,8 @@ impl Diary {
         let Some((title, artist, year, _)) = basics else { return Ok(0) };
         let mut fresh: Vec<Finished> = Vec::new();
         for f in done {
-            let key = f.key();
-            if !self.store.run(move |s| s.has_entry(&DIARY, &key)).await? {
+            let (key, old) = (f.key(), f.legacy_key());
+            if !self.store.run(move |s| Ok(s.has_entry(&DIARY, &key)? || s.has_entry(&DIARY, &old)?)).await? {
                 fresh.push(f);
             }
         }
@@ -212,6 +228,7 @@ impl Diary {
             return Ok(0);
         }
         let output = self.output_name().await;
+        let device = Some((self.device)()).filter(|d| !d.trim().is_empty());
         let n = fresh.len();
         for f in fresh {
             let entry = DiaryEntry {
@@ -224,7 +241,7 @@ impl Diary {
                 songs_played: f.songs_played,
                 songs_total: f.songs_total,
                 minutes: ((f.ms_listened + 30_000) / 60_000).max(0) as u32,
-                device: Some(self.device.clone()).filter(|d| !d.is_empty()),
+                device: device.clone(),
                 output: output.clone(),
                 rating: None,
                 note: String::new(),
@@ -269,11 +286,12 @@ impl Diary {
     pub async fn edit(&self, id: &str, edit: DiaryEdit) -> AppResult<DiaryItem> {
         let rating = check_rating(edit.rating)?;
         let note = clean_note(&edit.note)?;
-        if let Some(at) = edit.at
-            && (at <= 0 || at > (self.clock)() + 86_400_000)
-        {
-            return Err(AppError::Invalid("That date is in the future.".into()));
+        match edit.at {
+            Some(at) if at <= 0 => return Err(AppError::Invalid("That isn't a date the diary can use.".into())),
+            Some(at) if at > (self.clock)() + 86_400_000 => return Err(AppError::Invalid("That date is in the future.".into())),
+            _ => {}
         }
+        let guard = self.writing.lock().await;
         let key = id.to_owned();
         let Some(mut e) = self.store.run(move |s| s.get(&DIARY, &key)).await? else {
             return Err(AppError::NotFound("That diary entry is gone.".into()));
@@ -285,14 +303,17 @@ impl Diary {
         }
         let (key, value) = (id.to_owned(), e.clone());
         self.store.run(move |s| s.put(&DIARY, &key, &value)).await?;
+        drop(guard);
         self.changed();
         self.item(id.to_owned(), e).await
     }
 
     /// Delete an entry. Returns whether there was one.
     pub async fn delete(&self, id: &str) -> AppResult<bool> {
+        let guard = self.writing.lock().await;
         let key = id.to_owned();
         let gone = self.store.run(move |s| s.remove(&DIARY, &key)).await?;
+        drop(guard);
         if gone {
             self.changed();
         }
@@ -337,6 +358,9 @@ impl Diary {
         let id = album_id.to_owned();
         let played = self.db.read_async(move |c| detect::first_play(c, &id)).await?;
         let id = album_id.to_owned();
+        // The sync store can only list a namespace whole (keys from older
+        // builds are rewritten as they're read), so this reads the diary.
+        // It's one local query over a few thousand small rows at most.
         let logged = self
             .store
             .run(move |s| s.list(&DIARY))
@@ -445,8 +469,15 @@ pub async fn diary_export(
     };
     let path = picked.into_path().map_err(|e| AppError::Io(format!("export path: {e}")))?;
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let shown = if name.is_empty() { path.display().to_string() } else { name.clone() };
     tokio::task::spawn_blocking(move || std::fs::write(&path, body))
         .await
-        .map_err(|e| AppError::Internal(format!("export: {e}")))??;
+        .map_err(|e| AppError::Internal(format!("export: {e}")))?
+        .map_err(|e| export_error(&shown, &e))?;
     Ok(Some(name))
+}
+
+/// A failed export names the file it couldn't write.
+pub(crate) fn export_error(name: &str, e: &std::io::Error) -> AppError {
+    AppError::Io(format!("Couldn't save {name}: {e}"))
 }

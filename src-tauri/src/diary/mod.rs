@@ -76,14 +76,29 @@ impl ListenedOn {
 }
 
 /// Headphones or speakers from an output device's name, when it says.
+/// Words are matched whole ("Buds" but not "Rosebuds", "IEM" but not
+/// "Siemens"), so a monitor speaker never reads as headphones.
 pub fn listened_on(output: &str) -> Option<ListenedOn> {
-    let n = output.to_lowercase();
-    const PHONES: [&str; 12] =
-        ["headphone", "headset", "earphone", "earbud", "airpods", "buds", "in-ear", "iem", "wh-1000", "hd 6", "hd6", "dt 770"];
-    const SPEAKERS: [&str; 6] = ["speaker", "monitor", "soundbar", "homepod", "sonos", "receiver"];
-    if PHONES.iter().any(|w| n.contains(w)) {
+    let lower = output.to_lowercase();
+    let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    let is = |w: &str, stems: &[&str]| stems.iter().any(|s| w == *s || w.strip_prefix(s) == Some("s"));
+    // "Buds2", "Buds3": a word that is "buds" and then a number.
+    let buds = |w: &str| w.strip_prefix("buds").is_some_and(|r| r.chars().all(|c| c.is_ascii_digit()));
+    let next = |i: usize| words.get(i + 1).copied().unwrap_or("");
+    let phones = words.iter().enumerate().any(|(i, w)| {
+        is(w, &["headphone", "headset", "earphone", "earbud", "airpod", "iem", "inear"])
+            || buds(w)
+            || (*w == "in" && next(i) == "ear")
+            // Model names: WH-1000XM5, HD 600 / HD650 / HD 6XX, DT 770.
+            || (*w == "wh" && next(i).starts_with("1000"))
+            || (*w == "hd" && next(i).starts_with('6') && next(i).len() >= 3)
+            || (w.len() >= 5 && w.starts_with("hd6") && w[3..].chars().all(|c| c.is_ascii_digit() || c == 'x' || c == 's'))
+            || (*w == "dt" && ["770", "880", "990"].contains(&next(i)))
+    });
+    let speakers = words.iter().any(|w| is(w, &["speaker", "monitor", "soundbar", "homepod", "sonos", "receiver"]));
+    if phones {
         Some(ListenedOn::Headphones)
-    } else if SPEAKERS.iter().any(|w| n.contains(w)) {
+    } else if speakers {
         Some(ListenedOn::Speakers)
     } else {
         None

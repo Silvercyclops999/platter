@@ -31,7 +31,7 @@ pub const LOOKBACK_MS: i64 = 24 * 3600 * 1000;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finished {
     pub album_id: String,
-    /// The listen log row of the play that completed it (keys the entry).
+    /// The listen log row of the play that completed it.
     pub play_id: i64,
     pub started_at: i64,
     pub ended_at: i64,
@@ -41,14 +41,24 @@ pub struct Finished {
 }
 
 impl Finished {
-    /// The entry's key in the sync store: one per completing play.
+    /// The entry's key in the sync store: one per sitting, named by the
+    /// album and when the sitting started. Listen log row ids are this
+    /// computer's own, so two devices syncing the diary could share one;
+    /// a start time to the millisecond they won't.
     pub fn key(&self) -> String {
-        entry_key_auto(&self.album_id, self.play_id)
+        entry_key_auto(&self.album_id, self.started_at)
+    }
+
+    /// The key older builds gave the same sitting (by listen log row), read
+    /// so an entry or tombstone written under it still counts.
+    pub fn legacy_key(&self) -> String {
+        format!("auto:{}:{}", self.album_id, self.play_id)
     }
 }
 
-pub fn entry_key_auto(album_id: &str, play_id: i64) -> String {
-    format!("auto:{album_id}:{play_id}")
+/// `auto:<album>:s<when the sitting started, unix ms>`.
+pub fn entry_key_auto(album_id: &str, started_at: i64) -> String {
+    format!("auto:{album_id}:s{started_at}")
 }
 
 /// Whether a play counts as heard.
@@ -81,6 +91,7 @@ pub fn finished_sessions(c: &Connection, album_id: &str, since_ms: i64) -> AppRe
     let on_album: HashSet<&str> = songs.iter().map(String::as_str).collect();
     let last = songs.last().map(String::as_str).unwrap_or_default();
     let need = ((songs.len() as f64) * MOST).ceil() as usize;
+    let since_ms = sitting_start(c, album_id, since_ms)?;
 
     let mut st = c.prepare_cached(
         "SELECT id, rating_key, started_at, coalesce(ended_at, started_at + ms_listened), ms_listened, duration_ms, completed
@@ -131,6 +142,27 @@ pub fn finished_sessions(c: &Connection, album_id: &str, since_ms: i64) -> AppRe
         }
     }
     Ok(out)
+}
+
+/// Where to start reading so a sitting the lookback cuts is read whole:
+/// back past any play from the album that ends within [`SESSION_GAP_MS`] of
+/// the start, until nothing before it is that close.
+fn sitting_start(c: &Connection, album_id: &str, since_ms: i64) -> AppResult<i64> {
+    let mut st = c.prepare_cached(
+        "SELECT min(started_at) FROM listen_log
+         WHERE context_kind = 'album' AND context_id = ?1 AND started_at < ?2
+           AND coalesce(ended_at, started_at + ms_listened) >= ?2 - ?3",
+    )?;
+    let mut at = since_ms;
+    // Each step goes back at least one play; a sitting is far fewer.
+    for _ in 0..1000 {
+        let earlier: Option<i64> = st.query_row(params![album_id, at, SESSION_GAP_MS], |r| r.get(0))?;
+        match earlier {
+            Some(e) if e < at => at = e,
+            _ => break,
+        }
+    }
+    Ok(at)
 }
 
 /// The earliest play of any of the album's songs: here, or imported from a
