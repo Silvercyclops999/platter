@@ -614,8 +614,8 @@ pub fn missing(c: &Connection, limit: usize) -> AppResult<Vec<MissingSong>> {
                     UNION
                     SELECT m.artist_fold, m.title_fold, 'l' || l.source, 'Liked songs'
                     FROM m JOIN import_likes l ON l.song_id = m.id),
-              g AS (SELECT a, t, count(DISTINCT want) AS wants, group_concat(DISTINCT name) AS names FROM w GROUP BY a, t)
-         SELECT min(m.artist), min(m.title), max(m.album), group_concat(DISTINCT m.source), g.wants, g.names
+              g AS (SELECT a, t, count(DISTINCT want) AS wants, group_concat(name, char(31)) AS names FROM w GROUP BY a, t)
+         SELECT min(m.artist), min(m.title), max(m.album), group_concat(m.source, char(31)), g.wants, g.names
          FROM m JOIN g ON g.a = m.artist_fold AND g.t = m.title_fold
          GROUP BY m.artist_fold, m.title_fold
          ORDER BY g.wants DESC, lower(min(m.artist)), lower(min(m.title))
@@ -624,8 +624,9 @@ pub fn missing(c: &Connection, limit: usize) -> AppResult<Vec<MissingSong>> {
     let rows = st.query_map([limit as i64], |r| {
         let artist: String = r.get(0)?;
         let title: String = r.get(1)?;
+        // Split on the unit separator: list names can hold commas.
         let split = |s: Option<String>| -> Vec<String> {
-            let mut v: Vec<String> = s.unwrap_or_default().split(',').filter(|x| !x.is_empty()).map(String::from).collect();
+            let mut v: Vec<String> = s.unwrap_or_default().split('\u{1f}').filter(|x| !x.is_empty()).map(String::from).collect();
             v.sort();
             v.dedup();
             v

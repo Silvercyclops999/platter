@@ -687,3 +687,17 @@ fn a_long_history_is_written_in_chunks() {
     assert_eq!(insert_imported(&mut c, &plays, 1).unwrap(), n);
     assert_eq!(insert_imported(&mut c, &plays, 2).unwrap(), 0, "again adds nothing");
 }
+
+#[test]
+fn playlist_names_with_commas_stay_whole_in_the_missing_list() {
+    let (_d, mut c) = db();
+    library(&c);
+    let text = "playlist,title,artist\n\
+                \"Rain, Then Sun\",Nowhere Song,Nobody Here\n\
+                Evening,Nowhere Song,Nobody Here\n";
+    import(&mut c, "lists", parse_csv(text, "x").unwrap(), 1_000);
+    let m = store::missing(&c, 100).unwrap();
+    assert_eq!(m.len(), 1);
+    assert_eq!(m[0].wanted_by, ["Evening", "Rain, Then Sun"]);
+    assert_eq!(m[0].wants, 2);
+}
