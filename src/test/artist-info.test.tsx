@@ -13,6 +13,9 @@ import { useRouter } from "../stores/router";
 import { loadSettings, useSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
 
+// These render the whole Settings page; a loaded CI machine needs more than 15 s.
+vi.setConfig({ testTimeout: 30_000 });
+
 const mock = backend as MockBackend;
 const artistAt = (i: number) => mock.fx.artists[i];
 
