@@ -106,7 +106,7 @@ describe("the frame model", () => {
 
   it("lists the six frames plus Custom, with only the built ones ready", () => {
     expect(FRAME_INFO.map((f) => f.id)).toEqual(["index", "deck", "turntable", "gatefold", "classic", "console", "custom"]);
-    expect(FRAME_INFO.filter((f) => f.ready).map((f) => f.id)).toEqual(["index", "deck", "turntable", "classic", "custom"]);
+    expect(FRAME_INFO.filter((f) => f.ready).map((f) => f.id)).toEqual(["index", "deck", "turntable", "gatefold", "classic", "console", "custom"]);
   });
 
   it("panels slide in with movement scaled by the motion setting, so reduced motion fades", () => {
@@ -233,19 +233,18 @@ describe("custom frames", () => {
 });
 
 describe("the first-run step", () => {
-  it("is Pick a layout and a look: Index first, the frames to come marked, Classic and Console under More", async () => {
+  it("is Pick a layout and a look: Index first, every frame ready, Classic and Console under More", async () => {
     const user = userEvent.setup();
     render(<PickLookDialog />);
     act(() => looks.openPick());
     const dialog = await screen.findByRole("dialog", { name: "Pick a layout and a look" });
     const layouts = within(within(dialog).getByRole("radiogroup", { name: "Layout" }));
-    expect(layouts.getAllByRole("radio").map((r) => r.getAttribute("aria-label"))).toEqual(["Index", "Deck", "Turntable", "Gatefold, coming soon"]);
-    expect(layouts.getByRole("radio", { name: "Gatefold, coming soon" })).toHaveAttribute("aria-disabled", "true");
-    await user.click(layouts.getByRole("radio", { name: "Gatefold, coming soon" }));
-    expect(useSettings.getState().settings?.layout.frame).toBe("classic");
+    expect(layouts.getAllByRole("radio").map((r) => r.getAttribute("aria-label"))).toEqual(["Index", "Deck", "Turntable", "Gatefold"]);
+    await user.click(layouts.getByRole("radio", { name: "Gatefold" }));
+    await waitFor(() => expect(useSettings.getState().settings?.layout.frame).toBe("gatefold"));
     await user.click(within(dialog).getByRole("button", { name: "More layouts" }));
     expect(layouts.getByRole("radio", { name: "Classic" })).toBeInTheDocument();
-    expect(layouts.getByRole("radio", { name: "Console, coming soon" })).toBeInTheDocument();
+    expect(layouts.getByRole("radio", { name: "Console" })).not.toHaveAttribute("aria-disabled");
     await user.click(layouts.getByRole("radio", { name: "Index" }));
     await waitFor(() => expect(useSettings.getState().settings?.layout.frame).toBe("index"));
     expect(useSettings.getState().settings?.layoutOffered).toBe(true);

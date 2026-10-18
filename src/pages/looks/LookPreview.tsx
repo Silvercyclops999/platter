@@ -624,6 +624,148 @@ function TurntableBody({ parts, page, drag }: { parts: LookParts; page: "home" |
   );
 }
 
+/** Gatefold, drawn small: the icon rail, the now playing page, the spine, the page you're on. */
+function GatefoldBody({ parts, page, drag }: { parts: LookParts; page: "home" | "album"; drag: ReturnType<typeof useDrag> }) {
+  const a = ALBUMS[0];
+  return (
+    <div className="lp-fbody lp-fbody--gatefold">
+      <div className="lp-gf__rail">
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <span key={i} className={`lp-fnav__icon ${i === 0 ? "is-on" : ""}`} />
+        ))}
+      </div>
+      <div className="lp-gf__spread">
+        <div className="lp-gf__leaf">
+          <Cover hue={a.hue} className="lp-gf__cover" />
+          <span className="lp-gf__title">{TRACKS[1]}</span>
+          <span className="lp-line lp-line--sub">
+            {a.artist} / {a.title}
+          </span>
+          <span className="lp-strip__line">
+            <span className="lp-plate">1:42</span>
+            <span className="lp-tonearm">
+              <span className="lp-tonearm__fill" />
+            </span>
+            <span className="lp-plate">-2:16</span>
+          </span>
+          <span className="lp-gf__label">Sleeve notes</span>
+          <span className="lp-gf__text">Released May 1997 on Harbour Records. Recorded at Low Barn.</span>
+          <span className="lp-gf__tabs">
+            <span className="is-on">Lyrics</span>
+            <span>Credits</span>
+          </span>
+          <span className="lp-gf__text lp-gf__text--lyric">The ferry leaves at seven</span>
+          <span className="lp-gf__text">and the harbour lights go out</span>
+        </div>
+        <div className="lp-gf__spine">
+          <Shuffle size={11} aria-hidden="true" />
+          <SkipBack size={12} aria-hidden="true" />
+          <span className="lp-play lp-play--small lp-play--ink">
+            <Play size={12} fill="currentColor" aria-hidden="true" />
+          </span>
+          <SkipForward size={12} aria-hidden="true" />
+          <Repeat size={11} aria-hidden="true" />
+          <span className="lp-deck__knob" />
+          <span className="lp-gf__handle">
+            <ListMusic size={12} aria-hidden="true" />
+          </span>
+        </div>
+        <div className="lp-main lp-gf__page">{page === "album" ? <Album parts={parts} drag={drag} /> : <Home parts={parts} drag={drag} />}</div>
+      </div>
+    </div>
+  );
+}
+
+const CONSOLE_TREE = [
+  { t: "Home", l: 1 },
+  { t: "Liked songs", l: 1 },
+  { t: "Artists", l: 1, g: true },
+  { t: "Ilse Brandt", l: 2 },
+  { t: "Mara Vale", l: 2, on: true },
+  { t: "Low Tide Hours", l: 3 },
+  { t: "Albums by year", l: 1, g: true },
+  { t: "Labels", l: 1, g: true },
+  { t: "Playlists", l: 1, g: true },
+  { t: "Late night", l: 2 },
+  { t: "Filters", l: 1, g: true },
+];
+
+/** Console, drawn small: the tree, the dense table, the details pane, the status line. */
+function ConsoleBody() {
+  const a = ALBUMS[0];
+  const rows = [...TRACKS, "Harbour Song", "Quiet Engine", "North Pier", "Undertow"];
+  return (
+    <div className="lp-fbody lp-fbody--console">
+      <div className="lp-cs__panes">
+        <div className="lp-cs__tree">
+          <span className="lp-fnav__search">
+            <Search size={11} aria-hidden="true" /> Search
+          </span>
+          {CONSOLE_TREE.map((n) => (
+            <span key={n.t} className={`lp-cs__node ${n.g ? "is-group" : ""} ${n.on ? "is-on" : ""}`} style={{ paddingLeft: 6 + (n.l - 1) * 12 }}>
+              {n.t}
+            </span>
+          ))}
+        </div>
+        <div className="lp-main lp-cs__table">
+          <span className="lp-cs__kind">Album</span>
+          <span className="lp-cs__name">{a.title}</span>
+          <span className="lp-cs__row lp-cs__row--head">
+            <span />
+            <span>Name</span>
+            <span>Artist</span>
+            <span>Year</span>
+            <span>Format</span>
+            <span>Length</span>
+          </span>
+          {rows.map((t, i) => (
+            <span key={t} className={`lp-cs__row ${i === 1 ? "is-on" : ""}`}>
+              <Cover hue={ALBUMS[0].hue} className="lp-cs__art" />
+              <span className="lp-cs__strong">{t}</span>
+              <span>{a.artist}</span>
+              <span>1997</span>
+              <span>{i % 3 ? "FLAC" : "FLAC 24/96"}</span>
+              <span>{`${3 + (i % 3)}:${String(10 + i * 7).slice(-2)}`}</span>
+            </span>
+          ))}
+        </div>
+        <div className="lp-cs__details">
+          <Cover hue={a.hue} className="lp-cs__cover" />
+          <span className="lp-line lp-line--title">{TRACKS[1]}</span>
+          <span className="lp-line lp-line--sub">{a.artist}</span>
+          <span className="lp-gf__label">Tags</span>
+          {["Track 2", "FLAC 24/96", "Plays 41"].map((x) => (
+            <span key={x} className="lp-gf__text">
+              {x}
+            </span>
+          ))}
+          <span className="lp-gf__label">Signal path</span>
+          <span className="lp-gf__text">Bit-perfect, exclusive</span>
+        </div>
+      </div>
+      <div className="lp-cs__status">
+        <Cover hue={a.hue} className="lp-cs__art" />
+        <span className="lp-line lp-line--title">{TRACKS[1]}</span>
+        <span className="lp-player__controls">
+          <SkipBack size={12} aria-hidden="true" />
+          <span className="lp-play lp-play--small lp-play--ink">
+            <Play size={10} fill="currentColor" aria-hidden="true" />
+          </span>
+          <SkipForward size={12} aria-hidden="true" />
+        </span>
+        <span className="lp-strip__line lp-cs__line">
+          <span className="lp-plate">1:42</span>
+          <span className="lp-tonearm">
+            <span className="lp-tonearm__fill" />
+          </span>
+          <span className="lp-plate">-2:16</span>
+        </span>
+        <Volume2 size={12} aria-hidden="true" />
+      </div>
+    </div>
+  );
+}
+
 /** The picture itself. Its size comes from its parent (it scales to fit). */
 export function LookPreview({ base, tokens, parts, page = "home", onReorder, label = "Preview" }: LookPreviewProps) {
   const drag = useDrag(onReorder);
@@ -638,6 +780,10 @@ export function LookPreview({ base, tokens, parts, page = "home", onReorder, lab
         <DeckBody parts={parts} page={page} drag={drag} labels={layout.deckLabels !== false} />
       ) : layout.frame === "turntable" ? (
         <TurntableBody parts={parts} page={page} drag={drag} />
+      ) : layout.frame === "gatefold" ? (
+        <GatefoldBody parts={parts} page={page} drag={drag} />
+      ) : layout.frame === "console" ? (
+        <ConsoleBody />
       ) : (
         <FrameBody parts={parts} regions={regions} page={page} drag={drag} />
       );

@@ -130,7 +130,7 @@ export function stages(p: SignalPath, stream: string | null): Stage[] {
 }
 
 /** The stream quality label for the playing song, as the window works it out. */
-function useStreamLabel(): string | null {
+export function useStreamLabel(): string | null {
   const track = usePlayer((s) => s.state?.track ?? null);
   const settings = useSettings((s) => s.settings);
   const connection = useApp((s) => s.health?.connection ?? s.auth?.server?.connection ?? null);

@@ -26,6 +26,7 @@ import { framePatch } from "../../stores/looks";
 import { updateSettings, useSettings } from "../../stores/settings";
 import { lookPartsFrom, useTheme } from "../../stores/theme";
 import { COLLAPSE_ORDER, COMPONENT_NAME, FRAME_INFO, REGION_LABEL, frameInfo } from "../../shell/frames";
+import { COLUMN_NAME, CONSOLE_COLUMNS, CONSOLE_DEFAULT_COLUMNS, PANE_LIMITS, type ConsoleColumn } from "../../lib/consoleLayout";
 import { PreviewFrame } from "./LookPreview";
 import "./layouts-ui.css";
 
@@ -159,8 +160,48 @@ export function RegionEditor({ layout }: { layout: Layout }) {
 export function collapseNote(frame: Frame): string {
   if (frame === "deck") return "In a narrow window the faceplate folds to two rows, then the source keys keep only their icons.";
   if (frame === "turntable") return "In a narrow window the player column shrinks to a small platter with the transport.";
+  if (frame === "gatefold") return "In a window under 1000 pixels wide the now playing page folds into the spine.";
+  if (frame === "console") return "In a narrow window the details pane opens as a drawer from the status line, then the tree folds to icons.";
   return `In a narrow window: ${COLLAPSE_ORDER.map((x, i) => (i ? x.toLowerCase() : x)).join(", then ")}.`;
 }
+
+/** Console's table columns, as toggles in the table's order (this device). */
+function ConsoleColumns({ value }: { value: readonly ConsoleColumn[] }) {
+  const id = useId();
+  return (
+    <div className="layout-choice" data-setting-part="consoleColumns">
+      <span id={id} className="layout-choice__label">
+        Table columns (this device)
+      </span>
+      <div className="layout-columns" role="group" aria-labelledby={id}>
+        <span className="layout-columns__fixed">{COLUMN_NAME.name}</span>
+        {CONSOLE_COLUMNS.map((c) => {
+          const on = value.includes(c);
+          return (
+            <button
+              key={c}
+              type="button"
+              aria-pressed={on}
+              className={`layout-columns__option ${on ? "is-on" : ""}`}
+              onClick={() => void updateSettings({ consoleColumns: CONSOLE_COLUMNS.filter((x) => (x === c ? !on : value.includes(x))) })}
+            >
+              {COLUMN_NAME[c]}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const consoleIsDefault = (s: Settings | null) =>
+  !s ||
+  (JSON.stringify(s.consoleColumns ?? CONSOLE_DEFAULT_COLUMNS) === JSON.stringify(CONSOLE_DEFAULT_COLUMNS) &&
+    (s.consoleSort ?? "") === "" &&
+    (s.consoleTree ?? PANE_LIMITS.tree.start) === PANE_LIMITS.tree.start &&
+    (s.consoleDetails ?? PANE_LIMITS.details.start) === PANE_LIMITS.details.start);
+
+const CONSOLE_RESET = { consoleColumns: [...CONSOLE_DEFAULT_COLUMNS], consoleSort: "", consoleTree: PANE_LIMITS.tree.start, consoleDetails: PANE_LIMITS.details.start };
 
 /** Settings > Appearance > Layout: the cards, the frame's options, and the ways back. */
 export function LayoutSettings({ extra }: { extra?: ReactNode }) {
@@ -168,7 +209,9 @@ export function LayoutSettings({ extra }: { extra?: ReactNode }) {
   const layout = layoutOf(s);
   const frame = layout.frame;
   const column = s?.turntableColumn ?? "medium";
-  const isDefault = JSON.stringify(layout) === JSON.stringify({ ...structuredClone(CLASSIC_LAYOUT), frame }) && (frame !== "turntable" || column === "medium");
+  const isDefault =
+    JSON.stringify(layout) === JSON.stringify({ ...structuredClone(CLASSIC_LAYOUT), frame }) && (frame !== "turntable" || column === "medium") && (frame !== "console" || consoleIsDefault(s));
+  const panesMoved = !!s && (s.consoleTree !== PANE_LIMITS.tree.start || s.consoleDetails !== PANE_LIMITS.details.start);
   return (
     <div className="layout-settings">
       <FrameCards frames={FRAME_INFO.map((f) => f.id)} />
@@ -199,6 +242,32 @@ export function LayoutSettings({ extra }: { extra?: ReactNode }) {
           <Choice label="Player column (this device)" value={column} options={SIZE_OPTIONS} onChange={(v) => void updateSettings({ turntableColumn: v })} />
         </div>
       )}
+      {frame === "gatefold" && (
+        <Choice
+          label="Page turn"
+          value={layout.pageTurn === false ? "off" : "on"}
+          options={[
+            { value: "on", label: "On" },
+            { value: "off", label: "Off" },
+          ]}
+          onChange={(v) => void updateSettings({ layout: { ...layout, pageTurn: v === "on" } })}
+        />
+      )}
+      {frame === "gatefold" && <p className="layout-settings__note">The page you go to slides in over the spine. With reduced motion it fades instead.</p>}
+      {frame === "console" && s && (
+        <>
+          <ConsoleColumns value={s.consoleColumns ?? CONSOLE_DEFAULT_COLUMNS} />
+          <div className="layout-choice" data-setting-part="consolePanes">
+            <span className="layout-choice__label">Pane widths (this device)</span>
+            <span className="layout-settings__note">
+              Tree {s.consoleTree ?? PANE_LIMITS.tree.start} px, details {s.consoleDetails ?? PANE_LIMITS.details.start} px. Drag the handles between the panes to change them.
+            </span>
+            <Button size="sm" variant="ghost" disabled={!panesMoved} onClick={() => void updateSettings({ consoleTree: PANE_LIMITS.tree.start, consoleDetails: PANE_LIMITS.details.start })}>
+              Reset widths
+            </Button>
+          </div>
+        </>
+      )}
       {frame === "custom" && <RegionEditor layout={layout} />}
       {frame !== "classic" && <p className="layout-settings__note">{collapseNote(frame)}</p>}
       <div className="layout-settings__actions">
@@ -206,7 +275,13 @@ export function LayoutSettings({ extra }: { extra?: ReactNode }) {
         <Button
           size="sm"
           disabled={!s || isDefault}
-          onClick={() => void updateSettings({ layout: { ...structuredClone(CLASSIC_LAYOUT), frame }, ...(frame === "turntable" ? { turntableColumn: "medium" as const } : {}) })}
+          onClick={() =>
+            void updateSettings({
+              layout: { ...structuredClone(CLASSIC_LAYOUT), frame },
+              ...(frame === "turntable" ? { turntableColumn: "medium" as const } : {}),
+              ...(frame === "console" ? CONSOLE_RESET : {}),
+            })
+          }
         >
           Reset layout
         </Button>

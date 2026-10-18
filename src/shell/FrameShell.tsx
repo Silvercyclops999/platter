@@ -33,7 +33,10 @@ import { useLayout } from "../stores/theme";
 import { rightView as slotView, useUi, type RightView } from "../stores/ui";
 import { useApp } from "../stores/app";
 import { FriendActivityPanel } from "./FriendActivityPanel";
-import { frameRegions, regionOf, solveFrame, solveTurntable, type FrameSolve } from "./frames";
+import { FRAME_RAIL, frameRegions, regionOf, solveFrame, solveGatefold, solveTurntable, type FrameSolve } from "./frames";
+import { ConsoleDetails, ConsoleStatus, ConsoleTable, ConsoleTree, PaneHandle, consoleSourceOf, useConsole, usePaneWidths } from "./ConsoleFrame";
+import { GatefoldLeaf, GatefoldSpine, usePageTurn } from "./GatefoldFrame";
+import { solveConsole } from "../lib/consoleLayout";
 import { DeckFaceplate, DeckLyricsPage, DeckRail } from "./DeckFrame";
 import { useDeckLyrics } from "./deckLyrics";
 import { TurntableColumn, TurntableTabs } from "./TurntableFrame";
@@ -377,6 +380,16 @@ export function FrameShell({ children }: { children: ReactNode }) {
   const deckLyrics = useDeckLyrics();
   const shell = useRef<HTMLDivElement>(null);
   useShellTabOrder(shell);
+  const gatefold = layout.frame === "gatefold";
+  const consoleFrame = layout.frame === "console";
+  const gf = solveGatefold(width);
+  const turnPage = useRef<HTMLDivElement>(null);
+  const crease = useRef<HTMLDivElement>(null);
+  usePageTurn(turnPage, crease, gatefold && layout.pageTurn !== false);
+  const panes = usePaneWidths();
+  const cs = solveConsole(width, panes.tree, panes.details);
+  const detailsOpen = useConsole((s) => s.detailsOpen);
+  const route = useCurrentEntry().route;
 
   const queueOpen = useUi((s) => s.queueOpen);
   const nowPlayingOpen = useUi((s) => s.nowPlayingOpen);
@@ -408,6 +421,119 @@ export function FrameShell({ children }: { children: ReactNode }) {
     <EdgeRegion place="top" items={top} />
   ) : null;
   const bottomEl = !deck && !turntable && bottom.length > 0 ? <EdgeRegion place="bottom" items={bottom} /> : null;
+
+  const skip = (
+    <a
+      href="#main"
+      className="skip-link"
+      onClick={(e) => {
+        e.preventDefault();
+        skipToMain();
+      }}
+    >
+      Skip to main content
+    </a>
+  );
+  const drawer = place === "drawer" && view && <Drawer view={view} swap={slot.swap} />;
+
+  // Gatefold: the icon rail, then the spread (now playing page, spine, the page you're on).
+  if (gatefold) {
+    const rail: FrameSolve = { ...solve, left: FRAME_RAIL, leftMode: "rail" };
+    return (
+      <div
+        ref={shell}
+        className={`app app--chrome-${chrome} frame frame--gatefold has-left ${gf.folded ? "is-folded" : ""}`}
+        style={{ "--frame-left": `${FRAME_RAIL}px`, "--frame-right": `${solve.right}px`, "--gf-spine": `${gf.spine}px` } as CSSProperties}
+        data-frame="gatefold"
+      >
+        {skip}
+        <LeftRegion items={["navigation"]} solve={rail} />
+        <div className="frame-center gf-center">
+          <FrameBar />
+          <div className="gf-spread">
+            {!gf.folded && <GatefoldLeaf />}
+            <GatefoldSpine folded={gf.folded} />
+            <div className="frame-page gf-page">
+              <div ref={turnPage} className="gf-turn">
+                {place === "main" && view ? (
+                  <div className="frame-page__panel">
+                    <Panel view={view} />
+                  </div>
+                ) : (
+                  <MainView />
+                )}
+              </div>
+              <div ref={crease} className="gf-crease" aria-hidden="true" />
+              {drawer}
+            </div>
+          </div>
+          <RemoteStrip />
+          <ListenStrip />
+        </div>
+        {children}
+      </div>
+    );
+  }
+
+  // Console: the tree, the table, the details pane, and the status line under them.
+  if (consoleFrame) {
+    const src = consoleSourceOf(route);
+    const rail: FrameSolve = { ...solve, left: FRAME_RAIL, leftMode: "rail" };
+    const detailsDrawer = cs.detailsMode === "drawer";
+    return (
+      <div
+        ref={shell}
+        className={`app app--chrome-${chrome} frame frame--console ${cs.treeMode === "rail" ? "is-rail" : ""}`}
+        style={{ "--frame-left": `${cs.tree}px`, "--frame-right": `${solve.right}px`, "--console-tree": `${cs.tree}px`, "--console-details": `${cs.details}px` } as CSSProperties}
+        data-frame="console"
+      >
+        {skip}
+        <div className="frame-center console-center">
+          <FrameBar logo />
+          <div className="console-panes">
+            {cs.treeMode === "rail" ? (
+              <LeftRegion items={["navigation"]} solve={rail} />
+            ) : (
+              <>
+                <ConsoleTree />
+                <PaneHandle pane="tree" />
+              </>
+            )}
+            <div className="frame-page console-page">
+              {place === "main" && view ? (
+                <div className="frame-page__panel">
+                  <Panel view={view} />
+                </div>
+              ) : src ? (
+                <ConsoleTable src={src} />
+              ) : (
+                <MainView />
+              )}
+              {drawer}
+              {detailsDrawer && detailsOpen && !drawer && (
+                <div className="frame-drawer console-details-drawer" data-testid="console-details-drawer">
+                  <div className="frame-drawer__scrim" aria-hidden="true" onClick={() => useConsole.setState({ detailsOpen: false })} />
+                  <div className="frame-drawer__panel">
+                    <ConsoleDetails drawer />
+                  </div>
+                </div>
+              )}
+            </div>
+            {!detailsDrawer && (
+              <>
+                <PaneHandle pane="details" />
+                <ConsoleDetails />
+              </>
+            )}
+          </div>
+          <RemoteStrip />
+          <ListenStrip />
+          <ConsoleStatus detailsDrawer={detailsDrawer} />
+        </div>
+        {children}
+      </div>
+    );
+  }
 
   return (
     <div

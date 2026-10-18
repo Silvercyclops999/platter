@@ -66,3 +66,19 @@
 .pick-look__more { justify-self: start; }
 .pick-look__body { max-height: calc(100vh - 96px); overflow-y: auto; }
 .pick-look .frame-cards { grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); }
+
+/* Console's table columns: toggles in the table's order, after the name (always shown). */
+.layout-columns { display: inline-flex; flex-wrap: wrap; gap: var(--space-1); }
+.layout-columns__fixed,
+.layout-columns__option {
+  height: 28px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-sm);
+  line-height: 28px;
+}
+.layout-columns__fixed { color: var(--color-text-muted); border: 1px dashed var(--color-border); line-height: 26px; }
+.layout-columns__option { border: 1px solid var(--color-border); color: var(--color-text-secondary); transition: background-color var(--motion-quick) var(--motion-easing), color var(--motion-quick) var(--motion-easing); }
+.layout-columns__option:hover { color: var(--color-text-primary); }
+.layout-columns__option.is-on { border-color: transparent; background: var(--color-bg-overlay); color: var(--color-text-primary); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); }
+.layout-columns__option:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 1px; }

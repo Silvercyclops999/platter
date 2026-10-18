@@ -24,9 +24,9 @@ export const FRAME_INFO: readonly FrameInfo[] = [
   { id: "index", name: "Index", line: "Sections down the left, the player strip across the top, the queue in a drawer.", ready: true },
   { id: "deck", name: "Deck", line: "A faceplate across the top with a two-line display, source keys under it.", ready: true },
   { id: "turntable", name: "Turntable", line: "The player is a column on the left: platter, tonearm and what's next.", ready: true },
-  { id: "gatefold", name: "Gatefold", line: "Two pages: now playing on the left, browsing on the right.", ready: false },
+  { id: "gatefold", name: "Gatefold", line: "Two pages: now playing on the left, browsing on the right.", ready: true },
   { id: "classic", name: "Classic", line: "Your library on the left and the player bar along the bottom.", ready: true },
-  { id: "console", name: "Console", line: "A tree, a dense table and a details pane, for big libraries.", ready: false },
+  { id: "console", name: "Console", line: "A tree, a dense table and a details pane, for big libraries.", ready: true },
   { id: "custom", name: "Custom", line: "Choose what goes where yourself.", ready: true },
 ];
 
@@ -98,12 +98,32 @@ export const TURNTABLE_REGIONS: Regions = {
 };
 
 /**
- * Sketches of the frames still to come, so the picker can show their shape.
- * Never used to draw the app.
+ * Gatefold: two pages like an open sleeve. The left side is the icon rail
+ * and the now playing page, with the spine (transport and plates) along its
+ * inner edge; the right page is the page you're on, which also shows the
+ * now playing page's lyrics and credits. The queue opens as a drawer.
  */
-const SKETCH: Partial<Record<Frame, Regions>> = {
-  gatefold: { top: [], left: ["nowPlaying", "navigation"], main: ["library", "search"], right: [], bottom: ["transport", "signal"], overlay: ["queue"] },
-  console: { top: [], left: ["navigation", "filters"], main: ["library", "search"], right: ["credits", "signal"], bottom: ["transport", "nowPlaying"], overlay: ["queue"] },
+export const GATEFOLD_REGIONS: Regions = {
+  top: [],
+  left: ["navigation", "nowPlaying", "transport", "signal"],
+  main: ["library", "search", "lyrics", "credits"],
+  right: [],
+  bottom: [],
+  overlay: ["queue"],
+};
+
+/**
+ * Console: the tree (sections, search, filters) on the left, the table on
+ * the page, the details pane (credits, signal path) on the right, and a
+ * one-line transport along the bottom. Lyrics and the queue are drawers.
+ */
+export const CONSOLE_REGIONS: Regions = {
+  top: [],
+  left: ["search", "navigation", "filters"],
+  main: ["library"],
+  right: ["credits", "signal"],
+  bottom: ["transport", "nowPlaying"],
+  overlay: ["queue", "lyrics"],
 };
 
 /** The arrangement a layout's frame draws (null for Classic, which has its own shell). */
@@ -119,20 +139,16 @@ export function frameRegions(l: Pick<Layout, "frame" | "transport" | "regions">)
       return DECK_REGIONS;
     case "turntable":
       return TURNTABLE_REGIONS;
-    default:
-      // Gatefold and Console aren't built yet: Index stands in.
-      return indexRegions(l.transport);
+    case "gatefold":
+      return GATEFOLD_REGIONS;
+    case "console":
+      return CONSOLE_REGIONS;
   }
 }
 
 /** The arrangement to sketch in a preview of a frame. */
 export function sketchRegions(frame: Frame, l: Pick<Layout, "transport" | "regions">): Regions | null {
-  if (frame === "classic") return null;
-  if (frame === "custom") return l.regions;
-  if (frame === "index") return indexRegions(l.transport);
-  if (frame === "deck") return DECK_REGIONS;
-  if (frame === "turntable") return TURNTABLE_REGIONS;
-  return SKETCH[frame] ?? indexRegions("top");
+  return frameRegions({ frame, transport: l.transport, regions: l.regions });
 }
 
 /** The region that holds a component, or null. */
@@ -195,6 +211,18 @@ export function solveTurntable(windowWidth: number, size: RegionSize): { column:
   const full = TURNTABLE_COLUMN[size] ?? TURNTABLE_COLUMN.medium;
   if (windowWidth - FRAME_EDGES - full >= FRAME_MAIN_MIN) return { column: full, compact: false };
   return { column: TURNTABLE_COMPACT, compact: true };
+}
+
+/** Gatefold's icon rail, and the spine between the pages (px). */
+export const GATEFOLD_SPINE = 72;
+/** The spine with the now playing page folded into it. */
+export const GATEFOLD_FOLDED_SPINE = 232;
+/** Under this width the now playing page folds into the spine. */
+export const GATEFOLD_FOLD_AT = 1000;
+
+/** Gatefold in a window: both pages, or the left page folded into the spine. */
+export function solveGatefold(windowWidth: number): { folded: boolean; spine: number } {
+  return windowWidth < GATEFOLD_FOLD_AT ? { folded: true, spine: GATEFOLD_FOLDED_SPINE } : { folded: false, spine: GATEFOLD_SPINE };
 }
 
 /** The order a frame gives way in narrow windows, for the Layout settings. */

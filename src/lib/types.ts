@@ -5,6 +5,7 @@
  * with `?` are optional and may also be null.
  */
 import { CLASSIC_LAYOUT, type Layout, type RegionSize, type UserTheme } from "../design/themes/validate";
+import { CONSOLE_DEFAULT_COLUMNS, PANE_LIMITS, type ConsoleColumn } from "./consoleLayout";
 
 // ---------------------------------------------------------------- model.rs
 
@@ -1372,6 +1373,13 @@ export interface Settings {
   layoutOffered: boolean;
   /** The Turntable layout's player column width (this device). */
   turntableColumn: RegionSize;
+  /** The Console layout's table columns after the name, in order (this device). */
+  consoleColumns: ConsoleColumn[];
+  /** The Console table's sort: a column, "-" before it for descending, empty for the list's own order (this device). */
+  consoleSort: string;
+  /** The Console layout's tree and details pane widths, px (this device). */
+  consoleTree: number;
+  consoleDetails: number;
   /** Appearance shows the "Make your own" look builder. */
   showLookBuilder: boolean;
   /** The "Pick a look" step was shown or skipped on this computer. */
@@ -1862,6 +1870,10 @@ export const DEFAULT_SETTINGS: Settings = {
   layout: CLASSIC_LAYOUT,
   layoutOffered: true,
   turntableColumn: "medium",
+  consoleColumns: [...CONSOLE_DEFAULT_COLUMNS],
+  consoleSort: "",
+  consoleTree: PANE_LIMITS.tree.start,
+  consoleDetails: PANE_LIMITS.details.start,
   showLookBuilder: true,
   lookStepDone: false,
 };

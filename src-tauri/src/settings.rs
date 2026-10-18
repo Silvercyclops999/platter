@@ -123,6 +123,36 @@ fn legacy_record_motion() -> RecordMotion {
     RecordMotion::Off
 }
 
+/// The Console layout's table columns after the name, which is always shown.
+pub const CONSOLE_COLUMNS: &[&str] = &["artist", "album", "year", "format", "length", "plays"];
+pub const CONSOLE_DEFAULT_COLUMNS: &[&str] = &["artist", "album", "year", "format", "length"];
+pub const CONSOLE_TREE_DEFAULT: u32 = 240;
+pub const CONSOLE_TREE_MIN: u32 = 180;
+pub const CONSOLE_TREE_MAX: u32 = 400;
+pub const CONSOLE_DETAILS_DEFAULT: u32 = 300;
+pub const CONSOLE_DETAILS_MIN: u32 = 240;
+pub const CONSOLE_DETAILS_MAX: u32 = 440;
+
+/// Console columns: known ones, each once.
+fn clean_console_columns(c: &[String]) -> AppResult<Vec<String>> {
+    let mut out: Vec<String> = Vec::new();
+    for col in c {
+        if !CONSOLE_COLUMNS.contains(&col.as_str()) {
+            return Err(AppError::Invalid("Pick columns from the ones offered.".into()));
+        }
+        if !out.contains(col) {
+            out.push(col.clone());
+        }
+    }
+    Ok(out)
+}
+
+/// A Console sort: empty, or a column (the name or a table column) with an optional "-" for descending.
+fn console_sort_ok(s: &str) -> bool {
+    let col = s.strip_prefix('-').unwrap_or(s);
+    s.is_empty() || col == "name" || CONSOLE_COLUMNS.contains(&col)
+}
+
 /// The Turntable layout's player column width on this computer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -313,6 +343,13 @@ pub struct Settings {
     pub layout_offered: bool,
     /// The Turntable layout's player column width (this device).
     pub turntable_column: ColumnSize,
+    /// The Console layout's table columns after the name, in order (this device).
+    pub console_columns: Vec<String>,
+    /// The Console table's sort: a column, "-" before it for descending, empty for the list's own order (this device).
+    pub console_sort: String,
+    /// The Console layout's tree and details pane widths in px (this device).
+    pub console_tree: u32,
+    pub console_details: u32,
     /// Appearance shows the "Make your own" look builder.
     pub show_look_builder: bool,
     /// The "Pick a look" step was shown or skipped on this computer.
@@ -976,6 +1013,10 @@ impl Default for Settings {
             layout: crate::themes::Layout::index(),
             layout_offered: true,
             turntable_column: ColumnSize::Medium,
+            console_columns: CONSOLE_DEFAULT_COLUMNS.iter().map(|c| c.to_string()).collect(),
+            console_sort: String::new(),
+            console_tree: CONSOLE_TREE_DEFAULT,
+            console_details: CONSOLE_DETAILS_DEFAULT,
             show_look_builder: true,
             look_step_done: false,
             output_device: None,
@@ -1424,6 +1465,10 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "newLookOffered",
     "layoutOffered",
     "turntableColumn",
+    "consoleColumns",
+    "consoleSort",
+    "consoleTree",
+    "consoleDetails",
     "volume",
     "precacheCount",
     "artCacheMb",
@@ -1535,6 +1580,10 @@ pub struct SettingsPatch {
     pub layout: Option<crate::themes::Layout>,
     pub layout_offered: Option<bool>,
     pub turntable_column: Option<ColumnSize>,
+    pub console_columns: Option<Vec<String>>,
+    pub console_sort: Option<String>,
+    pub console_tree: Option<u32>,
+    pub console_details: Option<u32>,
     pub show_look_builder: Option<bool>,
     pub look_step_done: Option<bool>,
     pub home_shortcuts: Option<bool>,
@@ -1877,6 +1926,17 @@ impl Settings {
         }
         set(&mut self.layout_offered, p.layout_offered);
         set(&mut self.turntable_column, p.turntable_column);
+        if let Some(c) = &p.console_columns {
+            self.console_columns = clean_console_columns(c)?;
+        }
+        if let Some(s) = &p.console_sort {
+            if !console_sort_ok(s) {
+                return Err(AppError::Invalid("Sort by one of the table's columns.".into()));
+            }
+            self.console_sort = s.clone();
+        }
+        set(&mut self.console_tree, p.console_tree);
+        set(&mut self.console_details, p.console_details);
         set(&mut self.show_look_builder, p.show_look_builder);
         set(&mut self.look_step_done, p.look_step_done);
         set(&mut self.home_shortcuts, p.home_shortcuts);
@@ -2298,6 +2358,14 @@ impl Settings {
             self.bring_in_waves = crate::lidarr::waves::DEFAULT_WAVES.to_vec();
         }
         self.precache_count = self.precache_count.clamp(PRECACHE_MIN, PRECACHE_MAX);
+        self.console_tree = self.console_tree.clamp(CONSOLE_TREE_MIN, CONSOLE_TREE_MAX);
+        self.console_details = self.console_details.clamp(CONSOLE_DETAILS_MIN, CONSOLE_DETAILS_MAX);
+        if clean_console_columns(&self.console_columns).is_err() {
+            self.console_columns = CONSOLE_DEFAULT_COLUMNS.iter().map(|c| c.to_string()).collect();
+        }
+        if !console_sort_ok(&self.console_sort) {
+            self.console_sort.clear();
+        }
         self.art_cache_mb = self.art_cache_mb.clamp(ART_CACHE_MIN_MB, ART_CACHE_MAX_MB);
         self.download_limit_gb = self.download_limit_gb.clamp(downloads::LIMIT_MIN_GB, downloads::LIMIT_MAX_GB);
         if !DAYLIST_HOURS.contains(&self.daylist_hours) {
@@ -4723,6 +4791,24 @@ mod tests {
         assert!(Settings::default().layout.deck_labels);
         s.apply(&serde_json::from_str(r#"{"layout":{"frame":"deck","deckLabels":false}}"#).unwrap()).unwrap();
         assert!(!s.layout.deck_labels && s.layout.frame == "deck");
+        // Gatefold's page turn rides in the layout too, on by default.
+        assert!(Settings::default().layout.page_turn);
+        s.apply(&serde_json::from_str(r#"{"layout":{"frame":"gatefold","pageTurn":false}}"#).unwrap()).unwrap();
+        assert!(!s.layout.page_turn);
+        // Console: columns, sort and pane widths, this device only, checked and clamped.
+        for k in ["consoleColumns", "consoleSort", "consoleTree", "consoleDetails"] {
+            assert!(DEVICE_SETTINGS.contains(&k));
+        }
+        assert_eq!(s.console_columns, CONSOLE_DEFAULT_COLUMNS);
+        s.apply(&serde_json::from_str(r#"{"consoleColumns":["plays","artist","plays"],"consoleSort":"-year","consoleTree":9999,"consoleDetails":10}"#).unwrap())
+            .unwrap();
+        assert_eq!(s.console_columns, ["plays", "artist"]);
+        assert_eq!(s.console_sort, "-year");
+        assert_eq!((s.console_tree, s.console_details), (CONSOLE_TREE_MAX, CONSOLE_DETAILS_MIN));
+        assert!(s.apply(&serde_json::from_str(r#"{"consoleColumns":["mood"]}"#).unwrap()).is_err());
+        assert!(s.apply(&serde_json::from_str(r#"{"consoleSort":"mood"}"#).unwrap()).is_err());
+        s.apply(&serde_json::from_str(r#"{"consoleSort":""}"#).unwrap()).unwrap();
+        assert_eq!(s.console_sort, "");
     }
 
     #[test]

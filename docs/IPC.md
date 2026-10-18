@@ -3590,6 +3590,8 @@ goes in one region at most, and `library`, `navigation`, `search`,
 or component, one in a region it doesn't fit, or a missing one refuses the
 file with the reason. `leftSize` and `rightSize` are `small`, `medium` or
 `large`. `deckLabels` (bool, true) shows the names on Deck's source keys.
+`pageTurn` (bool, true) turns Gatefold's right page when you go to another
+page (a fade with reduced motion).
 
 ## Settings and tracking
 | Command | Args |
@@ -3643,7 +3645,10 @@ The rest of the fields, with their defaults:
 | `themeFile` | `ThemeFile` or null | The theme or look file in use, held whole so it travels in the sync file. Checked like a file in the folder; a bad one is refused. Null clears it. |
 | `layoutOffered` | bool, true | The one-time offer to try the Index layout was shown, or wasn't needed. False for settings saved before frames existed. This device only. |
 | `turntableColumn` | `small`, `medium` or `large`, `medium` | The Turntable layout's player column width. Any other value is refused. This device only. |
-| `layout` | `Layout`, Index | Index for new installs; settings saved without a layout, or with one that has no `frame`, are Classic. Layout options: `frame`, `transport`, `regions`, `leftSize`, `rightSize`, `deckLabels`, `sidebarSide`, `sidebarCollapsed`, `sidebarSections`, `nowPlaying`, `playerStyle`, `playerButtons`, `homeShelves`, `homeGreeting`, `quickAccess`, `headerStyle`, `trackColumns`, `coverShape`, `spinRecord`, `motion`. Checked like a look's layout; a bad one is refused, and a hand-edited bad one goes back to Classic. See Themes and looks. |
+| `consoleColumns` | list, `["artist", "album", "year", "format", "length"]` | The Console layout's table columns after the name, in order, from `artist`, `album`, `year`, `format`, `length` and `plays`. Repeats are dropped; anything else is refused. This device only. |
+| `consoleSort` | string, `""` | The Console table's sort: a column (`name` or one above), with `-` in front for descending, or empty for the list's own order. Anything else is refused. This device only. |
+| `consoleTree`, `consoleDetails` | px, `240` and `300` | The Console layout's tree and details pane widths, kept from 180 to 400 and from 240 to 440. This device only. |
+| `layout` | `Layout`, Index | Index for new installs; settings saved without a layout, or with one that has no `frame`, are Classic. Layout options: `frame`, `transport`, `regions`, `leftSize`, `rightSize`, `deckLabels`, `pageTurn`, `sidebarSide`, `sidebarCollapsed`, `sidebarSections`, `nowPlaying`, `playerStyle`, `playerButtons`, `homeShelves`, `homeGreeting`, `quickAccess`, `headerStyle`, `trackColumns`, `coverShape`, `spinRecord`, `motion`. Checked like a look's layout; a bad one is refused, and a hand-edited bad one goes back to Classic. See Themes and looks. |
 | `showLookBuilder` | bool, true | Appearance shows Make your own. |
 | `lookStepDone` | bool, false | The first-run Pick a look step was shown or skipped. This device only. |
 | `outputDevice` | device id or null, null | Read only here. Set with `output_select`; null follows the system default. |

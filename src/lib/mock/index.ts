@@ -217,6 +217,7 @@ import { MockDevices } from "./devices";
 import { MockSoundMap } from "./soundmap";
 import { MockJellyfin, plexRecord } from "./jellyfin";
 import { MockSubsonic } from "./subsonic";
+import { CONSOLE_COLUMNS, clampPane, consoleSortOk } from "../consoleLayout";
 
 /** Record labels for the mock album footers. */
 const MOCK_LABELS = ["Northlight Records", "Harbor Sound", "Quiet Hours Music", "Glasshouse Recordings"];
@@ -2827,6 +2828,16 @@ export class MockBackend implements Backend {
       if (patch.turntableColumn !== undefined && !["small", "medium", "large"].includes(patch.turntableColumn)) {
         throw { kind: "invalid", message: "Pick one of the widths offered." };
       }
+      // The Console layout's table and panes, checked and clamped as the core does.
+      if (patch.consoleColumns !== undefined) {
+        if (!Array.isArray(patch.consoleColumns) || patch.consoleColumns.some((c) => !CONSOLE_COLUMNS.includes(c))) {
+          throw { kind: "invalid", message: "Pick columns from the ones offered." };
+        }
+        next.consoleColumns = [...new Set(patch.consoleColumns)];
+      }
+      if (patch.consoleSort !== undefined && !consoleSortOk(patch.consoleSort)) throw { kind: "invalid", message: "Sort by one of the table's columns." };
+      next.consoleTree = clampPane("tree", next.consoleTree);
+      next.consoleDetails = clampPane("details", next.consoleDetails);
       if (patch.doctorChecks !== undefined) next.doctorChecks = { ...DEFAULT_SETTINGS.doctorChecks, ...patch.doctorChecks };
       if (patch.listenRelay !== undefined) {
         const r = patch.listenRelay.trim().replace(/\/+$/, "");

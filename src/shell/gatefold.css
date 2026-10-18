@@ -1,0 +1,274 @@
+/* Gatefold (GatefoldFrame.tsx): an open sleeve. The icon rail on the outer
+   left edge, then the spread: the now playing page, the spine with the
+   transport, and the page you're on, which turns on navigation. The pages
+   meet at the spine with no gap, so they read as one sleeve folded open.
+   Colours are the look's tokens; brass marks only what is on. */
+
+.frame--gatefold .gf-center { gap: 0; }
+
+.gf-spread {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* ---------------------------------------------------------------- the left page */
+.gf-leaf {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  width: clamp(280px, 30vw, 420px);
+  min-height: 0;
+  border-radius: var(--radius-card) 0 0 var(--radius-card);
+  background: var(--color-bg-raised);
+  box-shadow: inset 0 1px 0 var(--engrave-light, transparent);
+}
+.gf-leaf__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-6) var(--space-6) var(--space-8);
+}
+.gf-leaf__scroll:hover,
+.gf-leaf__scroll:focus-within { scrollbar-width: thin; }
+.gf-leaf__now { display: flex; flex-direction: column; gap: var(--space-4); }
+
+/* The cover, the size of the page, edged like a sleeve on a shelf. */
+.gf-cover { display: block; width: 100%; aspect-ratio: 1; border-radius: var(--radius-art, 4px); cursor: pointer; }
+.gf-cover .art {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-ink) 10%, transparent), 0 10px 28px rgba(0, 0, 0, 0.38);
+}
+.gf-cover:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 3px; }
+
+.gf-song { display: flex; align-items: flex-start; gap: var(--space-2); min-width: 0; }
+.gf-song__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.gf-song__title { font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.gf-song__title > :not(:first-child) { margin-left: var(--space-2); }
+.gf-song__artist { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.gf-song__album { font-size: var(--font-size-sm); color: var(--color-text-muted); }
+.gf-song--big .gf-song__title {
+  font-family: var(--font-family-display, inherit);
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-display, var(--font-weight-bold));
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+.gf-song--big .gf-song__artist { font-size: var(--font-size-md); margin-top: 2px; }
+
+.gf-leaf__line { min-width: 0; }
+.gf-leaf__line .seek--strip { gap: var(--space-2); }
+.gf-leaf__line .seek--strip .seek__time { min-width: 44px; }
+.gf-leaf__line .player-bar__fold { display: none; }
+.gf-leaf__plates { display: flex; gap: var(--space-2); margin-top: calc(-1 * var(--space-2)); }
+.gf-leaf__plates:empty { display: none; }
+.gf-leaf__plates .signal-badge { width: auto; height: 22px; padding: 0 7px; }
+
+/* Small capitals over each part of the page, like the headings on a sleeve. */
+.gf-label {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.gf-sleeve { padding-top: var(--space-4); border-top: 1px solid var(--engrave-dark, var(--color-border)); box-shadow: inset 0 1px 0 var(--engrave-light, transparent); }
+.gf-sleeve__facts { margin: 0 0 var(--space-2); font-size: var(--font-size-sm); color: var(--color-text-primary); line-height: 1.5; }
+.gf-sleeve__notes {
+  display: -webkit-box;
+  margin: 0 0 var(--space-2);
+  overflow: hidden;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+}
+.gf-link {
+  padding: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-underline-offset: 3px;
+  transition: color var(--motion-quick) var(--motion-easing);
+}
+.gf-link:hover { color: var(--color-text-primary); }
+.gf-link:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; border-radius: 2px; }
+.gf-empty { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-muted); line-height: 1.5; }
+
+/* Lyrics or credits. */
+.gf-words { display: flex; flex-direction: column; gap: var(--space-3); }
+.gf-tabs { display: flex; gap: var(--space-4); border-bottom: 1px solid var(--engrave-dark, var(--color-border)); box-shadow: 0 1px 0 var(--engrave-light, transparent); }
+.gf-tab {
+  position: relative;
+  height: 32px;
+  padding: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  transition: color var(--motion-quick) var(--motion-easing);
+}
+.gf-tab:hover { color: var(--color-text-primary); }
+.gf-tab.is-on { color: var(--color-text-primary); }
+.gf-tab::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--color-text-primary);
+  transform: scaleX(0);
+  transition: transform var(--motion-medium) var(--motion-easing);
+}
+.gf-tab.is-on::after { transform: scaleX(1); }
+.gf-tab:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; border-radius: 2px; }
+.gf-words__panel { display: flex; flex-direction: column; gap: var(--space-3); }
+
+.gf-lyrics {
+  max-height: 280px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  mask-image: linear-gradient(to bottom, transparent, #000 16px, #000 calc(100% - 24px), transparent);
+  padding: var(--space-2) 0;
+  border-radius: 2px;
+}
+.gf-lyrics:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+.gf-lyrics__line {
+  margin: 0;
+  padding: 3px 0;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.45;
+  color: var(--color-text-muted);
+  transition: color var(--motion-medium) var(--motion-easing);
+}
+.gf-lyrics__line.is-now { color: var(--color-text-primary); }
+.gf-lyrics__line.is-gap { min-height: 0.8em; }
+
+.gf-credits { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.gf-credits__row { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.gf-credits__name { font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.gf-credits__roles { font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+
+/* Nothing playing: an empty sleeve, drawn in hairlines. */
+.gf-leaf__idle { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
+.gf-leaf__sleeve {
+  width: 100%;
+  aspect-ratio: 1;
+  margin-bottom: var(--space-4);
+  border-radius: var(--radius-art, 4px);
+  border: 1px dashed var(--color-border);
+  background:
+    radial-gradient(circle at 50% 50%, transparent 0 18%, color-mix(in srgb, var(--color-text-muted) 14%, transparent) 18.5% 19%, transparent 19.5%),
+    var(--color-bg-base);
+}
+.gf-leaf__idle-title { margin: 0; font-family: var(--font-family-display, inherit); font-size: var(--font-size-xl); font-weight: var(--font-weight-display, var(--font-weight-bold)); color: var(--color-text-primary); }
+
+/* ---------------------------------------------------------------- the spine */
+.gf-spine {
+  position: relative;
+  flex: none;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  width: var(--gf-spine);
+  min-height: 0;
+  padding: var(--space-4) 0;
+  /* The fold: shaded towards both pages, lit along its ridge. */
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.22), transparent 28%, transparent 72%, rgba(0, 0, 0, 0.22)),
+    var(--color-bg-raised2, var(--color-bg-raised));
+  box-shadow: inset 1px 0 0 var(--engrave-dark, var(--color-border)), inset -1px 0 0 var(--engrave-dark, var(--color-border));
+}
+.gf-spine__keys .player-bar__controls { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); }
+.gf-spine .player-bar__play {
+  width: 44px;
+  height: 44px;
+  margin: var(--space-1) 0;
+  background: var(--color-text-primary);
+  color: var(--color-bg-base);
+}
+.gf-spine .player-bar__play:hover:not([aria-disabled="true"]) { background: color-mix(in srgb, var(--color-text-primary) 86%, var(--color-bg-base)); }
+.gf-spine__knob .deck-knob { flex-direction: column-reverse; gap: var(--space-1); }
+.gf-spine__knob .deck-knob__dial { width: 44px; height: 44px; }
+.gf-spine__extras .ts-extras { flex-direction: column; justify-content: flex-start; gap: var(--space-1); }
+.gf-spine__extras .player-bar__fold { display: none; }
+.gf-spine__extras .player-bar__more { display: inline-flex; }
+.gf-spine__extras .private-pill__label { display: none; }
+.gf-spine__keys,
+.gf-spine__knob,
+.gf-spine__extras { flex: none; }
+.gf-spine__knob { padding: var(--space-3) 0; border-top: 1px solid var(--engrave-dark, var(--color-border)); border-bottom: 1px solid var(--engrave-dark, var(--color-border)); }
+
+/* The queue handle: a tab on the spine that pulls the queue out. */
+.gf-handle {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--space-2) var(--space-1) var(--space-1);
+  border-radius: var(--radius-row);
+  background: var(--color-bg-base);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 0 var(--engrave-light, transparent);
+}
+.gf-handle__label { font-size: 10px; font-weight: var(--font-weight-semibold); letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
+.gf-handle.is-open .gf-handle__label { color: var(--color-text-primary); }
+/* Pop-ups beside the spine open into the page. */
+.gf-spine .signal-panel { left: calc(100% + var(--space-4)); right: auto; top: auto; bottom: var(--space-4); }
+.gf-spine .volume-readout { z-index: 3; }
+
+/* Folded (a narrow window): the left page becomes a small now playing in the spine. */
+.gf-spine.is-folded {
+  align-items: stretch;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-card) 0 0 var(--radius-card);
+  background: var(--color-bg-raised);
+  box-shadow: inset -1px 0 0 var(--engrave-dark, var(--color-border));
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.gf-spine__now { display: flex; flex-direction: column; gap: var(--space-3); }
+.gf-spine.is-folded .gf-spine__keys .player-bar__controls { flex-direction: row; justify-content: center; gap: 0; }
+.gf-spine.is-folded .player-bar__play { margin: 0 var(--space-1); }
+.gf-spine.is-folded .gf-spine__knob { display: flex; justify-content: center; padding: var(--space-2) 0; }
+.gf-spine.is-folded .gf-spine__knob .deck-knob { flex-direction: row; }
+.gf-spine.is-folded .gf-spine__extras .ts-extras { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+.gf-spine.is-folded .gf-handle { flex-direction: row; justify-content: center; gap: var(--space-2); padding: var(--space-1) var(--space-3); }
+.gf-spine.is-folded .seek--strip .seek__time { min-width: 0; padding: 2px 4px; }
+.gf-spine.is-folded .seek--strip .player-bar__fold { display: none; }
+
+/* ---------------------------------------------------------------- the right page */
+.gf-page { overflow: hidden; }
+.frame--gatefold .gf-page > .gf-turn { flex: 1; min-height: 0; display: flex; flex-direction: column; will-change: auto; }
+.gf-turn > .main { flex: 1; min-height: 0; border-radius: 0 var(--radius-card) var(--radius-card) 0; }
+.gf-turn[data-turn] { will-change: transform, opacity; }
+/* The crease: a soft shadow from the spine across the page as it turns. */
+.gf-crease {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 96px;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.32), transparent);
+}
+.frame--gatefold .frame-drawer__scrim { border-radius: 0 var(--radius-card) var(--radius-card) 0; }
+
+:root[data-reduced-motion="true"] .gf-tab::after,
+:root[data-reduced-motion="true"] .gf-lyrics__line { transition: none; }

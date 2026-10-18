@@ -1576,7 +1576,7 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       section: "Appearance",
       title: "Layout",
       description: "How the window is arranged: where the player, your sections and the queue go. Synced.",
-      more: "Pick a frame: Index puts sections down the left and the player strip across the top, Deck puts a faceplate across the top with source keys under it, Turntable makes the player a column with the record on its platter, Classic is the layout Platter had before, and Custom lets you choose what goes where. Turntable's column width is kept on this device. Change layout covers the finer options: the player's buttons, Home's shelves, page headers, song list columns, cover shape and motion.",
+      more: "Pick a frame: Index puts sections down the left and the player strip across the top, Deck puts a faceplate across the top with source keys under it, Turntable makes the player a column with the record on its platter, Gatefold opens like a record sleeve with now playing on the left page and the page turning on the right, Console gives big libraries a tree, a dense table and a details pane, Classic is the layout Platter had before, and Custom lets you choose what goes where. Turntable's column width and Console's columns, sort and pane widths are kept on this device. Change layout covers the finer options: the player's buttons, Home's shelves, page headers, song list columns, cover shape and motion.",
       note: s ? layoutNote(s.layout) : undefined,
       control: () => (
         <Button size="sm" onClick={() => looks.openBuilder("layout")}>

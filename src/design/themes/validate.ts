@@ -83,6 +83,8 @@ export interface Layout {
   rightSize: RegionSize;
   /** Deck: the source keys under the faceplate show their names. */
   deckLabels: boolean;
+  /** Gatefold: the right page turns when you go to another page. */
+  pageTurn: boolean;
   sidebarSide: "left" | "right";
   sidebarCollapsed: boolean;
   sidebarSections: SidebarSection[];
@@ -110,6 +112,7 @@ export const CLASSIC_LAYOUT: Layout = {
   leftSize: "medium",
   rightSize: "medium",
   deckLabels: true,
+  pageTurn: true,
   sidebarSide: "left",
   sidebarCollapsed: false,
   sidebarSections: [...LOOK.layout.sidebarSections] as SidebarSection[],
@@ -363,6 +366,9 @@ function parseLayout(v: unknown, notes: string[]): Layout {
         break;
       case "deckLabels":
         l.deckLabels = flag(f, val);
+        break;
+      case "pageTurn":
+        l.pageTurn = flag(f, val);
         break;
       default:
         notes.push(`Left out layout.${shownKey(k)}: Platter doesn't know it.`);

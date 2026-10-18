@@ -183,6 +183,8 @@ pub struct Layout {
     pub right_size: String,
     /// Deck: the source keys under the faceplate show their names.
     pub deck_labels: bool,
+    /// Gatefold: the right page turns when you go to another page.
+    pub page_turn: bool,
     pub sidebar_side: String,
     pub sidebar_collapsed: bool,
     pub sidebar_sections: Vec<String>,
@@ -209,6 +211,7 @@ impl Default for Layout {
             left_size: "medium".into(),
             right_size: "medium".into(),
             deck_labels: true,
+            page_turn: true,
             sidebar_side: "left".into(),
             sidebar_collapsed: false,
             sidebar_sections: c.sidebar_sections.clone(),
@@ -537,6 +540,7 @@ fn parse_layout(v: &Value, notes: &mut Vec<String>) -> Result<Layout, String> {
             "leftSize" => l.left_size = pick(&f, val, &c.region_size)?,
             "rightSize" => l.right_size = pick(&f, val, &c.region_size)?,
             "deckLabels" => l.deck_labels = flag(&f, val)?,
+            "pageTurn" => l.page_turn = flag(&f, val)?,
             "regions" => l.regions = parse_regions(val)?,
             _ => notes.push(format!("Left out layout.{}: Platter doesn't know it.", shown_key(k))),
         }
