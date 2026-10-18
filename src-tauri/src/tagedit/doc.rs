@@ -241,24 +241,37 @@ fn vorbis_all(v: &VorbisComments, key: &str) -> Option<String> {
     (!all.is_empty()).then(|| all.join("; "))
 }
 
+/// The separate values of a multi-value field as the editor shows it
+/// (joined with `"; "`).
+pub(super) fn split_values(v: &str) -> Vec<String> {
+    v.split("; ").map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect()
+}
+
 /// A key's value, replacing every value it had, in the place the first
 /// one was (or at the end). Empty removes it.
 fn vorbis_put(v: &mut VorbisComments, key: &str, value: &str) {
+    let values: Vec<String> = if value.is_empty() { Vec::new() } else { vec![value.to_string()] };
+    vorbis_put_all(v, key, &values);
+}
+
+/// Like [`vorbis_put`], with one comment per value (how Vorbis keeps
+/// several artists or genres).
+fn vorbis_put_all(v: &mut VorbisComments, key: &str, values: &[String]) {
     let items: Vec<(String, String)> = v.take_items().collect();
     let mut done = false;
-    let mut out = Vec::with_capacity(items.len() + 1);
+    let mut out = Vec::with_capacity(items.len() + values.len());
     for (k, old) in items {
         if k.eq_ignore_ascii_case(key) {
-            if !done && !value.is_empty() {
-                out.push((k, value.to_string()));
+            if !done {
+                out.extend(values.iter().map(|val| (k.clone(), val.clone())));
             }
             done = true;
         } else {
             out.push((k, old));
         }
     }
-    if !done && !value.is_empty() {
-        out.push((key.to_string(), value.to_string()));
+    if !done {
+        out.extend(values.iter().map(|val| (key.to_string(), val.clone())));
     }
     for (k, val) in out {
         v.push(k, val);
@@ -371,7 +384,11 @@ fn vorbis_set(v: &mut VorbisComments, f: Field, val: &str, ctx: &Ctx) {
             };
             let key = alts.iter().find(|k| has(v, k)).copied().or(f.vorbis_key());
             if let Some(k) = key {
-                vorbis_put(v, k, val);
+                if f.multi_value() {
+                    vorbis_put_all(v, k, &split_values(val));
+                } else {
+                    vorbis_put(v, k, val);
+                }
             }
         }
     }
@@ -474,7 +491,13 @@ fn id3_get(tag: &Id3v2Tag, f: Field, ctx: &Ctx) -> Option<String> {
 
 fn id3_set(tag: &mut Id3v2Tag, v23: bool, f: Field, val: &str, ctx: &Ctx) -> AppResult<()> {
     if let Some(id) = id3_frame(f) {
-        id3_put_text(tag, v23, id, val);
+        if f.multi_value() && !v23 {
+            // ID3v2.4 keeps several values in one frame, split by NUL.
+            // v2.3 has no such rule, so it keeps the joined text.
+            id3_put_text(tag, v23, id, &split_values(val).join("\0"));
+        } else {
+            id3_put_text(tag, v23, id, val);
+        }
         return Ok(());
     }
     match f {
@@ -595,10 +618,14 @@ fn mp4_get(ilst: &Ilst, f: Field, ctx: &Ctx) -> Option<String> {
 fn mp4_set(ilst: &mut Ilst, f: Field, val: &str, ctx: &Ctx) {
     if let Some(c) = fourcc(f) {
         let ident = AtomIdent::Fourcc(c);
-        if val.is_empty() {
-            let _ = ilst.remove(&ident).count();
-        } else {
-            ilst.replace_atom(Atom::new(ident, AtomData::UTF8(val.to_string())));
+        let values = if f.multi_value() { split_values(val) } else { vec![val.to_string()] };
+        let data: Vec<AtomData> = values.into_iter().filter(|v| !v.is_empty()).map(AtomData::UTF8).collect();
+        match Atom::from_collection(ident.clone(), data) {
+            // One data atom per value.
+            Some(a) => ilst.replace_atom(a),
+            None => {
+                let _ = ilst.remove(&ident).count();
+            }
         }
         if f == Field::Genre {
             // A numbered genre would sit beside the text one.

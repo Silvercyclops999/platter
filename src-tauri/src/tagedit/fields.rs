@@ -76,6 +76,12 @@ impl Field {
         Field::Isrc,
     ];
 
+    /// Fields a file can hold several values of. They read joined with
+    /// `"; "` and are written back as separate values in the file's own way.
+    pub fn multi_value(self) -> bool {
+        matches!(self, Field::AlbumArtist | Field::Artist | Field::Genre)
+    }
+
     /// The Vorbis comment name, which is also the TXXX description and MP4
     /// freeform name for the fields that have no frame or atom of their own.
     /// None for the custom tag (its name comes from Settings).
