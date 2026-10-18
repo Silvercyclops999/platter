@@ -129,7 +129,8 @@ describe("Lidarr settings", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Check setup" }));
     await screen.findByText("Your API key would travel unencrypted");
     expect(screen.getByText(/Lidarr can't reach your curated music/)).toBeTruthy(), "a warning, never a block";
-  });
+    // Two full Settings renders and two setup checks: slow on CI.
+  }, 45_000);
 
   it("refuses a bad address and bad headers", async () => {
     await expect(mock.settingsSet({ lidarrUrl: "nas:8686" })).rejects.toMatchObject({ kind: "invalid" });

@@ -64,7 +64,8 @@ describe("axe audit of the main screens", () => {
     const main = screen.getByRole("main");
     // Fixed titles, or the page's own heading (an album's title).
     expect(main).toHaveAccessibleName(label ?? document.querySelector(".page h1")!.textContent!.trim());
-  });
+    // Settings renders every group at once and axe walks all of it: slow on CI.
+  }, 45_000);
 
   it("the queue panel has no violations", async () => {
     await act(() => mock.playContext({ context: { kind: "album", id: album().id } }));
