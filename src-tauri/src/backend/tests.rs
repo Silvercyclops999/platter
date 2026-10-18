@@ -269,6 +269,7 @@ async fn calls_go_to_the_server_the_id_names() {
     RoutedStreams(b.clone()).save_silence(&theirs, 1, 2);
     RoutedParts(b.clone()).part(&theirs, "/p").await.unwrap();
     RoutedDownloads(b.clone()).fetch(&track(&theirs), None).await.unwrap();
+    RoutedDownloads(b.clone()).connection_for(&track(&theirs)).await;
     assert_eq!(
         take(&log),
         vec![
@@ -278,6 +279,7 @@ async fn calls_go_to_the_server_the_id_names() {
             format!("other silence {theirs}"),
             format!("other part {theirs}"),
             format!("other download {theirs}"),
+            "other connection -".to_string(),
         ]
     );
 

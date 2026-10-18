@@ -6,10 +6,12 @@
 //! so playback always comes first. A file is the Plex part as it is, or an
 //! MP3 from the server's transcoder when the quality setting says so. Files
 //! live in one folder, named by track id, shared by every item that holds the
-//! song. Playlists and Liked Songs follow the library: new songs queue, and a
-//! removed song's file goes once no downloaded item needs it. The app pokes
-//! the queue on every library change ([`FOLLOW_EVENTS`]), so this happens
-//! within a moment; a slow re-read every [`RESYNC_EVERY`] catches the rest.
+//! song. Playlists, Liked Songs and mixes follow the library: new songs
+//! queue, and a removed song's file goes once no downloaded item needs it. A
+//! song replaced on the server keeps playing from its old file until the new
+//! one lands. The app pokes the queue on every library or mix change
+//! ([`FOLLOW_EVENTS`]), so this happens within a moment; a slow re-read
+//! every [`RESYNC_EVERY`] catches the rest.
 //!
 //! The queue waits while the server can't be reached or Go offline is on,
 //! away from the home network when "Download only on home network" is on,
@@ -47,13 +49,24 @@ use crate::plex::types::ConnectionKind;
 pub use store::{ItemKey, ItemKind};
 
 const GB: u64 = 1024 * 1024 * 1024;
-/// App events after which downloaded playlists, albums and Liked Songs are
-/// read again (live library updates, playlist edits, likes).
-pub const FOLLOW_EVENTS: [&str; 2] = ["library://changed", "likes://changed"];
+/// App events after which downloaded playlists, albums, Liked Songs and
+/// mixes are read again (live library updates, playlist edits, likes, mixes
+/// made again).
+pub const FOLLOW_EVENTS: [&str; 3] = ["library://changed", "likes://changed", "mixes://changed"];
 /// Re-read playlists and Liked Songs this often for new and removed songs.
 const RESYNC_EVERY: Duration = Duration::from_secs(30);
 /// How often a waiting queue looks again on its own.
 const WAIT_POLL: Duration = Duration::from_secs(5);
+/// How often finished files are checked on disk, and deletes that failed
+/// (a file in use) are tried again.
+const CHECK_EVERY: Duration = Duration::from_secs(60);
+/// How far down the queue a step looks for a song that fits and whose
+/// server can be reached.
+const CANDIDATES: usize = 50;
+/// Of those, how many servers it asks about.
+const REACH_TRIES: usize = 8;
+/// Files whose delete failed, tried again later (kv, JSON list of names).
+const KEY_PENDING_DELETE: &str = "downloads.pendingDelete";
 /// Progress events at most this often.
 const PROGRESS_EVERY: Duration = Duration::from_millis(250);
 /// Space kept free on the disk beyond the song being fetched.
@@ -132,6 +145,10 @@ pub struct Fetch {
 pub trait DownloadSource: Send + Sync {
     /// How the server is reached now, or None when it can't be.
     async fn connection(&self) -> Option<ConnectionKind>;
+    /// How the server holding `track` is reached now.
+    async fn connection_for(&self, _track: &Track) -> Option<ConnectionKind> {
+        self.connection().await
+    }
     /// The request for a track: the original part, or a transcode at `kbps`.
     async fn fetch(&self, track: &Track, kbps: Option<u32>) -> AppResult<Fetch>;
     /// Called after every fetch (stops a transcode session).
@@ -256,9 +273,12 @@ struct Inner {
     /// Finished files by track id (the play path reads this).
     files: RwLock<HashMap<String, PathBuf>>,
     last_progress: Mutex<Option<Instant>>,
-    /// The song that turned out too big for the room left: (track, limit,
-    /// bytes used) when it did. It isn't fetched again until one changes.
-    too_big: Mutex<Option<(String, u64, u64)>>,
+    /// Songs that turned out too big for the room left, with the (limit,
+    /// bytes used) they were too big for. They aren't fetched again until
+    /// one changes.
+    too_big: Mutex<Option<((u64, u64), std::collections::HashSet<String>)>>,
+    /// How often [`CHECK_EVERY`] runs (shorter in tests).
+    check_every: Mutex<Duration>,
     /// Held by each queue step and by a folder move, so a move never runs
     /// while a song is being saved.
     step_lock: tokio::sync::Mutex<()>,
@@ -279,9 +299,34 @@ fn now() -> i64 {
         .unwrap_or(0)
 }
 
-/// A track id made safe for a file name.
+/// FNV-1a, 32 bits, as 8 hex digits.
+fn short_hash(s: &str) -> String {
+    let mut h: u32 = 0x811c9dc5;
+    for b in s.as_bytes() {
+        h ^= *b as u32;
+        h = h.wrapping_mul(0x01000193);
+    }
+    format!("{h:08x}")
+}
+
+/// A track id made safe for a file name. An id that had to change (other
+/// characters, or too long) gets a hash of the whole id, so two ids never
+/// share a file.
 fn file_stem(id: &str) -> String {
-    id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').take(64).collect()
+    let clean: String = id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').take(64).collect();
+    if clean == id { clean } else { format!("{clean}-{}", short_hash(id)) }
+}
+
+/// The partial file for `name` while it comes from `part_key`. A partial
+/// file of another version of the song (the file changed on the server) has
+/// another name, so it is never continued.
+fn part_name(name: &str, part_key: &str) -> String {
+    format!("{name}.{}.part", short_hash(part_key))
+}
+
+/// Whether `file` is a partial file of the song stored as `stem`.
+fn is_part_of(file: &str, stem: &str) -> bool {
+    file.ends_with(".part") && file.strip_prefix(stem).is_some_and(|rest| rest.starts_with('.'))
 }
 
 /// File extension for a downloaded song.
@@ -327,6 +372,7 @@ impl Downloads {
                 files: RwLock::new(HashMap::new()),
                 last_progress: Mutex::new(None),
                 too_big: Mutex::new(None),
+                check_every: Mutex::new(CHECK_EVERY),
                 step_lock: tokio::sync::Mutex::new(()),
                 moving: AtomicBool::new(false),
             }),
@@ -396,8 +442,12 @@ impl Downloads {
         *self.inner.files.write() = files.into_iter().map(|(id, f)| (id, dir.join(f))).collect();
     }
 
-    /// Ids of every downloaded song.
+    /// Ids of every downloaded song. None while the folder can't be reached
+    /// (an unplugged drive): nothing there can play.
     pub fn downloaded_ids(&self) -> Vec<String> {
+        if !self.dir().is_dir() {
+            return Vec::new();
+        }
         let mut ids: Vec<String> = self.inner.files.read().keys().cloned().collect();
         ids.sort();
         ids
@@ -415,9 +465,14 @@ impl Downloads {
             .db
             .write_async(move |c| {
                 let tracks = match (k.kind, track_ids) {
-                    (ItemKind::Mix, Some(ids)) => ids,
-                    (ItemKind::Mix, None) => return Err(AppError::Invalid("A mix needs its songs.".into())),
-                    // The page's own list wins (a playlist not synced yet).
+                    // A mix follows its stored songs (what resync reads too);
+                    // a radio, which isn't stored, keeps the page's.
+                    (ItemKind::Mix, ids) => match store::tracks_of_library_item(c, &k, liked_min)? {
+                        Some(t) if !t.is_empty() => t,
+                        _ => ids.ok_or_else(|| AppError::Invalid("A mix needs its songs.".into()))?,
+                    },
+                    // The library's list wins; the page's own list when it
+                    // isn't there yet (a playlist not synced).
                     (_, ids) => match store::tracks_of_library_item(c, &k, liked_min)? {
                         Some(t) => t,
                         None => ids.ok_or_else(|| AppError::NotFound("That isn't in your library.".into()))?,
@@ -471,6 +526,7 @@ impl Downloads {
             }
         }
         let _ = std::fs::remove_dir_all(dir.join(art::ART_DIR));
+        self.retry_pending_deletes();
         self.files_changed();
         Ok(before)
     }
@@ -487,16 +543,107 @@ impl Downloads {
         self.inner.db.read_async(move |c| store::has_item(c, &key)).await
     }
 
-    fn delete_files(&self, names: Vec<String>) {
+    /// Deletes the files of rows no item needs: the finished file and any
+    /// partial ones. A file that can't be deleted now (in use) is tried again
+    /// later ([`Self::retry_pending_deletes`]).
+    fn delete_files(&self, gone: Vec<store::Gone>) {
+        if gone.is_empty() {
+            return;
+        }
         let dir = self.dir();
-        for n in names {
-            let p = dir.join(&n);
-            if let Err(e) = std::fs::remove_file(&p)
+        let mut failed = Vec::new();
+        for g in &gone {
+            if let Some(n) = &g.file
+                && let Err(e) = std::fs::remove_file(dir.join(n))
                 && e.kind() != std::io::ErrorKind::NotFound
             {
                 tracing::warn!("could not delete download {n}: {e}");
+                failed.push(n.clone());
             }
-            let _ = std::fs::remove_file(dir.join(format!("{n}.part")));
+        }
+        let stems: Vec<String> = gone.iter().map(|g| file_stem(&g.track_id)).collect();
+        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if stems.iter().any(|s| is_part_of(&name, s)) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+        if !failed.is_empty() {
+            let _ = self.inner.db.write(|c| {
+                let mut pending = pending_deletes(c)?;
+                pending.extend(failed);
+                pending.sort();
+                pending.dedup();
+                crate::db::store::kv_set(c, KEY_PENDING_DELETE, &serde_json::to_string(&pending).unwrap_or_default())
+            });
+        }
+    }
+
+    /// Tries again to delete files whose delete failed, unless a song uses
+    /// that file name again. Returns how many are still left.
+    pub fn retry_pending_deletes(&self) -> usize {
+        let Ok(pending) = self.inner.db.read(pending_deletes) else { return 0 };
+        if pending.is_empty() {
+            return 0;
+        }
+        let dir = self.dir();
+        if !dir.is_dir() {
+            return pending.len();
+        }
+        let in_use: std::collections::HashSet<String> =
+            self.inner.db.read(store::done_files).unwrap_or_default().into_iter().map(|(_, f)| f).collect();
+        let left: Vec<String> = pending
+            .into_iter()
+            .filter(|n| {
+                if in_use.contains(n) {
+                    return false;
+                }
+                match std::fs::remove_file(dir.join(n)) {
+                    Ok(()) => false,
+                    Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+                }
+            })
+            .collect();
+        let n = left.len();
+        let _ = self.inner.db.write(move |c| {
+            crate::db::store::kv_set(c, KEY_PENDING_DELETE, &serde_json::to_string(&left).unwrap_or_default())
+        });
+        n
+    }
+
+    /// At startup: partial files no row needs (from an item removed before
+    /// they finished, or an older version), deletes left over, and album art
+    /// no downloaded song uses.
+    pub fn sweep(&self) {
+        let dir = self.dir();
+        if !dir.is_dir() {
+            return;
+        }
+        self.retry_pending_deletes();
+        let Ok((ids, thumbs)) = self.inner.db.read(|c| {
+            let mut st = c.prepare("SELECT f.track_id, t.thumb FROM download_files f LEFT JOIN tracks t ON t.id = f.track_id")?;
+            let rows = st
+                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            let (ids, thumbs): (Vec<String>, Vec<Option<String>>) = rows.into_iter().unzip();
+            Ok((ids, thumbs))
+        }) else {
+            return;
+        };
+        let stems: std::collections::HashSet<String> = ids.iter().map(|id| file_stem(id)).collect();
+        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let Some(stem) = name.strip_suffix(".part").and_then(|n| n.split('.').next()) else { continue };
+            if !stems.contains(stem) && e.path().is_file() {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+        let keep: std::collections::HashSet<std::path::PathBuf> =
+            thumbs.into_iter().flatten().map(|t| art::path(&dir, &t)).collect();
+        for e in std::fs::read_dir(dir.join(art::ART_DIR)).into_iter().flatten().flatten() {
+            if !keep.contains(&e.path()) {
+                let _ = std::fs::remove_file(e.path());
+            }
         }
     }
 
@@ -620,18 +767,15 @@ impl Downloads {
             .unwrap_or(0.0);
         let (items, used, queued) = self.inner.db.read(|c| {
             let mut out = Vec::new();
+            let mut counts = store::all_item_counts(c)?;
+            let holding = match &cur_id {
+                Some(id) => store::items_holding(c, id)?,
+                None => Default::default(),
+            };
             for item in store::items(c)? {
-                let n = store::item_counts(c, &item.key)?;
-                let has_current = match &cur_id {
-                    Some(id) => c
-                        .query_row(
-                            "SELECT 1 FROM download_item_tracks WHERE kind = ?1 AND id = ?2 AND track_id = ?3",
-                            rusqlite::params![item.key.kind.as_str(), item.key.id, id],
-                            |_| Ok(()),
-                        )
-                        .is_ok(),
-                    None => false,
-                };
+                let k = (item.key.kind.as_str().to_string(), item.key.id.clone());
+                let n = counts.remove(&k).unwrap_or_default();
+                let has_current = holding.contains(&k);
                 let settled = n.done + n.failed + n.missing;
                 let state = if n.done >= n.total {
                     ItemState::Downloaded
@@ -701,22 +845,43 @@ impl Downloads {
 
     // ---------------------------------------------------------------- queue
 
-    /// Why the queue can't fetch now, if it can't.
+    /// Why the queue can't fetch anything now, if it can't. Whether a song's
+    /// own server can be reached is asked per song ([`Self::unreachable`]).
     async fn blocked(&self) -> Option<PauseReason> {
-        let p = self.prefs();
-        if p.offline {
+        if self.prefs().offline {
             return Some(PauseReason::Offline);
         }
         let dir = self.dir();
         if !dir.is_dir() && std::fs::create_dir_all(&dir).is_err() {
             return Some(PauseReason::FolderMissing);
         }
-        match self.inner.source.connection().await {
+        None
+    }
+
+    /// Why `track` can't be fetched from its server now, if it can't.
+    async fn unreachable(&self, track: &Track) -> Option<PauseReason> {
+        let p = self.prefs();
+        if p.offline {
+            return Some(PauseReason::Offline);
+        }
+        match self.inner.source.connection_for(track).await {
             None => Some(PauseReason::Offline),
             Some(ConnectionKind::Local) => None,
             Some(_) if p.home_only => Some(PauseReason::NotHome),
             Some(_) => None,
         }
+    }
+
+    /// Tests check the disk this often.
+    #[cfg(test)]
+    pub fn set_check_every(&self, d: Duration) {
+        *self.inner.check_every.lock() = d;
+    }
+
+    /// Waits up to `max`, but never past the next disk check.
+    async fn nap(&self, max: Duration) {
+        let every = *self.inner.check_every.lock();
+        self.wait(max.min(every)).await;
     }
 
     /// Whether anything is downloaded or set to download. Public for tests.
@@ -730,12 +895,21 @@ impl Downloads {
 
     /// The queue's loop. Runs until the app quits.
     pub async fn run(self) {
-        // Files deleted while the app was closed.
+        // Files deleted while the app was closed, and leftovers.
         if self.check_files() > 0 {
             tracing::info!("some downloaded files are missing");
         }
+        self.sweep();
         let mut last_sync: Option<Instant> = None;
+        let mut last_check = Instant::now();
         loop {
+            // Files deleted or a drive unplugged while running: offline
+            // plays stop counting on them within a minute.
+            if last_check.elapsed() >= *self.inner.check_every.lock() {
+                self.check_files();
+                self.retry_pending_deletes();
+                last_check = Instant::now();
+            }
             if self.inner.dirty.load(Ordering::SeqCst) || last_sync.is_none_or(|t| t.elapsed() >= RESYNC_EVERY) {
                 if let Err(e) = self.resync().await {
                     tracing::warn!("downloads resync failed: {e}");
@@ -751,11 +925,11 @@ impl Downloads {
             }
             if let Some(why) = self.blocked().await {
                 self.set_paused(Some(why));
-                self.wait(WAIT_POLL).await;
+                self.nap(WAIT_POLL).await;
                 continue;
             }
             if self.inner.transfer.read().is_none() {
-                self.wait(WAIT_POLL).await;
+                self.nap(WAIT_POLL).await;
                 continue;
             }
             match self.step().await {
@@ -769,16 +943,16 @@ impl Downloads {
                         .ok()
                         .flatten()
                         .map(|s| Duration::from_secs(s.max(1) as u64));
-                    self.wait(retry.map_or(RESYNC_EVERY, |r| r.min(RESYNC_EVERY))).await;
+                    self.nap(retry.map_or(RESYNC_EVERY, |r| r.min(RESYNC_EVERY))).await;
                 }
                 Ok(Step::Worked) => {}
                 Ok(Step::Paused(why)) => {
                     self.set_paused(Some(why));
-                    self.wait(WAIT_POLL).await;
+                    self.nap(WAIT_POLL).await;
                 }
                 Err(e) => {
                     tracing::warn!("downloads: {e}");
-                    self.wait(WAIT_POLL).await;
+                    self.nap(WAIT_POLL).await;
                 }
             }
         }
@@ -790,38 +964,79 @@ impl Downloads {
         if self.inner.moving.load(Ordering::SeqCst) {
             return Ok(Step::Idle);
         }
-        let Some(track_id) = self.inner.db.read_async(|c| store::next_queued(c, now())).await? else {
+        let ids = self.inner.db.read_async(|c| store::queue(c, now(), CANDIDATES)).await?;
+        if ids.is_empty() {
             return Ok(Step::Idle);
-        };
-        let id = track_id.clone();
-        let track = self
+        }
+        let lookup = ids.clone();
+        let (tracks, used, kept) = self
             .inner
             .db
-            .read_async(move |c| queries::tracks_by_ids(c, &[id]))
-            .await?
-            .into_iter()
-            .next();
-        let Some(track) = track else {
-            let id = track_id.clone();
+            .read_async(move |c| {
+                let tracks = queries::tracks_by_ids(c, &lookup)?;
+                // A finished file fetched again frees its old size when the
+                // new one lands.
+                let mut kept = HashMap::new();
+                for id in &lookup {
+                    if let Some(row) = store::file(c, id)?
+                        && row.state == "done"
+                    {
+                        kept.insert(id.clone(), row.size);
+                    }
+                }
+                Ok((tracks, store::used_bytes(c)?, kept))
+            })
+            .await?;
+        let by_id: HashMap<&str, &Track> = tracks.iter().map(|t| (t.id.as_str(), t)).collect();
+        let gone: Vec<String> = ids.iter().filter(|id| !by_id.contains_key(id.as_str())).cloned().collect();
+        if !gone.is_empty() {
             self.inner
                 .db
-                .write_async(move |c| store::mark_failed(c, &id, "This song is no longer in your library.", now()))
+                .write_async(move |c| {
+                    for id in &gone {
+                        store::mark_failed(c, id, "This song is no longer in your library.", now())?;
+                    }
+                    Ok(())
+                })
                 .await?;
             self.emit_status();
             return Ok(Step::Worked);
-        };
+        }
         let prefs = self.prefs();
-        // Room for it under the limit and on the disk.
-        let estimate = estimate_bytes(&track, prefs.quality);
-        let used = self.inner.db.read_async(store::used_bytes).await?;
-        if used + estimate > prefs.limit_bytes {
-            return Ok(Step::Paused(PauseReason::Full));
+        // The first song that fits under the limit (one too big doesn't hold
+        // up smaller ones behind it) and whose server can be reached.
+        let mut wait: Option<PauseReason> = None;
+        let mut asked = 0;
+        let mut pick = None;
+        for id in &ids {
+            let track = by_id[id.as_str()];
+            let base = used.saturating_sub(kept.get(id).copied().unwrap_or(0));
+            let estimate = estimate_bytes(track, prefs.quality);
+            let too_big = self
+                .inner
+                .too_big
+                .lock()
+                .as_ref()
+                .is_some_and(|(room, ids)| *room == (prefs.limit_bytes, base) && ids.contains(id));
+            if base + estimate > prefs.limit_bytes || too_big {
+                wait.get_or_insert(PauseReason::Full);
+                continue;
+            }
+            if asked == REACH_TRIES {
+                break;
+            }
+            asked += 1;
+            if let Some(why) = self.unreachable(track).await {
+                wait.get_or_insert(why);
+                continue;
+            }
+            pick = Some((track.clone(), base, estimate));
+            break;
         }
-        // Fetched before and found too big for this room: wait for more room.
-        let room_key = (track.id.clone(), prefs.limit_bytes, used);
-        if self.inner.too_big.lock().as_ref() == Some(&room_key) {
-            return Ok(Step::Paused(PauseReason::Full));
-        }
+        let Some((track, used, estimate)) = pick else {
+            return Ok(Step::Paused(wait.unwrap_or(PauseReason::Full)));
+        };
+        let room_key = (prefs.limit_bytes, used);
         let dir = self.dir();
         if (self.inner.free_space)(&dir).is_some_and(|free| free < estimate + DISK_MARGIN) {
             return Ok(Step::Paused(PauseReason::NoSpace));
@@ -840,11 +1055,17 @@ impl Downloads {
                 return Ok(Step::Worked);
             }
         };
-        let name = format!("{}.{}", file_stem(&track.id), extension(&track, prefs.quality));
-        let part = dir.join(format!("{name}.part"));
-        // A partial file from another quality can't be continued.
-        if !fetch.resumable {
-            let _ = tokio::fs::remove_file(&part).await;
+        let stem = file_stem(&track.id);
+        let name = format!("{stem}.{}", extension(&track, prefs.quality));
+        let part_file = part_name(&name, &track.part_key);
+        let part = dir.join(&part_file);
+        // Partial files from another version of the song or another quality
+        // can't be continued, and a transcode always starts over.
+        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let n = e.file_name().to_string_lossy().into_owned();
+            if is_part_of(&n, &stem) && (n != part_file || !fetch.resumable) {
+                let _ = tokio::fs::remove_file(e.path()).await;
+            }
         }
         let epoch = self.inner.epoch.load(Ordering::SeqCst);
         self.set_current(Some(CurrentFile { track_id: track.id.clone(), received: 0, total: None }), true);
@@ -857,6 +1078,7 @@ impl Downloads {
                 gate: &xfer.gate,
                 host: xfer.host.as_deref(),
                 room,
+                min_len: (!fetch.resumable).then(|| shortest_transcode(&track, prefs.quality)).flatten(),
                 keep_going: &|| me.keep_going(epoch, &id),
                 progress: &|received, total| {
                     me.set_current(Some(CurrentFile { track_id: id.clone(), received, total }), false)
@@ -877,13 +1099,14 @@ impl Downloads {
                     return Ok(Step::Worked);
                 }
                 let (pk, q, n) = (track.part_key.clone(), prefs.quality.as_str().to_string(), name.clone());
+                let id_for_old = id.clone();
                 let old = self
                     .inner
                     .db
                     .write_async(move |c| store::mark_done(c, &id, &pk, &q, &n, size, now()))
                     .await?;
                 if let Some(old) = old {
-                    self.delete_files(vec![old]);
+                    self.delete_files(vec![store::Gone { track_id: id_for_old, file: Some(old) }]);
                 }
                 if let (Some(art), Some(thumb)) = (&self.inner.art, &track.thumb) {
                     art::keep(art.as_ref(), &dir, thumb).await;
@@ -898,7 +1121,13 @@ impl Downloads {
             }
             transfer::Outcome::Full => {
                 let _ = tokio::fs::remove_file(&part).await;
-                *self.inner.too_big.lock() = Some(room_key);
+                let mut tb = self.inner.too_big.lock();
+                match tb.as_mut() {
+                    Some((room, ids)) if *room == room_key => {
+                        ids.insert(id);
+                    }
+                    _ => *tb = Some((room_key, [id].into_iter().collect())),
+                }
                 Ok(Step::Paused(PauseReason::Full))
             }
             transfer::Outcome::Stopped => {
@@ -928,6 +1157,23 @@ impl Downloads {
         }
         true
     }
+}
+
+/// The least a transcode at `quality` should come to: most of the size its
+/// bitrate and length give. None when that can't be told (no length, or no
+/// bitrate for a server that may send the file as it is when it's smaller).
+fn shortest_transcode(track: &Track, quality: DownloadQuality) -> Option<u64> {
+    let kbps = quality.kbps()?.min(track.bitrate?) as u64;
+    if track.duration_ms == 0 || kbps == 0 {
+        return None;
+    }
+    Some(kbps * 1000 / 8 * track.duration_ms / 1000 * 7 / 10)
+}
+
+fn pending_deletes(c: &rusqlite::Connection) -> AppResult<Vec<String>> {
+    Ok(crate::db::store::kv_get(c, KEY_PENDING_DELETE)?
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default())
 }
 
 /// What one step of the queue did.

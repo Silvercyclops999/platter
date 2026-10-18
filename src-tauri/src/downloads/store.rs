@@ -19,7 +19,8 @@ pub enum ItemKind {
     Playlist,
     /// Liked Songs (its id is always empty).
     Liked,
-    /// A mix; its songs come from the caller, not the library cache.
+    /// A mix; its songs follow the mix as it is made again (a radio, which
+    /// isn't kept, keeps the songs it was downloaded with).
     Mix,
 }
 
@@ -140,11 +141,34 @@ pub fn remove_item(c: &Connection, key: &ItemKey) -> AppResult<()> {
     Ok(())
 }
 
+/// A file row no item needs any more: its finished file (if any) and the
+/// track id its partial files are named after.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Gone {
+    pub track_id: String,
+    pub file: Option<String>,
+}
+
+/// A finished file whose song was replaced on the server (its part key
+/// changed). It stays 'done', so it keeps playing and counting, and is
+/// fetched again behind the new songs. `f` is the download_files alias.
+const STALE: &str = "(f.state = 'done' AND EXISTS (
+    SELECT 1 FROM tracks t WHERE t.id = f.track_id AND t.part_key != '' AND t.part_key != f.part_key))";
+
+/// Rows the queue can fetch now: new songs, failed ones whose wait is over,
+/// and stale finished files whose wait (after a failed refresh) is over.
+fn due_sql() -> String {
+    format!(
+        "f.state = 'queued' OR ((f.state = 'failed' OR {STALE}) AND f.attempts < ?1 AND f.next_try_at <= ?2)"
+    )
+}
+
 /// Brings the file rows in line with the items: songs that are wanted and
-/// have no row are queued (in the order their items were turned on), rows no
-/// item needs any more are dropped, and finished files whose song was
-/// replaced on the server are queued again. Returns the file names to delete.
-pub fn reconcile(c: &Connection) -> AppResult<Vec<String>> {
+/// have no row are queued (in the order their items were turned on) and
+/// rows no item needs any more are dropped. Finished files whose song was
+/// replaced on the server stay as they are until the new file lands (see
+/// [`STALE`]). Returns what to delete.
+pub fn reconcile(c: &Connection) -> AppResult<Vec<Gone>> {
     let mut seq: i64 = c.query_row("SELECT COALESCE(MAX(seq), 0) FROM download_files", [], |r| r.get(0))?;
     let wanted: Vec<String> = {
         let mut st = c.prepare_cached(
@@ -171,37 +195,38 @@ pub fn reconcile(c: &Connection) -> AppResult<Vec<String>> {
         st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?
     };
     let mut del = c.prepare_cached("DELETE FROM download_files WHERE track_id = ?1")?;
-    let mut files = Vec::new();
-    for (track, file) in gone {
-        del.execute([&track])?;
-        files.extend(file);
+    let mut out = Vec::new();
+    for (track_id, file) in gone {
+        del.execute([&track_id])?;
+        out.push(Gone { track_id, file });
     }
-    c.execute(
-        "UPDATE download_files SET state = 'queued', attempts = 0, next_try_at = 0, error = NULL
-         WHERE state = 'done' AND EXISTS (
-             SELECT 1 FROM tracks t WHERE t.id = download_files.track_id
-             AND t.part_key != '' AND t.part_key != download_files.part_key)",
-        [],
-    )?;
-    Ok(files)
+    Ok(out)
 }
 
-/// The next song to fetch: queued ones in order, then failed ones whose wait is over.
+/// The next song to fetch: queued ones in order, then stale finished files,
+/// then failed ones whose wait is over.
 pub fn next_queued(c: &Connection, now: i64) -> AppResult<Option<String>> {
-    Ok(c.query_row(
-        "SELECT track_id FROM download_files
-         WHERE state = 'queued' OR (state = 'failed' AND attempts < ?1 AND next_try_at <= ?2)
-         ORDER BY state = 'failed', seq LIMIT 1",
-        params![MAX_ATTEMPTS, now],
-        |r| r.get(0),
-    )
-    .optional()?)
+    Ok(queue(c, now, 1)?.into_iter().next())
+}
+
+/// The first `limit` songs the queue can fetch now, in the order it takes them.
+pub fn queue(c: &Connection, now: i64, limit: usize) -> AppResult<Vec<String>> {
+    let mut st = c.prepare_cached(&format!(
+        "SELECT f.track_id FROM download_files f WHERE {}
+         ORDER BY CASE f.state WHEN 'queued' THEN 0 WHEN 'done' THEN 1 ELSE 2 END, f.seq LIMIT ?3",
+        due_sql()
+    ))?;
+    let ids = st.query_map(params![MAX_ATTEMPTS, now, limit as i64], |r| r.get(0))?;
+    Ok(ids.collect::<Result<_, _>>()?)
 }
 
 /// Seconds until a failed song can be tried again, if any is waiting.
 pub fn next_retry_in(c: &Connection, now: i64) -> AppResult<Option<i64>> {
     let at: Option<i64> = c.query_row(
-        "SELECT MIN(next_try_at) FROM download_files WHERE state = 'failed' AND attempts < ?1",
+        &format!(
+            "SELECT MIN(f.next_try_at) FROM download_files f
+             WHERE (f.state = 'failed' OR ({STALE} AND f.attempts > 0)) AND f.attempts < ?1"
+        ),
         params![MAX_ATTEMPTS],
         |r| r.get(0),
     )?;
@@ -266,13 +291,16 @@ pub fn mark_done(
     Ok(old.flatten().filter(|f| f != file_name))
 }
 
+/// A fetch failed. A finished file being fetched again stays finished (it
+/// still plays); only its next try waits.
 pub fn mark_failed(c: &Connection, track_id: &str, error: &str, now: i64) -> AppResult<()> {
     let attempts: Option<i64> = c
         .query_row("SELECT attempts FROM download_files WHERE track_id = ?1", [track_id], |r| r.get(0))
         .optional()?;
     let attempts = attempts.unwrap_or(0) as u32 + 1;
     c.execute(
-        "UPDATE download_files SET state = 'failed', error = ?2, attempts = ?3, next_try_at = ?4 WHERE track_id = ?1",
+        "UPDATE download_files SET state = CASE WHEN state = 'done' THEN 'done' ELSE 'failed' END,
+         error = ?2, attempts = ?3, next_try_at = ?4 WHERE track_id = ?1",
         params![track_id, error, attempts, now + backoff_secs(attempts)],
     )?;
     Ok(())
@@ -287,19 +315,26 @@ pub fn mark_missing(c: &Connection, track_id: &str) -> AppResult<bool> {
     )? > 0)
 }
 
-/// Failed and missing songs (of one item, or all) go back in the queue.
+/// Failed and missing songs (of one item, or all) go back in the queue, and
+/// finished files waiting to be fetched again try again now.
 pub fn retry(c: &Connection, key: Option<&ItemKey>) -> AppResult<usize> {
-    let sql = "UPDATE download_files SET state = 'queued', attempts = 0, next_try_at = 0, error = NULL
-               WHERE state IN ('failed', 'missing')";
-    Ok(match key {
-        None => c.execute(sql, [])?,
-        Some(k) => c.execute(
-            &format!(
-                "{sql} AND track_id IN (SELECT track_id FROM download_item_tracks WHERE kind = ?1 AND id = ?2)"
-            ),
-            params![k.kind.as_str(), k.id],
-        )?,
-    })
+    let requeue = "UPDATE download_files SET state = 'queued', attempts = 0, next_try_at = 0, error = NULL
+                   WHERE state IN ('failed', 'missing')";
+    let refresh = "UPDATE download_files SET attempts = 0, next_try_at = 0, error = NULL
+                   WHERE state = 'done' AND attempts > 0";
+    let mut n = 0;
+    for sql in [requeue, refresh] {
+        n += match key {
+            None => c.execute(sql, [])?,
+            Some(k) => c.execute(
+                &format!(
+                    "{sql} AND track_id IN (SELECT track_id FROM download_item_tracks WHERE kind = ?1 AND id = ?2)"
+                ),
+                params![k.kind.as_str(), k.id],
+            )?,
+        };
+    }
+    Ok(n)
 }
 
 /// Every finished file: (track id, file name).
@@ -316,8 +351,7 @@ pub fn used_bytes(c: &Connection) -> AppResult<u64> {
 
 pub fn queued_count(c: &Connection, now: i64) -> AppResult<u32> {
     let n: i64 = c.query_row(
-        "SELECT COUNT(*) FROM download_files
-         WHERE state = 'queued' OR (state = 'failed' AND attempts < ?1 AND next_try_at <= ?2)",
+        &format!("SELECT COUNT(*) FROM download_files f WHERE {}", due_sql()),
         params![MAX_ATTEMPTS, now],
         |r| r.get(0),
     )?;
@@ -337,6 +371,48 @@ pub struct ItemCounts {
     pub error: Option<String>,
 }
 
+/// Counts for every item at once (items with no songs are left out).
+pub fn all_item_counts(c: &Connection) -> AppResult<std::collections::HashMap<(String, String), ItemCounts>> {
+    let mut st = c.prepare_cached(
+        "SELECT
+            t.kind, t.id,
+            COUNT(*),
+            COALESCE(SUM(f.state = 'done'), 0),
+            COALESCE(SUM(f.state = 'failed' AND f.attempts >= ?1), 0),
+            COALESCE(SUM(f.state = 'missing'), 0),
+            COALESCE(SUM(CASE WHEN f.state = 'done' AND NOT EXISTS (
+                SELECT 1 FROM download_item_tracks o
+                WHERE o.track_id = t.track_id AND (o.kind != t.kind OR o.id != t.id)) THEN f.size ELSE 0 END), 0),
+            (SELECT f2.error FROM download_item_tracks t2 JOIN download_files f2 ON f2.track_id = t2.track_id
+             WHERE t2.kind = t.kind AND t2.id = t.id AND f2.state IN ('failed', 'missing') AND f2.error IS NOT NULL
+             ORDER BY t2.position LIMIT 1)
+         FROM download_item_tracks t LEFT JOIN download_files f ON f.track_id = t.track_id
+         GROUP BY t.kind, t.id",
+    )?;
+    let rows = st.query_map(params![MAX_ATTEMPTS], |r| {
+        Ok((
+            (r.get::<_, String>(0)?, r.get::<_, String>(1)?),
+            ItemCounts {
+                total: r.get::<_, i64>(2)? as u32,
+                done: r.get::<_, i64>(3)? as u32,
+                failed: r.get::<_, i64>(4)? as u32,
+                missing: r.get::<_, i64>(5)? as u32,
+                own_bytes: r.get::<_, i64>(6)?.max(0) as u64,
+                error: r.get(7)?,
+            },
+        ))
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// The items (kind, id) that hold a song.
+pub fn items_holding(c: &Connection, track_id: &str) -> AppResult<HashSet<(String, String)>> {
+    let mut st = c.prepare_cached("SELECT kind, id FROM download_item_tracks WHERE track_id = ?1")?;
+    let rows = st.query_map([track_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+#[cfg(test)]
 pub fn item_counts(c: &Connection, key: &ItemKey) -> AppResult<ItemCounts> {
     let mut st = c.prepare_cached(
         "SELECT
@@ -365,19 +441,19 @@ pub fn item_counts(c: &Connection, key: &ItemKey) -> AppResult<ItemCounts> {
     })?)
 }
 
-/// Forgets every download. Returns the file names to delete.
-pub fn remove_all(c: &Connection) -> AppResult<Vec<String>> {
-    let files: Vec<String> = {
-        let mut st = c.prepare_cached("SELECT file FROM download_files WHERE file IS NOT NULL")?;
-        st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
+/// Forgets every download. Returns what to delete.
+pub fn remove_all(c: &Connection) -> AppResult<Vec<Gone>> {
+    let files: Vec<Gone> = {
+        let mut st = c.prepare_cached("SELECT track_id, file FROM download_files")?;
+        st.query_map([], |r| Ok(Gone { track_id: r.get(0)?, file: r.get(1)? }))?.collect::<Result<_, _>>()?
     };
     c.execute_batch("DELETE FROM download_item_tracks; DELETE FROM download_items; DELETE FROM download_files;")?;
     Ok(files)
 }
 
-/// An album's, playlist's or Liked Songs' songs now, from the library cache.
-/// None when the item isn't in the cache (or for a mix, whose songs come from
-/// the caller): its stored list is kept.
+/// An album's, playlist's, Liked Songs' or mix's songs now, from the library
+/// cache. None when the item isn't in the cache (a mix no longer made, or a
+/// radio): its stored list is kept.
 pub fn tracks_of_library_item(c: &Connection, key: &ItemKey, liked_min: f64) -> AppResult<Option<Vec<String>>> {
     match key.kind {
         ItemKind::Album => {
@@ -408,6 +484,20 @@ pub fn tracks_of_library_item(c: &Connection, key: &ItemKey, liked_min: f64) -> 
             Ok(Some(ids.collect::<Result<_, _>>()?))
         }
         ItemKind::Liked => Ok(Some(crate::db::likes::liked_ids(c, liked_min)?)),
-        ItemKind::Mix => Ok(None),
+        ItemKind::Mix => {
+            let exists = c
+                .query_row("SELECT 1 FROM mixes WHERE id = ?1", [&key.id], |_| Ok(()))
+                .optional()?
+                .is_some();
+            if !exists {
+                return Ok(None);
+            }
+            let mut st = c.prepare_cached(
+                "SELECT mt.track_id FROM mix_tracks mt JOIN tracks t ON t.id = mt.track_id
+                 WHERE mt.mix_id = ?1 ORDER BY mt.position",
+            )?;
+            let ids = st.query_map([&key.id], |r| r.get(0))?;
+            Ok(Some(ids.collect::<Result<_, _>>()?))
+        }
     }
 }

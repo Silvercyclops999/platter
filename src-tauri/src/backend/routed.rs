@@ -129,13 +129,18 @@ impl TrackResolver for RoutedStreams {
     }
 }
 
-/// Downloads from each track's server; the connection is the primary's.
+/// Downloads from each track's server, judged by that server's connection
+/// (the primary's when no song is named).
 pub struct RoutedDownloads(pub Backends);
 
 #[async_trait]
 impl DownloadSource for RoutedDownloads {
     async fn connection(&self) -> Option<ConnectionKind> {
         self.0.primary().ok()?.downloads().connection().await
+    }
+
+    async fn connection_for(&self, track: &Track) -> Option<ConnectionKind> {
+        self.0.for_id(&track.id).ok()?.downloads().connection_for(track).await
     }
 
     async fn fetch(&self, track: &Track, kbps: Option<u32>) -> AppResult<Fetch> {

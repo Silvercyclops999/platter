@@ -51,6 +51,8 @@ impl Respond for Files {
 struct FakeSource {
     base: String,
     conn: Mutex<Option<ConnectionKind>>,
+    /// Songs on another server: its connection.
+    conn_of: Mutex<HashMap<String, Option<ConnectionKind>>>,
     fetched: Mutex<Vec<(String, Option<u32>)>>,
     finished: AtomicUsize,
 }
@@ -59,6 +61,12 @@ struct FakeSource {
 impl DownloadSource for FakeSource {
     async fn connection(&self) -> Option<ConnectionKind> {
         *self.conn.lock()
+    }
+    async fn connection_for(&self, track: &Track) -> Option<ConnectionKind> {
+        match self.conn_of.lock().get(&track.id) {
+            Some(c) => *c,
+            None => *self.conn.lock(),
+        }
     }
     async fn fetch(&self, track: &Track, kbps: Option<u32>) -> AppResult<Fetch> {
         self.fetched.lock().push((track.id.clone(), kbps));
@@ -147,6 +155,7 @@ async fn rig_in(tmp: tempfile::TempDir, free: Option<u64>) -> Rig {
     let src = Arc::new(FakeSource {
         base: server.uri(),
         conn: Mutex::new(Some(ConnectionKind::Local)),
+        conn_of: Mutex::new(HashMap::new()),
         fetched: Mutex::new(Vec::new()),
         finished: AtomicUsize::new(0),
     });
@@ -230,7 +239,7 @@ async fn downloads_wait_behind_playback_on_the_gate_and_resume_by_range() {
     assert_eq!(std::fs::read(r.dir.join("a1.flac")).unwrap(), body_of("a1"));
 
     // A song that starts playing takes the gate from a download in flight.
-    let part = r.dir.join("a2.flac.part");
+    let part = r.dir.join(part_name("a2.flac", "/library/parts/a2/1/file.flac"));
     std::fs::write(&part, &body_of("a2")[..1000]).unwrap();
     let d = r.d.clone();
     let task = tokio::spawn(async move { d.step().await.unwrap() });
@@ -251,7 +260,7 @@ async fn queue_survives_a_restart_and_resumes_the_partial_file() {
     let r = rig_in(tmp, Some(1 << 40)).await;
     r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
     // Quit with half of a1 fetched.
-    std::fs::write(r.dir.join("a1.flac.part"), &body_of("a1")[..5000]).unwrap();
+    std::fs::write(r.dir.join(part_name("a1.flac", "/library/parts/a1/1/file.flac")), &body_of("a1")[..5000]).unwrap();
     let Rig { _tmp, db, .. } = r;
     drop(db);
     let r2 = rig_in(_tmp, Some(1 << 40)).await;
@@ -421,13 +430,16 @@ async fn a_song_bigger_than_its_estimate_is_not_fetched_again_and_again() {
     r.db.write(|c| Ok(c.execute("UPDATE tracks SET duration_ms = 1000, bitrate = 8", [])?)).unwrap();
     r.d.set_prefs(Prefs { limit_bytes: 50_000, ..Prefs::default() });
     r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    // Each song is tried once (one too big doesn't hold up the next), then
+    // the queue stays paused.
+    assert_eq!(r.d.step().await.unwrap(), Step::Paused(PauseReason::Full));
     assert_eq!(r.d.step().await.unwrap(), Step::Paused(PauseReason::Full));
     let fetched = r.hits.lock().len();
-    assert_eq!(fetched, 1);
+    assert_eq!(fetched, 2);
     for _ in 0..3 {
         assert_eq!(r.d.step().await.unwrap(), Step::Paused(PauseReason::Full));
     }
-    assert_eq!(r.hits.lock().len(), fetched, "stays paused without fetching it again");
+    assert_eq!(r.hits.lock().len(), fetched, "stays paused without fetching them again");
     // More room: it goes.
     r.d.set_prefs(Prefs::default());
     drain(&r.d).await;
@@ -445,17 +457,57 @@ async fn a_full_disk_stops_the_queue() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn away_from_home_waits_when_downloads_are_home_only() {
     let r = rig().await;
+    let t = &albums().2[0];
     *r.src.conn.lock() = Some(ConnectionKind::Remote);
-    assert_eq!(r.d.blocked().await, Some(PauseReason::NotHome));
+    assert_eq!(r.d.unreachable(t).await, Some(PauseReason::NotHome));
     *r.src.conn.lock() = Some(ConnectionKind::Relay);
-    assert_eq!(r.d.blocked().await, Some(PauseReason::NotHome));
+    assert_eq!(r.d.unreachable(t).await, Some(PauseReason::NotHome));
     r.d.set_prefs(Prefs { home_only: false, ..Prefs::default() });
-    assert_eq!(r.d.blocked().await, None);
+    assert_eq!(r.d.unreachable(t).await, None);
     *r.src.conn.lock() = None;
-    assert_eq!(r.d.blocked().await, Some(PauseReason::Offline));
+    assert_eq!(r.d.unreachable(t).await, Some(PauseReason::Offline));
     *r.src.conn.lock() = Some(ConnectionKind::Local);
     r.d.set_prefs(Prefs { offline: true, ..Prefs::default() });
     assert_eq!(r.d.blocked().await, Some(PauseReason::Offline), "Go offline");
+    // The step says why it waits.
+    r.d.set_prefs(Prefs::default());
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    *r.src.conn.lock() = Some(ConnectionKind::Remote);
+    assert_eq!(r.d.step().await.unwrap(), Step::Paused(PauseReason::NotHome));
+    assert!(r.hits.lock().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn each_song_waits_for_its_own_server() {
+    let r = rig().await;
+    // The main server is out of reach; album b's songs live on another one
+    // that is at home.
+    *r.src.conn.lock() = None;
+    r.src.conn_of.lock().insert("b1".into(), Some(ConnectionKind::Local));
+    r.src.conn_of.lock().insert("b2".into(), Some(ConnectionKind::Local));
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    r.d.add(key(ItemKind::Album, "b"), "Second".into(), None).await.unwrap();
+    assert_eq!(r.d.blocked().await, None, "the main server's connection doesn't hold up the queue");
+    assert_eq!(drain(&r.d).await.last(), Some(&Step::Paused(PauseReason::Offline)));
+    assert_eq!(r.d.downloaded_ids(), ["b1", "b2"]);
+    // The other way round: the main server is home, b's is away.
+    *r.src.conn.lock() = Some(ConnectionKind::Local);
+    r.src.conn_of.lock().insert("a2".into(), Some(ConnectionKind::Remote));
+    assert_eq!(drain(&r.d).await.last(), Some(&Step::Paused(PauseReason::NotHome)));
+    assert_eq!(r.d.downloaded_ids(), ["a1", "b1", "b2"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_song_too_big_for_the_room_left_lets_smaller_ones_by() {
+    let r = rig().await;
+    // a1 is estimated far bigger than a2; room for a2 only.
+    r.db.write(|c| Ok(c.execute("UPDATE tracks SET duration_ms = 100000000 WHERE id = 'a1'", [])?)).unwrap();
+    let small = estimate_bytes(&albums().2[1], DownloadQuality::Original);
+    r.d.set_prefs(Prefs { limit_bytes: small + 10, ..Prefs::default() });
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    assert_eq!(r.d.step().await.unwrap(), Step::Worked);
+    assert_eq!(r.d.downloaded_ids(), ["a2"]);
+    assert_eq!(r.d.step().await.unwrap(), Step::Paused(PauseReason::Full));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -463,7 +515,7 @@ async fn going_offline_mid_download_stops_it_and_keeps_the_part() {
     let r = rig().await;
     r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
     r.d.set_prefs(Prefs { offline: true, ..Prefs::default() });
-    assert_eq!(r.d.step().await.unwrap(), Step::Worked);
+    assert_eq!(r.d.step().await.unwrap(), Step::Paused(PauseReason::Offline));
     assert!(r.hits.lock().is_empty(), "no request once offline");
     assert!(r.d.downloaded_ids().is_empty());
     assert_eq!(r.d.status().unwrap().queued, 2, "still queued for later");
@@ -568,6 +620,7 @@ async fn an_unplugged_downloads_drive_marks_nothing_missing() {
     std::fs::write(&r.dir, b"not a folder").unwrap();
     assert_eq!(r.d.check_files(), 0);
     assert_eq!(r.d.path(&albums().2[0]), None, "plays from the server meanwhile");
+    assert!(r.d.downloaded_ids().is_empty(), "offline, nothing there counts as playable");
     assert_eq!(r.d.blocked().await, Some(PauseReason::FolderMissing));
     let st = r.d.status().unwrap();
     let a = item(&st, ItemKind::Album, "a");
@@ -585,7 +638,13 @@ fn quality_and_file_names() {
     let (_, _, tracks) = albums();
     assert_eq!(extension(&tracks[0], DownloadQuality::Original), "flac");
     assert_eq!(extension(&tracks[0], DownloadQuality::Kbps128), "mp3");
-    assert_eq!(file_stem("12/../34"), "1234");
+    assert!(file_stem("12/../34").starts_with("1234-"));
+    assert_eq!(file_stem("123"), "123");
+    // Ids that clean up to the same text still get their own files.
+    assert_ne!(file_stem("a.1"), file_stem("a1"));
+    assert_ne!(file_stem("0a1b2c3d:9"), file_stem("0a1b2c3d9"));
+    let long = "x".repeat(70);
+    assert_ne!(file_stem(&long), file_stem(&format!("{long}y")));
     assert_eq!(serde_json::to_value(DownloadQuality::Kbps320).unwrap(), "320");
     // 900 kbps for 200 s.
     assert_eq!(estimate_bytes(&tracks[0], DownloadQuality::Original), 22_500_000);
@@ -713,8 +772,8 @@ async fn go_offline_holds_new_songs_until_it_is_turned_off() {
 }
 
 #[test]
-fn the_app_pokes_downloads_on_library_and_like_changes() {
-    assert_eq!(FOLLOW_EVENTS, ["library://changed", "likes://changed"]);
+fn the_app_pokes_downloads_on_library_like_and_mix_changes() {
+    assert_eq!(FOLLOW_EVENTS, ["library://changed", "likes://changed", "mixes://changed"]);
     assert_eq!(crate::likes::EVENT_LIKES_CHANGED, FOLLOW_EVENTS[1]);
 }
 
@@ -783,6 +842,7 @@ async fn fetch_to(url: &str, part: &Path) -> transfer::Outcome {
         gate: &gate,
         host: None,
         room: u64::MAX,
+        min_len: None,
         keep_going: &|| true,
         progress: &|_, _| {},
     };
@@ -839,4 +899,251 @@ async fn a_download_without_a_length_is_checked_before_it_counts() {
     assert_eq!(std::fs::read(&part).unwrap(), body);
     let half = BODY as u64 / 2;
     assert_eq!(seen.lock().clone(), [None, Some(half), Some(half)], "asked past the end, then fetched the rest");
+}
+
+// ---- mixes, replaced songs and leftovers ---------------------------------------
+
+fn store_mix(db: &DbHandle, id: &str, tracks: &[&str]) {
+    use crate::mixes::store::{Stored, save_all};
+    let m = Stored {
+        id: id.into(),
+        kind: crate::mixes::MixKind::Daily,
+        title: "Daily Mix 1".into(),
+        description: String::new(),
+        color: "#000".into(),
+        artist_ids: vec![],
+        tag: None,
+        tracks: tracks.iter().map(|t| (t.to_string(), false)).collect(),
+    };
+    db.write(move |c| save_all(c, std::slice::from_ref(&m), "2026-10-18", 1)).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_downloaded_mix_follows_its_mix_when_it_is_made_again() {
+    let r = rig().await;
+    store_mix(&r.db, "daily:1", &["a1", "b1"]);
+    // The stored mix wins over a page's own list (a steered one).
+    r.d.add(key(ItemKind::Mix, "daily:1"), "Daily Mix 1".into(), Some(vec!["b2".into()])).await.unwrap();
+    drain(&r.d).await;
+    assert_eq!(r.d.downloaded_ids(), ["a1", "b1"]);
+    // The next day's mix: a1 left, a2 came in.
+    store_mix(&r.db, "daily:1", &["a2", "b1"]);
+    r.d.resync().await.unwrap();
+    assert!(!r.dir.join("a1.flac").exists(), "the song that left is freed");
+    drain(&r.d).await;
+    assert_eq!(r.d.downloaded_ids(), ["a2", "b1"]);
+    let st = r.d.status().unwrap();
+    let m = item(&st, ItemKind::Mix, "daily:1");
+    assert_eq!((m.state, m.done, m.total), (ItemState::Downloaded, 2, 2));
+    assert_eq!(st.used_bytes, 2 * BODY as u64, "only what is listed is counted");
+    // A mix no longer made keeps what it has.
+    r.db.write(|c| Ok(c.execute("DELETE FROM mixes", [])?)).unwrap();
+    r.d.resync().await.unwrap();
+    assert_eq!(r.d.downloaded_ids(), ["a2", "b1"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_remade_mix_downloads_its_new_songs_straight_away() {
+    let r = rig().await;
+    store_mix(&r.db, "daily:1", &["a1"]);
+    r.d.add(key(ItemKind::Mix, "daily:1"), "Daily Mix 1".into(), Some(vec!["a1".into()])).await.unwrap();
+    let run = tokio::spawn(r.d.clone().run());
+    assert!(within(5, || r.d.downloaded_ids() == ["a1"]).await);
+    store_mix(&r.db, "daily:1", &["b2"]);
+    // What the app does on mixes://changed.
+    r.d.poke();
+    assert!(within(5, || r.d.downloaded_ids() == ["b2"]).await, "{:?}", r.d.downloaded_ids());
+    assert!(!r.dir.join("a1.flac").exists());
+    run.abort();
+}
+
+fn new_part_key(db: &DbHandle, id: &str, key: &str) {
+    let (id, key) = (id.to_string(), key.to_string());
+    db.write(move |c| Ok(c.execute("UPDATE tracks SET part_key = ?2 WHERE id = ?1", rusqlite::params![id, key])?)).unwrap();
+}
+
+fn track_now(db: &DbHandle, id: &str) -> Track {
+    let id = id.to_string();
+    db.read(move |c| queries::tracks_by_ids(c, &[id])).unwrap().remove(0)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_song_replaced_on_the_server_plays_from_its_old_file_until_the_new_one_lands() {
+    let r = rig().await;
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    r.d.add(key(ItemKind::Album, "b"), "Second".into(), None).await.unwrap();
+    drain(&r.d).await;
+    // Plex scanned a1 again: it has a new part.
+    new_part_key(&r.db, "a1", "/library/parts/a1/2/file.flac");
+    r.d.resync().await.unwrap();
+    let st = r.d.status().unwrap();
+    assert_eq!(st.queued, 1, "waiting to be fetched again");
+    assert_eq!(st.used_bytes, 4 * BODY as u64, "its old file still counts");
+    // Something else changes the set of files: a1 still plays from disk.
+    r.d.remove(key(ItemKind::Album, "b")).await.unwrap();
+    assert_eq!(r.d.downloaded_ids(), ["a1", "a2"]);
+    assert_eq!(r.d.path(&track_now(&r.db, "a1")), Some(r.dir.join("a1.flac")));
+    // Away from home, nothing is fetched and it keeps playing.
+    *r.src.conn.lock() = Some(ConnectionKind::Remote);
+    assert_eq!(r.d.step().await.unwrap(), Step::Paused(PauseReason::NotHome));
+    assert_eq!(r.d.downloaded_ids(), ["a1", "a2"]);
+    assert_eq!(item(&r.d.status().unwrap(), ItemKind::Album, "a").state, ItemState::Downloaded);
+    // Home again: the new file replaces the old one.
+    *r.src.conn.lock() = Some(ConnectionKind::Local);
+    drain(&r.d).await;
+    assert!(r.hits.lock().iter().any(|(p, _)| p == "/library/parts/a1/2/file.flac"));
+    let row = r.db.read(|c| store::file(c, "a1")).unwrap().unwrap();
+    assert_eq!((row.state.as_str(), row.part_key.as_str()), ("done", "/library/parts/a1/2/file.flac"));
+    let st = r.d.status().unwrap();
+    assert_eq!((st.queued, st.used_bytes), (0, 2 * BODY as u64));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failed_refetch_keeps_the_old_file_playing() {
+    let r = rig().await;
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    drain(&r.d).await;
+    // The new part can't be fetched.
+    new_part_key(&r.db, "a1", "/library/parts/gone/2/file.flac");
+    assert_eq!(drain(&r.d).await.last(), Some(&Step::Idle), "waits out its retry instead of looping");
+    let row = r.db.read(|c| store::file(c, "a1")).unwrap().unwrap();
+    assert_eq!((row.state.as_str(), row.attempts), ("done", 1));
+    assert_eq!(r.d.downloaded_ids(), ["a1", "a2"]);
+    assert!(r.dir.join("a1.flac").is_file());
+    let st = r.d.status().unwrap();
+    assert_eq!((st.queued, st.used_bytes), (0, 2 * BODY as u64));
+    assert_eq!(item(&st, ItemKind::Album, "a").state, ItemState::Downloaded);
+    // Retry tries it again now.
+    r.d.retry(Some(key(ItemKind::Album, "a"))).await.unwrap();
+    assert_eq!(r.d.status().unwrap().queued, 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_partial_file_of_an_older_version_is_not_continued() {
+    let r = rig().await;
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    std::fs::create_dir_all(&r.dir).unwrap();
+    // Half of a1 came before the file changed on the server.
+    let old = r.dir.join(part_name("a1.flac", "/library/parts/a1/1/file.flac"));
+    std::fs::write(&old, vec![1u8; 1000]).unwrap();
+    new_part_key(&r.db, "a1", "/library/parts/a1/2/file.flac");
+    assert_eq!(r.d.step().await.unwrap(), Step::Worked);
+    assert!(!old.exists());
+    assert!(r.hits.lock().iter().all(|(_, range)| range.is_none()), "fetched from the start");
+    assert_eq!(std::fs::read(r.dir.join("a1.flac")).unwrap(), body_of("a1"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn removing_an_item_deletes_its_partial_files() {
+    let r = rig().await;
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    std::fs::create_dir_all(&r.dir).unwrap();
+    let part = r.dir.join(part_name("a1.flac", "/library/parts/a1/1/file.flac"));
+    let mp3 = r.dir.join(part_name("a1.mp3", "/library/parts/a1/1/file.flac"));
+    std::fs::write(&part, b"half").unwrap();
+    std::fs::write(&mp3, b"half").unwrap();
+    // Another song whose id starts the same way keeps its own.
+    let other = r.dir.join(part_name("a10.flac", "/x"));
+    std::fs::write(&other, b"half").unwrap();
+    r.d.remove(key(ItemKind::Album, "a")).await.unwrap();
+    assert!(!part.exists() && !mp3.exists());
+    assert!(other.exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_file_that_could_not_be_deleted_is_deleted_later() {
+    let r = rig().await;
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    drain(&r.d).await;
+    // Something holds a1 so it can't go (a folder in its place stands in
+    // for a file in use).
+    let a1 = r.dir.join("a1.flac");
+    std::fs::remove_file(&a1).unwrap();
+    std::fs::create_dir_all(a1.join("held")).unwrap();
+    r.d.remove(key(ItemKind::Album, "a")).await.unwrap();
+    assert_eq!(r.d.retry_pending_deletes(), 1, "still waiting");
+    // Let go of it.
+    std::fs::remove_dir_all(&a1).unwrap();
+    std::fs::write(&a1, b"x").unwrap();
+    assert_eq!(r.d.retry_pending_deletes(), 0);
+    assert!(!a1.exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn startup_sweeps_leftover_partial_files_and_unused_art() {
+    let r = rig().await;
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    std::fs::create_dir_all(r.dir.join(art::ART_DIR)).unwrap();
+    let wanted = r.dir.join(part_name("a1.flac", "/library/parts/a1/1/file.flac"));
+    let orphan = r.dir.join(part_name("zz.flac", "/library/parts/zz/1/file.flac"));
+    let legacy = r.dir.join("qq.flac.part");
+    let not_ours = r.dir.join("notes.txt");
+    for p in [&wanted, &orphan, &legacy, &not_ours] {
+        std::fs::write(p, b"x").unwrap();
+    }
+    let thumb = albums().2[0].thumb.clone().expect("a cover");
+    let used_art = art::path(&r.dir, &thumb);
+    let old_art = art::path(&r.dir, "/library/metadata/999/thumb/1");
+    std::fs::write(&used_art, b"img").unwrap();
+    std::fs::write(&old_art, b"img").unwrap();
+    r.d.sweep();
+    assert!(wanted.exists() && used_art.exists() && not_ours.exists());
+    assert!(!orphan.exists() && !legacy.exists() && !old_art.exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_file_deleted_while_running_stops_counting_within_a_check() {
+    let r = rig().await;
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    drain(&r.d).await;
+    r.d.set_check_every(Duration::from_millis(100));
+    let run = tokio::spawn(r.d.clone().run());
+    std::fs::remove_file(r.dir.join("a1.flac")).unwrap();
+    assert!(within(5, || r.d.downloaded_ids() == ["a2"]).await, "{:?}", r.d.downloaded_ids());
+    assert_eq!(item(&r.d.status().unwrap(), ItemKind::Album, "a").missing, 1);
+    run.abort();
+}
+
+#[test]
+fn a_transcode_must_come_to_most_of_its_size() {
+    let (_, _, tracks) = albums();
+    // 900 kbps source, 200 s, at 320: 8 MB, and at least 70 percent of it.
+    assert_eq!(shortest_transcode(&tracks[0], DownloadQuality::Kbps320), Some(5_600_000));
+    assert_eq!(shortest_transcode(&tracks[0], DownloadQuality::Original), None);
+    // A source smaller than the quality may come back as it is.
+    let mut small = tracks[0].clone();
+    small.bitrate = Some(128);
+    assert_eq!(shortest_transcode(&small, DownloadQuality::Kbps320), Some(128 * 125 * 200 * 7 / 10));
+    small.bitrate = None;
+    assert_eq!(shortest_transcode(&small, DownloadQuality::Kbps320), None, "can't tell");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_transcode_that_ends_early_is_tried_again_not_kept() {
+    let body = body_of("cut");
+    let (url, seen) = raw_server(move |_| response("200 OK", &[], &body[..body.len() / 2])).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let part = tmp.path().join("x.mp3.part");
+    let client = crate::audio::http::http_client();
+    let gate = TransferGate::new();
+    let ctx = transfer::Ctx {
+        client: &client,
+        gate: &gate,
+        host: None,
+        room: u64::MAX,
+        min_len: Some(BODY as u64 * 9 / 10),
+        keep_going: &|| true,
+        progress: &|_, _| {},
+    };
+    let fetch = Fetch { src: StreamSource { url, ..Default::default() }, resumable: false, session: None };
+    assert_eq!(
+        transfer::fetch_file(&ctx, &fetch, &part).await,
+        transfer::Outcome::Failed("The server stopped sending the song early.".into())
+    );
+    assert_eq!(seen.lock().len(), 3, "tried three times");
+    // The whole song is kept.
+    let body = body_of("whole");
+    let (url, _) = raw_server(move |_| response("200 OK", &[], &body)).await;
+    let fetch = Fetch { src: StreamSource { url, ..Default::default() }, resumable: false, session: None };
+    assert_eq!(transfer::fetch_file(&ctx, &fetch, &part).await, transfer::Outcome::Done(BODY as u64));
 }

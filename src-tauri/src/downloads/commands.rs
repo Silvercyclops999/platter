@@ -52,6 +52,13 @@ impl DownloadSource for PlexSource {
         self.0.client().await.ok()?.connection()
     }
 
+    async fn connection_for(&self, track: &Track) -> Option<ConnectionKind> {
+        if self.0.offline_by_choice() || !self.0.connected() {
+            return None;
+        }
+        self.0.client_for(&track.id).await.ok()?.connection()
+    }
+
     async fn fetch(&self, track: &Track, kbps: Option<u32>) -> AppResult<Fetch> {
         let client = self.0.client_for(&track.id).await?;
         match kbps {

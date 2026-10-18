@@ -65,6 +65,7 @@ impl TrackFiles for ServerFiles {
             gate: &self.gate,
             host: Some(&*self.host),
             room: u64::MAX,
+            min_len: None,
             keep_going: &keep_going,
             progress: &progress,
         };

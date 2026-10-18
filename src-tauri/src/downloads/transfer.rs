@@ -24,6 +24,9 @@ pub(crate) struct Ctx<'a> {
     pub host: Option<&'a dyn PrecacheHost>,
     /// Bytes left under the storage limit.
     pub room: u64,
+    /// For a fetch that can't say its length (a transcode): fewer bytes than
+    /// this means the server stopped early, not that the song ended.
+    pub min_len: Option<u64>,
     /// False once the song is no longer wanted or the queue must pause.
     pub keep_going: &'a (dyn Fn() -> bool + Sync),
     pub progress: &'a (dyn Fn(u64, Option<u64>) + Sync),
@@ -209,6 +212,9 @@ async fn attempt(ctx: &Ctx<'_>, fetch: &Fetch, part: &Path, permit: &crate::audi
         // No length given: ask for anything past the end. "Nothing more"
         // with the same length confirms it.
         None if fetch.resumable => confirm_end(ctx, fetch, written).await,
+        None if ctx.min_len.is_some_and(|m| written < m) => {
+            Attempt::Retry("The server stopped sending the song early.".into())
+        }
         None => Attempt::Done(written),
     }
 }
