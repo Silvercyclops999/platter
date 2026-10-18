@@ -3116,6 +3116,46 @@ Events:
 - `output://changed` → `OutputState` (after a switch, a fallback, or a reroute)
 - `output://lost` → `{ device }` (name of the chosen device that went away)
 
+## Signal path
+| Command | Args |
+| --- | --- |
+| `signal_path` | – → `SignalPath` |
+
+What happens to the sound between the file and the output device, read only.
+The engine notes the source format when a song's decoder opens and the device
+format when the output opens; the snapshot is built from those and from what
+the player already holds. The output thread does no extra work for it.
+
+```
+SignalPath = {
+  trackId: string | null,
+  source: { codec, lossless, bitDepth, sampleRate, channels, bitrate, transcoded, from: "server" | "cache" | "download" } | null,
+  decode: string | null,              // "32-bit float"
+  loudness: { on, mode: "smart" | "track" | "album" | "off", gainDb: number | null },
+  eq: { eq, correction, correctionPreampDb, preampDb, limiter },
+  resample: { fromRate, toRate, fromChannels, toChannels, quality } | null,
+  blend: { automix, crossfade: "smart" | "fixed" | "off", crossfadeMs },
+  output: { device, mode: "shared" | "exclusive" | "fallback", reason, rate, channels, bits, network, volume, volumeBypassed },
+  verdict: { kind: "idle" | "bitPerfect" | "lossless" | "lossy", text },
+  why: { text, setting: string | null } | null,
+}
+```
+
+`source.codec` is the format actually decoded, upper case. `transcoded` is
+true when the server sent a conversion (a streaming quality cap, or because
+the file couldn't be played directly); then `bitDepth` and `bitrate` are null
+since the file's own values don't describe the stream. While bit-perfect
+output has the device, every sound setting reads as off and `volumeBypassed`
+is true. `verdict.text` is plain words: "Bit-perfect", "Lossless, resampled to
+48 kHz", "Lossless, volume and EQ applied", "Lossy source (MP3 320)". `why`
+says what keeps it from being bit-perfect, and `setting` names the Settings
+row that changes it (`bitPerfectOutputs`, `qualityHome`), or null when no
+setting can.
+
+Events:
+- `audio://signal-path` → `SignalPath` (when it changes: a new song, its
+  source becoming known, another device, a sound setting, volume)
+
 ## Listen on
 The user's other computers running Platter, Plex players Platter can move
 playback to (Plexamp, Plex apps, Sonos linked to Plex), DLNA renderers, Chromecasts and
@@ -3431,6 +3471,7 @@ The rest of the fields, with their defaults:
 | `qualityHome` | `"original"`, `"320"`, `"256"`, `"192"`, `"128"` | Bitrate cap on the local connection. Original plays the file as is. |
 | `qualityAway` | same, default `"320"` | Cap over remote access and the relay. The relay never goes above 128 kbps. |
 | `showFormatBadge` | bool, true | Shows the codec and sample rate badge in track lists and album headers. |
+| `signalPathBadge` | bool, true | Shows the badge in the player bar that opens the signal path. |
 | `resumeContexts` | bool, true | Albums and playlists start where they were left. Off starts at track 1; points are still saved. |
 | `precacheCount` | 1 to 50, 5 | Upcoming tracks kept on disk. Out of range values are clamped. |
 | `popularSource` | `"global"`, `"myPlays"` | Ranks the artist page's Popular by the global top list (ListenBrainz or Last.fm) or by your own plays. |

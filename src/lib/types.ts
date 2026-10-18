@@ -824,6 +824,8 @@ export interface Settings {
   qualityHome: StreamQuality;
   qualityAway: StreamQuality;
   showFormatBadge: boolean;
+  /** The player bar's badge that opens the signal path. */
+  signalPathBadge: boolean;
   resumeContexts: boolean;
   /** Upcoming tracks kept on disk, 1 to 50. */
   precacheCount: number;
@@ -1515,6 +1517,7 @@ export const DEFAULT_SETTINGS: Settings = {
   qualityHome: "original",
   qualityAway: "320",
   showFormatBadge: true,
+  signalPathBadge: true,
   resumeContexts: true,
   precacheCount: 5,
   popularSource: "global",
@@ -3529,6 +3532,47 @@ export interface OutputState {
   exclusive?: Exclusive;
 }
 
+/** Where the playing audio is read from. */
+export type SignalSourceFrom = "server" | "cache" | "download";
+
+/** What happens to the sound on its way to the output (`signal_path`, `audio://signal-path`). */
+export interface SignalPath {
+  trackId: string | null;
+  source: {
+    /** Upper case: "FLAC", "MP3". */
+    codec: string | null;
+    lossless: boolean;
+    bitDepth: number | null;
+    sampleRate: number | null;
+    channels: number | null;
+    /** kbps of the file itself (unknown for a transcode). */
+    bitrate: number | null;
+    transcoded: boolean;
+    from: SignalSourceFrom | null;
+  } | null;
+  /** What the decoder hands on ("32-bit float"). */
+  decode: string | null;
+  loudness: { on: boolean; mode: "smart" | "track" | "album" | "off"; gainDb: number | null };
+  eq: { eq: boolean; correction: boolean; correctionPreampDb: number | null; preampDb: number; limiter: boolean };
+  resample: { fromRate: number; toRate: number; fromChannels: number; toChannels: number; quality: string } | null;
+  blend: { automix: boolean; crossfade: "smart" | "fixed" | "off"; crossfadeMs: number | null };
+  output: {
+    device: string | null;
+    mode: "shared" | "exclusive" | "fallback";
+    reason: string | null;
+    rate: number | null;
+    channels: number | null;
+    bits: number | null;
+    network: boolean;
+    /** Linear slider 0..1 (0 when muted). */
+    volume: number;
+    volumeBypassed: boolean;
+  };
+  verdict: { kind: "idle" | "bitPerfect" | "lossless" | "lossy"; text: string };
+  /** "Why isn't this bit-perfect?": a line and the Settings row that changes it. */
+  why: { text: string; setting: string | null } | null;
+}
+
 /** Bit-perfect state of the open output: shared, exclusive at the music's rate, or shared after an exclusive open failed. */
 export type Exclusive = { state: "off" } | { state: "on"; rate: number; bits: number } | { state: "fallback"; reason: string };
 
@@ -3807,6 +3851,8 @@ export interface EventMap {
   "player://error": PlayerError;
   /** Output devices or the device in use changed. */
   "output://changed": OutputState;
+  /** What happens to the sound changed (track, device or sound settings). */
+  "audio://signal-path": SignalPath;
   /** The chosen output device went away; playback paused and moved to the system default. */
   "output://lost": { device: string };
   /** Playback on another device started, changed, stopped or came back. */

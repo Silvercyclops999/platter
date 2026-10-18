@@ -48,6 +48,9 @@ import { LoopChip, LoopLayer, PlayerSubline, VolumeReadout } from "./PlayerExtra
 import { actionableNotice, useLyrics } from "./lyrics";
 import { normalizeLoop } from "./playerRules";
 import { HifiMark } from "./HifiMark";
+import { SignalBadge, SignalPanel } from "./SignalPath";
+import { openSignal } from "../stores/signalPath";
+import { AudioLines } from "lucide-react";
 
 /** Seek bar keys: arrows move 5 s, Page Up/Down 25 s. */
 export const SEEK_KEY_STEP = 5_000;
@@ -341,7 +344,7 @@ function MoreButton({ buttons, hasTrack }: { buttons: readonly string[]; hasTrac
   const folds = buttons.filter((b) => b === "miniplayer" || b === "fullWindow");
   if (!folds.length) return null;
   const open = () => {
-    const items = folds.map((b) =>
+    const folded = folds.map((b) =>
       b === "miniplayer"
         ? { label: useMiniplayer.getState().open ? "Close miniplayer" : "Open miniplayer", icon: PictureInPicture2, onSelect: () => void miniplayer.toggle() }
         : {
@@ -351,6 +354,7 @@ function MoreButton({ buttons, hasTrack }: { buttons: readonly string[]; hasTrac
             onSelect: fullWindow.toggle,
           },
     );
+    const items = hasTrack ? [...folded, { label: "Signal path", icon: AudioLines, onSelect: () => openSignal() }] : folded;
     const btn = ref.current?.querySelector("button");
     if (btn) openContextMenu("More player options", items, btn);
   };
@@ -493,6 +497,9 @@ export function PlayerBar() {
       </div>
 
       <div className="player-bar__extras">
+        <span className="player-bar__fold">
+          <SignalBadge />
+        </span>
         <PrivateSession />
         {/* The Layout option picks which buttons show, and their order. The
             hi-fi mark stays beside the device button. */}
@@ -523,6 +530,7 @@ export function PlayerBar() {
         ))}
         <MoreButton buttons={buttons} hasTrack={!!track} />
       </div>
+      <SignalPanel />
     </aside>
   );
 }

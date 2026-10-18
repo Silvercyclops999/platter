@@ -30,6 +30,7 @@ pub mod output;
 pub mod persist;
 pub mod player;
 pub mod queue;
+pub mod signal;
 pub mod source;
 
 pub use events::{EventSink, PlayerState, PlayerStatus, TauriSink, TrackingEvent};
@@ -47,6 +48,8 @@ mod dsp_tests;
 mod hifi_tests;
 #[cfg(test)]
 mod player_tests;
+#[cfg(test)]
+mod signal_tests;
 #[cfg(test)]
 mod smoke;
 #[cfg(test)]

@@ -78,6 +78,7 @@ import type {
   LibraryItem,
   OutputDevice,
   OutputState,
+  SignalPath,
   PinInfo,
   PlayContextArgs,
   PlayerState,
@@ -168,6 +169,7 @@ import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
 import { OFFLINE_NOTHING_PLAYS, offlineLeftOutMessage } from "../offline";
 import * as eq from "./eq";
 import * as hifi from "./hifi";
+import { mockSignalPath } from "./signal";
 import { MockHome, type ContextPlay } from "./home";
 import { MockHomeUsers } from "./homeUsers";
 import { mockBackendCaps } from "./servers";
@@ -2267,6 +2269,34 @@ export class MockBackend implements Backend {
 
   private emitState() {
     this.emit("player://state", this.snapshot());
+    this.emitSignal();
+  }
+
+  private lastSignal = "";
+  private signalSnapshot(): SignalPath {
+    const o = this.outputState();
+    const t = this.current?.track ?? null;
+    const cap = this.settings.qualityHome === "original" ? null : Number(this.settings.qualityHome);
+    return mockSignalPath({
+      track: t,
+      settings: this.settings,
+      device: o.current,
+      exclusive: o.exclusive ?? { state: "off" },
+      volume: this.volume,
+      muted: this.muted,
+      transcodeKbps: t && cap !== null && (t.bitrate ?? Infinity) > cap ? cap : null,
+    });
+  }
+  /** `audio://signal-path`, when it changed (like the core). */
+  private emitSignal() {
+    const p = this.signalSnapshot();
+    const key = JSON.stringify(p);
+    if (key === this.lastSignal) return;
+    this.lastSignal = key;
+    this.emit("audio://signal-path", p);
+  }
+  signalPath() {
+    return this.delay(() => this.signalSnapshot());
   }
 
   private act(fn: () => void) {
@@ -2387,6 +2417,7 @@ export class MockBackend implements Backend {
   private emitOutput() {
     const s = this.outputState();
     this.emit("output://changed", s);
+    this.emitSignal();
     if (eq.outputChanged(this.settings, s.current)) this.emit("settings://changed", { ...this.settings, volume: this.volume });
   }
   /** Test/demo hook: an output device is unplugged. If it was the chosen
@@ -2787,6 +2818,8 @@ export class MockBackend implements Backend {
       this.artUsed = Math.min(this.artUsed, next.artCacheMb * 1024 * 1024);
       if (typeof patch.volume === "number") this.volume = Math.min(1, Math.max(0, patch.volume));
       if (patch.readFileTags !== undefined) this.tags.settingsChanged();
+      // Sound settings change the signal path.
+      this.later(0, () => this.emitSignal());
       const mixKeys = ["mixVariety", "mixExcludeArtists", "mixExcludeGenres", "mixExcludeAlbums", "mixUnreleased", "daylistHours", "explicitContent", "showFanEdits"];
       if (mixKeys.some((k) => k in patch)) {
         this.mixes.invalidate();
@@ -2825,6 +2858,8 @@ export class MockBackend implements Backend {
       const next: Settings = { ...this.settings, eqProfiles: this.settings.eqProfiles.map((p) => ({ ...p })) };
       f(next);
       this.settings = next;
+      // EQ, correction and bit-perfect all show in the signal path.
+      this.later(0, () => this.emitSignal());
       return { ...next, volume: this.volume };
     });
   }

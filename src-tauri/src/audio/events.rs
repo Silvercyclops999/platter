@@ -161,6 +161,8 @@ pub trait EventSink: Send + Sync {
     fn output(&self, _state: &OutputState) {}
     /// The chosen output device went away.
     fn output_lost(&self, _lost: &OutputLost) {}
+    /// What happens to the sound changed (track, device, settings).
+    fn signal_path(&self, _path: &super::signal::SignalPath) {}
 }
 
 /// Emits to every webview via Tauri's event system.
@@ -186,6 +188,10 @@ impl<R: tauri::Runtime> EventSink for TauriSink<R> {
     fn output_lost(&self, lost: &OutputLost) {
         use tauri::Emitter;
         let _ = self.0.emit(EV_OUTPUT_LOST, lost);
+    }
+    fn signal_path(&self, path: &super::signal::SignalPath) {
+        use tauri::Emitter;
+        let _ = self.0.emit(super::signal::EV_SIGNAL_PATH, path);
     }
 }
 

@@ -40,6 +40,7 @@ use super::gate::{Priority, PriorityCell, TransferGate};
 use super::http::{HttpConfig, HttpSource, HttpStats};
 use super::devguard::GuardedOutput;
 use super::output::{OutputCallback, OutputEvent, OutputFormat, OutputState, Renderer};
+use super::signal::{SourceFrom, SourceInfo};
 use super::source::{LocalFiles, StreamSource, TrackResolver};
 use crate::error::{AppError, AppResult};
 use crate::model::Track;
@@ -105,6 +106,8 @@ pub enum EngineEvent {
     OutputReset(String),
     /// The output moved to another device by itself.
     OutputChanged,
+    /// A segment's source format or loudness data became known (signal path).
+    SourceKnown { key: u64 },
 }
 
 /// A track whose audio stopped before its end.
@@ -1226,6 +1229,49 @@ pub(crate) struct Core {
     cv: Condvar,
     events: UnboundedSender<EngineEvent>,
     cfg: EngineConfig,
+    /// What the signal path shows. Written when a decoder or the output
+    /// opens; the render callback never touches it.
+    published: Mutex<Published>,
+}
+
+/// Most segments whose source info is kept (the playing one and the next).
+const PUBLISHED_SOURCES: usize = 4;
+
+#[derive(Default)]
+struct Published {
+    /// The open stream's format.
+    format: Option<OutputFormat>,
+    sources: VecDeque<(u64, SourceInfo)>,
+}
+
+impl Core {
+    fn publish_source(&self, key: u64, info: SourceInfo) {
+        let mut p = self.published.lock();
+        p.sources.retain(|(k, _)| *k != key);
+        if p.sources.len() >= PUBLISHED_SOURCES {
+            p.sources.pop_front();
+        }
+        p.sources.push_back((key, info));
+        drop(p);
+        let _ = self.events.send(EngineEvent::SourceKnown { key });
+    }
+
+    fn published_source(&self, key: u64) -> Option<SourceInfo> {
+        self.published.lock().sources.iter().find(|(k, _)| *k == key).map(|(_, s)| s.clone())
+    }
+
+    fn published_format(&self) -> Option<OutputFormat> {
+        self.published.lock().format
+    }
+
+    fn publish_audio(&self, key: u64, audio: TrackAudio) {
+        let mut p = self.published.lock();
+        if let Some((_, s)) = p.sources.iter_mut().find(|(k, _)| *k == key) {
+            s.audio = Some(audio);
+            drop(p);
+            let _ = self.events.send(EngineEvent::SourceKnown { key });
+        }
+    }
 }
 
 impl Renderer for Core {
@@ -1462,6 +1508,7 @@ impl Engine {
             cv: Condvar::new(),
             events: tx,
             cfg: deps.config,
+            published: Mutex::new(Published::default()),
         });
         let env = Arc::new(Env {
             core,
@@ -1540,6 +1587,7 @@ impl Engine {
         };
         let (fmt, exclusive) = opened?;
         let bit_perfect = exclusive.is_on();
+        self.core().published.lock().format = Some(fmt);
         let mut m = self.core().mix.lock();
         let changed = m.format != fmt;
         m.format = fmt;
@@ -1673,6 +1721,34 @@ impl Engine {
     pub fn close_output(&self) {
         self.output.slow("closing", |o| o.close());
         self.core().mix.lock().output_open = false;
+        self.core().published.lock().format = None;
+    }
+
+    /// The source format of a loaded segment, as its decoder opened it
+    /// (signal path). Doesn't touch the render path.
+    pub fn published_source(&self, key: u64) -> Option<SourceInfo> {
+        self.core().published_source(key)
+    }
+
+    /// The open output stream's format (None while it's closed).
+    pub fn published_format(&self) -> Option<OutputFormat> {
+        self.core().published_format()
+    }
+
+    /// Holds the render lock, as the output thread does while it renders,
+    /// and reads the signal path record from another thread. True when the
+    /// read finished without waiting for the render lock.
+    #[cfg(test)]
+    pub(crate) fn signal_reads_skip_render_lock(&self, key: u64) -> bool {
+        let core = self.env.core.clone();
+        let _rendering = core.mix.lock();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let c = core.clone();
+        std::thread::spawn(move || {
+            let _ = (c.published_format(), c.published_source(key));
+            let _ = tx.send(());
+        });
+        rx.recv_timeout(Duration::from_secs(5)).is_ok()
     }
 
     /// The output devices, the choice and the device in use.
@@ -2115,6 +2191,9 @@ struct Opened {
     dec: TrackDecoder,
     stats: Option<HttpStats>,
     origin: Origin,
+    /// Where it's read from and the format hint it opened with (signal path).
+    from: SourceFrom,
+    codec: Option<String>,
     /// Bytes to store in the disk cache once fully fetched.
     cache_from: Option<HttpStats>,
 }
@@ -2126,6 +2205,7 @@ fn open_from(
     origin: Origin,
     prio: &PriorityCell,
 ) -> Result<Opened, OpenFail> {
+    let given = src.codec_hint.clone();
     let hint = src
         .codec_hint
         .clone()
@@ -2151,8 +2231,29 @@ fn open_from(
         dec,
         stats: Some(stats.clone()),
         origin,
+        from: SourceFrom::Server,
+        codec: given,
         cache_from: (origin == Origin::Stream).then_some(stats),
     })
+}
+
+/// What the signal path shows about an opened track. A stream whose format
+/// isn't the file's is a transcode the server chose (a quality cap).
+fn source_info(track: &Track, o: &Opened, fallback: bool, audio: Option<TrackAudio>) -> SourceInfo {
+    let low = |c: Option<&str>| c.map(str::to_ascii_lowercase);
+    let capped = o.origin == Origin::Stream
+        && o.codec.is_some()
+        && track.codec.is_some()
+        && low(o.codec.as_deref()) != low(track.codec.as_deref());
+    SourceInfo {
+        from: o.from,
+        transcoded: fallback || o.origin == Origin::Transcode || capped,
+        fallback: fallback || o.origin == Origin::Transcode,
+        codec: o.codec.clone(),
+        rate: o.dec.rate,
+        channels: o.dec.channels,
+        audio,
+    }
 }
 
 fn open_track(
@@ -2185,6 +2286,8 @@ fn open_track(
                     dec,
                     stats: None,
                     origin: Origin::Cache,
+                    from: SourceFrom::Download,
+                    codec: hint,
                     cache_from: None,
                 });
             }
@@ -2202,6 +2305,8 @@ fn open_track(
                     dec,
                     stats: None,
                     origin: Origin::Cache,
+                    from: SourceFrom::Cache,
+                    codec: None,
                     cache_from: None,
                 });
             }
@@ -2464,11 +2569,13 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
             }
         }
     }
+    core.publish_source(key, source_info(&track, &opened, transcoded, info));
     if let Some(task) = late_info {
         let core = core.clone();
         env.rt.spawn(async move {
             if let Ok(Ok(Some(info))) = tokio::time::timeout(LATE_INFO_WAIT, task).await {
                 core.mix.lock().set_audio(key, Some(info));
+                core.publish_audio(key, info);
             }
         });
     }

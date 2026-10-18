@@ -170,6 +170,13 @@ pub async fn player_state(player: State<'_, PlayerHandle>) -> AppResult<PlayerSt
     player.state().await.map(|s| s.for_ui().into_owned())
 }
 
+/// What happens to the sound now, from the file to the output device
+/// (also sent as `audio://signal-path` when it changes).
+#[tauri::command]
+pub async fn signal_path(player: State<'_, PlayerHandle>) -> AppResult<super::signal::SignalPath> {
+    player.signal_path().await
+}
+
 /// Audio output devices, the chosen one and the one in use.
 #[tauri::command]
 pub async fn output_devices(player: State<'_, PlayerHandle>) -> AppResult<OutputState> {

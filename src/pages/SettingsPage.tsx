@@ -1035,6 +1035,14 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       description: "Shows the format, bit depth and sample rate (like FLAC 24/96) next to songs and albums.",
       control: (ids) => toggle(s, "showFormatBadge", ids),
     },
+    {
+      key: "signalPathBadge",
+      section: "Sound",
+      title: "Show the signal path badge",
+      description: "A badge in the player bar that shows what happens to the sound on its way out.",
+      more: "A badge in the player bar with the playing song's format. Click it to see each step from the file to your output device, whether it's bit-perfect, and what to change if it isn't. The More player options menu and the expanded view open it too.",
+      control: (ids) => toggle(s, "signalPathBadge", ids),
+    },
     // Playback
     {
       key: "shuffleStyle",

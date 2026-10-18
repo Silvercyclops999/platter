@@ -1581,6 +1581,7 @@ pub fn run() {
             audio::commands::player_state,
             audio::commands::player_problems,
             audio::commands::output_devices,
+            audio::commands::signal_path,
             audio::commands::output_select,
             audio::commands::eq_profile_save,
             audio::commands::eq_profile_rename,

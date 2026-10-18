@@ -1,0 +1,169 @@
+/* Signal path: the badge in the player bar, and the panel of stages. Classic
+   draws plain rows; the Studio looks (identity.css tokens) make each stage an
+   engraved plate with brass only on the bit-perfect verdict. */
+
+.signal-badge {
+  flex: none;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--motion-very-quick) var(--motion-easing), border-color var(--motion-very-quick) var(--motion-easing);
+}
+.signal-badge:hover,
+.signal-badge.is-open { color: var(--color-text-primary); border-color: var(--color-text-secondary); }
+.signal-badge:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+.signal-badge.is-perfect { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 55%, transparent); }
+
+.signal-link {
+  padding: 2px 0;
+  background: none;
+  border: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-underline-offset: 3px;
+}
+.signal-link:hover { color: var(--color-text-primary); }
+.signal-link:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; border-radius: 2px; }
+
+.signal-panel {
+  position: fixed;
+  right: var(--space-4);
+  bottom: 100px;
+  z-index: var(--z-dialog);
+  width: min(340px, calc(100vw - 2 * var(--space-4)));
+  max-height: calc(100vh - 140px);
+  overflow: auto;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-bg-overlay);
+  color: var(--color-text-primary);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+.signal-panel:focus { outline: none; }
+.signal-panel:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+
+.signal-panel__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.signal-panel__title {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+.signal-panel__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.signal-panel__close:hover { color: var(--color-text-primary); background: var(--color-state-hover); }
+.signal-panel__close:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 1px; }
+.signal-panel__empty { margin: var(--space-3) 0 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+
+.signal-verdict {
+  margin: var(--space-1) 0 var(--space-3);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.3;
+}
+.signal-verdict--bitPerfect { color: var(--color-accent); }
+.signal-verdict--lossy { color: var(--color-text-secondary); }
+
+.signal-chain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.signal-plate {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  column-gap: var(--space-3);
+  row-gap: 1px;
+  padding: 6px 10px;
+  border-radius: var(--radius-row);
+  background: var(--color-bg-raised);
+}
+.signal-plate__name {
+  grid-row: span 2;
+  align-self: center;
+  font-size: 10.5px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.signal-plate__value { font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.signal-plate__detail { grid-column: 2; font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.signal-plate.is-off .signal-plate__value { color: var(--color-text-secondary); font-weight: var(--font-weight-regular, 400); }
+.signal-arrow { display: flex; justify-content: center; height: 13px; align-items: center; color: var(--color-text-muted); }
+
+.signal-why { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--color-border); }
+.signal-why__title { margin: 0 0 2px; font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); }
+.signal-why__text { margin: 0; font-size: var(--font-size-sm); line-height: 1.45; color: var(--color-text-secondary); }
+.signal-why__go {
+  margin-top: var(--space-2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.signal-why__go:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; border-radius: 2px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .signal-panel { animation: signal-in var(--motion-quick, 160ms) var(--motion-easing, ease-out); }
+}
+@keyframes signal-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------------------------------------------------------------- Studio */
+:root[data-identity] .signal-badge {
+  border: 0;
+  border-radius: 2px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--color-ink) 10%, transparent), color-mix(in srgb, var(--color-ink) 4%, transparent));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-ink) 10%, transparent), inset 0 -1px 0 var(--engrave-dark);
+  letter-spacing: 0.06em;
+}
+:root[data-identity] .signal-badge.is-perfect { color: var(--color-accent); }
+:root[data-identity] .signal-panel {
+  border-color: var(--engrave-dark);
+  border-radius: 4px;
+  background-image: var(--panel-sheen);
+  box-shadow: var(--panel-highlight), 0 18px 44px rgba(0, 0, 0, 0.5);
+}
+:root[data-identity] .signal-plate {
+  border-radius: 2px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--color-ink) 8%, var(--color-bg-raised)), color-mix(in srgb, var(--color-ink) 3%, var(--color-bg-raised)));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-ink) 9%, transparent), inset 0 -1px 0 var(--engrave-dark), 0 0 0 1px var(--engrave-dark);
+}
+/* Engraved lettering: a dark cut with a lit edge under it. */
+:root[data-identity] .signal-plate__name { text-shadow: 0 1px 0 var(--engrave-light); }
+:root[data-identity] .signal-why { border-top-color: var(--engrave-dark); box-shadow: inset 0 1px 0 var(--engrave-light); }
+:root[data-identity="sleeve"] .signal-badge,
+:root[data-identity="sleeve"] .signal-plate {
+  background: linear-gradient(180deg, #fbf8f1, #e9e1d1);
+  box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 var(--engrave-dark), 0 0 0 1px var(--engrave-dark);
+}
+:root[data-identity="sleeve"] .signal-panel { background-image: var(--paper-grain); box-shadow: var(--panel-highlight), 0 14px 34px rgba(43, 33, 23, 0.22); }

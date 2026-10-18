@@ -8,6 +8,7 @@ import { buildArtistLookup, type ArtistLookup } from "../lib/credits";
 import type { ArtistName, AuthStatus, Health, Playlist, SavedServer, SyncStatus } from "../lib/types";
 import { watchMixed } from "./mixed";
 import { outputLostMessage, useOutput } from "./output";
+import { useSignal } from "./signalPath";
 import { loadSettings, useSettings } from "./settings";
 import { useToasts } from "./toasts";
 import { loadPins } from "./pins";
@@ -124,6 +125,7 @@ export function connectApp(b: Backend = backend): () => void {
   );
   keep(b.listen("toast", (t) => useToasts.getState().push(t, t.kind === "error" ? 6000 : 4000)));
   keep(b.listen("output://changed", (o) => useOutput.getState().set(o)));
+  keep(b.listen("audio://signal-path", (p) => useSignal.getState().set(p)));
   // The core moved the EQ to the profile bound to a new output device.
   keep(b.listen("settings://changed", (s) => useSettings.getState().setLocal(s)));
   // Pins and folders changed (here, or another device through the sync file).

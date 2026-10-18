@@ -103,6 +103,7 @@ import type {
   OwnLyrics,
   NowPlayingDetails,
   OutputState,
+  SignalPath,
   HeadphoneEntry,
   Page,
   PinInfo,
@@ -517,6 +518,8 @@ export interface Backend {
   outputDevices(): Promise<OutputState>;
   /** Play on a device (null: the system default), keeping position and play state. */
   outputSelect(deviceId: string | null): Promise<OutputState>;
+  /** What happens to the sound now, from the file to the output device. */
+  signalPath(): Promise<SignalPath>;
 
   // Listen on (docs/IPC.md "Listen on")
   /** Plex players to play on (empty when the setting hides them). */
@@ -1340,6 +1343,7 @@ export function createTauriBackend(): Backend {
     playerState: () => call("player_state"),
     outputDevices: () => call("output_devices"),
     outputSelect: (deviceId) => call("output_select", { deviceId }),
+    signalPath: () => call("signal_path"),
     remotePlayers: () => call("remote_players"),
     remoteState: () => call("remote_state"),
     remoteMove: (playerId) => call("remote_move", { playerId }),

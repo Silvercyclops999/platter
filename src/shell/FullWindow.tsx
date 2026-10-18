@@ -17,6 +17,7 @@ import { LyricsPane, useLyricsBackground } from "./LyricsView";
 import { contextRoute, useNowPlayingDetails } from "./nowPlaying";
 import { SEEK_KEY_STEP } from "./PlayerBar";
 import { Turntable } from "./Turntable";
+import { SignalLink } from "./SignalPath";
 import { VOLUME_KEY_STEP } from "./useShortcuts";
 import "./full-window.css";
 
@@ -72,6 +73,8 @@ const modified = (e: KeyboardEvent) => e.ctrlKey || e.metaKey || e.altKey || e.s
  */
 function onFullWindowKey(e: KeyboardEvent) {
   if (e.defaultPrevented || useUi.getState().menu || document.querySelector("dialog[open], .dialog-backdrop")) return;
+  // The signal path panel over the view handles its own keys (Esc closes it first).
+  if (e.target instanceof Element && e.target.closest(".signal-panel")) return;
   const key = e.key;
   // In a panel beside the view, keys are the panel's own (Esc still leaves the view).
   if (key !== "Escape" && e.target instanceof Element && e.target.closest(".app__body")) return;
@@ -102,6 +105,7 @@ function Meta({ track, className = "" }: { track: Track; className?: string }) {
       <div className="fw__album truncate">
         <TextLink onActivate={() => nav.go({ name: "album", id: track.albumId })}>{track.albumTitle}</TextLink>
       </div>
+      <SignalLink className="fw__signal" />
     </div>
   );
 }

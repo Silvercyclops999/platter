@@ -27,6 +27,7 @@ use super::output::{AudioOutput, OutputState};
 use super::persist::{self, PersistedRef};
 use super::queue::{AddAt, ContextInfo, ItemSource, Queue, QueueItem, Repeat, ShuffleStyle};
 use super::dsp::DspSettings;
+use super::signal::{self, SignalPath};
 use super::automix::{self, AutomixOptions, MixInfoSource, MixMemory, MixStyle, Mixed, MixedPlaylist, PlanOptions, Reach};
 use super::source::{ContextKind, MoreRequest, PlayContext, TrackLookup, TrackResolver};
 use crate::analysis::features::Analysis;
@@ -165,6 +166,8 @@ enum Cmd {
     ExclusiveOutputs(Vec<String>, Reply<OutputState>),
     CorrectionBypass(bool, Reply<()>),
     State(oneshot::Sender<PlayerState>),
+    /// What happens to the sound on its way to the output.
+    SignalPath(oneshot::Sender<SignalPath>),
     Flush(oneshot::Sender<()>),
     /// Like SetContext, but starts at `start_ms` and plays or stays paused.
     SetContextAt {
@@ -389,6 +392,9 @@ impl PlayerHandle {
             held: None,
             continuing: false,
             outputs: outputs.clone(),
+            corr_bypass: false,
+            last_output: None,
+            last_signal: None,
         };
         rt.spawn(actor.run(rx, engine_rx));
         Self {
@@ -710,6 +716,15 @@ impl PlayerHandle {
         rx.await
             .map_err(|_| AppError::Internal("player stopped".into()))
     }
+    /// What happens to the sound now, from the file to the output device.
+    pub async fn signal_path(&self) -> AppResult<SignalPath> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(Cmd::SignalPath(tx))
+            .map_err(|_| AppError::Internal("player stopped".into()))?;
+        rx.await
+            .map_err(|_| AppError::Internal("player stopped".into()))
+    }
     /// Writes the queue file now (call on app exit).
     pub async fn flush(&self) {
         let (tx, rx) = oneshot::channel();
@@ -892,6 +907,12 @@ struct Actor {
     /// The loaded entry carries on a play that was already reported: when
     /// it's audible again that's a resume, not a new play.
     continuing: bool,
+    /// Headphone correction is off for an A/B comparison.
+    corr_bypass: bool,
+    /// The output state last sent (the signal path names the device from it).
+    last_output: Option<OutputState>,
+    /// The signal path last sent, so it's only sent again when it changes.
+    last_signal: Option<SignalPath>,
 }
 
 /// The entry a lost connection paused on.
@@ -934,7 +955,10 @@ impl Actor {
             let idle_at = self.idle_at;
             tokio::select! {
                 cmd = rx.recv() => match cmd {
-                    Some(cmd) => self.handle(cmd),
+                    Some(cmd) => {
+                        self.handle(cmd);
+                        self.check_signal();
+                    }
                     None => {
                         self.persist_now();
                         if let Some(w) = &self.writer {
@@ -943,7 +967,10 @@ impl Actor {
                         return;
                     }
                 },
-                Some(ev) = engine_rx.recv() => self.on_engine(ev),
+                Some(ev) = engine_rx.recv() => {
+                    self.on_engine(ev);
+                    self.check_signal();
+                }
                 // Paused or stopped, the tick isn't polled, so the actor sleeps.
                 _ = tick.tick(), if ticks_in(self.status) => self.on_tick(),
                 _ = async {
@@ -1198,9 +1225,44 @@ impl Actor {
         self.engine.set_album_context(album);
     }
 
-    fn emit_output(&self, state: &OutputState) {
+    fn emit_output(&mut self, state: &OutputState) {
         self.sink.output(state);
         let _ = self.outputs.send(state.clone());
+        self.last_output = Some(state.clone());
+    }
+
+    /// The signal path now, from what the controller holds and what the
+    /// engine recorded when the decoder and the output opened.
+    fn signal_path(&mut self) -> SignalPath {
+        if self.last_output.is_none() {
+            self.last_output = Some(self.engine.output_state());
+        }
+        let source = self.cur_key.and_then(|k| self.engine.published_source(k));
+        let album_in_order = self
+            .queue
+            .context()
+            .is_some_and(|c| c.kind == ContextKind::Album && !self.queue.shuffle());
+        let automix = self.pick_next().is_some_and(|n| self.automix_for(&n));
+        signal::build(&signal::Inputs {
+            track: self.current_track(),
+            source: source.as_ref(),
+            dsp: self.running_dsp(),
+            album_in_order,
+            output: self.last_output.as_ref(),
+            format: self.engine.published_format(),
+            volume: self.volume,
+            muted: self.muted,
+            automix,
+        })
+    }
+
+    /// Sends the signal path when it changed (track, device, settings).
+    fn check_signal(&mut self) {
+        let now = self.signal_path();
+        if self.last_signal.as_ref() != Some(&now) {
+            self.sink.signal_path(&now);
+            self.last_signal = Some(now);
+        }
     }
 
     /// The playing context, by kind and id.
@@ -1215,6 +1277,19 @@ impl Actor {
             dsp.crossfade = crate::audio::dsp::Crossfade::Smart;
         }
         self.engine.set_dsp(dsp);
+    }
+
+    /// The sound settings as the engine runs them (before bit-perfect
+    /// output bypasses them).
+    fn running_dsp(&self) -> DspSettings {
+        let mut dsp = self.dsp;
+        if self.transitions_for.is_some() && dsp.crossfade == crate::audio::dsp::Crossfade::Off {
+            dsp.crossfade = crate::audio::dsp::Crossfade::Smart;
+        }
+        if self.corr_bypass {
+            dsp.correction = None;
+        }
+        dsp
     }
 
     /// Smooth transitions end when another context starts.
@@ -1591,7 +1666,13 @@ impl Actor {
                 return;
             }
             Cmd::Output(tx) => {
-                let _ = tx.send(self.engine.output_state());
+                let state = self.engine.output_state();
+                self.last_output = Some(state.clone());
+                let _ = tx.send(state);
+                return;
+            }
+            Cmd::SignalPath(tx) => {
+                let _ = tx.send(self.signal_path());
                 return;
             }
             Cmd::SelectOutput(id, reply) => {
@@ -1613,6 +1694,7 @@ impl Actor {
                 let _ = reply.send(r.map(|_| state));
             }
             Cmd::CorrectionBypass(on, reply) => {
+                self.corr_bypass = on;
                 self.engine.set_correction_bypass(on);
                 let _ = reply.send(Ok(()));
                 return;
@@ -2319,9 +2401,12 @@ impl Actor {
                 self.emit_output(&self.engine.output_state());
             }
             EngineEvent::OutputChanged => {
-                self.emit_output(&self.engine.output_state());
+                let state = self.engine.output_state();
+                self.emit_output(&state);
                 return;
             }
+            // The signal path picks it up after every engine event.
+            EngineEvent::SourceKnown { .. } => return,
         }
         self.emit_state();
     }

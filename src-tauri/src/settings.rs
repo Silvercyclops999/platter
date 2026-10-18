@@ -253,6 +253,8 @@ pub struct Settings {
     pub quality_away: StreamQuality,
     /// Show the format badge (codec, bit depth, sample rate).
     pub show_format_badge: bool,
+    /// The player bar's badge that opens the signal path.
+    pub signal_path_badge: bool,
     /// Albums and playlists resume where they were left.
     pub resume_contexts: bool,
     /// Upcoming tracks kept on disk, 1 to 50.
@@ -895,6 +897,7 @@ impl Default for Settings {
             quality_home: StreamQuality::Original,
             quality_away: StreamQuality::Kbps320,
             show_format_badge: true,
+            signal_path_badge: true,
             resume_contexts: true,
             precache_count: 5,
             popular_source: PopularSource::Global,
@@ -1153,6 +1156,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "qualityHome",
     "qualityAway",
     "showFormatBadge",
+    "signalPathBadge",
     "resumeContexts",
     "popularSource",
     "deviceFormat",
@@ -1416,6 +1420,7 @@ pub struct SettingsPatch {
     pub quality_home: Option<StreamQuality>,
     pub quality_away: Option<StreamQuality>,
     pub show_format_badge: Option<bool>,
+    pub signal_path_badge: Option<bool>,
     pub resume_contexts: Option<bool>,
     pub precache_count: Option<u32>,
     pub popular_source: Option<PopularSource>,
@@ -1729,6 +1734,7 @@ impl Settings {
         set(&mut self.quality_home, p.quality_home);
         set(&mut self.quality_away, p.quality_away);
         set(&mut self.show_format_badge, p.show_format_badge);
+        set(&mut self.signal_path_badge, p.signal_path_badge);
         set(&mut self.resume_contexts, p.resume_contexts);
         set(&mut self.precache_count, p.precache_count);
         set(&mut self.popular_source, p.popular_source);
@@ -4438,6 +4444,20 @@ mod tests {
         save(&db, &s).unwrap();
         let again = load(&db);
         assert!(!again.lyrics_check_audio && !again.lyrics_fix_timing && again.lyrics_released_for_versions);
+    }
+
+    #[test]
+    fn the_signal_path_badge_is_on_by_default_syncs_and_turns_off() {
+        assert!(Settings::default().signal_path_badge);
+        // Settings saved before it existed get it on.
+        let old: Settings = serde_json::from_str(r#"{"volume":0.5}"#).unwrap();
+        assert!(old.signal_path_badge);
+        assert!(SYNCED_SETTINGS.contains(&"signalPathBadge"));
+        let p: SettingsPatch = serde_json::from_str(r#"{"signalPathBadge":false}"#).unwrap();
+        let mut s = Settings::default();
+        s.apply(&p).unwrap();
+        assert!(!s.signal_path_badge);
+        assert_eq!(serde_json::to_value(&s).unwrap()["signalPathBadge"], false);
     }
 
     #[test]
