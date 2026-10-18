@@ -136,6 +136,10 @@ export function SeekBar() {
       <span className="seek__time seek__time--end tabular" aria-hidden="true">
         -{formatDuration(Math.max(0, durationMs - shown))}
       </span>
+      {/* The format sits on the time line, not floating in the right group. */}
+      <span className="player-bar__fold">
+        <SignalBadge />
+      </span>
     </div>
   );
 }
@@ -497,9 +501,6 @@ export function PlayerBar() {
       </div>
 
       <div className="player-bar__extras">
-        <span className="player-bar__fold">
-          <SignalBadge />
-        </span>
         <PrivateSession />
         {/* The Layout option picks which buttons show, and their order. The
             hi-fi mark stays beside the device button. */}

@@ -805,6 +805,10 @@
 .seek { display: flex; align-items: center; gap: var(--space-2); width: 100%; }
 .seek__time { min-width: 40px; font-size: var(--font-size-xs); color: var(--color-text-secondary); text-align: right; }
 .seek__time--end { text-align: left; }
+/* The format badge ends the time line; a blank of the same width opens it so
+   the bar stays centred under the transport buttons. */
+.seek .signal-badge { width: 96px; padding: 0 4px; text-align: center; overflow: hidden; text-overflow: ellipsis; }
+.seek:has(.signal-badge)::before { content: ""; flex: none; width: 96px; }
 .player-bar__extras { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-1); min-width: 0; }
 .private-pill {
   display: inline-flex;
