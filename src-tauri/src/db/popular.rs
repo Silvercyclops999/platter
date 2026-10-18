@@ -464,8 +464,29 @@ pub fn known_in(c: &Connection, line: &str) -> AppResult<Vec<String>> {
 
 /// The credited names of a track's artist line, split with the known names.
 pub fn line_credits(c: &Connection, line: &str) -> AppResult<Vec<String>> {
-    let known = known_in(c, line)?;
+    line_credits_keeping(c, line, None)
+}
+
+/// [`line_credits`], also keeping `keep` (lower case) whole: the name a
+/// credit page or search asks about, which may hold a comma no one has
+/// taught the split yet ("Tyler, The Maker").
+pub fn line_credits_keeping(c: &Connection, line: &str, keep: Option<&str>) -> AppResult<Vec<String>> {
+    let mut known = known_in(c, line)?;
+    if let Some(k) = keep.map(str::trim).filter(|k| !k.is_empty()) {
+        known.push(k.to_lowercase());
+    }
     Ok(credits::split_credits(line, |k| known.iter().any(|n| n == k)).into_iter().map(str::to_owned).collect())
+}
+
+/// Names a line's split may have cut in two at a comma: each pair of
+/// neighbouring credits written "A, B" in the line ("Tyler", "The Maker"
+/// → "Tyler, The Maker").
+pub fn comma_pairs(line: &str, names: &[String]) -> Vec<String> {
+    names
+        .windows(2)
+        .map(|w| format!("{}, {}", w[0], w[1]))
+        .filter(|j| line.contains(j.as_str()))
+        .collect()
 }
 
 /// Tracks whose artist line credits `name` as a whole name (any case),
@@ -496,7 +517,7 @@ pub fn credited_tracks(c: &Connection, name: &str, exclude_artist: Option<&str>)
     let mut out = Vec::new();
     for t in mentioned {
         let line = t.track_artist.as_deref().unwrap_or_default();
-        if line_credits(c, line)?.iter().any(|n| n.to_lowercase() == me) {
+        if line_credits_keeping(c, line, Some(&me))?.iter().any(|n| n.to_lowercase() == me) {
             out.push(t);
         }
     }
@@ -508,7 +529,7 @@ pub fn credited_display_name(c: &Connection, key: &str) -> AppResult<Option<Stri
     let tracks = credited_tracks(c, key, None)?;
     for t in &tracks {
         if let Some(line) = &t.track_artist
-            && let Some(n) = line_credits(c, line)?.into_iter().find(|n| n.to_lowercase() == key)
+            && let Some(n) = line_credits_keeping(c, line, Some(key))?.into_iter().find(|n| n.to_lowercase() == key)
         {
             return Ok(Some(n));
         }

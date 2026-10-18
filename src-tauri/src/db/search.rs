@@ -332,6 +332,9 @@ pub struct Extra {
     pub joins: Vec<bool>,
     /// Words left out (the missing-word fallback).
     pub skip: Vec<usize>,
+    /// Short words also matched letter by letter ("rem" finds "R.E.M."),
+    /// kept apart from `alts` so they don't count as library words.
+    pub spelled: Vec<Option<String>>,
 }
 
 /// One word's FTS group: as typed (prefix), its parts as a phrase, its
@@ -360,7 +363,11 @@ pub fn build_fts(q: &ParsedQuery, extra: &Extra) -> Option<String> {
         return None;
     }
     let none: Vec<String> = Vec::new();
-    let g = |i: usize| group_expr(&q.toks[i], extra.alts.get(i).unwrap_or(&none));
+    let g = |i: usize| {
+        let mut forms = extra.alts.get(i).unwrap_or(&none).clone();
+        forms.extend(extra.spelled.get(i).cloned().flatten());
+        group_expr(&q.toks[i], &forms)
+    };
     let mut parts = Vec::new();
     let mut k = 0;
     while k < idx.len() {
@@ -493,6 +500,13 @@ fn judge(q: &ParsedQuery, title: &str, tw: &[searchtext::Word], others: &[Vec<se
     let t = canonical_of(tw);
     if t == q.norm {
         return (Tier::Exact, true);
+    }
+    // "rem" and "R.E.M.": the same name once single letters run together.
+    if t.contains(' ') || q.norm.contains(' ') {
+        let (tj, qj) = (searchtext::join_letters(&t), searchtext::join_letters(&q.norm));
+        if !qj.is_empty() && (tj != t || qj != q.norm) && tj == qj {
+            return (Tier::Exact, true);
+        }
     }
     if !q.norm.is_empty() && t.starts_with(&q.norm) {
         return (Tier::TitlePrefix, true);
@@ -664,7 +678,18 @@ fn search_credited(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usiz
     let mut found: Vec<(String, String, u32, Tier)> = Vec::new();
     for (line, plays) in rows {
         let Some(line) = line else { continue };
-        for name in popular::line_credits(c, &line)? {
+        let names = popular::line_credits(c, &line)?;
+        // A name with a comma the split cut in two ("Tyler, The Maker"): kept
+        // whole when the whole matches the query and neither half does.
+        let whole = |n: &str| {
+            let (t, in_title) = tier(q, n, &[]);
+            in_title && t >= Tier::WordPrefix
+        };
+        let joined: Vec<String> = popular::comma_pairs(&line, &names)
+            .into_iter()
+            .filter(|j| whole(j) && j.split(", ").all(|half| !whole(half)))
+            .collect();
+        for name in names.into_iter().chain(joined) {
             let key = name.to_lowercase();
             if let Some(f) = found.iter_mut().find(|f| f.0 == key) {
                 f.2 = f.2.saturating_add(plays);
@@ -906,6 +931,7 @@ pub(crate) fn search_conn(
         extra.alts = q.toks.iter().map(|t| if t.pieces.len() > 1 { Vec::new() } else { v.splits(&t.text) }).collect();
         extra.joins = q.toks.windows(2).map(|w| v.has_prefix(&format!("{}{}", w[0].text, w[1].text))).collect();
     }
+    extra.spelled = q.toks.iter().map(|t| if t.optional { None } else { searchtext::spelled_out(&t.text) }).collect();
     let fts = if q.short { typed } else { build_fts(&q, &extra).unwrap_or(typed) };
     let mut found = run(c, &q, &fts, now, l)?;
 
@@ -988,6 +1014,22 @@ pub(crate) fn search_conn(
     }
     out.took_ms = start.elapsed().as_secs_f64() * 1000.0;
     Ok(out)
+}
+
+/// The artist a query names: the first artist result whose name is the
+/// query (as search reads both), or starts with it word for word with only
+/// the last word cut short ("kid cud" names Kid Cudi; "kid" names no one).
+pub fn named_artist(query: &str, artists: &[Artist]) -> Option<String> {
+    let q = parse_query(query);
+    let n = q.norm.split(' ').count();
+    artists
+        .iter()
+        .find(|a| match tier(&q, &a.title, &[]) {
+            (Tier::Exact, _) => true,
+            (Tier::TitlePrefix, _) => canonical(&a.title).split(' ').count() == n,
+            _ => false,
+        })
+        .map(|a| a.title.clone())
 }
 
 /// Load the typo vocabulary for the current library generation.
@@ -1391,6 +1433,23 @@ mod tests {
         assert_eq!(tier(&q, "Ri$ky", &[]).0, Tier::Exact);
         assert!(Tier::Exact > Tier::TitlePrefix && Tier::TitlePrefix > Tier::Phrase && Tier::Phrase > Tier::WordPrefix);
         assert!(Tier::WordPrefix > Tier::Fuzzy && Tier::Fuzzy > Tier::Partial);
+    }
+
+    #[test]
+    fn exact_spelling_then_shorthand_then_typo_then_partial() {
+        let now = 1_000_000_000;
+        let q = parse_query("thru the darkness");
+        let s = |title: &str, plays: u32| {
+            let (t, in_title, bonus) = rate(&q, title, &[]);
+            score(t, in_title, plays, None, 13, now) + bonus
+        };
+        let order = [s("Thru the Darkness", 0), s("Through the Darkness", 0), s("Thru the Darknes", 0), s("Thru the Day", 0)];
+        assert!(order.windows(2).all(|w| w[0] > w[1]), "{order:?}");
+        // Plays break a tie.
+        assert!(s("Through the Darkness", 10) > s("Through the Darkness", 0));
+        let q = parse_query("tyler the creator");
+        assert_eq!(tier(&q, "Tyler, The Creator", &[]).0, Tier::Exact);
+        assert_eq!(tier(&parse_query("creator tyler"), "Tyler, The Creator", &[]).0, Tier::WordPrefix);
     }
 
     #[test]

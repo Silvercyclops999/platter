@@ -155,8 +155,46 @@ pub fn forms_of(ws: &[Word]) -> Vec<String> {
         if let Some(next) = ws.get(i + 1) {
             out.push(format!("{}{}", w.text, next.text));
         }
+        // A run of single letters reads as one word: "R.E.M." is "rem".
+        let single = |w: &Word| w.text.chars().count() == 1 && w.text.chars().all(char::is_alphabetic);
+        if single(w) && (i == 0 || !single(&ws[i - 1])) {
+            let run: String = ws[i..].iter().take_while(|w| single(w)).map(|w| w.text.as_str()).collect();
+            if run.chars().count() > 2 {
+                out.push(run);
+            }
+        }
     }
     out
+}
+
+/// Canonical words with each run of single letters run together:
+/// "r e m" → "rem", "the b p m band" → "the bpm band".
+pub fn join_letters(canonical: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut run = String::new();
+    for w in canonical.split(' ') {
+        if w.chars().count() == 1 && w.chars().all(char::is_alphabetic) {
+            run.push_str(w);
+            continue;
+        }
+        if !run.is_empty() {
+            out.push(std::mem::take(&mut run));
+        }
+        out.push(w.to_string());
+    }
+    if !run.is_empty() {
+        out.push(run);
+    }
+    out.join(" ")
+}
+
+/// The letters of a short word spaced out, as the index stores an
+/// abbreviation written with dots ("rem" → "r e m" for "R.E.M."). None for
+/// words outside 2 to 4 letters or with anything but letters.
+pub fn spelled_out(word: &str) -> Option<String> {
+    let n = word.chars().count();
+    ((2..=4).contains(&n) && word.chars().all(char::is_alphabetic))
+        .then(|| word.chars().map(String::from).collect::<Vec<_>>().join(" "))
 }
 
 /// Canonical words of a name joined by spaces (exact and prefix checks).
@@ -272,6 +310,40 @@ mod tests {
         assert!(words("&")[0].pieces.is_empty());
         assert!(match_forms("Kay Q").contains(&"kayq".to_string()));
         assert!(match_forms("Hip-Hop").contains(&"hip".to_string()));
+        assert!(match_forms("R.E.M.").contains(&"rem".to_string()));
+        assert!(match_forms("The B.P.M. Band").contains(&"bpm".to_string()));
+        assert_eq!(join_letters("r e m"), "rem");
+        assert_eq!(join_letters("the b p m band x"), "the bpm band x");
+        assert_eq!(join_letters("love"), "love");
+        assert_eq!(spelled_out("rem").as_deref(), Some("r e m"));
+        assert_eq!(spelled_out("a"), None);
+        assert_eq!(spelled_out("lovely"), None);
+        assert_eq!(spelled_out("b2b"), None);
+    }
+
+    #[test]
+    fn names_fold_the_same_both_ways() {
+        let same = |a: &str, b: &str| assert_eq!(canonical(a), canonical(b), "{a} / {b}");
+        same("Tyler, The Creator", "tyler the creator");
+        same("A$AP Rocky", "asap rocky");
+        same("A$AP Rocky", "a$ap rocky");
+        same("Ke$ha", "kesha");
+        same("Simon & Garfunkel", "simon and garfunkel");
+        same("Simon + Garfunkel", "Simon and Garfunkel");
+        same("Beyoncé", "beyonce");
+        same("Mr. Oizo", "mr oizo");
+        same("Don't Stop", "dont stop");
+        same("Thru the Nite", "through the night");
+        same("Tho", "though");
+        same("U & Ur Friends", "you and your friends");
+        same("Pt. 2", "part two");
+        same("Part Two", "pt 2");
+        same("Seven Nation Army", "7 nation army");
+        same("Ten Years", "10 years");
+        assert_eq!(canonical("Tyler, The Creator"), "tyler the creator");
+        assert_eq!(canonical("A$AP"), "asap");
+        // A lone "$" is not a word.
+        assert_eq!(canonical("$"), "");
     }
 
     #[test]

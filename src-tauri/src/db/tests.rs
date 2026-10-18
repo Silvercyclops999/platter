@@ -867,6 +867,29 @@ async fn search_lists_credited_artists() {
 }
 
 #[tokio::test]
+async fn search_finds_a_credited_name_with_a_comma_nobody_taught() {
+    let t = open();
+    sync(&t.db, &Arc::new(FakeSource::new(credited_library())), false).await;
+    // "Tyler, The Maker" is only on a track's artist line and the split
+    // cuts it at the comma; typed without the comma it's still found whole.
+    for q in ["tyler the maker", "Tyler, The Maker", "tyler maker"] {
+        let r = search::search(&t.db, q, SearchFilter::All, None).unwrap();
+        let hit = r.artists.iter().find(|a| a.id == "credit:tyler, the maker");
+        assert_eq!(hit.map(|a| a.title.as_str()), Some("Tyler, The Maker"), "{q}: {:?}", r.artists);
+        assert_eq!(r.top.as_ref().and_then(|h| h.artist.as_ref()).map(|a| a.id.as_str()), Some("credit:tyler, the maker"), "{q}");
+    }
+    // Its page is built from the tracks crediting the whole name.
+    let page = t.db.read(|c| queries::artist_page(c, "credit:tyler, the maker")).unwrap();
+    assert_eq!(page.artist.title, "Tyler, The Maker");
+    assert_eq!(page.popular.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["s3"]);
+    // A query one half matches doesn't make a joined name.
+    let r = search::search(&t.db, "rue ellis", SearchFilter::All, None).unwrap();
+    assert!(r.artists.iter().all(|a| !a.title.contains(',')), "{:?}", r.artists);
+    let r = search::search(&t.db, "tyler", SearchFilter::All, None).unwrap();
+    assert!(r.artists.iter().all(|a| a.id != "credit:tyler, the maker"), "{:?}", r.artists);
+}
+
+#[tokio::test]
 async fn artist_names_lists_every_artist() {
     let t = open();
     sync(&t.db, &Arc::new(FakeSource::new(sectioned_library())), false).await;
@@ -1598,6 +1621,62 @@ async fn search_matches_a_part_of_a_two_part_title() {
     assert_eq!(song_titles(&r)[0], "And They Came Back / This One Here");
     let r = search::search(&t.db, "this one here", SearchFilter::All, None).unwrap();
     assert_eq!(r.top.unwrap().track.unwrap().title, "And They Came Back / This One Here");
+}
+
+fn punctuated_library() -> FakeLibrary {
+    let mut lib = FakeLibrary { sections: vec![fake::section("1", "u")], ..Default::default() };
+    let names = ["Tyler, The Creator", "A$AP Rocky", "Simon & Garfunkel", "Mr. Oizo", "Guns N' Roses", "Hall and Oates", "R.E.M.", "Ke$ha", "Beyoncé"];
+    for (i, n) in names.iter().enumerate() {
+        let ar = fake::artist(&format!("{}", i + 1), n);
+        let al = fake::album(&format!("{}", i + 10), &format!("Record {i}"), &ar, 2000, Some("album"), &[]);
+        lib.tracks.push(fake::track(&format!("{}", i + 100), &format!("Song {i}"), &al, 1, 1));
+        lib.albums.push(al);
+        lib.artists.push(ar);
+    }
+    lib
+}
+
+#[tokio::test]
+async fn search_folds_punctuation_in_names_both_ways() {
+    let t = open();
+    let src = Arc::new(FakeSource::new(punctuated_library()));
+    sync(&t.db, &src, false).await;
+    let cases: &[(&str, &str)] = &[
+        ("tyler the creator", "Tyler, The Creator"),
+        ("Tyler, The Creator", "Tyler, The Creator"),
+        ("tyler creator", "Tyler, The Creator"),
+        ("tyler the", "Tyler, The Creator"),
+        ("asap rocky", "A$AP Rocky"),
+        ("asap", "A$AP Rocky"),
+        ("a$ap", "A$AP Rocky"),
+        ("A$AP Rocky", "A$AP Rocky"),
+        ("simon and garfunkel", "Simon & Garfunkel"),
+        ("simon & garfunkel", "Simon & Garfunkel"),
+        ("hall & oates", "Hall and Oates"),
+        ("mr oizo", "Mr. Oizo"),
+        ("guns n roses", "Guns N' Roses"),
+        ("guns and roses", "Guns N' Roses"),
+        ("rem", "R.E.M."),
+        ("r.e.m.", "R.E.M."),
+        ("r e m", "R.E.M."),
+        ("kesha", "Ke$ha"),
+        ("ke$ha", "Ke$ha"),
+        ("beyonce", "Beyoncé"),
+        ("BEYONCÉ", "Beyoncé"),
+        // The last word is a prefix while typing; order and extra words don't matter.
+        ("tyler the cre", "Tyler, The Creator"),
+        ("creator tyler", "Tyler, The Creator"),
+        ("tyler the creator zzqx", "Tyler, The Creator"),
+        ("garfunkel simon", "Simon & Garfunkel"),
+        // One typo in a long word.
+        ("tyler the craetor", "Tyler, The Creator"),
+        ("garfunkle", "Simon & Garfunkel"),
+    ];
+    for (q, want) in cases {
+        let r = search::search(&t.db, q, SearchFilter::All, None).unwrap();
+        assert_eq!(r.artists.first().map(|a| a.title.as_str()), Some(*want), "{q}");
+        assert_eq!(r.top.as_ref().and_then(|h| h.artist.as_ref()).map(|a| a.title.as_str()), Some(*want), "top of {q}");
+    }
 }
 
 #[tokio::test]
