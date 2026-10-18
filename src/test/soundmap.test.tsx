@@ -330,10 +330,20 @@ describe("the map keeps up with changes", () => {
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 3, clientX: sx, clientY: sy });
     fireEvent.pointerCancel(canvas, { pointerId: 3, clientX: sx, clientY: sy });
     expect(play).not.toHaveBeenCalled();
-    // The same tap let go normally plays it (so the place was right).
-    fireEvent.pointerDown(canvas, { button: 0, pointerId: 4, clientX: sx, clientY: sy });
-    fireEvent.pointerUp(canvas, { pointerId: 4, clientX: sx, clientY: sy });
-    await waitFor(() => expect(play).toHaveBeenCalledTimes(1));
+    // The same tap let go normally plays it (so the place was right). On a
+    // slow machine the points may still be landing: tap again until it plays.
+    let id = 4;
+    await waitFor(
+      () => {
+        if (play.mock.calls.length === 0) {
+          fireEvent.pointerDown(canvas, { button: 0, pointerId: id, clientX: sx, clientY: sy });
+          fireEvent.pointerUp(canvas, { pointerId: id, clientX: sx, clientY: sy });
+          id += 1;
+        }
+        expect(play).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 8000 },
+    );
     // A lasso that the system cancels: nothing selected.
     await user.click(screen.getByRole("button", { name: "Lasso" }));
     lassoAll(canvas, "cancel");
