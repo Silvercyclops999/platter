@@ -4,7 +4,7 @@ import { IconButton } from "../components/Button";
 import { LibraryCollection, LibraryTableHead } from "../shell/LibraryCollection";
 import { LibraryChips, LibrarySearch, LibrarySortView } from "../shell/LibraryControls";
 import { useLibraryLoader, useLibraryModel, useLibraryRecents } from "../shell/useLibrary";
-import { useLibraryView, type LibKind } from "../stores/library";
+import { WIDE_VIEWS, useLibraryView, type LibKind } from "../stores/library";
 import { nav, useRouter, type LibraryTab } from "../stores/router";
 import { useUi } from "../stores/ui";
 import { folders } from "../stores/folders";
@@ -22,7 +22,8 @@ export function minimizeLibrary() {
 /**
  * Your Library in wide mode: the sidebar's library as a full-width page (the
  * shell hides the sidebar on this route). Same chips, search and sort as the
- * sidebar; its own view setting, and a table in the list views.
+ * sidebar; its own view setting (with the record shelf as an extra view),
+ * and a table in the list views.
  */
 export function LibraryPage({ tab }: { tab?: LibraryTab }) {
   const entryKey = useRouter((s) => s.entries[s.index].key);
@@ -57,7 +58,7 @@ export function LibraryPage({ tab }: { tab?: LibraryTab }) {
       <LibraryChips filter={model.filter} sub={model.sub} kinds={model.kinds} downloaded={model.downloaded} shelf={model.shelf} />
       <div className="lib-tools lib-tools--wide">
         <LibrarySearch query={query} setQuery={setQuery} filter={model.filter} alwaysOpen />
-        <LibrarySortView filter={model.filter} sort={model.sort} view={view} setView={(v) => useLibraryView.getState().setWideView(v)} />
+        <LibrarySortView filter={model.filter} sort={model.sort} view={view} views={WIDE_VIEWS} setView={(v) => useLibraryView.getState().setWideView(v)} />
       </div>
       <LibraryCollection
         model={model}

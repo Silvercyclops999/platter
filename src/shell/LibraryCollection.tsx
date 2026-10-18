@@ -1,12 +1,12 @@
 /**
- * The library's items in one of four views (list, compact list, compact
- * grid, grid), as the sidebar list, the collapsed rail or the wide-mode page.
- * Virtualized by rows, so a library of thousands of albums only renders
- * what's on screen.
+ * The library's items in one of its views (list, compact list, compact
+ * grid, grid, and in wide mode the record shelf), as the sidebar list, the
+ * collapsed rail or the wide-mode page. Virtualized by rows (shelves, on the
+ * shelf), so a library of thousands of albums only renders what's on screen.
  */
 import { observeElementRect, useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
 import { ChevronDown, ChevronRight, Folder, Pause, Pin as PinIcon, Play, Volume2 } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Art, FluidArtSize } from "../components/Art";
 import { LikedCover } from "../components/LikedCover";
 import { openContextMenu } from "../components/ContextMenu";
@@ -24,7 +24,24 @@ import { useUi } from "../stores/ui";
 import { entryMenu, movePlaylist, openEntry, playEntry, type LibraryModel } from "./useLibrary";
 import { folders } from "../stores/folders";
 import { useServerName } from "../stores/caps";
+import { useTheme } from "../stores/theme";
+import { HEADER_TEXT, LIGHT_HEADER_TEXT, rgbToCss, themedHeader } from "../lib/color";
+import { useArtColours } from "../lib/useTint";
+import { prefersReducedMotion } from "../design/motion";
+import {
+  SHELF_ROW,
+  SHELF_TILE,
+  SHELF_TILE_ART,
+  SHELF_TILE_PAD,
+  SPINE_HEIGHT,
+  coverOnLeft,
+  isSpine,
+  nearestOnShelf,
+  packShelves,
+  spineWidth,
+} from "./shelf";
 import "./folders.css";
+import "./shelf.css";
 
 /** A folder's tile: a folder glyph on a plain square. */
 /** The drawn cover for Liked Songs, Bookmarks and Stats. */
@@ -86,6 +103,8 @@ export interface Geometry {
 /** Columns, art and row height for a view at a content width. */
 export function geometry(view: LibView, mode: CollectionMode, width: number, showArt = true): Geometry {
   if (mode === "rail") return { cols: 1, art: RAIL_ART, pad: 4, rowHeight: RAIL_TILE };
+  // The shelf packs its own rows; a shelf is one virtual row.
+  if (view === "shelf") return { cols: 1, art: SHELF_TILE_ART, pad: SHELF_TILE_PAD, rowHeight: SHELF_ROW };
   if (view === "list") return { cols: 1, art: LIST_ART, pad: 8, rowHeight: showArt ? LIST_ROW : LIST_ROW_NO_ART };
   if (view === "compactList") return { cols: 1, art: 0, pad: 8, rowHeight: mode === "wide" ? WIDE_COMPACT_ROW : COMPACT_ROW };
   const compact = view === "compactGrid";
@@ -275,13 +294,14 @@ function Row({ e, index, setSize, tabIndex, selected, isContext, playing, filter
   );
 }
 
-/** Grid and compact grid cells. */
-function Cell({ e, index, setSize, tabIndex, selected, isContext, playing, filtered, onMenu, compact }: ItemProps & { compact: boolean }) {
+/** Grid and compact grid cells (and the tiles standing on the record shelf). */
+function Cell({ e, index, setSize, tabIndex, selected, isContext, playing, filtered, onMenu, compact, shelf = false }: ItemProps & { compact: boolean; shelf?: boolean }) {
   const sub = subtitle(e, filtered);
   const dnd = useItemDnd(e);
   return (
     <div
-      className={`lib-cell ${compact ? "lib-cell--compact" : ""} ${selected ? "is-selected" : ""} ${dnd.className}`}
+      className={`lib-cell ${compact ? "lib-cell--compact" : ""} ${shelf ? "lib-cell--shelf" : ""} ${selected ? "is-selected" : ""} ${dnd.className}`}
+      style={shelf ? { width: SHELF_TILE } : undefined}
       role="listitem"
       aria-posinset={index + 1}
       aria-setsize={setSize}
@@ -316,6 +336,74 @@ function Cell({ e, index, setSize, tabIndex, selected, isContext, playing, filte
           </>
         )}
       </button>
+    </div>
+  );
+}
+
+/** Spine text on light and dark themes: the header's text colours. */
+const SPINE_INK = { dark: rgbToCss(HEADER_TEXT), light: rgbToCss(LIGHT_HEADER_TEXT) };
+
+/**
+ * An album standing on the record shelf: a spine in the cover's colour with
+ * the artist and title printed sideways. Pointing at it or focusing it pulls
+ * the record forward and shows the cover beside it, with a play button.
+ * Under reduced motion nothing moves: the spine is highlighted instead.
+ */
+function Spine({ e, index, setSize, tabIndex, selected, isContext, playing, onMenu, width, coverLeft }: ItemProps & { width: number; coverLeft: boolean }) {
+  // Read on each render (a hover re-renders), so Reduce motion applies at once.
+  const still = prefersReducedMotion();
+  const dnd = useItemDnd(e);
+  const [hover, setHover] = useState(false);
+  const [focus, setFocus] = useState(false);
+  const out = hover || focus;
+  const base = useTheme((s) => s.resolved.base);
+  const art = useArtColours(e.tint, e.thumb);
+  const colour = art ? themedHeader(art, base).vivid : null;
+  const style = {
+    width,
+    height: SPINE_HEIGHT,
+    ...(colour ? { ["--spine-colour" as string]: colour, ["--spine-ink" as string]: SPINE_INK[base] } : null),
+  } as CSSProperties;
+  const label = [e.title, e.creator].filter(Boolean).join(", ");
+  return (
+    <div
+      className={`lib-spine ${out ? (still ? "is-lit" : "is-out") : ""} ${coverLeft ? "lib-spine--cover-left" : ""} ${selected ? "is-selected" : ""} ${colour ? "" : "lib-spine--plain"} ${dnd.className}`}
+      role="listitem"
+      aria-posinset={index + 1}
+      aria-setsize={setSize}
+      style={style}
+      {...dnd.props}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onContextMenu={(ev) => {
+        ev.preventDefault();
+        onMenu(e, ev);
+      }}
+      onDoubleClick={() => void playEntry(e)}
+    >
+      <button
+        type="button"
+        className="lib-spine__open"
+        data-index={index}
+        tabIndex={tabIndex}
+        aria-label={label}
+        aria-current={selected ? "page" : undefined}
+        onClick={() => openEntry(e)}
+        onFocus={() => setFocus(true)}
+        onBlur={() => setFocus(false)}
+      >
+        <span className="lib-spine__print" aria-hidden="true">
+          {e.creator && <span className="lib-spine__artist">{e.creator}</span>}
+          <span className="lib-spine__title">{e.title}</span>
+        </span>
+        {isContext && <span className="lib-spine__now" role="img" aria-label="Now playing" />}
+      </button>
+      {out && !still && (
+        <span className="lib-spine__cover" data-testid="spine-cover">
+          <Art path={e.thumb} size={SPINE_HEIGHT} kind="album" />
+          <PlayOverlay e={e} playing={isContext && playing} className="lib-cell__play lib-spine__play" />
+        </span>
+      )}
     </div>
   );
 }
@@ -384,6 +472,14 @@ function Empty({ model, query, mode }: { model: LibraryModel; query: string; mod
 }
 
 function Skeletons({ mode, view }: { mode: CollectionMode; view: LibView }) {
+  if (mode === "wide" && view === "shelf")
+    return (
+      <div className="lib-skeleton-shelf" aria-hidden="true">
+        {Array.from({ length: 18 }, (_, i) => (
+          <Skeleton key={i} width={[30, 38, 26, 44, 34, 30][i % 6]} height={SPINE_HEIGHT} radius="card" />
+        ))}
+      </div>
+    );
   if (mode === "wide" && isGrid(view))
     return (
       <div className="lib-skeleton-grid" aria-hidden="true">
@@ -423,7 +519,10 @@ export interface LibraryCollectionProps {
 }
 
 export function LibraryCollection({ model, view: savedView, mode, query, showArt = true, label = "Your Library items", header }: LibraryCollectionProps) {
-  const view: LibView = mode === "rail" ? "list" : savedView;
+  // The shelf is wide mode's own; anywhere else it reads as a grid.
+  const view: LibView = mode === "rail" ? "list" : savedView === "shelf" && mode !== "wide" ? "grid" : savedView;
+  const shelf = view === "shelf";
+  const byTracks = useSettings((s) => s.settings?.spineWidthByTracks !== false);
   const grid = mode !== "rail" && isGrid(view);
   const compact = view === "compactList" || view === "compactGrid";
   const own = mode !== "wide";
@@ -456,7 +555,13 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
   }, [own, model.loading]);
 
   const g = geometry(view, mode, width, showArt);
-  const rows = Math.ceil(n / g.cols);
+  const shelfWidth = width > 0 ? width : 1024;
+  const layout = useMemo(() => (shelf ? packShelves(entries, shelfWidth, byTracks) : null), [shelf, entries, shelfWidth, byTracks]);
+  const rows = layout ? layout.starts.length : Math.ceil(n / g.cols);
+  /** First entry on a row, and one past its last. */
+  const rowStart = (r: number) => (layout ? (layout.starts[r] ?? n) : r * g.cols);
+  const rowEnd = (r: number) => (layout ? (layout.starts[r + 1] ?? n) : Math.min(n, (r + 1) * g.cols));
+  const rowOf = (i: number) => (layout ? (layout.shelfOf[i] ?? 0) : Math.floor(i / g.cols));
   const v = useVirtualizer({
     count: rows,
     getScrollElement: () => scrollEl,
@@ -475,8 +580,8 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
   const [cursor, setCursor] = useState<number | null>(null);
   const pending = useRef<number | null>(null);
   const vrows = v.getVirtualItems();
-  const firstShown = (vrows[0]?.index ?? 0) * g.cols;
-  const lastShown = Math.min(n, ((vrows[vrows.length - 1]?.index ?? -1) + 1) * g.cols) - 1;
+  const firstShown = rowStart(vrows[0]?.index ?? 0);
+  const lastShown = vrows.length ? rowEnd(vrows[vrows.length - 1].index) - 1 : -1;
   const want = Math.min(cursor ?? (selectedIndex >= 0 ? selectedIndex : 0), n - 1);
   const tabStop = want >= firstShown && want <= lastShown ? want : firstShown;
 
@@ -505,7 +610,14 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
   const focusIndex = (i: number) => {
     setCursor(i);
     pending.current = i;
-    v.scrollToIndex(Math.floor(i / g.cols));
+    v.scrollToIndex(rowOf(i));
+  };
+
+  /** On the shelf: the record nearest straight above or below, `by` shelves away. */
+  const shelfMove = (i: number, by: number) => {
+    if (!layout) return i;
+    const row = Math.max(0, Math.min(layout.starts.length - 1, layout.shelfOf[i] + by));
+    return nearestOnShelf(layout, n, row, layout.x[i] + layout.w[i] / 2);
   };
 
   const onMenu = (e: LibEntry, at: MouseEvent<HTMLElement> | HTMLElement) => {
@@ -534,6 +646,23 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
       focusIndex(ev.key === "Home" ? 0 : n - 1);
       return;
     }
+    if (shelf && (ev.key === " " || ev.key === "Spacebar")) {
+      // Space plays the record (Enter opens it).
+      ev.preventDefault();
+      const e = entries[i];
+      if (e.unavailable) return;
+      if (e.folder || e.stats) openEntry(e);
+      else void playEntry(e);
+      return;
+    }
+    if (shelf && (ev.key === "ArrowDown" || ev.key === "ArrowUp" || ev.key === "PageDown" || ev.key === "PageUp")) {
+      ev.preventDefault();
+      const page = Math.max(1, Math.floor((scrollEl?.clientHeight || 600) / g.rowHeight));
+      const by = { ArrowDown: 1, ArrowUp: -1, PageDown: page, PageUp: -page }[ev.key] ?? 0;
+      const next = shelfMove(i, by);
+      if (next !== i) focusIndex(next);
+      return;
+    }
     if (ev.key === "PageDown" || ev.key === "PageUp") {
       // A page is as many rows as fit in the view.
       ev.preventDefault();
@@ -541,7 +670,8 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
       focusIndex(Math.max(0, Math.min(n - 1, i + (ev.key === "PageDown" ? perPage : -perPage))));
       return;
     }
-    const step = { ArrowDown: g.cols, ArrowUp: -g.cols, ArrowRight: grid ? 1 : 0, ArrowLeft: grid ? -1 : 0 }[ev.key];
+    const across = grid || shelf;
+    const step = { ArrowDown: g.cols, ArrowUp: -g.cols, ArrowRight: across ? 1 : 0, ArrowLeft: across ? -1 : 0 }[ev.key];
     if (!step) return;
     ev.preventDefault();
     const next = i + step;
@@ -563,6 +693,9 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
       onMenu,
     };
     if (mode === "rail") return <Tile key={key} {...p} />;
+    if (shelf && layout && isSpine(e))
+      return <Spine key={key} {...p} width={spineWidth(e.trackCount, byTracks)} coverLeft={coverOnLeft(layout, i, shelfWidth)} />;
+    if (shelf) return <Cell key={key} {...p} compact={false} shelf />;
     if (grid) return <Cell key={key} {...p} compact={compact} />;
     return <Row key={key} {...p} compact={compact} wide={mode === "wide"} showArt={showArt} />;
   };
@@ -586,7 +719,7 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
   else if (n === 0) body = <Empty model={model} query={query} mode={mode} />;
   else
     body = (
-      <FluidArtSize.Provider value={grid ? g.art : null}>
+      <FluidArtSize.Provider value={grid || shelf ? g.art : null}>
         <div
           role="list"
           aria-label={label}
@@ -604,6 +737,7 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
                 left: 0,
                 width: "100%",
                 height: grid ? g.rowHeight - GRID_GAP : g.rowHeight,
+                ...(shelf ? { display: "flex", alignItems: "flex-end" } : null),
                 transform: `translateY(${r.start - v.options.scrollMargin}px)`,
                 ...(grid
                   ? {
@@ -614,10 +748,15 @@ export function LibraryCollection({ model, view: savedView, mode, query, showArt
                   : null),
               }}
             >
-              {Array.from({ length: g.cols }, (_, c) => {
-                const i = r.index * g.cols + c;
-                return i < n ? item(entries[i], i) : null;
-              })}
+              {shelf
+                ? Array.from({ length: rowEnd(r.index) - rowStart(r.index) }, (_, c) => {
+                    const i = rowStart(r.index) + c;
+                    return item(entries[i], i);
+                  })
+                : Array.from({ length: g.cols }, (_, c) => {
+                    const i = r.index * g.cols + c;
+                    return i < n ? item(entries[i], i) : null;
+                  })}
             </div>
           ))}
         </div>

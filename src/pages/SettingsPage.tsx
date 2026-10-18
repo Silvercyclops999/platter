@@ -1909,6 +1909,14 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       more: "Up to 4 playlists, albums, artists or folders you pin stay above everything else. Pin one from its menu. Pins sync with your other devices.",
       control: (ids) => toggle(s, "pinsInLibrary", ids),
     },
+    {
+      key: "spineWidthByTracks",
+      section: "Library",
+      title: "Spine width follows track count",
+      description: "In the Shelf view, albums with more songs stand thicker. Saved on this computer.",
+      more: "Your Library's Shelf view stands albums as spines. With this on, a spine is wider the more songs the album has, so a double album reads thicker than a single. Off, every spine is the same width. Saved on this computer only.",
+      control: (ids) => toggle(s, "spineWidthByTracks", ids),
+    },
     // Library: stats
     {
       key: "statsPage",

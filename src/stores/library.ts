@@ -13,10 +13,13 @@ export type LibFilter = LibKind | "all";
 /** Sub-chips: regular or smart playlists; followed artists; albums on the shelf. */
 export type LibSub = "byYou" | "smart" | "followed" | "shelf";
 export type LibSort = "recents" | "added" | "alpha" | "creator" | "custom";
-export type LibView = "list" | "compactList" | "compactGrid" | "grid";
+export type LibView = "list" | "compactList" | "compactGrid" | "grid" | "shelf";
 
 export const LIB_KINDS: LibKind[] = ["playlist", "album", "artist"];
+/** The sidebar's views. */
 export const LIB_VIEWS: LibView[] = ["compactList", "list", "compactGrid", "grid"];
+/** Wide mode adds the record shelf. */
+export const WIDE_VIEWS: LibView[] = [...LIB_VIEWS, "shelf"];
 export const KIND_LABEL: Record<LibKind, string> = { playlist: "Playlists", album: "Albums", artist: "Artists" };
 export const SUB_LABEL: Record<LibSub, string> = { byYou: "By you", smart: "Smart", followed: "Followed", shelf: "On the shelf" };
 export const SUB_CHIPS: Record<LibKind, LibSub[]> = { playlist: ["byYou", "smart"], album: ["shelf"], artist: ["followed"] };
@@ -32,6 +35,7 @@ export const VIEW_LABEL: Record<LibView, string> = {
   list: "List",
   compactGrid: "Compact grid",
   grid: "Grid",
+  shelf: "Shelf",
 };
 
 const KEY = "platter.library-view.v1"; // gitleaks:allow (localStorage key name, not a secret)
@@ -54,6 +58,7 @@ interface Saved {
 const DEFAULTS: Saved = { filter: "all", sub: null, sort: "recents", view: "list", wideView: "grid", customOrder: [], recents: {} };
 
 const isView = (v: unknown): v is LibView => typeof v === "string" && (LIB_VIEWS as string[]).includes(v);
+const isWideView = (v: unknown): v is LibView => typeof v === "string" && (WIDE_VIEWS as string[]).includes(v);
 const isSort = (v: unknown): v is LibSort => typeof v === "string" && v in SORT_LABEL;
 
 /** Read the saved settings, dropping anything unknown (older versions saved view "compact"). */
@@ -68,7 +73,7 @@ export function loadLibraryView(raw: string | null): Saved {
       sub,
       sort: isSort(p.sort) ? p.sort : DEFAULTS.sort,
       view: p.view === "compact" ? "compactList" : isView(p.view) ? p.view : DEFAULTS.view,
-      wideView: isView(p.wideView) ? p.wideView : DEFAULTS.wideView,
+      wideView: isWideView(p.wideView) ? p.wideView : DEFAULTS.wideView,
       customOrder: Array.isArray(p.customOrder) ? p.customOrder.filter((x): x is string => typeof x === "string") : [],
       recents: p.recents && typeof p.recents === "object" ? (p.recents as Record<string, number>) : {},
     };
@@ -240,6 +245,10 @@ export interface LibEntry {
   addedAt: number | null;
   playedAt: number | null;
   pinned: boolean;
+  /** The album's cover colour from the server (albums only). */
+  tint?: string | null;
+  /** Songs on the album (albums only). */
+  trackCount?: number | null;
   /** A pinned item that's no longer in the library. */
   unavailable?: boolean;
   /** Liked Songs (always pinned first; opens its own page). */
@@ -294,6 +303,8 @@ export function toEntries(items: LibraryItem[], owner: string | null): LibEntry[
     addedAt: i.addedAt ?? null,
     playedAt: i.playedAt ?? null,
     pinned: false,
+    ...(i.tint ? { tint: i.tint } : {}),
+    ...(i.trackCount ? { trackCount: i.trackCount } : {}),
     ...(i.platter ? { platter: true } : {}),
     ...(i.shared ? { shared: { role: i.shared.role, gone: i.shared.gone } } : {}),
     ...(i.blend ? { blend: true } : {}),

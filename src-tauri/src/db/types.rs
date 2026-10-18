@@ -67,6 +67,12 @@ pub struct LibraryItem {
     /// and Plex lastViewedAt for albums; their newest album for artists;
     /// local plays started from the playlist for playlists.
     pub played_at: Option<i64>,
+    /// The album's cover colour from the server (albums only), for spines.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tint: Option<String>,
+    /// Songs on the album (albums only), for spine width.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track_count: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

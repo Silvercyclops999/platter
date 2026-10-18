@@ -59,6 +59,14 @@ Labels come from your files' tags, Plex and the sleeve notes you've opened. Prod
 
 Under the songs, an album page shows up to two shelves, such as More from its label and More produced by its producer, from your library only. Other crates it's in are listed under More crates. Turn off Settings, Library, Crate shelves on album pages to leave them out, or Show crates to hide crates everywhere.
 
+## Record shelf
+
+Expand Your Library from the sidebar and it gets one more view: Shelf, in the sort and view menu next to the list and grid views. Your albums stand on shelves as spines in their cover's colour, with the artist and title printed down the side, in whatever order the library is sorted. Artists and playlists stand among them as small tiles.
+
+Point at a spine, or move to it with the arrow keys, and the record comes forward with its cover beside it. Click the spine or press Enter to open the album, use the play button on the cover or press Space to play it, and right-click for the usual album menu. With reduced motion on, the spine lights up instead of moving.
+
+A spine is thicker the more songs the album has, so a double album stands out. Turn off Settings, Library, Spine width follows track count to give every spine the same width. The view you pick and this setting are kept on this computer.
+
 ## Discord
 
 Settings, Integrations, Discord, Show what you're playing on Discord is off until you turn it on, in the Get started guide or in Settings. While it's on, music plays and the Discord app is open on this computer, your Discord profile shows the song, artist, album and cover. A private session hides it. [Privacy](privacy.md#discord) explains what goes to Discord.

@@ -140,6 +140,10 @@ export interface LibraryItem {
   shared?: { owner: string; role: CollabRole; gone: boolean };
   /** A Blend (`blend:<group>`). */
   blend?: boolean;
+  /** The album's cover colour from the server (albums only). */
+  tint?: string | null;
+  /** Songs on the album (albums only). */
+  trackCount?: number | null;
 }
 
 // ---------------------------------------------------------------- errors
@@ -1171,6 +1175,8 @@ export interface Settings {
   translationService: string;
   showPronunciation: boolean;
   pinsInLibrary: boolean;
+  /** Shelf view: an album's spine is wider the more songs it has. This device only. */
+  spineWidthByTracks: boolean;
   /** Stats, mixes and recaps count your play history on your Plex server. */
   includePlexHistory: boolean;
   /** The same for Tautulli's history, once Tautulli is set up. */
@@ -1733,6 +1739,7 @@ export const DEFAULT_SETTINGS: Settings = {
   translationService: "",
   showPronunciation: false,
   pinsInLibrary: true,
+  spineWidthByTracks: true,
   includePlexHistory: true,
   includeTautulliHistory: true,
   includeLastfmHistory: true,

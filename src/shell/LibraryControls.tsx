@@ -1,5 +1,5 @@
 /** Library header controls: filter chips, search, and the sort and view menu. */
-import { AlignJustify, Grid3x3, LayoutGrid, List, Search, X } from "lucide-react";
+import { AlignJustify, Grid3x3, LayoutGrid, LibraryBig, List, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { IconButton } from "../components/Button";
 import { useRovingRow } from "../components/roving";
@@ -131,10 +131,23 @@ export function LibrarySearch({
   );
 }
 
-const VIEW_ICON: Record<LibView, typeof List> = { list: List, compactList: AlignJustify, compactGrid: Grid3x3, grid: LayoutGrid };
+const VIEW_ICON: Record<LibView, typeof List> = { list: List, compactList: AlignJustify, compactGrid: Grid3x3, grid: LayoutGrid, shelf: LibraryBig };
 
 /** The button that shows the sort name and view icon, and opens their menu. */
-export function LibrarySortView({ filter, sort, view, setView }: { filter: LibFilter; sort: LibSort; view: LibView; setView: (v: LibView) => void }) {
+export function LibrarySortView({
+  filter,
+  sort,
+  view,
+  setView,
+  views = LIB_VIEWS,
+}: {
+  filter: LibFilter;
+  sort: LibSort;
+  view: LibView;
+  setView: (v: LibView) => void;
+  /** The views on offer (wide mode adds the shelf). */
+  views?: LibView[];
+}) {
   const sorts: LibSort[] = ["recents", "added", "alpha", "creator", ...(filter === "playlist" ? (["custom"] as LibSort[]) : [])];
   const Icon = VIEW_ICON[view];
   return (
@@ -155,7 +168,7 @@ export function LibrarySortView({ filter, sort, view, setView }: { filter: LibFi
                 onSelect: () => useLibraryView.getState().setSort(s),
               }),
             ),
-            ...LIB_VIEWS.map(
+            ...views.map(
               (v, i): MenuItem => ({
                 separator: i === 0,
                 heading: i === 0 ? "View as" : undefined,

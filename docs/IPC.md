@@ -341,13 +341,15 @@ from the artist's detail, not from sync: `artist_page` answers with what's
 cached and, when that is missing or a week old, fetches it in the background
 and then emits `artist://changed` with `{ id }` so the page can ask again.
 
-`LibraryItem = { kind: "playlist"|"album"|"artist", id, title, sortTitle, creator?, creatorId?, thumb?, smart, format?, addedAt?, playedAt? }`
+`LibraryItem = { kind: "playlist"|"album"|"artist", id, title, sortTitle, creator?, creatorId?, thumb?, smart, format?, addedAt?, playedAt?, tint?, trackCount? }`
 feeds the library sidebar, which sorts and filters it in the UI. `creator` is
 the album artist and `creatorId` its id (albums only). `addedAt` is Plex's addedAt for albums and the
 earliest of an artist's albums for artists; playlists have none. `playedAt` is
 the latest play in Plex history or the local listen log (and Plex's
 lastViewedAt) for albums, an artist's newest album play, and the latest local
-play started from a playlist. Times are unix seconds.
+play started from a playlist. Times are unix seconds. `tint` (the server's cover
+colour) and `trackCount` come with albums only and colour and size the
+spines in the library's Shelf view.
 `SyncStatus = { phase: "idle"|"artists"|"albums"|"tracks"|"incremental", done, total, lastSyncAt? }`
 Event `sync://progress` → `SyncStatus`; event `library://changed` (no payload)
 after any sync writes, so open pages refetch.
@@ -3755,6 +3757,7 @@ The rest of the fields, with their defaults:
 | `syncLyrics` | bool, true | What to sync: lyrics written in the editor. This device only. |
 | `bookmarksInLibrary` | bool, true | A Bookmarks row under Liked Songs in the library. |
 | `pinsInLibrary` | bool, true | Pins (up to 4 playlists, albums, artists or folders, `pins_toggle`) sit at the top of the library. |
+| `spineWidthByTracks` | bool, true | In the library's Shelf view a spine is wider the more songs the album has; off gives every spine one width. This device only. |
 | `showPronunciation` | bool, false | A romanised line under lyrics in Japanese, Korean, Chinese, Hindi and Cyrillic (`lyrics_pronounce`). |
 | `translationService` | string, "" | A LibreTranslate-compatible address for `lyrics_translate`; empty means no translation. This device only. |
 | `translateTo` | string, "en" | The language code lyrics are translated into. |

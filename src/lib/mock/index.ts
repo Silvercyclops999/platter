@@ -306,7 +306,7 @@ export function optionsFromUrl(search: string): MockOptions {
     lidarr: isLidarrDemo(p.get("lidarr")) ? (p.get("lidarr") as LidarrDemo) : isUpgradeDemo(p.get("upgrades")) ? "ready" : undefined,
     upgrades: isUpgradeDemo(p.get("upgrades")) ? (p.get("upgrades") as UpgradeDemo) : undefined,
     radarEmpty: p.get("radar") === "empty",
-    theme: (["dark", "light", "system", "midnight", "forest", "sand"] as const).find((t) => t === p.get("theme")),
+    theme: (["dark", "light", "system", "midnight", "forest", "sand", "studio", "studioBlack", "sleeve"] as const).find((t) => t === p.get("theme")),
     importDemo: p.get("import") === "demo",
     statsEmpty: p.get("stats") === "empty",
     statsSparse: p.get("stats") === "sparse",
@@ -1279,6 +1279,8 @@ export class MockBackend implements Backend {
           format: a.format,
           addedAt: a.addedAt,
           playedAt: a.lastViewedAt,
+          tint: a.tint ?? null,
+          trackCount: a.trackCount,
         };
       });
       for (const a of this.fx.artists) {

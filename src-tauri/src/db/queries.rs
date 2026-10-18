@@ -715,7 +715,7 @@ pub fn library_items(c: &Connection) -> AppResult<Vec<LibraryItem>> {
     let mut artist_dates: HashMap<String, (Option<i64>, Option<i64>)> = HashMap::new();
     {
         let mut st = c.prepare_cached(
-            "SELECT id, title, sort_title, artist_id, artist_title, thumb, format, added_at, last_viewed_at FROM albums",
+            "SELECT id, title, sort_title, artist_id, artist_title, thumb, format, added_at, last_viewed_at, tint, track_count FROM albums",
         )?;
         let rows = st.query_map([], |r| {
             Ok((
@@ -728,10 +728,12 @@ pub fn library_items(c: &Connection) -> AppResult<Vec<LibraryItem>> {
                 r.get::<_, Option<String>>(6)?,
                 r.get::<_, i64>(7)?,
                 r.get::<_, Option<i64>>(8)?,
+                r.get::<_, Option<String>>(9)?,
+                r.get::<_, i64>(10)?,
             ))
         })?;
         for row in rows {
-            let (id, title, sort_title, artist_id, artist_title, thumb, format, added, viewed) = row?;
+            let (id, title, sort_title, artist_id, artist_title, thumb, format, added, viewed, tint, tracks) = row?;
             let played = match (viewed, album_played.get(&id).copied()) {
                 (Some(a), Some(b)) => Some(a.max(b)),
                 (a, b) => a.or(b),
@@ -755,6 +757,8 @@ pub fn library_items(c: &Connection) -> AppResult<Vec<LibraryItem>> {
                 format,
                 added_at: added,
                 played_at: played,
+                tint,
+                track_count: u32::try_from(tracks).ok().filter(|n| *n > 0),
             });
         }
     }
@@ -778,6 +782,8 @@ pub fn library_items(c: &Connection) -> AppResult<Vec<LibraryItem>> {
                 format: None,
                 added_at,
                 played_at,
+                tint: None,
+                track_count: None,
             });
         }
     }
@@ -801,6 +807,8 @@ pub fn library_items(c: &Connection) -> AppResult<Vec<LibraryItem>> {
                 format: None,
                 added_at: None,
                 played_at: r.get(4)?,
+                tint: None,
+                track_count: None,
             })
         })?;
         for row in rows {

@@ -827,6 +827,9 @@ pub struct Settings {
     pub show_pronunciation: bool,
     /// Pins sit at the top of the library sidebar.
     pub pins_in_library: bool,
+    /// Shelf view in Your Library: a spine is wider the more songs the album
+    /// has (this device only).
+    pub spine_width_by_tracks: bool,
     /// Stats, mixes and recaps include the signed-in user's play history from
     /// their Plex server (playhistory::).
     pub include_plex_history: bool,
@@ -1168,6 +1171,7 @@ impl Default for Settings {
             translation_service: String::new(),
             show_pronunciation: false,
             pins_in_library: true,
+            spine_width_by_tracks: true,
             include_plex_history: true,
             include_tautulli_history: true,
             include_lastfm_history: true,
@@ -1362,6 +1366,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
 /// Settings kept on this device only.
 pub const DEVICE_SETTINGS: &[&str] = &[
     "syncDiary",
+    "spineWidthByTracks",
     "musicFolder",
     "musicFolderServer",
     "privateSession",
@@ -1706,6 +1711,7 @@ pub struct SettingsPatch {
     pub translation_service: Option<String>,
     pub show_pronunciation: Option<bool>,
     pub pins_in_library: Option<bool>,
+    pub spine_width_by_tracks: Option<bool>,
     pub include_plex_history: Option<bool>,
     pub include_tautulli_history: Option<bool>,
     pub include_lastfm_history: Option<bool>,
@@ -2045,6 +2051,7 @@ impl Settings {
         if let Some(u) = &p.translation_service { self.translation_service = if u.trim().is_empty() { String::new() } else { crate::lyrics::translate::service_url(u).ok_or_else(|| AppError::Invalid("The translation service is a web address like https://translate.example.com.".into()))? }; }
         set(&mut self.show_pronunciation, p.show_pronunciation);
         set(&mut self.pins_in_library, p.pins_in_library);
+        set(&mut self.spine_width_by_tracks, p.spine_width_by_tracks);
         set(&mut self.include_plex_history, p.include_plex_history);
         set(&mut self.include_tautulli_history, p.include_tautulli_history);
         set(&mut self.include_lastfm_history, p.include_lastfm_history);
@@ -4901,6 +4908,16 @@ mod tests {
         assert_eq!((s.translation_service.as_str(), s.translate_to.as_str()), ("https://tr.example.com", "pt"));
         s.apply(&serde_json::from_str(r#"{"translationService":"  "}"#).unwrap()).unwrap();
         assert!(s.translation_service.is_empty(), "blank turns it off");
+    }
+
+    #[test]
+    fn spine_width_by_tracks_is_on_and_this_device_only() {
+        let mut s = Settings::default();
+        assert!(s.spine_width_by_tracks);
+        assert!(DEVICE_SETTINGS.contains(&"spineWidthByTracks") && !SYNCED_SETTINGS.contains(&"spineWidthByTracks"));
+        s.apply(&serde_json::from_str(r#"{"spineWidthByTracks":false}"#).unwrap()).unwrap();
+        assert!(!s.spine_width_by_tracks);
+        assert!(serde_json::from_str::<Settings>("{}").unwrap().spine_width_by_tracks, "older settings read as on");
     }
 
     #[test]
