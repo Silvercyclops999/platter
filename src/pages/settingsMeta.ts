@@ -169,6 +169,8 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "upNextLine",
   "volumePercent",
   "homeColourWash",
+  "homeOnThisDay",
+  "homeTimeTravel",
   "fullWindowHideControls",
   "fullWindowRememberMode",
   "miniplayerTint",

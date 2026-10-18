@@ -1609,8 +1609,8 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
           <Skeleton width={40} height={24} radius="pill" />
         ),
     },
-    { key: "homeOnThisDay", section: "Home", title: "On this day", description: "What you played on today's date in earlier years, from your plays and imported history.", control: (ids) => toggle(s, "homeOnThisDay", ids) },
-    { key: "homeTimeTravel", section: "Home", title: "Time travel", description: "A mix of your most played songs from each decade, plus the year you listened most.", control: (ids) => toggle(s, "homeTimeTravel", ids) },
+    { key: "homeOnThisDay", section: "Appearance", title: "Show On this day on Home", description: "What you played on today's date in earlier years.", control: (ids) => toggle(s, "homeOnThisDay", ids) },
+    { key: "homeTimeTravel", section: "Appearance", title: "Show Time travel on Home", description: "A mix of your most played songs from each decade, and your year.", control: (ids) => toggle(s, "homeTimeTravel", ids) },
     // Mixes
     {
       key: "homeMixes",

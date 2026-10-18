@@ -158,7 +158,7 @@ describe("Time travel", () => {
 });
 
 describe("settings", () => {
-  it("both start on and have a row in Home settings", async () => {
+  it("both start on and have a row in Settings", async () => {
     expect(DEFAULT_SETTINGS.homeOnThisDay && DEFAULT_SETTINGS.homeTimeTravel).toBe(true);
     render(<SettingsPage />);
     for (const k of ["homeOnThisDay", "homeTimeTravel"]) {
