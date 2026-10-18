@@ -25,6 +25,10 @@ struct FakePlex {
     fail_all: Mutex<Option<AppError>>,
     /// The next add lands, but its answer is lost (a timeout).
     lose_add_answer: Mutex<bool>,
+    /// Creating a playlist waits for this before answering.
+    create_gate: Mutex<Option<Arc<tokio::sync::Notify>>>,
+    /// A new playlist gets only this many of its songs (a later part lost).
+    create_keeps: Mutex<Option<usize>>,
 }
 
 impl FakePlex {
@@ -98,8 +102,13 @@ impl PlaylistRemote for FakePlex {
     }
     async fn create(&self, title: &str, track_ids: &[String]) -> AppResult<String> {
         self.write(format!("create {title} {}", track_ids.join(",")))?;
+        let gate = self.create_gate.lock().take();
+        if let Some(gate) = gate {
+            gate.notified().await;
+        }
         let id = self.id();
-        let rows: Vec<(String, String)> = track_ids.iter().map(|t| (t.clone(), self.id())).collect();
+        let keep = self.create_keeps.lock().take().unwrap_or(track_ids.len());
+        let rows: Vec<(String, String)> = track_ids.iter().take(keep).map(|t| (t.clone(), self.id())).collect();
         self.lists.lock().insert(id.clone(), (playlist(&id, title, rows.len()), rows));
         Ok(id)
     }
@@ -286,6 +295,45 @@ async fn a_new_playlist_waits_for_its_first_song_then_is_created() {
     r.pl.add(p.id.clone(), s(&["3"]), Place::End).await.unwrap();
     r.pl.replay().await;
     assert_eq!(r.plex.tracks(&page.playlist.id), ["2", "1", "3"]);
+}
+
+#[tokio::test]
+async fn songs_added_while_plex_makes_the_playlist_are_sent_after() {
+    let r = rig();
+    let p = r.pl.create(Some("Late".into()), s(&["1", "2"])).await.unwrap();
+    let gate = Arc::new(tokio::sync::Notify::new());
+    *r.plex.create_gate.lock() = Some(gate.clone());
+    let replay = {
+        let pl = r.pl.clone();
+        tokio::spawn(async move { pl.replay().await })
+    };
+    while r.plex.calls().is_empty() {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    // Added (and one removed) while the create is out.
+    r.pl.add(p.id.clone(), s(&["3"]), Place::End).await.unwrap();
+    let first = r.page(&p.id).item_ids[0].clone();
+    r.pl.remove(p.id.clone(), vec![first]).await.unwrap();
+    gate.notify_one();
+    replay.await.unwrap();
+    r.pl.replay().await;
+    let pid = r.page(&p.id).playlist.id;
+    assert!(!local::is_local(&pid));
+    assert_eq!(r.plex.tracks(&pid), ["2", "3"]);
+    assert_eq!(r.local_tracks(&pid), ["2", "3"]);
+    assert_eq!(r.queued(), 0);
+}
+
+#[tokio::test]
+async fn a_new_playlist_made_without_its_last_songs_gets_them_after() {
+    let r = rig();
+    let p = r.pl.create(Some("Big".into()), s(&["1", "2", "3", "4"])).await.unwrap();
+    *r.plex.create_keeps.lock() = Some(2);
+    r.pl.replay().await;
+    r.pl.replay().await;
+    let pid = r.page(&p.id).playlist.id;
+    assert_eq!(r.plex.tracks(&pid), ["1", "2", "3", "4"]);
+    assert_eq!(r.queued(), 0);
 }
 
 #[tokio::test]

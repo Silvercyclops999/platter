@@ -482,15 +482,21 @@ impl Playlists {
                 // An earlier send that got no clear answer may have landed:
                 // if the playlist already ends with these songs, don't add
                 // them twice.
-                let landed = *sent && {
+                // A long add goes out in parts, so the first ones may have
+                // landed alone: only the rest is sent again.
+                let landed = if *sent {
                     let (_, rows) = remote.fetch(pid).await?;
-                    let start = rows.len().saturating_sub(track_ids.len());
-                    rows.len() >= track_ids.len() && rows[start..].iter().map(|r| &r.track_id).eq(track_ids.iter())
+                    (1..=track_ids.len())
+                        .rev()
+                        .find(|&k| rows.len() >= k && rows[rows.len() - k..].iter().map(|r| &r.track_id).eq(track_ids[..k].iter()))
+                        .unwrap_or(0)
+                } else {
+                    0
                 };
-                if !landed {
+                if landed < track_ids.len() {
                     let seq = q.seq;
                     self.db().write_async(move |c| local::mark_sent(c, seq)).await?;
-                    remote.add(pid, track_ids).await?;
+                    remote.add(pid, &track_ids[landed..]).await?;
                 }
                 // Plex appends: the last rows are the new ones. Learn their ids
                 // so queued removes and moves can name them. The add is done
@@ -590,6 +596,44 @@ impl Playlists {
                 let tx = c.transaction()?;
                 local::adopt(&tx, &local_id, &pid)?;
                 local::drop_ops_after_create(&tx, &pid)?;
+                let now = local::items(&tx, &pid)?;
+                // Plex made it without its last songs (a long playlist goes
+                // out in parts and a later part failed): those are added.
+                let landed = rows.len();
+                let short = landed > 0
+                    && landed < items.len()
+                    && rows.iter().zip(&items).all(|(r, i)| r.track_id == i.track_id);
+                let in_plex = if short { landed } else { items.len() };
+                let missing: Vec<&local::Item> =
+                    items[in_plex..].iter().filter(|m| now.iter().any(|n| n.item_id == m.item_id)).collect();
+                if !missing.is_empty() {
+                    let track_ids = missing.iter().map(|i| i.track_id.clone()).collect();
+                    let item_ids = missing.iter().map(|i| i.item_id.clone()).collect();
+                    local::enqueue(&tx, &pid, &Op::Add { track_ids, item_ids, sent: false })?;
+                }
+                // Edits made here while Plex was making the playlist weren't
+                // queued (it was only here then): queue what changed since.
+                for (index, gone) in items[..in_plex].iter().enumerate() {
+                    if !now.iter().any(|n| n.item_id == gone.item_id) {
+                        let item = ItemRef { item_id: gone.item_id.clone(), track_id: gone.track_id.clone(), index };
+                        local::enqueue(&tx, &pid, &Op::Remove { item })?;
+                    }
+                }
+                let added: Vec<usize> = (0..now.len()).filter(|&i| !items.iter().any(|s| s.item_id == now[i].item_id)).collect();
+                if !added.is_empty() {
+                    let track_ids = added.iter().map(|&i| now[i].track_id.clone()).collect();
+                    let item_ids = added.iter().map(|&i| now[i].item_id.clone()).collect();
+                    local::enqueue(&tx, &pid, &Op::Add { track_ids, item_ids, sent: false })?;
+                    // Plex appends; a row added elsewhere moves into place.
+                    let tail = now.len() - added.len();
+                    for (k, &i) in added.iter().enumerate() {
+                        if i != tail + k {
+                            let item = ItemRef { item_id: now[i].item_id.clone(), track_id: now[i].track_id.clone(), index: i };
+                            let after = i.checked_sub(1).map(|p| ItemRef { item_id: now[p].item_id.clone(), track_id: now[p].track_id.clone(), index: p });
+                            local::enqueue(&tx, &pid, &Op::Move { item, after })?;
+                        }
+                    }
+                }
                 if rows.len() == items.len() {
                     for (i, r) in items.iter().zip(&rows) {
                         if let Some(rid) = r.item_id.as_deref().filter(|_| r.track_id == i.track_id) {

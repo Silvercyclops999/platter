@@ -796,6 +796,10 @@ fn plain_id(id: &str) -> AppResult<&str> {
 
 /// `server://{machine}/com.plexapp.plugins.library/library/metadata/{k1,k2,…}`:
 /// how Plex names library items to put in a playlist.
+/// Songs sent in one playlist request: a whole artist or a long playlist in
+/// one address would be longer than Plex or a proxy in front of it takes.
+pub const PLAYLIST_CHUNK: usize = 200;
+
 fn library_uri(machine_id: &str, track_ids: &[String]) -> AppResult<String> {
     if track_ids.is_empty() {
         return Err(AppError::Invalid("no songs to add".into()));
@@ -1469,7 +1473,21 @@ impl PlexClient {
 
     /// `POST /playlists?type=audio&title=…&smart=0&uri=…`: a new playlist
     /// holding `track_ids` in order. Plex needs at least one item.
+    /// More than [`PLAYLIST_CHUNK`] songs: made with the first ones, the
+    /// rest added after. A later part that fails is logged and left out (the
+    /// playlist exists; the caller compares and adds what's missing).
     pub async fn create_playlist(&self, machine_id: &str, title: &str, track_ids: &[String]) -> AppResult<Playlist> {
+        let (first, rest) = track_ids.split_at(track_ids.len().min(PLAYLIST_CHUNK));
+        let p = self.create_playlist_part(machine_id, title, first).await?;
+        if !rest.is_empty()
+            && let Err(e) = self.playlist_add(machine_id, &p.id, rest).await
+        {
+            tracing::warn!("new playlist made without all its songs: {}", e.kind());
+        }
+        Ok(p)
+    }
+
+    async fn create_playlist_part(&self, machine_id: &str, title: &str, track_ids: &[String]) -> AppResult<Playlist> {
         let uri = library_uri(machine_id, &self.raw_all(track_ids)?)?;
         let rb = self.request(Method::POST, "/playlists")?.query(&[
             ("type", "audio"),
@@ -1520,13 +1538,20 @@ impl PlexClient {
     }
 
     /// `PUT /playlists/{id}/items?uri=…`: append songs in order.
+    /// Sent in parts of [`PLAYLIST_CHUNK`] songs, in order.
     pub async fn playlist_add(&self, machine_id: &str, id: &str, track_ids: &[String]) -> AppResult<()> {
         let id = plain_id(self.raw(id)?)?;
-        let uri = library_uri(machine_id, &self.raw_all(track_ids)?)?;
-        let rb = self
-            .request(Method::PUT, &format!("/playlists/{id}/items"))?
-            .query(&[("uri", uri.as_str())]);
-        self.send(rb).await.map(|_| ())
+        if track_ids.is_empty() {
+            return Err(AppError::Invalid("no songs to add".into()));
+        }
+        for part in track_ids.chunks(PLAYLIST_CHUNK) {
+            let uri = library_uri(machine_id, &self.raw_all(part)?)?;
+            let rb = self
+                .request(Method::PUT, &format!("/playlists/{id}/items"))?
+                .query(&[("uri", uri.as_str())]);
+            self.send(rb).await?;
+        }
+        Ok(())
     }
 
     /// `DELETE /playlists/{id}/items/{playlistItemID}`.
@@ -2243,6 +2268,34 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(&b[..], &[1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn long_playlist_writes_go_out_in_parts() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/playlists"))
+            .respond_with(mc(serde_json::json!({ "size": 1, "Metadata": [
+                { "ratingKey": "900", "title": "Long", "smart": false, "leafCount": 200 }
+            ]})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/playlists/900/items"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(2 + 3)
+            .mount(&server)
+            .await;
+        let c = client(&server);
+        let ids: Vec<String> = (1..=450).map(|i| i.to_string()).collect();
+        c.create_playlist("m1", "Long", &ids).await.unwrap();
+        c.playlist_add("m1", "900", &ids).await.unwrap();
+        let reqs = server.received_requests().await.unwrap();
+        let longest = reqs.iter().map(|r| r.url.as_str().len()).max().unwrap();
+        assert!(longest < 4_000, "{longest}");
+        let first = reqs.iter().find(|r| r.method.as_str() == "POST").unwrap();
+        assert!(first.url.as_str().contains("metadata%2F1%2C2%2C") || first.url.as_str().contains("metadata/1,2,"));
     }
 
     #[tokio::test]
