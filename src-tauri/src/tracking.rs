@@ -613,9 +613,21 @@ mod tests {
 
     #[tokio::test]
     async fn private_session_plays_stay_out_of_wrapped() {
+        // The play lands at 1_000_000 ms after the epoch, which is still 1969 west of UTC,
+        // so ask for the year it falls in on this machine's clock.
         let year = |db: &DbHandle| {
             db.write(|c| crate::stats::refresh(c).map(|_| ())).unwrap();
-            db.read(|c| crate::stats::wrapped::wrapped(c, 1970)).unwrap().totals.plays
+            db.read(|c| {
+                let y: i64 = c.query_row(
+                    "SELECT CAST(strftime('%Y', 1000, 'unixepoch', 'localtime') AS INTEGER)",
+                    [],
+                    |r| r.get(0),
+                )?;
+                crate::stats::wrapped::wrapped(c, y)
+            })
+            .unwrap()
+            .totals
+            .plays
         };
         let open = rig(false, false);
         full_play(&open.tracker).await;
