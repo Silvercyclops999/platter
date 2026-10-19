@@ -474,14 +474,16 @@ async fn transcode_session(client: &crate::plex::client::PlexClient) -> String {
         (0..TRANSCODE_SLOTS).map(name).collect()
     };
     let slot = NEXT_SLOT.fetch_add(1, std::sync::atomic::Ordering::SeqCst) % TRANSCODE_SLOTS;
-    for session in stale {
-        // Short: a server that doesn't answer shouldn't hold up playback.
-        match tokio::time::timeout(std::time::Duration::from_secs(2), client.transcode_stop(&session)).await {
+    // Together, and short: a server that doesn't answer shouldn't hold up
+    // playback.
+    futures::future::join_all(stale.iter().map(|session| async move {
+        match tokio::time::timeout(std::time::Duration::from_secs(2), client.transcode_stop(session)).await {
             Ok(Err(e)) => tracing::debug!("transcode {session} not stopped: {e}"),
             Err(_) => tracing::debug!("transcode {session}: stop timed out"),
             Ok(Ok(())) => {}
         }
-    }
+    }))
+    .await;
     name(slot)
 }
 
