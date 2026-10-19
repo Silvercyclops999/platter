@@ -448,7 +448,7 @@ function EmptyState({ info }: { info: SoundMapInfo }) {
 export function MapLead({ placed, groups, by, className = "" }: { placed: number; groups: { label: string; count: number; slot: number }[]; by: ColourBy; className?: string }) {
   const top = groups.filter((g) => g.slot >= 0 && g.count > 0).sort((a, b) => b.count - a.count)[0];
   return (
-    <p className={`lead lead--sm soundmap__sub ${className}`} data-testid="soundmap-lead">
+    <p className={`lg-lead lg-lead--sm soundmap__sub ${className}`} data-testid="soundmap-lead">
       {songs(placed)} on the map, each one near the songs it sounds like.
       {top &&
         (by === "genre" ? (
@@ -474,7 +474,7 @@ export function Legend({ groups, colours, by }: { groups: { label: string; count
           <li key={g.label} className="soundmap__legend-item">
             <span className="soundmap__swatch" style={{ background: colours[i] }} aria-hidden="true" />
             <span>{g.label}</span>
-            <span className="soundmap__legend-count num">{fmt(g.count)}</span>
+            <span className="soundmap__legend-count lg-num">{fmt(g.count)}</span>
           </li>
         ) : null,
       )}

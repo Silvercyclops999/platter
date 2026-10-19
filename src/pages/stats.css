@@ -54,7 +54,7 @@
 :root .stats .stats-tabs .tab.is-selected { color: var(--color-text-primary); box-shadow: inset 0 -2px 0 var(--color-text-primary); }
 .stats-panel:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 4px; border-radius: var(--radius-row); }
 .stats-panel > .stats-section:first-of-type { margin-top: 0; }
-.stats-panel > .stats-section:first-of-type > .ledger-head { border-top: 0; padding-top: 0; }
+.stats-panel > .stats-section:first-of-type > .lg-head { border-top: 0; padding-top: 0; }
 .stats-panel__note { margin: 0 0 var(--space-6); color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 .stats-range .chips-scroll { min-width: 0; max-width: 100%; }
 .stats-range__dates { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--color-text-secondary); font-size: var(--font-size-sm); }
@@ -96,10 +96,10 @@
 .stats-record__sleeve { display: block; width: 100%; aspect-ratio: 1; box-shadow: 0 1px 0 var(--ledger-faint), 0 10px 24px -14px color-mix(in srgb, #000 55%, transparent); }
 .stats-record__sleeve .art { border-radius: 2px; }
 .stats-record__caption { display: flex; flex-direction: column; gap: 2px; margin-top: var(--space-3); min-width: 0; }
-.stats-record__caption .eyebrow { margin-bottom: var(--space-1); }
+.stats-record__caption .lg-eyebrow { margin-bottom: var(--space-1); }
 .stats-record__title { font-family: var(--font-headings, var(--font-family)); font-size: var(--font-size-lg); font-weight: 600; color: var(--color-text-primary); overflow-wrap: anywhere; }
 .stats-record__sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
-.stats-record__sub .num { margin-left: var(--space-1); color: var(--color-text-muted); font-size: var(--font-size-xs); }
+.stats-record__sub .lg-num { margin-left: var(--space-1); color: var(--color-text-muted); font-size: var(--font-size-xs); }
 
 /* Minutes right under the hero, backing its sentence up. */
 .stats-minutes { margin-top: var(--space-10, 40px); }
@@ -109,7 +109,7 @@
 .stats-section { margin-top: var(--space-16); }
 .stats-section__head { margin-bottom: var(--space-3); }
 .stats-section__title { margin: 0 0 var(--space-4); font-size: var(--font-size-2xl); font-weight: var(--font-weight-bold); letter-spacing: -0.01em; }
-.ledger-head .stats-section__title { margin: 0; font-weight: 600; }
+.lg-head .stats-section__title { margin: 0; font-weight: 600; }
 .stats-section__actions { display: inline-flex; gap: var(--space-2); }
 .stats-section__panel { margin-top: var(--space-4); }
 .stats-more { margin-top: var(--space-2); }
@@ -186,7 +186,7 @@
    Each story is a small heading, a sentence and a chart that backs it up.
    Stems and days are neutral ink; the one mark that matters takes the accent. */
 .story { padding: var(--space-8) 0; border-top: 1px solid var(--ledger-faint); }
-.ledger-head + .story { border-top: 0; padding-top: var(--space-2); }
+.lg-head + .story { border-top: 0; padding-top: var(--space-2); }
 .story--side { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 7fr); gap: var(--space-12); align-items: start; }
 .story--stack .story__chart { margin-top: var(--space-6); }
 .story__heading { margin: 0 0 var(--space-2); }
@@ -344,10 +344,10 @@ button.moment__btn:focus-visible { outline: 2px solid var(--color-focus-ring); o
 .recap__sleeve .art { border-radius: 2px; }
 .recap__text { min-width: 0; }
 .recap__month { margin: 0; font-family: var(--font-headings, var(--font-family)); font-size: var(--font-size-xl); font-weight: 600; }
-.recap__month .num { margin-left: 2px; font-size: var(--font-size-sm); font-weight: var(--font-weight-regular); color: var(--color-text-muted); }
+.recap__month .lg-num { margin-left: 2px; font-size: var(--font-size-sm); font-weight: var(--font-weight-regular); color: var(--color-text-muted); }
 .recap__line { margin: var(--space-1) 0 0; font-size: var(--font-size-md); color: var(--color-text-secondary); text-wrap: pretty; }
 .recap__line strong { color: var(--color-text-primary); font-weight: var(--font-weight-semibold); }
-.recap__line .num { color: var(--color-text-primary); }
+.recap__line .lg-num { color: var(--color-text-primary); }
 .recap__line .stats-mark { margin: 0 0 0 var(--space-1); }
 .recap__days { display: flex; align-items: flex-end; justify-content: space-between; height: 32px; border-bottom: 1px solid var(--ledger-line); }
 .recap__days span { width: 2px; background: var(--ledger-stem); }
@@ -418,8 +418,8 @@ button.moment__btn:focus-visible { outline: 2px solid var(--color-focus-ring); o
   .daycharts { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: var(--space-4) var(--space-6); }
   .moments { grid-template-columns: minmax(0, 1fr); }
   .stats-count__text { min-width: 0; }
-  .year-entry { grid-template-columns: 44px 52px minmax(0, 1fr) auto; gap: var(--space-3); }
-  .year-entry__year { font-size: var(--font-size-lg); }
+  .lg-year { grid-template-columns: 44px 52px minmax(0, 1fr) auto; gap: var(--space-3); }
+  .lg-year__year { font-size: var(--font-size-lg); }
 }
 @container stats (max-width: 520px) {
   .daycharts { grid-template-columns: minmax(0, 1fr); }
@@ -437,12 +437,12 @@ button.moment__btn:focus-visible { outline: 2px solid var(--color-focus-ring); o
 .stats--phone .stats-minutes { margin-top: var(--space-8); }
 .stats--phone .story { padding: var(--space-6) 0; }
 .stats--phone .story__sentence { font-size: var(--font-size-lg); }
-.stats--phone .ledger-head__title { font-size: var(--font-size-xl); }
-.stats--phone .ph-rows .num { font-size: var(--font-size-xs); }
+.stats--phone .lg-head__title { font-size: var(--font-size-xl); }
+.stats--phone .ph-rows .lg-num { font-size: var(--font-size-xs); }
 .ph-stats__genre { display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: var(--space-2); color: var(--color-text-primary); }
-.ph-stats__genre .num { color: var(--color-text-muted); font-size: var(--font-size-xs); }
+.ph-stats__genre .lg-num { color: var(--color-text-muted); font-size: var(--font-size-xs); }
 .ph-stats__genre-share { grid-column: 2; position: relative; display: block; height: 1px; margin-top: 6px; background: var(--ledger-faint); }
 .ph-stats__genre-share span { position: absolute; left: 0; top: -1px; height: 3px; background: var(--ledger-stem); }
-.ph-stats__genres .ledger__row { padding: var(--space-3) 0; }
+.ph-stats__genres .lg-row { padding: var(--space-3) 0; }
 .stats--phone > .stats-section:first-child { margin-top: var(--space-4); }
-.stats--phone > .stats-section:first-child > .ledger-head { border-top: 0; padding-top: 0; }
+.stats--phone > .stats-section:first-child > .lg-head { border-top: 0; padding-top: 0; }

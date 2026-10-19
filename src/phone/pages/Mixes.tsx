@@ -17,9 +17,9 @@ function Group({ title, mixes }: { title: string; mixes: MixSummary[] }) {
   if (!mixes.length) return null;
   return (
     <section className="ph-x__section mixes-page__group" aria-label={title}>
-      <div className="ledger-head">
-        <h2 className="ledger-head__title">{title}</h2>
-        <span className="ledger-head__aside">{mixes.length}</span>
+      <div className="lg-head">
+        <h2 className="lg-head__title">{title}</h2>
+        <span className="lg-head__aside">{mixes.length}</span>
       </div>
       <ul className="ph-rows ph-mixes__rows" aria-label={title}>
         {mixes.map((m) => (
@@ -49,7 +49,7 @@ export function PhoneMixes() {
   const count = data ? data.madeForYou.length + data.moods.length + data.genres.length : 0;
   return (
     <PageFrame name="mixes" title="Radio and mixes" lede="Start radio from any song, album or artist with its menu. Mixes refresh as you listen." className="ph-mixes">
-      {on && data && count > 0 && <p className="lead lead--sm ph-mixes__lead">{mixesSentence(data)}</p>}
+      {on && data && count > 0 && <p className="lg-lead lg-lead--sm ph-mixes__lead">{mixesSentence(data)}</p>}
       {!on ? (
         <Empty title="Mixes are off" text="Turn on mixes in Settings and they show here." action={<GoPill route={{ name: "settings", row: "homeMixes" }}>Open Settings</GoPill>} />
       ) : error && !data ? (

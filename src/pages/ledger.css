@@ -3,7 +3,8 @@
    leads with one sentence in the display face, numbers sit in the readout
    face, and sections and rows are split by hairlines, not boxed in cards.
    Classic has no display face, so the same rules read in the body face.
-   Colours come from theme tokens only; the accent is kept for one mark. */
+   Colours come from theme tokens only; the accent is kept for one mark.
+   Every class here starts with lg- so it never meets another page's. */
 :root {
   --ledger-line: color-mix(in srgb, var(--color-ink) 12%, transparent);
   --ledger-faint: color-mix(in srgb, var(--color-ink) 7%, transparent);
@@ -12,7 +13,7 @@
 }
 
 /* The lead sentence: what this page says about you. */
-.lead {
+.lg-lead {
   margin: 0;
   max-width: 24em;
   font-family: var(--font-headings, var(--font-family));
@@ -25,11 +26,11 @@
   text-wrap: pretty;
   font-variant-numeric: lining-nums;
 }
-.lead strong { font-weight: 640; }
-.lead--sm { font-size: clamp(20px, 2.2cqi, 26px); line-height: 1.25; font-weight: 440; }
-.lead--xs { font-size: var(--font-size-xl); line-height: 1.3; font-weight: 460; }
+.lg-lead strong { font-weight: 640; }
+.lg-lead--sm { font-size: clamp(20px, 2.2cqi, 26px); line-height: 1.25; font-weight: 440; }
+.lg-lead--xs { font-size: var(--font-size-xl); line-height: 1.3; font-weight: 460; }
 /* Under the lead: the plain facts, in the readout face. */
-.lead-facts {
+.lg-facts {
   margin: var(--space-3) 0 0;
   font-family: var(--font-readout, var(--font-family));
   font-size: var(--font-size-sm);
@@ -39,7 +40,7 @@
 }
 
 /* A small label over a section or a value: readout face, spaced capitals. */
-.eyebrow {
+.lg-eyebrow {
   display: block;
   margin: 0;
   font-family: var(--font-readout, var(--font-family));
@@ -52,7 +53,7 @@
 }
 
 /* Section heads: a hairline across, then the head in the display face. */
-.ledger-head {
+.lg-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -62,7 +63,7 @@
   padding-top: var(--space-4);
   border-top: 1px solid var(--ledger-line);
 }
-.ledger-head__title {
+.lg-head__title {
   margin: 0;
   font-family: var(--font-headings, var(--font-family));
   font-optical-sizing: auto;
@@ -70,11 +71,11 @@
   font-weight: 600;
   letter-spacing: -0.008em;
 }
-.ledger-head__aside { font-family: var(--font-readout, var(--font-family)); font-size: var(--font-size-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.lg-head__aside { font-family: var(--font-readout, var(--font-family)); font-size: var(--font-size-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 
 /* Rows split by hairlines: a label, then its value set flush right. */
-.ledger { list-style: none; margin: 0; padding: 0; }
-.ledger__row {
+.lg-rows { list-style: none; margin: 0; padding: 0; }
+.lg-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: baseline;
@@ -82,9 +83,9 @@
   padding: var(--space-2) 0;
   border-top: 1px solid var(--ledger-faint);
 }
-.ledger__row:last-child { border-bottom: 1px solid var(--ledger-faint); }
-.ledger__label { min-width: 0; color: var(--color-text-secondary); font-size: var(--font-size-sm); }
-.ledger__value {
+.lg-row:last-child { border-bottom: 1px solid var(--ledger-faint); }
+.lg-row__label { min-width: 0; color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+.lg-row__value {
   min-width: 0;
   text-align: right;
   font-family: var(--font-readout, var(--font-family));
@@ -92,15 +93,15 @@
   color: var(--color-text-primary);
   font-variant-numeric: tabular-nums lining-nums;
 }
-.ledger__value small { display: block; font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.lg-row__value small { display: block; font-size: var(--font-size-xs); color: var(--color-text-muted); }
 
 /* A number in the readout face inside running text. */
-.num { font-family: var(--font-readout, var(--font-family)); font-variant-numeric: tabular-nums lining-nums; letter-spacing: 0; }
+.lg-num { font-family: var(--font-readout, var(--font-family)); font-variant-numeric: tabular-nums lining-nums; letter-spacing: 0; }
 
 /* A year's row (Wrapped, Top Songs): its record sleeve, the year, a title and a line. */
-.year-entries { list-style: none; margin: 0 0 var(--space-6); padding: 0; }
-.year-entries:last-child { margin-bottom: 0; }
-.year-entry {
+.lg-years { list-style: none; margin: 0 0 var(--space-6); padding: 0; }
+.lg-years:last-child { margin-bottom: 0; }
+.lg-year {
   display: grid;
   grid-template-columns: 48px 64px minmax(0, 1fr) auto;
   align-items: center;
@@ -116,16 +117,16 @@
   text-align: left;
   cursor: pointer;
 }
-.year-entries li:last-child .year-entry { border-bottom: 1px solid var(--ledger-faint); }
-.year-entry:hover { background: var(--color-state-hover); }
-.year-entry:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; }
-.year-entry__sleeve { position: relative; display: block; width: 48px; height: 48px; overflow: hidden; border-radius: 2px; background: var(--year-deep); }
-.year-entry__sleeve .year-art { position: absolute; inset: 0; width: 100%; height: 100%; }
-.year-entry__year { font-size: var(--font-size-xl); color: var(--color-text-primary); }
-.year-entry__text { display: flex; flex-direction: column; min-width: 0; }
-.year-entry__title { font-family: var(--font-headings, var(--font-family)); font-size: var(--font-size-lg); font-weight: 600; }
-.year-entry__sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
-.year-entry__go { color: var(--color-text-muted); }
+.lg-years li:last-child .lg-year { border-bottom: 1px solid var(--ledger-faint); }
+.lg-year:hover { background: var(--color-state-hover); }
+.lg-year:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; }
+.lg-year__sleeve { position: relative; display: block; width: 48px; height: 48px; overflow: hidden; border-radius: 2px; background: var(--year-deep); }
+.lg-year__sleeve .year-art { position: absolute; inset: 0; width: 100%; height: 100%; }
+.lg-year__year { font-size: var(--font-size-xl); color: var(--color-text-primary); }
+.lg-year__text { display: flex; flex-direction: column; min-width: 0; }
+.lg-year__title { font-family: var(--font-headings, var(--font-family)); font-size: var(--font-size-lg); font-weight: 600; }
+.lg-year__sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.lg-year__go { color: var(--color-text-muted); }
 
 
 /* On the phone, range and colour pickers read as words on a rule too, each a full 44 px to tap. */

@@ -186,7 +186,7 @@ function DiaryLead({ list }: { list: DiaryList }) {
   const high = rated.filter((e) => (e.rating ?? 0) >= 4).length;
   const at = new Date(latest.at);
   return (
-    <p className="lead lead--sm diary-head__lead" data-testid="diary-lead">
+    <p className="lg-lead lg-lead--sm diary-head__lead" data-testid="diary-lead">
       <strong>{plural(list.total, "record", "records")}</strong> in your diary{since && ` since ${MONTHS[since.getMonth()]} ${since.getFullYear()}`}. The latest is <strong>{latest.title}</strong>, on{" "}
       {MONTHS[at.getMonth()].slice(0, 3)} {at.getDate()}.
       {high > 0 && (high === rated.length ? (high === 1 ? " The one you rated got four stars or more." : ` All ${high} you rated got four stars or more.`) : ` ${high} of the ${rated.length} you rated got four stars or more.`)}
@@ -295,7 +295,7 @@ export function DiaryPage({ edit }: { edit?: string }) {
   return (
     <div className="page-pad diary-page">
       <header className="diary-head">
-        <p className="eyebrow diary-head__eyebrow">Private</p>
+        <p className="lg-eyebrow diary-head__eyebrow">Private</p>
         <h1 className="page-title diary-head__title">Listening diary</h1>
         {led && <DiaryLead list={list} />}
         <p className="diary-head__lede">{lede}</p>

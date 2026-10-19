@@ -132,7 +132,7 @@ function Feature({ r, kind, playSongs }: { r: Row; kind: StatsTopKind; playSongs
         )}
 
       </span>
-      <span className="eyebrow stats-feature__eyebrow">{label}</span>
+      <span className="lg-eyebrow stats-feature__eyebrow">{label}</span>
       {r.open ? (
         <TextLink className="stats-feature__title" onActivate={r.open}>
           {r.title}
@@ -146,7 +146,7 @@ function Feature({ r, kind, playSongs }: { r: Row; kind: StatsTopKind; playSongs
           {r.sub}
         </span>
       )}
-      <span className="stats-feature__count num">{countLine(r.plays, r.ms)}</span>
+      <span className="stats-feature__count lg-num">{countLine(r.plays, r.ms)}</span>
       {trackId && (
         <Button size="sm" variant="primary" className="stats-feature__play" icon={<Play size={14} fill="currentColor" />} onClick={() => playSongs(trackId)} aria-label={`Play ${r.title}`}>
           Play
@@ -253,8 +253,8 @@ export function TopLists({ o, range, title }: { o: StatsOverview; range: ReturnT
   const shown = rows.slice(1, more ? 50 : SHORT_LIST);
   return (
     <section className="stats-section" aria-labelledby={`${panel}-h`} data-shot="tops">
-      <div className="ledger-head stats-section__head">
-        <h2 id={`${panel}-h`} className="ledger-head__title stats-section__title">
+      <div className="lg-head stats-section__head">
+        <h2 id={`${panel}-h`} className="lg-head__title stats-section__title">
           Your top {kind}
         </h2>
         <span className="stats-section__actions">

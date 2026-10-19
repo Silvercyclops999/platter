@@ -49,7 +49,7 @@
 .soundmap__titles { flex: 1 1 420px; min-width: 0; }
 .soundmap__titles .page-title { margin: 0 0 var(--space-3); }
 .soundmap__sub { margin: 0; font-size: var(--font-size-md); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
-.soundmap__sub.lead { max-width: 30em; color: var(--color-text-primary); font-size: clamp(20px, 2cqi, 26px); }
+.soundmap__sub.lg-lead { max-width: 30em; color: var(--color-text-primary); font-size: clamp(20px, 2cqi, 26px); }
 .soundmap__tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-5, 20px); }
 .soundmap__note { margin: 0 0 var(--space-3); font-size: var(--font-size-sm); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
 .soundmap__link {

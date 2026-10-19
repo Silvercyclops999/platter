@@ -930,7 +930,7 @@
 .phone .stats-hero__facts { margin-top: 20px; }
 /* This year's Wrapped: a ruled row with the year's record, as on the Stats page. */
 .phone .ph-you__wrapped { grid-template-columns: 44px 56px minmax(0, 1fr) auto; gap: 12px; margin: 8px 0 4px; padding: 10px 0; border-bottom: 1px solid var(--ph-line, var(--ledger-faint)); border-top-color: var(--ph-line, var(--ledger-faint)); }
-.phone .ph-you__wrapped .year-entry__sleeve { width: 44px; height: 44px; }
+.phone .ph-you__wrapped .lg-year__sleeve { width: 44px; height: 44px; }
 .ph-you__links { margin-top: 24px; }
 
 /* ---------------------------------------------------------------- settings, phone-sized */

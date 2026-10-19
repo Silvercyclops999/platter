@@ -30,10 +30,10 @@ function RecapLine({ r }: { r: MonthRecap }) {
   const pct = change(r.totals.ms, r.prevMs);
   return (
     <p className="recap__line">
-      <span className="num">{minutes(r.totals.ms).toLocaleString()}</span> minutes
+      <span className="lg-num">{minutes(r.totals.ms).toLocaleString()}</span> minutes
       {pct && (
         <>
-          , <span className="num">{pct}</span> on the month before
+          , <span className="lg-num">{pct}</span> on the month before
         </>
       )}
       .
@@ -68,7 +68,7 @@ function RecapCard({ month, onShare }: { month: string; onShare: (r: MonthRecap)
       </span>
       <div className="recap__text">
         <h3 className="recap__month">
-          {m} <span className="num">{y}</span>
+          {m} <span className="lg-num">{y}</span>
         </h3>
         {error ? <p className="stats-muted">Couldn't load this month.</p> : !r ? <Skeleton width="80%" height={16} style={{ marginTop: 8 }} /> : <RecapLine r={r} />}
       </div>
@@ -95,8 +95,8 @@ export function MonthlySection({ months }: { months: string[] }) {
   const [sharing, setSharing] = useState<MonthRecap | null>(null);
   return (
     <section className="stats-section" aria-labelledby="stats-months" data-shot="recaps">
-      <div className="ledger-head">
-        <h2 id="stats-months" className="ledger-head__title stats-section__title">
+      <div className="lg-head">
+        <h2 id="stats-months" className="lg-head__title stats-section__title">
           Monthly recaps
         </h2>
       </div>

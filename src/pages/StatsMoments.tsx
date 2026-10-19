@@ -102,10 +102,10 @@ function Card({ c }: { c: MomentCard }) {
         <Art path={c.thumb} fluid requestSize={64} round={c.round} kind={c.round ? "artist" : "album"} />
       </span>
       <span className="moment__text">
-        <span className="eyebrow moment__eyebrow">{c.eyebrow}</span>
+        <span className="lg-eyebrow moment__eyebrow">{c.eyebrow}</span>
         <span className="moment__title truncate">{c.title}</span>
         <span className="moment__sub truncate">{c.sub}</span>
-        <span className="moment__detail num">{c.detail}</span>
+        <span className="moment__detail lg-num">{c.detail}</span>
       </span>
     </>
   );
@@ -128,8 +128,8 @@ export function MomentsSection({ moments, rangeTitle, isYear, year, error }: { m
   if (cards && !cards.length) return null;
   return (
     <section className="stats-section" aria-labelledby="stats-moments" data-shot="moments">
-      <div className="ledger-head">
-        <h2 id="stats-moments" className="ledger-head__title stats-section__title">
+      <div className="lg-head">
+        <h2 id="stats-moments" className="lg-head__title stats-section__title">
           Moments
         </h2>
       </div>

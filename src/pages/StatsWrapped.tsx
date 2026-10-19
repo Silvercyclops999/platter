@@ -17,16 +17,16 @@ import "./ledger.css";
 /** One year's row: its record sleeve, the year, what opening it shows. The You tab has this year's Wrapped as one. */
 export function YearEntry({ year, title, shown, sub, onOpen, className = "" }: { year: number | null; title: string; shown: string; sub: string; onOpen: () => void; className?: string }) {
   return (
-    <button type="button" className={`year-entry ${className}`} aria-label={title} onClick={onOpen}>
-      <span className="year-entry__sleeve" style={toneStyle(year)} aria-hidden="true">
+    <button type="button" className={`lg-year ${className}`} aria-label={title} onClick={onOpen}>
+      <span className="lg-year__sleeve" style={toneStyle(year)} aria-hidden="true">
         <YearBanner year={year} w={96} h={96} />
       </span>
-      <span className="year-entry__year num">{year ?? ""}</span>
-      <span className="year-entry__text">
-        <span className="year-entry__title">{shown}</span>
-        <span className="year-entry__sub">{sub}</span>
+      <span className="lg-year__year lg-num">{year ?? ""}</span>
+      <span className="lg-year__text">
+        <span className="lg-year__title">{shown}</span>
+        <span className="lg-year__sub">{sub}</span>
       </span>
-      <ChevronRight className="year-entry__go" size={18} aria-hidden="true" />
+      <ChevronRight className="lg-year__go" size={18} aria-hidden="true" />
     </button>
   );
 }
@@ -46,19 +46,19 @@ export function WrappedSection({ index }: { index?: TopSongsIndex }) {
   if (!on || !ix || (!ix.wrappedYears.length && !ix.years.length && !ix.allTime)) return null;
   return (
     <section className="stats-section wrapped-section" aria-labelledby="stats-wrapped" data-shot="wrapped">
-      <div className="ledger-head">
-        <h2 id="stats-wrapped" className="ledger-head__title stats-section__title">
+      <div className="lg-head">
+        <h2 id="stats-wrapped" className="lg-head__title stats-section__title">
           Wrapped and Top Songs
         </h2>
       </div>
       {ix.wrappedYears.length > 0 && (
-        <ul className="year-entries" aria-label="Wrapped">
+        <ul className="lg-years" aria-label="Wrapped">
           {ix.wrappedYears.map((y) => (
             <Entry key={y} year={y} title={`${y} Wrapped`} shown="Wrapped" sub="Your year in records, songs and hours" onOpen={() => wrapped.open(y)} />
           ))}
         </ul>
       )}
-      <ul className="year-entries" aria-label="Top Songs">
+      <ul className="lg-years" aria-label="Top Songs">
         {ix.years.map((y) => (
           <Entry key={y} year={y} title={`Your Top Songs ${y}`} shown="Your Top Songs" sub="Ranked by plays" onOpen={() => nav.go({ name: "topSongs", year: y })} />
         ))}

@@ -51,8 +51,8 @@ function chipOf(c: RangeChoice): ChipId {
 function Section({ title, children, aside }: { title: string; children: ReactNode; aside?: ReactNode }) {
   return (
     <section className="stats-section ph-stats__section" aria-label={title}>
-      <div className="ledger-head">
-        <h2 className="ledger-head__title">{title}</h2>
+      <div className="lg-head">
+        <h2 className="lg-head__title">{title}</h2>
         {aside}
       </div>
       {children}
@@ -110,7 +110,7 @@ function Overview({ o, title, isAll, isYear, today }: { o: StatsOverview; title:
                 key={a.key}
                 art={<Art path={a.thumb} size={48} round kind="artist" monogram={a.name} />}
                 title={`${i + 1}. ${a.name}`}
-                sub={<span className="num">{`${formatPlays(a.plays)} · ${duration(a.ms)}`}</span>}
+                sub={<span className="lg-num">{`${formatPlays(a.plays)} · ${duration(a.ms)}`}</span>}
                 onOpen={a.artistId ? () => nav.go({ name: "artist", id: a.artistId! }) : undefined}
               />
             ))}
@@ -129,7 +129,7 @@ function Overview({ o, title, isAll, isYear, today }: { o: StatsOverview; title:
                 title={`${i + 1}. ${a.title}`}
                 sub={
                   <>
-                    {a.artist} <span className="num">{formatPlays(a.plays)}</span>
+                    {a.artist} <span className="lg-num">{formatPlays(a.plays)}</span>
                   </>
                 }
                 onOpen={a.albumId ? () => nav.go({ name: "album", id: a.albumId! }) : undefined}
@@ -141,16 +141,16 @@ function Overview({ o, title, isAll, isYear, today }: { o: StatsOverview; title:
 
       {genres.length > 0 && (
         <Section title="Your top genres">
-          <ol className="ledger ph-stats__genres">
+          <ol className="lg-rows ph-stats__genres">
             {genres.map((g, i) => (
-              <li key={g.name} className="ledger__row">
-                <span className="ledger__label ph-stats__genre">
-                  <span className="num">{i + 1}</span> {g.name}
+              <li key={g.name} className="lg-row">
+                <span className="lg-row__label ph-stats__genre">
+                  <span className="lg-num">{i + 1}</span> {g.name}
                   <span className="ph-stats__genre-share" aria-hidden="true">
                     <span style={{ width: `${Math.round(genreShare[i] * 100)}%` }} />
                   </span>
                 </span>
-                <span className="ledger__value">{formatPlays(g.plays)}</span>
+                <span className="lg-row__value">{formatPlays(g.plays)}</span>
               </li>
             ))}
           </ol>

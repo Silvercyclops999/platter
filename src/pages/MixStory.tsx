@@ -35,7 +35,7 @@ export function MixStory({ tracks, familiar, className = "" }: { tracks: Pick<Tr
   const k = known.filter(Boolean).length;
   return (
     <div className={`mix-story ${className}`} data-testid="mix-story">
-      <p className="lead lead--xs mix-story__sentence">{mixSentence(tracks, familiar)}</p>
+      <p className="lg-lead lg-lead--xs mix-story__sentence">{mixSentence(tracks, familiar)}</p>
       {mixed && (
         <figure className="mix-strip" role="img" aria-label={`In running order: ${k} songs you know and ${tracks.length - k} you've hardly played.`}>
           <span className="mix-strip__songs" aria-hidden="true">

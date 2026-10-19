@@ -87,9 +87,9 @@ function MixList({ title, mixes }: { title: string; mixes: MixSummary[] }) {
   if (!mixes.length) return null;
   return (
     <section className="mixes-page__group" aria-label={title}>
-      <div className="ledger-head">
-        <h2 className="ledger-head__title">{title}</h2>
-        <span className="ledger-head__aside">{mixes.length}</span>
+      <div className="lg-head">
+        <h2 className="lg-head__title">{title}</h2>
+        <span className="lg-head__aside">{mixes.length}</span>
       </div>
       <ul className="mix-rows" aria-label={title}>
         {mixes.map((m) => (
@@ -110,7 +110,7 @@ export function MixesPage() {
     <div className="page-pad mixes-page">
       <h1 className="page-title">Radio and mixes</h1>
       {on && data && count > 0 && (
-        <p className="lead lead--sm mixes-page__lead" data-testid="mixes-lead">
+        <p className="lg-lead lg-lead--sm mixes-page__lead" data-testid="mixes-lead">
           {mixesSentence(data)}
         </p>
       )}

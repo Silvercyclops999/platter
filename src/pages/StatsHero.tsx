@@ -17,9 +17,9 @@ import "./ledger.css";
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <li className="ledger__row stats-fact">
-      <span className="ledger__label stats-fact__label">{label}</span>
-      <span className="ledger__value stats-fact__value">{children}</span>
+    <li className="lg-row stats-fact">
+      <span className="lg-row__label stats-fact__label">{label}</span>
+      <span className="lg-row__value stats-fact__value">{children}</span>
     </li>
   );
 }
@@ -35,7 +35,7 @@ function TopRecord({ o, named }: { o: StatsOverview; named: string | null }) {
         <Art path={a.thumb} fluid requestSize={240} sleeve={{ title: a.title, artist: a.artist }} />
       </span>
       <figcaption className="stats-record__caption">
-        <span className="eyebrow">Played most</span>
+        <span className="lg-eyebrow">Played most</span>
         {open ? (
           <TextLink className="stats-record__title" onActivate={open}>
             {a.title}
@@ -45,7 +45,7 @@ function TopRecord({ o, named }: { o: StatsOverview; named: string | null }) {
         )}
         <span className="stats-record__sub">
           {a.artist !== named && <>{a.artist} </>}
-          <span className="num">{formatPlays(a.plays)}</span>
+          <span className="lg-num">{formatPlays(a.plays)}</span>
         </span>
       </figcaption>
     </figure>
@@ -67,11 +67,11 @@ export function StatsHero({ o, moments, title, isAll }: { o: StatsOverview; mome
   return (
     <section className="stats-hero" aria-label={`${title} at a glance`} data-shot="hero" data-testid="stats-hero">
       <div className="stats-hero__main">
-        <p className="eyebrow stats-hero__eyebrow">
+        <p className="lg-eyebrow stats-hero__eyebrow">
           {title}
           <span className="stats-hero__dates">{dates}</span>
         </p>
-        <p className="lead stats-hero__sentence" data-testid="hero-sentence">
+        <p className="lg-lead stats-hero__sentence" data-testid="hero-sentence">
           You listened for <strong>{s.time}</strong> on <strong>{s.days}</strong>.
           {s.artist && (
             <>
@@ -80,8 +80,8 @@ export function StatsHero({ o, moments, title, isAll }: { o: StatsOverview; mome
             </>
           )}
         </p>
-        <p className="lead-facts stats-hero__totals">{totals.join(" · ")}</p>
-        <ul className="ledger stats-hero__facts">
+        <p className="lg-facts stats-hero__totals">{totals.join(" · ")}</p>
+        <ul className="lg-rows stats-hero__facts">
           <Fact label="Longest streak">
             {o.streak ? `${o.streak.days.toLocaleString()} ${o.streak.days === 1 ? "day" : "days"} in a row` : "None yet"}
             {o.streak && o.streak.days > 1 && (

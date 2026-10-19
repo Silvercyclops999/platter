@@ -74,7 +74,7 @@ export function EraStory({ data, className = "", gap }: { data: EraPage; classNa
   const last = marks[marks.length - 1];
   return (
     <div className={`era-story ${className}`} data-testid="era-story">
-      <p className="lead lead--sm era-story__sentence">
+      <p className="lg-lead lg-lead--sm era-story__sentence">
         <strong>{s.lead}</strong>
         {s.rest}
       </p>
@@ -96,7 +96,7 @@ export function EraStory({ data, className = "", gap }: { data: EraPage; classNa
               <span className="era-line__tick" />
               <span className="era-line__label">
                 <span className="era-line__title">{m.title}</span>
-                <span className="era-line__date num">{m.date}</span>
+                <span className="era-line__date lg-num">{m.date}</span>
               </span>
             </span>
           ))}

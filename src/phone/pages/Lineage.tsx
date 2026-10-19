@@ -102,7 +102,7 @@ export function PhoneLineage({ id }: { id: string }) {
         onPlay={() => (playingHere ? void player.toggle() : void player.playTracks(ids))}
         left={<span className="ph-x__meta">Pick two to compare them.</span>}
       />
-      <p className="lead lead--sm ph-lineage__lead">{lineageSentence(data)}</p>
+      <p className="lg-lead lg-lead--sm ph-lineage__lead">{lineageSentence(data)}</p>
       <ol className="ph-lineage__list" aria-label={`Versions of ${data.title}, oldest first`}>
         {data.nodes.map((n) => (
           <Node

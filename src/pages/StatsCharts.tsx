@@ -427,7 +427,7 @@ function Story({ id, heading, sentence, layout = "stack", children }: { id: stri
   return (
     <article className={`story story--${layout}`} aria-labelledby={id} data-testid={id}>
       <div className="story__text">
-        <h3 id={id} className="eyebrow story__heading">
+        <h3 id={id} className="lg-eyebrow story__heading">
           {heading}
         </h3>
         <p className="story__sentence">{typeof sentence === "string" ? keepTogether(sentence) : sentence}</p>
@@ -485,8 +485,8 @@ export function WhenYouListened({ o, today }: { o: StatsOverview; today: string 
     .join(" ");
   return (
     <section className="stats-section stats-when" aria-labelledby="stats-charts" data-shot="charts">
-      <div className="ledger-head">
-        <h2 id="stats-charts" className="ledger-head__title stats-section__title">
+      <div className="lg-head">
+        <h2 id="stats-charts" className="lg-head__title stats-section__title">
           When you listened
         </h2>
       </div>

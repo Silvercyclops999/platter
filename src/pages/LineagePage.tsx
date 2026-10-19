@@ -182,7 +182,7 @@ export function LineagePage({ id }: { id: string }) {
         </div>
 
         {data && (
-          <p className="lead lead--sm lineage-page__lead" data-testid="lineage-lead">
+          <p className="lg-lead lg-lead--sm lineage-page__lead" data-testid="lineage-lead">
             {lineageSentence(data)}
           </p>
         )}
