@@ -16,7 +16,8 @@ import { useSleeveNotes } from "../lib/useSleeveNotes";
 import { useCreditRows } from "../shell/creditRows";
 import { SEEK_KEY_STEP, SEEK_PAGE_STEP } from "../shell/PlayerBar";
 import { player, usePlayer } from "../stores/player";
-import { FormatPlate, LikeControl, Marquee, remaining, tap } from "./bits";
+import { FormatPlate, LikeControl, Marquee, remaining, RowGlyphs, tap } from "./bits";
+
 import { OutputButton } from "./DeviceSheet";
 import { useArtGestures } from "./gestures";
 import { LyricsCard } from "./LyricsScreen";
@@ -127,9 +128,12 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
               <button type="button" className="ph-np__title" onClick={() => phone.go({ name: "album", id: track.albumId })}>
                 {track.title}
               </button>
-              <button type="button" className="ph-np__artist" aria-label={trackArtistLine(track)} onClick={() => phone.go({ name: "artist", id: track.artistId })}>
-                <Marquee text={trackArtistLine(track)} moving={playing} />
-              </button>
+              <span className="ph-np__artist-line">
+                <RowGlyphs trackId={track.id} />
+                <button type="button" className="ph-np__artist" aria-label={trackArtistLine(track)} onClick={() => phone.go({ name: "artist", id: track.artistId })}>
+                  <Marquee text={trackArtistLine(track)} moving={playing} />
+                </button>
+              </span>
             </div>
             <LikeControl track={track} />
           </div>

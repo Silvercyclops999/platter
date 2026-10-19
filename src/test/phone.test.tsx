@@ -23,6 +23,8 @@ import { phone, usePhoneUi } from "../phone/phoneUi";
 import { dropIndex } from "../phone/Sheets";
 import { cancelSleep, due, sleepLabel, startSleep, useSleep } from "../phone/sleepTimer";
 import { plateText, remaining } from "../phone/bits";
+import { useDownloads } from "../stores/downloads";
+import { useFileTags } from "../stores/fileTags";
 import { player, usePlayer } from "../stores/player";
 import { useRouter } from "../stores/router";
 import { loadSettings, useSettings } from "../stores/settings";
@@ -124,11 +126,31 @@ describe("mini player and now playing", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Now playing" })).not.toBeInTheDocument());
   });
 
-  it("the plate says Downloaded, the format, or nothing known", () => {
+  it("now playing marks an explicit, downloaded song with the row glyphs before the artist, not words", async () => {
+    const t = tracks()[0];
+    play(t);
+    render(<PhoneShell />);
+    act(() => phone.openPlayer());
+    const np = await screen.findByRole("dialog", { name: "Now playing" });
+    // After the shell's own first load of the downloaded songs.
+    await waitFor(() => expect(useDownloads.getState().status).not.toBeNull());
+    act(() => {
+      useFileTags.setState({ index: { tracks: { [t.id]: { explicit: true } }, albums: {}, groups: {} } });
+      useDownloads.setState({ ids: new Set([t.id]) });
+    });
+    const line = np.querySelector(".ph-np__artist-line") as HTMLElement;
+    expect(within(line).getAllByRole("img").map((g) => g.getAttribute("aria-label"))).toEqual(["Explicit", "Downloaded"]);
+    expect(within(np).queryByText("Downloaded")).toBeNull();
+    act(() => {
+      useFileTags.setState({ index: { tracks: {}, albums: {}, groups: {} } });
+      useDownloads.setState({ ids: new Set() });
+    });
+  });
+
+  it("the plate says the format, or nothing when it is not known", () => {
     const t = { codec: "flac", bitDepth: 24, sampleRate: 96000, bitrate: 2300 };
-    expect(plateText(t, false)).toBe("FLAC 24/96");
-    expect(plateText(t, true)).toBe("Downloaded");
-    expect(plateText({ codec: null, bitDepth: null, sampleRate: null, bitrate: null }, false)).toBeNull();
+    expect(plateText(t)).toBe("FLAC 24/96");
+    expect(plateText({ codec: null, bitDepth: null, sampleRate: null, bitrate: null })).toBeNull();
   });
 });
 

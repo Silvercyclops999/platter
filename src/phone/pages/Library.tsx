@@ -10,6 +10,7 @@ import { LikedCover } from "../../components/LikedCover";
 import { KIND_LABEL, SORT_LABEL, useLibraryView, type LibEntry, type LibKind } from "../../stores/library";
 import { openEntry, useLibraryLoader, useLibraryModel } from "../../shell/useLibrary";
 import { useApp } from "../../stores/app";
+import type { DownloadKind } from "../../lib/types";
 import { RowGlyphs, tap } from "../bits";
 import { letterOf, phoneRows, phoneSubtitle } from "../libraryRows";
 import "./parity.css";
@@ -152,7 +153,7 @@ function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof use
                 )}
                 <span className="ph-card-tile__title">{e.title}</span>
                 <span className="ph-card-tile__sub">
-                  <RowGlyphs pinned={e.pinned && !e.liked} downloaded={e.downloaded} />
+                  <RowGlyphs pinned={e.pinned && !e.liked} downloaded={e.downloaded} item={downloadItemOf(e)} albumId={e.kind === "album" ? e.id : undefined} />
                   {phoneSubtitle(e, model.filter !== "all")}
                 </span>
               </button>
@@ -212,6 +213,12 @@ function LetterIndex({ list, letters }: { list: React.RefObject<HTMLUListElement
   );
 }
 
+/** The download a library item stands for: Liked Songs, an album or a playlist. */
+export function downloadItemOf(e: Pick<LibEntry, "kind" | "id" | "liked">): { kind: DownloadKind; id: string } | undefined {
+  if (e.liked) return { kind: "liked", id: "" };
+  return e.kind === "album" || e.kind === "playlist" ? { kind: e.kind, id: e.id } : undefined;
+}
+
 function LibRow({ e, typed, letter }: { e: LibEntry; typed: boolean; letter?: string }) {
   const round = e.kind === "artist";
   return (
@@ -225,7 +232,7 @@ function LibRow({ e, typed, letter }: { e: LibEntry; typed: boolean; letter?: st
         <span className="ph-row__text">
           <span className="ph-row__title">{e.title}</span>
           <span className="ph-row__sub">
-            <RowGlyphs pinned={e.pinned && !e.liked} downloaded={e.downloaded} />
+            <RowGlyphs pinned={e.pinned && !e.liked} downloaded={e.downloaded} item={downloadItemOf(e)} albumId={e.kind === "album" ? e.id : undefined} />
             {phoneSubtitle(e, typed)}
           </span>
         </span>

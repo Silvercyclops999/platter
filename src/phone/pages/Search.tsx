@@ -13,7 +13,7 @@ import { hitInfo, hitOf, mixedHits, openHit, rememberHit, subtitleWithType } fro
 import { useLoad } from "../../lib/useLoad";
 import { nav, useRouter } from "../../stores/router";
 import { phone } from "../phoneUi";
-import { tap } from "../bits";
+import { RowGlyphs, tap } from "../bits";
 
 /** Typing settles for this long before the search runs. */
 export const SEARCH_SETTLE_MS = 150;
@@ -234,7 +234,10 @@ function HitRow({
         <Art path={i.thumb} size={52} round={i.round} kind={i.kind === "track" ? "album" : i.kind} monogram={i.round ? i.title : undefined} />
         <span className="ph-row__text">
           <span className="ph-row__title">{i.title}</span>
-          <span className="ph-row__sub">{hitLine(i, typed)}</span>
+          <span className="ph-row__sub">
+            <RowGlyphs trackId={i.kind === "track" ? i.id : undefined} albumId={i.kind === "album" ? i.id : undefined} />
+            {hitLine(i, typed)}
+          </span>
         </span>
       </button>
       {onRemove && (

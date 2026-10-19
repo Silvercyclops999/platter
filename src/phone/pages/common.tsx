@@ -5,7 +5,8 @@
 import { ChevronLeft, MoreHorizontal } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Art } from "../../components/Art";
-import { DownloadedMark } from "../../components/DownloadButton";
+import { RowGlyphs } from "../bits";
+
 import { trackArtistLine } from "../../lib/format";
 import type { HomeItem, Track } from "../../lib/types";
 import { useCanGoBack, useRouter, type Route } from "../../stores/router";
@@ -86,7 +87,7 @@ export function SongRow({
         <span className="ph-row__text">
           <span className={`ph-row__title ${playing ? "is-playing" : ""}`}>{track.title}</span>
           <span className="ph-row__sub">
-            <DownloadedMark trackId={track.id} />
+            <RowGlyphs trackId={track.id} />
             {sub ?? trackArtistLine(track)}
           </span>
         </span>

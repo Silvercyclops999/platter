@@ -337,11 +337,10 @@ describe("touch and sheets", () => {
 });
 
 describe("what the phone says", () => {
-  it("format plates only for lossless files or downloads", () => {
-    expect(plateText({ codec: "mp3", bitDepth: null, sampleRate: 44100, bitrate: 320 }, false)).toBeNull();
-    expect(plateText({ codec: "mp3", bitDepth: null, sampleRate: 44100, bitrate: 320 }, true)).toBe("Downloaded");
+  it("format plates only for lossless files", () => {
+    expect(plateText({ codec: "mp3", bitDepth: null, sampleRate: 44100, bitrate: 320 })).toBeNull();
     const flac = { codec: "flac", bitDepth: 16, sampleRate: 44100, bitrate: 900 };
-    expect(albumPlate([flac, flac])).toBe(plateText(flac, false));
+    expect(albumPlate([flac, flac])).toBe(plateText(flac));
     expect(albumPlate([flac, { ...flac, codec: "mp3" }])).toBeNull();
   });
 

@@ -171,6 +171,11 @@
 /* The shared engraved plate, a touch larger on the phone. */
 .phone .plate { flex: none; }
 .ph-glyphs { display: inline-flex; align-items: center; gap: 4px; margin-right: 6px; vertical-align: -1px; }
+.ph-glyphs:empty { display: none; }
+/* Every row glyph is one 14 px square on the grey line: the explicit "E" and the download mark line up. */
+.ph-glyphs .explicit-badge { width: 14px; height: 14px; font-size: 9px; border-radius: 2px; }
+.ph-glyph--dl { display: inline-flex; flex: none; width: 14px; height: 14px; color: var(--color-text-secondary); }
+.ph-glyph--dl svg { display: block; }
 .ph-glyph--pin { display: inline-flex; color: var(--color-accent); }
 .ph-glyph--pin svg { transform: rotate(35deg); }
 
@@ -330,7 +335,9 @@
   overflow: hidden;
   overflow-wrap: anywhere;
 }
-.ph-np__artist { display: block; min-width: 0; min-height: 24px; font-size: 16px; color: var(--color-text-secondary); }
+.ph-np__artist-line { display: flex; align-items: center; min-width: 0; }
+.ph-np__artist-line .ph-glyphs { flex: none; vertical-align: 0; }
+.ph-np__artist { display: block; flex: 1; min-width: 0; min-height: 24px; font-size: 16px; color: var(--color-text-secondary); }
 .ph-marquee { display: block; overflow: hidden; white-space: nowrap; }
 .ph-marquee.is-over { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
 .ph-marquee.is-over.is-moving { -webkit-mask-image: linear-gradient(90deg, transparent, #000 16px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, transparent, #000 16px, #000 calc(100% - 28px), transparent); }

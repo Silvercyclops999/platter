@@ -326,8 +326,6 @@
 /* ---------------------------------------------------------------- downloads */
 .ph-dl { position: relative; color: var(--color-text-secondary); }
 .ph-dl.is-done { color: var(--color-accent); }
-.ph-dl.is-downloading, .ph-dl.is-waiting { width: auto; min-width: 44px; padding: 0 6px; gap: 4px; display: inline-flex; border-radius: 22px; }
-.ph-dl__count { font-family: var(--font-readout, var(--font-family)); font-size: 12px; color: var(--color-text-secondary); }
 .ph-dl-card { margin: 4px 0 16px !important; display: flex; flex-direction: column; gap: 8px; }
 .ph-dl-card__used { margin: 0; font-size: 15px; font-weight: 600; }
 .ph-dl-card__meter { display: block; height: 6px; border-radius: 3px; overflow: hidden; background: var(--ph-faint); }

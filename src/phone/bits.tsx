@@ -8,11 +8,15 @@ import { Plate } from "../components/Plate";
 import { backend, type HapticKind } from "../lib/backend";
 import { prefersReducedMotion } from "../design/motion";
 import { usePlayer } from "../stores/player";
-import { DownloadedGlyph } from "../components/DownloadButton";
+import { ExplicitBadge } from "../components/FileTagBadges";
+import type { DownloadKind } from "../lib/types";
+import { useAlbumBadges, useTrackBadges } from "../stores/fileTags";
+import { DownloadMark, ItemDownloadMark, TrackDownloadMark } from "./DownloadMark";
+
 import { qualityLabel } from "../lib/format";
 import { isLosslessCodec } from "../lib/libraryChips";
 import type { Track } from "../lib/types";
-import { useIsDownloaded } from "../stores/downloads";
+
 import { setLiked, useIsLiked } from "../stores/likes";
 import { useSettings } from "../stores/settings";
 import { phone } from "./phoneUi";
@@ -46,28 +50,27 @@ export function tap(kind: HapticKind = "light") {
 }
 
 /**
- * What the plate says: "Downloaded", or the format of a lossless file
- * ("FLAC 24/96"). A lossy file's bitrate is left off the phone: it is the
- * usual case, and a number there reads like a debug label.
+ * What the plate says: the format of a lossless file ("FLAC 24/96"). A
+ * lossy file's bitrate is left off the phone: it is the usual case, and a
+ * number there reads like a debug label. Downloaded is the row glyph, not
+ * a word on the plate.
  */
-export function plateText(track: Pick<Track, "codec" | "bitDepth" | "sampleRate" | "bitrate">, downloaded: boolean): string | null {
-  if (downloaded) return "Downloaded";
+export function plateText(track: Pick<Track, "codec" | "bitDepth" | "sampleRate" | "bitrate">): string | null {
   return isLosslessCodec(track.codec) ? qualityLabel(track) : null;
 }
 
 /** An album's plate: its format when every song shares one lossless format. */
 export function albumPlate(tracks: Pick<Track, "codec" | "bitDepth" | "sampleRate" | "bitrate">[]): string | null {
-  const labels = new Set(tracks.map((t) => plateText(t, false)));
+  const labels = new Set(tracks.map((t) => plateText(t)));
   if (labels.size !== 1) return null;
   return [...labels][0];
 }
 
-/** The engraved format plate beside an artist line. */
+/** The engraved format plate (lossless only). */
 export function FormatPlate({ track, className = "" }: { track: Track; className?: string }) {
-  const downloaded = useIsDownloaded(track.id);
-  const text = plateText(track, downloaded);
+  const text = plateText(track);
   if (!text) return null;
-  const hiRes = !downloaded && ((track.bitDepth ?? 0) > 16 || (track.sampleRate ?? 0) > 48_000);
+  const hiRes = (track.bitDepth ?? 0) > 16 || (track.sampleRate ?? 0) > 48_000;
   return (
     <Plate size="sm" tone={hiRes ? "lit" : "plain"} className={`ph-plate ${className}`}>
       {text}
@@ -75,9 +78,26 @@ export function FormatPlate({ track, className = "" }: { track: Track; className
   );
 }
 
-/** Glyphs before a library row's grey line: pinned, downloaded. */
-export function RowGlyphs({ pinned, downloaded }: { pinned?: boolean; downloaded?: boolean }) {
-  if (!pinned && !downloaded) return null;
+/**
+ * The small glyphs before a row's grey line, in one order and one size:
+ * pinned, explicit, then the download mark. A song row passes `trackId`
+ * (its explicit tag and its own download); an album row `albumId` (the
+ * album's explicit tag); a library row its download `item`. Nothing shows
+ * when none applies.
+ */
+export function RowGlyphs({
+  pinned,
+  downloaded,
+  trackId,
+  albumId,
+  item,
+}: {
+  pinned?: boolean;
+  downloaded?: boolean;
+  trackId?: string;
+  albumId?: string;
+  item?: { kind: DownloadKind; id: string };
+}) {
   return (
     <span className="ph-glyphs">
       {pinned && (
@@ -85,9 +105,26 @@ export function RowGlyphs({ pinned, downloaded }: { pinned?: boolean; downloaded
           <Pin size={12} aria-hidden="true" />
         </span>
       )}
-      {downloaded && <DownloadedGlyph />}
+      {trackId && <TrackExplicit trackId={trackId} />}
+      {albumId && <AlbumExplicit albumId={albumId} />}
+      {trackId ? (
+        <TrackDownloadMark trackId={trackId} />
+      ) : item ? (
+        <ItemDownloadMark kind={item.kind} id={item.id} downloaded={downloaded} />
+      ) : (
+        downloaded && <DownloadMark state="done" />
+      )}
     </span>
   );
+}
+
+/** The desktop's "E", at the row glyphs' size. */
+function TrackExplicit({ trackId }: { trackId: string }) {
+  return useTrackBadges(trackId).explicit ? <ExplicitBadge /> : null;
+}
+
+function AlbumExplicit({ albumId }: { albumId: string }) {
+  return useAlbumBadges(albumId)?.explicit ? <ExplicitBadge /> : null;
 }
 
 /**
