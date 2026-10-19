@@ -3769,6 +3769,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-media-player"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85f2a98483f6e76313cb85a5a185eaa3cda86a177b13a8852d56cbd0085bf635"
+dependencies = [
+ "bitflags 2.13.2",
+ "block2",
+ "objc2",
+ "objc2-foundation",
+]
+
+[[package]]
 name = "objc2-osa-kit"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4193,6 +4205,7 @@ version = "0.2.28"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
+ "block2",
  "bytes",
  "chacha20poly1305",
  "chardetng",
@@ -4213,10 +4226,13 @@ dependencies = [
  "md-5",
  "mdns-sd",
  "mp3lame-encoder",
+ "objc2",
  "objc2-avf-audio",
  "objc2-core-audio",
  "objc2-core-foundation",
  "objc2-foundation",
+ "objc2-media-player",
+ "objc2-ui-kit",
  "ogg",
  "parking_lot",
  "percent-encoding",

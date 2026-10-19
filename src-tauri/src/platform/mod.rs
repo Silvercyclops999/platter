@@ -8,6 +8,10 @@
 pub mod art;
 #[cfg(target_os = "ios")]
 pub mod audio_session;
+#[cfg(target_os = "ios")]
+mod ios_session;
+#[cfg(target_os = "ios")]
+pub mod ios_webview;
 pub mod commands;
 pub mod cpu;
 pub mod discord;
@@ -442,7 +446,23 @@ fn session_factory<R: Runtime>(app: &AppHandle<R>) -> Box<dyn media::SessionFact
     })
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+/// The iPhone's lock screen and Control Centre; the command targets are
+/// added on the main thread.
+#[cfg(target_os = "ios")]
+fn session_factory<R: Runtime>(app: &AppHandle<R>) -> Box<dyn media::SessionFactory> {
+    let app = app.clone();
+    Box::new(move |cb: media::CommandFn| -> Result<Box<dyn media::MediaSession>, String> {
+        let (tx, rx) = mpsc::channel();
+        app.run_on_main_thread(move || {
+            let _ = tx.send(ios_session::IosSession::create(cb));
+        })
+        .map_err(|e| e.to_string())?;
+        let s = rx.recv_timeout(std::time::Duration::from_secs(10)).map_err(|e| e.to_string())??;
+        Ok(Box::new(s))
+    })
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "ios")))]
 fn session_factory<R: Runtime>(_app: &AppHandle<R>) -> Box<dyn media::SessionFactory> {
     Box::new(|_cb: media::CommandFn| -> Result<Box<dyn media::MediaSession>, String> {
         Err("no system media controls on this platform".into())

@@ -471,6 +471,8 @@ pub fn run() {
             std::fs::create_dir_all(&root_dir)?;
             monitor::crash::install(&root_dir);
             platform::logs::open(app.handle());
+            #[cfg(target_os = "ios")]
+            platform::ios_webview::settle(app.handle());
             // The Plex Home user this run belongs to: their own folder and
             // keychain entries (the user who signed in keeps the top folder).
             let (profile, data_dir) = plex::home::startup(&root_dir);
