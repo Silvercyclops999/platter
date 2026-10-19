@@ -80,7 +80,14 @@ pub struct DeviceSync {
     replies: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// A link was added, or "Sync now".
     kick: tokio::sync::Notify,
+    /// Keep my devices in sync (Settings); on when not set.
+    switch: RwLock<Option<Switch>>,
+    on_status: Mutex<Option<OnStatus>>,
+    last_status: Mutex<Vec<DeviceStatus>>,
 }
+
+type Switch = Arc<dyn Fn() -> bool + Send + Sync>;
+type OnStatus = Arc<dyn Fn(&[DeviceStatus]) + Send + Sync>;
 
 impl DeviceSync {
     pub fn new(peer: Arc<SyncPeer>, wire: Arc<Wire>, timing: Timing) -> Self {
@@ -93,6 +100,37 @@ impl DeviceSync {
             lan: RwLock::default(),
             replies: Mutex::default(),
             kick: tokio::sync::Notify::new(),
+            switch: RwLock::default(),
+            on_status: Mutex::default(),
+            last_status: Mutex::default(),
+        }
+    }
+
+    /// Follow Keep my devices in sync: while it's off nothing is sent,
+    /// taken or listened for.
+    pub fn set_switch(&self, f: Switch) {
+        *self.switch.write() = Some(f);
+    }
+
+    pub fn is_on(&self) -> bool {
+        self.switch.read().as_ref().is_none_or(|f| f())
+    }
+
+    /// Called with every linked device's status when any of it changes.
+    pub fn set_on_status(&self, f: OnStatus) {
+        *self.on_status.lock() = Some(f);
+    }
+
+    /// Tell the window if the status changed.
+    pub fn status_changed(&self) {
+        let now = self.status();
+        let mut last = self.last_status.lock();
+        if *last != now {
+            *last = now.clone();
+            drop(last);
+            if let Some(f) = self.on_status.lock().clone() {
+                f(&now);
+            }
         }
     }
 
@@ -170,13 +208,59 @@ impl DeviceSync {
 
     /// A round with every linked device ("Sync now").
     pub async fn sync_now(&self) {
+        if !self.is_on() {
+            return;
+        }
         for link in self.wire.links.links() {
             self.round(&link).await;
         }
     }
 
+    /// "Copy settings from my computer": take the synced settings a linked
+    /// computer has, as they are there, so they win here and everywhere.
+    /// The computer that was in step most recently is asked (a phone or
+    /// tablet only when there's no computer). Returns its name.
+    pub async fn copy_settings(&self, wait: Duration) -> crate::error::AppResult<String> {
+        use crate::error::AppError;
+        if !self.is_on() {
+            return Err(AppError::Invalid("Turn on Keep my devices in sync first.".into()));
+        }
+        let mobile = |p: &str| matches!(p.to_ascii_lowercase().as_str(), "ios" | "ipados" | "android");
+        let mut all = self.wire.links.all();
+        all.sort_by_key(|p| {
+            let seen = self.peer.seen(&p.id).unwrap_or_default();
+            (mobile(&seen.platform), std::cmp::Reverse(p.last_synced_at))
+        });
+        let Some(p) = all.first() else {
+            return Err(AppError::NotFound("Pair this device with your computer first, in Settings under Keep my devices in sync.".into()));
+        };
+        let link = self.wire.links.link(&p.id).ok_or_else(|| AppError::NotFound("That device isn't linked here.".into()))?;
+        let seen = self.peer.seen(&p.id).unwrap_or_default();
+        let name = if seen.name.is_empty() { p.name.clone() } else { seen.name };
+        // The other end answers only once it has checked this one's account:
+        // a hello goes first when this run hasn't met it yet.
+        let mut msgs = Vec::new();
+        if !self.peer.verified(&link.id) {
+            msgs.extend(self.peer.hello(false).await);
+        }
+        msgs.push(self.peer.copy_settings(&link));
+        self.send(&link, msgs).await;
+        let until = tokio::time::Instant::now() + wait;
+        while self.peer.copying(&link.id) && tokio::time::Instant::now() < until {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        if self.peer.copying(&link.id) {
+            self.peer.stop_copying(&link.id);
+            return Err(AppError::Network(format!("{name} didn't answer. Open Platter there and try again.")));
+        }
+        Ok(name)
+    }
+
     /// Local changes out to every linked device.
     pub async fn push_all(&self) {
+        if !self.is_on() {
+            return;
+        }
         for link in self.wire.links.links() {
             let msgs = self.peer.push(&link).await;
             self.send(&link, msgs).await;
@@ -185,6 +269,9 @@ impl DeviceSync {
 
     /// One message in from a link: answered on the same link.
     pub async fn incoming(&self, link: &Link, msg: Msg) {
+        if !self.is_on() {
+            return;
+        }
         let replies = self.peer.handle(link, msg).await;
         self.send(link, replies).await;
     }
@@ -205,6 +292,7 @@ impl DeviceSync {
     /// Every linked device, for Settings > Sync.
     pub fn status(&self) -> Vec<DeviceStatus> {
         let paths = self.paths.lock().clone();
+        let on = self.is_on();
         self.wire
             .links
             .all()
@@ -214,6 +302,7 @@ impl DeviceSync {
                 let name = if seen.name.is_empty() { p.name.clone() } else { seen.name.clone() };
                 let path = paths.get(&p.id).copied().unwrap_or_default();
                 let words = match (seen.paused, path) {
+                    _ if !on => "Keep my devices in sync is off".to_string(),
                     (Some(Paused::OtherAccount), _) => "This device is signed in to a different account. Sync paused".to_string(),
                     (Some(Paused::SignedOut), _) => "Sign in to Plex to keep your devices in sync".to_string(),
                     (None, PathState::RelayBusy) => "The relay is busy, trying again later".to_string(),
@@ -236,6 +325,13 @@ impl DeviceSync {
     }
 
     fn listen_new(&self, tx: &mpsc::Sender<Incoming>) {
+        if !self.is_on() {
+            // Off: stop listening until it's on again.
+            for (_, s) in self.listeners.lock().drain() {
+                let _ = s.send(true);
+            }
+            return;
+        }
         for link in self.wire.links.links() {
             let mut l = self.listeners.lock();
             if !l.contains_key(&link.id) {
@@ -291,6 +387,7 @@ impl DeviceSync {
                     return;
                 }
             }
+            self.status_changed();
         }
     }
 }

@@ -358,6 +358,12 @@ impl RemoteService {
         *self.inner.peers.lock() = Some(dir);
     }
 
+    /// Where the user's other Platter devices are looked for (once the
+    /// control API runs).
+    pub fn peers(&self) -> Option<Arc<dyn PeerDirectory>> {
+        self.inner.peers.lock().clone()
+    }
+
     pub fn own_id(&self) -> &str {
         &self.inner.own_id
     }

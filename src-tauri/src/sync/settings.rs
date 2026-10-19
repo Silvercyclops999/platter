@@ -21,6 +21,11 @@ fn store_key(name: &str) -> &str {
     STORE_NAMES.iter().find(|(n, _)| *n == name).map_or(name, |(_, k)| k)
 }
 
+/// Every synced setting's store key.
+pub fn store_keys() -> Vec<String> {
+    SYNCED_SETTINGS.iter().map(|n| store_key(n).to_string()).collect()
+}
+
 fn as_map(s: &Settings) -> AppResult<Map<String, Value>> {
     match serde_json::to_value(s).map_err(|e| AppError::Internal(e.to_string()))? {
         Value::Object(m) => Ok(m),

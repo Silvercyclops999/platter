@@ -547,6 +547,11 @@ impl Downloads {
 
     // ---------------------------------------------------------------- items
 
+    /// Every item that's on (albums, playlists, Liked Songs, mixes).
+    pub fn items(&self) -> Vec<store::ItemRow> {
+        self.inner.db.read(store::items).unwrap_or_default()
+    }
+
     /// Turns an item on. Albums, playlists and Liked Songs take their songs
     /// from the library cache; a mix needs `track_ids`.
     pub async fn add(&self, key: ItemKey, title: String, track_ids: Option<Vec<String>>) -> AppResult<()> {

@@ -14,10 +14,14 @@
 //! - [`run`]: listeners, rounds and sending local changes through the relay.
 //! - [`lan`]: the local network path (tried first), and answering it.
 //! - [`clock`]: how far apart two devices' clocks are, in words.
+//! - [`feeds`]: looks, downloads and imported plays into the store and out.
+//! - [`commands`]: setting it up in the app, and the Tauri commands.
 //! - [`pair`]: pairing two devices, with the 6-digit code at home or the
 //!   long code anywhere.
 
 pub mod clock;
+pub mod commands;
+pub mod feeds;
 pub mod lan;
 pub mod pair;
 pub mod protocol;

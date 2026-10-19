@@ -16,7 +16,7 @@ use crate::remote::peer::server::{self, ExtraSlot, PeerServer};
 use crate::remote::peer::sync::SyncRoutes;
 use crate::sync::devices::pair::{CODE_TTL_MS, DevicePairing, PairDeps, PairPhase, TRIES};
 
-const ACCT_TOKEN: &str = "acct-token-SECRET-9";
+pub(super) const ACCT_TOKEN: &str = "acct-token-SECRET-9";
 
 /// Every pairing request and answer as it crossed the network.
 struct Tap {
@@ -43,13 +43,13 @@ impl PeerPair for Tap {
     }
 }
 
-struct Host {
-    dev: Dev,
-    pairing: Arc<DevicePairing>,
-    sync: Arc<DeviceSync>,
+pub(super) struct Host {
+    pub(super) dev: Dev,
+    pub(super) pairing: Arc<DevicePairing>,
+    pub(super) sync: Arc<DeviceSync>,
     tap: Arc<Tap>,
-    device: PeerDevice,
-    client: PeerClient,
+    pub(super) device: PeerDevice,
+    pub(super) client: PeerClient,
     _stop: tokio::sync::watch::Sender<bool>,
 }
 
@@ -70,7 +70,7 @@ fn deps(d: &Dev, relay: &str) -> PairDeps {
 
 /// A device with its control port on loopback answering pairing and sync,
 /// signing with `token` (devices with one token are one account).
-async fn host(d: Dev, token: &str, relay: &str) -> Host {
+pub(super) async fn host(d: Dev, token: &str, relay: &str) -> Host {
     let pairing = DevicePairing::new(deps(&d, relay));
     let tap = Arc::new(Tap { inner: pairing.clone(), wire: Mutex::default() });
     let wire = Arc::new(Wire::new(d.links.clone(), Arc::new(Ntfy::new().unwrap()) as Arc<dyn RelayFactory>, Arc::new(crate::sync::store::system_ms)));

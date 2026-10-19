@@ -859,4 +859,5 @@ mod lan {
     }
 }
 
+mod app;
 mod pairing;
