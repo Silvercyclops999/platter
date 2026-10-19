@@ -450,6 +450,33 @@ pub fn stream_cap_kbps(
     }
 }
 
+/// Transcodes the server is running for us, oldest first. Plex keeps each
+/// one going until it times out and refuses new ones once enough are open,
+/// so skipping through songs on a remote connection ended in "Bad Request"
+/// for every song after a few.
+static OPEN_TRANSCODES: Mutex<std::collections::VecDeque<(crate::plex::client::PlexClient, String)>> =
+    Mutex::new(std::collections::VecDeque::new());
+
+/// How many may stay open: the song playing and the one loaded after it.
+const TRANSCODES_KEPT: usize = 2;
+
+/// Notes a new transcode and stops the oldest beyond [`TRANSCODES_KEPT`].
+fn keep_transcode(client: crate::plex::client::PlexClient, session: String) {
+    let stale: Vec<_> = {
+        let mut open = OPEN_TRANSCODES.lock();
+        open.push_back((client, session));
+        let extra = open.len().saturating_sub(TRANSCODES_KEPT);
+        open.drain(..extra).collect()
+    };
+    for (client, session) in stale {
+        tokio::spawn(async move {
+            if let Err(e) = client.transcode_stop(&session).await {
+                tracing::debug!("transcode not stopped: {e}");
+            }
+        });
+    }
+}
+
 /// Turns a track into an HTTP source on the connected server. The token
 /// travels only in headers. With the db it also serves loudness data and
 /// remembers measured silence.
@@ -476,6 +503,7 @@ impl TrackResolver for PlexStreams {
         if let Some(kbps) = stream_cap_kbps(client.connection(), track.bitrate, prefs.home(), prefs.away()) {
             let session = uuid::Uuid::new_v4().to_string();
             let req = client.transcode_request(&track.id, kbps, &session)?;
+            keep_transcode(client.clone(), session);
             return Ok(source_of(req, Some("mp3".into())));
         }
         let req = client.stream_request(&track.part_key)?;
@@ -484,7 +512,9 @@ impl TrackResolver for PlexStreams {
 
     async fn transcode(&self, track: &Track) -> AppResult<StreamSource> {
         let session = uuid::Uuid::new_v4().to_string();
-        let req = self.0.client_for(&track.id).await?.transcode_request(&track.id, 320, &session)?;
+        let client = self.0.client_for(&track.id).await?;
+        let req = client.transcode_request(&track.id, 320, &session)?;
+        keep_transcode(client, session);
         Ok(source_of(req, Some("mp3".into())))
     }
 
@@ -1083,5 +1113,47 @@ mod in_order_tests {
         let out = in_order(tracks, &ids);
         let got: Vec<(&str, &str)> = out.iter().map(|t| (t.id.as_str(), t.part_key.as_str())).collect();
         assert_eq!(got, vec![("c", "/p/4"), ("a", "/p/1"), ("b", "/p/2"), ("a", "/p/3")]);
+    }
+}
+
+#[cfg(test)]
+mod transcode_tests {
+    use std::sync::Arc;
+
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::{OPEN_TRANSCODES, TRANSCODES_KEPT, keep_transcode};
+    use crate::plex::client::PlexClient;
+    use crate::plex::identity::ClientIdentity;
+    use crate::plex::token::Token;
+    use crate::plex::types::ConnectionKind;
+
+    #[tokio::test]
+    async fn only_the_playing_and_next_transcodes_stay_open() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/music/:/transcode/universal/stop"))
+            .and(query_param("session", "s1"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let c = PlexClient::new(
+            &server.uri(),
+            Token::new("tok-123456789").unwrap(),
+            Arc::new(ClientIdentity::with_id("cid")),
+            Some(ConnectionKind::Remote),
+        )
+        .unwrap();
+        OPEN_TRANSCODES.lock().clear();
+        for s in ["s1", "s2", "s3"] {
+            keep_transcode(c.clone(), s.into());
+        }
+        let open: Vec<String> = OPEN_TRANSCODES.lock().iter().map(|(_, s)| s.clone()).collect();
+        assert_eq!(open, ["s2", "s3"]);
+        assert_eq!(open.len(), TRANSCODES_KEPT);
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        // `expect(1)` is checked when the server drops: s1 was stopped once.
     }
 }
