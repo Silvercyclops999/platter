@@ -23,7 +23,8 @@ import type {
   RepeatMode,
   QueueAt,
 } from "../lib/types";
-import { OFFLINE_SKIPPED } from "../lib/offline";
+import { offlineSkipped } from "../lib/offline";
+import { usePhoneForm } from "../phone/form";
 import { useApp } from "./app";
 import { addToSession, controlSession, guestLive } from "./social";
 import { toast, useToasts } from "./toasts";
@@ -123,7 +124,8 @@ export function connectPlayer(b: Backend = backend): () => void {
     if (!useApp.getState().health?.cachedOnly || !e.message.startsWith("Skipped")) return toast.error(e.message);
     if (offlineSkipShown) return;
     offlineSkipShown = true;
-    toast.error(OFFLINE_SKIPPED);
+    // A notice, not an error: the songs play again once the server is back.
+    toast.info(offlineSkipped(usePhoneForm.getState().phone));
   }).then((u) => (alive ? unsubs.push(u) : u()));
   b.remoteState()
     .then((r) => alive && usePlayer.getState().setRemote(r))

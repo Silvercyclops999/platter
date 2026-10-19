@@ -34,9 +34,13 @@ use crate::analysis::features::Analysis;
 use crate::error::{AppError, AppResult};
 use crate::model::Track;
 
-/// Play refused because nothing asked for is stored on this computer.
+/// Play refused because nothing asked for is stored on this device.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub const OFFLINE_NOTHING_PLAYS: &str =
     "These songs aren't on this computer, so they can't play until Platter can reach your server.";
+#[cfg(any(target_os = "ios", target_os = "android"))]
+pub const OFFLINE_NOTHING_PLAYS: &str =
+    "These songs aren't on this phone, so they can't play until Platter can reach your server.";
 
 /// Where to start among the playable tracks, and how many are left out. A
 /// start song that can't play moves to the next playable one after it (or

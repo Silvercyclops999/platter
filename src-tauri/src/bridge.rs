@@ -643,9 +643,12 @@ impl OfflinePlay {
     }
 }
 
+/// What this device is called in the offline notices.
+pub const HERE: &str = if cfg!(any(target_os = "ios", target_os = "android")) { "this phone" } else { "this computer" };
+
 pub fn offline_left_out_message(n: usize) -> String {
     let songs = if n == 1 { "1 song that isn't".to_string() } else { format!("{n} songs that aren't") };
-    format!("Skipped {songs} on this computer. They play again when Platter can reach your server.")
+    format!("Skipped {songs} on {HERE}. They play again when Platter can reach your server.")
 }
 
 #[async_trait]

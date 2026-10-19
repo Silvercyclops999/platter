@@ -1229,7 +1229,7 @@
 /* Over now playing the note sits under its top bar, clear of the controls. */
 .phone:has(.ph-np:not(.is-closing)) .toaster { top: calc(var(--ph-safe-top) + 60px); bottom: auto; }
 .phone .toast :is(.toast__icon, .toast__art, .toast__close) { display: none; }
-.phone .toast__msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone .toast__msg { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .phone .toast__action { flex: none; min-height: 32px; padding: 0 2px; background: none; border: 0; color: inherit; font: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
 .phone .toast--error { background: color-mix(in srgb, var(--color-error, #b3261e) 92%, #000); color: #fff; }
 @keyframes ph-note-in { from { opacity: 0; transform: translateY(8px); } }
