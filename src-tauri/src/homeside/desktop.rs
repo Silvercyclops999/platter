@@ -324,6 +324,13 @@ impl Desktop {
                 "That isn't a Bridge code. Copy it again from the Bridge's log: it starts with PBB-.".into()
             })
         })?;
+        // A pasted code names its relay: only the default, the user's own, or
+        // https to a public address, like any other link (never this computer
+        // or the home network).
+        let own = crate::settings::load(&self.d.db).listen_relay;
+        if !crate::social::listen::invite::link_relay_ok(code.relay.as_deref(), &own) {
+            return Err(AppError::Invalid(crate::social::listen::invite::UNSAFE_RELAY.into()));
+        }
         let relay_url = code.relay.clone().unwrap_or_else(|| super::DEFAULT_RELAY.to_string());
         let relay = self.d.relays.relay(&relay_url);
         let (joining, (topic, body)) = Joining::start_to_bridge(code.clone(), &(self.d.name)(), super::VERSION, (self.d.clock)())?;

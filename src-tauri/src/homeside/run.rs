@@ -616,8 +616,12 @@ impl Bridge {
                     }
                 }
             }
-            let _ = self.p.keys.delete(ACCOUNT_TOKEN);
-            let _ = self.p.keys.delete(crate::plex::keychain::SERVER_TOKEN);
+            let gone = self.p.keys.delete(ACCOUNT_TOKEN).is_ok() & self.p.keys.delete(crate::plex::keychain::SERVER_TOKEN).is_ok();
+            if !gone {
+                // Tried again at the next start, until the old sign-in is really gone.
+                tracing::warn!("The Bridge couldn't remove your Plex account's old sign-in from its keys file. It tries again when it next starts. Check that /data is writable.");
+                return;
+            }
             tracing::info!("The Bridge no longer keeps your Plex account's sign-in. It uses a sign-in of its own (or PLEX_TOKEN) instead.");
         }
         let _ = self.p.db.write(|c| kv_set(c, PLEX_MIGRATED_KEY, "1"));

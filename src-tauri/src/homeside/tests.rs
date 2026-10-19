@@ -596,6 +596,11 @@ async fn a_phone_pairs_with_the_code_the_bridge_shows() {
 
     // The phone: no Lidarr of its own.
     let p = side(tmp.path(), "phone");
+    // The test relay runs on this computer: like anyone running their own
+    // relay, the phone has it set, or a pasted code naming it is refused.
+    let mut ps = crate::settings::load(&p.db);
+    ps.listen_relay = ntfy.url.clone();
+    crate::settings::save(&p.db, &ps).unwrap();
     let phone = desktop_for(&p, "Adam's phone", relays.clone());
     tokio::spawn(phone.clone().run());
     // The kind of code a computer makes is turned away at once, with words.
