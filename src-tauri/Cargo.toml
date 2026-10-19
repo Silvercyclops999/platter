@@ -130,6 +130,8 @@ objc2-avf-audio = { version = "0.3.2", default-features = false, features = ["st
 # Lock screen and Control Centre: now-playing info and the remote commands.
 objc2 = "0.6"
 block2 = "0.6"
+# Main-queue work for Bonjour (other Platters on the Wi-Fi).
+dispatch2 = "0.3"
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSDictionary", "NSValue", "NSArray", "NSObject", "NSData"] }
 objc2-media-player = { version = "0.3.2", default-features = false, features = ["std", "block2", "MPNowPlayingInfoCenter", "MPRemoteCommandCenter", "MPRemoteCommand", "MPRemoteCommandEvent", "MPMediaItem", "MPNowPlayingInfoLanguageOption"] }
 objc2-ui-kit = { version = "0.3.2", default-features = false, features = ["std", "UIImage", "UIScene", "UISceneDefinitions", "UISceneOptions", "UISceneSession", "UIResponder", "UIApplication"] }

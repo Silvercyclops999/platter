@@ -229,6 +229,10 @@ impl LocalPlayer for PlayerHandle {
 /// setting is on, and find theirs. The answer is the control API's port
 /// while it listens.
 pub fn spawn_peers(remote: &RemoteService, platform: String, version: String) -> watch::Receiver<Option<u16>> {
+    // iOS allows Bonjour but not raw multicast from an app.
+    #[cfg(target_os = "ios")]
+    let dir: Arc<dyn PeerDirectory> = super::peer::bonjour::BonjourPeers::new();
+    #[cfg(not(target_os = "ios"))]
     let dir: Arc<dyn PeerDirectory> = Arc::new(MdnsPeers::new());
     remote.set_peers(dir.clone());
     let (port, rx) = watch::channel(None);

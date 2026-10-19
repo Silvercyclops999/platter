@@ -3,7 +3,7 @@
 //! two-instance checks ([`MemoryLan`]).
 
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -20,6 +20,18 @@ pub struct Announce {
     pub txt: Vec<(String, String)>,
     pub ips: Vec<Ipv4Addr>,
     pub port: u16,
+}
+
+/// IPv4 and IPv6 from Bonjour's `sockaddr` blobs.
+pub(crate) fn ip_of(sockaddr: &[u8]) -> Option<IpAddr> {
+    match sockaddr.get(1)? {
+        2 if sockaddr.len() >= 8 => Some(IpAddr::V4(Ipv4Addr::new(sockaddr[4], sockaddr[5], sockaddr[6], sockaddr[7]))),
+        30 if sockaddr.len() >= 24 => {
+            let b: [u8; 16] = sockaddr[8..24].try_into().ok()?;
+            Some(IpAddr::V6(Ipv6Addr::from(b)))
+        }
+        _ => None,
+    }
 }
 
 #[async_trait]
@@ -206,5 +218,23 @@ mod live {
         tokio::time::sleep(std::time::Duration::from_secs(4)).await;
         let n = m.scan().await.len();
         println!("platter devices announcing: {n}");
+    }
+}
+
+#[cfg(test)]
+mod bonjour_tests {
+    use super::ip_of;
+
+    #[test]
+    fn sockaddrs_read_as_addresses() {
+        let v4 = [16u8, 2, 0x7f, 0x50, 192, 168, 1, 20, 0, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(ip_of(&v4), Some("192.168.1.20".parse().unwrap()));
+        let mut v6 = [0u8; 28];
+        v6[1] = 30;
+        v6[8] = 0xfe;
+        v6[9] = 0x80;
+        v6[23] = 1;
+        assert_eq!(ip_of(&v6), Some("fe80::1".parse().unwrap()));
+        assert_eq!(ip_of(&[16, 99, 0, 0]), None);
     }
 }

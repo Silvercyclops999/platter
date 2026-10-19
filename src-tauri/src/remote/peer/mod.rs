@@ -18,6 +18,8 @@
 //! - [`keys`]: the requests that copy keys between devices.
 
 pub mod auth;
+#[cfg(target_os = "ios")]
+pub mod bonjour;
 pub mod client;
 pub mod devices;
 pub mod directory;
