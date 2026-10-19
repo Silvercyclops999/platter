@@ -493,6 +493,9 @@
 .ph-lyric.is-sung { color: #fffaf0 !important; }
 .ph-lyric.is-worded .lyrics__word { color: rgba(18, 16, 14, 0.58); transition: color 80ms linear; }
 .ph-lyric.is-worded .lyrics__word.is-sung { color: #fffaf0; }
+/* Reduced motion: the words light at once, no fade. */
+:root[data-reduced-motion="true"] :is(.ph-lyric, .ph-lyrics-card__line) .lyrics__word { transition: none; }
+@media (prefers-reduced-motion: reduce) { :is(.ph-lyric, .ph-lyrics-card__line) .lyrics__word { transition: none !important; } }
 .ph-lyric--gap { min-height: 1.28em; letter-spacing: 0.2em; }
 .ph-lyrics__none, .ph-lyrics__credit { margin: 24px 0 0; font-size: 13px; color: rgba(255, 250, 240, 0.7); }
 .ph-lyrics__bottom { display: flex; align-items: center; gap: 16px; padding: 8px 20px calc(16px + var(--ph-safe-bottom)); }

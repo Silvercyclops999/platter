@@ -81,6 +81,9 @@
 /* Word by word: sung words bright, the rest of the line still waiting. */
 .lyrics__line.is-current .lyrics__word { color: var(--lyrics-future); transition: color var(--motion-very-quick) linear; }
 .lyrics__line.is-current .lyrics__word.is-sung { color: var(--lyrics-now); }
+/* Reduced motion: words light at once, no fade. */
+:root[data-reduced-motion="true"] .lyrics__word { transition: none !important; }
+@media (prefers-reduced-motion: reduce) { .lyrics__word { transition: none !important; } }
 
 /* An instrumental gap: small dots, bright while it plays. */
 /* Pronunciation and translation under a line: smaller, same colour as the line. */

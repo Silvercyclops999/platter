@@ -6,7 +6,7 @@
  * computer; otherwise the whole line lights.
  */
 import { ChevronDown, Maximize2, Pause, PenLine, Play, RotateCw } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { backend } from "../lib/backend";
 import { trackArtistLine } from "../lib/format";
 import type { Lyrics, LyricLine, LyricWord, Track } from "../lib/types";
@@ -194,26 +194,33 @@ export function NoLyrics({ track }: { track: Track }) {
 }
 
 function TimedLines({ lines, current, word, onSeek }: { lines: LyricLine[]; current: number; word: number; onSeek: (ms: number) => void }) {
+  // One seek for every row, so a row only draws again when its own state changes.
+  const seekRef = useRef(onSeek);
+  seekRef.current = onSeek;
+  const seek = useCallback((ms: number) => seekRef.current(ms), []);
   return (
     <div className="ph-lyrics__lines">
-      {lines.map((l, i) => {
-        const gap = !l.text.trim();
-        const sung = i <= current;
-        // The current line lights word by word when its words are timed.
-        const words = i === current && !gap && l.words?.length ? l.words : null;
-        return (
-          <button
-            key={i}
-            type="button"
-            data-line={i}
-            className={`ph-lyric ${sung ? "is-sung" : ""} ${i === current ? "is-current" : ""} ${words ? "is-worded" : ""} ${gap ? "ph-lyric--gap" : ""}`}
-            aria-current={i === current ? "true" : undefined}
-            onClick={() => onSeek(l.startMs)}
-          >
-            {gap ? <span aria-label="Instrumental">♪</span> : words ? <LyricWords words={words} word={word} /> : l.text}
-          </button>
-        );
-      })}
+      {lines.map((l, i) => (
+        <TimedLine key={i} line={l} i={i} sung={i <= current} now={i === current} word={i === current ? word : -1} onSeek={seek} />
+      ))}
     </div>
   );
 }
+
+/** One timed line; only the current one is given the word index. */
+const TimedLine = memo(function TimedLine({ line, i, sung, now, word, onSeek }: { line: LyricLine; i: number; sung: boolean; now: boolean; word: number; onSeek: (ms: number) => void }) {
+  const gap = !line.text.trim();
+  // The current line lights word by word when its words are timed.
+  const words = now && !gap && line.words?.length ? line.words : null;
+  return (
+    <button
+      type="button"
+      data-line={i}
+      className={`ph-lyric ${sung ? "is-sung" : ""} ${now ? "is-current" : ""} ${words ? "is-worded" : ""} ${gap ? "ph-lyric--gap" : ""}`}
+      aria-current={now ? "true" : undefined}
+      onClick={() => onSeek(line.startMs)}
+    >
+      {gap ? <span aria-label="Instrumental">♪</span> : words ? <LyricWords words={words} word={word} /> : line.text}
+    </button>
+  );
+});
