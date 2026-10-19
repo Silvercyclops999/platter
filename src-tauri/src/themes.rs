@@ -768,7 +768,7 @@ pub fn save_into(dir: &Path, look: &ThemeFile, replace: bool) -> AppResult<Theme
     Ok(ThemeFile { file, ..look })
 }
 
-fn themes_dir(app: &AppHandle) -> AppResult<PathBuf> {
+pub fn themes_dir(app: &AppHandle) -> AppResult<PathBuf> {
     let dir = app.path().app_data_dir().map_err(|e| AppError::Internal(format!("data folder: {e}")))?.join("themes");
     std::fs::create_dir_all(&dir)?;
     Ok(dir)

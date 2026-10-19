@@ -1470,6 +1470,28 @@ pub fn run() {
                 app.manage(sc::SyncService { store, engine, keys, vault });
             }
 
+            // Keep my devices in sync: paired devices swap the store's
+            // entries directly, over the local network at home and through
+            // the sealed relay away. No server, and the sync file stays
+            // optional.
+            {
+                let id = plex.identity();
+                let devices = sync::devices::commands::start(sync::devices::commands::Setup {
+                    app: app.handle().clone(),
+                    store: sync_store.clone(),
+                    db: db.clone(),
+                    remote: app.state::<remote::RemoteService>().inner().clone(),
+                    groups: live.sync.clone(),
+                    on: live.device_sync.clone(),
+                    relays: Arc::new(social::listen::relay::Ntfy::new().map_err(error::AppError::Internal)?),
+                    relay: live.social.listen.relay.clone(),
+                    downloads: downloads.clone(),
+                    platform: id.platform.clone(),
+                    version: id.version.clone(),
+                });
+                app.manage(devices);
+            }
+
             plex.start(app.handle().clone());
             watch_library(app.handle().clone(), plex.clone(), db.clone());
             doctor::spawn(app.handle().clone(), db.clone(), Arc::new(backend::routed::RoutedParts(backends.clone())), tags::fetch::Reader::new(audio::http::http_client(), player.transfer_gate(), Some(player.transfer_host())));
@@ -1902,6 +1924,18 @@ pub fn run() {
             sync::commands::keys_receive_state,
             sync::commands::keys_receive_cancel,
             sync::commands::keys_send,
+            sync::devices::commands::device_sync_status,
+            sync::devices::commands::device_sync_now,
+            sync::devices::commands::device_sync_forget,
+            sync::devices::commands::device_sync_quarantined,
+            sync::devices::commands::device_sync_take_quarantined,
+            sync::devices::commands::device_pair_start,
+            sync::devices::commands::device_pair_cancel,
+            sync::devices::commands::device_pair_state,
+            sync::devices::commands::device_pair_join,
+            sync::devices::commands::device_download_suggestions,
+            sync::devices::commands::device_download_dismiss,
+            sync::devices::commands::pair_copy_settings,
             hidden::hidden_list,
             hidden::hidden_set,
             bookmarks::bookmarks_list,
@@ -2048,6 +2082,15 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
+            // Back in front (the phone opened again): catch up with the
+            // other devices now. While playing it keeps running and catches
+            // up as it goes.
+            #[cfg(any(target_os = "ios", target_os = "android"))]
+            if let tauri::RunEvent::Resumed = event
+                && let Some(d) = app.try_state::<sync::devices::commands::DeviceService>()
+            {
+                d.sync.kick();
+            }
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 platform::reveal::save(app);
                 let player = app.state::<PlayerHandle>().inner().clone();

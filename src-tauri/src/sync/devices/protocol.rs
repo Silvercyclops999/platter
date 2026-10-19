@@ -35,7 +35,7 @@ use crate::homeside::links::{Links, Outbox, batches};
 use crate::homeside::wire::{Msg, PROTO, SyncHello};
 use crate::sync::SyncStore;
 use crate::sync::engine::{AccountTag, Groups};
-use crate::sync::store::{EntryMap, NAMESPACES, diff_keys, looks_secret};
+use crate::sync::store::{EntryMap, NAMESPACES, SETTINGS, diff_keys, looks_secret};
 
 /// Most keys asked for in one message.
 const WANT_CHUNK: usize = 2000;
@@ -89,6 +89,9 @@ pub struct PeerSeen {
 pub struct SyncPeer {
     d: SyncDeps,
     seen: Mutex<HashMap<String, PeerSeen>>,
+    /// Links whose synced settings are being copied here ("Copy settings
+    /// from my computer"): their next settings entries win as new edits.
+    adopting: Mutex<std::collections::HashSet<String>>,
     /// Messages that came before the hello they follow, by link.
     waiting: Mutex<HashMap<String, Vec<Msg>>>,
 }
@@ -128,7 +131,7 @@ fn entries_msgs(m: EntryMap) -> Vec<Msg> {
 
 impl SyncPeer {
     pub fn new(d: SyncDeps) -> Self {
-        Self { d, seen: Mutex::default(), waiting: Mutex::default() }
+        Self { d, seen: Mutex::default(), waiting: Mutex::default(), adopting: Mutex::default() }
     }
 
     pub fn deps(&self) -> &SyncDeps {
@@ -350,7 +353,38 @@ impl SyncPeer {
         }
     }
 
+    /// Ask the other end of `link` for its synced settings, to take them
+    /// as they are there.
+    pub fn copy_settings(&self, link: &Link) -> Msg {
+        self.adopting.lock().insert(link.id.clone());
+        Msg::SyncWant { ns: SETTINGS.name().to_string(), keys: crate::sync::settings::store_keys() }
+    }
+
+    /// Whether a settings copy from `link` is still waiting for its answer.
+    pub fn copying(&self, link_id: &str) -> bool {
+        self.adopting.lock().contains(link_id)
+    }
+
+    /// Give up waiting for a settings copy (a late answer merges as usual).
+    pub fn stop_copying(&self, link_id: &str) {
+        self.adopting.lock().remove(link_id);
+    }
+
     fn on_entries(&self, link: &Link, entries: &EntryMap) -> Vec<Msg> {
+        let mut entries = std::borrow::Cow::Borrowed(entries);
+        if entries.contains_key(SETTINGS.name()) && self.adopting.lock().remove(&link.id) {
+            // Copying settings: what the other device has wins here, and
+            // from here everywhere, as if just chosen.
+            // Later than anything here, even an edit made this millisecond.
+            let now = self.d.store.now();
+            let here: HashMap<String, u64> = self.d.store.stamps(SETTINGS.name()).unwrap_or_default().into_iter().map(|(k, ts, _)| (k, ts)).collect();
+            if let Some(s) = entries.to_mut().get_mut(SETTINGS.name()) {
+                for (k, e) in s.iter_mut().filter(|(_, e)| e.value.is_some()) {
+                    e.ts = e.ts.max(now).max(here.get(k).map_or(0, |t| t + 1));
+                }
+            }
+        }
+        let entries = entries.as_ref();
         let ns: Vec<String> = entries.keys().filter(|n| self.moves(&link.id, n)).cloned().collect();
         let refs: Vec<&str> = ns.iter().map(String::as_str).collect();
         let from = self.seen(&link.id).map(|s| s.name).unwrap_or_default();
@@ -369,7 +403,7 @@ impl SyncPeer {
         Vec::new()
     }
 
-    fn mark_synced(&self, link_id: &str) {
+    pub(crate) fn mark_synced(&self, link_id: &str) {
         let now = self.d.store.now();
         let _ = self.d.links.update(link_id, |p| p.last_synced_at = Some(now));
     }

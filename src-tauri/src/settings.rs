@@ -2895,6 +2895,8 @@ pub struct Live {
     pub social: crate::social::SocialSwitches,
     /// The sync file settings the sync engine follows.
     pub sync: crate::sync::engine::ConfigSwitch,
+    /// Keep my devices in sync.
+    pub device_sync: Arc<AtomicBool>,
     /// Scrobbling.
     pub scrobble: crate::scrobble::ScrobbleSwitches,
     /// The now-playing feed for widgets.
@@ -3015,6 +3017,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     }
     live.platform.set(s.platform());
     live.sync.set(s.sync_config());
+    live.device_sync.store(s.device_sync, Ordering::Relaxed);
     live.discord.set(s.discord());
     db.set_tag_view(s.tag_view());
     let before = (crate::db::release::count_unmatched(), crate::db::release::use_musicbrainz());

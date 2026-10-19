@@ -36,11 +36,30 @@ pub trait LanSend: Send + Sync {
     async fn post(&self, device: &str, path: &str, body: &LanBody) -> Result<LanBody, PeerError>;
 }
 
+/// A client signed with this device's key; None when signed out.
+#[async_trait]
+pub trait ClientSource: Send + Sync {
+    async fn client(&self) -> Option<PeerClient>;
+}
+
+#[async_trait]
+impl<F: Fn() -> Option<PeerClient> + Send + Sync> ClientSource for F {
+    async fn client(&self) -> Option<PeerClient> {
+        self()
+    }
+}
+
+#[async_trait]
+impl ClientSource for crate::remote::RemoteService {
+    async fn client(&self) -> Option<PeerClient> {
+        self.peer_client().await
+    }
+}
+
 /// Finds the user's other devices over mDNS (same account only) and posts
 /// to them, signed.
 pub struct PeerLan {
-    /// A client signed with this device's key; None when signed out.
-    pub client: Arc<dyn Fn() -> Option<PeerClient> + Send + Sync>,
+    pub client: Arc<dyn ClientSource>,
     pub directory: Arc<dyn PeerDirectory>,
     pub account: Arc<dyn AccountTag>,
     pub own_id: String,
@@ -50,7 +69,7 @@ pub struct PeerLan {
 
 impl PeerLan {
     pub fn new(
-        client: Arc<dyn Fn() -> Option<PeerClient> + Send + Sync>,
+        client: Arc<dyn ClientSource>,
         directory: Arc<dyn PeerDirectory>,
         account: Arc<dyn AccountTag>,
         own_id: String,
@@ -79,7 +98,7 @@ impl PeerLan {
 #[async_trait]
 impl LanSend for PeerLan {
     async fn post(&self, device: &str, path: &str, body: &LanBody) -> Result<LanBody, PeerError> {
-        let client = (self.client)().ok_or_else(|| PeerError::Refused(SIGNED_OUT.into()))?;
+        let client = self.client.client().await.ok_or_else(|| PeerError::Refused(SIGNED_OUT.into()))?;
         let cached = self.known.lock().get(device).cloned();
         let tries = match cached {
             Some(c) => vec![c, Vec::new()],
@@ -166,6 +185,10 @@ impl DeviceSync {
                 }
             }
         }
+        // The exchange ran to its end, every answer taken: in step.
+        if self.peer.verified(&link.id) {
+            self.peer.mark_synced(&link.id);
+        }
         Vec::new()
     }
 }
@@ -173,6 +196,9 @@ impl DeviceSync {
 #[async_trait]
 impl PeerSync for DeviceSync {
     async fn exchange(&self, from: &str, req: LanBody) -> AppResult<LanBody> {
+        if !self.is_on() {
+            return Err(AppError::NotFound("Keep my devices in sync is off on that device.".into()));
+        }
         let gone = || AppError::NotFound("That device isn't linked here.".into());
         let link = self.wire.links.link(&req.link).filter(|l| l.side == Side::Device).ok_or_else(gone)?;
         // A link learns the other device's id from its hello; a signed
