@@ -33,10 +33,10 @@ export function mockFrame(ms: number, scope: boolean): SpectrumFrame {
     db += 2.5 * Math.sin(ms / 170 + k * 1.7) * Math.sin(ms / 410 + k * 0.6);
     bands.push(Math.max(FLOOR, Math.min(0, db)));
   }
-  const level = 0.28 + 0.22 * kick + 0.03 * Math.sin(ms / 700);
+  const level = 0.13 + 0.1 * kick + 0.02 * Math.sin(ms / 700);
   const sway = 0.04 * Math.sin(ms / 1300);
   const rms: [number, number] = [toDb(level * (1 + sway)), toDb(level * (1 - sway))];
-  const peak: [number, number] = [toDb(Math.min(1, level * 2.6 * (1 + sway))), toDb(Math.min(1, level * 2.5 * (1 - sway)))];
+  const peak: [number, number] = [toDb(Math.min(1, level * 4.2 * (1 + sway))), toDb(Math.min(1, level * 4 * (1 - sway)))];
   const frame: SpectrumFrame = { t: Math.round(ms), bands, rms, peak };
   if (scope) {
     const pairs: number[] = [];

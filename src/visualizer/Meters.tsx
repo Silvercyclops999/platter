@@ -21,9 +21,11 @@ interface Geometry {
 }
 
 function geometry(w: number, h: number, compact: boolean): Geometry {
-  // The pivot sits below the face, so only the top of the needle shows.
-  const r = Math.min(w * 0.52, h * (compact ? 1.25 : 1.05));
-  const cy = (compact ? 0.18 : 0.2) * h + r;
+  // The pivot sits near the foot of the face, the arc high over it.
+  // Room either side for the scale's numbers; a tall face centres the dial.
+  if (compact) return { w, h, cx: w / 2, cy: h * 0.94, r: Math.min(w * 0.55, h * 0.82) };
+  const r = Math.max(0, Math.min(w * 0.5 - 16, h * 0.78));
+  const cy = Math.min(h * 0.9, h / 2 + r * 0.55 + 8);
   return { w, h, cx: w / 2, cy, r };
 }
 
@@ -41,10 +43,12 @@ function arcPath(g: Geometry, from: number, to: number, rad: number): string {
 
 const LABELLED = new Set([-20, -10, -5, -3, 0, 3]);
 const COMPACT_LABELLED = new Set([-20, 0, 3]);
+const SMALL_LABELLED = new Set([-20, -5, 0, 3]);
 
 function Face({ g, side, compact }: { g: Geometry; side: "L" | "R"; compact: boolean }) {
   const ref = vuPosition(0);
-  const labelled = compact ? COMPACT_LABELLED : LABELLED;
+  // A small dial keeps fewer numbers, so they never touch.
+  const labelled = compact ? COMPACT_LABELLED : g.r < 110 ? SMALL_LABELLED : LABELLED;
   return (
     <svg className="vis-meter__face" width={g.w} height={g.h} aria-hidden="true">
       <path className="vis-meter__arc" d={arcPath(g, 0, ref, g.r)} />
@@ -58,7 +62,7 @@ function Face({ g, side, compact }: { g: Geometry; side: "L" | "R"; compact: boo
         return (
           <g key={m}>
             <line className="vis-meter__tick" x1={x0} y1={y0} x2={x1} y2={y1} />
-            {long && (
+            {long && !compact && (
               <text className="vis-meter__mark" x={tx} y={ty} textAnchor="middle" dominantBaseline="middle">
                 {m > 0 ? `+${m}` : m}
               </text>
@@ -70,7 +74,12 @@ function Face({ g, side, compact }: { g: Geometry; side: "L" | "R"; compact: boo
         {side}
       </text>
       {!compact && (
-        <text className="vis-meter__unit" x={g.cx} y={g.h - 12} textAnchor="middle">
+        <text className="vis-meter__side" x={g.w - 24} y={g.h - 12} textAnchor="end">
+          PEAK
+        </text>
+      )}
+      {!compact && (
+        <text className="vis-meter__unit" x={g.cx} y={g.cy - g.r * 0.42} textAnchor="middle">
           VU
         </text>
       )}
@@ -123,9 +132,14 @@ export function Meters({ fps, accent, compact = false }: MetersProps) {
         ctx.lineWidth = compact ? 1.25 : 1.5;
         ctx.lineCap = "round";
         ctx.beginPath();
-        ctx.moveTo(ox + g.cx + Math.sin(a) * g.r * 0.25, g.cy - Math.cos(a) * g.r * 0.25);
+        ctx.moveTo(ox + g.cx, g.cy);
         ctx.lineTo(ox + g.cx + Math.sin(a) * (g.r + 4), g.cy - Math.cos(a) * (g.r + 4));
         ctx.stroke();
+        // The pivot's cap.
+        ctx.beginPath();
+        ctx.arc(ox + g.cx, g.cy, compact ? 2 : 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = dim;
+        ctx.fill();
         // The peak lamp: lit in the accent for a moment after a peak near full scale.
         const lit = now < lamps.current[ch];
         const lx = ox + faceW - (compact ? 9 : 14);

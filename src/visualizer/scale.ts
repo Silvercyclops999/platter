@@ -94,7 +94,7 @@ export const VU_MS = 300;
 const VU_W = 6.64 / (VU_MS / 1000);
 
 /** Where 0 VU sits, in dBFS RMS. The meter face prints it. */
-export const VU_REF_DBFS = -14;
+export const VU_REF_DBFS = -10;
 /** The marks on the VU scale. */
 export const VU_MARKS = [-20, -10, -7, -5, -3, -2, -1, 0, 1, 2, 3] as const;
 /** Peak lamp: lights at this many dBFS and stays lit a moment. */
