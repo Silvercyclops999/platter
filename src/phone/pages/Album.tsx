@@ -3,8 +3,8 @@
  * artist and year; download, more, shuffle and a large play;
  * then the songs, each with the downloaded mark before its artist line.
  */
-import { MoreHorizontal, Pause, Play, Shuffle } from "lucide-react";
-import type { CSSProperties } from "react";
+import { ChevronDown, MoreHorizontal, Pause, Play, Shuffle } from "lucide-react";
+import { useState, type CSSProperties } from "react";
 import { Art } from "../../components/Art";
 import { discGroups } from "../../pages/album";
 import { PhoneDownload } from "../PhoneDownload";
@@ -19,7 +19,9 @@ import { SleeveCard } from "../NowPlaying";
 import { BackBar, PageFailed, PageLoading, ShelfCard, SongRow, countLine } from "./common";
 import { UpgradeCard, useAlbumUpgrade } from "../../pages/LidarrUpgrade";
 import { useSleeveNotes } from "../../lib/useSleeveNotes";
-import { RoleLines } from "../../pages/SleeveNotes";
+import { RoleLines, SongBySong, songsWithCredits } from "../../pages/SleeveNotes";
+import { tap } from "../bits";
+
 
 
 /**
@@ -28,17 +30,47 @@ import { RoleLines } from "../../pages/SleeveNotes";
  */
 function AlbumPeople({ albumId }: { albumId: string }) {
   const { data } = useSleeveNotes(albumId);
+  const [open, setOpen] = useState(false);
   const groups = data?.groups.filter((g) => g.people.length) ?? [];
-  if (!groups.length) return null;
+  const songs = data ? songsWithCredits(data) : [];
+  if (!groups.length && !songs.length) return null;
+  // A long Song by song folds behind its own row; a short one just shows.
+  const folds = songs.length > SONG_BY_SONG_OPEN_UP_TO;
+  const shown = !folds || open;
   return (
     <section className="sleeve__credits ph-sleeve-credits" aria-labelledby="ph-album-credits">
       <h2 id="ph-album-credits" className="sleeve__heading">
         Credits
       </h2>
-      <RoleLines groups={groups.slice(0, 8).map((g) => ({ ...g, people: g.people.slice(0, 8) }))} marks={false} />
+      {groups.length > 0 ? <RoleLines groups={groups} marks={false} /> : <p className="sleeve-muted">No album credits yet.</p>}
+      {songs.length > 0 && (
+        <>
+          {folds ? (
+            <button
+              type="button"
+              className="ph-sbs-toggle"
+              aria-expanded={open}
+              onClick={() => {
+                tap("selection");
+                setOpen((o) => !o);
+              }}
+            >
+              <span className="sleeve__subheading">Song by song</span>
+              <span className="ph-sbs-toggle__count tabular">{countLine(songs.length, "song")}</span>
+              <ChevronDown size={18} aria-hidden="true" className="ph-sbs-toggle__chev" />
+            </button>
+          ) : (
+            <h3 className="sleeve__subheading">Song by song</h3>
+          )}
+          {shown && data && <SongBySong n={data} />}
+        </>
+      )}
     </section>
   );
 }
+
+/** Song by song shows open up to this many songs; past it, it folds behind a row. */
+export const SONG_BY_SONG_OPEN_UP_TO = 3;
 
 export function PhoneAlbum({ id }: { id: string }) {
   const { data, error, retry } = useLoad(() => backend.albumPage(id), [id]);

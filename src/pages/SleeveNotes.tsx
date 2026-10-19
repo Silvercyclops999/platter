@@ -144,6 +144,54 @@ function isEmpty(n: SleeveNotes): boolean {
   );
 }
 
+/** The songs that have credits or a recording date of their own. */
+export function songsWithCredits(n: SleeveNotes) {
+  return n.tracks.filter((t) => t.groups.length > 0 || t.recorded);
+}
+
+/** Song by song: each song's own credits under its number and title (the album page's tab, and the phone's album page). */
+export function SongBySong({ n }: { n: SleeveNotes }) {
+  const songs = songsWithCredits(n);
+  const discs = new Set(n.tracks.map((t) => t.disc)).size > 1;
+  return (
+    <ol className="sleeve-songs">
+      {songs.map((t, i) => (
+        <Fragment key={t.trackId}>
+          {discs && (i === 0 || songs[i - 1].disc !== t.disc) && (
+            <li className="sleeve-songs__disc" aria-hidden="true">
+              Disc {t.disc}
+            </li>
+          )}
+          <li className="sleeve-song">
+            <span className="sleeve-song__n">{t.number || ""}</span>
+            <div className="sleeve-song__body">
+              <span className="sleeve-song__title">{t.title}</span>
+              {t.groups.map((g) => (
+                <p key={g.role} className="sleeve-song__line src-row">
+                  <span className="sleeve-song__role">{ROLE_LABEL[g.role] ?? roleLabel(g.role)}</span>{" "}
+                  {g.people.map((p, j) => (
+                    <Fragment key={p.key}>
+                      {j > 0 && ", "}
+                      <PersonLink p={p} />
+                      {p.details.length > 0 && <span className="sleeve-person__detail">{p.details.join(", ")}</span>}
+                    </Fragment>
+                  ))}
+                  <SourceMarks sources={[...new Set(g.people.flatMap((p) => p.sources))]} />
+                </p>
+              ))}
+              {t.recorded && (
+                <p className="sleeve-song__line sleeve-muted src-row" tabIndex={0}>
+                  Recorded {formatSleeveDate(t.recorded.value)} <SourceMarks sources={t.recorded.sources} />
+                </p>
+              )}
+            </div>
+          </li>
+        </Fragment>
+      ))}
+    </ol>
+  );
+}
+
 /** Whether the release side has anything to print. */
 export function linerHasFacts(n: SleeveNotes): boolean {
   return factRows(n).length > 0 || n.studios.length > 0 || !!n.notes;
@@ -197,7 +245,7 @@ export function SleeveLiner({ n, compact = false, heading = "The release", actio
           ))}
         </dl>
       )}
-      {!compact && n.editionNotes.length > 0 && (
+      {n.editionNotes.length > 0 && (
         <ul className="sleeve-editions" aria-label="Other editions">
           {n.editionNotes.map((e) => (
             <li key={e.value} className="src-row" tabIndex={0}>
@@ -242,10 +290,10 @@ export function SleeveNotesPanel({ albumId, title }: { albumId: string; title: s
       </div>
     );
   }
-  const songs = n.tracks.filter((t) => t.groups.length > 0 || t.recorded);
-  const discs = new Set(n.tracks.map((t) => t.disc)).size > 1;
+  const songs = songsWithCredits(n);
   return (
     <div className="sleeve">
+
       <SleeveLiner n={n} />
 
       <section className="sleeve__credits" aria-labelledby="sleeve-credits-title">
@@ -256,41 +304,7 @@ export function SleeveNotesPanel({ albumId, title }: { albumId: string; title: s
         {songs.length > 0 && (
           <>
             <h3 className="sleeve__subheading">Song by song</h3>
-            <ol className="sleeve-songs">
-              {songs.map((t, i) => (
-                <Fragment key={t.trackId}>
-                  {discs && (i === 0 || songs[i - 1].disc !== t.disc) && (
-                    <li className="sleeve-songs__disc" aria-hidden="true">
-                      Disc {t.disc}
-                    </li>
-                  )}
-                  <li className="sleeve-song">
-                    <span className="sleeve-song__n">{t.number || ""}</span>
-                    <div className="sleeve-song__body">
-                      <span className="sleeve-song__title">{t.title}</span>
-                      {t.groups.map((g) => (
-                        <p key={g.role} className="sleeve-song__line src-row">
-                          <span className="sleeve-song__role">{ROLE_LABEL[g.role] ?? roleLabel(g.role)}</span>{" "}
-                          {g.people.map((p, j) => (
-                            <Fragment key={p.key}>
-                              {j > 0 && ", "}
-                              <PersonLink p={p} />
-                              {p.details.length > 0 && <span className="sleeve-person__detail">{p.details.join(", ")}</span>}
-                            </Fragment>
-                          ))}
-                          <SourceMarks sources={[...new Set(g.people.flatMap((p) => p.sources))]} />
-                        </p>
-                      ))}
-                      {t.recorded && (
-                        <p className="sleeve-song__line sleeve-muted src-row" tabIndex={0}>
-                          Recorded {formatSleeveDate(t.recorded.value)} <SourceMarks sources={t.recorded.sources} />
-                        </p>
-                      )}
-                    </div>
-                  </li>
-                </Fragment>
-              ))}
-            </ol>
+            <SongBySong n={n} />
           </>
         )}
       </section>

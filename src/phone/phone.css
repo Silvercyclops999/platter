@@ -405,13 +405,21 @@ n/* A cover on the phone: its own colour while it loads, then a 150 ms fade once
 .phone .src-marks { position: static; display: inline; padding: 0; background: none; box-shadow: none; opacity: 1; transform: none; }
 .phone .src-mark { display: none; }
 .phone :is(.sleeve-roles__people li, .sleeve-song__line, .sleeve-editions li, .sleeve-note figcaption) { max-width: none; }
-.phone .sleeve__liner--compact .sleeve-note blockquote { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; font-size: 15px; }
-.phone .sleeve__liner--compact .sleeve-note figcaption { display: none; }
+.ph-np__scroll .sleeve__liner--compact .sleeve-note blockquote { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; font-size: 15px; }
+.ph-np__scroll .sleeve__liner--compact .sleeve-note figcaption { display: none; }
 .ph-sleeve-credits { margin: 28px 0 0; padding: 0; }
 .ph-sleeve-credits .sleeve-roles { gap: 10px; }
 .phone .sleeve-roles__row { grid-template-columns: 104px minmax(0, 1fr); gap: 10px; }
 .phone .sleeve-roles__people li { font-size: 15px; line-height: 24px; }
 .phone .sleeve-person { min-height: 24px; }
+/* Song by song, folded behind its own row when it's long. */
+.ph-sbs-toggle { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; margin-top: 18px; border-top: 1px solid var(--engrave-dark, var(--ph-line)) !important; }
+.ph-sbs-toggle .sleeve__subheading { flex: 1; margin: 0; }
+.ph-sbs-toggle__count { font-size: 13px; color: var(--color-text-muted); }
+.ph-sbs-toggle__chev { color: var(--color-text-secondary); transition: transform var(--ph-quick) var(--ph-ease); }
+.ph-sbs-toggle[aria-expanded="true"] .ph-sbs-toggle__chev { transform: rotate(180deg); }
+.ph-sleeve-credits .sleeve-song { grid-template-columns: 24px minmax(0, 1fr); }
+.ph-sleeve-credits .sleeve-song__line { font-size: 14px; }
 
 .ph-credits { list-style: none; margin: 0; padding: 0; }
 .ph-credits__row { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; }

@@ -20,7 +20,8 @@ import { phone, usePhoneUi } from "../phone/phoneUi";
 import { installTapGuard } from "../phone/gestures";
 import { albumPlate, plateText } from "../phone/bits";
 import { playingFrom, shownDate, SleeveCard } from "../phone/NowPlaying";
-import { PhoneAlbum } from "../phone/pages/Album";
+import { PhoneAlbum, SONG_BY_SONG_OPEN_UP_TO } from "../phone/pages/Album";
+import { SleeveNotesPanel } from "../pages/SleeveNotes";
 import { inLibraryLine } from "../phone/pages/Artist";
 import { ofKind } from "../phone/pages/Search";
 import { latestOnce } from "../phone/pages/You";
@@ -423,6 +424,35 @@ describe("sleeve notes on the phone", () => {
     expect(panel).toHaveClass("sleeve__liner", "sleeve__liner--compact");
     expect(panel.querySelector(".sleeve-facts__row dt")?.textContent).toBe("Released");
     expect(within(panel).getByRole("button", { name: "Open the album" })).toBeInTheDocument();
+  });
+
+  it("print every fact the computer's release side prints, full dates included", async () => {
+    await mock.settingsSet({ ...DEFAULT_SETTINGS, infoMusicbrainz: true });
+    await loadSettings();
+    const album = withNotes();
+    const desk = render(<SleeveNotesPanel albumId={album.id} title={album.title} />);
+    const deskPanel = await screen.findByRole("region", { name: "The release" });
+    const labels = (el: HTMLElement) => [...el.querySelectorAll(".sleeve-facts__row")].map((r) => `${r.querySelector("dt")?.textContent}=${r.querySelector(".sleeve-facts__value")?.textContent}`);
+    const want = labels(deskPanel);
+    expect(want.length).toBeGreaterThan(4);
+    desk.unmount();
+    render(<SleeveCard track={{ albumId: album.id, albumTitle: album.title, artistTitle: album.artistTitle, thumb: album.thumb }} />);
+    const panel = await screen.findByRole("region", { name: "Sleeve notes" });
+    expect(labels(panel)).toEqual(want);
+  });
+
+  it("the album page keeps Song by song, folded behind its own row when it's long", async () => {
+    await mock.settingsSet({ ...DEFAULT_SETTINGS, infoMusicbrainz: true });
+    await loadSettings();
+    const album = withNotes();
+    render(<PhoneAlbum id={album.id} />);
+    const credits = await screen.findByRole("region", { name: "Credits" }, { timeout: 4000 });
+    const toggle = await within(credits).findByRole("button", { name: /Song by song/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(credits.querySelector(".sleeve-songs")).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(credits.querySelectorAll(".sleeve-song").length).toBeGreaterThan(SONG_BY_SONG_OPEN_UP_TO);
   });
 
   it("the album page sets its credits like the computer's, a role and its names", async () => {
