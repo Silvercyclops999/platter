@@ -874,23 +874,14 @@
 .ph-you__meta { margin: 0; font-size: 14px; color: var(--color-text-secondary); }
 .ph-you__cog { align-self: start; margin: -4px -10px 0 0; }
 .ph-you__month { margin-bottom: 16px; }
-.ph-readouts {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin: 0;
-  border-radius: 12px;
-  overflow: hidden;
-  background: var(--glass-top, color-mix(in srgb, var(--color-ink) 6%, var(--color-bg-raised)));
-  background: linear-gradient(180deg, var(--glass-top, #161411), var(--glass-bottom, #1e1b17));
-  box-shadow: inset 0 0 0 1px var(--plate-edge, var(--ph-line));
-}
-.ph-readout { display: flex; flex-direction: column-reverse; gap: 4px; padding: 14px 12px 12px; min-width: 0; }
-.ph-readout + .ph-readout { box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.07); }
-.ph-readout__value { margin: 0; font-family: var(--font-family); font-weight: 600; font-size: 24px; font-weight: 500; font-variant-numeric: tabular-nums lining-nums; color: var(--glass-text, #efe6d6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ph-readout__label { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--glass-dim, #b9ae9c); }
-.ph-readout__wait { display: inline-block; width: 48px; height: 22px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); }
-.ph-you__top { margin: 10px 2px 0; font-size: 14px; color: var(--color-text-secondary); }
-.ph-you__top strong { color: var(--color-text-primary); font-weight: 600; }
+/* This month and the Stats hero: the computer's sentences, scaled to the phone. */
+.phone .month-story { margin-top: 4px; padding: 14px 0 16px; border-color: var(--ph-line); }
+.phone .month-story__sentence { font-size: 22px; line-height: 1.25; }
+.phone .month-story__more { margin-top: 8px; font-size: 13px; }
+.phone .stats-hero { margin-top: 16px; }
+.phone .stats-hero__sentence { font-size: 24px; line-height: 1.22; }
+.phone .stats-hero__facts { grid-template-columns: minmax(0, 1fr); margin-top: 20px; }
+.phone .stats-fact { padding: 12px 0 0; border-left: 0; }
 .ph-wrapped {
   display: flex;
   align-items: center;
@@ -1121,10 +1112,6 @@
   --ph-line: rgba(0, 0, 0, 0.1);
 }
 /* The You tab's stats sit on a light card, not a black box. */
-:root[data-theme-base="light"] .phone .ph-readouts { background: var(--color-bg-raised); box-shadow: inset 0 0 0 1px var(--ph-line); }
-:root[data-theme-base="light"] .phone .ph-readout__value { color: var(--color-text-primary); }
-:root[data-theme-base="light"] .phone .ph-readout__label { color: var(--color-text-secondary); }
-:root[data-theme-base="light"] .phone .ph-readout + .ph-readout { box-shadow: inset 1px 0 0 var(--ph-line); }
 
 /* The mini player and Home's card take their colour from the cover in both
    looks: a deep tint on the dark look, a pale one with ink on the light. */

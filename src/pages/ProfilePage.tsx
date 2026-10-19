@@ -17,7 +17,7 @@ import { Skeleton } from "../components/Skeleton";
 import { TrackList, TrackRow } from "../components/TrackRow";
 import { backend } from "../lib/backend";
 import { metaLine, profileFriends, profilePlaylists, profileSections, thisMonth, type ProfileFriend, type ProfileSection } from "../lib/profile";
-import { formatPlays, minutes } from "../lib/stats";
+import { formatPlays } from "../lib/stats";
 import type { CompareSummary, StatsOverview } from "../lib/statsTypes";
 import type { ActivityPanel } from "../lib/types";
 import { useLoad } from "../lib/useLoad";
@@ -27,6 +27,7 @@ import { player } from "../stores/player";
 import { nav } from "../stores/router";
 import { updateSettings, useSettings } from "../stores/settings";
 import { wrapped } from "../stores/wrapped";
+import { MonthStory } from "./MonthStory";
 import "./profile.css";
 import { LoadError } from "../components/LoadError";
 
@@ -46,24 +47,6 @@ function Section({ id, title, note, action, children }: { id: string; title: str
       </div>
       {children}
     </section>
-  );
-}
-
-function Numbers({ o }: { o: StatsOverview | undefined }) {
-  const items: [string, string | null][] = [
-    ["Minutes this month", o ? minutes(o.totals.ms).toLocaleString() : null],
-    ["Plays", o ? o.totals.plays.toLocaleString() : null],
-    ["Longest streak", o ? (o.streak ? `${o.streak.days.toLocaleString()} ${o.streak.days === 1 ? "day" : "days"}` : "None yet") : null],
-  ];
-  return (
-    <dl className="profile-numbers" aria-label="This month" data-testid="profile-numbers">
-      {items.map(([label, value]) => (
-        <div key={label} className="profile-number">
-          <dt className="profile-number__label">{label}</dt>
-          <dd className="profile-number__value">{value ?? <Skeleton width={64} height={22} />}</dd>
-        </div>
-      ))}
-    </dl>
   );
 }
 
@@ -167,7 +150,7 @@ export function ProfilePage() {
     );
 
   const sections: Record<ProfileSection, ReactNode> = {
-    numbers: statsOn && hasHistory ? <Numbers o={o} /> : null,
+    numbers: statsOn && hasHistory ? <MonthStory o={o} testId="profile-month" /> : null,
     topArtists:
       statsOn && hasHistory ? (
         <Section id="artists" title="Top artists this month" note="Only visible to you" action={<ShowAll label="Show all" onClick={() => nav.go({ name: "stats", tab: "overview", month: monthKey })} />}>

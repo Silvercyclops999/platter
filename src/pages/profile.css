@@ -42,10 +42,21 @@
 
 .profile-actions { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-6) 0 var(--space-2); }
 
-.profile-numbers { display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-12); margin: var(--space-4) 0 0; padding: var(--space-4) 0; border-top: 1px solid var(--profile-line); border-bottom: 1px solid var(--profile-line); }
-.profile-number { display: flex; flex-direction: column-reverse; gap: 2px; }
-.profile-number__label { font-size: var(--font-size-xs); color: var(--color-text-muted); }
-.profile-number__value { margin: 0; font-size: var(--font-size-xl); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); font-variant-numeric: tabular-nums; }
+/* This month in words (MonthStory): the Stats hero's sentence, a size down. */
+.month-story { margin: var(--space-4) 0 0; padding: var(--space-4) 0 var(--space-6); border-top: 1px solid var(--profile-line, var(--color-border-subtle)); border-bottom: 1px solid var(--profile-line, var(--color-border-subtle)); }
+.month-story__sentence {
+  margin: 0;
+  max-width: 24em;
+  font-size: clamp(22px, 2.8cqi, 32px);
+  line-height: 1.22;
+  letter-spacing: -0.015em;
+  color: var(--color-text-secondary);
+  text-wrap: pretty;
+  font-variant-numeric: tabular-nums;
+}
+.month-story__sentence strong { color: var(--color-text-primary); font-weight: var(--font-weight-semibold); }
+.month-story__more { margin: var(--space-3) 0 0; max-width: 40em; font-size: var(--font-size-sm); color: var(--color-text-muted); font-variant-numeric: tabular-nums; text-wrap: pretty; }
+.month-story--loading { display: flex; flex-direction: column; }
 
 .profile-section { margin-top: var(--space-12); }
 .profile-section__head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-3); }

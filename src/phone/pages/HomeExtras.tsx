@@ -4,8 +4,6 @@
  * radar, new artists, on this day, the archive, your shelf, the sound map).
  * Each shows only while its feature is on.
  */
-import { Archive, CalendarClock, Disc3, Map as MapIcon, Radar, Radio, Sparkles, UserPlus } from "lucide-react";
-import type { ReactNode } from "react";
 import { MixArt, openMix } from "../../pages/MixCard";
 import { useMixShelves } from "../../pages/mixShelves";
 import { useShowPhysical } from "../../stores/physical";
@@ -37,23 +35,28 @@ export function HomeMixes() {
 
 interface Way {
   title: string;
-  icon: ReactNode;
+  /** What's there, in a few words. */
+  about: string;
   route: Route;
 }
 
+/**
+ * The places Home can't hold, as a contents list: each one's name and what
+ * is there, ruled like the computer's lists. No icons, no boxes.
+ */
 export function HomeExplore() {
   const s = useSettings((x) => x.settings);
   const shelf = useShowPhysical();
   const map = useSoundMapOn();
   const ways: Way[] = [
-    { title: "What's new", icon: <Sparkles size={20} />, route: { name: "whatsNew" } },
-    ...(s?.homeMixes !== false ? [{ title: "Radio and mixes", icon: <Radio size={20} />, route: { name: "mixes" } as Route }] : []),
-    ...(s?.releaseRadar !== false ? [{ title: "Release radar", icon: <Radar size={20} />, route: { name: "releaseRadar" } as Route }] : []),
-    ...(s?.homeNewToYou !== false ? [{ title: "New to you", icon: <UserPlus size={20} />, route: { name: "newToYou" } as Route }] : []),
-    ...(s?.homeOnThisDay !== false ? [{ title: "On this day", icon: <CalendarClock size={20} />, route: { name: "onThisDay" } as Route }] : []),
-    { title: "Archive", icon: <Archive size={20} />, route: { name: "archive" } },
-    ...(shelf ? [{ title: "Your shelf", icon: <Disc3 size={20} />, route: { name: "shelf" } as Route }] : []),
-    ...(map ? [{ title: "Sound map", icon: <MapIcon size={20} />, route: { name: "soundMap" } as Route }] : []),
+    { title: "What's new", about: "The latest records from artists you follow", route: { name: "whatsNew" } },
+    ...(s?.homeMixes !== false ? [{ title: "Radio and mixes", about: "Made from what you play, and changed every day", route: { name: "mixes" } as Route }] : []),
+    ...(s?.releaseRadar !== false ? [{ title: "Release radar", about: "New records from the artists you follow and play most", route: { name: "releaseRadar" } as Route }] : []),
+    ...(s?.homeNewToYou !== false ? [{ title: "New to you", about: "Artists like your favourites you don't have yet", route: { name: "newToYou" } as Route }] : []),
+    ...(s?.homeOnThisDay !== false ? [{ title: "On this day", about: "What you played on this date in other years", route: { name: "onThisDay" } as Route }] : []),
+    { title: "Archive", about: "Records you've put away", route: { name: "archive" } },
+    ...(shelf ? [{ title: "Your shelf", about: "The records you own on vinyl, CD and tape", route: { name: "shelf" } as Route }] : []),
+    ...(map ? [{ title: "Sound map", about: "Songs that sound alike, side by side", route: { name: "soundMap" } as Route }] : []),
   ];
   return (
     <section className="ph-shelf" aria-label="Explore">
@@ -63,16 +66,18 @@ export function HomeExplore() {
           <li key={w.title}>
             <button
               type="button"
-              className="ph-explore__tile"
+              className="ph-explore__row"
+              aria-label={w.title}
+              aria-describedby={`ph-explore-${w.route.name}`}
               onClick={() => {
                 tap();
                 nav.go(w.route);
               }}
             >
-              <span className="ph-explore__icon" aria-hidden="true">
-                {w.icon}
-              </span>
               <span className="ph-explore__title">{w.title}</span>
+              <span className="ph-explore__about" id={`ph-explore-${w.route.name}`}>
+                {w.about}
+              </span>
             </button>
           </li>
         ))}
