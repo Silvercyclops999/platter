@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <!-- Light variant of app-icon.svg for the Sleeve look: ink on cream paper,
-       brass spindle. Same drawing and grid. -->
+       brass spindle. Same drawing, grid and offset. -->
   <rect width="1024" height="1024" fill="#EEE7D8"/>
-  <path fill="#1C1712" fill-rule="evenodd" d="M304 828V404A208 208 0 1 1 420 590.55V828Z M600 404A88 88 0 1 0 424 404A88 88 0 1 0 600 404Z"/>
-  <circle cx="512" cy="404" r="30" fill="#A07E3C"/>
+  <path fill="#1C1712" fill-rule="evenodd" d="M296 876V456A240 240 0 1 1 408 659.02V876Z M616 456A80 80 0 1 0 456 456A80 80 0 1 0 616 456Z"/>
+  <circle cx="536" cy="456" r="32" fill="#A07E3C"/>
 </svg>

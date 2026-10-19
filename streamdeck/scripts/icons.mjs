@@ -112,16 +112,17 @@ function png(size, shapes) {
   ]);
 }
 // Platter's mark (src-tauri/app-icon.svg): a P whose bowl is a record, a
-// ring with the spindle in its centre. The 1024 drawing scaled by 0.19.
+// ring with the spindle in its centre. The 1024 drawing scaled by 0.17 about
+// its centre, keeping the icon's weight offset (bowl centre 536, 456).
 const plugin = [
-  { ringAt: [72, 51.5, 28.1, 22.8] },
-  { rect: [32.5, 51.5, 54.5, 132] },
-  { dotAt: [72, 51.5, 5.7] },
+  { ringAt: [76.1, 62.5, 27.2, 27.2] },
+  { rect: [35.3, 62.5, 54.3, 133.9] },
+  { dotAt: [76.1, 62.5, 5.4] },
 ];
 // The category icon is drawn at 28 px: no spindle, which would only blur.
 const category = [
-  { ringAt: [72, 51.5, 28.1, 22.8] },
-  { rect: [32.5, 51.5, 54.5, 132] },
+  { ringAt: [76.1, 62.5, 27.2, 27.2] },
+  { rect: [35.3, 62.5, 54.3, 133.9] },
 ];
 for (const [name, shapes, size] of [
   ["plugin/icon", plugin, 256],

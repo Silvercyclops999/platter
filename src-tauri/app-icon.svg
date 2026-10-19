@@ -1,11 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <!-- Platter's icon master, full bleed: the OS rounds the corners (iOS,
        Icon Composer). The mark is a P whose bowl is a record: a ring with the
-       spindle in its centre. Drawn on a 1024 grid: bowl r 208 with a 88 counter
-       (weight 120), stem 116 wide (a touch lighter, so it reads the same),
-       mark 416 x 632 centred. app-icon-desktop.svg is the same drawing on the
-       macOS icon grid, which the desktop icons come from. -->
+       spindle in its centre, the counter the record's label (a third of the
+       disc). Drawn on a 1024 grid: bowl r 240 with an 80 counter (weight 160),
+       stem 112 wide, spindle r 32, mark 480 x 660. The bowl carries most of
+       the weight, so the mark is placed by that weight, not its outline: its
+       area centroid sits a little above and left of the outline's centre, and
+       the drawing is offset (24, 52) so it looks centred beside other icons.
+       app-icon-desktop.svg is the same drawing on the macOS icon grid, which
+       the desktop icons come from. -->
   <rect width="1024" height="1024" fill="#1A1816"/>
-  <path fill="#CDAE6E" fill-rule="evenodd" d="M304 828V404A208 208 0 1 1 420 590.55V828Z M600 404A88 88 0 1 0 424 404A88 88 0 1 0 600 404Z"/>
-  <circle cx="512" cy="404" r="30" fill="#F2EDE4"/>
+  <path fill="#CDAE6E" fill-rule="evenodd" d="M296 876V456A240 240 0 1 1 408 659.02V876Z M616 456A80 80 0 1 0 456 456A80 80 0 1 0 616 456Z"/>
+  <circle cx="536" cy="456" r="32" fill="#F2EDE4"/>
 </svg>

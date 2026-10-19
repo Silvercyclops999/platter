@@ -1,9 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
   <!-- Tray glyph (Windows): the app icon at 32 px, a graphite tile with the
-       brass P, no spindle (too small to hold). Reads on light and dark
-       taskbars. tray-template.svg is the macOS menu bar copy. -->
+       brass P, no spindle (a one-pixel dot in a three-pixel hole would only
+       fill it in). The mark is centred by its outline here: at this size the
+       icon's weight offset would push it into the tile's edge. Reads on
+       light and dark taskbars. tray-template.svg is the macOS menu bar copy. -->
   <rect x="1" y="1" width="30" height="30" rx="7" fill="#1A1816"/>
-  <g transform="translate(16 16) scale(0.0356) translate(-512 -512)">
-    <path fill="#CDAE6E" fill-rule="evenodd" d="M304 828V404A208 208 0 1 1 420 590.55V828Z M600 404A88 88 0 1 0 424 404A88 88 0 1 0 600 404Z"/>
+  <g transform="translate(16 16.4) scale(0.034) translate(-536 -546)">
+    <path fill="#CDAE6E" fill-rule="evenodd" d="M296 876V456A240 240 0 1 1 408 659.02V876Z M616 456A80 80 0 1 0 456 456A80 80 0 1 0 616 456Z"/>
   </g>
 </svg>

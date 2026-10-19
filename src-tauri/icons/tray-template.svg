@@ -1,7 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
   <!-- macOS menu bar glyph (a template image: black and transparent only;
-       the system colours it). The P with the record's open centre. -->
-  <g transform="translate(16 16) scale(0.0459) translate(-512 -512)">
-    <path fill="#000" fill-rule="evenodd" d="M304 828V404A208 208 0 1 1 420 590.55V828Z M608 404A96 96 0 1 0 416 404A96 96 0 1 0 608 404Z"/>
+       the system colours it). The P with the record's open centre, the
+       counter widened a little (88) so the hole stays open at menu bar size. -->
+  <g transform="translate(16 16) scale(0.042) translate(-536 -546)">
+    <path fill="#000" fill-rule="evenodd" d="M296 876V456A240 240 0 1 1 408 659.02V876Z M624 456A88 88 0 1 0 448 456A88 88 0 1 0 624 456Z"/>
   </g>
 </svg>
