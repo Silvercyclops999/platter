@@ -991,7 +991,11 @@ impl Downloads {
                 let n = counts.remove(&k).unwrap_or_default();
                 let has_current = holding.contains(&k);
                 let settled = n.done + n.failed + n.missing;
-                let state = if n.done >= n.total {
+                // An item whose songs aren't listed yet has nothing done: it waits,
+                // it is never "downloaded" with no songs on this device.
+                let state = if n.total == 0 {
+                    ItemState::Queued
+                } else if n.done >= n.total {
                     ItemState::Downloaded
                 } else if settled >= n.total {
                     ItemState::Error
@@ -1001,7 +1005,7 @@ impl Downloads {
                     ItemState::Queued
                 };
                 let progress = if n.total == 0 {
-                    1.0
+                    0.0
                 } else {
                     ((n.done as f64 + if has_current { fraction } else { 0.0 }) / n.total as f64).min(1.0) as f32
                 };

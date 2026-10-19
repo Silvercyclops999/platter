@@ -20,6 +20,7 @@ import { PhoneDevices } from "./pages/Devices";
 import { PhoneDiary } from "./pages/Diary";
 import { PhoneDiscography } from "./pages/Discography";
 import { PhoneDoctor } from "./pages/Doctor";
+import { PhoneDownloads } from "./pages/Downloads";
 import { PhoneEra } from "./pages/Era";
 import { PhoneHome } from "./pages/Home";
 import { PhoneHomeShelf } from "./pages/HomeShelf";
@@ -95,6 +96,7 @@ export const PHONE_PAGES: Pages = {
   credits: (r) => <PhoneCredits key={r.person} person={r.person} />,
   mixes: () => <PhoneMixes />,
   archive: () => <PhoneArchive />,
+  downloads: () => <PhoneDownloads />,
 };
 
 /** The phone page for a route. */

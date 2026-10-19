@@ -6,7 +6,7 @@
  */
 import { ListPlus, RotateCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { DownloadButton } from "../../components/DownloadButton";
+import { PhoneDownload } from "../PhoneDownload";
 import { backend } from "../../lib/backend";
 import { failText } from "../../lib/errorText";
 import { formatLongDuration, plural } from "../../lib/format";
@@ -83,7 +83,7 @@ export function PhoneMix({ id, seed }: { id?: string; seed?: string }) {
         onShuffle={() => void player.setContextShuffle(key, !shuffle)}
         left={
           <>
-            {!radio && <DownloadButton kind="mix" id={key} title={mix.title} trackIds={() => ids} disabled={!ids.length} size="md" />}
+            {!radio && <PhoneDownload kind="mix" id={key} title={mix.title} trackIds={() => ids} />}
             <button type="button" className="ph-icon-btn" aria-label="Save as playlist" disabled={!ids.length} onClick={() => void save()}>
               <ListPlus size={24} aria-hidden="true" />
             </button>

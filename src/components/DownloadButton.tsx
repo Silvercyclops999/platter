@@ -28,7 +28,7 @@ import { Dialog } from "./Dialog";
 import "./downloads.css";
 
 /** A down arrow inside a circle; `filled` is the downloaded disc. */
-function ArrowGlyph({ size, filled }: { size: number; filled?: boolean }) {
+export function ArrowGlyph({ size, filled }: { size: number; filled?: boolean }) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" className={`dl-glyph ${filled ? "dl-glyph--filled" : ""}`}>
       {filled ? (
@@ -50,7 +50,7 @@ function ArrowGlyph({ size, filled }: { size: number; filled?: boolean }) {
 }
 
 /** A progress ring (0 to 1) around a small arrow. */
-function RingGlyph({ size, progress, waiting }: { size: number; progress: number; waiting?: boolean }) {
+export function RingGlyph({ size, progress, waiting }: { size: number; progress: number; waiting?: boolean }) {
   const r = 10.25;
   const c = 2 * Math.PI * r;
   return (

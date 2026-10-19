@@ -173,11 +173,11 @@ export function PhoneSearch() {
         <section aria-label="Results">
           {hits.length ? (
             <ul className="ph-rows">
-              {hits.map((h, i) => (
+              {hits.map((h) => (
                 <HitRow
                   key={hitInfo(h)?.key}
                   hit={h}
-                  top={i === 0 && kind === "all"}
+                  typed={kind !== "all"}
                   onOpen={() => open(h)}
                   onMore={h.track ? () => phone.push({ kind: "track", track: h.track! }) : h.album ? () => phone.push({ kind: "album", album: h.album! }) : undefined}
                   versions={h.track ? versionsCount(h.track, res) : 0}
@@ -203,9 +203,16 @@ export function versionsCount(t: Track, res: SearchResults | null, countsOn = us
   return countsOn ? (t.otherVersions ?? 0) : 0;
 }
 
+/** A result's grey line: "Album · Artist" among all results; under a type pill the type goes (the pill says it). */
+export function hitLine(i: NonNullable<ReturnType<typeof hitInfo>>, typed: boolean): string {
+  return typed ? i.byline || i.typeLabel : subtitleWithType(i);
+}
+
+/** One row style for every kind of result, in every pill, so switching pills keeps the list's look. */
 function HitRow({
   hit,
   top,
+  typed = false,
   onOpen,
   onRemove,
   onMore,
@@ -213,6 +220,7 @@ function HitRow({
 }: {
   hit: SearchHit;
   top?: boolean;
+  typed?: boolean;
   onOpen: () => void;
   onRemove?: () => void;
   onMore?: () => void;
@@ -226,7 +234,7 @@ function HitRow({
         <Art path={i.thumb} size={52} round={i.round} kind={i.kind === "track" ? "album" : i.kind} monogram={i.round ? i.title : undefined} />
         <span className="ph-row__text">
           <span className="ph-row__title">{i.title}</span>
-          <span className="ph-row__sub">{subtitleWithType(i)}</span>
+          <span className="ph-row__sub">{hitLine(i, typed)}</span>
         </span>
       </button>
       {onRemove && (

@@ -5,6 +5,8 @@
  * one under it.
  */
 import {
+  ArrowDownToLine,
+  CircleSlash,
   Bookmark,
   Check,
   Disc3,
@@ -46,7 +48,9 @@ import { useCircle } from "../stores/circle";
 import { collaboratorPlaylists, editablePlaylists } from "../components/PlaylistPicker";
 import { versionLabel } from "../components/FileTagBadges";
 import { formatArchiveDate, SONG_STATUS_LABEL } from "../pages/era";
-import type { VersionItem } from "../lib/types";
+import type { DownloadItem, VersionItem } from "../lib/types";
+import { retryDownload, toggleDownload, useDownloadItem, type DownloadTarget } from "../stores/downloads";
+import { countText, phoneDownloadState } from "./PhoneDownload";
 import { useSettings } from "../stores/settings";
 import { openSongCredits } from "../stores/songCredits";
 import { countLine } from "./pages/common";
@@ -517,6 +521,19 @@ function ActionList({ items }: { items: Action[] }) {
   );
 }
 
+/** Download, Stop downloading or Remove download, by where the item stands (from its songs). */
+function downloadAction(item: DownloadItem | undefined, target: DownloadTarget, act: (f: () => unknown) => () => void): Action {
+  const state = phoneDownloadState(item);
+  const label =
+    state === "none" ? "Download" : state === "done" ? "Remove download" : state === "error" ? "Download again" : `Stop downloading (${countText(item!)})`;
+  return {
+    label,
+    icon: state === "none" || state === "error" ? ArrowDownToLine : CircleSlash,
+    danger: state === "done",
+    run: act(() => (state === "error" ? retryDownload(target.kind, target.id) : toggleDownload(target))),
+  };
+}
+
 function AlbumSheet({ album }: { album: Album }) {
   const act = (f: () => unknown) => () => {
     tap("selection");
@@ -532,7 +549,9 @@ function AlbumSheet({ album }: { album: Album }) {
       </span>
     </div>
   );
+  const dl = useDownloadItem("album", album.id);
   const items: Action[] = [
+    downloadAction(dl, { kind: "album", id: album.id, title: album.title }, act),
     { label: "Add to queue", icon: ListEnd, run: act(() => player.queueAlbum(album.id)) },
     { label: "Artist radio", icon: Radio, run: act(() => player.playRadio(`artist:${album.artistId}`)) },
     { label: "Bookmark", icon: Bookmark, run: act(() => bookmarkPage("album", album.id, album.title, { subtitle: album.artistTitle, thumb: album.thumb })) },
@@ -562,7 +581,9 @@ function PlaylistSheet({ playlist }: { playlist: Playlist }) {
     </div>
   );
   const own = !/^(blend|shared):/.test(playlist.id);
+  const dl = useDownloadItem("playlist", playlist.id);
   const items: Action[] = [
+    ...(/^(blend|shared|smart):/.test(playlist.id) ? [] : [downloadAction(dl, { kind: "playlist", id: playlist.id, title: playlist.title }, act)]),
     ...(own && !playlist.smart ? [{ label: "Edit name and description", icon: Pencil, run: act(() => editDetails(playlist)) }] : []),
     { label: "Share", icon: Share, run: act(() => openShareCard({ kind: "playlist", id: playlist.id, title: playlist.title, thumb: playlist.thumb })) },
     ...(own ? [{ label: "Delete playlist", icon: Trash2, danger: true, run: act(() => askDelete(playlist)) }] : []),

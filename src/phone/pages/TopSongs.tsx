@@ -5,7 +5,7 @@
  */
 import { ListPlus, Sparkles } from "lucide-react";
 import { useMemo } from "react";
-import { DownloadButton } from "../../components/DownloadButton";
+import { PhoneDownload } from "../PhoneDownload";
 import { backend } from "../../lib/backend";
 import { failText } from "../../lib/errorText";
 import { formatLongDuration, plural, trackArtistLine } from "../../lib/format";
@@ -87,7 +87,7 @@ export function PhoneTopSongs({ year }: { year: number | null }) {
             onShuffle={() => void player.setContextShuffle(key, !shuffle)}
             left={
               <>
-                <DownloadButton kind="mix" id={key} title={title} trackIds={() => ids} disabled={!ids.length} size="md" />
+                <PhoneDownload kind="mix" id={key} title={title} trackIds={() => ids} />
                 <button type="button" className="ph-icon-btn" aria-label="Save as playlist" disabled={!ids.length} onClick={() => void save()}>
                   <ListPlus size={24} aria-hidden="true" />
                 </button>

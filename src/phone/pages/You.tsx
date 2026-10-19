@@ -20,6 +20,8 @@ import { nav, type Route } from "../../stores/router";
 import { useSettings } from "../../stores/settings";
 import { wrapped } from "../../stores/wrapped";
 import { tap } from "../bits";
+import { toast } from "../../stores/toasts";
+import { failText } from "../../lib/errorText";
 
 const NONE_YET = new Promise<never>(() => {});
 
@@ -98,12 +100,15 @@ export function PhoneYou() {
     ...(bookmarksOn ? [{ title: "Bookmarks", route: { name: "bookmarks" } as Route }] : []),
   ];
   const tools: { title: string; route: Route }[] = [
+    { title: "Downloads", route: { name: "downloads" } },
     { title: "Library import and Missing", route: { name: "import" } },
     { title: "Library doctor", route: { name: "doctor" } },
     { title: "Create a Blend", route: { name: "blendNew" } },
     { title: "Devices", route: { name: "devices" } },
     { title: "Settings", route: { name: "settings" } },
   ];
+  // Copy settings from my computer: shown once the core can do it.
+  const copy = (backend as unknown as { pairCopySettings?: () => Promise<unknown> }).pairCopySettings;
 
   return (
     <div className="ph-page ph-you" data-testid="phone-you">
@@ -223,6 +228,26 @@ export function PhoneYou() {
             </button>
           </li>
         ))}
+        {typeof copy === "function" && (
+          <li>
+            <button
+              type="button"
+              className="ph-set-link"
+              onClick={() =>
+                void copy.call(backend).then(
+                  () => toast.info("Settings copied from your computer"),
+                  (e: unknown) => toast.error(failText("Couldn't copy settings from your computer", e)),
+                )
+              }
+            >
+              <span className="ph-set-link__text">
+                <span className="ph-set-link__title">Copy settings from my computer</span>
+                <span className="ph-set-link__sub">Your look, playback and sound, the way Platter is set up there</span>
+              </span>
+              <ChevronRight size={18} aria-hidden="true" className="ph-set-link__chev" />
+            </button>
+          </li>
+        )}
       </ul>
     </div>
   );

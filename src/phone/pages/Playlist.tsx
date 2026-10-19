@@ -8,7 +8,7 @@ import { Art } from "../../components/Art";
 import { LikedCover } from "../../components/LikedCover";
 import { phone } from "../phoneUi";
 import { useMemo, useState, type ReactNode } from "react";
-import { DownloadButton } from "../../components/DownloadButton";
+import { PhoneDownload } from "../PhoneDownload";
 import { backend } from "../../lib/backend";
 import { formatLongDuration } from "../../lib/format";
 import type { Playlist, Track } from "../../lib/types";
@@ -42,7 +42,7 @@ export function PhonePlaylist({ id }: { id: string }) {
       tracks={data.tracks}
       contextKind="playlist"
       contextId={data.playlist.id}
-      download={<DownloadButton kind="playlist" id={data.playlist.id} title={data.playlist.title} size="md" />}
+      download={<PhoneDownload kind="playlist" id={data.playlist.id} title={data.playlist.title} trackIds={() => data.tracks.map((t) => t.id)} />}
       play={(start, shuffle, ids) => void player.playPlaylist(data.playlist.id, start, shuffle, ids)}
       inPlaylist={(i) => ({ playlist: data.playlist, itemId: data.itemIds[i], order })}
     />
@@ -59,7 +59,7 @@ export function PhoneLiked() {
       tracks={data.tracks}
       contextKind="liked"
       contextId="liked"
-      download={<DownloadButton kind="liked" id="" title="Liked Songs" size="md" />}
+      download={<PhoneDownload kind="liked" id="" title="Liked Songs" />}
       play={(start, shuffle, ids) => void player.playLiked(start, ids, shuffle)}
     />
   );

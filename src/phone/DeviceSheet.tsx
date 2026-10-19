@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import { Slider } from "../components/Slider";
 import type { PlayerKind, RemotePlayer } from "../lib/types";
 import { player, usePlayer } from "../stores/player";
-import { moveTo, returnHere, useRemote, watchPlayers } from "../stores/remote";
+import { loadPlayers, moveTo, returnHere, useRemote, watchPlayers } from "../stores/remote";
 import { toast } from "../stores/toasts";
 import { SheetFrame, tap } from "./bits";
 import { phone } from "./phoneUi";
@@ -32,8 +32,29 @@ const VIA_LINE: Record<RemotePlayer["via"], string> = {
   dlna: "Network player",
 };
 
+/**
+ * Other places to play are looked for once as soon as an output button
+ * shows (and kept as the core announces them), so other Platters are listed
+ * the moment the sheet opens. The sheet itself keeps looking while it's open.
+ */
+let warmed = false;
+export function useWarmPlayers() {
+  useEffect(() => {
+    if (warmed) return;
+    warmed = true;
+    void loadPlayers();
+    void backend.listen("remote://players", (players) => useRemote.setState({ players })).catch(() => {});
+  }, []);
+}
+
+/** Other Platters first (they take the queue and the exact place in the song), then the rest by name. */
+export function sortPlaces(list: RemotePlayer[]): RemotePlayer[] {
+  return [...list].sort((a, b) => Number(b.via === "platter") - Number(a.via === "platter") || a.name.localeCompare(b.name));
+}
+
 /** The output button in the mini player and on now playing; "Playing on <device>" in the accent while remote. */
 export function OutputButton({ compact = false }: { compact?: boolean }) {
+  useWarmPlayers();
   const remote = usePlayer((s) => s.remote);
   const Icon = remote ? KIND_ICON[remote.kind] : Smartphone;
   return (
@@ -59,7 +80,9 @@ export function DeviceSheet() {
   const busy = useRemote((s) => s.busy);
   const [help, setHelp] = useState(false);
   useEffect(() => watchPlayers(), []);
-  const others = (players ?? []).filter((p) => p.id !== remote?.playerId && p.online);
+  const downloaded = useIsDownloaded(track?.id ?? "");
+  const quality = track ? plateText(track, downloaded) : null;
+  const others = sortPlaces((players ?? []).filter((p) => p.id !== remote?.playerId && p.online));
   const CardIcon = remote ? KIND_ICON[remote.kind] : Smartphone;
   return (
     <SheetFrame title="Where music plays" onClose={phone.pop}>
@@ -87,7 +110,7 @@ export function DeviceSheet() {
           <DeviceRow
             key={p.id}
             name={p.name}
-            line={p.unsupported ?? (p.playing ? `Playing ${p.playing}` : VIA_LINE[p.via])}
+            line={p.unsupported ?? (p.playing ? `Playing ${p.playing}` : p.via === "platter" ? "Platter · picks up where you are" : VIA_LINE[p.via])}
             Icon={p.via === "cast" ? Cast : KIND_ICON[p.kind]}
             busy={busy === p.id}
             disabled={!!p.unsupported || p.unreachable}

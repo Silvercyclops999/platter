@@ -247,6 +247,9 @@ export function Page({ route }: { route: Route }) {
       return <MixesPage />;
     case "archive":
       return <LibraryPage key="archive" tab="albums" archive />;
+    case "downloads":
+      // On a computer, downloads are managed in Settings.
+      return <SettingsPage section="Downloads and devices" />;
     case "lyrics":
       // Never pushed: the router opens the expanded view in lyrics mode instead.
       return null;

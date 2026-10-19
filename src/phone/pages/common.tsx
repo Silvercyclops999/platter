@@ -10,6 +10,8 @@ import { trackArtistLine } from "../../lib/format";
 import type { HomeItem, Track } from "../../lib/types";
 import { useCanGoBack, useRouter, type Route } from "../../stores/router";
 import { usePlayer } from "../../stores/player";
+import { useApp } from "../../stores/app";
+import { useIsDownloaded } from "../../stores/downloads";
 import { phone, type InPlaylist } from "../phoneUi";
 
 /**
@@ -70,8 +72,12 @@ export function SongRow({
   inPlaylist?: InPlaylist;
 }) {
   const playing = usePlayer((s) => s.state?.track?.id === track.id);
+  // Offline (or Go offline on), a song that isn't on the phone is dimmed: it can't play.
+  const offline = useApp((s) => !!s.health?.cachedOnly);
+  const here = useIsDownloaded(track.id);
+  const unplayable = offline && !here;
   return (
-    <li className="ph-song">
+    <li className={`ph-song ${unplayable ? "is-unplayable" : ""}`} aria-disabled={unplayable || undefined}>
       <button type="button" className="ph-song__main" onClick={onPlay} aria-current={playing ? "true" : undefined}>
         {index !== undefined && (
           <span className={`ph-song__num tabular ${playing ? "is-playing" : ""}`}>{playing ? <PlayingBars /> : index}</span>

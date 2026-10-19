@@ -86,7 +86,9 @@ export type Route =
   /** Every mix made for you, and where radio starts. */
   | { name: "mixes" }
   /** The archive: demos, mixtapes and unreleased albums (the library with that filter on). */
-  | { name: "archive" };
+  | { name: "archive" }
+  /** What's downloaded on this device, storage used and Remove all. */
+  | { name: "downloads" };
 
 export interface HistoryEntry {
   key: number;

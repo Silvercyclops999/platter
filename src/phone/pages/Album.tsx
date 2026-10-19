@@ -7,7 +7,7 @@ import { MoreHorizontal, Pause, Play, Shuffle } from "lucide-react";
 import type { CSSProperties } from "react";
 import { Art } from "../../components/Art";
 import { discGroups } from "../../pages/album";
-import { DownloadButton } from "../../components/DownloadButton";
+import { PhoneDownload } from "../PhoneDownload";
 import { backend } from "../../lib/backend";
 import { formatLongDuration, releaseTypeLabel } from "../../lib/format";
 import { useLoad } from "../../lib/useLoad";
@@ -84,7 +84,7 @@ export function PhoneAlbum({ id }: { id: string }) {
       )}
       <div className="ph-actions">
         <div className="ph-actions__left">
-          <DownloadButton kind="album" id={album.id} title={album.title} size="md" />
+          <PhoneDownload kind="album" id={album.id} title={album.title} trackIds={() => tracks.map((t) => t.id)} />
           <button type="button" className="ph-icon-btn" aria-label={`More for ${album.title}`} onClick={() => phone.push({ kind: "album", album })}>
             <MoreHorizontal size={24} aria-hidden="true" />
           </button>

@@ -1507,3 +1507,29 @@ async fn adding_again_while_the_library_is_half_read_keeps_every_downloaded_song
     assert_eq!(held, ["a1", "a2"]);
     assert!(r.dir.join("a1.flac").exists() && r.dir.join("a2.flac").exists());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_item_is_downloaded_only_when_every_song_is() {
+    let r = rig().await;
+    // A list whose songs aren't known yet waits; it never reads as downloaded.
+    r.d.add(key(ItemKind::Playlist, "empty"), "Empty".into(), Some(vec![])).await.unwrap();
+    let st = r.d.status().unwrap();
+    let e = item(&st, ItemKind::Playlist, "empty");
+    assert_eq!((e.state, e.done, e.total, e.progress), (ItemState::Queued, 0, 0, 0.0));
+    // One song of two finished: still downloading, 1 of 2.
+    r.d.add(key(ItemKind::Album, "a"), "First".into(), None).await.unwrap();
+    assert_eq!(r.d.step().await.unwrap(), Step::Worked);
+    let st = r.d.status().unwrap();
+    let a = item(&st, ItemKind::Album, "a");
+    assert_eq!((a.done, a.total), (1, 2));
+    assert_ne!(a.state, ItemState::Downloaded);
+    // Each finished file has its finish time written.
+    let done_at: Option<i64> = r
+        .db
+        .read(|c| Ok(c.query_row("SELECT done_at FROM download_files WHERE track_id = 'a1'", [], |row| row.get(0))?))
+        .unwrap();
+    assert!(done_at.unwrap_or(0) > 0);
+    drain(&r.d).await;
+    let st = r.d.status().unwrap();
+    assert_eq!(item(&st, ItemKind::Album, "a").state, ItemState::Downloaded);
+}

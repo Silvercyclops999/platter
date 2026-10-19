@@ -20,7 +20,9 @@ import { resetArtistPhotos } from "../lib/artistPhotos";
 import { usePhoneForm } from "../phone/form";
 import { alphaKey, isLikedCopy, letterOf, phoneRows, phoneSubtitle } from "../phone/libraryRows";
 import { baseTitle, groupEditions } from "../phone/editions";
-import { versionsCount } from "../phone/pages/Search";
+import { hitLine, versionsCount } from "../phone/pages/Search";
+import { countText, phoneDownloadProgress, phoneDownloadState } from "../phone/PhoneDownload";
+import { sortPlaces } from "../phone/DeviceSheet";
 import { PHONE_PAGES } from "../phone/routes";
 import { PhonePage, PhoneShell } from "../phone/PhoneShell";
 import { phone, usePhoneUi } from "../phone/phoneUi";
@@ -106,6 +108,7 @@ const SAMPLES: { [N in Route["name"]]: Extract<Route, { name: N }> } = {
   credits: { name: "credits", person: "Juno Ashby" },
   mixes: { name: "mixes" },
   archive: { name: "archive" },
+  downloads: { name: "downloads" },
 };
 
 /** Every route name in the router's own source, so a new one fails here until it has a phone page. */
@@ -388,5 +391,46 @@ describe("phone Settings words", () => {
     expect(phoneText("Keep settings the same on your computers")).toBe("Keep settings the same on your devices");
     expect(phoneText("Always play Default Device with Flat.")).toBe("Always play this phone's speaker with Flat.");
     expect(phoneText("Shows the now playing view on the right, unless the queue is open there.")).toBe("Shows the now playing view.");
+  });
+});
+
+describe("downloads on the phone", () => {
+  const it0 = { state: "downloaded" as const, total: 19, done: 12, failed: 0, missing: 0, progress: 0.63 };
+  it("an item is downloaded only when every one of its songs is, whatever the core's word", () => {
+    expect(phoneDownloadState(it0)).toBe("downloading");
+    expect(phoneDownloadState({ ...it0, done: 19 })).toBe("done");
+    expect(phoneDownloadState({ ...it0, state: "downloaded", total: 0, done: 0 })).toBe("waiting");
+    expect(phoneDownloadState({ ...it0, state: "queued", done: 0 })).toBe("waiting");
+    expect(phoneDownloadState({ ...it0, done: 17, failed: 2 })).toBe("error");
+    expect(phoneDownloadState(undefined)).toBe("none");
+  });
+
+  it("the ring never fills before the last song, and says 12/19", () => {
+    expect(phoneDownloadProgress({ total: 19, done: 18, progress: 1 })).toBeLessThan(1);
+    expect(phoneDownloadProgress({ total: 19, done: 19, progress: 1 })).toBe(1);
+    expect(phoneDownloadProgress({ total: 0, done: 0, progress: 1 })).toBe(0);
+    expect(countText({ total: 19, done: 12 })).toBe("12/19");
+  });
+
+  it("the Downloads page lists what's on the phone and is reached from You", async () => {
+    render(<PhoneShell />);
+    act(() => phone.tab("you"));
+    fireEvent.click(await screen.findByRole("button", { name: "Downloads" }, SLOW));
+    await waitFor(() => expect(route()).toEqual({ name: "downloads" }));
+    expect(await screen.findByRole("switch", { name: "Go offline" }, SLOW)).toBeInTheDocument();
+  });
+});
+
+describe("devices and search", () => {
+  it("other Platters are listed first", () => {
+    const p = (name: string, via: "platter" | "plex" | "cast") => ({ id: name, name, via }) as never;
+    expect(sortPlaces([p("Den TV", "cast"), p("Laptop", "platter"), p("Attic", "plex")]).map((x: { name: string }) => x.name)).toEqual(["Laptop", "Attic", "Den TV"]);
+  });
+
+  it("every pill shows results in one row style; under a type pill the type word goes", () => {
+    const album = { key: "album:1", kind: "album", id: "1", title: "Ivory", byline: "Copperline Choir", typeLabel: "Album", thumb: null, round: false } as const;
+    expect(hitLine(album, false)).toBe("Album · Copperline Choir");
+    expect(hitLine(album, true)).toBe("Copperline Choir");
+    expect(hitLine({ ...album, kind: "artist", byline: "", typeLabel: "Artist" }, true)).toBe("Artist");
   });
 });
