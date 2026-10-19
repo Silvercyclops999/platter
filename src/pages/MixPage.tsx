@@ -20,6 +20,7 @@ import { toast } from "../stores/toasts";
 import { useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
 import { daylistGradient } from "./MixCard";
+import { MixStory } from "./MixStory";
 import "./mixes.css";
 import { PageMissing } from "../components/PageMissing";
 import { failText } from "../lib/errorText";
@@ -50,7 +51,7 @@ function nextUpdate(at: number): string {
   return new Date(at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
-/** The page header: a toned artist photo, the radio's three circles, the daylist gradient, or covers. */
+/** The page header: a toned artist photo, the radio's three circles, or covers (Top Songs and the daylist). */
 function Header({ mix, user, step, compact, header, column }: {
   mix: MixSummary;
   user: string | null;
@@ -77,7 +78,7 @@ function Header({ mix, user, step, compact, header, column }: {
             </span>
           ))}
         </div>
-      ) : mix.kind === "topSongs" ? (
+      ) : mix.kind === "topSongs" || (mix.kind === "daylist" && mix.covers.length > 0) ? (
         <div className="detail-header__art mix-cover" aria-hidden="true">
           {Array.from({ length: 4 }, (_, i) => (
             <Art key={i} path={mix.covers[i % Math.max(1, mix.covers.length)] ?? null} fluid requestSize={116} kind="album" />
@@ -255,6 +256,7 @@ export function MixPage({ id, seed }: { id?: string; seed?: string }) {
             />
           </div>
         )}
+        {page && mix?.kind !== "topSongs" && <MixStory tracks={page.tracks} familiar={page.familiar} />}
         <TrackList label={mix ? `${mix.title} songs` : "Songs"} showPlays={mix?.kind === "topSongs"}>
           {page
             ? page.tracks.map((t, i) => (

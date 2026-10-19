@@ -15,6 +15,8 @@ import { useLoad } from "../../lib/useLoad";
 import { useContextState } from "../../pages/cards";
 import { MixArt } from "../../pages/MixCard";
 import { steers } from "../../pages/MixPage";
+import { MixStory } from "../../pages/MixStory";
+import { MixSleeve } from "../../pages/MixesPage";
 import { useCurate } from "../../stores/curate";
 import { player, usePlayer } from "../../stores/player";
 import { toast } from "../../stores/toasts";
@@ -40,7 +42,11 @@ export function PhoneMix({ id, seed }: { id?: string; seed?: string }) {
   }, [data]);
   const hiddenTracks = useCurate((s) => s.hiddenTracks);
   const hiddenArtists = useCurate((s) => s.hiddenArtists);
-  const page = useMemo(() => (shown ? { ...shown, tracks: shown.tracks.filter((t) => !hiddenTracks.has(t.id) && !hiddenArtists.has(t.artistId)) } : null), [shown, hiddenTracks, hiddenArtists]);
+  const page = useMemo(() => {
+    if (!shown) return null;
+    const keep = shown.tracks.map((t) => !hiddenTracks.has(t.id) && !hiddenArtists.has(t.artistId));
+    return { ...shown, tracks: shown.tracks.filter((_, i) => keep[i]), familiar: shown.familiar.filter((_, i) => keep[i]) };
+  }, [shown, hiddenTracks, hiddenArtists]);
   const { isContext, playing } = useContextState(radio ? "radio" : "mix", key);
   const shuffle = usePlayer((s) => s.state?.shuffledContexts?.includes(key) ?? false);
   if (error && !page) return <PageFailed what={radio ? "this radio" : "this mix"} retry={retry} framed />;
@@ -69,7 +75,7 @@ export function PhoneMix({ id, seed }: { id?: string; seed?: string }) {
   };
   return (
     <PageFrame name={radio ? "radio" : "mix"} title={mix.title} kicker={radio ? "Radio" : mix.kind === "genre" || mix.kind === "mood" ? "Mix" : "Made for you"} className="ph-mix" lede={mix.description || undefined}>
-      <Hero art={<MixArt mix={mix} size={480} />}>
+      <Hero art={mix.kind === "daylist" ? <MixSleeve mix={mix} size={240} /> : <MixArt mix={mix} size={480} />}>
         <p className="ph-x__meta tabular">
           {plural(mix.trackCount, "song")}, {formatLongDuration(mix.durationMs)}
         </p>
@@ -94,6 +100,7 @@ export function PhoneMix({ id, seed }: { id?: string; seed?: string }) {
         }
       />
       {steers(mix.kind) && <Pills label="Steer this mix" items={STEER} value={steer ?? "none"} onChange={(v) => setSteer(v === "none" ? null : v)} />}
+      {mix.kind !== "topSongs" && <MixStory tracks={page.tracks} familiar={page.familiar} />}
       {page.tracks.length ? (
         <ul className="ph-songs" aria-label={`${mix.title} songs`}>
           {page.tracks.map((t, i) => (
