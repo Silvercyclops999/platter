@@ -1,9 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
   <!-- macOS menu bar glyph (a template image: black and transparent only;
-       the system colours it). Same drawing as tray.svg. -->
-  <ellipse cx="14" cy="19.5" rx="12.5" ry="8" fill="none" stroke="#000" stroke-width="2"/>
-  <ellipse cx="14" cy="19.5" rx="4.6" ry="2.9" fill="#000"/>
-  <circle cx="27" cy="5.5" r="2.4" fill="#000"/>
-  <path d="M27 5.5 L24.2 15 L21 18" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M21 18 L19.4 19.6" stroke="#000" stroke-width="3.2" stroke-linecap="round"/>
+       the system colours it). The P with the record's open centre. -->
+  <g transform="translate(16 16) scale(0.0459) translate(-512 -512)">
+    <path fill="#000" fill-rule="evenodd" d="M304 828V404A208 208 0 1 1 420 590.55V828Z M608 404A96 96 0 1 0 416 404A96 96 0 1 0 608 404Z"/>
+  </g>
 </svg>

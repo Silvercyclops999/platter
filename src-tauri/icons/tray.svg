@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <!-- Tray glyph: the app icon's platter and tonearm, simplified for 16 to
-       32 pixels on a taskbar. tray-template.svg is the macOS menu bar copy. -->
-  <ellipse cx="14" cy="19.5" rx="12.5" ry="8" fill="#0E0D0C" stroke="#CFC8BB" stroke-width="1.6"/>
-  <ellipse cx="14" cy="19.5" rx="4.6" ry="2.9" fill="#CDAE6E"/>
-  <circle cx="27" cy="5.5" r="2.4" fill="#CFC8BB"/>
-  <path d="M27 5.5 L24.2 15 L21 18" fill="none" stroke="#CFC8BB" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M21 18 L19.4 19.6" stroke="#CDAE6E" stroke-width="3" stroke-linecap="round"/>
+  <!-- Tray glyph (Windows): the app icon at 32 px, a graphite tile with the
+       brass P, no spindle (too small to hold). Reads on light and dark
+       taskbars. tray-template.svg is the macOS menu bar copy. -->
+  <rect x="1" y="1" width="30" height="30" rx="7" fill="#1A1816"/>
+  <g transform="translate(16 16) scale(0.0356) translate(-512 -512)">
+    <path fill="#CDAE6E" fill-rule="evenodd" d="M304 828V404A208 208 0 1 1 420 590.55V828Z M600 404A88 88 0 1 0 424 404A88 88 0 1 0 600 404Z"/>
+  </g>
 </svg>

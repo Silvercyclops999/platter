@@ -12,8 +12,8 @@ use crate::audio::events::{PlayerState, PlayerStatus};
 
 const TRAY_ID: &str = "platter-tray";
 
-/// The tray glyph (icons/tray.svg drawn at 32 px): the app icon's platter
-/// and tonearm, simplified. On macOS the menu bar takes the black template
+/// The tray glyph (icons/tray.svg drawn at 32 px): the app icon's P, whose
+/// bowl is a record, on its graphite tile. On macOS the menu bar takes the black template
 /// copy, which the system colours for light and dark menu bars.
 const TRAY_PNG: &[u8] = if cfg!(target_os = "macos") {
     include_bytes!("../../icons/tray-template.png")

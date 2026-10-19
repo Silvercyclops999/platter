@@ -1,42 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <!-- Platter's icon master: a platter seen at an angle with a tonearm,
-       brass on graphite. The app icons come from this file
-       (npx tauri icon src-tauri/app-icon.svg); the favicon, tray glyph and
-       Stream Deck art are the same drawing simplified. -->
-  <defs>
-    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2A2724"/>
-      <stop offset="1" stop-color="#171513"/>
-    </linearGradient>
-    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#3B3833"/>
-      <stop offset="0.45" stop-color="#5A564F"/>
-      <stop offset="1" stop-color="#34312D"/>
-    </linearGradient>
-    <linearGradient id="brass" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#E2CB95"/>
-      <stop offset="1" stop-color="#B4955A"/>
-    </linearGradient>
-  </defs>
-  <rect width="1024" height="1024" rx="224" fill="url(#tile)"/>
-  <rect x="6" y="6" width="1012" height="1012" rx="218" fill="none" stroke="#FFF3E0" stroke-opacity="0.06" stroke-width="4"/>
-  <!-- Platter: its edge, then its top -->
-  <ellipse cx="456" cy="632" rx="384" ry="226" fill="#0E0D0C"/>
-  <ellipse cx="456" cy="600" rx="384" ry="226" fill="url(#rim)"/>
-  <!-- Record and grooves -->
-  <ellipse cx="456" cy="600" rx="352" ry="204" fill="#121110"/>
-  <g fill="none" stroke="#24211D" stroke-width="5">
-    <ellipse cx="456" cy="600" rx="312" ry="180"/>
-    <ellipse cx="456" cy="600" rx="272" ry="157"/>
-    <ellipse cx="456" cy="600" rx="232" ry="134"/>
-    <ellipse cx="456" cy="600" rx="192" ry="111"/>
-  </g>
-  <!-- Brass label and spindle -->
-  <ellipse cx="456" cy="600" rx="120" ry="70" fill="url(#brass)"/>
-  <ellipse cx="456" cy="596" rx="16" ry="10" fill="#1A1610"/>
-  <!-- Tonearm: pivot at the top right, arm across to the outer grooves -->
-  <circle cx="842" cy="246" r="64" fill="#2E2B27" stroke="#4A453F" stroke-width="8"/>
-  <circle cx="842" cy="246" r="26" fill="#CFC8BB"/>
-  <path d="M842 246 L760 520 L680 600" fill="none" stroke="#CFC8BB" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
-  <rect x="628" y="574" width="86" height="54" rx="10" transform="rotate(-45 671 601)" fill="url(#brass)"/>
+  <!-- Platter's icon master, full bleed: the OS rounds the corners (iOS,
+       Icon Composer). The mark is a P whose bowl is a record: a ring with the
+       spindle in its centre. Drawn on a 1024 grid: bowl r 208 with a 88 counter
+       (weight 120), stem 116 wide (a touch lighter, so it reads the same),
+       mark 416 x 632 centred. app-icon-desktop.svg is the same drawing on the
+       macOS icon grid, which the desktop icons come from. -->
+  <rect width="1024" height="1024" fill="#1A1816"/>
+  <path fill="#CDAE6E" fill-rule="evenodd" d="M304 828V404A208 208 0 1 1 420 590.55V828Z M600 404A88 88 0 1 0 424 404A88 88 0 1 0 600 404Z"/>
+  <circle cx="512" cy="404" r="30" fill="#F2EDE4"/>
 </svg>

@@ -65,9 +65,13 @@ function segment(px, py, [ax, ay, bx, by]) {
 /**
  * How far inside a shape a point is (negative outside), in 144 units.
  * Shapes: { ring: [r, width] } or { dot: r } centred; { oval: [cx, cy, rx, ry, width] }
- * an ellipse outline and { fill: [cx, cy, rx, ry] } a filled one; { line: [x1, y1, x2, y2, width] }.
+ * an ellipse outline and { fill: [cx, cy, rx, ry] } a filled one; { line: [x1, y1, x2, y2, width] };
+ * { ringAt: [cx, cy, r, width] } and { dotAt: [cx, cy, r] } off centre; { rect: [x0, y0, x1, y1] }.
  */
 function inside(s, px, py) {
+  if (s.ringAt) return s.ringAt[3] / 2 - Math.abs(Math.hypot(px - s.ringAt[0], py - s.ringAt[1]) - s.ringAt[2]);
+  if (s.dotAt) return s.dotAt[2] - Math.hypot(px - s.dotAt[0], py - s.dotAt[1]);
+  if (s.rect) return Math.min(px - s.rect[0], s.rect[2] - px, py - s.rect[1], s.rect[3] - py);
   if (s.dot !== undefined) return s.dot - Math.hypot(px - 72, py - 72);
   if (s.ring) return s.ring[1] / 2 - Math.abs(Math.hypot(px - 72, py - 72) - s.ring[0]);
   if (s.line) return s.line[4] / 2 - segment(px, py, s.line);
@@ -107,23 +111,17 @@ function png(size, shapes) {
     chunk("IEND", Buffer.alloc(0)),
   ]);
 }
-// Platter's icon drawing (src-tauri/app-icon.svg): a platter seen at an
-// angle with its label, and the tonearm from the top right.
+// Platter's mark (src-tauri/app-icon.svg): a P whose bowl is a record, a
+// ring with the spindle in its centre. The 1024 drawing scaled by 0.19.
 const plugin = [
-  { oval: [64, 84, 56, 34, 8] },
-  { oval: [64, 84, 38, 23, 3] },
-  { fill: [64, 84, 16, 10] },
-  { fill: [120, 28, 8, 8] },
-  { line: [120, 28, 108, 68, 7] },
-  { line: [108, 68, 96, 80, 7] },
-  { line: [96, 80, 90, 86, 12] },
+  { ringAt: [72, 51.5, 28.1, 22.8] },
+  { rect: [32.5, 51.5, 54.5, 132] },
+  { dotAt: [72, 51.5, 5.7] },
 ];
+// The category icon is drawn at 28 px: no spindle, which would only blur.
 const category = [
-  { oval: [64, 84, 56, 34, 11] },
-  { fill: [64, 84, 18, 11] },
-  { fill: [120, 28, 10, 10] },
-  { line: [120, 28, 104, 74, 10] },
-  { line: [104, 74, 90, 86, 12] },
+  { ringAt: [72, 51.5, 28.1, 22.8] },
+  { rect: [32.5, 51.5, 54.5, 132] },
 ];
 for (const [name, shapes, size] of [
   ["plugin/icon", plugin, 256],

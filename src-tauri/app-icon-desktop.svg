@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Desktop icon (npm run tauri icon src-tauri/app-icon-desktop.svg): the
+       app-icon.svg drawing on the macOS grid, an 824 tile with 100 of clear
+       space, so macOS shows it as is and Windows gets the same rounded tile. -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#1A1816"/>
+  <g transform="translate(512 512) scale(0.8047) translate(-512 -512)">
+    <path fill="#CDAE6E" fill-rule="evenodd" d="M304 828V404A208 208 0 1 1 420 590.55V828Z M600 404A88 88 0 1 0 424 404A88 88 0 1 0 600 404Z"/>
+    <circle cx="512" cy="404" r="30" fill="#F2EDE4"/>
+  </g>
+</svg>
