@@ -19,32 +19,23 @@ import { SleeveCard } from "../NowPlaying";
 import { BackBar, PageFailed, PageLoading, ShelfCard, SongRow, countLine } from "./common";
 import { UpgradeCard, useAlbumUpgrade } from "../../pages/LidarrUpgrade";
 import { useSleeveNotes } from "../../lib/useSleeveNotes";
-import { roleLabel } from "../../lib/sleeve";
+import { RoleLines } from "../../pages/SleeveNotes";
 
-/** The record's people, by role; each opens their credits page. */
+
+/**
+ * The record's people, by role, set like the computer's sleeve notes
+ * ("Produced by" and the names beside it); each opens their credit page.
+ */
 function AlbumPeople({ albumId }: { albumId: string }) {
   const { data } = useSleeveNotes(albumId);
   const groups = data?.groups.filter((g) => g.people.length) ?? [];
   if (!groups.length) return null;
   return (
-    <section className="ph-card ph-people-card" aria-label="Credits">
-      <div className="ph-card__head">
-        <h3 className="ph-card__title">Credits</h3>
-      </div>
-      <div className="ph-people">
-        {groups.slice(0, 6).map((g) => (
-          <div key={g.role}>
-            <p className="ph-people__role">{roleLabel(g.role)}</p>
-            <div className="ph-people__names">
-              {g.people.slice(0, 8).map((p) => (
-                <button key={p.key} type="button" className="ph-pill" onClick={() => nav.go({ name: "credits", person: p.name })}>
-                  {p.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+    <section className="sleeve__credits ph-sleeve-credits" aria-labelledby="ph-album-credits">
+      <h2 id="ph-album-credits" className="sleeve__heading">
+        Credits
+      </h2>
+      <RoleLines groups={groups.slice(0, 8).map((g) => ({ ...g, people: g.people.slice(0, 8) }))} marks={false} />
     </section>
   );
 }

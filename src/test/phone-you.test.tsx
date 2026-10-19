@@ -19,7 +19,8 @@ import { phoneLookOf, phoneLookPatch } from "../phone/phoneSettings";
 import { phone, usePhoneUi } from "../phone/phoneUi";
 import { installTapGuard } from "../phone/gestures";
 import { albumPlate, plateText } from "../phone/bits";
-import { playingFrom, shownDate } from "../phone/NowPlaying";
+import { playingFrom, shownDate, SleeveCard } from "../phone/NowPlaying";
+import { PhoneAlbum } from "../phone/pages/Album";
 import { inLibraryLine } from "../phone/pages/Artist";
 import { ofKind } from "../phone/pages/Search";
 import { latestOnce } from "../phone/pages/You";
@@ -409,5 +410,27 @@ describe("the phone's other pages", () => {
     await waitFor(() => expect(document.querySelector('[data-phone-page="recents"]')).not.toBeNull());
     act(() => useRouter.getState().navigate({ name: "devices" }));
     expect(await screen.findByText("On your computer")).toBeInTheDocument();
+  });
+});
+
+describe("sleeve notes on the phone", () => {
+  const withNotes = () => mock.fx.albums.find((a) => (Number(a.id) || a.title.length) % 11 !== 10 && a.section !== "demos")!;
+
+  it("are the computer's printed sleeve, compact, under its own heading", async () => {
+    const album = withNotes();
+    render(<SleeveCard track={{ albumId: album.id, albumTitle: album.title, artistTitle: album.artistTitle, thumb: album.thumb }} />);
+    const panel = await screen.findByRole("region", { name: "Sleeve notes" });
+    expect(panel).toHaveClass("sleeve__liner", "sleeve__liner--compact");
+    expect(panel.querySelector(".sleeve-facts__row dt")?.textContent).toBe("Released");
+    expect(within(panel).getByRole("button", { name: "Open the album" })).toBeInTheDocument();
+  });
+
+  it("the album page sets its credits like the computer's, a role and its names", async () => {
+    const album = withNotes();
+    render(<PhoneAlbum id={album.id} />);
+    const credits = await screen.findByRole("region", { name: "Credits" }, { timeout: 4000 });
+    expect(credits).toHaveClass("sleeve__credits");
+    expect(credits.querySelector(".sleeve-roles__row dt")).not.toBeNull();
+    expect(credits.querySelector(".ph-pill")).toBeNull();
   });
 });

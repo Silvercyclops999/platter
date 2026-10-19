@@ -13,6 +13,7 @@ import { formatDuration, trackArtistLine } from "../lib/format";
 import type { Track } from "../lib/types";
 import { useArtColours } from "../lib/useTint";
 import { useSleeveNotes } from "../lib/useSleeveNotes";
+import { linerHasFacts, SleeveLiner } from "../pages/SleeveNotes";
 import { useCreditRows } from "../shell/creditRows";
 import { SEEK_KEY_STEP, SEEK_PAGE_STEP } from "../shell/PlayerBar";
 import { player, usePlayer } from "../stores/player";
@@ -308,38 +309,25 @@ export function shownDate(v: string): string {
 /** An album's sleeve notes as a card: the facts, then the release's own notes. */
 export function SleeveCard({ track, link = true }: { track: Pick<Track, "albumId" | "albumTitle" | "artistTitle" | "thumb">; link?: boolean }) {
   const { data } = useSleeveNotes(track.albumId);
-  if (!data) return null;
-  const facts = [
-    ["Released", data.released?.value ? shownDate(data.released.value) : undefined],
-    ["Recorded", data.recorded?.value ? shownDate(data.recorded.value) : undefined],
-    ["Label", data.label?.value],
-    ["Studio", data.studios[0]?.name],
-  ].filter((f): f is [string, string] => !!f[1]);
-  const notes = data.notes?.value;
-  if (!facts.length && !notes) return null;
+  if (!data || !linerHasFacts(data)) return null;
+  // The computer's printed sleeve, set for the phone's width.
   return (
-    <section className="ph-card ph-sleeve-card" aria-label="Sleeve notes">
-      <div className="ph-card__head">
-        <h3 className="ph-card__title">Sleeve notes</h3>
-        {link && (
-          <button type="button" className="ph-card__link" onClick={() => phone.go({ name: "album", id: track.albumId, tab: "sleeve" })}>
-            Open the album
-          </button>
-        )}
-      </div>
-      {facts.length > 0 && (
-        <dl className="ph-facts">
-          {facts.map(([k, v]) => (
-            <div key={k} className="ph-facts__row">
-              <dt>{k}</dt>
-              <dd className="tabular">{v}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
-      {notes && <p className="ph-sleeve-card__notes">{notes}</p>}
-    </section>
+    <div className="ph-sleeve-card">
+      <SleeveLiner
+        n={data}
+        compact
+        heading="Sleeve notes"
+        action={
+          link ? (
+            <button type="button" className="ph-card__link" onClick={() => phone.go({ name: "album", id: track.albumId, tab: "sleeve" })}>
+              Open the album
+            </button>
+          ) : undefined
+        }
+      />
+    </div>
   );
+
 }
 
 function CreditsCard({ track }: { track: Track }) {

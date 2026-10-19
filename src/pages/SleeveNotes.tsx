@@ -5,7 +5,8 @@
  * people open their credit page.
  */
 import { ExternalLink } from "lucide-react";
-import { Fragment } from "react";
+import { Fragment, useId, type ReactNode } from "react";
+
 import { Button } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import { backend } from "../lib/backend";
@@ -143,6 +144,80 @@ function isEmpty(n: SleeveNotes): boolean {
   );
 }
 
+/** Whether the release side has anything to print. */
+export function linerHasFacts(n: SleeveNotes): boolean {
+  return factRows(n).length > 0 || n.studios.length > 0 || !!n.notes;
+}
+
+/**
+ * The release side of the sleeve: its facts set on rules like the back of a
+ * record, the studios, other editions and the release's own notes, on the
+ * printed panel. The album page's tab shows it whole; the phone shows the
+ * same panel `compact` (the facts and the notes, a few lines of them) under
+ * now playing and on its album page, with its own heading and a link.
+ */
+export function SleeveLiner({ n, compact = false, heading = "The release", action }: { n: SleeveNotes; compact?: boolean; heading?: string; action?: ReactNode }) {
+  const id = useId();
+  const rows = factRows(n);
+  return (
+    <section className={`sleeve__liner ${compact ? "sleeve__liner--compact" : ""}`} aria-labelledby={id}>
+      <div className="sleeve__liner-head">
+        <h2 id={id} className="sleeve__heading">
+          {heading}
+        </h2>
+        {action}
+      </div>
+      {rows.length > 0 && (
+        <dl className="sleeve-facts">
+          {rows.map((r) => (
+            <div key={r.key} className="sleeve-facts__row src-row">
+              <dt>{r.label}</dt>
+              <dd>
+                <span className="sleeve-facts__value" tabIndex={compact ? undefined : 0}>
+                  {r.text}
+                </span>
+                <SourceMarks sources={r.fact.sources} />
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {n.studios.length > 0 && (
+        <dl className="sleeve-facts sleeve-facts--studios">
+          {n.studios.map((s) => (
+            <div key={`${s.role}-${s.name}`} className="sleeve-facts__row src-row">
+              <dt>{STUDIO_LABEL[s.role] ?? s.role}</dt>
+              <dd>
+                <span className="sleeve-facts__value" tabIndex={compact ? undefined : 0}>
+                  {s.name}
+                </span>
+                <SourceMarks sources={s.sources} />
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {!compact && n.editionNotes.length > 0 && (
+        <ul className="sleeve-editions" aria-label="Other editions">
+          {n.editionNotes.map((e) => (
+            <li key={e.value} className="src-row" tabIndex={0}>
+              {e.value} <SourceMarks sources={e.sources} />
+            </li>
+          ))}
+        </ul>
+      )}
+      {n.notes && (
+        <figure className="sleeve-note">
+          <blockquote>{n.notes.value}</blockquote>
+          <figcaption className="src-row" tabIndex={compact ? undefined : 0}>
+            Release notes <SourceMarks sources={n.notes.sources} />
+          </figcaption>
+        </figure>
+      )}
+    </section>
+  );
+}
+
 /** The tab's panel. Asks for the notes only while shown. */
 export function SleeveNotesPanel({ albumId, title }: { albumId: string; title: string }) {
   const { data, loading, failed } = useSleeveNotes(albumId);
@@ -167,63 +242,11 @@ export function SleeveNotesPanel({ albumId, title }: { albumId: string; title: s
       </div>
     );
   }
-  const rows = factRows(n);
   const songs = n.tracks.filter((t) => t.groups.length > 0 || t.recorded);
   const discs = new Set(n.tracks.map((t) => t.disc)).size > 1;
   return (
     <div className="sleeve">
-      <section className="sleeve__liner" aria-labelledby="sleeve-liner-title">
-        <h2 id="sleeve-liner-title" className="sleeve__heading">
-          The release
-        </h2>
-        {rows.length > 0 && (
-          <dl className="sleeve-facts">
-            {rows.map((r) => (
-              <div key={r.key} className="sleeve-facts__row src-row">
-                <dt>{r.label}</dt>
-                <dd>
-                  <span className="sleeve-facts__value" tabIndex={0}>
-                    {r.text}
-                  </span>
-                  <SourceMarks sources={r.fact.sources} />
-                </dd>
-              </div>
-            ))}
-          </dl>
-        )}
-        {n.studios.length > 0 && (
-          <dl className="sleeve-facts sleeve-facts--studios">
-            {n.studios.map((s) => (
-              <div key={`${s.role}-${s.name}`} className="sleeve-facts__row src-row">
-                <dt>{STUDIO_LABEL[s.role] ?? s.role}</dt>
-                <dd>
-                  <span className="sleeve-facts__value" tabIndex={0}>
-                    {s.name}
-                  </span>
-                  <SourceMarks sources={s.sources} />
-                </dd>
-              </div>
-            ))}
-          </dl>
-        )}
-        {n.editionNotes.length > 0 && (
-          <ul className="sleeve-editions" aria-label="Other editions">
-            {n.editionNotes.map((e) => (
-              <li key={e.value} className="src-row" tabIndex={0}>
-                {e.value} <SourceMarks sources={e.sources} />
-              </li>
-            ))}
-          </ul>
-        )}
-        {n.notes && (
-          <figure className="sleeve-note">
-            <blockquote>{n.notes.value}</blockquote>
-            <figcaption className="src-row" tabIndex={0}>
-              Release notes <SourceMarks sources={n.notes.sources} />
-            </figcaption>
-          </figure>
-        )}
-      </section>
+      <SleeveLiner n={n} />
 
       <section className="sleeve__credits" aria-labelledby="sleeve-credits-title">
         <h2 id="sleeve-credits-title" className="sleeve__heading">
