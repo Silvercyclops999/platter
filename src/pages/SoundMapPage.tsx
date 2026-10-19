@@ -22,6 +22,7 @@ import { useSettings } from "../stores/settings";
 import { useSoundMap, useSoundMapOn } from "../stores/soundmap";
 import { MapCanvas, type MapApi, type MapMode } from "./soundmap/MapCanvas";
 import { emptyData, joinChunks, legend as makeLegend, type ColourBy, type MapData } from "./soundmap/geometry";
+import "./ledger.css";
 import "./soundmap.css";
 import { LoadError, TakingLong } from "../components/LoadError";
 import { useTakingLong } from "../lib/useLoad";
@@ -271,10 +272,7 @@ export function SoundMapPage({ album }: { album?: string } = {}) {
       <header className="soundmap__head">
         <div className="soundmap__titles">
           <h1 className="page-title">Sound map</h1>
-          <p className="soundmap__sub">
-            Songs that sound alike sit together.
-            {ready && placed > 0 && <> {songs(placed)} on the map.</>}
-          </p>
+          {ready && placed > 0 ? <MapLead placed={placed} groups={legend.groups} by={by} /> : <p className="soundmap__sub">Songs that sound alike sit together.</p>}
         </div>
         {ready && placed > 0 && (
           <div className="soundmap__tools">
@@ -443,6 +441,31 @@ function EmptyState({ info }: { info: SoundMapInfo }) {
   );
 }
 
+/**
+ * The page's sentence: how many songs are on the map, then its biggest
+ * patch by genre, or the decade most of them come from.
+ */
+export function MapLead({ placed, groups, by, className = "" }: { placed: number; groups: { label: string; count: number; slot: number }[]; by: ColourBy; className?: string }) {
+  const top = groups.filter((g) => g.slot >= 0 && g.count > 0).sort((a, b) => b.count - a.count)[0];
+  return (
+    <p className={`lead lead--sm soundmap__sub ${className}`} data-testid="soundmap-lead">
+      {songs(placed)} on the map, each one near the songs it sounds like.
+      {top &&
+        (by === "genre" ? (
+          <>
+            {" "}
+            <strong>{top.label}</strong> is the biggest patch, with {fmt(top.count)}.
+          </>
+        ) : (
+          <>
+            {" "}
+            The most come from the <strong>{top.label}</strong>, {fmt(top.count)} of them.
+          </>
+        ))}
+    </p>
+  );
+}
+
 export function Legend({ groups, colours, by }: { groups: { label: string; count: number }[]; colours: string[]; by: ColourBy }) {
   return (
     <ul className="soundmap__legend" aria-label={by === "genre" ? "Genres" : "Eras"}>
@@ -451,7 +474,7 @@ export function Legend({ groups, colours, by }: { groups: { label: string; count
           <li key={g.label} className="soundmap__legend-item">
             <span className="soundmap__swatch" style={{ background: colours[i] }} aria-hidden="true" />
             <span>{g.label}</span>
-            <span className="soundmap__legend-count">{fmt(g.count)}</span>
+            <span className="soundmap__legend-count num">{fmt(g.count)}</span>
           </li>
         ) : null,
       )}

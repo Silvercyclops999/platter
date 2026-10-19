@@ -127,3 +127,17 @@
 .year-entry__sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
 .year-entry__go { color: var(--color-text-muted); }
 
+
+/* On the phone, range and colour pickers read as words on a rule too, each a full 44 px to tap. */
+:is(.ph-stats, .ph-map, .ph-ledger) .ph-x__pills { gap: 4px; border-bottom: 1px solid var(--ph-line, var(--ledger-faint)); -webkit-mask-image: none; mask-image: none; }
+:root :is(.ph-stats, .ph-map, .ph-ledger) .ph-x__pills .ph-chip {
+  height: 44px;
+  padding: 0 8px;
+  border: 0 !important;
+  border-radius: 0;
+  background: none !important;
+  box-shadow: inset 0 -2px 0 transparent;
+  color: var(--color-text-secondary) !important;
+  font-weight: var(--font-weight-regular);
+}
+:root :is(.ph-stats, .ph-map, .ph-ledger) .ph-x__pills .ph-chip.is-on { color: var(--color-text-primary) !important; font-weight: var(--font-weight-semibold); box-shadow: inset 0 -2px 0 var(--color-accent); }

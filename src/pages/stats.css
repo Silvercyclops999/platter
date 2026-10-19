@@ -431,18 +431,6 @@ button.moment__btn:focus-visible { outline: 2px solid var(--color-focus-ring); o
    The same page set for the phone: the range as words on a rule, the
    chosen one underlined, and the sections a little closer together. */
 .ph-stats .ph-seg__tab.is-on::after { background: var(--color-text-primary); border-radius: 0; }
-.ph-stats .ph-x__pills { gap: 4px; border-bottom: 1px solid var(--ph-line, var(--ledger-faint)); -webkit-mask-image: none; mask-image: none; }
-:root .ph-stats .ph-x__pills .ph-chip {
-  height: 44px;
-  padding: 0 8px;
-  border: 0 !important;
-  border-radius: 0;
-  background: none !important;
-  box-shadow: inset 0 -2px 0 transparent;
-  color: var(--color-text-secondary) !important;
-  font-weight: var(--font-weight-regular);
-}
-:root .ph-stats .ph-x__pills .ph-chip.is-on { color: var(--color-text-primary) !important; font-weight: var(--font-weight-semibold); box-shadow: inset 0 -2px 0 var(--color-accent); }
 .stats--phone { max-width: none; padding-bottom: var(--space-6); }
 .stats--phone .stats-hero { margin-top: var(--space-6); }
 .stats--phone .stats-section { margin-top: var(--space-10, 40px); }

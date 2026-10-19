@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Art } from "../../components/Art";
 import { backend } from "../../lib/backend";
 import type { SoundMapInfo, SoundMapSong } from "../../lib/types";
-import { FindBox, Legend, loadAll, useColours, walkOrder } from "../../pages/SoundMapPage";
+import { FindBox, Legend, loadAll, MapLead, useColours, walkOrder } from "../../pages/SoundMapPage";
 import { MapCanvas, type MapApi, type MapMode } from "../../pages/soundmap/MapCanvas";
 import { emptyData, legend as makeLegend, type ColourBy, type MapData } from "../../pages/soundmap/geometry";
 import { player } from "../../stores/player";
@@ -105,7 +105,7 @@ export function PhoneSoundMap({ album }: { album?: string }) {
       {/* Its own frame: the map reads its colours from this root element. */}
       <BackBar title="Sound map" after={72} />
       <h1 className="ph-title ph-title--page ph-x__title">Sound map</h1>
-      <p className="ph-x__lede">Songs that sound alike sit together.{placed > 0 ? ` ${songs(placed)} on the map.` : ""}</p>
+      {placed > 0 && data ? <MapLead className="ph-x__lede" placed={placed} groups={legend.groups} by={by} /> : <p className="ph-x__lede">Songs that sound alike sit together.</p>}
       {!on ? (
         <Empty title="The sound map is off" text="Turn it on in Settings to see your songs placed by how they sound." action={<GoPill route={{ name: "settings", row: "showSoundMap" }}>Open Settings</GoPill>} />
       ) : error && !data ? (
