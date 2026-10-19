@@ -185,3 +185,62 @@
 .artist-aliases__text em { font-style: normal; color: var(--color-text-primary); }
 .artist-aliases__add { flex-wrap: wrap; align-items: center; }
 .artist-aliases__join { font-size: var(--font-size-sm); color: var(--color-text-secondary); white-space: nowrap; }
+
+/* ---------------------------------------------------------------- Radio and mixes
+   A sentence on what there is to play, then each kind of mix as a ruled
+   list: the sleeve, the name in the display face, who is in it, its
+   length in the readout face, and Play. */
+.mixes-page { container-type: inline-size; }
+.mixes-page .mixes-page__lead { margin: 0 var(--space-3) var(--space-3); max-width: 30em; }
+.mixes-page .mixes-page__lead + .mixes-page__lede { margin-top: 0; font-size: var(--font-size-sm); }
+.mixes-page .ledger-head { margin: 0 var(--space-3) var(--space-1); }
+.mixes-page__group + .mixes-page__group { margin-top: var(--space-10, 40px); }
+.mix-rows { list-style: none; margin: 0 var(--space-3); padding: 0; }
+.mix-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-2) var(--space-3) 0;
+  border-top: 1px solid var(--ledger-faint);
+}
+.mix-row:first-child { border-top: 0; }
+.mix-row:hover { background: var(--color-state-hover); }
+.mix-row__sleeve { display: block; width: 64px; height: 64px; }
+.mix-row__sleeve .mix-art { border-radius: 2px; box-shadow: none; }
+.mix-row__sleeve .art { border-radius: 2px; }
+.mix-row__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mix-row__title {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-family: var(--font-headings, var(--font-family));
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.mix-row__title:hover { text-decoration: underline; text-underline-offset: 3px; }
+.mix-row__title:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; border-radius: 2px; }
+.mix-row.is-playing .mix-row__title { color: var(--color-playing); }
+.mix-row__about { font-size: var(--font-size-sm); color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mix-row__length { min-width: 96px; text-align: right; font-family: var(--font-readout, var(--font-family)); font-size: var(--font-size-xs); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.mix-row__length small { display: block; font-size: inherit; color: var(--color-text-muted); }
+@container (max-width: 560px) {
+  .mix-row { grid-template-columns: 56px minmax(0, 1fr) auto; }
+  .mix-row__sleeve { width: 56px; height: 56px; }
+  .mix-row__length { display: none; }
+}
+.ph-mixes .ph-mixes__lead { margin: 12px 0 20px; }
+.ph-mixes .ph-mixes__rows .ph-mixes__row { border-top: 1px solid var(--ledger-faint); border-radius: 0; }
+.ph-mixes .ph-mixes__rows li:first-child .ph-mixes__row { border-top: 0; }
+.ph-mixes .ph-mixes__row .ph-row__title { font-family: var(--font-headings, var(--font-family)); font-weight: 600; }
+.ph-mixes .mix-row__sleeve { flex: none; width: 56px; height: 56px; }
+.ph-mixes .mix-row__length { min-width: 0; }

@@ -1,25 +1,43 @@
 /**
- * Radio and mixes on the phone: every mix made for you, by kind, two
- * across. Radio starts from any song, album or artist's sheet.
+ * Radio and mixes on the phone: the computer's page set for the phone. The
+ * same sentence, then every mix made for you by kind as ruled rows with
+ * its sleeve and length. Radio starts from any song, album or artist's sheet.
  */
 import { useApp } from "../../stores/app";
 import { useSettings } from "../../stores/settings";
-import { MixArt, openMix } from "../../pages/MixCard";
+import { openMix } from "../../pages/MixCard";
+import { MixSleeve, mixesSentence } from "../../pages/MixesPage";
+import { duration } from "../../lib/statsStory";
 import { useMixShelves } from "../../pages/mixShelves";
 import type { MixSummary } from "../../lib/types";
 import { PageFailed } from "./common";
-import { Empty, GhostRows, GoPill, PageFrame, Tile, TileGrid } from "./kit";
+import { Empty, GhostRows, GoPill, PageFrame, Row } from "./kit";
 
 function Group({ title, mixes }: { title: string; mixes: MixSummary[] }) {
   if (!mixes.length) return null;
   return (
-    <section className="ph-x__section" aria-label={title}>
-      <h2 className="ph-section-title">{title}</h2>
-      <TileGrid label={title}>
+    <section className="ph-x__section mixes-page__group" aria-label={title}>
+      <div className="ledger-head">
+        <h2 className="ledger-head__title">{title}</h2>
+        <span className="ledger-head__aside">{mixes.length}</span>
+      </div>
+      <ul className="ph-rows ph-mixes__rows" aria-label={title}>
         {mixes.map((m) => (
-          <Tile key={m.id} title={m.kind === "daylist" ? "daylist" : m.title} sub={m.kind === "daylist" ? "Your day in a playlist" : m.description} art={<MixArt mix={m} size={320} named={false} />} onOpen={() => openMix(m)} />
+          <Row
+            key={m.id}
+            className="ph-mixes__row"
+            art={
+              <span className="mix-row__sleeve">
+                <MixSleeve mix={m} size={56} />
+              </span>
+            }
+            title={m.kind === "daylist" ? "daylist" : m.title}
+            sub={m.kind === "daylist" ? "Your day in a playlist" : m.description}
+            end={m.durationMs > 0 ? <span className="mix-row__length">{duration(m.durationMs)}</span> : undefined}
+            onOpen={() => openMix(m)}
+          />
         ))}
-      </TileGrid>
+      </ul>
     </section>
   );
 }
@@ -30,7 +48,8 @@ export function PhoneMixes() {
   const { data, error, retry } = useMixShelves(on);
   const count = data ? data.madeForYou.length + data.moods.length + data.genres.length : 0;
   return (
-    <PageFrame name="mixes" title="Radio and mixes" lede="Start radio from any song, album or artist with its menu. Mixes refresh as you listen.">
+    <PageFrame name="mixes" title="Radio and mixes" lede="Start radio from any song, album or artist with its menu. Mixes refresh as you listen." className="ph-mixes">
+      {on && data && count > 0 && <p className="lead lead--sm ph-mixes__lead">{mixesSentence(data)}</p>}
       {!on ? (
         <Empty title="Mixes are off" text="Turn on mixes in Settings and they show here." action={<GoPill route={{ name: "settings", row: "homeMixes" }}>Open Settings</GoPill>} />
       ) : error && !data ? (
