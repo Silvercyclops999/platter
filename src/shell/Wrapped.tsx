@@ -457,7 +457,8 @@ export function WrappedView({ year, onClose }: { year: number; onClose: () => vo
   }, []);
 
   const onDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || isControl(e.target)) return;
+    // One finger at a time: a second one while the first is down is ignored.
+    if (press.current || e.button !== 0 || isControl(e.target)) return;
     const timer = window.setTimeout(() => {
       if (!press.current || press.current.axis) return;
       press.current.hold = true;
@@ -492,6 +493,8 @@ export function WrappedView({ year, onClose }: { year: number; onClose: () => vo
       }
       e.currentTarget.setPointerCapture?.(e.pointerId);
     }
+    // The cards follow the finger; under reduced motion they stay put and only the release counts.
+    if (reduced) return;
     if (p.axis === "y") setPull({ x: 0, y: Math.max(0, dy) });
     else if (p.edge) setPull({ x: Math.max(0, dx), y: 0 });
   };
@@ -519,10 +522,11 @@ export function WrappedView({ year, onClose }: { year: number; onClose: () => vo
     }
     go(p.x - box.left < box.width / 3 ? -1 : 1);
   };
-  const onCancel = () => {
+  const onCancel = (e: ReactPointerEvent<HTMLDivElement>) => {
     const p = press.current;
+    if (!p || p.id !== e.pointerId) return;
     press.current = null;
-    if (p) window.clearTimeout(p.timer);
+    window.clearTimeout(p.timer);
     setHeld(false);
     setPull(null);
   };
@@ -566,8 +570,8 @@ export function WrappedView({ year, onClose }: { year: number; onClose: () => vo
             </span>
           )}
           <span className="wrapped__tools">
-            {!onPhone && !reduced && !last && cards.length > 0 && (
-              <IconButton label={stopped ? "Resume" : "Pause"} size="sm" icon={stopped ? <Play size={16} fill="currentColor" /> : <Pause size={16} fill="currentColor" />} onClick={() => setStopped((s) => !s)} />
+            {!reduced && !last && cards.length > 0 && (
+              <IconButton label={stopped ? "Resume" : "Pause"} size="sm" className={onPhone ? "wrapped__quiet" : ""} icon={stopped ? <Play size={16} fill="currentColor" /> : <Pause size={16} fill="currentColor" />} onClick={() => setStopped((s) => !s)} />
             )}
             {onPhone ? (
               <button type="button" className="wrapped__close" aria-label="Close" onClick={onClose}>
@@ -622,12 +626,12 @@ export function WrappedView({ year, onClose }: { year: number; onClose: () => vo
           </section>
         )}
       </div>
-      {cards.length > 1 && !onPhone && (
+      {cards.length > 1 && (
         <>
-          <button type="button" className="wrapped__nav wrapped__nav--prev" aria-label="Previous card" disabled={i === 0} onClick={() => go(-1)}>
+          <button type="button" className={`wrapped__nav wrapped__nav--prev ${onPhone ? "wrapped__quiet" : ""}`} aria-label="Previous card" disabled={i === 0} onClick={() => go(-1)}>
             <ChevronLeft size={20} aria-hidden="true" />
           </button>
-          <button type="button" className="wrapped__nav wrapped__nav--next" aria-label="Next card" disabled={last} onClick={() => go(1)}>
+          <button type="button" className={`wrapped__nav wrapped__nav--next ${onPhone ? "wrapped__quiet" : ""}`} aria-label="Next card" disabled={last} onClick={() => go(1)}>
             <ChevronRight size={20} aria-hidden="true" />
           </button>
         </>

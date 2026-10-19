@@ -204,15 +204,29 @@ export function linerHasFacts(n: SleeveNotes): boolean {
  * same panel `compact` (the facts and the notes, a few lines of them) under
  * now playing and on its album page, with its own heading and a link.
  */
-export function SleeveLiner({ n, compact = false, heading = "The release", action }: { n: SleeveNotes; compact?: boolean; heading?: string; action?: ReactNode }) {
+export function SleeveLiner({
+  n,
+  compact = false,
+  heading = "The release",
+  level = 2,
+  action,
+}: {
+  n: SleeveNotes;
+  compact?: boolean;
+  heading?: string;
+  /** The heading's level where it sits (now playing's cards are h3). */
+  level?: 2 | 3;
+  action?: ReactNode;
+}) {
   const id = useId();
   const rows = factRows(n);
+  const Heading = level === 3 ? "h3" : "h2";
   return (
     <section className={`sleeve__liner ${compact ? "sleeve__liner--compact" : ""}`} aria-labelledby={id}>
       <div className="sleeve__liner-head">
-        <h2 id={id} className="sleeve__heading">
+        <Heading id={id} className="sleeve__heading">
           {heading}
-        </h2>
+        </Heading>
         {action}
       </div>
       {rows.length > 0 && (

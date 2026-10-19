@@ -10,7 +10,7 @@ import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS, type PlayerState, type QueueItem, type Track } from "../lib/types";
 import { SettingsPage } from "../pages/SettingsPage";
-import { DESKTOP_ONLY, onPhone, phoneText } from "../pages/settingsMeta";
+import { DESKTOP_ONLY, NOT_RESET, onPhone, phoneText } from "../pages/settingsMeta";
 import { ASSUMED_CAPS, useCaps } from "../stores/caps";
 import { usePhoneForm } from "../phone/form";
 import { PhoneShell } from "../phone/PhoneShell";
@@ -213,6 +213,10 @@ describe("phone settings screens", () => {
     } finally {
       act(() => useCaps.setState({ all: ASSUMED_CAPS }));
     }
+  });
+
+  it("a reset on the computer keeps its name", () => {
+    expect(NOT_RESET.has("computerName")).toBe(true);
   });
 
   it("the computer keeps every row", () => {
@@ -439,6 +443,18 @@ describe("sleeve notes on the phone", () => {
     render(<SleeveCard track={{ albumId: album.id, albumTitle: album.title, artistTitle: album.artistTitle, thumb: album.thumb }} />);
     const panel = await screen.findByRole("region", { name: "Sleeve notes" });
     expect(labels(panel)).toEqual(want);
+  });
+
+  it("sit under the right heading level: h3 among now playing's cards, h2 under the album page's h1", async () => {
+    const album = withNotes();
+    const t = { albumId: album.id, albumTitle: album.title, artistTitle: album.artistTitle, thumb: album.thumb };
+    const { unmount } = render(<SleeveCard track={t} />);
+    expect(await screen.findByRole("heading", { name: "Sleeve notes", level: 3 })).toBeInTheDocument();
+    unmount();
+    render(<SleeveCard track={t} link={false} level={2} />);
+    expect(await screen.findByRole("heading", { name: "Sleeve notes", level: 2 })).toBeInTheDocument();
+    // "Open the album" is a full 44 pt target.
+    expect(phoneCss).toMatch(/\.ph-card__link \{[^}]*min-width: 44px;[^}]*min-height: 44px;/);
   });
 
   it("the album page keeps Song by song, folded behind its own row when it's long", async () => {

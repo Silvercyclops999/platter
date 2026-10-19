@@ -11,6 +11,11 @@ import { Art, tintColour, watchNear } from "../components/Art";
 import { artPixelSize, PHONE_ART_MAX, PHONE_ART_SAMPLE, PHONE_ART_STEPS, phoneArtPixelSize } from "../lib/artSize";
 import { artSampleUrl, artUrl, backend } from "../lib/backend";
 import { usePhoneForm } from "../phone/form";
+import phoneCss from "../phone/phone.css?raw";
+import parityCss from "../phone/pages/parity.css?raw";
+import wrappedCss from "../shell/wrapped.css?raw";
+import sleeveCss from "../pages/sleeve.css?raw";
+import componentsCss from "../components/components.css?raw";
 
 const size = (url: string | undefined) => Number(new URL(url!, "http://x").searchParams.get("w"));
 
@@ -72,6 +77,18 @@ describe("the phone's art ladder", () => {
       expect(size(artUrl("/t/1", 48))).toBe(artPixelSize(48, 3));
       expect(size(artSampleUrl("/t/1"))).toBe(artPixelSize(64, 3));
     });
+  });
+});
+
+describe("the stylesheets this touches", () => {
+  it("have no stray characters glued to a rule (a stray `n` once hid the tint placeholder)", () => {
+    for (const [name, css] of Object.entries({ phoneCss, wrappedCss, sleeveCss, parityCss, componentsCss })) {
+      // A line that starts with something other than a selector, brace or comment, then opens a comment.
+      expect(css, name).not.toMatch(/^[^\s/*{}.:#[@>~+&-][^{};]*\/\*/m);
+      // A line that is a bare word or two letters on its own.
+      expect(css, name).not.toMatch(/^[A-Za-z]{1,2}\s*$/m);
+    }
+    expect(phoneCss).toMatch(/^\.phone \.art__tint \{/m);
   });
 });
 
@@ -185,6 +202,28 @@ describe("loading the next screenful", () => {
     expect(shelfIo.seen).toEqual([img]);
     act(() => shelfIo.cb([{ target: img, isIntersecting: true }]));
     expect(img.getAttribute("loading")).toBe("eager");
+  });
+
+  it("a cover that fired and then unmounts doesn't stop another cover watching the same place", () => {
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    try {
+      const first = vi.fn();
+      const stopFirst = watchNear(el, first);
+      const io = made[made.length - 1];
+      io.cb([{ target: el, isIntersecting: true }]);
+      expect(first).toHaveBeenCalledOnce();
+      const second = vi.fn();
+      watchNear(el, second);
+      // The first one's effect cleanup runs after it already fired.
+      stopFirst();
+      expect(io.seen).toContain(el);
+      io.cb([{ target: el, isIntersecting: true }]);
+      expect(second).toHaveBeenCalledOnce();
+      expect(first).toHaveBeenCalledOnce();
+    } finally {
+      el.remove();
+    }
   });
 
   it("watching stops cleanly", () => {

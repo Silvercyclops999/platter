@@ -179,7 +179,8 @@
 .ph-glyph--dl svg { display: block; }
 .ph-glyph--pin { display: inline-flex; color: var(--color-accent); }
 .ph-glyph--pin svg { transform: rotate(35deg); }
-n/* A cover on the phone: its own colour while it loads, then a 150 ms fade once decoded (none from the cache, none under reduced motion). */
+
+/* A cover on the phone: its own colour while it loads, then a 150 ms fade once decoded (none from the cache, none under reduced motion). */
 .phone .art__tint { position: absolute; inset: 0; }
 .phone .art.is-loaded.is-fading img { animation: fade-in 150ms var(--ph-ease); }
 :root[data-reduced-motion="true"] .phone .art.is-loaded.is-fading img { animation: none; }
@@ -377,7 +378,7 @@ n/* A cover on the phone: its own colour while it loads, then a 150 ms fade once
 }
 .ph-card__head { display: flex; align-items: center; justify-content: space-between; margin: -6px -8px 8px 0; }
 .ph-card__title { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: 0.01em; }
-.ph-card__link { font-size: 13px; font-weight: 600; color: var(--color-text-secondary); min-height: 44px; padding: 0 8px; }
+.ph-card__link { display: inline-flex; align-items: center; justify-content: center; flex: none; font-size: 13px; font-weight: 600; color: var(--color-text-secondary); min-width: 44px; min-height: 44px; padding: 0 8px; }
 .ph-lyrics-card { background: color-mix(in srgb, var(--ph-tint) 62%, #121010); color: #f6f1e8; }
 .ph-lyrics-card .ph-icon-btn { color: rgba(246, 241, 232, 0.8); }
 .ph-lyrics-card__lines { display: flex; flex-direction: column; gap: 8px; width: 100%; }

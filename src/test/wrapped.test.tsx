@@ -505,11 +505,14 @@ describe("Wrapped cards", () => {
       el.getBoundingClientRect = () => ({ left: 0, top: 0, width: 390, height: 844, right: 390, bottom: 844, x: 0, y: 0, toJSON: () => ({}) });
     };
 
-    it("fills the screen with a close mark at the top right and no page arrows", async () => {
+    it("fills the screen with a close mark at the top right; pause and the arrows stay only for keyboards and screen readers", async () => {
       const { view, onClose } = await open();
       expect(view).toHaveClass("wrapped--phone");
-      expect(screen.queryByRole("button", { name: "Next card" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
+      for (const name of ["Previous card", "Next card", "Pause"]) expect(screen.getByRole("button", { name })).toHaveClass("wrapped__quiet");
+      fireEvent.click(screen.getByRole("button", { name: "Next card" }));
+      expect(view).toHaveAttribute("data-card", "artists");
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+      expect(view).toHaveAttribute("data-paused", "true");
       await userEvent.setup().click(screen.getByRole("button", { name: "Close" }));
       expect(onClose).toHaveBeenCalledOnce();
     });
@@ -556,6 +559,31 @@ describe("Wrapped cards", () => {
       expect(onClose).toHaveBeenCalledOnce();
       key("GoBack");
       expect(onClose).toHaveBeenCalledTimes(2);
+    });
+
+    it("one finger at a time: a second finger is ignored, and only the first one's cancel counts", async () => {
+      const { view, stage } = await open();
+      box(stage);
+      fireEvent.pointerDown(stage, { button: 0, pointerId: 1, clientX: 330, clientY: 400 });
+      fireEvent.pointerDown(stage, { button: 0, pointerId: 2, clientX: 40, clientY: 400 });
+      fireEvent.pointerCancel(stage, { pointerId: 2 });
+      fireEvent.pointerUp(stage, { button: 0, pointerId: 2, clientX: 40, clientY: 400 });
+      expect(view).toHaveAttribute("data-card", "minutes");
+      fireEvent.pointerUp(stage, { button: 0, pointerId: 1, clientX: 330, clientY: 400 });
+      expect(view).toHaveAttribute("data-card", "artists");
+    });
+
+    it("under reduced motion the cards don't follow the finger, but a pull down still closes", async () => {
+      document.documentElement.dataset.reducedMotion = "true";
+      const { view, stage, onClose } = await open();
+      box(stage);
+      fireEvent.pointerDown(stage, { button: 0, pointerId: 1, clientX: 200, clientY: 300 });
+      fireEvent.pointerMove(stage, { pointerId: 1, clientX: 200, clientY: 400 });
+      fireEvent.pointerMove(stage, { pointerId: 1, clientX: 200, clientY: 620 });
+      expect(view).not.toHaveClass("is-pulled");
+      expect(view.style.transform).toBe("");
+      fireEvent.pointerUp(stage, { button: 0, pointerId: 1, clientX: 200, clientY: 620 });
+      expect(onClose).toHaveBeenCalledOnce();
     });
 
     it("a sideways swipe away from the edge pages", async () => {

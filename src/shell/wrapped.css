@@ -295,6 +295,19 @@ button.wcard__row:hover .wcard__play, button.wcard__row:focus-visible .wcard__pl
   transition: transform var(--ph-quick, 220ms) var(--ph-ease, ease-out), opacity var(--ph-quick, 220ms) var(--ph-ease, ease-out);
 }
 .wrapped--phone.is-pulled { transition: none; }
+:root[data-reduced-motion="true"] .wrapped--phone { transition: none; }
+/* Pause and the page arrows stay for keyboards and screen readers, out of sight (and out of the way of taps) until focused. */
+.wrapped--phone .wrapped__quiet:not(:focus-visible) {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.wrapped--phone .wrapped__nav.wrapped__quiet:focus-visible { opacity: 1; width: 44px; height: 44px; margin-top: -22px; }
 .wrapped--phone .wrapped__bar { padding: calc(var(--wr-safe-top) + 8px) 6px 0 16px; }
 .wrapped--phone .wrapped__progress { gap: 4px; margin-right: 10px; }
 .wrapped--phone .wrapped__seg { height: 2.5px; }

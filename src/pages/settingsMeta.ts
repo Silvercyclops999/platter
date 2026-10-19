@@ -402,6 +402,7 @@ export const NOT_RESET: ReadonlySet<string> = new Set([
   "lidarrStagingFolder",
   "tautulliUrl",
   "translationService",
+  "computerName",
   "volume",
 ]);
 

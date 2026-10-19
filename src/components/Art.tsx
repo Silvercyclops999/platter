@@ -76,9 +76,14 @@ function observeNear(el: Element, onNear: () => void): () => void {
   const watcher = io;
   const set = nearCallbacks.get(el) ?? new Set();
   nearCallbacks.set(el, set);
+  let done = false;
   const stop = () => {
+    // Runs once: firing and the effect's cleanup both call it, and by the
+    // second call another cover may have started a fresh set for `el`.
+    if (done) return;
+    done = true;
     set.delete(cb);
-    if (!set.size) {
+    if (!set.size && nearCallbacks.get(el) === set) {
       watcher.unobserve(el);
       nearCallbacks.delete(el);
     }

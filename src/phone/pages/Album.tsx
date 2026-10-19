@@ -147,7 +147,7 @@ export function PhoneAlbum({ id }: { id: string }) {
       <p className="ph-foot tabular">
         {countLine(tracks.length, "song")}, {formatLongDuration(data.totalDurationMs)}
       </p>
-      <SleeveCard track={{ albumId: album.id, albumTitle: album.title, artistTitle: album.artistTitle, thumb: album.thumb }} link={false} />
+      <SleeveCard track={{ albumId: album.id, albumTitle: album.title, artistTitle: album.artistTitle, thumb: album.thumb }} link={false} level={2} />
       <AlbumPeople albumId={album.id} />
       {data.moreByArtist.length > 0 && (
         <section className="ph-shelf" aria-label={`More by ${album.artistTitle}`}>

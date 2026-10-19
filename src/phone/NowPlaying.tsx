@@ -306,8 +306,12 @@ export function shownDate(v: string): string {
   return Number.isNaN(d.getTime()) ? v : dayFmt.format(d);
 }
 
-/** An album's sleeve notes as a card: the facts, then the release's own notes. */
-export function SleeveCard({ track, link = true }: { track: Pick<Track, "albumId" | "albumTitle" | "artistTitle" | "thumb">; link?: boolean }) {
+/**
+ * An album's sleeve notes: the computer's printed release side, compact.
+ * Under now playing its heading is an h3 like the cards beside it; on the
+ * album page, under the h1, an h2.
+ */
+export function SleeveCard({ track, link = true, level = 3 }: { track: Pick<Track, "albumId" | "albumTitle" | "artistTitle" | "thumb">; link?: boolean; level?: 2 | 3 }) {
   const { data } = useSleeveNotes(track.albumId);
   if (!data || !linerHasFacts(data)) return null;
   // The computer's printed sleeve, set for the phone's width.
@@ -316,6 +320,7 @@ export function SleeveCard({ track, link = true }: { track: Pick<Track, "albumId
       <SleeveLiner
         n={data}
         compact
+        level={level}
         heading="Sleeve notes"
         action={
           link ? (
