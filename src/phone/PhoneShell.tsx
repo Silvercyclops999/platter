@@ -5,10 +5,11 @@
  * desktop uses; nothing here talks to a server.
  */
 import { CircleUserRound, Home, Library, Search } from "lucide-react";
-import { lazy, Suspense, useEffect, useRef } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import { backend } from "../lib/backend";
 import { afterFirstPaint } from "../lib/idle";
-import { ShellHosts } from "../shell/AppShell";
+import { SettingsPage } from "../shell/lazyPages";
+import { ShellHosts } from "../shell/ShellHosts";
 import { startLyricsTrust } from "../shell/lyrics";
 import { useLibraryRecents } from "../shell/useLibrary";
 import { startDownloads } from "../stores/downloads";
@@ -36,7 +37,6 @@ import { PhoneRoutePage } from "./routes";
 import { SheetHost } from "./Sheets";
 import "./phone.css";
 
-const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 
 const TAB_ICON: Record<PhoneTab, typeof Home> = { home: Home, search: Search, library: Library, you: CircleUserRound };
 
@@ -92,7 +92,7 @@ export function PhoneShell() {
       <NowPlaying />
       <LyricsScreen />
       <SheetHost />
-      <ShellHosts phone />
+      <ShellHosts />
     </div>
   );
 }

@@ -3,10 +3,6 @@ import { installReducedMotion, setMotionPreference } from "./design/motion";
 import { installPageVisibility } from "./design/pageVisibility";
 import { installOverlayScrollbars } from "./design/scrollbars";
 import { installTheme, motionPreference } from "./stores/theme";
-import { SignInPage, ServerPickPage } from "./pages/SignInPage";
-import { AppShell } from "./shell/AppShell";
-import { PhoneShell } from "./phone/PhoneShell";
-import { PhoneServerPick, PhoneSignIn } from "./phone/PhoneSignIn";
 import { checkFormWithCore, usePhoneForm } from "./phone/form";
 import { connectApp, useApp } from "./stores/app";
 import { connectFileTags } from "./stores/fileTags";
@@ -21,6 +17,16 @@ import { offerFirstRun } from "./guides/offer";
 import { connectSwitching } from "./stores/switching";
 import { SwitchingScreen } from "./shell/SwitchingScreen";
 import { READY_WAIT_FOR_AUTH_MS, signalReady } from "./lib/firstPaint";
+
+// Each form loads only its own shell and sign-in screens: the phone never
+// fetches the computer's shell code, and the computer never fetches the phone's.
+// The fallback is empty: the frame has no spinner, and the window is shown only once drawn.
+const AppShell = lazy(() => import("./shell/AppShell").then((m) => ({ default: m.AppShell })));
+const SignInPage = lazy(() => import("./pages/SignInPage").then((m) => ({ default: m.SignInPage })));
+const ServerPickPage = lazy(() => import("./pages/SignInPage").then((m) => ({ default: m.ServerPickPage })));
+const PhoneShell = lazy(() => import("./phone/PhoneShell").then((m) => ({ default: m.PhoneShell })));
+const PhoneSignIn = lazy(() => import("./phone/PhoneSignIn").then((m) => ({ default: m.PhoneSignIn })));
+const PhoneServerPick = lazy(() => import("./phone/PhoneSignIn").then((m) => ({ default: m.PhoneServerPick })));
 
 // Only the miniplayer window needs it.
 const Miniplayer = lazy(() => import("./shell/Miniplayer").then((m) => ({ default: m.Miniplayer })));
@@ -114,7 +120,7 @@ function MainApp() {
   else page = isPhone ? <PhoneShell /> : <AppShell />;
   return (
     <>
-      {page}
+      <Suspense fallback={null}>{page}</Suspense>
       <SwitchingScreen />
     </>
   );

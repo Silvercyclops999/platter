@@ -1,0 +1,33 @@
+/** Pages that load when first opened, so a start-up never parses their code. Every route page that is not on the first screen goes through this one map. */
+import { lazy } from "react";
+
+export const BookmarksPage = lazy(() => import("../pages/BookmarksPage").then((m) => ({ default: m.BookmarksPage })));
+export const ImportPage = lazy(() => import("../pages/ImportPage").then((m) => ({ default: m.ImportPage })));
+export const SmartPlaylistPage = lazy(() => import("../pages/SmartPlaylistPage").then((m) => ({ default: m.SmartPlaylistPage })));
+export const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
+export const StatsPage = lazy(() => import("../pages/StatsPage").then((m) => ({ default: m.StatsPage })));
+export const ProfilePage = lazy(() => import("../pages/ProfilePage").then((m) => ({ default: m.ProfilePage })));
+export const TopSongsPage = lazy(() => import("../pages/TopSongsPage").then((m) => ({ default: m.TopSongsPage })));
+export const WhatsNewPage = lazy(() => import("../pages/WhatsNewPage").then((m) => ({ default: m.WhatsNewPage })));
+export const ReleaseRadarPage = lazy(() => import("../pages/ReleaseRadar").then((m) => ({ default: m.ReleaseRadarPage })));
+export const CreditPage = lazy(() => import("../pages/CreditPage").then((m) => ({ default: m.CreditPage })));
+export const LineagePage = lazy(() => import("../pages/LineagePage").then((m) => ({ default: m.LineagePage })));
+export const EraPage = lazy(() => import("../pages/EraPage").then((m) => ({ default: m.EraPage })));
+export const DoctorPage = lazy(() => import("../pages/DoctorPage").then((m) => ({ default: m.DoctorPage })));
+export const DevicesPage = lazy(() => import("../pages/DevicesPage").then((m) => ({ default: m.DevicesPage })));
+export const CratesPage = lazy(() => import("../pages/CratesPage").then((m) => ({ default: m.CratesPage })));
+export const CratePage = lazy(() => import("../pages/CratesPage").then((m) => ({ default: m.CratePage })));
+export const DiaryPage = lazy(() => import("../pages/DiaryPage").then((m) => ({ default: m.DiaryPage })));
+export const MixesPage = lazy(() => import("../pages/MixesPage").then((m) => ({ default: m.MixesPage })));
+export const SoundMapPage = lazy(() => import("../pages/SoundMapPage").then((m) => ({ default: m.SoundMapPage })));
+export const DiscographyPage = lazy(() => import("../pages/DiscographyPage").then((m) => ({ default: m.DiscographyPage })));
+export const ArtistShelfPage = lazy(() => import("../pages/HomeShelfPage").then((m) => ({ default: m.ArtistShelfPage })));
+export const HomeShelfPage = lazy(() => import("../pages/HomeShelfPage").then((m) => ({ default: m.HomeShelfPage })));
+export const MixPage = lazy(() => import("../pages/MixPage").then((m) => ({ default: m.MixPage })));
+export const SharedPlaylistPage = lazy(() => import("../pages/SharedPlaylistPage").then((m) => ({ default: m.SharedPlaylistPage })));
+export const BlendPage = lazy(() => import("../pages/BlendPage").then((m) => ({ default: m.BlendPage })));
+export const BlendCreatePage = lazy(() => import("../pages/BlendCreatePage").then((m) => ({ default: m.BlendCreatePage })));
+export const RecentsPage = lazy(() => import("../pages/RecentsPage").then((m) => ({ default: m.RecentsPage })));
+export const NewToYouPage = lazy(() => import("../pages/NewToYou").then((m) => ({ default: m.NewToYouPage })));
+export const OnThisDayPage = lazy(() => import("../pages/HistoryShelves").then((m) => ({ default: m.OnThisDayPage })));
+export const ShelfPage = lazy(() => import("../pages/ShelfPage").then((m) => ({ default: m.ShelfPage })));

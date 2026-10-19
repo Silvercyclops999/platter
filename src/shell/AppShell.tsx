@@ -1,14 +1,6 @@
 import { PanelRightOpen } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { ContextMenuHost } from "../components/ContextMenu";
-import { CoverLightSource } from "./CoverLightSource";
 import { DragAnnouncer } from "../components/DragAnnouncer";
-import { LinkAskDialog } from "../components/LinkAskDialog";
-import { PlaylistDialogs } from "../components/PlaylistDialogs";
-import { CircleDialogs } from "../components/CircleDialogs";
-import { FolderDialogs } from "./FolderMenus";
-import { SavedInHost } from "../components/SavedInMenu";
-import { Toaster } from "../components/Toast";
 import { Tooltip } from "../components/Tooltip";
 import { chrome } from "../lib/platform";
 import { useCurrentEntry } from "../stores/router";
@@ -31,10 +23,10 @@ import {
   type SidebarDrag,
 } from "./layout";
 import { FullWindow } from "./FullWindow";
+import { ShellHosts } from "./ShellHosts";
 import { startLyricsTrust, useLyricsAutoShow } from "./lyrics";
 import { startTranscribe } from "../stores/transcribe";
 import { startDownloads } from "../stores/downloads";
-import { DownloadDialogs } from "../components/DownloadButton";
 import { loadOwnLyricsIds } from "../stores/lyricsEditor";
 import { MainView } from "./MainView";
 import { NowPlayingPanel, useOpenNowPlayingOnStart } from "./NowPlayingPanel";
@@ -42,7 +34,6 @@ import { OutputPanel } from "./OutputPanel";
 import { PlayerBar } from "./PlayerBar";
 import { RemoteStrip } from "./RemoteStrip";
 import { ListenStrip } from "./ListenStrip";
-import { ShareMusicDialog } from "./ShareMusic";
 import { FriendActivityPanel } from "./FriendActivityPanel";
 import { startSocial } from "../stores/social";
 import { startCircle } from "../stores/circle";
@@ -55,14 +46,9 @@ import { backend } from "../lib/backend";
 import { NewLookOffer } from "./NewLookOffer";
 import { LayoutOffer } from "./LayoutOffer";
 import { FrameShell } from "./FrameShell";
-import { LazyLookBuilderHost, LazyLyricsEditorHost, LazyPickLookHost, LazyPlexEditDialogs, LazyShareCardHost, LazySmartEditorHost, LazyStatsDialogHost, LazyTagEditDialogs } from "./lazyHosts";
-import { LazyGuideHost, LazyHelpPanel, LazyWrappedHost, LazyWrongLyricsHost } from "./lazyHosts";
+import { LazyHelpPanel, LazyLookBuilderHost } from "./lazyHosts";
 import { LookDrop } from "./LookDrop";
 import { QueuePanel } from "./QueuePanel";
-import { WhatsNewDialog } from "../help/WhatsNewDialog";
-import { ArchiveDialogs } from "../components/ArchiveDialogs";
-import { PhysicalDialogHost } from "../components/PhysicalDialog";
-import { SongCreditsHost } from "../components/SongCreditsDialog";
 import { ResizeHandle } from "./ResizeHandle";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -240,49 +226,21 @@ function ClassicShell({ children }: { children: ReactNode }) {
   );
 }
 
-/**
- * Dialogs, menus and hosts every frame carries. The phone shell leaves out
- * the ones that need a keyboard, a mouse or a desktop window.
- */
-export function ShellHosts({ phone = false }: { phone?: boolean } = {}) {
-  const desk = !phone;
+/** Hosts only the computer's frames carry: they need a keyboard, a mouse or a desktop window. */
+function DeskHosts() {
   return (
     <>
-      {desk && <NewLookOffer />}
-      {desk && <LayoutOffer />}
-      {desk && <CommandPalette />}
-      <LazyGuideHost />
-      <WhatsNewDialog />
-      <ShareMusicDialog />
-      {desk && <ShortcutsHelp />}
-      {desk && <PowerHints />}
-      <ContextMenuHost />
-      <SavedInHost />
-      <Toaster />
-      <PlaylistDialogs />
-      <LinkAskDialog />
-      <CircleDialogs />
-      <ArchiveDialogs />
-      <PhysicalDialogHost />
-      <SongCreditsHost />
-      <LazyPlexEditDialogs />
-      <LazyTagEditDialogs />
-      <LazySmartEditorHost />
-      <FolderDialogs />
-      <DownloadDialogs />
-      {desk && <DragAnnouncer />}
-      <LazyLyricsEditorHost />
-      <LazyWrongLyricsHost />
-      {desk && <FullWindow />}
-      <LazyShareCardHost />
-      {desk && <DeckActions />}
-      {desk && <DeckPairPrompt />}
-      <LazyStatsDialogHost />
-      <LazyWrappedHost />
-      {desk && <LazyLookBuilderHost />}
-      <LazyPickLookHost />
-      {desk && <LookDrop />}
-      <CoverLightSource />
+      <NewLookOffer />
+      <LayoutOffer />
+      <CommandPalette />
+      <ShortcutsHelp />
+      <PowerHints />
+      <DragAnnouncer />
+      <FullWindow />
+      <DeckActions />
+      <DeckPairPrompt />
+      <LazyLookBuilderHost />
+      <LookDrop />
     </>
   );
 }
@@ -314,6 +272,11 @@ export function AppShell() {
   useEffect(() => afterFirstPaint(() => void startCircle()), []);
   useEffect(() => void startCurate(), []);
   const frame = useLayout().frame ?? "classic";
-  const hostsEl = <ShellHosts />;
+  const hostsEl = (
+    <>
+      <ShellHosts />
+      <DeskHosts />
+    </>
+  );
   return frame === "classic" ? <ClassicShell>{hostsEl}</ClassicShell> : <FrameShell>{hostsEl}</FrameShell>;
 }

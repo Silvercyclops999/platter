@@ -1,52 +1,54 @@
 import { Pause, Play } from "lucide-react";
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { IconButton } from "../components/Button";
 import { NEUTRAL_HEADER, THEMED_NEUTRAL_HEADER, themedHeader } from "../lib/color";
 import { useTheme } from "../stores/theme";
 import type { SyncStatus } from "../lib/types";
 import { AlbumPage } from "../pages/AlbumPage";
 import { ArtistPage } from "../pages/ArtistPage";
-import { DiscographyPage } from "../pages/DiscographyPage";
 import { HomePage } from "../pages/HomePage";
-import { ArtistShelfPage, HomeShelfPage } from "../pages/HomeShelfPage";
 import { LibraryPage } from "../pages/LibraryPage";
 import { LikedPage } from "../pages/LikedPage";
-import { MixPage } from "../pages/MixPage";
 import { PlaylistPage } from "../pages/PlaylistPage";
-import { SharedPlaylistPage } from "../pages/SharedPlaylistPage";
-import { BlendPage } from "../pages/BlendPage";
-import { BlendCreatePage } from "../pages/BlendCreatePage";
-import { RecentsPage } from "../pages/RecentsPage";
 import { SearchPage } from "../pages/SearchPage";
-import { NewToYouPage } from "../pages/NewToYou";
-import { OnThisDayPage } from "../pages/HistoryShelves";
-import { ShelfPage } from "../pages/ShelfPage";
 import { useApp } from "../stores/app";
 import { useCurrentEntry, type Route } from "../stores/router";
 import { useUi } from "../stores/ui";
 import { HealthBanner } from "./HealthBanner";
 import { DownloadsBanner } from "../components/DownloadButton";
+import {
+  ArtistShelfPage,
+  BlendCreatePage,
+  BlendPage,
+  BookmarksPage,
+  CratePage,
+  CratesPage,
+  CreditPage,
+  DevicesPage,
+  DiaryPage,
+  DiscographyPage,
+  DoctorPage,
+  EraPage,
+  HomeShelfPage,
+  ImportPage,
+  LineagePage,
+  MixPage,
+  MixesPage,
+  NewToYouPage,
+  OnThisDayPage,
+  ProfilePage,
+  RecentsPage,
+  ReleaseRadarPage,
+  SettingsPage,
+  SharedPlaylistPage,
+  ShelfPage,
+  SmartPlaylistPage,
+  SoundMapPage,
+  StatsPage,
+  TopSongsPage,
+  WhatsNewPage,
+} from "./lazyPages";
 
-// Rarely visited pages load on first visit, so their code isn't parsed at startup.
-const BookmarksPage = lazy(() => import("../pages/BookmarksPage").then((m) => ({ default: m.BookmarksPage })));
-const ImportPage = lazy(() => import("../pages/ImportPage").then((m) => ({ default: m.ImportPage })));
-const SmartPlaylistPage = lazy(() => import("../pages/SmartPlaylistPage").then((m) => ({ default: m.SmartPlaylistPage })));
-const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
-const StatsPage = lazy(() => import("../pages/StatsPage").then((m) => ({ default: m.StatsPage })));
-const ProfilePage = lazy(() => import("../pages/ProfilePage").then((m) => ({ default: m.ProfilePage })));
-const TopSongsPage = lazy(() => import("../pages/TopSongsPage").then((m) => ({ default: m.TopSongsPage })));
-const WhatsNewPage = lazy(() => import("../pages/WhatsNewPage").then((m) => ({ default: m.WhatsNewPage })));
-const ReleaseRadarPage = lazy(() => import("../pages/ReleaseRadar").then((m) => ({ default: m.ReleaseRadarPage })));
-const CreditPage = lazy(() => import("../pages/CreditPage").then((m) => ({ default: m.CreditPage })));
-const LineagePage = lazy(() => import("../pages/LineagePage").then((m) => ({ default: m.LineagePage })));
-const EraPage = lazy(() => import("../pages/EraPage").then((m) => ({ default: m.EraPage })));
-const DoctorPage = lazy(() => import("../pages/DoctorPage").then((m) => ({ default: m.DoctorPage })));
-const DevicesPage = lazy(() => import("../pages/DevicesPage").then((m) => ({ default: m.DevicesPage })));
-const CratesPage = lazy(() => import("../pages/CratesPage").then((m) => ({ default: m.CratesPage })));
-const CratePage = lazy(() => import("../pages/CratesPage").then((m) => ({ default: m.CratePage })));
-const DiaryPage = lazy(() => import("../pages/DiaryPage").then((m) => ({ default: m.DiaryPage })));
-const MixesPage = lazy(() => import("../pages/MixesPage").then((m) => ({ default: m.MixesPage })));
-const SoundMapPage = lazy(() => import("../pages/SoundMapPage").then((m) => ({ default: m.SoundMapPage })));
 
 /** Scroll offset per history entry, so Back returns to where you were. */
 const scrollMemory = new Map<number, number>();
