@@ -1105,6 +1105,11 @@
 .ph-layer.is-sliding { z-index: 2; box-shadow: -10px 0 28px rgba(0, 0, 0, 0.26); }
 .ph-layer.is-fading { z-index: 2; }
 .ph-stack-dim { position: absolute; inset: 0; z-index: 1; background: rgba(0, 0, 0, 0.2); opacity: 0; pointer-events: none; }
+/* The page Back goes to: drawn and still scrolled where it was, out of sight until a back uncovers it. */
+.ph-layer.is-parked { visibility: hidden; pointer-events: none; }
+/* While pages slide the frosted bars turn solid, so nothing is blurred again under a moving page. */
+.ph-stack[data-moving] .ph-backbar.is-titled { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--color-bg-base); }
+.ph-stack[data-moving]::after { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--color-bg-base); }
 
 /* ---------------------------------------------------------------- the cover's flight */
 /* A copy of the cover flies between the mini player and now playing while

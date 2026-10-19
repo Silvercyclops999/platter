@@ -6,8 +6,13 @@
  * Both pages stay mounted until the move ends, so there is never a blank
  * frame. React draws only at the start and the end of a move; the frames
  * in between belong to the Web Animations API.
+ *
+ * The page you would go back to stays drawn under the one on top, hidden
+ * ("parked"), so Back and the edge swipe slide over a page that is already
+ * there instead of building it on the way. Pages only redraw for their own
+ * reasons: the stack moving never redraws them.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter, type HistoryEntry } from "../stores/router";
 import {
   FADE_MS,
@@ -21,6 +26,7 @@ import {
   release,
   run,
   stackSignals,
+  whenIdle,
 } from "./motion";
 import { usePhoneUi } from "./phoneUi";
 
@@ -63,12 +69,15 @@ export function PageStack({ render }: { render: (entry: HistoryEntry) => ReactNo
   const entries = useRouter((s) => s.entries);
   const index = useRouter((s) => s.index);
   const current = entries[index];
-  const [st, setSt] = useState<{ cur: HistoryEntry; move: Move | null; drag: HistoryEntry | null; scroll: Map<number, number> }>(() => ({
+  const [st, setSt] = useState<{ cur: HistoryEntry; move: Move | null; drag: HistoryEntry | null; scroll: Map<number, number>; park: number | null }>(() => ({
     cur: current,
     move: null,
     drag: null,
     scroll: new Map(),
+    park: null,
   }));
+  const renderRef = useRef(render);
+  renderRef.current = render;
   const seen = useRef({ entries, index });
   const host = useRef<HTMLDivElement>(null);
   const layers = useRef(new Map<number, HTMLDivElement>());
@@ -83,7 +92,7 @@ export function PageStack({ render }: { render: (entry: HistoryEntry) => ReactNo
     const scroll = new Map<number, number>();
     if (kind === "back") scroll.set(current.key, scrollByKey.get(current.key) ?? 0);
     if (kind === "tab" && signal.tabSwitch) scroll.set(current.key, scrollByTab.get(signal.tabSwitch.to) ?? 0);
-    setSt({ cur: current, move: kind ? { id: ++moveSeq, kind, from: st.cur, to: current, fromTab: signal.tabSwitch?.from } : null, drag: null, scroll });
+    setSt({ cur: current, move: kind ? { id: ++moveSeq, kind, from: st.cur, to: current, fromTab: signal.tabSwitch?.from } : null, drag: null, scroll, park: st.park });
   } else if (st.cur !== current) {
     // The same page with a new route (a search query, a library filter).
     setSt({ ...st, cur: current });
@@ -119,7 +128,9 @@ export function PageStack({ render }: { render: (entry: HistoryEntry) => ReactNo
       if (!live) return;
       // The page that stays lets go of its last frame (a held transform would trap fixed children).
       release(toEl);
-      setSt((s) => (s.move?.id === move.id ? { ...s, move: null } : s));
+      // After a push the page left is the one Back goes to: it stays, parked.
+      if (move.kind === "push") release(fromEl);
+      setSt((s) => (s.move?.id === move.id ? { ...s, move: null, park: move.kind === "push" ? move.from.key : s.park } : s));
     });
     return () => {
       live = false;
@@ -127,6 +138,14 @@ export function PageStack({ render }: { render: (entry: HistoryEntry) => ReactNo
       release(toEl);
     };
   }, [move]);
+
+  // Once the stack is still and the screen idle, the page Back would go to is drawn, parked under this one.
+  const still = !move && !st.drag;
+  const wantPark = still ? (entries[index - 1]?.key ?? null) : undefined;
+  useEffect(() => {
+    if (wantPark === undefined || wantPark === st.park) return;
+    return whenIdle(() => setSt((s) => (s.move || s.drag ? s : { ...s, park: wantPark })));
+  }, [wantPark, st.park]);
 
   // Prune memory for pages that have left the history.
   useEffect(() => {
@@ -168,7 +187,7 @@ export function PageStack({ render }: { render: (entry: HistoryEntry) => ReactNo
   });
 
   // Bottom to top: older pages under newer ones, which keeps the DOM order steady.
-  const shown: { entry: HistoryEntry; role: "only" | "under" | "over" | "arriving" | "fading" | "leaving" }[] = [];
+  const shown: { entry: HistoryEntry; role: "only" | "under" | "over" | "arriving" | "fading" | "leaving" | "parked" }[] = [];
   if (move) {
     const fresh = (e: HistoryEntry) => (e.key === current.key ? current : e);
     if (move.kind === "push") shown.push({ entry: move.from, role: "under" }, { entry: fresh(move.to), role: "over" });
@@ -177,23 +196,40 @@ export function PageStack({ render }: { render: (entry: HistoryEntry) => ReactNo
     shown.sort((a, b) => a.entry.key - b.entry.key);
   } else if (st.drag) shown.push({ entry: st.drag, role: "under" }, { entry: current, role: "over" });
   else shown.push({ entry: current, role: "only" });
+  // The parked page stays drawn (hidden) while it is still in the history, through moves too, so none of them mounts or drops it mid-slide.
+  const parked = st.park !== null && !shown.some((x) => x.entry.key === st.park) ? entries.find((e) => e.key === st.park) : undefined;
+  if (parked) {
+    shown.push({ entry: parked, role: "parked" });
+    shown.sort((a, b) => a.entry.key - b.entry.key);
+  }
   const sliding = !!st.drag || (!!move && move.kind !== "tab" && !reduced());
 
   return (
     <div ref={host} className="ph-stack" data-testid="page-stack" data-moving={move ? move.kind : st.drag ? "drag" : undefined}>
       {shown.map(({ entry, role }) => {
-        const hidden = role === "under" || role === "leaving";
-        const cls = role === "over" || role === "leaving" ? (sliding ? "is-sliding" : "is-fading") : role === "fading" ? "is-fading" : role === "under" || role === "arriving" ? "is-under" : "";
+        const hidden = role === "under" || role === "leaving" || role === "parked";
+        const cls =
+          role === "parked"
+            ? "is-parked"
+            : role === "over" || role === "leaving"
+              ? sliding
+                ? "is-sliding"
+                : "is-fading"
+              : role === "fading"
+                ? "is-fading"
+                : role === "under" || role === "arriving"
+                  ? "is-under"
+                  : "";
         return (
           <Layer
             key={entry.key}
             entryKey={entry.key}
             className={cls}
             hidden={hidden}
-            scroll={st.scroll.get(entry.key) ?? 0}
+            scroll={role === "parked" ? (scrollByKey.get(entry.key) ?? 0) : (st.scroll.get(entry.key) ?? 0)}
             refs={layers.current}
           >
-            {render(entry)}
+            <PageBody entry={entry} render={renderRef} />
           </Layer>
         );
       })}
@@ -201,6 +237,18 @@ export function PageStack({ render }: { render: (entry: HistoryEntry) => ReactNo
     </div>
   );
 }
+
+/**
+ * One page's content. It redraws when its own history entry changes (a new
+ * route on the same page) and for its own state, never because the stack
+ * around it moved.
+ */
+const PageBody = memo(
+  function PageBody({ entry, render }: { entry: HistoryEntry; render: React.RefObject<(entry: HistoryEntry) => ReactNode> }) {
+    return <>{render.current(entry)}</>;
+  },
+  (a, b) => a.entry === b.entry,
+);
 
 /** Note where a page being left was scrolled; a tab's first page also counts for the tab. */
 function remember(entry: HistoryEntry, el: HTMLElement | undefined, prev: { entries: HistoryEntry[]; index: number }, leavingTab?: string) {
@@ -311,6 +359,9 @@ function useEdgeSwipe(
       if (!g) return;
       const { top, under } = parts(g);
       const p = Math.max(0, Math.min(1, dx / g.width));
+      // Their own compositor layers while the finger moves them (the layers exist a frame after the claim).
+      if (top && top.style.willChange !== "transform") top.style.willChange = "transform";
+      if (under && under.style.willChange !== "transform") under.style.willChange = "transform";
       if (top) top.style.transform = `translateX(${dx}px)`;
       if (under) under.style.transform = `translateX(${-UNDER_SHIFT * g.width * (1 - p)}px)`;
       if (dim.current) dim.current.style.opacity = String(1 - p);
@@ -370,8 +421,10 @@ function useEdgeSwipe(
         settling = false;
         if (back) {
           if (top) top.style.transform = `translateX(${s.width}px)`;
-          if (under) under.style.transform = "";
         } else if (top) top.style.transform = "";
+        // The page under goes back to its place either way (parked again when the swipe stayed).
+        if (under) under.style.transform = "";
+        for (const n of [top, under]) if (n) n.style.willChange = "";
         release(under);
         if (!back) release(top);
         if (dim.current) dim.current.style.opacity = "";

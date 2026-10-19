@@ -205,7 +205,7 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
  * the now-playing card's. Only one that is on screen counts.
  */
 function smallCover(root: HTMLElement): HTMLElement | null {
-  const el = root.querySelector<HTMLElement>(".ph-dock:not(.is-mini-away) .ph-mini__art") ?? root.querySelector<HTMLElement>(".ph-layer:not(.is-under) .ph-now__art");
+  const el = root.querySelector<HTMLElement>(".ph-dock:not(.is-mini-away) .ph-mini__art") ?? root.querySelector<HTMLElement>(".ph-layer:not(.is-under):not(.is-parked) .ph-now__art");
   if (!el) return null;
   const r = el.getBoundingClientRect();
   return r.width > 0 && r.bottom > 0 && r.top < (root.clientHeight || window.innerHeight) ? el : null;

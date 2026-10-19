@@ -172,7 +172,8 @@ describe("press feedback", () => {
 });
 
 describe("the page stack", () => {
-  const layers = () => document.querySelectorAll(".ph-layer");
+  // What is on screen: the parked page Back goes to is drawn but hidden.
+  const layers = () => document.querySelectorAll(".ph-layer:not(.is-parked)");
 
   it("a pushed page slides in over the one before, and both stay until the slide ends", async () => {
     const anims = fakeAnimations();
@@ -253,6 +254,51 @@ describe("the page stack", () => {
     act(() => useRouter.getState().navigate({ name: "album", id: mock.fx.albums[0].id }));
     return waitFor(() => expect(layers()).toHaveLength(1));
   });
+
+  it("the page Back goes to stays drawn, hidden, so going back slides over the same page instead of building it again", async () => {
+    const anims = fakeAnimations();
+    render(<PhoneShell />);
+    const homePage = await waitFor(() => {
+      const p = document.querySelector<HTMLElement>(".ph-layer .ph-home");
+      expect(p).not.toBeNull();
+      return p!;
+    });
+    act(() => useRouter.getState().navigate({ name: "album", id: mock.fx.albums[0].id }));
+    await anims.finishAll();
+    const parked = document.querySelector(".ph-layer.is-parked");
+    expect(parked).not.toBeNull();
+    expect(parked).toHaveAttribute("aria-hidden", "true");
+    expect(parked!.contains(homePage)).toBe(true);
+    act(() => useRouter.getState().back());
+    expect(screen.getByTestId("page-stack")).toHaveAttribute("data-moving", "back");
+    // The very page that was there before: nothing was mounted for the back.
+    expect(document.querySelector(".ph-home")).toBe(homePage);
+    expect(homePage.closest(".ph-layer")).toHaveClass("is-under");
+    await anims.finishAll();
+    expect(document.querySelector(".ph-home")).toBe(homePage);
+    expect(layers()).toHaveLength(1);
+  });
+
+  it("only the page Back goes to is parked, and it comes once the stack is still", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const anims = fakeAnimations();
+    render(<PhoneShell />);
+    const albums = mock.fx.albums;
+    act(() => useRouter.getState().navigate({ name: "album", id: albums[0].id }));
+    await anims.finishAll();
+    act(() => useRouter.getState().navigate({ name: "album", id: albums[1].id }));
+    await anims.finishAll();
+    // Home has left; the first album is parked.
+    await act(async () => void vi.advanceTimersByTime(400));
+    expect(document.querySelectorAll(".ph-layer.is-parked")).toHaveLength(1);
+    expect(document.querySelector(".ph-layer.is-parked .ph-home")).toBeNull();
+    act(() => useRouter.getState().back());
+    await anims.finishAll();
+    // Back on the first album: Home is drawn under it again once the screen is idle, not during the slide.
+    expect(document.querySelector(".ph-layer.is-parked")).toBeNull();
+    await act(async () => void vi.advanceTimersByTime(400));
+    expect(document.querySelector(".ph-layer.is-parked")).not.toBeNull();
+  });
 });
 
 describe("edge swipe back", () => {
@@ -284,12 +330,23 @@ describe("edge swipe back", () => {
     fireEvent.pointerMove(stack, { clientX: 40, clientY: 302, pointerId: 7, pointerType: "touch" });
     expect(stack).toHaveAttribute("data-moving", "drag");
     expect(document.querySelectorAll(".ph-layer")).toHaveLength(2);
+    expect(document.querySelector(".ph-layer.is-parked")).toBeNull();
+    fireEvent.pointerMove(stack, { clientX: 50, clientY: 302, pointerId: 7, pointerType: "touch" });
+    // Only transforms move, on their own layers while the finger is down.
+    const [under, top] = [...document.querySelectorAll<HTMLElement>(".ph-layer")];
+    expect(top.style.transform).toMatch(/^translateX\(/);
+    expect(top.style.willChange).toBe("transform");
+    expect(under.style.willChange).toBe("transform");
     vi.advanceTimersByTime(100);
     fireEvent.pointerMove(stack, { clientX: 60, clientY: 302, pointerId: 7, pointerType: "touch" });
     fireEvent.pointerUp(stack, { clientX: 60, clientY: 302, pointerId: 7, pointerType: "touch" });
     await anims.finishAll();
-    await waitFor(() => expect(document.querySelectorAll(".ph-layer")).toHaveLength(1));
+    await waitFor(() => expect(document.querySelectorAll(".ph-layer:not(.is-parked)")).toHaveLength(1));
     expect(useRouter.getState().entries[useRouter.getState().index].route.name).toBe("album");
+    // The page it sprang back over is parked again, back in its place and off its own layer.
+    const parked = document.querySelector<HTMLElement>(".ph-layer.is-parked")!;
+    expect(parked.style.transform).toBe("");
+    expect(parked.style.willChange).toBe("");
   });
 
   it("a drag past a third of the width goes back, with no second slide of its own", async () => {
@@ -308,7 +365,7 @@ describe("edge swipe back", () => {
     await anims.finishAll();
     await waitFor(() => expect(useRouter.getState().entries[useRouter.getState().index].route.name).toBe("home"));
     expect(stack).not.toHaveAttribute("data-moving");
-    expect(document.querySelectorAll(".ph-layer")).toHaveLength(1);
+    expect(document.querySelectorAll(".ph-layer:not(.is-parked)")).toHaveLength(1);
   });
 
   it("a press that starts away from the edge never drags the page", async () => {

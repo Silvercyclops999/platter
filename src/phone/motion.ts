@@ -140,3 +140,19 @@ export async function flyCover(opts: {
   big.style.opacity = "";
   copy.remove();
 }
+
+/**
+ * Runs `fn` once the screen is idle: on an idle callback where there is one,
+ * else after `fallbackMs` (a web view without idle callbacks). For work that
+ * mustn't land in a move, like drawing the page Back goes to. Returns a
+ * function that cancels it.
+ */
+export function whenIdle(fn: () => void, fallbackMs = 250, timeoutMs = 1000): () => void {
+  const w = typeof window !== "undefined" ? (window as Window & { requestIdleCallback?: Window["requestIdleCallback"] }) : undefined;
+  if (w?.requestIdleCallback) {
+    const id = w.requestIdleCallback(fn, { timeout: timeoutMs });
+    return () => w.cancelIdleCallback(id);
+  }
+  const t = setTimeout(fn, fallbackMs);
+  return () => clearTimeout(t);
+}
