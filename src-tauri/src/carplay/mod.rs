@@ -7,10 +7,12 @@
 
 use rusqlite::Connection;
 
+use crate::audio::queue::{QueueView, Repeat};
 use crate::audio::source::{ContextKind, PlayContext};
 use crate::db::queries;
 use crate::db::types::{AlbumSort, ArtistSort, HomeItem};
 use crate::error::AppResult;
+use crate::plex::types::{Health, HealthStatus};
 
 /// Most rows one CarPlay list shows; cars allow 100 to 500, and a long list
 /// is hard to use while driving anyway.
@@ -33,26 +35,33 @@ pub enum CarAction {
     Play(PlayContext),
     /// Open another list.
     Open(CarList),
+    /// Play this queue entry (its item id) now: a row in Up next.
+    Jump(String),
+    /// A message, not a choice: picking it does nothing.
+    Info,
 }
 
 /// The lists the car can open.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CarList {
     RecentlyPlayed,
     RecentlyAdded,
     Playlists,
     Albums,
     Artists,
+    /// One artist: Popular, then their albums.
+    Artist { id: String, name: String },
 }
 
 impl CarList {
-    pub fn title(self) -> &'static str {
+    pub fn title(&self) -> &str {
         match self {
             CarList::RecentlyPlayed => "Recently played",
             CarList::RecentlyAdded => "Recently added",
             CarList::Playlists => "Playlists",
             CarList::Albums => "Albums",
             CarList::Artists => "Artists",
+            CarList::Artist { name, .. } => name,
         }
     }
 }
@@ -99,7 +108,7 @@ pub fn library() -> Vec<CarItem> {
 }
 
 /// One of the lists a row opens, at most [`LIST_MAX`] long.
-pub fn list(c: &Connection, which: CarList) -> AppResult<Vec<CarItem>> {
+pub fn list(c: &Connection, which: &CarList) -> AppResult<Vec<CarItem>> {
     Ok(match which {
         CarList::RecentlyPlayed => queries::recently_played(c, LIST_MAX)?.into_iter().map(home_item).collect(),
         CarList::RecentlyAdded => queries::recently_added(c, LIST_MAX)?.into_iter().map(album_item).collect(),
@@ -114,7 +123,21 @@ pub fn list(c: &Connection, which: CarList) -> AppResult<Vec<CarItem>> {
             .into_iter()
             .map(artist_item)
             .collect(),
+        CarList::Artist { id, .. } => artist(c, id)?,
     })
+}
+
+/// An artist's list: Popular (which plays on through the albums, as the
+/// artist page's play does), then each album.
+fn artist(c: &Connection, id: &str) -> AppResult<Vec<CarItem>> {
+    let popular = CarItem {
+        title: "Popular".to_string(),
+        subtitle: None,
+        thumb: None,
+        action: play(ContextKind::Artist, id),
+    };
+    let albums = queries::artist_albums(c, id, LIST_MAX - 1)?;
+    Ok(std::iter::once(popular).chain(albums.into_iter().map(album_item)).collect())
 }
 
 /// The Downloaded tab: everything kept on the phone, newest first, so the
@@ -237,7 +260,7 @@ fn artist_item(a: crate::model::Artist) -> CarItem {
     CarItem {
         subtitle: None,
         thumb: a.thumb.clone(),
-        action: play(ContextKind::Artist, &a.id),
+        action: CarAction::Open(CarList::Artist { id: a.id, name: a.title.clone() }),
         title: a.title,
     }
 }
@@ -247,6 +270,81 @@ fn home_item(h: HomeItem) -> CarItem {
         HomeItem::Album { album } => album_item(album),
         HomeItem::Artist { artist } => artist_item(artist),
         HomeItem::Playlist { playlist } => playlist_item(playlist),
+    }
+}
+
+/// Up next on the car: the songs queued by hand, then the rest of what's
+/// playing, at most [`LIST_MAX`]. Picking one plays it.
+pub fn up_next(q: &QueueView) -> Vec<CarItem> {
+    q.user_queue
+        .iter()
+        .chain(&q.next_up)
+        .take(LIST_MAX)
+        .map(|i| CarItem {
+            title: i.track.title.clone(),
+            subtitle: Some(i.track.track_artist.clone().unwrap_or_else(|| i.track.artist_title.clone())),
+            thumb: i.track.thumb.clone(),
+            action: CarAction::Jump(i.item_id.clone()),
+        })
+        .collect()
+}
+
+/// The car's repeat button steps Off, All, One, and back to Off.
+pub fn next_repeat(r: Repeat) -> Repeat {
+    match r {
+        Repeat::Off => Repeat::All,
+        Repeat::All => Repeat::One,
+        Repeat::One => Repeat::Off,
+    }
+}
+
+/// Whether the car can show the library.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reach {
+    /// No account and no other server: nothing to show yet.
+    SignedOut,
+    /// Signed in, but the server is out of reach: only downloads play.
+    Unreachable,
+    Online,
+}
+
+/// How things stand, from the Plex account's health and whether another
+/// server (Jellyfin, Navidrome) is set up. With another server, a Plex
+/// account that isn't signed in doesn't count.
+pub fn reach(plex: &Health, other_servers: bool) -> Reach {
+    match plex.status {
+        HealthStatus::NoAuth if !plex.cached_only => {
+            if other_servers { Reach::Online } else { Reach::SignedOut }
+        }
+        _ if plex.cached_only => Reach::Unreachable,
+        _ => Reach::Online,
+    }
+}
+
+/// The car's tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tab {
+    Home,
+    Library,
+    Downloaded,
+    Radio,
+}
+
+pub const SIGN_IN: &str = "Open Platter on your phone to sign in";
+pub const UNREACHABLE: &str = "Can't reach your server";
+
+fn info(title: &str, subtitle: Option<&str>) -> CarItem {
+    CarItem { title: title.to_string(), subtitle: subtitle.map(str::to_string), thumb: None, action: CarAction::Info }
+}
+
+/// A tab's rows for how things stand. Signed out, every tab says to sign in
+/// on the phone; with the server out of reach, Downloaded still lists what's
+/// kept and the others say so. `rows` reads the tab only when it shows.
+pub fn tab_rows(tab: Tab, reach: Reach, rows: impl FnOnce() -> Vec<CarItem>) -> Vec<CarItem> {
+    match (reach, tab) {
+        (Reach::SignedOut, _) => vec![info(SIGN_IN, None)],
+        (Reach::Unreachable, Tab::Downloaded) | (Reach::Online, _) => rows(),
+        (Reach::Unreachable, _) => vec![info(UNREACHABLE, Some("Downloaded music still plays"))],
     }
 }
 

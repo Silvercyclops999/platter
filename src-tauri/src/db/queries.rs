@@ -495,6 +495,16 @@ fn unhidden(tracks: Vec<Track>, page_id: &str, hidden: Option<&HiddenSet>) -> Ve
     }
 }
 
+/// An artist's own albums in the page's order (albums, then EPs and the
+/// other sections; newest first in each), at most `limit`.
+pub fn artist_albums(c: &Connection, id: &str, limit: usize) -> AppResult<Vec<Album>> {
+    let mut st = c.prepare_cached(&format!(
+        "SELECT {ALBUM_COLS} FROM albums al WHERE al.artist_id = ?1
+         ORDER BY al.section_rank, al.year IS NULL, al.year DESC, al.added_at DESC LIMIT ?2"
+    ))?;
+    Ok(st.query_map(params![id, limit as i64], row_album)?.collect::<Result<Vec<_>, _>>()?)
+}
+
 /// [`artist_page_by`] leaving hidden songs and artists out of Popular.
 pub fn artist_page_with(c: &Connection, id: &str, source: PopularSource, hidden: Option<&HiddenSet>) -> AppResult<ArtistPage> {
     if let Some(key) = popular::credit_key(id) {
