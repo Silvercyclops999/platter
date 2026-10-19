@@ -93,6 +93,7 @@ const SHOWN_WHEN: Record<string, string> = {
   phoneKeepRecent: "the phone layout",
   phoneMobileQuality: "the phone layout",
   phoneHaptics: "the phone layout (phone.test.tsx)",
+  streamingRecheck: "the account import source turned on (account-import.test.tsx)",
 };
 
 describe("every setting", () => {

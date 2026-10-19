@@ -171,7 +171,8 @@ import {
 import { mockBio } from "./bio";
 import { MOCK_CLOUD_FOLDERS, MockSync } from "./sync";
 import { MockImport, importLinkAllowed } from "./importData";
-import type { ImportDecision, ImportSourceId, PlayedHidden, PlayedQuery } from "../importTypes";
+import type { AccountStatus, ImportDecision, ImportSourceId, PlayedHidden, PlayedQuery } from "../importTypes";
+import { MockAccount } from "./accountData";
 import { mockArtistInfo, mockKeysStatus, mockSetKey, type MockInfoKeys } from "./artistInfo";
 import { mockAlbumCredits } from "./albumCredits";
 import { demoHealth, isHealthDemo, type HealthDemo } from "./health";
@@ -435,6 +436,7 @@ export class MockBackend implements Backend {
   readonly syncFile: MockSync;
   /** Library import (test hook: failNext). */
   readonly importMock: MockImport;
+  readonly account: MockAccount;
   /** Store links the Missing list opened. */
   readonly importLinksOpened: string[] = [];
   /** Hidden songs and artists. */
@@ -696,6 +698,11 @@ export class MockBackend implements Backend {
     if (this.opts.frame) this.settings = { ...this.settings, layout: { ...this.settings.layout, frame: this.opts.frame }, layoutOffered: true };
     if (this.opts.statsCompare) this.settings = { ...this.settings, statsCompare: true };
     this.importMock = new MockImport(this.fx, () => this.settings.importSources);
+    this.account = new MockAccount(
+      () => this.settings.importSources.includes("streaming-account"),
+      () => this.importMock.accountRun(),
+      () => this.importMock.accountLastRead(),
+    );
     if (this.opts.importDemo) {
       this.settings = { ...this.settings, importSources: ["streaming", "transfer"] };
       this.importMock.run("streaming", "Downloads/my_data.zip");
@@ -2954,7 +2961,8 @@ export class MockBackend implements Backend {
         if (!w.length || w.length !== patch.bringInWaves.length || w.length > 5) throw { kind: "invalid", message: "Waves are 1 to 5 different play counts, like 100, 50, 20." };
         next.bringInWaves = w;
       }
-      if (patch.importSources) next.importSources =["streaming", "transfer", "lists"].filter((id) => patch.importSources!.includes(id));
+      if (patch.importSources) next.importSources = ["streaming", "streaming-account", "transfer", "lists"].filter((id) => patch.importSources!.includes(id));
+
       if (patch.nowPlayingFeedPort !== undefined) {
         const port = patch.nowPlayingFeedPort;
         if (!Number.isInteger(port) || port < 1024 || port > 65535) throw { kind: "invalid", message: "Pick a port from 1024 to 65535." };
@@ -4326,6 +4334,39 @@ export class MockBackend implements Backend {
   }
   importForget(source: ImportSourceId) {
     return this.delay(() => this.importMock.forget(source));
+  }
+  private accountChanged(st: AccountStatus) {
+    this.later(0, () => this.emit("streaming-account://status", st));
+    return st;
+  }
+  streamingAccountStatus() {
+    return this.delay(() => this.account.status());
+  }
+  streamingAccountSignIn() {
+    const going = this.account.signIn();
+    this.accountChanged(this.account.status());
+    return this.delay(() => null)
+      .then(() => going)
+      .then((st) => {
+        if (st.state === "connected") void this.account.read().then((r) => this.accountChanged(r));
+        return this.accountChanged(clone(st));
+      });
+  }
+  streamingAccountRead() {
+    const going = this.account.read();
+    this.accountChanged(this.account.status());
+    return this.delay(() => null)
+      .then(() => going)
+      .then((st) => this.accountChanged(clone(st)));
+  }
+  streamingAccountCancel() {
+    return this.delay(() => this.accountChanged(this.account.cancel()));
+  }
+  streamingAccountSignOut() {
+    return this.delay(() => this.accountChanged(this.account.signOut()));
+  }
+  streamingAccountClientIdSet(id: string | null) {
+    return this.delay(() => this.accountChanged(this.account.setClientId(id)));
   }
 
   // ---------------------------------------------------------------- discord

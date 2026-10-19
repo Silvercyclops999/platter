@@ -64,7 +64,7 @@ describe("Settings > Library import", () => {
     const section = await screen.findByTestId("library-import-settings");
     expect(within(section).getByRole("heading", { name: "Library import" })).toBeInTheDocument();
     const switches = (await within(section).findAllByRole("switch")).filter((s) => !s.closest("[data-setting='showPlayedALot'], [data-setting='bringIn']"));
-    expect(switches).toHaveLength(3);
+    expect(switches).toHaveLength(4);
     for (const s of switches) expect(s).toHaveAttribute("aria-checked", "false");
     expect(within(section).getByText(/Account > Privacy settings/)).toBeInTheDocument();
     expect(within(section).getByText(/TuneMyMusic or Soundiiz/)).toBeInTheDocument();
@@ -458,7 +458,7 @@ describe("report wording", () => {
       plays: { total: 1, matched: 1 },
       playsAdded: 1,
       history: { plays: 0, playsMatched: 0, songs: 0, songsMatched: 0, firstPlayed: null, lastPlayed: null },
-      skipped: { privatePlays: 1, podcasts: 0, noMetadata: 0, shortPlays: 2, incompleteRows: 0, unknownFiles: 0 },
+      skipped: { privatePlays: 1, podcasts: 0, noMetadata: 0, shortPlays: 2, incompleteRows: 0, unknownFiles: 0, othersPlaylists: 0 },
     };
     expect(songsLine(r)).toBe("812 of 900 songs found");
     expect(reportLine(r)).toBe("812 of 900 songs found");
@@ -478,7 +478,7 @@ describe("report wording", () => {
     plays: { total: 0, matched: 0 },
     playsAdded: 0,
     history: { plays: 0, playsMatched: 0, songs: 0, songsMatched: 0, firstPlayed: null, lastPlayed: null },
-    skipped: { privatePlays: 0, podcasts: 0, noMetadata: 0, shortPlays: 0, incompleteRows: 0, unknownFiles: 0 },
+    skipped: { privatePlays: 0, podcasts: 0, noMetadata: 0, shortPlays: 0, incompleteRows: 0, unknownFiles: 0, othersPlaylists: 0 },
   };
   const history = {
     plays: 153_497,

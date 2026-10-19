@@ -47,6 +47,8 @@ use api::{Api, Endpoints, PAGE};
 
 /// The import source id.
 pub const SOURCE: &str = "streaming-account";
+/// The keychain account holding the developer app's Client ID.
+pub const CLIENT_ACCOUNT: &str = "import-account-client-id";
 /// The status event.
 pub const EVENT: &str = "streaming-account://status";
 /// What to register in the developer app. Loopback addresses may take any
@@ -93,6 +95,8 @@ impl From<Fail> for AppError {
 pub struct Config {
     /// The source is on in Settings > Library import.
     pub enabled: bool,
+    /// The developer app's Client ID. Kept in the keychain (this device),
+    /// filled in by the service; settings never hold it.
     pub client_id: String,
     /// Re-check daily.
     pub recheck: bool,
@@ -102,7 +106,7 @@ impl Config {
     pub fn from_settings(s: &crate::settings::Settings) -> Self {
         Config {
             enabled: s.import_sources.iter().any(|x| x == SOURCE),
-            client_id: s.streaming_client_id.clone(),
+            client_id: String::new(),
             recheck: s.streaming_recheck,
         }
     }
@@ -201,6 +205,39 @@ impl AccountImport {
         AccountImport(Arc::new(Inner { deps, api, phase: Mutex::new(Phase::Idle), name: Mutex::new(None), busy: AtomicBool::new(false) }))
     }
 
+    /// The settings, with the Client ID from the keychain.
+    fn cfg(&self) -> Config {
+        let mut c = (self.0.deps.config)();
+        c.client_id = self.client_id().unwrap_or_default();
+        c
+    }
+
+    /// The Client ID kept in the keychain.
+    pub fn client_id(&self) -> Option<String> {
+        self.0.deps.keys.get(CLIENT_ACCOUNT).ok().flatten().map(|t| t.expose().to_string())
+    }
+
+    /// Keeps a new Client ID (letters and digits), or removes it with None
+    /// or an empty one. A different app can't use the old sign-in, so a
+    /// change signs out.
+    pub fn set_client_id(&self, id: Option<&str>) -> Result<AccountStatus, AppError> {
+        let id = id.map(str::trim).unwrap_or_default();
+        if !id.is_empty() && !(id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric())) {
+            return Err(AppError::Invalid("A Client ID is the letters and digits on your developer app's page.".into()));
+        }
+        if self.client_id().unwrap_or_default() == id {
+            return Ok(self.status());
+        }
+        self.sign_out();
+        if id.is_empty() {
+            self.0.deps.keys.delete(CLIENT_ACCOUNT)?;
+        } else {
+            self.0.deps.keys.set(CLIENT_ACCOUNT, &crate::plex::token::Token::new(id)?)?;
+        }
+        self.emit();
+        Ok(self.status())
+    }
+
     fn now(&self) -> i64 {
         (self.0.deps.clock)()
     }
@@ -218,7 +255,7 @@ impl AccountImport {
     }
 
     pub fn status(&self) -> AccountStatus {
-        let cfg = (self.0.deps.config)();
+        let cfg = self.cfg();
         let signed_in = self.0.api.signed_in();
         let phase = self.0.phase.lock().clone();
         let mut st = AccountStatus {
@@ -323,7 +360,7 @@ impl AccountImport {
     /// Signs in through the browser: a one-off listener on 127.0.0.1, the
     /// sign-in page in the system browser, then the code for tokens.
     pub async fn sign_in(&self) -> AccountStatus {
-        let cfg = (self.0.deps.config)();
+        let cfg = self.cfg();
         if cfg.client_id.is_empty() || !cfg.enabled {
             return self.status();
         }
@@ -351,7 +388,7 @@ impl AccountImport {
 
     /// Reads the playlists and imports them. Returns where it stands after.
     pub async fn read(&self) -> AccountStatus {
-        let cfg = (self.0.deps.config)();
+        let cfg = self.cfg();
         if cfg.client_id.is_empty() || !cfg.enabled || !self.0.api.signed_in() {
             return self.status();
         }
@@ -433,7 +470,7 @@ impl AccountImport {
 
     /// Whether a daily read is due now.
     pub fn due(&self) -> bool {
-        let cfg = (self.0.deps.config)();
+        let cfg = self.cfg();
         if !cfg.enabled || !cfg.recheck || cfg.client_id.is_empty() || !self.0.api.signed_in() || self.0.busy.load(Ordering::SeqCst) {
             return false;
         }

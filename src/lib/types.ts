@@ -6,6 +6,7 @@
  */
 import { CLASSIC_LAYOUT, type Layout, type RegionSize, type UserTheme } from "../design/themes/validate";
 import { CONSOLE_DEFAULT_COLUMNS, PANE_LIMITS, type ConsoleColumn } from "./consoleLayout";
+import type { AccountStatus } from "./importTypes";
 
 // ---------------------------------------------------------------- model.rs
 
@@ -1286,6 +1287,8 @@ export interface Settings {
   allowStreamDeck: boolean;
   /** Library import sources turned on ("streaming", "transfer", "lists"). All off until picked. */
   importSources: string[];
+  /** Read the connected account's playlists again once a day while the app runs. Synced. */
+  streamingRecheck: boolean;
   /** The Missing page lists songs and albums from imported listening history that aren't in the library. Synced. */
   showPlayedALot: boolean;
   /** Fewest plays a song or album needs to be on that list (1 to 1000). Synced. */
@@ -1836,6 +1839,7 @@ export const DEFAULT_SETTINGS: Settings = {
   nowPlayingFeedPort: 32540,
   allowStreamDeck: false,
   importSources: [],
+  streamingRecheck: true,
   showPlayedALot: true,
   playedMinPlays: 5,
   playedPeriod: "all",
@@ -4212,6 +4216,8 @@ export interface ServerLibrary {
 
 /** Every event in docs/IPC.md → its payload. */
 export interface EventMap {
+  /** A connected streaming account's sign-in or read moved on. */
+  "streaming-account://status": AccountStatus;
   "auth://changed": AuthStatus;
   /** The servers in use or what they can do changed: ask backend_caps again. */
   "backends://changed": Record<string, never>;

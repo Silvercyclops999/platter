@@ -78,7 +78,7 @@ const fold = (s: string) => s.normalize("NFKC").trim().replace(/\s+/g, " ").toLo
 export const playedKey = (kind: PlayedHidden["kind"], artist: string, name: string) =>
   kind === "artist" ? `artist:${fold(artist)}` : `${kind}:${fold(artist)}\u001f${fold(name)}`;
 
-const NONE: ImportSkipped = { privatePlays: 0, podcasts: 0, noMetadata: 0, shortPlays: 0, incompleteRows: 0, unknownFiles: 0 };
+const NONE: ImportSkipped = { privatePlays: 0, podcasts: 0, noMetadata: 0, shortPlays: 0, incompleteRows: 0, unknownFiles: 0, othersPlaylists: 0 };
 
 /** Songs the fixture library doesn't have (invented names). */
 const ABSENT: [string, string, string][] = [
@@ -235,6 +235,24 @@ export class MockImport {
     return this.report(source)!;
   }
 
+  /** A read from the connected account: two playlists of its own, two by other people left out. Returns when. */
+  accountRun(): number {
+    const source: ImportSourceId = "streaming-account";
+    const t = this.fx.tracks;
+    const road = [...t.slice(0, 5).map((x) => this.matched(source, x)), this.missing(source, 0)];
+    const late = [...t.slice(40, 44).map((x) => this.matched(source, x)), this.missing(source, 3)];
+    this.putList(source, "Road Trip", false, road);
+    this.putList(source, "Late Night", false, late);
+    const now = Date.now();
+    this.runs.set(source, { importedAt: now, fileName: null, albums: { total: 0, matched: 0 }, plays: { total: 0, matched: 0 }, playsAdded: 0, history: NO_HISTORY, skipped: { ...NONE, othersPlaylists: 2 } });
+    return now;
+  }
+
+  /** When the connected account was last read. */
+  accountLastRead(): number | null {
+    return this.runs.get("streaming-account")?.importedAt ?? null;
+  }
+
   private report(source: ImportSourceId): ImportReport | null {
     const run = this.runs.get(source);
     if (!run) return null;
@@ -268,7 +286,7 @@ export class MockImport {
   }
 
   overview(): ImportOverview {
-    const order: ImportSourceId[] = ["lists", "streaming", "transfer"];
+    const order: ImportSourceId[] = ["lists", "streaming", "streaming-account", "transfer"];
     return {
       reports: order.map((s) => this.report(s)).filter((r): r is ImportReport => !!r),
       lists: [...this.lists]

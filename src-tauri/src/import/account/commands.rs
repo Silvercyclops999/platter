@@ -43,3 +43,10 @@ pub async fn streaming_account_cancel(account: State<'_, AccountImport>) -> AppR
 pub async fn streaming_account_sign_out(account: State<'_, AccountImport>) -> AppResult<AccountStatus> {
     Ok(account.sign_out())
 }
+
+/// Keeps the developer app's Client ID in the keychain, or removes it
+/// (None). It never comes back to the UI; the status says whether one is set.
+#[tauri::command]
+pub async fn streaming_account_client_id_set(account: State<'_, AccountImport>, id: Option<String>) -> AppResult<AccountStatus> {
+    account.set_client_id(id.as_deref())
+}

@@ -89,6 +89,7 @@ export function skippedLine(s: ImportSkipped): string | null {
   if (s.shortPlays) parts.push(plural(s.shortPlays, "play under 30 seconds", "plays under 30 seconds"));
   if (s.incompleteRows) parts.push(plural(s.incompleteRows, "row without an artist or title", "rows without an artist or title"));
   if (s.unknownFiles) parts.push(plural(s.unknownFiles, "other file", "other files"));
+  if (s.othersPlaylists) parts.push(plural(s.othersPlaylists, "playlist by other people (the account data zip has them)", "playlists by other people (the account data zip has them)"));
   return parts.length ? `Left out: ${parts.join(", ")}.` : null;
 }
 

@@ -1,7 +1,7 @@
 /** Library import (docs/IPC.md, import_* commands). */
 import type { LidarrRequestState, PlayedPeriod, Track } from "./types";
 
-export type ImportSourceId = "streaming" | "transfer" | "lists";
+export type ImportSourceId = "streaming" | "streaming-account" | "transfer" | "lists";
 
 export interface ImportSkipped {
   /** Plays marked private. */
@@ -16,6 +16,28 @@ export interface ImportSkipped {
   incompleteRows: number;
   /** Files that weren't anything this source reads. */
   unknownFiles: number;
+  /** Playlists other people own, which a connected account can't read the songs of. */
+  othersPlaylists: number;
+}
+
+/** Where a connected streaming account stands (streaming_account_* commands). */
+export type AccountState = "notSetUp" | "signedOut" | "signingIn" | "connected" | "reading" | "refused" | "expired" | "rateLimited" | "offline";
+
+export interface AccountStatus {
+  state: AccountState;
+  /** What to register as the developer app's redirect URI. */
+  redirectUri: string;
+  /** The account's display name, once read. */
+  name: string | null;
+  /** Why it stopped, or what the last read left out. */
+  message: string | null;
+  /** Unix ms when a rate limit ends. */
+  retryAt: number | null;
+  /** Playlists read and to read, while reading. */
+  done: number;
+  total: number;
+  /** Unix ms of the last finished read. */
+  lastRead: number | null;
 }
 
 export interface ImportCounts {

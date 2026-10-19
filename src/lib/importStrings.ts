@@ -27,6 +27,14 @@ export const IMPORT_SOURCES: ImportSourceText[] = [
     note: "Private session plays and podcasts are left out. Only the song, when it played and for how long are kept.",
   },
   {
+    id: "streaming-account",
+    name: "Spotify playlists from your account",
+    help:
+      "Connect your account to bring in the playlists you made or collaborate on, right away, with each song's ISRC for exact matching. It needs a free developer app of your own (its owner needs Premium): on developer.spotify.com open the Dashboard, create an app with the Web API ticked, add the redirect URI below, add your account under User Management, then paste the app's Client ID here.",
+    short: "Connect your account to bring in your own playlists right away.",
+    note: "Playlists only. Liked songs, saved albums, your listening history and playlists other people made come from the account data zip above.",
+  },
+  {
     id: "transfer",
     name: "Tidal, Deezer, Amazon Music, SoundCloud",
     help:
@@ -64,6 +72,13 @@ export function storeLinks(artist: string, title: string): Record<(typeof STORE_
     itunes: `https://music.apple.com/search?term=${q}`,
   };
 }
+
+/** The connect card's words for the account source. */
+export const ACCOUNT_TEXT = {
+  service: "Spotify",
+  brings: "Your playlists and the ones you collaborate on, right away, with exact song codes for matching.",
+  cant: "Liked songs, saved albums, your listening history and other people's playlists can't come this way. Those come from the account data zip.",
+} as const;
 
 export function importSourceName(id: string): string {
   return IMPORT_SOURCES.find((s) => s.id === id)?.name ?? id;

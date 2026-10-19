@@ -20,6 +20,7 @@ import { PlayedSettings } from "./PlayedALot";
 import "./library-import.css";
 import { failText } from "../lib/errorText";
 import { MoreText } from "./SettingMore";
+import { ACCOUNT_SOURCE, AccountSetup } from "./AccountConnect";
 
 const SECTION_WORDS = "library import services playlists liked songs history csv m3u transfer played a lot missing plays period";
 
@@ -79,19 +80,23 @@ function SourceRow({ src, on, report }: { src: ImportSourceText; on: boolean | n
       </div>
       {on && (
         <div className="setting-row__block import-source__block">
-          <div className="import-source__actions">
-            <Button size="sm" onClick={() => void pick(false)} disabled={busy} aria-describedby={`${id}-t`}>
-              Choose file
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => void pick(true)} disabled={busy} aria-describedby={`${id}-t`}>
-              Choose folder
-            </Button>
-            {busy && (
-              <span className="import-source__busy" role="status">
-                Importing and matching to your library…
-              </span>
-            )}
-          </div>
+          {src.id === ACCOUNT_SOURCE ? (
+            <AccountSetup />
+          ) : (
+            <div className="import-source__actions">
+              <Button size="sm" onClick={() => void pick(false)} disabled={busy} aria-describedby={`${id}-t`}>
+                Choose file
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => void pick(true)} disabled={busy} aria-describedby={`${id}-t`}>
+                Choose folder
+              </Button>
+              {busy && (
+                <span className="import-source__busy" role="status">
+                  Importing and matching to your library…
+                </span>
+              )}
+            </div>
+          )}
           {report && (
             <div className="import-source__report" data-testid={`import-report-${src.id}`}>
               <span className="import-source__found">{reportLine(report)}</span>
@@ -100,7 +105,7 @@ function SourceRow({ src, on, report }: { src: ImportSourceText; on: boolean | n
                   {p}
                 </span>
               ))}
-              <span className="import-source__when">Imported {when(report.importedAt)}</span>
+              <span className="import-source__when">{src.id === ACCOUNT_SOURCE ? "Read" : "Imported"} {when(report.importedAt)}</span>
               <ImportHistoryLinks r={report} />
               <span className="import-source__links">
                 <Button size="sm" variant="ghost" onClick={() => nav.go({ name: "import" })}>

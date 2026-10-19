@@ -2802,6 +2802,27 @@ Music that isn't in the library, from MusicBrainz (the shared one-a-second limit
 
 Requests from these pages use `lidarr_request_preview` and `lidarr_request` with `artistMbid` in the input, so the artist is known without a name search. Store links open through `import_open_link`. Artists marked "Not interested" are the synced `dismissedArtists` setting (`{ mbid, name }[]`).
 
+## Connected streaming account
+
+The `streaming-account` import source reads the user's playlists through the service's Web API with their own developer app: Authorization Code with PKCE, no client secret, scopes `playlist-read-private playlist-read-collaborative` only. The sign-in opens in the system browser and comes back to a listener on `127.0.0.1` with a free port, open only while the sign-in waits. The developer app registers `http://127.0.0.1/callback` (no port; loopback addresses may take any). The refresh token is kept in the OS keychain (account `import-account-refresh`), the access token only in memory.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `streaming_account_status` | – | `AccountStatus` |
+| `streaming_account_sign_in` | – | `AccountStatus` once the browser answers (5 minutes at most); a good sign-in starts a read in the background |
+| `streaming_account_read` | – | `AccountStatus` after reading and importing the playlists |
+| `streaming_account_cancel` | – | `AccountStatus`; stops a sign-in or a read |
+| `streaming_account_sign_out` | – | `AccountStatus`; the refresh token leaves the keychain, imported playlists stay |
+| `streaming_account_client_id_set` | `{ id: string \| null }` | `AccountStatus`; keeps the Client ID (letters and digits) in the keychain, or removes it with null |
+
+`AccountStatus = { state, redirectUri, name, message, retryAt, done, total, lastRead }`. `state` is `notSetUp` (no Client ID), `signedOut`, `signingIn`, `connected`, `reading` (`done` of `total` playlists), `refused` (the sign-in page said no, the Client ID wasn't accepted, or the account isn't added to the developer app; `message` says which), `expired` (the refresh token stopped working and was removed), `rateLimited` (`retryAt`, unix ms) or `offline`. Event: `streaming-account://status` with the same payload.
+
+A read lists the user's playlists (`GET /me/playlists`) and reads the items of those they own or collaborate on (`GET /playlists/{id}/items`), 50 at a time, following `next` links only on the API. Other people's playlists come back without their songs, so they are counted in the report's `skipped.othersPlaylists`. A 429 waits out a Retry-After of up to 30 seconds, three times at most, else the read stops as `rateLimited`. A 401 refreshes the access token once. Songs carry the ISRC, length and album, and go through the same matching, Missing list and playlist saving as a file import. Reading again updates the playlists it finds and never removes one. Liked songs, saved albums and listening history are not read this way.
+
+The developer app's Client ID is kept in the keychain too (account `import-account-client-id`, this device only) and never comes back to the UI; `notSetUp` means there is none. Setting a different one signs out, since the old sign-in belongs to the old app.
+
+Settings (synced): `streamingRecheck` (on: read again once a day while the app runs). The source is turned on through `importSources` like the file sources.
+
 ## Played a lot, not in your library
 
 The Missing page's second tab lists what imported listening history (any source in `imported_plays`) played that has no match in the library. Plays count when they lasted 30 seconds or more. Sources left out of every count are left out here too.

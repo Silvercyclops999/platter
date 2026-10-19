@@ -168,6 +168,14 @@ and your own Plex server.
   the headphones and nothing about you or your music. Searching for a model
   happens on your computer.
 
+- Spotify's Web API, only if you turn on "Spotify playlists from your
+  account" under Library import, enter your own developer app's Client ID
+  and sign in. The sign-in happens in your browser; Platter asks only to
+  read your playlists, and keeps the sign-in in your computer's keychain
+  until you sign out. Platter then reads your account name and your
+  playlists with their songs, and nothing else. Nothing is sent back to the
+  service and no audio comes from it.
+
 Lyrics transcription runs entirely on your computer: songs are read from your
 own server (or the app's cache), turned into text on this machine, and saved
 in the app's data folder. No audio is sent anywhere. The text goes only to

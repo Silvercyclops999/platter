@@ -23,6 +23,7 @@ import { ImportHistoryLinks } from "./ImportHistoryLinks";
 import { ListView } from "./ImportListView";
 import { MissingPage } from "./ImportMissing";
 import "./library-import.css";
+import { ACCOUNT_SOURCE, AccountCard } from "./AccountConnect";
 import { failText } from "../lib/errorText";
 
 const n = (v: number) => v.toLocaleString();
@@ -63,7 +64,7 @@ function ReportCard({ r }: { r: ImportReport }) {
       <ImportHistoryLinks r={r} />
       {skipped && <p className="import-report__skipped">{skipped}</p>}
       <p className="import-report__when">
-        Imported {when(r.importedAt)}
+        {r.source === ACCOUNT_SOURCE ? `Read from your account ${when(r.importedAt)}` : `Imported ${when(r.importedAt)}`}
         {r.fileName ? ` from ${r.fileName}` : ""}
       </p>
     </article>
@@ -167,6 +168,7 @@ function ListLink({ l }: { l: ImportedList }) {
 
 function Home() {
   const [o, err] = useImportOverview();
+  const account = useSettings((x) => x.settings?.importSources.includes(ACCOUNT_SOURCE) ?? false);
   if (err) return <p className="import-empty" role="alert">{err}</p>;
   if (!o) {
     return (
@@ -177,17 +179,21 @@ function Home() {
   }
   if (!o.reports.length) {
     return (
-      <div className="import-empty" role="status">
-        <p>Nothing imported yet.</p>
-        <p>Pick a file for a service in Settings, under Library import.</p>
-        <Button className="import-empty__go" onClick={() => nav.go({ name: "settings", page: "libraryImport" })}>
-          Open Settings
-        </Button>
-      </div>
+      <>
+        {account && <AccountCard />}
+        <div className="import-empty" role="status">
+          <p>Nothing imported yet.</p>
+          <p>Pick a file for a service, or connect an account, in Settings under Library import.</p>
+          <Button className="import-empty__go" onClick={() => nav.go({ name: "settings", page: "libraryImport" })}>
+            Open Settings
+          </Button>
+        </div>
+      </>
     );
   }
   return (
     <>
+      {account && <AccountCard />}
       <div className="import-reports">
         {o.reports.map((r) => (
           <ReportCard key={r.source} r={r} />

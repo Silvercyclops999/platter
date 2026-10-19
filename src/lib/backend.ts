@@ -266,6 +266,7 @@ import type {
   CratePage,
 } from "./types";
 import type {
+  AccountStatus,
   ImportDecision,
   ImportOverview,
   ImportReport,
@@ -1169,6 +1170,18 @@ export interface Backend {
   importOpenLink(url: string): Promise<void>;
   /** Forget everything imported from a source. */
   importForget(source: ImportSourceId): Promise<void>;
+  /** Where the connected streaming account stands. */
+  streamingAccountStatus(): Promise<AccountStatus>;
+  /** Sign in through the browser (resolves when the sign-in page answers), then read the playlists in the background. */
+  streamingAccountSignIn(): Promise<AccountStatus>;
+  /** Read the account's playlists now and import them. */
+  streamingAccountRead(): Promise<AccountStatus>;
+  /** Stop a sign-in or a read. */
+  streamingAccountCancel(): Promise<AccountStatus>;
+  /** Sign out: the sign-in leaves the keychain. Imported playlists stay. */
+  streamingAccountSignOut(): Promise<AccountStatus>;
+  /** Keep the developer app's Client ID in the keychain (this device), or remove it with null. A new one signs out. */
+  streamingAccountClientIdSet(id: string | null): Promise<AccountStatus>;
   /** Take one song out of an imported list. */
   importListRemove(listId: string, songId: number): Promise<void>;
   /** A page of "Played a lot, not in your library": imported history with no library match. */
@@ -1698,6 +1711,12 @@ export function createTauriBackend(): Backend {
     discogsImport: () => call("discogs_import"),
     importOpenLink: (url) => call("import_open_link", { url }),
     importForget: (source) => call("import_forget", { source }),
+    streamingAccountStatus: () => call("streaming_account_status"),
+    streamingAccountSignIn: () => call("streaming_account_sign_in"),
+    streamingAccountRead: () => call("streaming_account_read"),
+    streamingAccountCancel: () => call("streaming_account_cancel"),
+    streamingAccountSignOut: () => call("streaming_account_sign_out"),
+    streamingAccountClientIdSet: (id) => call("streaming_account_client_id_set", { id }),
     importListRemove: (listId, songId) => call("import_list_remove", { listId, songId }),
     importPlayed: (query) => call("import_played", { query }),
     importPlayedHide: (kind, artist, name, hide) => call("import_played_hide", { kind, artist, name, hide }),

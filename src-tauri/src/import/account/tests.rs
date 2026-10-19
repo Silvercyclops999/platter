@@ -62,7 +62,8 @@ async fn rig() -> Rig {
     let db = DbHandle::open(dir.path().join("a.db")).unwrap();
     let keys = Arc::new(MemoryStore::new());
     let events = Arc::new(Events(Mutex::new(Vec::new())));
-    let cfg = Arc::new(Mutex::new(Config { enabled: true, client_id: CLIENT.into(), recheck: true }));
+    let cfg = Arc::new(Mutex::new(Config { enabled: true, client_id: String::new(), recheck: true }));
+    keys.set(CLIENT_ACCOUNT, &Token::new(CLIENT).unwrap()).unwrap();
     let clock = Arc::new(AtomicI64::new(1_700_000_000_000));
     let opened = Arc::new(Mutex::new(Vec::new()));
     let browser = Arc::new(Mutex::new(Browser::Allow));
@@ -325,7 +326,7 @@ async fn a_client_id_the_service_doesnt_know_is_refused() {
 #[tokio::test]
 async fn not_set_up_without_a_client_id() {
     let r = rig().await;
-    r.cfg.lock().client_id.clear();
+    r.keys.delete(CLIENT_ACCOUNT).unwrap();
     assert_eq!(r.acct.status().state, State::NotSetUp);
     assert_eq!(r.acct.sign_in().await.state, State::NotSetUp);
     assert!(r.opened.lock().is_empty());
@@ -333,7 +334,7 @@ async fn not_set_up_without_a_client_id() {
     assert_eq!(r.acct.read().await.state, State::NotSetUp);
     assert!(r.server.received_requests().await.unwrap().is_empty());
     // Turned off in Settings: nothing happens either.
-    r.cfg.lock().client_id = CLIENT.into();
+    r.keys.set(CLIENT_ACCOUNT, &Token::new(CLIENT).unwrap()).unwrap();
     r.cfg.lock().enabled = false;
     r.acct.read().await;
     assert!(r.server.received_requests().await.unwrap().is_empty());
@@ -661,25 +662,41 @@ fn track_objects_become_import_songs() {
 // ------------------------------------------------------------------ settings
 
 #[test]
-fn settings_client_id_and_daily_check() {
+fn settings_daily_check_and_the_source() {
     use crate::settings::{DEVICE_SETTINGS, SYNCED_SETTINGS, Settings, SettingsPatch};
     let mut s = Settings::default();
-    assert!(s.streaming_client_id.is_empty(), "not set up");
     assert!(s.streaming_recheck, "re-check daily is on");
-    assert!(SYNCED_SETTINGS.contains(&"streamingClientId") && SYNCED_SETTINGS.contains(&"streamingRecheck"));
-    assert!(!DEVICE_SETTINGS.contains(&"streamingClientId"));
-    s.apply(&SettingsPatch { streaming_client_id: Some(format!("  {CLIENT} ")), streaming_recheck: Some(false), ..Default::default() }).unwrap();
-    assert_eq!(s.streaming_client_id, CLIENT);
+    assert!(SYNCED_SETTINGS.contains(&"streamingRecheck") && !DEVICE_SETTINGS.contains(&"streamingRecheck"));
+    s.apply(&SettingsPatch { streaming_recheck: Some(false), ..Default::default() }).unwrap();
     assert!(!s.streaming_recheck);
-    assert!(s.apply(&SettingsPatch { streaming_client_id: Some("not a client id!".into()), ..Default::default() }).is_err());
-    assert_eq!(s.streaming_client_id, CLIENT);
-    s.apply(&SettingsPatch { streaming_client_id: Some(String::new()), ..Default::default() }).unwrap();
-    assert!(s.streaming_client_id.is_empty());
     // The source can be turned on like the file ones.
     s.apply(&SettingsPatch { import_sources: Some(vec![SOURCE.into(), "nope".into()]), ..Default::default() }).unwrap();
     assert_eq!(s.import_sources, [SOURCE]);
     let cfg = Config::from_settings(&s);
-    assert!(cfg.enabled && cfg.client_id.is_empty() && !cfg.recheck);
+    assert!(cfg.enabled && cfg.client_id.is_empty() && !cfg.recheck, "settings never hold the Client ID");
+    let json = serde_json::to_string(&s).unwrap().to_lowercase();
+    assert!(!json.contains("clientid"));
+}
+
+#[tokio::test]
+async fn the_client_id_lives_in_the_keychain_and_a_new_one_signs_out() {
+    let r = rig().await;
+    r.signed_in("ref-1");
+    assert_eq!(r.acct.client_id().as_deref(), Some(CLIENT));
+    assert!(r.acct.set_client_id(Some("not a client id!")).is_err());
+    assert_eq!(r.acct.client_id().as_deref(), Some(CLIENT));
+    // The same one again changes nothing.
+    assert_eq!(r.acct.set_client_id(Some(&format!(" {CLIENT} "))).unwrap().state, State::Connected);
+    // Another app can't use this sign-in.
+    let st = r.acct.set_client_id(Some("abcdef0123456789abcdef0123456789")).unwrap();
+    assert_eq!(st.state, State::SignedOut);
+    assert!(r.refresh_token().is_none());
+    assert_eq!(r.acct.client_id().as_deref(), Some("abcdef0123456789abcdef0123456789"));
+    // Removing it: not set up.
+    assert_eq!(r.acct.set_client_id(None).unwrap().state, State::NotSetUp);
+    assert!(r.keys.get(CLIENT_ACCOUNT).unwrap().is_none());
+    // The status never carries it.
+    assert!(!serde_json::to_string(&r.acct.status()).unwrap().contains("abcdef0123456789"));
 }
 
 #[test]

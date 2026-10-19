@@ -30,6 +30,21 @@ The first service in the list lets you ask for a copy of your data.
 
 Plays from a private session and podcasts are left out. Only the song, when it played and for how long are kept.
 
+### Streaming account, connected
+
+The second service in the list reads your playlists straight from your account, so you don't wait for an email. It brings in the playlists you made and the ones you collaborate on, with each song's ISRC, which makes matching exact. Liked songs, saved albums, your listening history and playlists other people made can't come this way; the download above has them.
+
+It needs a free developer app of your own. Its owner needs a paid account.
+
+1. On the service's developer site, open the Dashboard and create an app. Tick Web API.
+2. In the app's settings, add the redirect URI Platter shows (`http://127.0.0.1/callback`). It has no port on purpose.
+3. Under User Management, add the account you sign in with.
+4. Copy the app's Client ID into Platter and choose **Save**, then **Connect your account**. The sign-in opens in your browser.
+
+Platter asks only to read your playlists. The Client ID and the sign-in are kept in this computer's keychain, so each computer is set up on its own, and **Sign out** removes the sign-in. With **Re-check daily** on, Platter reads your playlists again once a day while it runs. Reading again updates the playlists it finds and never removes one you imported.
+
+If the card says your sign-in ran out, choose **Sign in again**. The service ends sign-ins after a few months.
+
 ### Tidal, Deezer, Amazon Music, SoundCloud
 
 1. Use a free transfer tool such as TuneMyMusic or Soundiiz to export your library to a CSV file.

@@ -51,6 +51,34 @@
 .import-report__counts { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin: 0; padding: 0; list-style: none; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
 .import-report__skipped, .import-report__when { font-size: var(--font-size-xs); color: var(--color-text-muted); line-height: 1.45; }
 
+/* Connect your account */
+.import-account {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-6);
+  margin-bottom: var(--space-6);
+  padding: var(--space-4) var(--space-6);
+  border-radius: var(--radius-card);
+  background: var(--color-bg-raised2);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 8%, transparent);
+}
+.import-account__text { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.import-page h2.import-account__title { margin: 0 0 var(--space-1); font-size: var(--font-size-lg); }
+.import-account__brings { margin: 0; color: var(--color-text-primary); font-size: var(--font-size-md); }
+.import-account__cant { margin: 0; color: var(--color-text-muted); font-size: var(--font-size-sm); }
+.import-account__state { margin: var(--space-2) 0 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.import-account__state--alert { color: var(--color-text-primary); }
+.import-account__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.import-account-setup { display: flex; flex-direction: column; gap: var(--space-2); }
+.import-account-setup > .setting-row { padding-inline: 0; }
+.import-account__client { width: 300px; max-width: 100%; }
+.import-account__saved { display: flex; align-items: center; gap: var(--space-2); }
+.import-account__saved-note { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.import-account__uri { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.import-account__uri code { font-size: var(--font-size-sm); color: var(--color-text-primary); overflow-wrap: anywhere; user-select: all; }
+
 /* Review queue */
 .import-review { display: flex; flex-direction: column; gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
 .import-review__item { padding: var(--space-3) var(--space-4); border-radius: var(--radius-card); background: var(--color-bg-raised2); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 8%, transparent); }
