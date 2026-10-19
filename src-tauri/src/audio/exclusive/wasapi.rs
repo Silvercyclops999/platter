@@ -78,6 +78,8 @@ pub struct OwnStream {
     layout: SampleLayout,
     channels: u16,
     frames: u32,
+    /// The stream's rate (a block written plays about one buffer later).
+    rate: u32,
 }
 
 fn activate(device: &IMMDevice) -> windows::core::Result<IAudioClient> {
@@ -146,7 +148,7 @@ pub(super) fn open(endpoint_id: &str, rate: u32, channels: u16) -> Result<Opened
             }
         };
         Ok(Opened::Own {
-            stream: OwnStream { client, render, event, layout, channels, frames },
+            stream: OwnStream { client, render, event, layout, channels, frames, rate },
             rate,
             channels,
             bits: layout.valid_bits(),
@@ -159,6 +161,7 @@ impl OwnStream {
     fn fill(&self, scratch: &mut [f32], renderer: &dyn Renderer) -> windows::core::Result<()> {
         let n = self.frames as usize * self.channels as usize;
         let samples = &mut scratch[..n];
+        renderer.set_latency(std::time::Duration::from_secs_f64(f64::from(self.frames) / f64::from(self.rate.max(1))));
         renderer.render(samples);
         // SAFETY: GetBuffer hands out `frames` frames of device memory until
         // ReleaseBuffer; the slice covers exactly that.

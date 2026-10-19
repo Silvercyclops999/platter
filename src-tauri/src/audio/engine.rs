@@ -41,7 +41,7 @@ use super::http::{HttpConfig, HttpSource, HttpStats};
 use super::devguard::GuardedOutput;
 use super::output::{OutputCallback, OutputEvent, OutputFormat, OutputState, Renderer};
 use super::signal::{SourceFrom, SourceInfo};
-use super::visual::{Spectrum, VisTap};
+use super::visual::VisTap;
 use super::source::{LocalFiles, StreamSource, TrackResolver};
 use crate::error::{AppError, AppResult};
 use crate::model::Track;
@@ -109,8 +109,6 @@ pub enum EngineEvent {
     OutputChanged,
     /// A segment's source format or loudness data became known (signal path).
     SourceKnown { key: u64 },
-    /// A visualizer frame, while one is watched.
-    Spectrum(Box<Spectrum>),
 }
 
 /// A track whose audio stopped before its end.
@@ -1281,9 +1279,8 @@ impl Core {
 
 impl Renderer for Core {
     fn set_latency(&self, latency: Duration) {
-        if self.vis.active() {
-            self.vis.set_latency(latency);
-        }
+        // A plain atomic store: no lock, no allocation.
+        self.vis.set_latency(latency);
     }
 
     fn render(&self, out: &mut [f32]) -> usize {
@@ -1296,11 +1293,9 @@ impl Renderer for Core {
         let fade_len = m.declick_frames(&self.cfg).max(1);
         let declick = self.cfg.declick_ms > 0;
         let quiet = !m.can_clip();
-        // The visualizer's copy, only while a window watches.
-        let mut tap = self.vis.active().then(|| self.vis.lock());
-        if let Some(t) = tap.as_mut() {
-            t.begin(m.format.sample_rate, frames);
-        }
+        // The visualizer's copy, only while a window watches: atomics into
+        // a ring made in advance, never a lock or an allocation here.
+        let mut tap = self.vis.writer(m.format.sample_rate, frames);
         let mut filled = 0;
         let mut consumed_any = false;
         let mut underrun = false;
@@ -1421,10 +1416,8 @@ impl Renderer for Core {
         }
         drop(guard);
         if let Some(mut t) = tap {
-            t.push_silence(frames - f);
-            if let Some(sp) = t.due() {
-                events.push(EngineEvent::Spectrum(Box::new(sp)));
-            }
+            t.silence(frames - f);
+            t.finish();
         }
         if consumed_any {
             self.cv.notify_all();
@@ -1733,6 +1726,12 @@ impl Engine {
     #[cfg(test)]
     pub(crate) fn front_gain(&self) -> Option<f32> {
         self.core().mix.lock().segments.front().map(|s| s.lg_target)
+    }
+
+    /// Renders one block on the calling thread, as an output would (tests).
+    #[cfg(test)]
+    pub(crate) fn render_here(&self, out: &mut [f32]) -> usize {
+        self.core().render(out)
     }
 
     /// How many segments are loaded and whether all of them are decoded to

@@ -3,18 +3,25 @@
 //! picture doesn't shrink when the volume goes down. It also works while
 //! the output is bit-perfect, since it only reads.
 //!
-//! Nothing runs unless a window is watching: [`VisTap::watch`] has to be
-//! renewed, and a watch that isn't renewed within [`WATCH_FOR`] ends by
-//! itself, so a closed or hidden window can't leave it running. While
-//! watched, the render callback copies each block into a ring and, every
-//! `rate / fps` frames, analyses the last [`WINDOW`] frames that are
-//! actually being heard (the ring is read [`TapState::latency_frames`]
-//! behind the newest frame): a Hann window, a real FFT, [`BANDS`] log-spaced
-//! bands in dB, RMS and peak per channel, and [`SCOPE_POINTS`] stereo pairs
-//! for the phase scope. There is no thread of its own.
+//! The output callback does as little as it can and never waits or
+//! allocates: while someone watches, it copies each frame into a ring of
+//! atomics made in advance by [`VisTap::watch`], then publishes how far it
+//! wrote. Everything else happens off the audio thread. The player's own
+//! task asks for a [`Spectrum`] at the watched frame rate
+//! ([`VisTap::frame`]), which reads the last [`WINDOW`] frames being heard
+//! (held back by the output's delay), runs a Hann window and a real FFT per
+//! channel, and folds the result into [`BANDS`] log-spaced bands, RMS and
+//! peak per channel, and [`SCOPE_POINTS`] stereo pairs. One frame is made
+//! and sent at a time, so nothing queues up.
+//!
+//! Each window renews its own watch ([`VisTap::watch`] with its caller id);
+//! a watch that isn't renewed within [`WATCH_FOR`] ends by itself, and one
+//! window ending its watch leaves the others running.
 
+use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
@@ -41,6 +48,10 @@ pub const MAX_FPS: u32 = 60;
 pub const MIN_FPS: u32 = 1;
 /// The most the picture is held back to line up with the sound.
 const MAX_LATENCY: Duration = Duration::from_millis(250);
+/// The ring holds the window plus the longest hold-back at this rate; above
+/// it the hold-back is capped a little shorter.
+const RING_RATE: u32 = 192_000;
+const RING_FRAMES: usize = WINDOW + (RING_RATE as usize / 4) + 1;
 
 /// `player://spectrum` payload. Levels are dBFS, floored at [`FLOOR_DB`]:
 /// a full-scale sine reads 0 in its band.
@@ -73,13 +84,115 @@ pub fn to_db(v: f32) -> f32 {
     (20.0 * v.log10()).max(FLOOR_DB)
 }
 
+// ---------------------------------------------------------------- the ring
+
+/// Stereo frames as f32 bits in atomics: one writer (the output callback),
+/// readers anywhere, no lock. A reader racing the writer can see a frame or
+/// two from either side of a wrap, which a picture doesn't mind.
+pub struct Ring {
+    data: Box<[AtomicU32]>,
+    /// Frames ever written (the next one goes at `written % frames`).
+    written: AtomicU64,
+}
+
+impl Ring {
+    fn new(frames: usize) -> Self {
+        Self { data: (0..frames * 2).map(|_| AtomicU32::new(0)).collect(), written: AtomicU64::new(0) }
+    }
+
+    fn frames(&self) -> usize {
+        self.data.len() / 2
+    }
+
+    /// Frames ever written.
+    pub fn written(&self) -> u64 {
+        self.written.load(Ordering::Acquire)
+    }
+
+    /// The frame `back` frames before the newest one written by `upto`.
+    fn read(&self, upto: u64, back: usize) -> (f32, f32) {
+        let n = self.frames() as u64;
+        if back as u64 >= upto.min(n) {
+            return (0.0, 0.0);
+        }
+        let i = ((upto - 1 - back as u64) % n) as usize;
+        (f32::from_bits(self.data[i * 2].load(Ordering::Relaxed)), f32::from_bits(self.data[i * 2 + 1].load(Ordering::Relaxed)))
+    }
+}
+
+/// The output callback's handle on the ring for one block.
+pub(crate) struct TapWriter<'a> {
+    ring: &'a Ring,
+    pos: u64,
+}
+
+impl TapWriter<'_> {
+    /// Copies one output frame (mono doubled, past two channels left out).
+    #[inline]
+    pub(crate) fn push(&mut self, frame: &[f32]) {
+        let (l, r) = match frame {
+            [] => (0.0, 0.0),
+            [m] => (*m, *m),
+            [l, r, ..] => (*l, *r),
+        };
+        let i = (self.pos % self.ring.frames() as u64) as usize;
+        self.ring.data[i * 2].store(l.to_bits(), Ordering::Relaxed);
+        self.ring.data[i * 2 + 1].store(r.to_bits(), Ordering::Relaxed);
+        self.pos += 1;
+    }
+
+    /// `n` frames of silence (the part of a block nothing filled).
+    pub(crate) fn silence(&mut self, n: usize) {
+        for _ in 0..n.min(self.ring.frames()) {
+            self.push(&[0.0, 0.0]);
+        }
+        self.pos += n.saturating_sub(self.ring.frames()) as u64;
+    }
+
+    /// Publishes the block.
+    pub(crate) fn finish(self) {
+        self.ring.written.store(self.pos, Ordering::Release);
+    }
+}
+
+// ---------------------------------------------------------------- watching
+
+#[derive(Debug, Clone, Copy)]
+struct Watcher {
+    until_ms: u64,
+    fps: u32,
+    scope: bool,
+}
+
+/// What the watchers want together.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Wanted {
+    pub fps: u32,
+    pub scope: bool,
+}
+
 pub struct VisTap {
     epoch: Instant,
-    /// Watched until this many ms after `epoch` (0: not watched).
+    /// Watched until this many ms after `epoch` (0: not watched): the
+    /// latest of every watcher's.
     until_ms: AtomicU64,
+    /// The asked frame rate (the highest any watcher wants).
+    fps: AtomicU32,
+    scope: AtomicBool,
     /// How long a renewal lasts, in ms (tests shorten it).
     watch_ms: AtomicU64,
-    state: Mutex<TapState>,
+    watchers: Mutex<HashMap<String, Watcher>>,
+    /// Made on the first watch, never on the audio thread.
+    ring: OnceLock<Ring>,
+    /// Written by the callback: the output rate, the last block's length,
+    /// and the device's reported delay past it (ns; u64::MAX: not reported).
+    rate: AtomicU32,
+    last_block: AtomicU32,
+    latency_ns: AtomicU64,
+    /// `ring.written` when the current watch began.
+    start: AtomicU64,
+    /// The analysis buffers, used off the audio thread only.
+    state: Mutex<Analysis>,
 }
 
 impl Default for VisTap {
@@ -93,8 +206,16 @@ impl VisTap {
         Self {
             epoch: Instant::now(),
             until_ms: AtomicU64::new(0),
+            fps: AtomicU32::new(30),
+            scope: AtomicBool::new(false),
             watch_ms: AtomicU64::new(WATCH_FOR.as_millis() as u64),
-            state: Mutex::new(TapState::default()),
+            watchers: Mutex::new(HashMap::new()),
+            ring: OnceLock::new(),
+            rate: AtomicU32::new(48_000),
+            last_block: AtomicU32::new(0),
+            latency_ns: AtomicU64::new(u64::MAX),
+            start: AtomicU64::new(0),
+            state: Mutex::new(Analysis::default()),
         }
     }
 
@@ -103,31 +224,54 @@ impl VisTap {
         self.epoch.elapsed().as_millis() as u64 + 1
     }
 
-    /// Starts or renews a watch at `fps` (clamped to 1..=60), or ends it.
-    /// `scope` adds the stereo pairs. The buffers are made here, not on the
-    /// audio thread.
-    pub fn watch(&self, on: bool, fps: u32, scope: bool) {
-        if !on {
-            self.until_ms.store(0, Ordering::SeqCst);
-            return;
+    /// Starts, renews or ends `caller`'s watch at `fps` (clamped to 1..=60).
+    /// `scope` adds the stereo pairs. Buffers are made here, off the audio
+    /// thread. Returns what all the watchers want together, or None when
+    /// nobody watches now.
+    pub fn watch(&self, caller: &str, on: bool, fps: u32, scope: bool) -> Option<Wanted> {
+        let now = self.now_ms();
+        if on {
+            // Build first, outside any lock the callback could meet.
+            let ring = self.ring.get_or_init(|| Ring::new(RING_FRAMES));
+            let was_on = self.active();
+            let mut st = self.state.lock();
+            st.prepare();
+            if !was_on {
+                st.last_written = None;
+                // A fresh watch counts its clock from here. Published
+                // before `until_ms`, so the first frame reads it.
+                self.start.store(ring.written(), Ordering::SeqCst);
+            }
         }
-        {
-            let mut s = self.state.lock();
-            s.fps = fps.clamp(MIN_FPS, MAX_FPS);
-            s.scope = scope;
-            s.prepare();
+        let mut w = self.watchers.lock();
+        if on {
+            w.insert(caller.to_string(), Watcher { until_ms: now + self.watch_ms.load(Ordering::SeqCst), fps: fps.clamp(MIN_FPS, MAX_FPS), scope });
+        } else {
+            w.remove(caller);
         }
-        let was = self.until_ms.swap(self.now_ms() + self.watch_ms.load(Ordering::SeqCst), Ordering::SeqCst);
-        if was == 0 || was < self.now_ms() {
-            // A fresh watch starts its clock and forgets old audio.
-            self.state.lock().restart();
+        w.retain(|_, x| x.until_ms > now);
+        let until = w.values().map(|x| x.until_ms).max().unwrap_or(0);
+        let wanted = (until != 0).then(|| Wanted {
+            fps: w.values().map(|x| x.fps).max().unwrap_or(MIN_FPS),
+            scope: w.values().any(|x| x.scope),
+        });
+        if let Some(x) = wanted {
+            self.fps.store(x.fps, Ordering::SeqCst);
+            self.scope.store(x.scope, Ordering::SeqCst);
         }
+        self.until_ms.store(until, Ordering::SeqCst);
+        wanted
     }
 
     /// Someone is watching now.
     pub fn active(&self) -> bool {
         let until = self.until_ms.load(Ordering::Relaxed);
         until != 0 && self.now_ms() < until
+    }
+
+    /// The frame rate asked for.
+    pub fn fps(&self) -> u32 {
+        self.fps.load(Ordering::Relaxed)
     }
 
     /// How long a renewal lasts.
@@ -140,71 +284,90 @@ impl VisTap {
         self.watch_ms.store(d.as_millis() as u64, Ordering::SeqCst);
     }
 
-    /// For the render callback, only while [`active`](Self::active).
-    pub(crate) fn lock(&self) -> parking_lot::MutexGuard<'_, TapState> {
-        self.state.lock()
+    /// The ring, once a watch made it.
+    pub fn ring(&self) -> Option<&Ring> {
+        self.ring.get()
     }
 
-    /// The output's own delay (device buffer), so the picture is held back
-    /// to match what is heard.
+    // ------------------------------------------------ the output callback
+
+    /// For the output callback: a writer for a block of `frames` at `rate`
+    /// while someone watches. Lock-free and allocation-free.
+    #[inline]
+    pub(crate) fn writer(&self, rate: u32, frames: usize) -> Option<TapWriter<'_>> {
+        if !self.active() {
+            return None;
+        }
+        let ring = self.ring.get()?;
+        self.rate.store(rate.max(1), Ordering::Relaxed);
+        self.last_block.store(frames.min(u32::MAX as usize) as u32, Ordering::Relaxed);
+        Some(TapWriter { ring, pos: ring.written.load(Ordering::Relaxed) })
+    }
+
+    /// The output's own delay past the block being written, so the picture
+    /// is held back to match what is heard. Lock-free.
     pub fn set_latency(&self, latency: Duration) {
-        let mut s = self.state.lock();
-        s.latency = Some(latency.min(MAX_LATENCY));
+        let ns = latency.min(MAX_LATENCY).as_nanos() as u64;
+        self.latency_ns.store(ns, Ordering::Relaxed);
+    }
+
+    // ------------------------------------------------ off the audio thread
+
+    /// Delay the picture is held back by, in frames: the block just written
+    /// plays after the device's own delay.
+    pub fn latency_frames(&self) -> usize {
+        let rate = self.rate.load(Ordering::Relaxed) as u64;
+        let ns = self.latency_ns.load(Ordering::Relaxed);
+        let delay = if ns == u64::MAX { 0 } else { (ns * rate / 1_000_000_000) as usize };
+        let frames = self.last_block.load(Ordering::Relaxed) as usize + delay;
+        frames.min(RING_FRAMES - WINDOW - 1)
+    }
+
+    /// The next frame to send, made here (off the audio thread): None while
+    /// nobody watches, or when no audio has gone out since the last one.
+    pub fn frame(&self) -> Option<Spectrum> {
+        if !self.active() {
+            return None;
+        }
+        let ring = self.ring.get()?;
+        let written = ring.written();
+        let rate = self.rate.load(Ordering::Relaxed).max(1);
+        let lat = self.latency_frames();
+        let start = self.start.load(Ordering::SeqCst);
+        let scope = self.scope.load(Ordering::Relaxed);
+        let mut st = self.state.lock();
+        if st.last_written == Some(written) {
+            return None;
+        }
+        st.last_written = Some(written);
+        let shown = written.saturating_sub(start).saturating_sub(lat as u64);
+        let mut sp = st.analyse(rate, |back| ring.read(written, lat + back), scope);
+        sp.t = shown * 1000 / rate as u64;
+        Some(sp)
     }
 }
 
-/// Ring of what went out, and the analysis buffers.
-pub struct TapState {
-    fps: u32,
-    scope: bool,
-    rate: u32,
-    /// Stereo frames, interleaved.
-    ring: Vec<f32>,
-    /// Next frame written.
-    write: usize,
-    /// Frames since the last analysis.
-    since: usize,
-    /// Frames heard since the watch began.
-    clock: u64,
-    /// The output's reported delay past the block being written.
-    latency: Option<Duration>,
-    last_block: usize,
+// ---------------------------------------------------------------- analysis
+
+/// The FFT and its buffers, made once by the first watch.
+#[derive(Default)]
+pub struct Analysis {
     fft: Option<Arc<dyn RealToComplex<f32>>>,
     hann: Vec<f32>,
     /// Left and right, windowed.
     input: [Vec<f32>; 2],
     spec: [Vec<Complex<f32>>; 2],
+    scratch: Vec<Complex<f32>>,
     /// Power per bin, both channels averaged.
     power: Vec<f32>,
-    scratch: Vec<Complex<f32>>,
-    /// Bin range per band, for `rate`.
+    /// Bin range per band, for `bins_rate`.
     bins: Vec<(usize, usize)>,
+    bins_rate: u32,
+    /// The ring position the last frame was made from.
+    last_written: Option<u64>,
 }
 
-impl Default for TapState {
-    fn default() -> Self {
-        Self {
-            fps: 30,
-            scope: false,
-            rate: 0,
-            ring: Vec::new(),
-            write: 0,
-            since: 0,
-            clock: 0,
-            latency: None,
-            last_block: 0,
-            fft: None,
-            hann: Vec::new(),
-            input: [Vec::new(), Vec::new()],
-            spec: [Vec::new(), Vec::new()],
-            power: Vec::new(),
-            scratch: Vec::new(),
-            bins: Vec::new(),
-        }
-    }
-}
-
-impl TapState {
+impl Analysis {
     fn prepare(&mut self) {
         if self.fft.is_some() {
             return;
@@ -212,8 +375,8 @@ impl TapState {
         let fft = RealFftPlanner::<f32>::new().plan_fft_forward(WINDOW);
         self.input = [fft.make_input_vec(), fft.make_input_vec()];
         self.spec = [fft.make_output_vec(), fft.make_output_vec()];
-        self.power = vec![0.0; WINDOW / 2 + 1];
         self.scratch = fft.make_scratch_vec();
+        self.power = vec![0.0; WINDOW / 2 + 1];
         self.hann = (0..WINDOW)
             .map(|i| {
                 let x = std::f32::consts::PI * 2.0 * i as f32 / WINDOW as f32;
@@ -223,23 +386,12 @@ impl TapState {
         self.fft = Some(fft);
     }
 
-    fn restart(&mut self) {
-        self.ring.fill(0.0);
-        self.write = 0;
-        self.since = 0;
-        self.clock = 0;
-    }
-
-    /// Sizes the ring and band table for `rate` (only when it changes).
-    fn configure(&mut self, rate: u32) {
-        if rate == self.rate && !self.ring.is_empty() {
+    /// The band table for `rate` (only when it changes).
+    fn bins_for(&mut self, rate: u32) {
+        if rate == self.bins_rate && !self.bins.is_empty() {
             return;
         }
-        self.rate = rate;
-        let frames = WINDOW + (rate as f64 * MAX_LATENCY.as_secs_f64()).ceil() as usize + 1;
-        self.ring = vec![0.0; frames * 2];
-        self.write = 0;
-        self.since = 0;
+        self.bins_rate = rate;
         let bin_hz = rate as f32 / WINDOW as f32;
         let top = WINDOW / 2;
         self.bins = (0..BANDS)
@@ -263,84 +415,25 @@ impl TapState {
             .collect();
     }
 
-    /// Delay the picture is held back by, in frames.
-    pub fn latency_frames(&self) -> usize {
-        // The block just written plays after the device's own delay.
-        let delay = self.latency.map_or(0, |d| (d.as_secs_f64() * self.rate as f64).round() as usize);
-        let frames = self.last_block + delay;
-        let cap = self.ring.len() / 2 - WINDOW - 1;
-        frames.min(cap)
-    }
-
-    /// Starts a render block of `frames` frames at `rate`.
-    pub(crate) fn begin(&mut self, rate: u32, frames: usize) {
-        self.configure(rate.max(1));
-        self.last_block = frames;
-    }
-
-    /// Copies one output frame (any channel count; mono is doubled, past
-    /// two the rest is left out).
-    #[inline]
-    pub(crate) fn push(&mut self, frame: &[f32]) {
-        let (l, r) = match frame {
-            [] => (0.0, 0.0),
-            [m] => (*m, *m),
-            [l, r, ..] => (*l, *r),
-        };
-        let at = self.write * 2;
-        self.ring[at] = l;
-        self.ring[at + 1] = r;
-        self.write += 1;
-        if self.write * 2 >= self.ring.len() {
-            self.write = 0;
-        }
-        self.since += 1;
-        self.clock += 1;
-    }
-
-    /// `n` frames of silence (the part of a block nothing filled).
-    pub(crate) fn push_silence(&mut self, n: usize) {
-        for _ in 0..n.min(self.ring.len() / 2) {
-            self.push(&[0.0, 0.0]);
-        }
-        let skipped = n.saturating_sub(self.ring.len() / 2);
-        self.since += skipped;
-        self.clock += skipped as u64;
-    }
-
-    /// The analysis, when a frame is due.
-    pub(crate) fn due(&mut self) -> Option<Spectrum> {
-        let every = (self.rate / self.fps.max(1)).max(1) as usize;
-        if self.since < every || self.fft.is_none() || self.ring.is_empty() {
-            return None;
-        }
-        self.since %= every;
-        Some(self.analyse())
-    }
-
-    fn frame_at(&self, back: usize) -> (f32, f32) {
-        let n = self.ring.len() / 2;
-        let i = (self.write + n - 1 - back % n) % n;
-        (self.ring[i * 2], self.ring[i * 2 + 1])
-    }
-
-    /// Analyses the [`WINDOW`] frames ending `latency_frames` ago.
-    pub fn analyse(&mut self) -> Spectrum {
-        let lat = self.latency_frames();
+    /// Analyses [`WINDOW`] frames; `frame(back)` gives the frame `back`
+    /// before the newest one shown. `t` is left 0 for the caller.
+    fn analyse(&mut self, rate: u32, frame: impl Fn(usize) -> (f32, f32), scope: bool) -> Spectrum {
+        self.prepare();
+        self.bins_for(rate);
         let mut sum = [0.0f64; 2];
         let mut peak = [0.0f32; 2];
-        let mut scope = self.scope.then(|| Vec::with_capacity(SCOPE_POINTS * 2));
+        let mut pairs = scope.then(|| Vec::with_capacity(SCOPE_POINTS * 2));
         let step = WINDOW / SCOPE_POINTS;
         for i in 0..WINDOW {
             // Oldest first.
-            let (l, r) = self.frame_at(lat + WINDOW - 1 - i);
+            let (l, r) = frame(WINDOW - 1 - i);
             sum[0] += (l * l) as f64;
             sum[1] += (r * r) as f64;
             peak[0] = peak[0].max(l.abs());
             peak[1] = peak[1].max(r.abs());
             self.input[0][i] = l * self.hann[i];
             self.input[1][i] = r * self.hann[i];
-            if let Some(s) = scope.as_mut()
+            if let Some(s) = pairs.as_mut()
                 && i % step == 0
             {
                 s.push(l.clamp(-1.0, 1.0));
@@ -368,40 +461,50 @@ impl TapState {
                 }
             }
         }
-        let rms = sum.map(|s| to_db((s / WINDOW as f64).sqrt() as f32));
-        let shown = self.clock.saturating_sub(lat as u64);
-        Spectrum {
-            t: shown * 1000 / self.rate.max(1) as u64,
-            bands,
-            rms,
-            peak: peak.map(to_db),
-            scope,
-        }
+        Spectrum { t: 0, bands, rms: sum.map(|s| to_db((s / WINDOW as f64).sqrt() as f32)), peak: peak.map(to_db), scope: pairs }
     }
+
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn tap(rate: u32, fps: u32, scope: bool) -> TapState {
-        let mut s = TapState { fps, scope, ..Default::default() };
-        s.prepare();
-        s.configure(rate);
-        s
-    }
-
-    fn feed(s: &mut TapState, frames: usize, f: impl Fn(usize) -> (f32, f32)) -> Vec<Spectrum> {
+    /// A watched tap fed `frames` frames of `f` in blocks of 512, as the
+    /// callback would, asking for a frame every `rate / fps` frames.
+    fn run(tap: &VisTap, rate: u32, fps: u32, frames: usize, f: impl Fn(usize) -> (f32, f32)) -> Vec<Spectrum> {
+        let every = (rate / fps) as usize;
         let mut out = Vec::new();
-        s.begin(s.rate, 512);
-        for i in 0..frames {
-            let (l, r) = f(i);
-            s.push(&[l, r]);
-            if let Some(sp) = s.due() {
-                out.push(sp);
+        let mut i = 0;
+        while i < frames {
+            let n = 512.min(frames - i);
+            let mut w = tap.writer(rate, n).expect("watched");
+            for k in 0..n {
+                let (l, r) = f(i + k);
+                w.push(&[l, r]);
+                if (i + k + 1) % every == 0 {
+                    // A frame made mid-block sees what was published so far.
+                    let pos = w.pos;
+                    w.ring.written.store(pos, Ordering::Release);
+                    if let Some(s) = tap.frame() {
+                        out.push(s);
+                    }
+                }
             }
+            w.finish();
+            i += n;
         }
         out
+    }
+
+    fn watched(rate: u32, scope: bool) -> VisTap {
+        let t = VisTap::new();
+        t.watch("test", true, 30, scope);
+        t.set_latency(Duration::ZERO);
+        // The block length counts as delay: the test frames read at once.
+        let w = t.writer(rate, 0).unwrap();
+        w.finish();
+        t
     }
 
     fn sine(freq: f32, amp: f32, rate: u32) -> impl Fn(usize) -> (f32, f32) {
@@ -419,11 +522,23 @@ mod tests {
         (0..BANDS).max_by(|&a, &b| sp.bands[a].total_cmp(&sp.bands[b])).unwrap()
     }
 
+    /// Like `run` but with no hold-back at all (the block length is 0).
+    fn analyse(rate: u32, frames: usize, scope: bool, f: impl Fn(usize) -> (f32, f32)) -> Spectrum {
+        let t = watched(rate, scope);
+        let w = t.writer(rate, 0).unwrap();
+        let mut w = w;
+        for i in 0..frames {
+            let (l, r) = f(i);
+            w.push(&[l, r]);
+        }
+        w.finish();
+        t.frame().unwrap()
+    }
+
     #[test]
     fn bands_run_log_spaced_from_20_hz_to_20_khz() {
         assert!((band_edge(0) - 20.0).abs() < 1e-3);
         assert!((band_edge(BANDS) - 20_000.0).abs() < 0.5);
-        // Each band is the same ratio wider than the last.
         let r = band_edge(1) / band_edge(0);
         assert!((band_edge(40) / band_edge(39) - r).abs() < 1e-4);
     }
@@ -431,14 +546,11 @@ mod tests {
     #[test]
     fn a_1_khz_sine_lands_in_its_band_at_full_scale() {
         for rate in [44_100, 48_000, 96_000] {
-            let mut s = tap(rate, 30, false);
-            let out = feed(&mut s, rate as usize, sine(1000.0, 1.0, rate));
-            let last = out.last().unwrap();
-            assert_eq!(loudest(last), band_of(1000.0), "{rate} Hz");
+            let last = analyse(rate, rate as usize, false, sine(1000.0, 1.0, rate));
+            assert_eq!(loudest(&last), band_of(1000.0), "{rate} Hz");
             let db = last.bands[band_of(1000.0)];
             // Hann scalloping is at most about 1.4 dB off a bin centre.
             assert!((-1.5..=0.2).contains(&db), "{rate}: {db} dB");
-            // Far away it is way down.
             assert!(last.bands[band_of(100.0)] < -60.0, "{}", last.bands[band_of(100.0)]);
             assert!(last.bands[band_of(10_000.0)] < -60.0);
         }
@@ -447,11 +559,10 @@ mod tests {
     #[test]
     fn half_the_amplitude_reads_6_db_lower() {
         let rate = 48_000;
-        let a = feed(&mut tap(rate, 30, false), 8192, sine(1000.0, 0.5, rate)).pop().unwrap();
-        let b = feed(&mut tap(rate, 30, false), 8192, sine(1000.0, 0.25, rate)).pop().unwrap();
+        let a = analyse(rate, 8192, false, sine(1000.0, 0.5, rate));
+        let b = analyse(rate, 8192, false, sine(1000.0, 0.25, rate));
         let k = band_of(1000.0);
         assert!((a.bands[k] - b.bands[k] - 6.02).abs() < 0.05, "{} vs {}", a.bands[k], b.bands[k]);
-        // RMS of a sine is 3 dB under its peak; peak is the amplitude.
         assert!((a.peak[0] - to_db(0.5)).abs() < 0.05);
         assert!((a.peak[0] - a.rms[0] - 3.01).abs() < 0.1, "{} {}", a.peak[0], a.rms[0]);
     }
@@ -459,13 +570,13 @@ mod tests {
     #[test]
     fn low_bands_narrower_than_a_bin_still_read_their_tone() {
         let rate = 48_000;
-        let out = feed(&mut tap(rate, 30, false), 16_384, sine(30.0, 1.0, rate)).pop().unwrap();
+        let out = analyse(rate, 16_384, false, sine(30.0, 1.0, rate));
         assert!(out.bands[band_of(30.0)] > -6.0, "{}", out.bands[band_of(30.0)]);
     }
 
     #[test]
     fn silence_is_the_floor() {
-        let out = feed(&mut tap(48_000, 30, true), 8192, |_| (0.0, 0.0)).pop().unwrap();
+        let out = analyse(48_000, 8192, true, |_| (0.0, 0.0));
         assert!(out.bands.iter().all(|&b| b == FLOOR_DB));
         assert_eq!(out.rms, [FLOOR_DB; 2]);
         assert_eq!(out.peak, [FLOOR_DB; 2]);
@@ -474,102 +585,133 @@ mod tests {
 
     #[test]
     fn bands_past_what_the_rate_holds_are_the_floor() {
-        // 32 kHz holds up to 16 kHz.
         let rate = 32_000;
-        let out = feed(&mut tap(rate, 30, false), 8192, sine(1000.0, 1.0, rate)).pop().unwrap();
+        let out = analyse(rate, 8192, false, sine(1000.0, 1.0, rate));
         assert_eq!(out.bands[BANDS - 1], FLOOR_DB);
     }
 
     #[test]
     fn the_scope_of_a_mono_song_is_a_line_and_a_wide_one_is_not() {
         let rate = 48_000;
-        let mono = feed(&mut tap(rate, 30, true), 8192, sine(220.0, 0.8, rate)).pop().unwrap();
+        let mono = analyse(rate, 8192, true, sine(220.0, 0.8, rate));
         let pairs = mono.scope.unwrap();
         assert_eq!(pairs.len(), SCOPE_POINTS * 2);
         assert!(pairs.chunks(2).all(|p| p[0] == p[1]));
-        let wide = feed(&mut tap(rate, 30, true), 8192, |i| {
+        let wide = analyse(rate, 8192, true, |i| {
             let t = i as f32 / rate as f32 * 2.0 * std::f32::consts::PI * 220.0;
             (t.sin() * 0.8, t.cos() * 0.8)
-        })
-        .pop()
-        .unwrap();
+        });
         let spread = wide.scope.unwrap().chunks(2).map(|p| (p[0] - p[1]).abs()).fold(0.0f32, f32::max);
         assert!(spread > 0.5, "{spread}");
-        // Not asked for: not sent.
-        let none = feed(&mut tap(rate, 30, false), 4096, |_| (0.1, 0.1)).pop().unwrap();
+        let none = analyse(rate, 4096, false, |_| (0.1, 0.1));
         assert!(none.scope.is_none());
         assert!(serde_json::to_value(&none).unwrap().get("scope").is_none());
     }
 
     #[test]
-    fn frames_come_at_the_asked_rate() {
+    fn frames_come_only_when_new_audio_went_out() {
         let rate = 48_000;
-        assert_eq!(feed(&mut tap(rate, 30, false), rate as usize, |_| (0.0, 0.0)).len(), 30);
-        assert_eq!(feed(&mut tap(rate, 60, false), rate as usize, |_| (0.0, 0.0)).len(), 60);
-        assert_eq!(feed(&mut tap(rate, 15, false), rate as usize, |_| (0.0, 0.0)).len(), 15);
+        let t = watched(rate, false);
+        assert_eq!(run(&t, rate, 30, rate as usize, |_| (0.1, 0.1)).len(), 30);
+        // Nothing new written since: no frame.
+        assert!(t.frame().is_none());
     }
 
     #[test]
     fn the_picture_is_held_back_by_the_output_latency() {
         let rate = 48_000;
-        // Loud for a second, then silent: the frame right after the change
-        // still shows the loud part while it's in the device's buffer.
         let lat = Duration::from_millis(100);
-        let mut held = tap(rate, 30, false);
-        held.latency = Some(lat);
-        held.begin(rate, 512);
+        let feed = |t: &VisTap| {
+            let mut w = t.writer(rate, 512).unwrap();
+            for i in 0..rate as usize + 4_800 {
+                let v = if i < rate as usize { 0.5 } else { 0.0 };
+                w.push(&[v, v]);
+            }
+            w.finish();
+        };
+        let held = watched(rate, false);
+        held.set_latency(lat);
+        feed(&held);
         assert_eq!(held.latency_frames(), 4_800 + 512);
-        let mut plain = tap(rate, 30, false);
-        plain.latency = Some(Duration::ZERO);
-        let f = |i: usize| if i < rate as usize { (0.5, 0.5) } else { (0.0, 0.0) };
-        let frames = rate as usize + 4_800;
-        let h = feed(&mut held, frames, f).pop().unwrap();
-        let p = feed(&mut plain, frames, f).pop().unwrap();
+        let plain = watched(rate, false);
+        plain.set_latency(Duration::ZERO);
+        feed(&plain);
+        let h = held.frame().unwrap();
+        let p = plain.frame().unwrap();
         assert_eq!(p.peak[0], FLOOR_DB, "no delay: already silent");
         assert!((h.peak[0] - to_db(0.5)).abs() < 0.01, "delayed: still loud");
-        // The clock says what moment is shown.
         assert_eq!(p.t - h.t, 100);
-        // Without a reported delay, the device block's length is used, and
-        // a silly delay is capped.
-        let mut s = tap(rate, 30, false);
-        s.begin(rate, 480);
-        assert_eq!(s.latency_frames(), 480);
-        s.latency = Some(Duration::from_secs(5));
-        assert_eq!(s.latency_frames(), (rate as f64 * MAX_LATENCY.as_secs_f64()) as usize);
+        // A silly delay is capped.
+        held.set_latency(Duration::from_secs(5));
+        assert_eq!(held.latency_frames(), 512 + (rate as f64 * MAX_LATENCY.as_secs_f64()) as usize);
     }
 
     #[test]
     fn a_watch_ends_by_itself_unless_renewed() {
         let t = VisTap::new();
         assert!(!t.active(), "nothing watches at first");
+        assert!(t.writer(48_000, 512).is_none(), "and the callback writes nothing");
         assert_eq!(t.watch_for(), Duration::from_secs(3));
         t.set_watch_for(Duration::from_millis(80));
-        t.watch(true, 60, false);
+        t.watch("a", true, 60, false);
         assert!(t.active());
         std::thread::sleep(Duration::from_millis(50));
-        t.watch(true, 60, false);
+        t.watch("a", true, 60, false);
         std::thread::sleep(Duration::from_millis(50));
         assert!(t.active(), "the renewal kept it going");
         std::thread::sleep(Duration::from_millis(60));
         assert!(!t.active(), "ended without a renewal");
-        t.watch(true, 60, false);
-        t.watch(false, 60, false);
+        assert!(t.frame().is_none());
+        t.watch("a", true, 60, false);
+        t.watch("a", false, 60, false);
         assert!(!t.active(), "ended when asked");
+    }
+
+    #[test]
+    fn each_window_has_its_own_watch() {
+        let t = VisTap::new();
+        assert_eq!(t.watch("main", true, 60, false), Some(Wanted { fps: 60, scope: false }));
+        assert_eq!(t.watch("phone", true, 30, true), Some(Wanted { fps: 60, scope: true }));
+        // One window going leaves the other running, with what it wants.
+        assert_eq!(t.watch("main", false, 0, false), Some(Wanted { fps: 30, scope: true }));
+        assert!(t.active());
+        assert_eq!(t.fps(), 30);
+        assert_eq!(t.watch("phone", false, 0, false), None);
+        assert!(!t.active());
+    }
+
+    #[test]
+    fn a_fresh_watch_starts_its_clock_where_the_audio_is() {
+        let rate = 48_000;
+        let t = watched(rate, false);
+        let mut w = t.writer(rate, 0).unwrap();
+        for _ in 0..rate {
+            w.push(&[0.1, 0.1]);
+        }
+        w.finish();
+        assert_eq!(t.frame().unwrap().t, 1000);
+        t.watch("test", false, 0, false);
+        t.watch("test", true, 30, false);
+        let mut w = t.writer(rate, 0).unwrap();
+        for _ in 0..rate / 2 {
+            w.push(&[0.1, 0.1]);
+        }
+        w.finish();
+        assert_eq!(t.frame().unwrap().t, 500);
     }
 
     #[test]
     fn the_asked_frame_rate_is_kept_in_range() {
         let t = VisTap::new();
-        t.watch(true, 500, false);
-        assert_eq!(t.lock().fps, MAX_FPS);
-        t.watch(true, 0, false);
-        assert_eq!(t.lock().fps, MIN_FPS);
+        t.watch("a", true, 500, false);
+        assert_eq!(t.fps(), MAX_FPS);
+        t.watch("a", true, 0, false);
+        assert_eq!(t.fps(), MIN_FPS);
     }
 
     #[test]
     fn json_shape() {
-        let mut s = tap(48_000, 30, true);
-        let sp = feed(&mut s, 4096, |_| (0.25, -0.25)).pop().unwrap();
+        let sp = analyse(48_000, 4096, true, |_| (0.25, -0.25));
         let v = serde_json::to_value(&sp).unwrap();
         assert_eq!(v["bands"].as_array().unwrap().len(), BANDS);
         assert_eq!(v["rms"].as_array().unwrap().len(), 2);
@@ -578,31 +720,34 @@ mod tests {
         assert!(v["t"].is_u64());
     }
 
-    /// The cost of one frame of analysis (run with `--ignored --nocapture`).
+    /// The cost on and off the audio thread (run with `--ignored --nocapture`).
     #[test]
     #[ignore]
     fn cost_per_frame() {
         let rate = 48_000;
-        let mut s = tap(rate, 60, true);
+        let t = watched(rate, true);
         let f = sine(1000.0, 0.5, rate);
-        s.begin(rate, 512);
-        for i in 0..WINDOW * 2 {
+        let n = 2_000u32;
+        // On the audio thread: copying a second of audio into the ring.
+        let start = Instant::now();
+        let mut w = t.writer(rate, 512).unwrap();
+        for i in 0..rate as usize {
             let (l, r) = f(i);
-            s.push(&[l, r]);
+            w.push(std::hint::black_box(&[l, r]));
         }
-        let n = 2_000;
+        w.finish();
+        let copy = start.elapsed();
+        // Off it: one frame of analysis.
         let start = Instant::now();
         for _ in 0..n {
-            std::hint::black_box(s.analyse());
+            t.state.lock().last_written = None;
+            std::hint::black_box(t.frame());
         }
         let per = start.elapsed() / n;
-        // Copying a second of audio into the ring.
-        let start = Instant::now();
-        for i in 0..rate as usize {
-            s.push(std::hint::black_box(&[i as f32, 0.0]));
-        }
-        let copy = start.elapsed();
-        let share = (per.as_secs_f64() * 60.0 + copy.as_secs_f64()) * 100.0;
-        println!("analysis {per:?} per frame, copy {copy:?} per second of audio, {share:.3}% of a core at 60 fps");
+        println!(
+            "audio thread: {copy:?} per second of audio ({:.4}% of a core); player task: {per:?} per frame ({:.3}% of a core at 60 fps)",
+            copy.as_secs_f64() * 100.0,
+            per.as_secs_f64() * 60.0 * 100.0
+        );
     }
 }

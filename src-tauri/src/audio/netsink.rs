@@ -114,6 +114,8 @@ impl AudioOutput for NetOutput {
                         std::thread::sleep((due - now).min(Duration::from_millis(5)));
                         continue;
                     }
+                    // The player plays what it gets about `lead` later.
+                    renderer.set_latency(lead);
                     let filled = renderer.render(&mut buf);
                     buf[filled * ch..].fill(0.0);
                     to_i16(&buf, &mut pcm);

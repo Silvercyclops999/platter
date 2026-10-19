@@ -398,6 +398,8 @@ impl AudioOutput for CaptureOutput {
                 // The capture is locked across the render: events sent from
                 // inside it ("ended", "drained") reach a test before the
                 // block is stored, and reading the capture then waits for it.
+                // Nothing between this block and the "listener": no extra delay.
+                renderer.set_latency(Duration::ZERO);
                 let filled = {
                     let mut samples = shared.samples.lock();
                     let filled = renderer.render(&mut buf);

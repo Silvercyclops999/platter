@@ -160,6 +160,9 @@ impl Default for PlayerConfig {
 type Reply<T> = oneshot::Sender<AppResult<T>>;
 
 enum Cmd {
+    /// Nothing to do: the loop looks again at what it waits for (a
+    /// visualizer watch started).
+    Wake,
     SetContext {
         info: ContextInfo,
         tracks: Vec<Track>,
@@ -451,9 +454,16 @@ impl PlayerHandle {
         }
     }
 
-    /// Starts, renews or ends a visualizer watch (see [`super::visual`]).
-    pub fn visualizer_watch(&self, on: bool, fps: u32, scope: bool) {
-        self.vis.watch(on, fps, scope);
+    /// Starts, renews or ends `caller`'s visualizer watch (see
+    /// [`super::visual`]), and wakes the player task so it starts making
+    /// frames at once.
+    pub fn visualizer_watch(&self, caller: &str, on: bool, fps: u32, scope: bool) -> bool {
+        let was = self.vis.active();
+        let running = self.vis.watch(caller, on, fps, scope).is_some();
+        if running && !was {
+            let _ = self.tx.send(Cmd::Wake);
+        }
+        running
     }
 
     /// The visualizer's tap.
@@ -1022,8 +1032,19 @@ impl Actor {
     ) {
         let mut tick = tokio::time::interval(self.config.position_interval);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        // Visualizer frames are made here, off the audio thread, one at a
+        // time at the watched rate; unwatched, the tick isn't polled.
+        let vis = self.engine.visualizer();
+        let mut vis_fps = 0;
+        let mut vis_tick = tokio::time::interval(Duration::from_secs(1));
         self.refresh_precache();
         loop {
+            let watched = vis.active();
+            if watched && vis.fps() != vis_fps {
+                vis_fps = vis.fps();
+                vis_tick = tokio::time::interval(Duration::from_secs_f64(1.0 / f64::from(vis_fps.max(1))));
+                vis_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            }
             self.plan_output_idle();
             let persist_at = self.persist_at;
             let idle_at = self.idle_at;
@@ -1042,16 +1063,17 @@ impl Actor {
                     }
                 },
                 Some(ev) = engine_rx.recv() => {
-                    // Visualizer frames go straight out; nothing else changed.
-                    if let EngineEvent::Spectrum(sp) = ev {
-                        self.sink.spectrum(&sp);
-                        continue;
-                    }
                     self.on_engine(ev);
                     self.check_signal();
                 }
                 // Paused or stopped, the tick isn't polled, so the actor sleeps.
                 _ = tick.tick(), if ticks_in(self.status) => self.on_tick(),
+                _ = vis_tick.tick(), if watched => {
+                    if let Some(sp) = vis.frame() {
+                        self.sink.spectrum(&sp);
+                    }
+                    continue;
+                }
                 _ = async {
                     match persist_at {
                         Some(at) => tokio::time::sleep_until(at).await,
@@ -1747,6 +1769,7 @@ impl Actor {
 
     fn handle(&mut self, cmd: Cmd) {
         match cmd {
+            Cmd::Wake => return,
             Cmd::State(tx) => {
                 let _ = tx.send(self.snapshot());
                 return;
@@ -2579,10 +2602,6 @@ impl Actor {
             }
             // The signal path picks it up after every engine event.
             EngineEvent::SourceKnown { .. } => return,
-            EngineEvent::Spectrum(sp) => {
-                self.sink.spectrum(&sp);
-                return;
-            }
         }
         self.emit_state();
     }

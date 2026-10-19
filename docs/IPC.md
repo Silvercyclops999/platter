@@ -1643,13 +1643,18 @@ It reads only, so bit-perfect output stays untouched. Nothing is copied or
 analysed until a window calls `visualizer_watch` with `on: true`, and a watch
 ends by itself 3 s after the last call, so the window renews it about once a
 second while the view is on screen and calls it with `on: false` when it
-goes. `fps` is 1 to 60. `scope: true` adds the stereo pairs. The call returns
-false and nothing runs while the window is minimised or hidden, or on battery
-power when `pauseOnBattery` (default true) is set.
+goes. Each window has its own watch: one window ending its watch leaves
+another's running, at the highest `fps` any asks for. `fps` is 1 to 60.
+`scope: true` adds the stereo pairs. The call returns false and nothing runs
+while the window is minimised or hidden, or on battery power when
+`pauseOnBattery` (default true) is set. The battery state is a cached value
+refreshed in the background, so the call never waits on it.
 
-While watched, the output path analyses the last 2048 frames every
-`rate / fps` frames (no thread of its own): a Hann window, a real FFT per
-channel with the power averaged, 64 bands, RMS and peak per channel. The
+While watched, the output only copies samples into a ring made in advance
+(no lock, no allocation). The player's own task makes a frame from the last
+2048 frames at `fps`, one at a time, and only when new audio went out: a
+Hann window, a real FFT per channel with the power averaged, 64 bands, RMS
+and peak per channel. The
 frames are the ones being heard now, read back by the device's reported
 delay. `bands` are dBFS, floored at -90, where a full-scale sine reads 0 in
 its band; band k spans `20 * 1000^(k / 64)` Hz up to the next edge, so the

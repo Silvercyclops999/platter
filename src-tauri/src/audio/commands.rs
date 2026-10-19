@@ -314,18 +314,61 @@ pub async fn follow_output<R: tauri::Runtime>(app: tauri::AppHandle<R>, player: 
     }
 }
 
-/// Battery state, asked at most every 30 s (on a Mac asking runs a tool).
-fn on_battery_cached() -> bool {
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-    static AT: AtomicU64 = AtomicU64::new(0);
-    static ON: AtomicBool = AtomicBool::new(false);
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    if now.saturating_sub(AT.load(Ordering::Relaxed)) >= 30 {
-        ON.store(crate::platform::power::on_battery(), Ordering::Relaxed);
-        AT.store(now, Ordering::Relaxed);
+/// The battery state for the visualizer: read from a cached value, so the
+/// command never waits on the system. A stale value starts one refresh in
+/// the background (never two at once), which gives up after a few seconds
+/// (on a Mac asking runs a tool).
+pub struct BatteryCache {
+    on: std::sync::atomic::AtomicBool,
+    /// Seconds since the epoch of the last answer (0: never).
+    at: std::sync::atomic::AtomicU64,
+    refreshing: std::sync::atomic::AtomicBool,
+}
+
+/// How old the cached battery state may get.
+pub const BATTERY_FRESH_S: u64 = 30;
+/// How long one refresh may take before it is given up.
+pub const BATTERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// A refresh to run on the async runtime.
+pub type Refresh = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
+
+impl BatteryCache {
+    pub const fn new() -> Self {
+        use std::sync::atomic::{AtomicBool, AtomicU64};
+        Self { on: AtomicBool::new(false), at: AtomicU64::new(0), refreshing: AtomicBool::new(false) }
     }
-    ON.load(Ordering::Relaxed)
+
+    /// The cached state now. When it is stale, `spawn` gets a future that
+    /// asks `probe` (on a blocking thread, with a timeout) and stores the
+    /// answer; only one runs at a time.
+    pub fn get(&'static self, now_s: u64, spawn: impl FnOnce(Refresh), probe: fn() -> bool) -> bool {
+        use std::sync::atomic::Ordering;
+        let stale = now_s.saturating_sub(self.at.load(Ordering::Relaxed)) >= BATTERY_FRESH_S;
+        if stale && !self.refreshing.swap(true, Ordering::SeqCst) {
+            spawn(Box::pin(async move {
+                if let Ok(Ok(v)) = tokio::time::timeout(BATTERY_TIMEOUT, tokio::task::spawn_blocking(probe)).await {
+                    self.on.store(v, Ordering::Relaxed);
+                    self.at.store(now_s, Ordering::Relaxed);
+                }
+                self.refreshing.store(false, Ordering::SeqCst);
+            }));
+        }
+        self.on.load(Ordering::Relaxed)
+    }
+}
+
+impl Default for BatteryCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+static BATTERY: BatteryCache = BatteryCache::new();
+
+fn now_s() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
 /// Whether a visualizer watch may run: the asking window is on screen, and
@@ -334,10 +377,11 @@ pub fn visualizer_allowed(on: bool, window_seen: bool, pause_on_battery: bool, o
     on && window_seen && !(pause_on_battery && on_battery())
 }
 
-/// Starts or renews a visualizer watch: `player://spectrum` frames come at
-/// `fps` (1 to 60) until it is turned off or not renewed within 3 s.
-/// `scope` adds the stereo pairs. Returns whether it runs: not while the
-/// window is minimised or hidden, nor on battery with `pauseOnBattery`.
+/// Starts or renews this window's visualizer watch: `player://spectrum`
+/// frames come at `fps` (1 to 60) until it is turned off or not renewed
+/// within 3 s. Each window has its own watch. `scope` adds the stereo
+/// pairs. Returns whether it runs: not while the window is minimised or
+/// hidden, nor on battery with `pauseOnBattery`.
 #[tauri::command]
 pub async fn visualizer_watch(
     player: State<'_, PlayerHandle>,
@@ -350,17 +394,11 @@ pub async fn visualizer_watch(
     #[cfg(desktop)]
     let seen = window.is_visible().unwrap_or(true) && !window.is_minimized().unwrap_or(false);
     #[cfg(mobile)]
-    let seen = {
-        let _ = &window;
-        true
-    };
+    let seen = true;
     let rest_on_battery = pause_on_battery.unwrap_or(true);
-    let run = on
-        && tokio::task::spawn_blocking(move || visualizer_allowed(true, seen, rest_on_battery, on_battery_cached))
-            .await
-            .unwrap_or(false);
-    player.visualizer_watch(run, fps, scope.unwrap_or(false));
-    Ok(run)
+    let battery = || BATTERY.get(now_s(), |f| drop(tauri::async_runtime::spawn(f)), crate::platform::power::on_battery);
+    let run = visualizer_allowed(on, seen, rest_on_battery, battery);
+    Ok(player.visualizer_watch(window.label(), run, fps, scope.unwrap_or(false)) && run)
 }
 
 #[cfg(test)]
@@ -374,5 +412,34 @@ mod visualizer_tests {
         assert!(!visualizer_allowed(true, true, true, || true), "on battery, resting");
         assert!(visualizer_allowed(true, true, false, || true), "on battery, allowed");
         assert!(!visualizer_allowed(false, true, false, || false));
+    }
+
+    #[tokio::test]
+    async fn the_battery_state_comes_from_a_cache_refreshed_once_at_a_time() {
+        use super::{BATTERY_FRESH_S, BatteryCache};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static CACHE: BatteryCache = BatteryCache::new();
+        static ASKED: AtomicUsize = AtomicUsize::new(0);
+        fn probe() -> bool {
+            ASKED.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            true
+        }
+        let mut spawned = Vec::new();
+        // Stale at first: the answer now is the cached one, one refresh starts.
+        assert!(!CACHE.get(1_000, |f| spawned.push(tokio::spawn(f)), probe));
+        // A second ask while it runs starts nothing more.
+        assert!(!CACHE.get(1_000, |f| spawned.push(tokio::spawn(f)), probe));
+        assert_eq!(spawned.len(), 1);
+        for h in spawned.drain(..) {
+            h.await.unwrap();
+        }
+        assert_eq!(ASKED.load(Ordering::SeqCst), 1);
+        // Fresh: read from the cache, nothing asked.
+        assert!(CACHE.get(1_010, |f| spawned.push(tokio::spawn(f)), probe));
+        assert!(spawned.is_empty());
+        // Stale again: refreshed again.
+        assert!(CACHE.get(1_000 + BATTERY_FRESH_S, |f| spawned.push(tokio::spawn(f)), probe));
+        assert_eq!(spawned.len(), 1);
     }
 }
