@@ -3,7 +3,7 @@
  * scaled down): the chosen style, a row to pick another (remembered, and
  * synced), and plain words when there is nothing to draw.
  */
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useId } from "react";
 import type { VisualizerStyle } from "../lib/types";
 import { usePlayer } from "../stores/player";
 import { updateSettings, useSettings } from "../stores/settings";
@@ -64,6 +64,7 @@ export function VisualizerView({ phone = false }: { phone?: boolean }) {
   const block = useVisualizerBlock();
   const remoteOrIdle = usePlayer((s) => s.remote !== null || !s.state?.track);
   const accent = useVisAccent("dark");
+  const calmId = useId();
   useSpectrumFeed(remoteOrIdle ? null : { fps, scope: style === "scope" });
 
   let picture;
@@ -83,7 +84,7 @@ export function VisualizerView({ phone = false }: { phone?: boolean }) {
           <Suspense fallback={null}>{picture}</Suspense>
         )}
       </div>
-      <div className="vis__styles" role="radiogroup" aria-label="Visualizer style">
+      <div className="vis__styles" role="group" aria-label="Visualizer style">
         {STYLES.map((s) => {
           const off = reduced && !CALM_STYLES.includes(s.id);
           const on = s.id === style;
@@ -91,10 +92,9 @@ export function VisualizerView({ phone = false }: { phone?: boolean }) {
             <button
               key={s.id}
               type="button"
-              role="radio"
-              aria-checked={on}
+              aria-pressed={on}
               aria-disabled={off || undefined}
-              title={off ? "Off while Reduce motion is on" : undefined}
+              aria-describedby={off ? calmId : undefined}
               className={`vis__style ${on ? "is-on" : ""}`}
               onClick={() => {
                 if (!off && s.id !== chosen) void updateSettings({ visualizerStyle: s.id });
@@ -105,6 +105,11 @@ export function VisualizerView({ phone = false }: { phone?: boolean }) {
           );
         })}
       </div>
+      {reduced && (
+        <p id={calmId} className="vis__note">
+          Scope and Glow are off while Reduce motion is on.
+        </p>
+      )}
     </section>
   );
 }

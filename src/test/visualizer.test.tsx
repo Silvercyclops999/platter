@@ -301,6 +301,44 @@ describe("the feed", () => {
     stop();
   });
 
+  it("ends the watch even when the view goes before the first answer", async () => {
+    let answer: (v: boolean) => void = () => {};
+    const calls: boolean[] = [];
+    vi.spyOn(backend, "visualizerWatch").mockImplementation((on) => {
+      calls.push(on);
+      return on ? new Promise<boolean>((r) => (answer = r)) : Promise.resolve(false);
+    });
+    const stop = watchFeed({ fps: 60, scope: false });
+    stop();
+    answer(true);
+    await waitFor(() => expect(calls).toEqual([true, false]));
+  });
+
+  it("keeps one listener however quickly views come and go", async () => {
+    const real = backend.listen.bind(backend);
+    const live = new Set<number>();
+    let n = 0;
+    vi.spyOn(backend, "listen").mockImplementation(async (event, cb) => {
+      // Slow to answer, as over IPC.
+      await new Promise((r) => setTimeout(r, 5));
+      const id = n++;
+      live.add(id);
+      const un = await real(event, cb);
+      return () => {
+        live.delete(id);
+        un();
+      };
+    });
+    // Mounted, unmounted and mounted again before the first listen answers.
+    watchFeed({ fps: 60, scope: false })();
+    const stop = watchFeed({ fps: 60, scope: false });
+    await waitFor(() => expect(n).toBe(2));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(live.size).toBe(1);
+    stop();
+    expect(live.size).toBe(0);
+  });
+
   it("says when it rests on battery", async () => {
     vi.spyOn(backend, "visualizerWatch").mockResolvedValue(false);
     const stop = watchFeed({ fps: 60, scope: false });
@@ -375,7 +413,7 @@ describe("each style", () => {
 
   it("picking a style keeps it (synced setting)", async () => {
     render(<VisualizerView />);
-    fireEvent.click(screen.getByRole("radio", { name: "Meters" }));
+    fireEvent.click(screen.getByRole("button", { name: "Meters" }));
     await waitFor(() => expect(useSettings.getState().settings?.visualizerStyle).toBe("meters"));
     expect((await mock.settingsGet()).visualizerStyle).toBe("meters");
   });
@@ -384,10 +422,22 @@ describe("each style", () => {
     setReducedMotion(true);
     await act(async () => void useSettings.setState({ settings: { ...DEFAULT_SETTINGS, visualizerStyle: "scope" } }));
     render(<VisualizerView />);
-    expect(screen.getByRole("radio", { name: "Scope" })).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByRole("radio", { name: "Glow" })).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByRole("radio", { name: "Analyser" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("button", { name: "Scope" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Glow" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Analyser" })).toHaveAttribute("aria-pressed", "true");
+    // The reason is on screen and read with the buttons it applies to.
+    expect(screen.getByText("Scope and Glow are off while Reduce motion is on.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Scope" })).toHaveAccessibleDescription("Scope and Glow are off while Reduce motion is on.");
     await waitFor(() => expect(lastCall()).toEqual({ on: true, fps: 15, scope: false }));
+  });
+
+  it("picks styles with plain pressed buttons, each a tab stop", () => {
+    render(<VisualizerView />);
+    const group = screen.getByRole("group", { name: "Visualizer style" });
+    const buttons = within(group).getAllByRole("button");
+    expect(buttons.map((b) => b.textContent)).toEqual(["Analyser", "Meters", "Scope", "Glow"]);
+    expect(buttons.map((b) => b.getAttribute("aria-pressed"))).toEqual(["true", "false", "false", "false"]);
+    expect(screen.queryByRole("radio")).toBeNull();
   });
 
   it("says so and asks for nothing when playback is on another device or nothing plays", async () => {
@@ -411,7 +461,7 @@ describe("Scope and Glow", () => {
     await act(async () => void useSettings.setState({ settings: { ...DEFAULT_SETTINGS, visualizerStyle: "scope" } }));
     const run = frames();
     render(<VisualizerView />);
-    const scope = await screen.findByRole("img", { name: "Stereo phase scope" });
+    const scope = await screen.findByRole("group", { name: "Stereo phase scope" });
     for (const l of ["L", "R", "M", "S"]) expect(within(scope).getByText(l)).toBeInTheDocument();
     // The scope needs the stereo pairs.
     await waitFor(() => expect(lastCall()).toEqual({ on: true, fps: 60, scope: true }));
@@ -500,7 +550,7 @@ describe("the phone", () => {
     expect(screen.queryByTestId("np-art")).toBeNull();
     const vis = within(screen.getByTestId("np-visualizer")).getByTestId("visualizer");
     expect(vis).toHaveClass("vis--phone");
-    for (const s of ["Analyser", "Meters", "Scope", "Glow"]) expect(within(vis).getByRole("radio", { name: s })).toBeInTheDocument();
+    for (const s of ["Analyser", "Meters", "Scope", "Glow"]) expect(within(vis).getByRole("button", { name: s })).toBeInTheDocument();
     // The desktop's 60 is capped at 30 on the phone.
     await waitFor(() => expect(lastCall()).toEqual({ on: true, fps: 30, scope: false }));
     // Remembered on this device.
@@ -534,6 +584,22 @@ describe("the expanded view", () => {
     act(() => void fireEvent.keyDown(window, { key: "v" }));
     expect(useFullWindow.getState().mode).toBe("artwork");
     act(() => void fireEvent.keyDown(window, { key: "V" }));
+    expect(useFullWindow.getState().mode).toBe("visualizer");
+  });
+
+  it("leaves V and L to a field being typed in", () => {
+    render(
+      <>
+        <input aria-label="Search" />
+        <FullWindow />
+      </>,
+    );
+    act(() => fullWindow.open());
+    const field = screen.getByRole("textbox", { name: "Search" });
+    act(() => void fireEvent.keyDown(field, { key: "v" }));
+    act(() => void fireEvent.keyDown(field, { key: "l" }));
+    expect(useFullWindow.getState().mode).toBe("artwork");
+    act(() => void fireEvent.keyDown(window, { key: "v" }));
     expect(useFullWindow.getState().mode).toBe("visualizer");
   });
 

@@ -33,7 +33,11 @@ let latestAt = 0;
 const wants = new Map<number, Want>();
 let nextId = 1;
 let unlisten: Unlisten | null = null;
-let listening: Promise<void> | null = null;
+/** Which listen attempt is current: a stop, then a start, makes a new one. */
+let listenToken = 0;
+let listening = false;
+/** A watch was asked for since the last end, so an end must be sent. */
+let asked = false;
 let timer: ReturnType<typeof setInterval> | null = null;
 let last: string | null = null;
 
@@ -73,6 +77,7 @@ async function renew() {
     return;
   }
   try {
+    asked = true;
     const running = await backend.visualizerWatch(true, want.fps, want.scope, batteryPause());
     // Gone or hidden while the call was out: end it now.
     if (!combined() || hidden()) {
@@ -93,7 +98,10 @@ function startTimer() {
 function pause() {
   if (timer) clearInterval(timer);
   timer = null;
-  if (useFeed.getState().running) void backend.visualizerWatch(false, 0, false, batteryPause()).catch(() => {});
+  // Sent whenever one was asked for, even if the view went before the
+  // first answer came.
+  if (asked) void backend.visualizerWatch(false, 0, false, batteryPause()).catch(() => {});
+  asked = false;
   useFeed.setState({ running: false });
 }
 
@@ -102,7 +110,8 @@ function stop() {
   last = null;
   const un = unlisten;
   unlisten = null;
-  listening = null;
+  listening = false;
+  listenToken++;
   un?.();
 }
 
@@ -116,13 +125,17 @@ function onVisibility() {
 
 function ensureListening() {
   if (listening) return;
-  listening = backend
+  listening = true;
+  // Each attempt has its own token: one that resolves after a stop (or
+  // after a stop and a new start) drops its own listener.
+  const token = ++listenToken;
+  void backend
     .listen("player://spectrum", (f) => {
       latest = f;
       latestAt = performance.now();
     })
     .then((un) => {
-      if (listening) unlisten = un;
+      if (token === listenToken) unlisten = un;
       else un();
     });
   document.addEventListener("visibilitychange", onVisibility);

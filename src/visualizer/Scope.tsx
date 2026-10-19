@@ -96,7 +96,8 @@ export function Scope({ fps, accent }: { fps: number; accent: string | null }) {
   );
 
   return (
-    <div ref={box} className="vis-scope" role="img" aria-label="Stereo phase scope">
+    <div ref={box} className="vis-scope" role="group" aria-label="Stereo phase scope">
+      <div className="vis-scope__plot" role="img" aria-label="Stereo trace, mid up and side across">
       {size > 0 && (
         <svg className="vis-scale" width={w} height={h} aria-hidden="true">
           <rect className="vis-scale__line" x={ox + 0.5} y={0.5} width={size - 1} height={size - 1} fill="none" />
@@ -119,6 +120,8 @@ export function Scope({ fps, accent }: { fps: number; accent: string | null }) {
         </svg>
       )}
       <canvas ref={canvas} className="vis-canvas" style={{ width: w, height: h }} />
+      </div>
+      {/* The readout is text beside the picture, so screen readers reach it. */}
       <div className="vis-scope__corr" style={{ width: size || undefined }}>
         <span className="vis-scope__end">{"−1"}</span>
         <span className="vis-scope__track">

@@ -4,7 +4,7 @@
  * (and stopped while the page is hidden), the cover's accent, and the
  * reduced motion flag as React state.
  */
-import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { coverLightColour } from "../design/coverLight";
 import { prefersReducedMotion } from "../design/motion";
 import { useCoverColors } from "../shell/nowPlaying";
@@ -48,7 +48,10 @@ export function fitCanvas(canvas: HTMLCanvasElement, w: number, h: number): numb
  */
 export function useFrameLoop(draw: (dtMs: number, now: number) => void, fps: number, on = true): void {
   const fn = useRef(draw);
-  fn.current = draw;
+  // The latest draw, kept after each render (never written during one).
+  useLayoutEffect(() => {
+    fn.current = draw;
+  });
   useEffect(() => {
     if (!on || typeof requestAnimationFrame === "undefined") return;
     const every = 1000 / Math.max(1, fps);

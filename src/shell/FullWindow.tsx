@@ -68,6 +68,9 @@ function useIdle(enabled: boolean, ms: number): boolean {
 const inSlider = (t: EventTarget | null) => t instanceof Element && !!t.closest("[role=slider]");
 const inButton = (t: EventTarget | null) => t instanceof Element && !!t.closest("button, a, [role=slider], [role=switch], input, textarea, select");
 const modified = (e: KeyboardEvent) => e.ctrlKey || e.metaKey || e.altKey || e.shiftKey;
+/** Typing in a field: letter keys are the field's. */
+const editable = (t: EventTarget | null) =>
+  t instanceof Element && (!!t.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']") || (t as HTMLElement).isContentEditable === true);
 
 /**
  * Keys while the view is open, ahead of the app's own shortcuts: Space
@@ -88,9 +91,9 @@ function onFullWindowKey(e: KeyboardEvent) {
     void player.seekBy(key === "ArrowRight" ? SEEK_KEY_STEP : -SEEK_KEY_STEP);
   else if ((key === "ArrowUp" || key === "ArrowDown") && !modified(e) && !inSlider(e.target) && !(e.target as Element | null)?.closest?.(".lyrics__scroll"))
     player.nudgeVolume(key === "ArrowUp" ? VOLUME_KEY_STEP : -VOLUME_KEY_STEP);
-  else if (key.toLowerCase() === "l" && !modified(e)) fullWindow.toggleLyrics();
-  else if (key.toLowerCase() === "v" && !modified(e) && useSettings.getState().settings?.visualizerButton !== false) fullWindow.toggleVisualizer();
-  else if (key.toLowerCase() === "f" && !modified(e)) void fullWindow.toggleOsFullscreen();
+  else if (key.toLowerCase() === "l" && !modified(e) && !editable(e.target)) fullWindow.toggleLyrics();
+  else if (key.toLowerCase() === "v" && !modified(e) && !editable(e.target) && useSettings.getState().settings?.visualizerButton !== false) fullWindow.toggleVisualizer();
+  else if (key.toLowerCase() === "f" && !modified(e) && !editable(e.target)) void fullWindow.toggleOsFullscreen();
   else handled = false;
   if (handled) {
     e.preventDefault();

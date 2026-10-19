@@ -131,6 +131,8 @@ class GlLines implements LineRenderer {
     gl.deleteBuffer(this.buf);
     gl.deleteVertexArray(this.vao);
     gl.deleteProgram(this.prog);
+    // Hand the GPU context back now rather than when the canvas is collected.
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
 }
 
