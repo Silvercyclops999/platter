@@ -219,8 +219,8 @@
   margin-bottom: var(--space-2);
   border-radius: 50%;
   background:
-    radial-gradient(circle, var(--color-bg-raised) 0 5%, var(--color-accent) 5.5% 30%, transparent 31%),
-    repeating-radial-gradient(circle, color-mix(in srgb, var(--color-ink) 10%, transparent) 0 1px, transparent 1px 3px),
+    radial-gradient(circle, var(--color-bg-raised) 0 3%, var(--color-accent) 3.4% 33%, transparent 33.5%),
+    conic-gradient(from -52deg, color-mix(in srgb, var(--color-ink) 9%, transparent), transparent 12% 38%, color-mix(in srgb, var(--color-ink) 5%, transparent) 50%, transparent 62% 88%, color-mix(in srgb, var(--color-ink) 9%, transparent)),
     color-mix(in srgb, var(--color-ink) 12%, var(--color-bg-raised));
   box-shadow: 0 0 0 1px var(--engrave-dark);
 }

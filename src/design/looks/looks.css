@@ -90,8 +90,9 @@ h2,
   height: 80%;
   border-radius: 50%;
   background:
-    radial-gradient(circle, transparent 0 30%, #0b0b0b 30.5% 31.5%, transparent 32%),
-    repeating-radial-gradient(circle, #141414 0 1px, #1e1e1e 1px 2px);
+    conic-gradient(from -52deg, rgba(255, 255, 255, 0.07), transparent 10% 40%, rgba(255, 255, 255, 0.04) 50%, transparent 60% 90%, rgba(255, 255, 255, 0.07)),
+    radial-gradient(circle, transparent 0 34%, rgba(255, 255, 255, 0.025) 34.5% 38%, transparent 38.5%),
+    #121110;
 }
 :root[data-look-cover-shape="sleeve"] .card .art:not(.art--round) :is(img, .art__fallback, .art__skeleton) {
   inset: 6% 12% 6% 0;
@@ -111,9 +112,8 @@ h2,
   inset: 0;
   border-radius: 50%;
   pointer-events: none;
-  background:
-    radial-gradient(circle, var(--color-bg-raised) 0 4%, rgba(0, 0, 0, 0.55) 4.5% 5.5%, transparent 6% 30%, rgba(0, 0, 0, 0.18) 30.5% 31%, transparent 31.5%),
-    repeating-radial-gradient(circle, transparent 0 2px, rgba(0, 0, 0, 0.06) 2px 3px);
+  /* The spindle hole only: the cover is the label, and drawn rings would be coarser than real grooves. */
+  background: radial-gradient(circle, var(--color-bg-raised) 0 2.4%, rgba(0, 0, 0, 0.35) 2.6% 3%, transparent 3.2%);
 }
 @keyframes look-spin {
   to { transform: rotate(360deg); }

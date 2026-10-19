@@ -172,9 +172,7 @@
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  background:
-    radial-gradient(circle, var(--color-bg-raised) 0 4%, rgba(0, 0, 0, 0.55) 4.5% 5.5%, transparent 6% 30%, rgba(0, 0, 0, 0.18) 30.5% 31%, transparent 31.5%),
-    repeating-radial-gradient(circle, transparent 0 2px, rgba(0, 0, 0, 0.06) 2px 3px);
+  background: radial-gradient(circle, var(--color-bg-raised) 0 2.4%, rgba(0, 0, 0, 0.35) 2.6% 3%, transparent 3.2%);
 }
 @keyframes lp-spin {
   to { transform: rotate(360deg); }

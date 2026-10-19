@@ -96,16 +96,16 @@
   height: 30px;
   border-radius: 50%;
   background:
-    radial-gradient(circle, var(--color-bg-raised) 0 2px, var(--color-text-muted) 2px 6px, transparent 6px),
-    repeating-radial-gradient(circle, #1b1916 0 1px, #24211d 1px 2.5px);
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.06);
+    radial-gradient(circle, var(--color-bg-raised) 0 1.5px, var(--color-text-muted) 2px 10px, transparent 10.5px),
+    conic-gradient(from -52deg, rgb(255 255 255 / 0.08), transparent 12% 38%, rgb(255 255 255 / 0.04) 50%, transparent 62% 88%, rgb(255 255 255 / 0.08)),
+    #1b1916;
   transition: transform var(--motion-base, 200ms) var(--motion-easing);
 }
 .share-lib.is-on .share-lib__disc {
   background:
-    radial-gradient(circle, var(--color-bg-raised) 0 2px, var(--color-accent) 2px 7px, transparent 7px),
-    repeating-radial-gradient(circle, #1b1916 0 1px, #2a2621 1px 2.5px);
-  transform: rotate(140deg);
+    radial-gradient(circle, var(--color-bg-raised) 0 1.5px, var(--color-accent) 2px 10px, transparent 10.5px),
+    conic-gradient(from -52deg, rgb(255 255 255 / 0.08), transparent 12% 38%, rgb(255 255 255 / 0.04) 50%, transparent 62% 88%, rgb(255 255 255 / 0.08)),
+    #1b1916;
 }
 .share-lib__text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .share-lib__title { font-weight: var(--font-weight-bold); font-size: var(--font-size-md); }

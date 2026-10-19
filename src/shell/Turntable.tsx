@@ -206,7 +206,7 @@ export function RecordPlayerArt({
       {/* The arm's fixed parts: base, cue lever, rest. */}
       <g className="turntable__arm-base">
         {/* The armboard the base and the rest are mounted on: a plain plate, a shade darker than the plinth. */}
-        <rect x={PIVOT.x - 30} y={PIVOT.y - 34} width={74} height={REST_AT.y - PIVOT.y + 52} rx={5} fill="#000" fillOpacity="0.16" stroke="#fff" strokeOpacity="0.05" strokeWidth="0.6" />
+        <rect x={PIVOT.x - 30} y={PIVOT.y - 34} width={74} height={REST_AT.y - PIVOT.y + 52} rx={6} fill="#000" fillOpacity="0.12" />
         <circle cx={PIVOT.x + 1.5} cy={PIVOT.y + 2.5} r={27} fill="#000" opacity="0.25" />
         <circle cx={PIVOT.x} cy={PIVOT.y} r={26} fill={`url(#${ids("base")})`} />
         <circle cx={PIVOT.x} cy={PIVOT.y} r={25.6} fill="none" stroke="#fff" strokeOpacity="0.07" strokeWidth="0.6" />
