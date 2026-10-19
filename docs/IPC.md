@@ -3246,10 +3246,15 @@ and devices sync only when they meet on the local network.
 A round also runs when the app comes back to the foreground and when the
 network changes (`device_sync_network`), at most once every 10 seconds.
 
-A device back after more than 80 days out of step with another takes the
-other's state first: it starts the round itself, takes what it lacks, and
-lets go of entries the other no longer has unless they changed here within
-the 90 days deletions are kept. Unpairing tells the other device, which
+Two devices back in touch after more than 80 days out of step both see
+the other's key lists. An entry only one of them has, older than the last
+time they were in step, was deleted on the other meanwhile: it is deleted
+on this one too (stamped just after its version here, so later edits
+elsewhere still win), not sent back. Anything newer moves as usual. A
+device only takes the other's word for being apart when it was in step
+with it itself, never for a later time than its own, and only for what it
+kept in step then. Rounds of a copy from the computer, one group at a time,
+never count as being in step. Unpairing tells the other device, which
 forgets the link too; forgetting a device that's offline removes the link
 here, and its messages are no longer opened.
 
