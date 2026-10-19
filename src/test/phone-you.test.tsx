@@ -208,7 +208,9 @@ describe("phone settings screens", () => {
     expect(phoneLookPatch("device", { theme: "sleeve" })).toEqual({ theme: "studio", followSystem: true, themeFile: null });
     render(<SettingsPage section="Appearance" />);
     const row = (await screen.findByText("Look")).closest("[data-setting]") as HTMLElement;
-    fireEvent.change(within(row).getByRole("combobox"), { target: { value: "sleeve" } });
+    // On the phone a choice opens a page of its choices.
+    fireEvent.click(within(row).getByRole("button", { name: /Look/ }));
+    fireEvent.click(await screen.findByRole("radio", { name: "Sleeve" }));
     await waitFor(() => expect(useSettings.getState().settings?.theme).toBe("sleeve"));
     expect(useSettings.getState().settings?.followSystem).toBe(false);
   });
@@ -373,11 +375,11 @@ describe("what the phone says", () => {
   });
 });
 
-describe("pages the phone borrows", () => {
-  it("a page with no phone version opens in one column; file and drive tools say they're on the computer", async () => {
+describe("the phone's other pages", () => {
+  it("open as phone pages; syncing to a drive says it's on the computer", async () => {
     render(<PhoneShell />);
     act(() => useRouter.getState().navigate({ name: "recents" }));
-    await waitFor(() => expect(document.querySelector('.ph-desk[data-route="recents"]')).not.toBeNull());
+    await waitFor(() => expect(document.querySelector('[data-phone-page="recents"]')).not.toBeNull());
     act(() => useRouter.getState().navigate({ name: "devices" }));
     expect(await screen.findByText("On your computer")).toBeInTheDocument();
   });

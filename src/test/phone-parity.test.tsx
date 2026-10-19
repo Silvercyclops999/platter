@@ -1,0 +1,392 @@
+/**
+ * The phone's pages for every route: each route the router has resolves to
+ * a page made for the phone, each page is reachable from Home, Library or
+ * You (or from the page that links to it on a computer), Get on the
+ * phone's artist page follows a request through to the library, Library
+ * import and Missing work on the phone, versions of a song show from
+ * search and the song's sheet, and the Library tour fixes hold.
+ */
+import { ONLINE_EXTRAS } from "./onlineExtras";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import routerSource from "../stores/router.ts?raw";
+import { backend } from "../lib/backend";
+import type { MockBackend } from "../lib/mock";
+import { MockCatalogue } from "../lib/mock/catalogue";
+import { DEFAULT_SETTINGS, type Track } from "../lib/types";
+import { GET_UNDO_MS } from "../pages/GetButton";
+import { resetCatalogueCache } from "../pages/SearchCatalogue";
+import { resetArtistPhotos } from "../lib/artistPhotos";
+import { usePhoneForm } from "../phone/form";
+import { alphaKey, isLikedCopy, letterOf, phoneRows, phoneSubtitle } from "../phone/libraryRows";
+import { baseTitle, groupEditions } from "../phone/editions";
+import { versionsCount } from "../phone/pages/Search";
+import { PHONE_PAGES } from "../phone/routes";
+import { PhonePage, PhoneShell } from "../phone/PhoneShell";
+import { phone, usePhoneUi } from "../phone/phoneUi";
+import { shortLine } from "../pages/SettingsPage";
+import { phoneText } from "../pages/settingsMeta";
+import { useApp } from "../stores/app";
+import { refreshRequests, resetRequests } from "../stores/requests";
+import { useRouter, type Route } from "../stores/router";
+import { loadSettings, useSettings } from "../stores/settings";
+import { useToasts } from "../stores/toasts";
+import type { LibEntry } from "../stores/library";
+
+const mock = backend as MockBackend;
+const SLOW = { timeout: 6000 };
+const AFTER_UNDO = { timeout: GET_UNDO_MS + 6000 };
+const route = () => useRouter.getState().entries[useRouter.getState().index].route;
+
+async function setUp(patch: Record<string, unknown> = {}, lidarr = false) {
+  if (lidarr) {
+    mock.lidarr.reset("ready");
+    mock.lidarr.setTypedOnce(true);
+  }
+  await mock.settingsSet({ ...DEFAULT_SETTINGS, ...(lidarr ? { lidarrUrl: "http://10.0.0.5:8686" } : {}), ...ONLINE_EXTRAS, ...patch });
+  useSettings.setState({ settings: null });
+  await loadSettings();
+}
+
+beforeEach(async () => {
+  usePhoneForm.setState({ phone: true });
+  usePhoneUi.setState({ tab: "home", nowPlaying: false, lyrics: false, sheets: [] });
+  useApp.setState({ auth: { state: "signedIn", username: "listener", needsServerPick: false } });
+  useToasts.setState({ toasts: [] });
+  useRouter.getState().reset({ name: "home" });
+  resetCatalogueCache();
+  resetArtistPhotos();
+  resetRequests();
+  await setUp();
+});
+
+afterEach(() => {
+  usePhoneForm.setState({ phone: false });
+  vi.restoreAllMocks();
+});
+
+/** One route of every name the router has, with values the browser mock knows. */
+const SAMPLES: { [N in Route["name"]]: Extract<Route, { name: N }> } = {
+  home: { name: "home" },
+  search: { name: "search" },
+  library: { name: "library" },
+  artist: { name: "artist", id: "100" },
+  discography: { name: "discography", id: "100" },
+  lineage: { name: "lineage", id: "10000" },
+  era: { name: "era", id: "190", era: "Glass Season" },
+  album: { name: "album", id: "1000" },
+  playlist: { name: "playlist", id: "500" },
+  liked: { name: "liked" },
+  settings: { name: "settings" },
+  recents: { name: "recents" },
+  whatsNew: { name: "whatsNew" },
+  releaseRadar: { name: "releaseRadar" },
+  lyrics: { name: "lyrics" },
+  homeShelf: { name: "homeShelf", shelf: "recentlyAdded" },
+  artistShelf: { name: "artistShelf", id: "100", shelf: "fansAlsoLike" },
+  mix: { name: "mix", id: "daily:1" },
+  radio: { name: "radio", seed: "artist:100" },
+  bookmarks: { name: "bookmarks" },
+  stats: { name: "stats" },
+  profile: { name: "profile" },
+  topSongs: { name: "topSongs" },
+  import: { name: "import" },
+  doctor: { name: "doctor" },
+  devices: { name: "devices" },
+  soundMap: { name: "soundMap" },
+  crates: { name: "crates" },
+  crate: { name: "crate", kind: "genre", key: "rock" },
+  catalogueArtist: { name: "catalogueArtist", mbid: MockCatalogue.artistId(1) },
+  catalogueAlbum: { name: "catalogueAlbum", id: MockCatalogue.albumId(11) },
+  newToYou: { name: "newToYou" },
+  onThisDay: { name: "onThisDay" },
+  shelf: { name: "shelf" },
+  diary: { name: "diary" },
+  blendNew: { name: "blendNew" },
+  credits: { name: "credits", person: "Juno Ashby" },
+  mixes: { name: "mixes" },
+  archive: { name: "archive" },
+};
+
+/** Every route name in the router's own source, so a new one fails here until it has a phone page. */
+function routerNames(): string[] {
+  const union = routerSource.slice(routerSource.indexOf("export type Route ="), routerSource.indexOf("export interface HistoryEntry"));
+  return [...union.matchAll(/name: "(\w+)"/g)].map((m) => m[1]).sort();
+}
+
+describe("every route has a phone page", () => {
+  it("the table names exactly the router's routes", () => {
+    expect(Object.keys(PHONE_PAGES).sort()).toEqual(routerNames());
+    expect(Object.keys(SAMPLES).sort()).toEqual(routerNames());
+  });
+
+  // Route names whose phone page is the phone's own (no borrowed computer page).
+  const routes = Object.values(SAMPLES).filter((r) => r.name !== "lyrics");
+  it.each(routes.map((r) => [r.name, r] as const))("%s shows a phone page, never a computer page in a narrow column", async (_name, r) => {
+    act(() => useRouter.getState().reset(r));
+    const { container, unmount } = render(<PhonePage route={r} />);
+    await waitFor(() => expect(container.querySelector(".ph-page")).not.toBeNull(), SLOW);
+    expect(container.querySelector(".ph-desk"), "no borrowed narrow column").toBeNull();
+    expect(container.querySelector(".page-pad:not(.ph-wrap .page-pad)"), "a computer page only inside a phone frame").toBeNull();
+    unmount();
+  });
+
+  it("lyrics is never a page: it opens the player's lyrics and steps back", async () => {
+    act(() => {
+      useRouter.getState().reset({ name: "home" });
+      useRouter.getState().navigate({ name: "album", id: "1000" });
+    });
+    render(<PhonePage route={{ name: "lyrics" }} />);
+    await waitFor(() => expect(usePhoneUi.getState().lyrics).toBe(true));
+    expect(usePhoneUi.getState().nowPlaying).toBe(true);
+    expect(route()).toEqual({ name: "home" });
+  });
+
+  it("devices is the one page that stays on the computer, and it says why", async () => {
+    render(<PhonePage route={{ name: "devices" }} />);
+    expect(await screen.findByText(/A phone can't see those drives/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Downloads on this phone" })).toBeInTheDocument();
+  });
+});
+
+describe("every page can be reached", () => {
+  const opens = async (where: string, label: RegExp | string, want: Partial<Route>) => {
+    const button = await screen.findByRole("button", { name: label }, SLOW);
+    fireEvent.click(button);
+    await waitFor(() => expect(route()).toMatchObject(want), SLOW);
+    void where;
+  };
+
+  it("from Home: Show all, mixes and the Explore list", async () => {
+    render(<PhoneShell />);
+    await opens("home", "Show all: Recently added", { name: "homeShelf", shelf: "recentlyAdded" });
+    act(() => phone.tab("home"));
+    await opens("home", "Show all: Recently played", { name: "recents" });
+    act(() => phone.tab("home"));
+    await opens("home", "Show all: Made for you", { name: "mixes" });
+    for (const [label, name] of [
+      ["What's new", "whatsNew"],
+      ["Release radar", "releaseRadar"],
+      ["New to you", "newToYou"],
+      ["On this day", "onThisDay"],
+      ["Archive", "archive"],
+      ["Sound map", "soundMap"],
+    ] as const) {
+      act(() => phone.tab("home"));
+      const explore = await screen.findByRole("region", { name: "Explore" }, SLOW);
+      fireEvent.click(within(explore).getByRole("button", { name: label }));
+      await waitFor(() => expect(route().name).toBe(name));
+    }
+  });
+
+  it("from You: stats, top songs, recents, mixes, diary, bookmarks, import, doctor, Blend, devices and Settings", async () => {
+    render(<PhoneShell />);
+    for (const [label, name] of [
+      ["All your stats", "stats"],
+      ["Your Top Songs", "topSongs"],
+      ["Everything you played", "recents"],
+      ["Mixes made for you", "mixes"],
+      ["Listening diary", "diary"],
+      ["Bookmarks", "bookmarks"],
+      ["Library import and Missing", "import"],
+      ["Library doctor", "doctor"],
+      ["Create a Blend", "blendNew"],
+      ["Devices", "devices"],
+    ] as const) {
+      act(() => phone.tab("you"));
+      const links = await screen.findAllByRole("button", { name: label }, SLOW);
+      fireEvent.click(links[0]);
+      await waitFor(() => expect(route().name).toBe(name));
+    }
+  });
+
+  it("from an artist: radio, eras, the discography, Appears on and Fans also like", async () => {
+    render(<PhoneShell />);
+    act(() => useRouter.getState().navigate({ name: "artist", id: "190" }));
+    await opens("artist", "Vesper Lowe radio", { name: "radio", seed: "artist:190" });
+    act(() => useRouter.getState().navigate({ name: "artist", id: "190" }));
+    const eras = await screen.findByRole("region", { name: "Eras" }, SLOW);
+    fireEvent.click(within(eras).getAllByRole("button")[0]);
+    await waitFor(() => expect(route().name).toBe("era"));
+    act(() => useRouter.getState().navigate({ name: "artist", id: "100" }));
+    const disco = await screen.findByRole("region", { name: "Discography" }, SLOW);
+    fireEvent.click(within(disco).getByRole("button", { name: "See all" }));
+    await waitFor(() => expect(route()).toMatchObject({ name: "discography", id: "100" }));
+    act(() => useRouter.getState().navigate({ name: "artist", id: "100" }));
+    await opens("artist", "See all: Fans also like", { name: "artistShelf", shelf: "fansAlsoLike" });
+  });
+
+  it("from an album: its credits, its era and the artist's discography", async () => {
+    render(<PhoneShell />);
+    act(() => useRouter.getState().navigate({ name: "album", id: "1000" }));
+    await opens("album", "See discography", { name: "discography" });
+  });
+
+  it("from a song: its versions and the timeline of them", async () => {
+    const t = { ...mock.fx.tracks[0], otherVersions: 2 } as Track;
+    render(<PhoneShell />);
+    act(() => phone.push({ kind: "track", track: t }));
+    fireEvent.click(await screen.findByRole("button", { name: "Versions (3)" }));
+    expect(usePhoneUi.getState().sheets.slice(-1)[0]).toEqual({ kind: "versions", track: t });
+  });
+});
+
+describe("Get on the phone's artist page", () => {
+  it("requests a record you don't have, can be undone, then follows Lidarr to the library", async () => {
+    await setUp({}, true);
+    const get = vi.spyOn(mock, "lidarrGet");
+    render(<PhoneShell />);
+    act(() => useRouter.getState().navigate({ name: "artist", id: "100" }));
+    const disco = await screen.findByRole("region", { name: "Discography" }, SLOW);
+    fireEvent.click(within(disco).getByRole("button", { name: "Albums" }));
+    const button = await within(disco).findByRole("button", { name: "Get Paper Lanterns" }, SLOW);
+    fireEvent.click(button);
+    expect(within(disco).getByText("Checking")).toBeInTheDocument();
+    expect(within(disco).getByRole("button", { name: "Undo Get Paper Lanterns" })).toBeInTheDocument();
+    // Waiting: sent, and Lidarr is looking.
+    expect(await within(disco).findByLabelText("Looking on your indexers", {}, AFTER_UNDO)).toBeInTheDocument();
+    expect(get).toHaveBeenCalledWith(expect.objectContaining({ title: "Paper Lanterns", artistId: "100" }));
+    const rg = "6f1c0c55-0000-4000-8000-000000000001";
+    mock.lidarr.advance(rg, "downloading", 50);
+    await act(() => refreshRequests());
+    expect(await within(disco).findByLabelText("Downloading 50%", {}, SLOW)).toBeInTheDocument();
+    mock.lidarr.advance(rg, "imported");
+    await act(() => refreshRequests());
+    expect(await within(disco).findByText("In your library", {}, SLOW)).toBeInTheDocument();
+  });
+
+  it("says so when the request fails, and the button comes back", async () => {
+    await setUp({}, true);
+    vi.spyOn(mock, "lidarrGet").mockRejectedValue({ kind: "network", message: "Lidarr didn't answer" });
+    render(<PhoneShell />);
+    act(() => useRouter.getState().navigate({ name: "artist", id: "100" }));
+    const disco = await screen.findByRole("region", { name: "Discography" }, SLOW);
+    fireEvent.click(within(disco).getByRole("button", { name: "Albums" }));
+    fireEvent.click(await within(disco).findByRole("button", { name: "Get Northern Rooms" }, SLOW));
+    await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.message)).toContain("Lidarr didn't answer"), AFTER_UNDO);
+    expect(await within(disco).findByRole("button", { name: "Get Northern Rooms" }, SLOW)).toBeInTheDocument();
+  });
+
+  it("without Lidarr there's nothing to press", async () => {
+    render(<PhoneShell />);
+    act(() => useRouter.getState().navigate({ name: "artist", id: "100" }));
+    await screen.findByRole("region", { name: "Discography" }, SLOW);
+    expect(screen.queryByRole("button", { name: /^Get / })).toBeNull();
+  });
+});
+
+describe("Library import on the phone", () => {
+  beforeEach(() => {
+    mock.importMock.reset();
+  });
+
+  it("shows each report and Bring in my listening, and turning it on shows where the waves stand", async () => {
+    await setUp({ importSources: ["streaming", "transfer"] });
+    mock.importMock.run("streaming", "my_data.zip");
+    mock.importMock.run("transfer", "library.csv");
+    render(<PhonePage route={{ name: "import" }} />);
+    expect(await screen.findByTestId("report-streaming", {}, SLOW)).toHaveTextContent("33 of 38 songs found");
+    expect(screen.getByTestId("report-transfer")).toHaveTextContent("8 of 10 songs found");
+    const bring = screen.getByRole("region", { name: "Bring in my listening" });
+    const sw = within(bring).getByRole("switch");
+    expect(sw).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(sw);
+    await waitFor(() => expect(useSettings.getState().settings?.bringIn).toBe(true));
+    expect((await within(bring).findAllByText(/Wave \d+ of|Every wave/, {}, SLOW)).length).toBeGreaterThan(0);
+  });
+
+  it("takes a match from the review queue", async () => {
+    await setUp({ importSources: ["streaming"] });
+    mock.importMock.run("streaming", "my_data.zip");
+    const review = vi.spyOn(mock, "importReview");
+    render(<PhonePage route={{ name: "import" }} />);
+    const accept = (await screen.findAllByRole("button", { name: /^Accept / }, SLOW))[0];
+    fireEvent.click(accept);
+    await waitFor(() => expect(review).toHaveBeenCalledWith(expect.anything(), { kind: "accept" }));
+  });
+
+  it("Missing lists the songs with where to buy them, and Get asks Lidarr", async () => {
+    await setUp({ importSources: ["streaming"] }, true);
+    mock.importMock.run("streaming", "my_data.zip");
+    render(<PhonePage route={{ name: "import", view: "missing" }} />);
+    const list = await screen.findByRole("list", { name: "Missing songs" }, SLOW);
+    const first = within(list).getAllByRole("listitem")[0];
+    fireEvent.click(within(first).getAllByRole("button")[0]);
+    expect(await within(first).findAllByRole("button", { name: /^Search .* for / }, SLOW)).toHaveLength(3);
+    expect(await within(first).findByRole("button", { name: /^Request / }, SLOW)).toBeInTheDocument();
+  });
+});
+
+describe("versions of a song", () => {
+  it("counts the versions search folded, else the library's count while it's on", () => {
+    const t = { id: "t1", otherVersions: 3 } as Track;
+    expect(versionsCount(t, { versions: { t1: [{} as Track, {} as Track] } } as never, true)).toBe(2);
+    expect(versionsCount(t, null, true)).toBe(3);
+    expect(versionsCount(t, null, false)).toBe(0);
+  });
+
+  it("the sheet lists each version with its record, and plays the one tapped", async () => {
+    const t = { ...mock.fx.tracks[0] } as Track;
+    const items = [
+      { track: { ...t, id: "v1", title: "Song", albumTitle: "First Record" }, status: "released", current: true, year: 2019, date: null, edition: null, version: null, quality: null },
+      { track: { ...t, id: "v2", title: "Song (Live)", albumTitle: "Live Record" }, status: "released", current: false, year: 2021, date: null, edition: null, version: null, quality: null },
+    ];
+    vi.spyOn(mock, "trackVersions").mockResolvedValue(items as never);
+    const play = vi.spyOn(mock, "playContext");
+    render(<PhoneShell />);
+    act(() => phone.push({ kind: "versions", track: t }));
+    const list = await screen.findByRole("list", { name: `Versions of ${t.title}` }, SLOW);
+    expect(within(list).getByText("Live Record · 2021")).toBeInTheDocument();
+    fireEvent.click(within(list).getByText("Song (Live)"));
+    await waitFor(() => expect(play).toHaveBeenCalledWith(expect.objectContaining({ startTrackId: "v2" })));
+  });
+});
+
+describe("the Library tour fixes", () => {
+  const e = (x: Partial<LibEntry>): LibEntry => ({ kind: "playlist", id: x.title ?? "x", title: "x", sortTitle: "x", creator: "listener", creatorId: null, thumb: null, smart: false, format: null, addedAt: null, playedAt: null, pinned: false, ...x });
+
+  it("Bookmarks, Stats and another player's liked list stay off; playlists say their song count", () => {
+    const rows = phoneRows([e({ title: "Liked Songs", liked: true }), e({ title: "Bookmarks", bookmarks: true }), e({ title: "Stats", stats: true }), e({ title: "❤️ Tracks" }), e({ id: "p1", title: "Road" })], "recents", new Map([["p1", 12]]));
+    expect(rows.map((r) => r.title)).toEqual(["Liked Songs", "Road"]);
+    expect(phoneSubtitle(rows[1], true)).toBe("12 songs");
+    expect(phoneSubtitle(rows[1], false)).toBe("Playlist · 12 songs");
+    expect(isLikedCopy({ kind: "playlist", title: "Tracks" })).toBe(false);
+  });
+
+  it("A to Z goes by the name as written, ignoring a leading The", () => {
+    const rows = phoneRows(
+      [e({ kind: "artist", title: "Tyler, The Creator", sortTitle: "Tyler, The Creator" }), e({ kind: "artist", title: "Kanye West", sortTitle: "West Kanye" }), e({ kind: "artist", title: "The Kills", sortTitle: "Kills" }), e({ kind: "artist", title: "James Blake", sortTitle: "Blake James" })],
+      "alpha",
+    );
+    expect(rows.map((r) => r.title)).toEqual(["James Blake", "Kanye West", "The Kills", "Tyler, The Creator"]);
+    expect(alphaKey("The Kills")).toBe("Kills");
+    expect(letterOf("The Kills")).toBe("K");
+    expect(letterOf("2Pac")).toBe("#");
+  });
+
+  it("editions of one record fold into one card", () => {
+    expect(baseTitle("Glass Season (2025 Remaster)")).toBe("glass season");
+    expect(baseTitle("Late Orchestration - Deluxe Edition")).toBe("late orchestration");
+    expect(baseTitle("Live at the Mill")).toBe("live at the mill");
+    const groups = groupEditions([
+      { id: "a", title: "Glass Season (Deluxe)" },
+      { id: "b", title: "Glass Season" },
+      { id: "c", title: "Night Ferry" },
+      { id: "d", title: "Glass Season [Remastered 2011]" },
+    ]);
+    expect(groups.map((g) => [g.main.id, g.all.length])).toEqual([
+      ["b", 3],
+      ["c", 1],
+    ]);
+  });
+});
+
+describe("phone Settings words", () => {
+  it("keeps one short line per row, and says things the phone's way", () => {
+    expect(shortLine("Plays songs at a similar volume. Uses the loudness the server measured.")).toBe("Plays songs at a similar volume.");
+    expect(phoneText("12 GB free on this drive")).toBe("12 GB free on this phone");
+    expect(phoneText("Keep settings the same on your computers")).toBe("Keep settings the same on your devices");
+    expect(phoneText("Always play Default Device with Flat.")).toBe("Always play this phone's speaker with Flat.");
+    expect(phoneText("Shows the now playing view on the right, unless the queue is open there.")).toBe("Shows the now playing view.");
+  });
+});

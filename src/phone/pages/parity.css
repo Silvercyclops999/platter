@@ -318,3 +318,7 @@
 .ph-x__hero .ph-x__photo, .ph-x__hero .ph-x__photo .art { width: 100% !important; height: auto !important; aspect-ratio: 1; }
 .ph-hit__versions-line { flex-basis: 100%; }
 .ph-hit.is-top.has-versions .ph-hit__versions { margin-left: 78px; }
+
+/* A cover still loading on the phone: its printed sleeve, set from data attributes. */
+.art__sleeve--pending [data-text]::before { content: attr(data-text); }
+.art__sleeve--pending { position: absolute; inset: 0; }

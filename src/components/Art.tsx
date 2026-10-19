@@ -148,7 +148,13 @@ export function Art({ path, size = 48, fluid, requestSize, round, kind = "album"
             <Fallback size={fluid ? 40 : Math.max(16, Math.round(size * 0.38))} strokeWidth={1.5} />
           </span>
         ))}
-      {printWhileLoading && <FallbackSleeve text={sleeve!} size={cssSize} fluid={!!fluid} />}
+      {printWhileLoading && (
+        // Printed by CSS from data attributes: a stand-in, not words of the page.
+        <span className="art__fallback art__sleeve art__sleeve--pending" aria-hidden="true" style={{ "--sleeve-h": sleeveHue(sleeve!.title) } as React.CSSProperties}>
+          <span className="art__sleeve-title" data-text={sleeve!.title} />
+          {sleeve!.artist && <span className="art__sleeve-artist" data-text={sleeve!.artist} />}
+        </span>
+      )}
       {wanted && !failed && !loaded && !printWhileLoading && <span className="art__skeleton skeleton" aria-hidden="true" />}
       {src && !failed && (
         <img
