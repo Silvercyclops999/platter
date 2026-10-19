@@ -6,6 +6,8 @@
 //! through its public handle. The UI is not involved beyond Settings.
 
 pub mod art;
+#[cfg(target_os = "ios")]
+pub mod audio_session;
 pub mod commands;
 pub mod cpu;
 pub mod discord;

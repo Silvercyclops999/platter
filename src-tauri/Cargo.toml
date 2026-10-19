@@ -123,6 +123,11 @@ tauri-plugin-autostart = "2.7.0"
 tauri-plugin-global-shortcut = "2.4.1"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
+# iPhone: the audio session, so music plays with the ringer switch on silent
+# and keeps playing when the screen locks.
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2-avf-audio = { version = "0.3.2", default-features = false, features = ["std", "AVAudioSession", "AVAudioSessionTypes"] }
+
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 souvlaki = { version = "0.8.3", default-features = false }
 

@@ -4213,6 +4213,7 @@ dependencies = [
  "md-5",
  "mdns-sd",
  "mp3lame-encoder",
+ "objc2-avf-audio",
  "objc2-core-audio",
  "objc2-core-foundation",
  "objc2-foundation",

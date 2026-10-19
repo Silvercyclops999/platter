@@ -451,6 +451,8 @@ pub fn run() {
             .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
         tracing_subscriber::registry().with(console).with(file).init();
     }
+    #[cfg(target_os = "ios")]
+    platform::audio_session::start();
 
     desktop_plugins(tauri::Builder::default())
         .plugin(tauri_plugin_deep_link::init())

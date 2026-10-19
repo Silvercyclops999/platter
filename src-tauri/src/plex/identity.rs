@@ -77,6 +77,10 @@ fn platform_name() -> &'static str {
         "Windows"
     } else if cfg!(target_os = "macos") {
         "macOS"
+    } else if cfg!(target_os = "ios") {
+        "iOS"
+    } else if cfg!(target_os = "android") {
+        "Android"
     } else {
         "Linux"
     }

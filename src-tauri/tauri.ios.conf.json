@@ -1,0 +1,9 @@
+{
+  "identifier": "com.silvercyclops999.platter",
+  "bundle": {
+    "createUpdaterArtifacts": false,
+    "iOS": {
+      "minimumSystemVersion": "16.0"
+    }
+  }
+}
