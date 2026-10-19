@@ -1,17 +1,29 @@
 /**
- * Platter mark: a platter seen at an angle with a tonearm, the label and
- * headshell in the accent colour. The same drawing as the app icon
- * (src-tauri/app-icon.svg), simplified for small sizes. Original artwork.
+ * Platter mark: a P whose bowl is a record, a ring with the spindle in its
+ * centre. The same drawing and grid as the app icon (src-tauri/app-icon.svg),
+ * cropped to the mark. The P takes the look's accent, the spindle its text
+ * colour. Below 20 px the spindle is left out, as it would only blur.
  */
-export function Logo({ size = 28 }: { size?: number }) {
+const BOWL_AND_STEM = "M304 828V404A208 208 0 1 1 420 590.55V828Z M600 404A88 88 0 1 0 424 404A88 88 0 1 0 600 404Z";
+
+export function Logo({ size = 28, label }: { size?: number; label?: string }) {
+  const named = label ? { role: "img", "aria-label": label } : { "aria-hidden": true as const };
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-      <ellipse cx="14" cy="19.4" rx="12.6" ry="7.6" fill="#141311" stroke="var(--color-text-secondary)" strokeWidth="1.3" />
-      <ellipse cx="14" cy="19.4" rx="8" ry="4.7" fill="none" stroke="#3A3631" strokeWidth="0.8" />
-      <ellipse cx="14" cy="19.4" rx="4" ry="2.4" fill="var(--color-accent)" />
-      <circle cx="27" cy="5.6" r="2.3" fill="var(--color-text-secondary)" />
-      <path d="M27 5.6 L24.4 14.6 L21.6 17.4" fill="none" stroke="var(--color-text-secondary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M21.6 17.4 L19.9 19.1" stroke="var(--color-accent)" strokeWidth="2.6" strokeLinecap="round" />
+    <svg className="logo-mark" width={size} height={size} viewBox="196 196 632 632" focusable="false" {...named}>
+      <path d={BOWL_AND_STEM} fill="var(--color-accent)" fillRule="evenodd" />
+      {size >= 20 && <circle cx="512" cy="404" r="30" fill="var(--color-text-primary)" data-part="spindle" />}
     </svg>
+  );
+}
+
+/** The mark with the name set in the display serif, for sign-in and welcome screens. */
+export function Wordmark({ size = 26, className = "" }: { size?: number; className?: string }) {
+  return (
+    <span className={`wordmark ${className}`.trim()} role="img" aria-label="Platter">
+      <Logo size={size} />
+      <span className="wordmark__name" aria-hidden="true">
+        Platter
+      </span>
+    </span>
   );
 }

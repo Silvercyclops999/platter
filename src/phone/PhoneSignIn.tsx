@@ -10,6 +10,7 @@ import { backend } from "../lib/backend";
 import type { AppError, PinInfo, ServerInfo } from "../lib/types";
 import { AddServerFlow, type AddressKind } from "../pages/AddServer";
 import { useApp } from "../stores/app";
+import { Wordmark } from "../shell/Logo";
 import { useUi } from "../stores/ui";
 import { tap } from "./bits";
 import { notchFromUrl } from "./form";
@@ -29,11 +30,11 @@ function Frame({ children, step }: { children: ReactNode; step: string }) {
   );
 }
 
-/** The name at the top of the sign-in screens: type only, nothing drawn. */
-function Wordmark() {
+/** The mark and name at the top of the sign-in screens. */
+function Brand() {
   return (
     <p className="ph-wordmark" aria-hidden="true">
-      Platter
+      <Wordmark size={27} />
     </p>
   );
 }
@@ -117,7 +118,7 @@ export function PhoneSignIn({ onBack }: { onBack?: () => void } = {}) {
           </button>
         </div>
       )}
-      <Wordmark />
+      <Brand />
       {!pending ? (
         <>
           <div className="ph-signin__words">
@@ -212,7 +213,7 @@ export function PhoneServerPick() {
   };
   return (
     <Frame step="server">
-      <Wordmark />
+      <Brand />
       <div className="ph-signin__words">
         <p className="ph-eyebrow">Signed in</p>
         <h1 className="ph-title ph-signin__title">Choose your server</h1>

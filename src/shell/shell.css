@@ -980,3 +980,17 @@
   0%, 100% { transform: scale(1); opacity: 0.2; }
   50% { transform: scale(calc(1 + 0.06 * var(--motion-move))); opacity: 0.55; }
 }
+
+/* The mark with the name, on sign-in and welcome screens. The name is set in
+   the display serif, a little tighter than text, its cap height level with
+   the top of the P's bowl. */
+.wordmark { display: inline-flex; align-items: center; gap: 0.32em; color: var(--color-text-primary); line-height: 1; }
+.wordmark .logo-mark { flex: none; }
+.wordmark__name {
+  font-family: "Fraunces Variable", var(--font-headings, var(--font-family));
+  font-size: 26px;
+  font-weight: 560;
+  letter-spacing: -0.018em;
+  font-variation-settings: "opsz" 72;
+  transform: translateY(-0.04em);
+}
