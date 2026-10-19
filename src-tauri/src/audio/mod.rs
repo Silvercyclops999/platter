@@ -32,6 +32,7 @@ pub mod player;
 pub mod queue;
 pub mod signal;
 pub mod source;
+pub mod visual;
 
 pub use events::{EventSink, PlayerState, PlayerStatus, TauriSink, TrackingEvent};
 pub use output::{AudioOutput, CpalOutput};
@@ -52,5 +53,7 @@ mod player_tests;
 mod signal_tests;
 #[cfg(test)]
 mod smoke;
+#[cfg(test)]
+mod visual_tests;
 #[cfg(test)]
 pub(crate) mod testutil;

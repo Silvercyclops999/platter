@@ -288,6 +288,8 @@ pub struct PlayerHandle {
     /// Moves on each play request: a slow lookup that finishes after a
     /// newer play is dropped instead of replacing it.
     play_seq: Arc<std::sync::atomic::AtomicU64>,
+    /// The visualizer's tap on the output.
+    vis: Arc<super::visual::VisTap>,
 }
 
 /// The cache, how to reach a file, and downloads already on disk.
@@ -338,6 +340,7 @@ impl PlayerHandle {
             gate: gate.clone(),
         });
         let host = engine.precache_host();
+        let vis = engine.visualizer();
         let precacher = cache.as_ref().map(|c| {
             Precacher::spawn(
                 &rt,
@@ -444,7 +447,18 @@ impl PlayerHandle {
             host,
             files,
             play_seq: Arc::default(),
+            vis,
         }
+    }
+
+    /// Starts, renews or ends a visualizer watch (see [`super::visual`]).
+    pub fn visualizer_watch(&self, on: bool, fps: u32, scope: bool) {
+        self.vis.watch(on, fps, scope);
+    }
+
+    /// The visualizer's tap.
+    pub fn visualizer(&self) -> Arc<super::visual::VisTap> {
+        self.vis.clone()
     }
 
     /// The track's whole file is on this computer: downloaded, or in the
@@ -1028,6 +1042,11 @@ impl Actor {
                     }
                 },
                 Some(ev) = engine_rx.recv() => {
+                    // Visualizer frames go straight out; nothing else changed.
+                    if let EngineEvent::Spectrum(sp) = ev {
+                        self.sink.spectrum(&sp);
+                        continue;
+                    }
                     self.on_engine(ev);
                     self.check_signal();
                 }
@@ -2560,6 +2579,10 @@ impl Actor {
             }
             // The signal path picks it up after every engine event.
             EngineEvent::SourceKnown { .. } => return,
+            EngineEvent::Spectrum(sp) => {
+                self.sink.spectrum(&sp);
+                return;
+            }
         }
         self.emit_state();
     }

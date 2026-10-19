@@ -1628,6 +1628,36 @@ session, so Hide then Translate doesn't ask again. With no service set
 it fails with "Set a translation service in Settings first." and sends
 nothing. There's no default service.
 
+## Visualizer
+| Command | Args | Returns |
+| --- | --- | --- |
+| `visualizer_watch` | `{ on, fps, scope?, pauseOnBattery? }` | `bool` (it runs) |
+
+| Event | Payload |
+| --- | --- |
+| `player://spectrum` | `{ t, bands, rms, peak, scope? }` |
+
+The visualizer reads a copy of what goes out on this device, after the sound
+settings and before the volume, so the picture keeps its size at any volume.
+It reads only, so bit-perfect output stays untouched. Nothing is copied or
+analysed until a window calls `visualizer_watch` with `on: true`, and a watch
+ends by itself 3 s after the last call, so the window renews it about once a
+second while the view is on screen and calls it with `on: false` when it
+goes. `fps` is 1 to 60. `scope: true` adds the stereo pairs. The call returns
+false and nothing runs while the window is minimised or hidden, or on battery
+power when `pauseOnBattery` (default true) is set.
+
+While watched, the output path analyses the last 2048 frames every
+`rate / fps` frames (no thread of its own): a Hann window, a real FFT per
+channel with the power averaged, 64 bands, RMS and peak per channel. The
+frames are the ones being heard now, read back by the device's reported
+delay. `bands` are dBFS, floored at -90, where a full-scale sine reads 0 in
+its band; band k spans `20 * 1000^(k / 64)` Hz up to the next edge, so the
+bands run from 20 Hz to 20 kHz. `rms` and `peak` are `[left, right]` in dBFS.
+`scope` is 256 pairs interleaved left, right in -1..1. `t` is milliseconds
+of audio heard since the watch began. Nothing comes while playback is on
+another device or the output is held still (paused).
+
 ## Lyrics transcription
 | Command | Args | Returns |
 | --- | --- | --- |

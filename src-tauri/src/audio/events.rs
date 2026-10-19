@@ -163,6 +163,8 @@ pub trait EventSink: Send + Sync {
     fn output_lost(&self, _lost: &OutputLost) {}
     /// What happens to the sound changed (track, device, settings).
     fn signal_path(&self, _path: &super::signal::SignalPath) {}
+    /// A visualizer frame (only while a window watches).
+    fn spectrum(&self, _frame: &super::visual::Spectrum) {}
 }
 
 /// Emits to every webview via Tauri's event system.
@@ -192,6 +194,10 @@ impl<R: tauri::Runtime> EventSink for TauriSink<R> {
     fn signal_path(&self, path: &super::signal::SignalPath) {
         use tauri::Emitter;
         let _ = self.0.emit(super::signal::EV_SIGNAL_PATH, path);
+    }
+    fn spectrum(&self, frame: &super::visual::Spectrum) {
+        use tauri::Emitter;
+        let _ = self.0.emit(super::visual::EV_SPECTRUM, frame);
     }
 }
 

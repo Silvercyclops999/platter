@@ -73,6 +73,38 @@ impl StreamQuality {
     }
 }
 
+/// The visualizer's picture: a spectrum analyser line, a pair of needle
+/// meters, a stereo phase scope, or the cover's colours breathing with the
+/// low end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum VisualizerStyle {
+    #[default]
+    Analyser,
+    Meters,
+    Scope,
+    Glow,
+}
+
+/// How slowly the visualizer's lines settle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum VisualizerSmoothing {
+    Low,
+    #[default]
+    Medium,
+    High,
+}
+
+/// Frame rates the visualizer offers.
+pub const VISUALIZER_FPS: [u32; 3] = [15, 30, 60];
+
+/// The visualizer's frame rate before one is picked: 30 on a phone, 60 on
+/// a computer.
+pub fn default_visualizer_fps() -> u32 {
+    if cfg!(any(target_os = "ios", target_os = "android")) { 30 } else { 60 }
+}
+
 /// Phone stream quality over mobile data. Auto keeps the original file
 /// when it is lossless and under 1.5 Mbps, else streams at 320 kbps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -671,6 +703,18 @@ pub struct Settings {
     pub phone_mobile_quality: MobileQuality,
     /// Phone: a light tap of feedback on the player's controls (this device only).
     pub phone_haptics: bool,
+    /// Now playing has a Visualizer button (synced).
+    pub visualizer_button: bool,
+    /// The visualizer's picture (synced).
+    pub visualizer_style: VisualizerStyle,
+    /// Visualizer frames per second, one of VISUALIZER_FPS (this device only).
+    pub visualizer_fps: u32,
+    /// How slowly the visualizer's lines settle (synced).
+    pub visualizer_smoothing: VisualizerSmoothing,
+    /// A slim analyser under the cover in the now playing panel (this device only).
+    pub visualizer_panel_strip: bool,
+    /// The visualizer rests while on battery power (this device only).
+    pub visualizer_battery_pause: bool,
     /// Sync to a device: what songs become on a device that doesn't pick
     /// its own format (synced).
     pub device_format: crate::devices::DeviceFormat,
@@ -1220,6 +1264,12 @@ impl Default for Settings {
             phone_keep_recent: 50,
             phone_mobile_quality: MobileQuality::Auto,
             phone_haptics: true,
+            visualizer_button: true,
+            visualizer_style: VisualizerStyle::Analyser,
+            visualizer_fps: default_visualizer_fps(),
+            visualizer_smoothing: VisualizerSmoothing::Medium,
+            visualizer_panel_strip: false,
+            visualizer_battery_pause: true,
             device_format: crate::devices::DeviceFormat::Original,
             device_delete_removed: false,
             home_mixes: true,
@@ -1378,6 +1428,9 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "qualityAway",
     "showFormatBadge",
     "signalPathBadge",
+    "visualizerButton",
+    "visualizerStyle",
+    "visualizerSmoothing",
     "resumeContexts",
     "popularSource",
     "deviceFormat",
@@ -1637,6 +1690,9 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "phoneKeepRecent",
     "phoneMobileQuality",
     "phoneHaptics",
+    "visualizerFps",
+    "visualizerPanelStrip",
+    "visualizerBatteryPause",
     "notifyNewReleases",
     "autoRequest",
     "autoRequestCap",
@@ -1814,6 +1870,13 @@ pub struct SettingsPatch {
     pub phone_keep_recent: Option<u32>,
     pub phone_mobile_quality: Option<MobileQuality>,
     pub phone_haptics: Option<bool>,
+    pub visualizer_button: Option<bool>,
+    pub visualizer_style: Option<VisualizerStyle>,
+    /// One of VISUALIZER_FPS.
+    pub visualizer_fps: Option<u32>,
+    pub visualizer_smoothing: Option<VisualizerSmoothing>,
+    pub visualizer_panel_strip: Option<bool>,
+    pub visualizer_battery_pause: Option<bool>,
     pub device_format: Option<crate::devices::DeviceFormat>,
     pub device_delete_removed: Option<bool>,
     pub home_mixes: Option<bool>,
@@ -2181,6 +2244,17 @@ impl Settings {
         set(&mut self.phone_mobile_downloads, p.phone_mobile_downloads);
         set(&mut self.phone_mobile_quality, p.phone_mobile_quality);
         set(&mut self.phone_haptics, p.phone_haptics);
+        set(&mut self.visualizer_button, p.visualizer_button);
+        set(&mut self.visualizer_style, p.visualizer_style);
+        set(&mut self.visualizer_smoothing, p.visualizer_smoothing);
+        set(&mut self.visualizer_panel_strip, p.visualizer_panel_strip);
+        set(&mut self.visualizer_battery_pause, p.visualizer_battery_pause);
+        if let Some(n) = p.visualizer_fps {
+            if !VISUALIZER_FPS.contains(&n) {
+                return Err(AppError::Invalid("The visualizer runs at 15, 30 or 60 frames a second.".into()));
+            }
+            self.visualizer_fps = n;
+        }
         if let Some(n) = p.phone_keep_recent {
             if !PHONE_KEEP_RECENT_CHOICES.contains(&n) {
                 return Err(AppError::Invalid("Keep 0, 25, 50, 100, 250 or 500 recent songs.".into()));
@@ -4917,6 +4991,44 @@ mod tests {
         s.apply(&p).unwrap();
         assert!(!s.home_records_first);
         assert_eq!(serde_json::to_value(&s).unwrap()["homeRecordsFirst"], false);
+    }
+
+    #[test]
+    fn the_visualizer_settings_have_their_defaults_and_scopes() {
+        let d = Settings::default();
+        assert!(d.visualizer_button);
+        assert_eq!(d.visualizer_style, VisualizerStyle::Analyser);
+        assert_eq!(d.visualizer_fps, 60, "a computer runs at 60");
+        assert_eq!(d.visualizer_smoothing, VisualizerSmoothing::Medium);
+        assert!(!d.visualizer_panel_strip);
+        assert!(d.visualizer_battery_pause);
+        // Settings saved before they existed get the defaults.
+        let old: Settings = serde_json::from_str(r#"{"volume":0.5}"#).unwrap();
+        assert!(old.visualizer_button && old.visualizer_battery_pause && !old.visualizer_panel_strip);
+        assert_eq!(old.visualizer_fps, default_visualizer_fps());
+        for k in ["visualizerButton", "visualizerStyle", "visualizerSmoothing"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
+        }
+        for k in ["visualizerFps", "visualizerPanelStrip", "visualizerBatteryPause"] {
+            assert!(DEVICE_SETTINGS.contains(&k), "{k} is this device only");
+        }
+        let p: SettingsPatch = serde_json::from_str(
+            r#"{"visualizerButton":false,"visualizerStyle":"scope","visualizerFps":30,"visualizerSmoothing":"high","visualizerPanelStrip":true,"visualizerBatteryPause":false}"#,
+        )
+        .unwrap();
+        let mut s = Settings::default();
+        s.apply(&p).unwrap();
+        assert!(!s.visualizer_button && s.visualizer_panel_strip && !s.visualizer_battery_pause);
+        assert_eq!(s.visualizer_style, VisualizerStyle::Scope);
+        assert_eq!(s.visualizer_fps, 30);
+        assert_eq!(s.visualizer_smoothing, VisualizerSmoothing::High);
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["visualizerStyle"], "scope");
+        assert_eq!(v["visualizerSmoothing"], "high");
+        // Only the offered rates.
+        let bad: SettingsPatch = serde_json::from_str(r#"{"visualizerFps":45}"#).unwrap();
+        assert!(s.apply(&bad).is_err());
+        assert_eq!(s.visualizer_fps, 30);
     }
 
     #[test]

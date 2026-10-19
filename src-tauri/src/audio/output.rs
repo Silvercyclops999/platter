@@ -34,6 +34,9 @@ pub trait Renderer: Send + Sync + 'static {
     /// Fills `out` (interleaved). Returns how many frames came from actual
     /// audio; the remainder is silence (paused, idle or underrun).
     fn render(&self, out: &mut [f32]) -> usize;
+    /// How long after its callback a rendered block starts playing, when
+    /// the device says.
+    fn set_latency(&self, _latency: Duration) {}
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -675,10 +678,12 @@ where
     let broken = Arc::new(AtomicBool::new(false));
     device.build_output_stream::<T, _, _>(
         config,
-        move |data: &mut [T], _info| {
+        move |data: &mut [T], info: &cpal::OutputCallbackInfo| {
             if scratch.len() != data.len() {
                 scratch.resize(data.len(), 0.0);
             }
+            let ts = info.timestamp();
+            renderer.set_latency(ts.playback.duration_since(ts.callback));
             renderer.render(&mut scratch);
             for (d, s) in data.iter_mut().zip(scratch.iter()) {
                 *d = T::from_sample(*s);

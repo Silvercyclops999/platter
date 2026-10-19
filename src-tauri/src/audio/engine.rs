@@ -41,6 +41,7 @@ use super::http::{HttpConfig, HttpSource, HttpStats};
 use super::devguard::GuardedOutput;
 use super::output::{OutputCallback, OutputEvent, OutputFormat, OutputState, Renderer};
 use super::signal::{SourceFrom, SourceInfo};
+use super::visual::{Spectrum, VisTap};
 use super::source::{LocalFiles, StreamSource, TrackResolver};
 use crate::error::{AppError, AppResult};
 use crate::model::Track;
@@ -108,6 +109,8 @@ pub enum EngineEvent {
     OutputChanged,
     /// A segment's source format or loudness data became known (signal path).
     SourceKnown { key: u64 },
+    /// A visualizer frame, while one is watched.
+    Spectrum(Box<Spectrum>),
 }
 
 /// A track whose audio stopped before its end.
@@ -1232,6 +1235,8 @@ pub(crate) struct Core {
     /// What the signal path shows. Written when a decoder or the output
     /// opens; the render callback never touches it.
     published: Mutex<Published>,
+    /// The visualizer's read-only copy of what goes out.
+    vis: Arc<VisTap>,
 }
 
 /// Most segments whose source info is kept (the playing one and the next).
@@ -1275,6 +1280,12 @@ impl Core {
 }
 
 impl Renderer for Core {
+    fn set_latency(&self, latency: Duration) {
+        if self.vis.active() {
+            self.vis.set_latency(latency);
+        }
+    }
+
     fn render(&self, out: &mut [f32]) -> usize {
         let mut events: Vec<EngineEvent> = Vec::new();
         let mut guard = self.mix.lock();
@@ -1285,6 +1296,11 @@ impl Renderer for Core {
         let fade_len = m.declick_frames(&self.cfg).max(1);
         let declick = self.cfg.declick_ms > 0;
         let quiet = !m.can_clip();
+        // The visualizer's copy, only while a window watches.
+        let mut tap = self.vis.active().then(|| self.vis.lock());
+        if let Some(t) = tap.as_mut() {
+            t.begin(m.format.sample_rate, frames);
+        }
         let mut filled = 0;
         let mut consumed_any = false;
         let mut underrun = false;
@@ -1371,6 +1387,11 @@ impl Renderer for Core {
             } else {
                 m.chain.process(o, quiet);
             }
+            // After the sound settings, before the pause ramp and volume:
+            // a read-only copy, so the picture keeps its size at any volume.
+            if let Some(t) = tap.as_mut() {
+                t.push(o);
+            }
             // Pause ramp and volume, after the chain so audio held in the
             // limiter's delay ramps with everything else.
             if !from_tail {
@@ -1399,6 +1420,12 @@ impl Renderer for Core {
             events.push(EngineEvent::Buffering(underrun));
         }
         drop(guard);
+        if let Some(mut t) = tap {
+            t.push_silence(frames - f);
+            if let Some(sp) = t.due() {
+                events.push(EngineEvent::Spectrum(Box::new(sp)));
+            }
+        }
         if consumed_any {
             self.cv.notify_all();
         }
@@ -1509,6 +1536,7 @@ impl Engine {
             events: tx,
             cfg: deps.config,
             published: Mutex::new(Published::default()),
+            vis: Arc::new(VisTap::new()),
         });
         let env = Arc::new(Env {
             core,
@@ -1538,6 +1566,11 @@ impl Engine {
 
     fn core(&self) -> &Core {
         &self.env.core
+    }
+
+    /// The visualizer's tap (watch it to get [`EngineEvent::Spectrum`]).
+    pub fn visualizer(&self) -> Arc<VisTap> {
+        self.core().vis.clone()
     }
 
     pub fn format(&self) -> OutputFormat {
