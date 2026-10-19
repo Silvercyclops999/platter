@@ -269,6 +269,7 @@ impl SoundId {
         tokio::time::sleep(START_DELAY).await;
         loop {
             let _ = tokio::time::timeout(LOOK_EVERY, WAKE.notified()).await;
+            crate::platform::foreground::settled().await;
             if !options().on || self.0.refused.load(Ordering::Relaxed) || self.key().is_none() {
                 continue;
             }

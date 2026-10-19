@@ -23,6 +23,7 @@ pub mod media;
 pub mod menubar;
 pub mod miniplayer;
 pub mod power;
+pub mod foreground;
 pub mod haptics;
 pub mod reveal;
 pub mod route_picker;

@@ -456,6 +456,8 @@ pub fn run() {
     platform::audio_session::start();
     #[cfg(target_os = "ios")]
     carplay::ios::install();
+    #[cfg(target_os = "ios")]
+    platform::foreground::watch_app_state();
 
     desktop_plugins(tauri::Builder::default())
         .plugin(tauri_plugin_deep_link::init())

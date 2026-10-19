@@ -946,6 +946,7 @@ pub async fn watch(w: Waves) {
             _ = tokio::time::sleep(LOOK_EVERY) => {}
             _ = w.wake.notified() => {}
         }
+        crate::platform::foreground::settled().await;
     }
 }
 

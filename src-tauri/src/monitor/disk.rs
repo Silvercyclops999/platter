@@ -103,6 +103,7 @@ pub fn spawn(plex: PlexState, audio_dir: PathBuf, art: ArtCache, art_cap: Arc<At
                 plex.set_low_disk(low);
             }
             tokio::time::sleep(CHECK_EVERY).await;
+            crate::platform::foreground::settled().await;
         }
     });
 }

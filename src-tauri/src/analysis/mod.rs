@@ -276,6 +276,7 @@ impl Analyzer {
         tokio::time::sleep(START_DELAY).await;
         loop {
             let _ = tokio::time::timeout(LOOK_EVERY, WAKE.notified()).await;
+            crate::platform::foreground::settled().await;
             if !self.is_on() {
                 continue;
             }

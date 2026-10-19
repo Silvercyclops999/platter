@@ -362,6 +362,7 @@ async fn watch(app: tauri::AppHandle, db: DbHandle, parts: Arc<dyn PartSource>, 
     let mut seen: Option<store::Stamp> = None;
     loop {
         let poked = tokio::time::timeout(LOOK_EVERY, WAKE.notified()).await.is_ok();
+        crate::platform::foreground::settled().await;
         let opts = options();
         if !opts.on {
             continue;

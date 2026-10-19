@@ -245,6 +245,7 @@ impl TagScanner {
     async fn run(self) {
         let mut pruned_once = false;
         loop {
+            crate::platform::foreground::settled().await;
             if !self.enabled() {
                 self.0.status.lock().running = false;
                 self.emit_progress();

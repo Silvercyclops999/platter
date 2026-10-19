@@ -156,6 +156,11 @@ pub fn spawn(plex: PlexState, db: DbHandle, player: PlayerHandle, probe: Arc<dyn
                     continue;
                 }
             }
+            // With the screen off the periodic check waits; around playback
+            // (a burst of failures) it still runs.
+            if !active {
+                crate::platform::foreground::settled().await;
+            }
             last_look = Instant::now();
             let problems: Vec<(i64, String)> =
                 player.problems().into_iter().map(|p| (p.at, p.kind)).collect();

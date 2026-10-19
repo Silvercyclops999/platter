@@ -664,5 +664,6 @@ pub async fn watch(r: Radar) {
             }
         }
         tokio::time::sleep(LOOK_EVERY).await;
+        crate::platform::foreground::settled().await;
     }
 }

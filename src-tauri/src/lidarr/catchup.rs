@@ -528,6 +528,7 @@ pub async fn watch(l: Lidarr) {
     tokio::time::sleep(Duration::from_secs(20)).await;
     let wall = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     loop {
+        crate::platform::foreground::settled().await;
         if let Err(e) = l.catch_up().await {
             tracing::debug!("lidarr catch-up: {e}");
         }
