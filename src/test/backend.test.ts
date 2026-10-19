@@ -35,6 +35,13 @@ const CALLS: [string, (b: ReturnType<typeof createTauriBackend>) => Promise<unkn
   ["sync_status", (b) => b.syncStatus(), undefined],
   ["sync_now", (b) => b.syncNow(true), { full: true }],
   ["home", (b) => b.home(), undefined],
+  ["artist_aliases", (b) => b.artistAliases(), undefined],
+  [
+    "artist_alias_set",
+    (b) => b.artistAliasSet({ key: "northwind", name: "Northwind", sameAs: "the northwinds", sameAsName: "The Northwinds" }, true),
+    { key: "northwind", name: "Northwind", sameAs: "the northwinds", sameAsName: "The Northwinds", on: true },
+  ],
+  ["stats_played_artists", (b) => b.statsPlayedArtists("north", 8), { query: "north", limit: 8 }],
   ["artists", (b) => b.artists({ sort: "name", offset: 0, limit: 50 }), { sort: "name", offset: 0, limit: 50 }],
   ["artist_names", (b) => b.artistNames(), undefined],
   ["albums", (b) => b.albums({ sort: "year", offset: 10, limit: 5, section: "live" }), { sort: "year", offset: 10, limit: 5, section: "live" }],

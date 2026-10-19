@@ -47,6 +47,7 @@ import { LibraryImportSettings, importMatches } from "./LibraryImportSettings";
 import { AutomationSettings, StreamDeckSettings, automationMatches, streamDeckMatches } from "./StreamDeckSettings";
 import { BridgeSettings, bridgeMatches, useBridge } from "./BridgeSettings";
 import { MixExclusions } from "./MixExclusions";
+import { ArtistAliases } from "./ArtistAliases";
 import { DismissedArtists } from "./DiscoverSettings";
 import { DefaultLibraries, InvitesToYou, PeopleWithAccess, ShareMyMusic } from "./SharingSettings";
 import { DISCOGS_TOKEN_DESCRIPTION, DiscogsImportControl, DiscogsTokenControl, discogsNote, useDiscogs } from "./DiscogsSettings";
@@ -452,7 +453,7 @@ export interface RowDef {
   group?: string;
   control: (ids: { title: string; desc: string }) => ReactNode;
   /** A wide part under the row (the EQ editor). */
-  block?: () => ReactNode;
+  block?: (ids: { title: string; desc: string }) => ReactNode;
   /** Shown only when a server in use can do this. */
   cap?: CapName;
   /** False while its service isn't connected or its feature is off: the row waits, and search offers its page. */
@@ -474,7 +475,7 @@ function Row({ row }: { row: RowDef }) {
         footnote={row.footnote}
       />
       <div className="setting-row__control">{row.control(ids)}</div>
-      {row.block && <div className="setting-row__block">{row.block()}</div>}
+      {row.block && <div className="setting-row__block">{row.block(ids)}</div>}
     </div>
   );
 }
@@ -2281,6 +2282,15 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
           ]}
         />
       ),
+    },
+    {
+      key: "artistAliases",
+      section: "Library",
+      title: "Same artist under two names",
+      description: "Count two names as one artist in Stats, Wrapped and top lists.",
+      more: "An artist who changed their name can show up twice. Names your server matched to the same MusicBrainz artist are counted as one on their own; join any others here. Their plays add up under the name you played most. Kept in the sync file when Followed artists and hidden items is synced.",
+      control: () => null,
+      block: (ids) => <ArtistAliases ids={ids} />,
     },
     // Library: the listening diary
     {

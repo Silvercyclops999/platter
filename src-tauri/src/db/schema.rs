@@ -1354,6 +1354,12 @@ CREATE TABLE IF NOT EXISTS sync_entries_unknown (
     PRIMARY KEY (ns, key)
 ) WITHOUT ROWID;
 "#,
+    // v46: the MusicBrainz id Plex matched each artist to, so an artist who
+    // renamed (two Plex artists, one id) counts as one in stats (stats::aliases).
+    r#"
+ALTER TABLE artists ADD COLUMN mbid TEXT;
+CREATE INDEX IF NOT EXISTS artists_mbid ON artists (mbid) WHERE mbid IS NOT NULL;
+"#,
 ];
 
 #[cfg(test)]

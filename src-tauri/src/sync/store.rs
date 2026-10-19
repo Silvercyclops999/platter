@@ -81,6 +81,9 @@ pub const FOLDER_ITEMS: Ns<super::folders::Placement> = Ns::new("folderItems");
 pub const FOLLOWS: Ns<crate::social::follows::FollowedArtist> = Ns::new("follows");
 /// Hidden and snoozed items, keyed `kind:id`.
 pub const HIDDEN: Ns<Hidden> = Ns::new("hidden");
+/// "Same artist as...": an artist counted as another in stats, keyed by
+/// the artist's stats key (stats::aliases).
+pub const ARTIST_ALIASES: Ns<crate::stats::aliases::ArtistAlias> = Ns::new("artistAliases");
 /// Bookmarks (songs at a time, and pages), keyed by bookmark id.
 pub const BOOKMARKS: Ns<Bookmark> = Ns::new("bookmarks");
 /// Platter smart playlists, keyed by playlist id.
@@ -130,7 +133,7 @@ pub const IMPORTED_PLAYS: Ns<super::imported_plays::PlayDay> = Ns::new("imported
 
 /// Every namespace the store takes. Anything else is refused, so nothing
 /// lands in the sync file by accident.
-pub const NAMESPACES: [&str; 24] = [
+pub const NAMESPACES: [&str; 25] = [
     LOOKS.name(),
     DOWNLOAD_INTENT.name(),
     IMPORTED_PLAYS.name(),
@@ -151,6 +154,7 @@ pub const NAMESPACES: [&str; 24] = [
     FOLLOWS.name(),
     HIDDEN.name(),
     PLAYED_HIDDEN.name(),
+    ARTIST_ALIASES.name(),
     BOOKMARKS.name(),
     LYRICS.name(),
     LYRICS_CHOICES.name(),

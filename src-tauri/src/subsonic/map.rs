@@ -60,6 +60,7 @@ pub fn artist(tag: &str, a: &SArtist) -> Artist {
         art: None,
         view_count: 0,
         summary: None,
+        mbid: mbid(&a.music_brainz_id),
     }
 }
 

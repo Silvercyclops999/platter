@@ -41,6 +41,7 @@ pub fn row_artist(r: &Row<'_>) -> rusqlite::Result<Artist> {
         art: r.get(4)?,
         view_count: r.get(5)?,
         summary: None,
+        mbid: None,
     })
 }
 
@@ -140,15 +141,17 @@ pub fn src_of(server_tag: &str, section_id: &str) -> String {
 /// [`upsert_artists`] for rows of library `src`.
 pub fn upsert_artists_in(tx: &Transaction<'_>, items: &[Artist], gen_: i64, src: &str) -> AppResult<()> {
     let mut st = tx.prepare_cached(
-        "INSERT INTO artists (id, title, sort_title, thumb, art, view_count, summary, seen_gen, src)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        "INSERT INTO artists (id, title, sort_title, thumb, art, view_count, summary, seen_gen, src, mbid)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
          ON CONFLICT (id) DO UPDATE SET title = excluded.title, sort_title = excluded.sort_title,
            thumb = excluded.thumb, art = excluded.art, view_count = excluded.view_count,
-           summary = excluded.summary, seen_gen = excluded.seen_gen, src = excluded.src",
+           summary = excluded.summary, seen_gen = excluded.seen_gen, src = excluded.src,
+           mbid = excluded.mbid",
     )?;
     // `similar` isn't on list items; the artist page fills it (db::similar).
     for a in items {
-        st.execute(params![a.id, a.title, a.sort_title, a.thumb, a.art, a.view_count, a.summary, gen_, src])?;
+        let mbid = a.mbid.as_deref().map(str::to_ascii_lowercase);
+        st.execute(params![a.id, a.title, a.sort_title, a.thumb, a.art, a.view_count, a.summary, gen_, src, mbid])?;
     }
     Ok(())
 }

@@ -714,6 +714,7 @@ fn search_credited(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usiz
                 art: None,
                 view_count: plays,
                 summary: None,
+                mbid: None,
             };
             Scored { item: artist, score: s }
         })

@@ -296,6 +296,8 @@ import type {
   StatsPoint,
   StatsSpan,
   StatsTopKind,
+  ArtistAlias,
+  PlayedArtist,
   TopSongsIndex,
   TopSongsList,
   Wrapped,
@@ -1255,6 +1257,12 @@ export interface Backend {
   topSongsList(year: number | null): Promise<TopSongsList>;
   /** A year's Wrapped. */
   statsWrapped(year: number): Promise<Wrapped>;
+  /** Artists counted as another one by hand ("Same artist as..."), newest first. */
+  artistAliases(): Promise<ArtistAlias[]>;
+  /** Count `key` as `sameAs` (on), or stop (off); resolves to the whole list. */
+  artistAliasSet(alias: { key: string; name?: string; sameAs?: string; sameAsName?: string }, on: boolean): Promise<ArtistAlias[]>;
+  /** Played artists whose name has `query` in it, most played first. */
+  statsPlayedArtists(query: string, limit?: number): Promise<PlayedArtist[]>;
   /** Your summary to share with a friend (Compare must be on in Settings). */
   statsCompareSummary(unreleasedOk: boolean, theirUnreleasedOk: boolean): Promise<CompareSummary>;
   /** Compare a friend's summary with yours. */
@@ -1787,6 +1795,9 @@ export function createTauriBackend(): Backend {
     homeRecords: () => call("home_records"),
     topSongsList: (year) => call("top_songs_list", { year }),
     statsWrapped: (year) => call("stats_wrapped", { year }),
+    artistAliases: () => call("artist_aliases"),
+    artistAliasSet: (a, on) => call("artist_alias_set", { key: a.key, name: a.name ?? null, sameAs: a.sameAs ?? null, sameAsName: a.sameAsName ?? null, on }),
+    statsPlayedArtists: (query, limit) => call("stats_played_artists", { query, limit: limit ?? null }),
     statsCompareSummary: (unreleasedOk, theirUnreleasedOk) => call("stats_compare_summary", { unreleasedOk, theirUnreleasedOk }),
     statsCompare: (theirs, unreleasedOk) => call("stats_compare", { theirs, unreleasedOk }),
     statsFriends: () => call("stats_friends"),

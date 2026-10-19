@@ -66,6 +66,7 @@ pub fn artist(tag: &str, it: &Item) -> Artist {
         art: it.backdrop_image_tags.first().map(|t| image(tag, &it.id, "Backdrop/0", t)),
         view_count: plays(it).0,
         summary: it.overview.clone().filter(|s| !s.trim().is_empty()),
+        mbid: mbid(it, "MusicBrainzArtist"),
     }
 }
 

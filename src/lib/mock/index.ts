@@ -4255,6 +4255,15 @@ export class MockBackend implements Backend {
   statsWrapped(year: number) {
     return this.delay(() => this.stats.wrapped(year));
   }
+  artistAliases() {
+    return this.delay(() => this.stats.aliasList());
+  }
+  artistAliasSet(a: { key: string; name?: string; sameAs?: string; sameAsName?: string }, on: boolean) {
+    return this.delay(() => this.stats.aliasSet(a, on));
+  }
+  statsPlayedArtists(query: string, limit?: number) {
+    return this.delay(() => this.stats.playedArtists(query, limit));
+  }
   statsCompareSummary(unreleasedOk: boolean, theirUnreleasedOk: boolean) {
     return this.delay(() => this.stats.compareSummary(unreleasedOk, theirUnreleasedOk));
   }

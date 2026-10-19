@@ -189,6 +189,7 @@ pub fn artist(id: &str, title: &str) -> Artist {
         art: None,
         view_count: 0,
         summary: None,
+        mbid: None,
     }
 }
 
