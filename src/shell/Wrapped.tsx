@@ -6,7 +6,10 @@
  * Cards move on by themselves; arrow keys or a click move between them
  * (the left third goes back), holding the pointer down (or Space) pauses,
  * Esc closes. Under reduced motion nothing moves: the cards are static and
- * wait for you. The last card is the summary, which saves or copies as a
+ * wait for you. On the phone the cards fill the screen inside its safe
+ * areas, like stories: tap the left third to go back and the rest to go
+ * on, hold to pause, and a pull down, a swipe in from the left edge, Back
+ * or the close mark at the top right leaves. The last card is the summary, which saves or copies as a
  * 1080 by 1920 image; unreleased songs stay off it unless turned on there.
  */
 import { ChevronLeft, ChevronRight, Copy, Download, Pause, Play, RotateCcw, X } from "lucide-react";
@@ -26,6 +29,9 @@ import { player } from "../stores/player";
 import { nav } from "../stores/router";
 import { toast } from "../stores/toasts";
 import { useWrapped, wrapped } from "../stores/wrapped";
+import { usePhoneForm } from "../phone/form";
+import { lockAxis, release as swipeOutcome, type Axis } from "../phone/gestures";
+import { EDGE_PX, edgeClaims, edgeRelease } from "../phone/motion";
 import "./wrapped.css";
 
 /** How long a card stays before the next one. */
@@ -265,6 +271,8 @@ function SummaryCard({ w, onRestart }: { w: WrappedData; onRestart: () => void }
   const canvas = useRef<HTMLCanvasElement>(null);
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [busy, setBusy] = useState(false);
+  const device = usePhoneForm((s) => (s.phone ? "phone" : "computer"));
+
 
   useEffect(() => {
     let live = true;
@@ -327,7 +335,7 @@ function SummaryCard({ w, onRestart }: { w: WrappedData; onRestart: () => void }
         <div className="wcard__words">
           <Kicker>Your year</Kicker>
           <h2 className="wcard__lead">That was your {w.year}.</h2>
-          <p className="wcard__sub">Keep it as a picture, or copy it to share. It's made on this computer and nothing is uploaded.</p>
+          <p className="wcard__sub">Keep it as a picture, or copy it to share. It's made on this {device} and nothing is uploaded.</p>
           <div className="wcard__actions">
             <Button variant="primary" icon={<Download size={16} />} disabled={busy} onClick={() => void save()}>
               Save image
@@ -376,6 +384,22 @@ function CardBody({ kind, w, onRestart }: { kind: CardKind; w: WrappedData; onRe
 
 const isControl = (t: EventTarget | null) => t instanceof Element && !!t.closest("button, a, input, label, [role='switch'], canvas");
 
+const clock = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+
+/** A finger or button down on the cards. */
+interface Press {
+  id: number;
+  timer: number;
+  hold: boolean;
+  x: number;
+  y: number;
+  /** Started at the left edge (phone): a swipe right from here leaves. */
+  edge: boolean;
+  axis: Axis | null;
+  last: { x: number; y: number; t: number };
+  v: { x: number; y: number };
+}
+
 /** The cards for one year. */
 export function WrappedView({ year, onClose }: { year: number; onClose: () => void }) {
   const { data: w, error } = useLoad(() => backend.statsWrapped(year), [year]);
@@ -388,7 +412,10 @@ export function WrappedView({ year, onClose }: { year: number; onClose: () => vo
   const paused = held || stopped || reduced || last || !cards.length;
   const remaining = useRef(CARD_MS);
   const root = useRef<HTMLDivElement>(null);
-  const press = useRef<{ timer: number; hold: boolean; x: number } | null>(null);
+  const press = useRef<Press | null>(null);
+  const onPhone = usePhoneForm((s) => s.phone);
+  // How far a finger has pulled the cards down (or in from the edge), while it does.
+  const [pull, setPull] = useState<{ x: number; y: number } | null>(null);
 
   const go = useCallback((step: number) => setI((n) => Math.max(0, Math.min(cards.length - 1, n + step))), [cards.length]);
 
@@ -410,7 +437,8 @@ export function WrappedView({ year, onClose }: { year: number; onClose: () => vo
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const k = e.key;
-      if (k === "Escape") onClose();
+      // Esc, and the phone's Back.
+      if (k === "Escape" || k === "GoBack" || k === "BrowserBack") onClose();
       else if (k === "ArrowRight" || k === "PageDown") go(1);
       else if (k === "ArrowLeft" || k === "PageUp") go(-1);
       else if (k === " " && !isControl(e.target)) setStopped((s) => !s);
@@ -431,18 +459,64 @@ export function WrappedView({ year, onClose }: { year: number; onClose: () => vo
   const onDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || isControl(e.target)) return;
     const timer = window.setTimeout(() => {
-      if (press.current) press.current.hold = true;
+      if (!press.current || press.current.axis) return;
+      press.current.hold = true;
       setHeld(true);
     }, HOLD_MS);
-    press.current = { timer, hold: false, x: e.clientX };
+    const left = e.currentTarget.getBoundingClientRect().left;
+    const t = clock();
+    press.current = { id: e.pointerId, timer, hold: false, x: e.clientX, y: e.clientY, edge: onPhone && e.clientX - left <= EDGE_PX, axis: null, last: { x: e.clientX, y: e.clientY, t }, v: { x: 0, y: 0 } };
+  };
+  // On the phone a press that moves is a gesture: down closes, sideways pages, in from the left edge closes.
+  const onMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const p = press.current;
+    if (!p || !onPhone || p.id !== e.pointerId) return;
+    const dx = e.clientX - p.x;
+    const dy = e.clientY - p.y;
+    const t = clock();
+    const dt = Math.max(1, t - p.last.t);
+    p.v = { x: (e.clientX - p.last.x) / dt, y: (e.clientY - p.last.y) / dt };
+    p.last = { x: e.clientX, y: e.clientY, t };
+    if (!p.axis) {
+      if (p.edge) {
+        const claims = edgeClaims(dx, dy);
+        if (claims === null) return;
+        p.edge = claims;
+      }
+      p.axis = lockAxis(dx, dy);
+      if (!p.axis) return;
+      window.clearTimeout(p.timer);
+      if (p.hold) {
+        p.hold = false;
+        setHeld(false);
+      }
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+    }
+    if (p.axis === "y") setPull({ x: 0, y: Math.max(0, dy) });
+    else if (p.edge) setPull({ x: Math.max(0, dx), y: 0 });
   };
   const onUp = (e: ReactPointerEvent<HTMLDivElement>) => {
     const p = press.current;
+    if (!p || p.id !== e.pointerId) return;
     press.current = null;
-    if (!p) return;
     window.clearTimeout(p.timer);
+    setPull(null);
     if (p.hold) return setHeld(false);
     const box = e.currentTarget.getBoundingClientRect();
+    if (p.axis) {
+      const dx = e.clientX - p.x;
+      const dy = e.clientY - p.y;
+      const width = box.width || 1;
+      if (p.edge && p.axis === "x") {
+        if (edgeRelease({ dx, vx: p.v.x, width }) === "back") onClose();
+        return;
+      }
+      const out = swipeOutcome({ axis: p.axis, dx, dy, vx: p.v.x, vy: p.v.y, width, height: box.height || 1 });
+      if (out === "close") onClose();
+      else if (out === "next") go(1);
+      else if (out === "previous") go(-1);
+      return;
+    }
     go(p.x - box.left < box.width / 3 ? -1 : 1);
   };
   const onCancel = () => {
@@ -450,15 +524,21 @@ export function WrappedView({ year, onClose }: { year: number; onClose: () => vo
     press.current = null;
     if (p) window.clearTimeout(p.timer);
     setHeld(false);
+    setPull(null);
   };
 
   const tone = yearTone(year);
   const kind = cards[i];
   const style = { "--year-deep": tone.deep, "--year-light": tone.light, "--card-ms": `${CARD_MS}ms` } as CSSProperties;
+  if (pull) {
+    // The cards follow the finger, fading a little as they go.
+    style.transform = `translate(${pull.x}px, ${pull.y}px)`;
+    style.opacity = 1 - Math.min(0.4, (pull.x + pull.y) / 1000);
+  }
   return (
     <div
       ref={root}
-      className="wrapped"
+      className={`wrapped ${onPhone ? "wrapped--phone" : ""} ${pull ? "is-pulled" : ""}`}
       role="dialog"
       aria-modal="true"
       aria-label={`${year} Wrapped`}
@@ -486,14 +566,20 @@ export function WrappedView({ year, onClose }: { year: number; onClose: () => vo
             </span>
           )}
           <span className="wrapped__tools">
-            {!reduced && !last && cards.length > 0 && (
+            {!onPhone && !reduced && !last && cards.length > 0 && (
               <IconButton label={stopped ? "Resume" : "Pause"} size="sm" icon={stopped ? <Play size={16} fill="currentColor" /> : <Pause size={16} fill="currentColor" />} onClick={() => setStopped((s) => !s)} />
             )}
-            <IconButton label="Close Wrapped" size="sm" icon={<X size={18} />} onClick={onClose} />
+            {onPhone ? (
+              <button type="button" className="wrapped__close" aria-label="Close" onClick={onClose}>
+                <X size={24} aria-hidden="true" />
+              </button>
+            ) : (
+              <IconButton label="Close Wrapped" size="sm" icon={<X size={18} />} onClick={onClose} />
+            )}
           </span>
         </div>
       </div>
-      <div className="wrapped__stage" onPointerDown={onDown} onPointerUp={onUp} onPointerCancel={onCancel} onPointerLeave={onCancel}>
+      <div className="wrapped__stage" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel} onPointerLeave={onCancel}>
         {error ? (
           <div className="wcard wcard--state">
             <div className="wcard__body">
@@ -536,7 +622,7 @@ export function WrappedView({ year, onClose }: { year: number; onClose: () => vo
           </section>
         )}
       </div>
-      {cards.length > 1 && (
+      {cards.length > 1 && !onPhone && (
         <>
           <button type="button" className="wrapped__nav wrapped__nav--prev" aria-label="Previous card" disabled={i === 0} onClick={() => go(-1)}>
             <ChevronLeft size={20} aria-hidden="true" />

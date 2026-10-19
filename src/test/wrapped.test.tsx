@@ -43,6 +43,7 @@ import { useRouter } from "../stores/router";
 import { loadSettings, useSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
 import { useWrapped } from "../stores/wrapped";
+import { usePhoneForm } from "../phone/form";
 
 const mock = backend as MockBackend;
 
@@ -495,6 +496,78 @@ describe("Wrapped cards", () => {
     key("ArrowLeft");
     expect(view).toHaveAttribute("data-card", "songs");
     expect(screen.getByText("Unreleased")).toBeInTheDocument();
+  });
+
+  describe("on the phone", () => {
+    beforeEach(() => usePhoneForm.setState({ phone: true }));
+    afterEach(() => usePhoneForm.setState({ phone: false }));
+    const box = (el: HTMLElement) => {
+      el.getBoundingClientRect = () => ({ left: 0, top: 0, width: 390, height: 844, right: 390, bottom: 844, x: 0, y: 0, toJSON: () => ({}) });
+    };
+
+    it("fills the screen with a close mark at the top right and no page arrows", async () => {
+      const { view, onClose } = await open();
+      expect(view).toHaveClass("wrapped--phone");
+      expect(screen.queryByRole("button", { name: "Next card" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
+      await userEvent.setup().click(screen.getByRole("button", { name: "Close" }));
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it("a tap on the right third goes on, on the left third goes back", async () => {
+      const { view, stage } = await open();
+      box(stage);
+      fireEvent.pointerDown(stage, { button: 0, pointerId: 1, clientX: 330, clientY: 400 });
+      fireEvent.pointerUp(stage, { button: 0, pointerId: 1, clientX: 330, clientY: 400 });
+      expect(view).toHaveAttribute("data-card", "artists");
+      fireEvent.pointerDown(stage, { button: 0, pointerId: 2, clientX: 40, clientY: 400 });
+      fireEvent.pointerUp(stage, { button: 0, pointerId: 2, clientX: 40, clientY: 400 });
+      expect(view).toHaveAttribute("data-card", "minutes");
+    });
+
+    it("a pull down closes; a short one snaps back", async () => {
+      const { view, stage, onClose } = await open();
+      box(stage);
+      // A slow finger: no flick.
+      let t = 0;
+      vi.spyOn(performance, "now").mockImplementation(() => (t += 200));
+      fireEvent.pointerDown(stage, { button: 0, pointerId: 1, clientX: 200, clientY: 300 });
+      fireEvent.pointerMove(stage, { pointerId: 1, clientX: 200, clientY: 330 });
+      fireEvent.pointerMove(stage, { pointerId: 1, clientX: 200, clientY: 340 });
+      expect(view).toHaveClass("is-pulled");
+      fireEvent.pointerUp(stage, { button: 0, pointerId: 1, clientX: 200, clientY: 340 });
+      expect(onClose).not.toHaveBeenCalled();
+      expect(view).not.toHaveClass("is-pulled");
+      expect(view).toHaveAttribute("data-card", "minutes");
+      fireEvent.pointerDown(stage, { button: 0, pointerId: 2, clientX: 200, clientY: 300 });
+      fireEvent.pointerMove(stage, { pointerId: 2, clientX: 200, clientY: 400 });
+      fireEvent.pointerMove(stage, { pointerId: 2, clientX: 200, clientY: 620 });
+      fireEvent.pointerUp(stage, { button: 0, pointerId: 2, clientX: 200, clientY: 620 });
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it("a swipe in from the left edge and the phone's Back both close", async () => {
+      const { stage, onClose } = await open();
+      box(stage);
+      fireEvent.pointerDown(stage, { button: 0, pointerId: 1, clientX: 6, clientY: 400 });
+      fireEvent.pointerMove(stage, { pointerId: 1, clientX: 60, clientY: 402 });
+      fireEvent.pointerMove(stage, { pointerId: 1, clientX: 220, clientY: 404 });
+      fireEvent.pointerUp(stage, { button: 0, pointerId: 1, clientX: 220, clientY: 404 });
+      expect(onClose).toHaveBeenCalledOnce();
+      key("GoBack");
+      expect(onClose).toHaveBeenCalledTimes(2);
+    });
+
+    it("a sideways swipe away from the edge pages", async () => {
+      const { view, stage, onClose } = await open();
+      box(stage);
+      fireEvent.pointerDown(stage, { button: 0, pointerId: 1, clientX: 300, clientY: 400 });
+      fireEvent.pointerMove(stage, { pointerId: 1, clientX: 250, clientY: 402 });
+      fireEvent.pointerMove(stage, { pointerId: 1, clientX: 120, clientY: 404 });
+      fireEvent.pointerUp(stage, { button: 0, pointerId: 1, clientX: 120, clientY: 404 });
+      expect(view).toHaveAttribute("data-card", "artists");
+      expect(onClose).not.toHaveBeenCalled();
+    });
   });
 
   it("says so when a year has nothing to wrap", async () => {

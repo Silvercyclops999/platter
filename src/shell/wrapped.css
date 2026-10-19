@@ -282,3 +282,91 @@ button.wcard__row:hover .wcard__play, button.wcard__row:focus-visible .wcard__pl
 :root[data-reduced-motion="true"] .wrapped * {
   animation: none !important;
 }
+
+/* ------------------------------------------------------------ phone */
+/* The phone: stories inside the safe areas. One column, type sized to the
+   width, the close mark at the top right (44 pt), and no page arrows (taps
+   and swipes do that). Nothing on a card scrolls, so a pull down always
+   means leave. */
+.wrapped--phone {
+  --wr-safe-top: var(--ph-safe-top, env(safe-area-inset-top, 0px));
+  --wr-safe-bottom: var(--ph-safe-bottom, env(safe-area-inset-bottom, 0px));
+  touch-action: none;
+  transition: transform var(--ph-quick, 220ms) var(--ph-ease, ease-out), opacity var(--ph-quick, 220ms) var(--ph-ease, ease-out);
+}
+.wrapped--phone.is-pulled { transition: none; }
+.wrapped--phone .wrapped__bar { padding: calc(var(--wr-safe-top) + 8px) 6px 0 16px; }
+.wrapped--phone .wrapped__progress { gap: 4px; margin-right: 10px; }
+.wrapped--phone .wrapped__seg { height: 2.5px; }
+.wrapped--phone .wrapped__top { height: 44px; margin-top: 2px; gap: var(--space-2); }
+.wrapped--phone .wrapped__title { font-size: 15px; }
+.wrapped--phone .wrapped__count { font-size: 13px; }
+.wrapped__close {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--wr-text);
+  cursor: pointer;
+}
+.wrapped__close:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; }
+
+.wrapped--phone .wcard {
+  align-items: flex-start;
+  overflow: hidden;
+  padding: calc(var(--wr-safe-top) + 84px) 24px calc(var(--wr-safe-bottom) + 28px);
+}
+.wrapped--phone .wcard__body--split,
+.wrapped--phone .wcard--summary .wcard__body--split { grid-template-columns: minmax(0, 1fr); gap: 28px; align-content: start; }
+.wrapped--phone .wcard__kicker { font-size: 12px; }
+.wrapped--phone .wcard__lead { max-width: none; margin: 10px 0 12px; font-size: clamp(27px, 8vw, 34px); line-height: 1.08; letter-spacing: -0.025em; }
+.wrapped--phone .wcard__sub { max-width: none; font-size: 16px; line-height: 1.45; }
+.wrapped--phone .wcard__big { margin: 28px 0 28px -0.04em; font-size: clamp(72px, 24vw, 104px); }
+.wrapped--phone .wcard__unit { font-size: 22px; }
+.wrapped--phone .wcard__art::after { background: linear-gradient(180deg, rgba(14, 13, 12, 0.35) 0%, rgba(14, 13, 12, 0.7) 60%, rgba(14, 13, 12, 0.85) 100%); }
+.wrapped--phone .wcard__photo img { object-position: 50% 20%; }
+.wrapped--phone .wcard__photo::after { background: linear-gradient(180deg, rgba(14, 13, 12, 0.55) 0%, rgba(14, 13, 12, 0.35) 30%, rgba(14, 13, 12, 0.88) 62%, rgba(14, 13, 12, 0.96) 100%); }
+.wrapped--phone .wcard--artists { align-items: flex-end; }
+.wrapped--phone .wcard--artists .wcard__lead, .wrapped--phone .wcard--artists .wcard__sub { max-width: none; }
+
+.wrapped--phone .wcard__ranks { margin-top: 20px; gap: 4px; }
+.wrapped--phone .wcard__ranks li { grid-template-columns: 32px minmax(0, 1fr); font-size: 19px; }
+.wrapped--phone .wcard__ranks li.is-first { font-size: 26px; }
+
+.wrapped--phone .wcard__songs { gap: 2px; margin: 0 -8px; }
+.wrapped--phone .wcard__row { grid-template-columns: 22px 44px minmax(0, 1fr) auto; gap: 12px; padding: 6px 8px; }
+.wrapped--phone .wcard__songs .wcard__rank { font-size: 17px; }
+.wrapped--phone .wcard__cover { width: 44px; height: 44px; }
+.wrapped--phone .wcard__cover .art { width: 44px !important; height: 44px !important; }
+.wrapped--phone .wcard__name { font-size: 16px; }
+.wrapped--phone .wcard__by, .wrapped--phone .wcard__plays { font-size: 13px; }
+
+.wrapped--phone .wcard--albums .wcard__body--split { gap: 20px; }
+.wrapped--phone .wcard__hero-cover { order: -1; justify-self: start; width: min(44vw, 24vh); box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45); }
+.wrapped--phone .wcard__albums { grid-template-columns: minmax(0, 1fr); gap: 10px; margin-top: 18px; }
+.wrapped--phone .wcard__albums li > :first-child { width: 44px !important; height: 44px !important; }
+.wrapped--phone .wcard__album-text .wcard__name { font-size: 15px; }
+.wrapped--phone .wcard__genres { margin-top: 18px; padding-top: 12px; font-size: 17px; }
+
+.wrapped--phone .wcard__traits { grid-template-columns: minmax(0, 1fr); gap: 14px; margin-top: 24px; }
+.wrapped--phone .wcard__traits li { display: grid; grid-template-columns: 116px minmax(0, 1fr); column-gap: 14px; align-items: baseline; padding-top: 12px; }
+.wrapped--phone .wcard__value { grid-row: span 2; font-size: 40px; }
+.wrapped--phone .wcard__trait { font-size: 16px; }
+.wrapped--phone .wcard__line { font-size: 13px; }
+
+.wrapped--phone .wcard__replay { justify-self: stretch; width: auto; flex-direction: row; align-items: center; gap: 16px; }
+.wrapped--phone .wcard__replay-cover { flex: none; width: 112px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45); }
+.wrapped--phone .wcard__replay figcaption { min-width: 0; }
+.wrapped--phone .wcard__replay-line { margin: 4px 0 10px; font-size: 16px; }
+
+.wrapped--phone .wcard--summary .wcard__body--split { gap: 20px; }
+.wrapped--phone .wcard__preview { order: -1; justify-self: center; }
+.wrapped--phone .wcard__canvas { height: min(40vh, 340px); border-radius: 10px; }
+.wrapped--phone .wcard--summary .wcard__lead { margin-top: 6px; }
+.wrapped--phone .wcard--summary .wcard__sub { font-size: 14px; }
+.wrapped--phone .wcard__actions { gap: 8px; margin-top: 16px; }
+.wrapped--phone .wcard__option { margin-top: 12px; font-size: 14px; }
+.wrapped--phone .wcard__fine { margin-top: 8px; font-size: 12px; }
