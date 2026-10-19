@@ -17,6 +17,7 @@
 //! - [`publish`]: telling plex.tv where this computer answers.
 //! - [`keys`]: the requests that copy keys between devices.
 //! - [`sync`]: the requests that keep the user's devices in step.
+//! - [`pair`]: the requests that pair two of them with the 6-digit code.
 
 pub mod auth;
 #[cfg(target_os = "ios")]
@@ -25,6 +26,7 @@ pub mod client;
 pub mod devices;
 pub mod directory;
 pub mod keys;
+pub mod pair;
 pub mod publish;
 pub mod runtime;
 pub mod server;

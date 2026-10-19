@@ -34,6 +34,11 @@ impl SharedKey {
         hmac_sha256(&self.0, label)
     }
 
+    /// A key for another use of the same exchange (device pairing).
+    pub fn derive(&self, label: &str) -> [u8; 32] {
+        self.sub(label.as_bytes())
+    }
+
     /// What the receiver sends to show it has the same key.
     pub fn confirmation(&self) -> [u8; 32] {
         self.sub(b"platter-keys-v1 confirm")

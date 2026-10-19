@@ -78,6 +78,8 @@ pub struct DeviceSync {
     lan: RwLock<Option<Arc<dyn LanSend>>>,
     /// One answer to a request from the local network at a time, per link.
     replies: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// A link was added, or "Sync now".
+    kick: tokio::sync::Notify,
 }
 
 impl DeviceSync {
@@ -90,7 +92,14 @@ impl DeviceSync {
             listeners: Mutex::default(),
             lan: RwLock::default(),
             replies: Mutex::default(),
+            kick: tokio::sync::Notify::new(),
         }
+    }
+
+    /// A device was paired, or the user asked to sync now: listen on any
+    /// new link and run a round with every device.
+    pub fn kick(&self) {
+        self.kick.notify_one();
     }
 
     /// Use the local network when the other device answers there.
@@ -262,6 +271,10 @@ impl DeviceSync {
                     }
                 },
                 _ = every.tick() => self.sync_now().await,
+                _ = self.kick.notified() => {
+                    self.listen_new(&tx);
+                    self.sync_now().await;
+                }
                 c = changes.recv() => {
                     if c.is_ok() && !self.wire.links.all().is_empty() {
                         dirty = Some(tokio::time::Instant::now());

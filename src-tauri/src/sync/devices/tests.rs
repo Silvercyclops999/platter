@@ -643,7 +643,7 @@ mod lan {
     use crate::remote::types::RemoteCommand;
     use crate::sync::devices::lan::{LanSend, PeerLan};
 
-    struct NoPlayer;
+    pub(super) struct NoPlayer;
     #[async_trait]
     impl PeerHandler for NoPlayer {
         async fn hello(&self) -> Hello {
@@ -663,7 +663,7 @@ mod lan {
         }
     }
 
-    struct Fixed(PeerKey);
+    pub(super) struct Fixed(pub(super) PeerKey);
     #[async_trait]
     impl KeySource for Fixed {
         async fn key(&self) -> Option<PeerKey> {
@@ -671,7 +671,7 @@ mod lan {
         }
     }
 
-    fn key(t: &str) -> PeerKey {
+    pub(super) fn key(t: &str) -> PeerKey {
         PeerKey::from_token(&Token::new(t).unwrap())
     }
 
@@ -831,3 +831,5 @@ mod lan {
         let _ = (a.stop.send(true), b.stop.send(true));
     }
 }
+
+mod pairing;
