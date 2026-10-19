@@ -142,3 +142,46 @@ fn the_last_check_through_a_home_side_counts_with_no_address_here() {
     pc.store(false, Ordering::SeqCst);
     assert!(!r.lidarr.status().ready);
 }
+
+#[test]
+fn an_address_that_arrives_by_sync_never_becomes_the_keys_host() {
+    let r = rig();
+    // A key saved before hosts were recorded, with the home address set.
+    r.db.write(|c| {
+        c.execute("DELETE FROM kv WHERE key = 'keyHosts.lidarr-api-key'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    // On start, before anything syncs, the key is bound to it.
+    crate::keyhost::startup_adopt(&r.db);
+    // Then another device's address arrives.
+    let mut s = crate::settings::load(&r.db);
+    s.lidarr_url = "http://10.20.30.99:8686".into();
+    s.lidarr_away_url = "https://elsewhere.example.com".into();
+    crate::settings::save(&r.db, &s).unwrap();
+    for u in [s.lidarr_url.as_str(), s.lidarr_away_url.as_str()] {
+        assert!(!crate::keyhost::trusted(&r.db, super::KEY_ACCOUNT, u, &[u]), "{u}");
+    }
+    assert!(r.lidarr.home_side_route().is_none(), "the computer never answers with the key sent there");
+    assert!(r.lidarr.status().moved.is_some());
+    assert!(order(&r.lidarr).is_err(), "and nothing here sends it there");
+    // The address it was entered for still works.
+    assert!(crate::keyhost::trusted(&r.db, super::KEY_ACCOUNT, "http://10.20.30.40:8686", &[]));
+
+    // A device with no key and no address at start gets an empty record,
+    // so an address arriving later isn't taken either.
+    let r = rig();
+    r.lidarr.set_key(None).unwrap();
+    r.db.write(|c| {
+        c.execute("DELETE FROM kv WHERE key = 'keyHosts.lidarr-api-key'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    let mut s = crate::settings::load(&r.db);
+    s.lidarr_url = String::new();
+    crate::settings::save(&r.db, &s).unwrap();
+    crate::keyhost::startup_adopt(&r.db);
+    s.lidarr_url = "http://10.20.30.99:8686".into();
+    crate::settings::save(&r.db, &s).unwrap();
+    assert!(!crate::keyhost::trusted(&r.db, super::KEY_ACCOUNT, &s.lidarr_url, &[&s.lidarr_url]));
+}
