@@ -187,7 +187,7 @@ struct Stream {
 }
 
 fn first_meta(body: &[u8]) -> AppResult<Meta> {
-    let env: Envelope = serde_json::from_slice(body)
+    let env: Envelope = super::client::decode_json(body)
         .map_err(|e| AppError::Decode(format!("/library/metadata: {e}")))?;
     env.media_container
         .metadata

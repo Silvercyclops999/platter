@@ -940,7 +940,7 @@ impl PlexClient {
     /// (sessions, history): the same fields [`Self::qualify_meta`] tags.
     pub fn qualify_json(&self, body: &[u8]) -> Vec<u8> {
         let Some(t) = self.tag.as_deref() else { return body.to_vec() };
-        let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(body) else { return body.to_vec() };
+        let Ok(mut v) = decode_json::<serde_json::Value>(body) else { return body.to_vec() };
         fn walk(t: &str, v: &mut serde_json::Value) {
             const FIELDS: &[&str] = &[
                 "ratingKey",
@@ -1042,7 +1042,7 @@ impl PlexClient {
         }
         let resp = self.send(rb).await?;
         let bytes = crate::web::body_capped(resp, PLEX_MAX, map_send_error).await?;
-        serde_json::from_slice(&bytes)
+        decode_json(&bytes)
             .map_err(|e| AppError::Decode(format!("{}: {e}", path.split('?').next().unwrap_or(""))))
     }
 
@@ -1498,7 +1498,7 @@ impl PlexClient {
         let resp = self.send(rb).await?;
         let bytes = crate::web::body_capped(resp, PLEX_MAX, map_send_error).await?;
         let mut env: Envelope<Container> =
-            serde_json::from_slice(&bytes).map_err(|e| AppError::Decode(format!("/playlists: {e}")))?;
+            decode_json(&bytes).map_err(|e| AppError::Decode(format!("/playlists: {e}")))?;
         self.qualify_container(&mut env.media_container);
         env.media_container
             .metadata
@@ -1520,7 +1520,7 @@ impl PlexClient {
         let resp = self.send(rb).await?;
         let bytes = crate::web::body_capped(resp, PLEX_MAX, map_send_error).await?;
         let mut env: Envelope<Container> =
-            serde_json::from_slice(&bytes).map_err(|e| AppError::Decode(format!("/playlists: {e}")))?;
+            decode_json(&bytes).map_err(|e| AppError::Decode(format!("/playlists: {e}")))?;
         self.qualify_container(&mut env.media_container);
         env.media_container
             .metadata
@@ -1758,8 +1758,73 @@ impl PlexClient {
     }
 }
 
+/// Decodes a Plex reply. A tag with a broken character comes back as bytes
+/// that aren't UTF-8, or as a lone UTF-16 half (`\ud83d` with no partner),
+/// and JSON rejects both; such a reply is read again with each broken
+/// character swapped for U+FFFD, so one bad tag doesn't stop the whole
+/// library from loading.
+pub(crate) fn decode_json<T: DeserializeOwned>(bytes: &[u8]) -> serde_json::Result<T> {
+    serde_json::from_slice(bytes).or_else(|e| {
+        let text = String::from_utf8_lossy(bytes);
+        let fixed = fix_lone_surrogates(text.as_bytes());
+        if fixed == bytes { Err(e) } else { serde_json::from_slice(&fixed) }
+    })
+}
+
+fn fix_lone_surrogates(bytes: &[u8]) -> Vec<u8> {
+    fn half(b: &[u8], i: usize) -> Option<u16> {
+        let h = b.get(i..i + 6)?;
+        if h[0] != b'\\' || h[1] != b'u' {
+            return None;
+        }
+        u16::from_str_radix(std::str::from_utf8(&h[2..]).ok()?, 16).ok()
+    }
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            // An escape: a UTF-16 half or pair, any other \\u, or a two-byte one.
+            if let Some(u) = half(bytes, i) {
+                let paired = |n: Option<u16>| n.is_some_and(|n| (0xDC00..0xE000).contains(&n));
+                if (0xD800..0xDC00).contains(&u) && paired(half(bytes, i + 6)) {
+                    out.extend_from_slice(&bytes[i..i + 12]);
+                    i += 12;
+                } else if (0xD800..0xE000).contains(&u) {
+                    out.extend_from_slice(b"\\ufffd");
+                    i += 6;
+                } else {
+                    out.extend_from_slice(&bytes[i..i + 6]);
+                    i += 6;
+                }
+            } else {
+                out.extend_from_slice(&bytes[i..(i + 2).min(bytes.len())]);
+                i += 2;
+            }
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn broken_characters_become_replacement_characters() {
+        let body = br#"{"a":"x\ud83dy","b":"\ud83d\ude00","c":"\\ud83d","d":"\udc00"}"#;
+        assert!(serde_json::from_slice::<serde_json::Value>(body).is_err());
+        let v: serde_json::Value = decode_json(body).unwrap();
+        assert_eq!(v["a"], "x\u{fffd}y");
+        assert_eq!(v["b"], "\u{1f600}");
+        assert_eq!(v["c"], "\\ud83d");
+        assert_eq!(v["d"], "\u{fffd}");
+        let latin1 = b"{\"a\":\"Beyonc\xe9\"}";
+        assert!(serde_json::from_slice::<serde_json::Value>(latin1).is_err());
+        let v: serde_json::Value = decode_json(latin1).unwrap();
+        assert_eq!(v["a"], "Beyonc\u{fffd}");
+    }
     use super::*;
     use wiremock::matchers::{header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
