@@ -90,7 +90,9 @@ describe("the diary page", () => {
     expect(within(rows[0]).getByRole("heading", { level: 3, name: e.title })).toBeInTheDocument();
     expect(within(rows[0]).getByText(e.artist, { exact: false })).toBeInTheDocument();
     if (e.rating != null) expect(within(rows[0]).getByRole("img", { name: `Rated ${e.rating} out of 5` })).toBeInTheDocument();
-    expect(screen.getByText(`${entries.length} entries since`, { exact: false })).toHaveTextContent("Only on this computer.");
+    // The page leads with the whole diary in a sentence: how many, since when, the latest.
+    expect(screen.getByTestId("diary-lead")).toHaveTextContent(new RegExp(`^${entries.length} records in your diary since \\w+ \\d{4}\\. The latest is ${entries[0].title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}, on `));
+    expect(screen.getByText("Only on this computer.")).toBeInTheDocument();
   });
 
   it("the year view lays out a year's covers by month with counts", async () => {

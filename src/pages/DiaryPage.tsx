@@ -7,7 +7,7 @@
  * entries shown as text or CSV. Kept on this computer unless the diary's
  * sync setting is on.
  */
-import { ChevronLeft, ChevronRight, Download, NotebookPen, Pencil } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Pencil } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Art } from "../components/Art";
 import { Button, IconButton } from "../components/Button";
@@ -27,6 +27,7 @@ import { updateSettings, useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import { DiaryEntryDialog } from "./DiaryEntryDialog";
 import { StarDisplay } from "./StarRating";
+import "./ledger.css";
 import "./diary.css";
 
 type View = "entries" | "year";
@@ -173,6 +174,26 @@ function YearView({ year, list, onMonth }: { year: number; list: DiaryList; onMo
   );
 }
 
+/**
+ * The diary's sentence: how many records since when, the latest one, and
+ * how you rated them. Only for the whole diary (no filter or search), when
+ * every entry is in hand.
+ */
+function DiaryLead({ list }: { list: DiaryList }) {
+  const latest = list.entries[0];
+  const since = list.firstAt != null ? new Date(list.firstAt) : null;
+  const rated = list.entries.filter((e) => e.rating != null);
+  const high = rated.filter((e) => (e.rating ?? 0) >= 4).length;
+  const at = new Date(latest.at);
+  return (
+    <p className="lead lead--sm diary-head__lead" data-testid="diary-lead">
+      <strong>{plural(list.total, "record", "records")}</strong> in your diary{since && ` since ${MONTHS[since.getMonth()]} ${since.getFullYear()}`}. The latest is <strong>{latest.title}</strong>, on{" "}
+      {MONTHS[at.getMonth()].slice(0, 3)} {at.getDate()}.
+      {high > 0 && (high === rated.length ? (high === 1 ? " The one you rated got four stars or more." : ` All ${high} you rated got four stars or more.`) : ` ${high} of the ${rated.length} you rated got four stars or more.`)}
+    </p>
+  );
+}
+
 export function DiaryPage({ edit }: { edit?: string }) {
   const on = useDiaryOn();
   const synced = useSettings((s) => !!s.settings?.syncDiary);
@@ -258,10 +279,14 @@ export function DiaryPage({ edit }: { edit?: string }) {
   const filtered = filter !== "all" || year != null || !!words.trim();
   const since = list?.firstAt != null ? new Date(list.firstAt) : null;
   const where = synced ? "Synced to your devices." : "Only on this computer.";
+  // With the sentence above it, the line under it only says where the diary lives.
+  const led = !!list && list.total > 0 && !filtered && list.entries.length === list.total;
   const lede =
     list == null
       ? " "
-      : list.total === 0
+      : led
+        ? where
+        : list.total === 0
         ? "Albums you play start to finish are written here on their own."
         : since == null
           ? `${plural(list.total, "entry", "entries")}. ${where}`
@@ -270,10 +295,9 @@ export function DiaryPage({ edit }: { edit?: string }) {
   return (
     <div className="page-pad diary-page">
       <header className="diary-head">
-        <p className="diary-head__eyebrow">
-          <NotebookPen size={16} aria-hidden="true" /> Private
-        </p>
+        <p className="eyebrow diary-head__eyebrow">Private</p>
         <h1 className="page-title diary-head__title">Listening diary</h1>
+        {led && <DiaryLead list={list} />}
         <p className="diary-head__lede">{lede}</p>
       </header>
 

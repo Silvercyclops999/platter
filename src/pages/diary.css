@@ -8,53 +8,60 @@
 .diary-page { max-width: 980px; container-type: inline-size; }
 
 .diary-head { margin-bottom: var(--space-6); }
-.diary-head__eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin: 0 0 var(--space-2);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-secondary);
-}
-.diary-head .diary-head__title { margin: 0 0 var(--space-2); }
+.diary-head__eyebrow { margin: 0 0 var(--space-2); }
+.diary-head .diary-head__title { margin: 0 0 var(--space-4); }
 .diary-page > .page-title { margin-left: 0; }
-.diary-head__lede { margin: 0; color: var(--color-text-secondary); font-size: var(--font-size-md); }
+.diary-head .diary-head__lead { margin-bottom: var(--space-3); }
+.diary-head__lede { margin: 0; color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 
-/* Controls: views, filters, year, search, export. */
+/* Controls: views, filters, year, search, export, as words on one rule. */
 .diary-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3) var(--space-4);
-  padding-bottom: var(--space-4);
-  margin-bottom: var(--space-6);
-  border-bottom: 1px solid var(--color-border);
+  gap: var(--space-2) var(--space-6);
+  padding-bottom: 0;
+  margin-bottom: var(--space-8);
+  border-bottom: 1px solid var(--ledger-line);
 }
 :root[data-identity] .diary-bar { border-bottom-color: var(--engrave-dark); box-shadow: 0 1px 0 var(--engrave-light); }
-.diary-bar__views { margin: 0; }
-.diary-bar__filters { margin: 0; }
+.diary-bar__views, .diary-bar__filters { margin: 0; gap: var(--space-1); }
+:root .diary-bar :is(.tab, .chip) {
+  height: 40px;
+  padding: 0 var(--space-2);
+  border-radius: 0;
+  background: none;
+  box-shadow: inset 0 -2px 0 transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-regular);
+}
+:root .diary-bar :is(.tab, .chip):hover { background: none; color: var(--color-text-primary); }
+:root .diary-bar .tab.is-selected { background: none; color: var(--color-text-primary); font-weight: var(--font-weight-semibold); box-shadow: inset 0 -2px 0 var(--color-text-primary); }
+:root .diary-bar .chip.is-selected { background: none; color: var(--color-text-primary); font-weight: var(--font-weight-semibold); box-shadow: inset 0 -2px 0 var(--color-accent); }
+.diary-bar__views { padding-right: var(--space-6); border-right: 1px solid var(--ledger-faint); }
 .diary-bar__year select {
   height: 32px;
-  padding: 0 var(--space-3);
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-raised);
+  padding: 0 var(--space-6) 0 var(--space-1);
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
   color: var(--color-text-primary);
   font: inherit;
+  font-family: var(--font-readout, var(--font-family));
   font-size: var(--font-size-sm);
 }
 .diary-bar__step { display: inline-flex; align-items: center; gap: var(--space-1); }
 .diary-bar__step-year {
   min-width: 3.2em;
   text-align: center;
-  font-family: var(--font-headings, var(--font-family));
-  font-size: var(--font-size-lg);
+  font-family: var(--font-readout, var(--font-family));
+  font-size: var(--font-size-md);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.diary-bar__search { flex: 1 1 200px; max-width: 300px; margin-left: auto; }
-
+.diary-bar__search { flex: 1 1 200px; max-width: 280px; margin-left: auto; }
+.diary-bar .search-field { height: 36px; border-radius: 2px; background: var(--ledger-faint); }
 /* Month sections. */
 .diary-month { margin-bottom: var(--space-8); }
 .diary-month__head {
@@ -70,7 +77,7 @@
   font-weight: 600;
   letter-spacing: -0.005em;
 }
-.diary-month__count { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.diary-month__count { font-family: var(--font-readout, var(--font-family)); font-size: var(--font-size-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .diary-month__list { list-style: none; margin: 0; padding: 0; }
 
 /* One entry: margin date, sleeve, text, edit. */
