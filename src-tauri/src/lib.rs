@@ -84,9 +84,29 @@ use crate::plex::notifications::PlexEvent;
 ///   runs every `SAFETY_EVERY` anyway: a server can keep the socket open
 ///   and still not send library events (to an account that isn't its
 ///   owner, say).
+/// - Every `SCAN_CHECK_EVERY` the music library's last scan time is asked
+///   for; a scan since the last look runs a sync, so new music shows within
+///   minutes even when the scan's notification never came.
 const QUIET: Duration = Duration::from_secs(5);
 const FALLBACK_EVERY: Duration = Duration::from_secs(15 * 60);
 const SAFETY_EVERY: Duration = Duration::from_secs(60 * 60);
+/// How often the music library's last scan time is asked for (one small
+/// request): a scan that added music runs a sync within minutes even when
+/// its notification never arrived.
+const SCAN_CHECK_EVERY: Duration = Duration::from_secs(3 * 60);
+
+/// Whether the library was scanned since the last look: `scanned` is the
+/// section's last scan time now, `seen` the one from the previous look
+/// (None the first time, when it's compared with the last sync instead).
+/// Only a move forward counts, so a server clock that runs ahead of this
+/// computer's can't cause a sync on every look.
+fn scanned_since(scanned: Option<i64>, seen: Option<i64>, last_sync: Option<i64>) -> bool {
+    let Some(scanned) = scanned else { return false };
+    match seen {
+        Some(seen) => scanned > seen,
+        None => last_sync.is_none_or(|at| scanned > at),
+    }
+}
 
 fn watch_library(app: tauri::AppHandle, plex: PlexState, db: DbHandle) {
     // When the last relevant change arrived; None = nothing pending.
@@ -150,8 +170,29 @@ fn watch_library(app: tauri::AppHandle, plex: PlexState, db: DbHandle) {
     spawn_live_batches(app, db.clone(), live_rx, pending.clone(), wake.clone());
     tauri::async_runtime::spawn(async move {
         let mut last_fallback = std::time::Instant::now();
+        let mut last_scan_check = std::time::Instant::now();
+        let mut seen_scan: Option<i64> = None;
         loop {
             let down = !socket_up.load(std::sync::atomic::Ordering::Acquire);
+            if last_scan_check.elapsed() >= SCAN_CHECK_EVERY && pending.lock().is_none() {
+                last_scan_check = std::time::Instant::now();
+                let state = db.read(db::store::sync_state).ok().flatten();
+                if let (Some(state), Ok(client)) = (state, plex.client().await) {
+                    match client.sections().await {
+                        Ok(sections) => {
+                            let scanned = sections.iter().find(|s| s.id == state.section_id).and_then(|s| s.scanned_at);
+                            if scanned_since(scanned, seen_scan, state.last_sync_at) {
+                                tracing::debug!("music library scanned since the last look; sync");
+                                *pending.lock() = std::time::Instant::now().checked_sub(QUIET);
+                            }
+                            if scanned.is_some() {
+                                seen_scan = scanned;
+                            }
+                        }
+                        Err(e) => tracing::debug!("library scan check: {e}"),
+                    }
+                }
+            }
             if last_fallback.elapsed() >= if down { FALLBACK_EVERY } else { SAFETY_EVERY } {
                 last_fallback = std::time::Instant::now();
                 tracing::debug!(down, "periodic sync");
@@ -173,7 +214,8 @@ fn watch_library(app: tauri::AppHandle, plex: PlexState, db: DbHandle) {
                 }
             }
             let age = pending.lock().map(|at| at.elapsed());
-            let wait = library_wait(age, down, last_fallback.elapsed(), blocked);
+            let wait = library_wait(age, down, last_fallback.elapsed(), blocked)
+                .min(SCAN_CHECK_EVERY.saturating_sub(last_scan_check.elapsed()).max(Duration::from_secs(1)));
             tokio::select! {
                 _ = tokio::time::sleep(wait) => {}
                 _ = wake.notified() => {}
@@ -1997,6 +2039,22 @@ mod watch_tests {
             item_type: Some(10),
             state: Some(5),
         }
+    }
+
+    #[test]
+    fn a_scan_counts_once_and_only_when_it_moves_forward() {
+        // First look: compared with the last sync.
+        assert!(scanned_since(Some(200), None, Some(100)));
+        assert!(!scanned_since(Some(100), None, Some(200)));
+        assert!(scanned_since(Some(100), None, None));
+        // Later looks: only a newer scan than the last one seen.
+        assert!(!scanned_since(Some(200), Some(200), Some(100)));
+        assert!(scanned_since(Some(201), Some(200), Some(100)));
+        // A server clock far ahead of this computer's: one sync, not one per look.
+        assert!(scanned_since(Some(9_000), None, Some(100)));
+        assert!(!scanned_since(Some(9_000), Some(9_000), Some(150)));
+        // The server didn't say.
+        assert!(!scanned_since(None, Some(5), Some(1)));
     }
 
     fn scan_ended(section: Option<&str>) -> PlexEvent {
