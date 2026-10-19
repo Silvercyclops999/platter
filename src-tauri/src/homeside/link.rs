@@ -41,6 +41,9 @@ const MAX_PENDING: usize = 32;
 pub enum Side {
     Desktop,
     Bridge,
+    /// One of the user's own devices, linked to another one. The two ends
+    /// are equals: each publishes on a topic of its own.
+    Device,
 }
 
 /// One pairing, as both ends keep it.
@@ -54,6 +57,8 @@ pub struct Link {
     pub side: Side,
     /// This end's id inside frames.
     pub me: String,
+    /// The other end's id inside frames (device links; empty otherwise).
+    pub peer: String,
 }
 
 impl std::fmt::Debug for Link {
@@ -71,11 +76,17 @@ impl Link {
         Channel::new(&self.secret, "bridge to-desktop")
     }
 
+    /// A device's own channel on a device link, derived from its frame id.
+    fn from_device(&self, id: &str) -> Channel {
+        Channel::new(&self.secret, &format!("device from-{id}"))
+    }
+
     /// Where this end listens.
     pub fn inbox(&self) -> Channel {
         match self.side {
             Side::Desktop => self.to_desktop(),
             Side::Bridge => self.to_bridge(),
+            Side::Device => self.from_device(&self.peer),
         }
     }
 
@@ -84,8 +95,22 @@ impl Link {
         match self.side {
             Side::Desktop => self.to_bridge(),
             Side::Bridge => self.to_desktop(),
+            Side::Device => self.from_device(&self.me),
         }
     }
+
+    /// On a device link, the key for messages sent over the local network
+    /// instead of the relay: (what this end opens, what it seals with).
+    /// Their own keys, so a frame can't be moved from one path to the other.
+    pub fn lan_channels(&self) -> (Channel, Channel) {
+        let ch = |id: &str| Channel::new(&self.secret, &format!("device lan from-{id}"));
+        (ch(&self.peer), ch(&self.me))
+    }
+}
+
+/// How big a message is once deflated, before sealing.
+pub fn packed_len(msg: &Msg) -> usize {
+    serde_json::to_vec(msg).ok().and_then(|p| deflate(&p).ok()).map_or(usize::MAX, |p| p.len())
 }
 
 /// One sealed piece of a message.

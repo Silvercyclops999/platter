@@ -179,6 +179,11 @@ pub struct SyncHello {
     #[serde(default)]
     pub acct: String,
     pub digests: Digests,
+    /// Namespaces it knows but has switched off: nothing in them is sent
+    /// to it. A namespace in neither list is one it doesn't know yet; it
+    /// keeps and passes those on.
+    #[serde(default)]
+    pub skip: Vec<String>,
     #[serde(default)]
     pub answer: bool,
 }
