@@ -19,13 +19,14 @@ use objc2_car_play::{
     CPNowPlayingTemplate, CPSelectableListItem, CPTabBarTemplate, CPTemplate, CPTemplateApplicationScene,
     CPTemplateApplicationSceneDelegate, CPTemplateApplicationSceneSessionRoleApplication,
 };
-use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSString};
+use objc2_foundation::{NSArray, NSData, NSObject, NSObjectProtocol, NSString};
 use objc2_ui_kit::UISceneDelegate;
 use tauri::{AppHandle, Manager, Wry};
 
 use super::{CarAction, CarItem, CarList};
 use crate::audio::player::PlayerHandle;
 use crate::db::DbHandle;
+use crate::db::artcache::ArtCache;
 
 std::arch::global_asm!(".linker_option \"-framework\", \"CarPlay\"");
 
@@ -127,19 +128,24 @@ fn ns(s: &str) -> Retained<NSString> {
 fn show_tabs() {
     let Some(mtm) = MainThreadMarker::new() else { return };
     let Some(controller) = CAR.with(|c| c.borrow().clone()) else { return };
-    let (home, library) = match APP.get() {
-        Some(app) => {
-            let db = app.state::<DbHandle>();
-            let home = db.read(super::home).unwrap_or_else(|e| {
-                tracing::warn!("CarPlay home not read: {e}");
-                Vec::new()
-            });
-            (home, super::library())
-        }
-        None => (Vec::new(), Vec::new()),
+    let read = |name: &str, f: &dyn Fn(&rusqlite::Connection) -> crate::error::AppResult<Vec<CarItem>>| match APP.get() {
+        Some(app) => app.state::<DbHandle>().read(|c| f(c)).unwrap_or_else(|e| {
+            tracing::warn!("CarPlay {name} not read: {e}");
+            Vec::new()
+        }),
+        None => Vec::new(),
     };
+    let home = read("home", &super::home);
+    let downloaded = read("downloads", &super::downloaded);
+    let radio = read("radio", &|c| super::radio(c, None));
+    let library = if APP.get().is_some() { super::library() } else { Vec::new() };
     let loading = APP.get().is_none();
-    let tabs = [("Home", "house", home), ("Library", "books.vertical", library)]
+    let tabs = [
+        ("Home", "house", home),
+        ("Library", "books.vertical", library),
+        ("Downloaded", "arrow.down.circle", downloaded),
+        ("Radio", "dot.radiowaves.left.and.right", radio),
+    ]
         .into_iter()
         .map(|(title, symbol, items)| {
             let t = list_template(mtm, title, &items, loading);
@@ -200,6 +206,9 @@ fn text_row(mtm: MainThreadMarker, text: &str, detail: Option<&str>) -> Retained
 
 fn row(mtm: MainThreadMarker, item: &CarItem) -> Retained<CPListItem> {
     let r = text_row(mtm, &item.title, item.subtitle.as_deref());
+    if let (Some(thumb), Some(app)) = (&item.thumb, APP.get()) {
+        load_art(app, thumb.clone(), OnMain(r.clone()));
+    }
     let action = item.action.clone();
     let opens = matches!(action, CarAction::Open(_));
     let handler = RcBlock::new(
@@ -220,6 +229,42 @@ fn row(mtm: MainThreadMarker, item: &CarItem) -> Retained<CPListItem> {
     }
     r
 }
+
+/// Fetches a row's cover through the art cache and sets it when it comes.
+/// A row handed to a background task and back; it is only touched again on
+/// the main thread.
+struct OnMain(Retained<CPListItem>);
+// SAFETY: the row is created on the main thread and only used there again
+// (inside `run_on_main_thread`); the task in between just carries it.
+unsafe impl Send for OnMain {}
+
+impl OnMain {
+    fn into_row(self) -> Retained<CPListItem> {
+        self.0
+    }
+}
+
+fn load_art(app: &AppHandle<Wry>, thumb: String, row: OnMain) {
+    let art = app.state::<ArtCache>().inner().clone();
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let Ok(img) = art.get_or_fetch(&thumb, ART_PX, ART_PX).await else { return };
+        let _ = app.run_on_main_thread(move || {
+            let row = row.into_row();
+            // SAFETY: UIImage from bytes (nil for bytes it can't read), set on
+            // the main thread.
+            unsafe {
+                let data = NSData::with_bytes(&img.bytes);
+                if let Some(image) = objc2_ui_kit::UIImage::imageWithData(&data) {
+                    row.setImage(Some(&image));
+                }
+            }
+        });
+    });
+}
+
+/// Row covers: CarPlay draws them small.
+const ART_PX: u32 = 120;
 
 fn picked(action: &CarAction) {
     let Some(app) = APP.get() else { return };

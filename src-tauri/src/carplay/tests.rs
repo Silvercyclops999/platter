@@ -51,3 +51,22 @@ fn library_tab_starts_with_liked_songs_then_the_shelves() {
     let opens: Vec<_> = tab[1..].iter().map(|i| i.title.as_str()).collect();
     assert_eq!(opens, ["Playlists", "Albums", "Artists"]);
 }
+
+#[tokio::test]
+async fn radio_offers_stations_from_whats_playing_then_albums() {
+    let (db, _dir) = synced(3, 2).await;
+    let none = db.read(|c| radio(c, None)).unwrap();
+    assert_eq!(none.len(), 1, "a random album only, while nothing plays (nothing is old yet)");
+    assert_eq!(none[0].title, "A random album");
+    let playing = Playing { track_id: "t1".into(), title: "Song".into(), artist_id: "a1".into(), artist: "Band".into() };
+    let with = db.read(|c| radio(c, Some(&playing))).unwrap();
+    assert_eq!(with[0].title, "Radio from Song");
+    assert!(matches!(&with[0].action, CarAction::Play(p) if p.kind == ContextKind::Radio && p.id.as_deref() == Some("track:t1")));
+    assert!(matches!(&with[1].action, CarAction::Play(p) if p.id.as_deref() == Some("artist:a1")));
+}
+
+#[tokio::test]
+async fn downloaded_is_empty_with_nothing_kept() {
+    let (db, _dir) = synced(2, 2).await;
+    assert!(db.read(downloaded).unwrap().is_empty());
+}

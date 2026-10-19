@@ -117,6 +117,103 @@ pub fn list(c: &Connection, which: CarList) -> AppResult<Vec<CarItem>> {
     })
 }
 
+/// The Downloaded tab: everything kept on the phone, newest first, so the
+/// car has music with no signal.
+pub fn downloaded(c: &Connection) -> AppResult<Vec<CarItem>> {
+    use crate::downloads::store::{self, ItemKind};
+    let mut rows = store::items(c)?;
+    rows.reverse();
+    let albums: Vec<String> = rows.iter().filter(|r| r.key.kind == ItemKind::Album).map(|r| r.key.id.clone()).collect();
+    let albums = queries::albums_by_ids(c, &albums)?;
+    Ok(rows
+        .into_iter()
+        .take(LIST_MAX)
+        .map(|r| match r.key.kind {
+            ItemKind::Album => match albums.iter().find(|a| a.id == r.key.id) {
+                Some(a) => album_item(a.clone()),
+                None => CarItem { title: r.title, subtitle: None, thumb: None, action: play(ContextKind::Album, &r.key.id) },
+            },
+            ItemKind::Playlist => CarItem {
+                title: r.title,
+                subtitle: Some("Playlist".into()),
+                thumb: None,
+                action: play(ContextKind::Playlist, &r.key.id),
+            },
+            ItemKind::Liked => CarItem {
+                title: "Liked songs".into(),
+                subtitle: None,
+                thumb: None,
+                action: play(ContextKind::Liked, "liked"),
+            },
+            ItemKind::Mix => CarItem {
+                title: r.title,
+                subtitle: Some("Mix".into()),
+                thumb: None,
+                action: CarAction::Play(PlayContext {
+                    kind: ContextKind::Tracks,
+                    id: None,
+                    track_ids: store::item_tracks(c, &r.key).ok(),
+                }),
+            },
+        })
+        .collect())
+}
+
+/// What's playing, for the Radio tab's first stations.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Playing {
+    pub track_id: String,
+    pub title: String,
+    pub artist_id: String,
+    pub artist: String,
+}
+
+/// The Radio tab: one-tap stations, Platter's own (nothing from outside).
+pub fn radio(c: &Connection, playing: Option<&Playing>) -> AppResult<Vec<CarItem>> {
+    let mut out = Vec::new();
+    if let Some(p) = playing {
+        out.push(CarItem {
+            title: format!("Radio from {}", p.title),
+            subtitle: Some(p.artist.clone()),
+            thumb: None,
+            action: play(ContextKind::Radio, &format!("track:{}", p.track_id)),
+        });
+        if !p.artist_id.is_empty() {
+            out.push(CarItem {
+                title: format!("{} radio", p.artist),
+                subtitle: None,
+                thumb: None,
+                action: play(ContextKind::Radio, &format!("artist:{}", p.artist_id)),
+            });
+        }
+    }
+    let pick = |sql: &str| -> AppResult<Option<String>> {
+        Ok(c.query_row(sql, [], |r| r.get::<_, String>(0)).ok())
+    };
+    if let Some(id) = pick("SELECT id FROM albums ORDER BY random() LIMIT 1")? {
+        out.extend(queries::albums_by_ids(c, &[id])?.into_iter().map(|a| CarItem {
+            title: "A random album".into(),
+            subtitle: Some(format!("{} by {}", a.title, a.artist_title)),
+            thumb: a.thumb.clone(),
+            action: play(ContextKind::Album, &a.id),
+        }));
+    }
+    // Played before, but not in the last 90 days (or never, when nothing is old).
+    let forgotten = pick(
+        "SELECT id FROM albums WHERE view_count > 0 AND last_viewed_at < strftime('%s','now') - 90 * 86400
+         ORDER BY random() LIMIT 1",
+    )?;
+    if let Some(id) = forgotten {
+        out.extend(queries::albums_by_ids(c, &[id])?.into_iter().map(|a| CarItem {
+            title: "One you haven't played in a while".into(),
+            subtitle: Some(format!("{} by {}", a.title, a.artist_title)),
+            thumb: a.thumb.clone(),
+            action: play(ContextKind::Album, &a.id),
+        }));
+    }
+    Ok(out)
+}
+
 fn album_item(a: crate::model::Album) -> CarItem {
     CarItem {
         subtitle: Some(a.artist_title.clone()),
