@@ -398,4 +398,7 @@ GET /library/parts/7/1/file.flac [accept,x-plex-client-identifier,x-plex-device,
 GET /music/:/transcode/universal/start.mp3?path=/library/metadata/42&mediaIndex=0&partIndex=0&protocol=http&directPlay=0&directStream=0&hasMDE=1&musicBitrate=192&maxAudioBitrate=192&session=* [accept,x-plex-client-identifier,x-plex-device,x-plex-device-name,x-plex-platform,x-plex-platform-version,x-plex-product,x-plex-provides,x-plex-session-identifier,x-plex-token,x-plex-version] Some("mp3") resumable=false
 # download finished
 GET /music/:/transcode/universal/stop?session=*
+GET /music/:/transcode/universal/stop?session=*
+GET /music/:/transcode/universal/stop?session=*
+GET /music/:/transcode/universal/stop?session=*
 "#;

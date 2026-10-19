@@ -454,8 +454,9 @@ pub fn stream_cap_kbps(
 /// and the one loaded after it.
 const TRANSCODE_SLOTS: usize = 2;
 
-static NEXT_SLOT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-static SLOTS_CLEARED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Per device id: the next slot to use, once leftovers from before this
+/// run are stopped. Keyed by device so each client's turns are its own.
+static SLOTS: Mutex<std::collections::BTreeMap<String, usize>> = Mutex::new(std::collections::BTreeMap::new());
 
 /// The session name for a new transcode. Plex keeps every transcode going
 /// until it times out and refuses new ones once a few are open, so random
@@ -467,13 +468,20 @@ static SLOTS_CLEARED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 async fn transcode_session(client: &crate::plex::client::PlexClient) -> String {
     let id = &client.identity().client_id;
     let name = |slot: usize| format!("platter-{id}-{slot}");
-    let stale: Vec<String> = if SLOTS_CLEARED.swap(true, std::sync::atomic::Ordering::SeqCst) {
-        let slot = NEXT_SLOT.load(std::sync::atomic::Ordering::SeqCst) % TRANSCODE_SLOTS;
-        vec![name(slot)]
-    } else {
-        (0..TRANSCODE_SLOTS).map(name).collect()
+    let (slot, stale): (usize, Vec<String>) = {
+        let mut slots = SLOTS.lock();
+        match slots.get_mut(id.as_str()) {
+            Some(next) => {
+                let slot = *next % TRANSCODE_SLOTS;
+                *next = next.wrapping_add(1);
+                (slot, vec![name(slot)])
+            }
+            None => {
+                slots.insert(id.to_string(), 1);
+                (0, (0..TRANSCODE_SLOTS).map(name).collect())
+            }
+        }
     };
-    let slot = NEXT_SLOT.fetch_add(1, std::sync::atomic::Ordering::SeqCst) % TRANSCODE_SLOTS;
     // Together, and short: a server that doesn't answer shouldn't hold up
     // playback.
     futures::future::join_all(stale.iter().map(|session| async move {
