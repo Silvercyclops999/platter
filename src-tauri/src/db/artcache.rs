@@ -26,6 +26,8 @@ use super::source::{ArtBytes, ArtFetcher};
 pub const DEFAULT_CAP_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_DIM: u32 = 4096;
 const MAX_PATH_LEN: usize = 2048;
+/// A cover that takes longer than this to come from the server is logged.
+const SLOW_FETCH: std::time::Duration = std::time::Duration::from_millis(1500);
 
 type SharedFetch = Shared<BoxFuture<'static, Result<ArtBytes, Arc<AppError>>>>;
 
@@ -380,7 +382,12 @@ impl ArtCache {
     }
 
     async fn fetch_and_store(&self, path: String, w: u32, h: u32, key: String) -> AppResult<ArtBytes> {
+        let started = std::time::Instant::now();
         let mut art = self.inner.fetcher.fetch(&path, w, h).await?;
+        let took = started.elapsed();
+        if took > SLOW_FETCH {
+            tracing::info!(ms = took.as_millis() as u64, bytes = art.bytes.len(), w, h, "slow art fetch");
+        }
         if art.content_type.is_empty() || art.content_type == "application/octet-stream" {
             art.content_type = sniff_content_type(&art.bytes).to_owned();
         }
