@@ -202,9 +202,28 @@ impl Offer {
         let side = if self.me.is_some() { Side::Device } else { Side::Desktop };
         let link = Link { id: link_id(l, &secret), secret, relay, side, me: desktop, peer: bridge };
         let fallback = if self.me.is_some() { "Your other device" } else { "Platter Bridge" };
-        let name = if name.trim().is_empty() { fallback.to_string() } else { name.chars().take(60).collect() };
+        let name = shown_name(&name);
+        let name = if name.is_empty() { fallback.to_string() } else { name };
         let device = if self.me.is_some() { dev.chars().take(100).collect() } else { String::new() };
         Some(((ch.topic, body), PairedBridge { link, name, version: version.chars().take(20).collect(), device }))
+    }
+}
+
+/// A name the other end sent, made safe to show: no control or direction
+/// characters (which could make it read as another name), at most 60.
+fn shown_name(name: &str) -> String {
+    let bidi = |c: char| matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{061c}');
+    let kept: String = name.chars().filter(|c| !c.is_control() && !bidi(*c)).take(60).collect();
+    kept.trim().to_string()
+}
+
+#[cfg(test)]
+mod shown_name_tests {
+    #[test]
+    fn names_lose_control_and_direction_characters() {
+        assert_eq!(super::shown_name("Adam\u{202e}s PC\n"), "Adams PC");
+        assert_eq!(super::shown_name(" \u{200f} "), "");
+        assert_eq!(super::shown_name(&"x".repeat(80)).len(), 60);
     }
 }
 

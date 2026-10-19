@@ -15,15 +15,24 @@ fn kv_key(account: &str) -> String {
     format!("keyHosts.{account}")
 }
 
-/// The host and port of an address, lowercased (`10.20.30.40:8686`). None
-/// for a blank or unreadable address.
+/// The scheme, host and port of an address, lowercased
+/// (`http://10.20.30.40:8686`). None for a blank or unreadable address.
+/// The scheme counts: a key entered for https never goes out over http.
 pub fn host_of(url: &str) -> Option<String> {
     let u = url::Url::parse(url.trim()).ok()?;
     let host = u.host_str()?.to_ascii_lowercase();
+    let scheme = u.scheme();
     Some(match u.port_or_known_default() {
-        Some(p) => format!("{host}:{p}"),
-        None => host,
+        Some(p) => format!("{scheme}://{host}:{p}"),
+        None => format!("{scheme}://{host}"),
     })
+}
+
+/// Whether `h` is one of `hosts`, or an https upgrade of one of them on
+/// the same host and port.
+fn listed(hosts: &[String], h: &str) -> bool {
+    hosts.iter().any(|k| k == h)
+        || h.strip_prefix("https://").is_some_and(|rest| hosts.iter().any(|k| k.strip_prefix("http://") == Some(rest)))
 }
 
 /// The host as the user would read it (no default port).
@@ -91,7 +100,7 @@ pub fn trusted(db: &DbHandle, account: &str, url: &str, current: &[&str]) -> boo
             current.iter().filter_map(|u| host_of(u)).collect()
         }
     };
-    hosts.contains(&h)
+    listed(&hosts, &h)
 }
 
 /// The words for an address the key wasn't entered for.
@@ -126,8 +135,8 @@ mod tests {
 
     #[test]
     fn hosts_are_host_and_port() {
-        assert_eq!(host_of("http://10.20.30.40:8686/lidarr").as_deref(), Some("10.20.30.40:8686"));
-        assert_eq!(host_of("https://NAS.example.com").as_deref(), Some("nas.example.com:443"));
+        assert_eq!(host_of("http://10.20.30.40:8686/lidarr").as_deref(), Some("http://10.20.30.40:8686"));
+        assert_eq!(host_of("https://NAS.example.com").as_deref(), Some("https://nas.example.com:443"));
         assert_eq!(host_of(""), None);
         assert_eq!(shown_host("https://nas.example.com/x"), "nas.example.com");
         assert_eq!(shown_host("http://10.20.30.41:8686"), "10.20.30.41:8686");
@@ -141,6 +150,16 @@ mod tests {
         assert!(!trusted(&db, "k", "http://10.20.30.99:8686", &["http://10.20.30.99:8686"]), "a new host isn't taken");
         allow(&db, "k", "http://10.20.30.99:8686").unwrap();
         assert!(trusted(&db, "k", "http://10.20.30.99:8686", &[]));
+    }
+
+    #[test]
+    fn a_key_for_https_never_goes_out_over_http() {
+        let (_d, db) = db();
+        bind(&db, "k", &["https://10.20.30.40:8686"]).unwrap();
+        assert!(trusted(&db, "k", "https://10.20.30.40:8686/x", &[]));
+        assert!(!trusted(&db, "k", "http://10.20.30.40:8686", &[]), "https to http is refused");
+        bind(&db, "k", &["http://10.20.30.40:8686"]).unwrap();
+        assert!(trusted(&db, "k", "https://10.20.30.40:8686", &[]), "http to https on the same host and port is fine");
     }
 
     #[test]
