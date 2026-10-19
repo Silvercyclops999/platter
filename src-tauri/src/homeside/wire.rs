@@ -1,10 +1,12 @@
-//! What a desktop and a Bridge say to each other, inside sealed frames
-//! (`link`). Nothing here is ever sent in the clear.
+//! What a desktop and a Bridge say to each other, and what two of the
+//! user's own devices say on a device link, inside sealed frames (`link`).
+//! Nothing here is ever sent in the clear. A message kind or field this
+//! build doesn't know is ignored, never an error.
 
 use serde::{Deserialize, Serialize};
 
 use crate::lidarr::waves_bridge::{WavesPlan, WavesProgress};
-use crate::sync::store::EntryMap;
+use crate::sync::store::{Digests, EntryMap, Stamp};
 
 /// How the Bridge reaches the music folder.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -135,6 +137,50 @@ pub enum Msg {
     WavesPlan(Box<WavesPlan>),
     /// From the Bridge: how the waves are going.
     WavesProgress(Box<WavesProgress>),
+    /// Between two of the user's own devices: who this is, its clock, and
+    /// a digest of each namespace it keeps in step. `answer`: the reply to
+    /// the other end's hello (it isn't answered again).
+    SyncHello(Box<SyncHello>),
+    /// The stamps of every entry in one namespace (no values).
+    SyncDiff { ns: String, keys: Vec<Stamp> },
+    /// Entries this end wants from the other one.
+    SyncWant { ns: String, keys: Vec<String> },
+    /// Entries, in batches (`links::batches`).
+    SyncEntries { entries: EntryMap },
+    /// The device unpaired.
+    SyncBye,
+    /// A message from a newer build this one doesn't know. Ignored.
+    #[serde(other)]
+    Unknown,
+}
+
+/// The device link protocol this build speaks. A newer peer speaks the
+/// lower of the two; nothing refuses a link for being newer.
+pub const PROTO: u32 = 1;
+
+/// A device's hello on the device link.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncHello {
+    pub proto: u32,
+    /// The device's id (its Plex client id).
+    pub device: String,
+    pub name: String,
+    #[serde(default)]
+    pub platform: String,
+    #[serde(default)]
+    pub version: String,
+    /// The sender's clock when it sent this (ms).
+    pub clock_ms: u64,
+    /// The groups it keeps in step, for the status line.
+    #[serde(default)]
+    pub groups: Vec<String>,
+    /// Its account's tag; a device of another account is refused.
+    #[serde(default)]
+    pub acct: String,
+    pub digests: Digests,
+    #[serde(default)]
+    pub answer: bool,
 }
 
 impl Msg {
@@ -152,6 +198,12 @@ impl Msg {
             Msg::Unpair => "unpair",
             Msg::WavesPlan(_) => "wavesPlan",
             Msg::WavesProgress(_) => "wavesProgress",
+            Msg::SyncHello(_) => "syncHello",
+            Msg::SyncDiff { .. } => "syncDiff",
+            Msg::SyncWant { .. } => "syncWant",
+            Msg::SyncEntries { .. } => "syncEntries",
+            Msg::SyncBye => "syncBye",
+            Msg::Unknown => "unknown",
         }
     }
 }

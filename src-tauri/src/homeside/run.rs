@@ -301,6 +301,8 @@ impl Bridge {
                 self.waves.poke();
             }
             Msg::Hello { .. } | Msg::Status(_) | Msg::Answer { .. } | Msg::Failed { .. } | Msg::WavesProgress(_) => {}
+            // Device link messages and kinds from a newer build.
+            Msg::SyncHello(_) | Msg::SyncDiff { .. } | Msg::SyncWant { .. } | Msg::SyncEntries { .. } | Msg::SyncBye | Msg::Unknown => {}
         }
     }
 
