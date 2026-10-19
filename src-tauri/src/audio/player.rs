@@ -429,6 +429,7 @@ impl PlayerHandle {
             unreachable_at: None,
             next_unreachable: None,
             interrupted_playing: false,
+            headphones_playing: false,
             output_stale: false,
             writer: config.persist_path.as_ref().and_then(|_| persist::Writer::spawn()),
             sink,
@@ -991,6 +992,8 @@ struct Actor {
     unreachable_at: Option<Unreachable>,
     /// Playing when an interruption began: its end may resume.
     interrupted_playing: bool,
+    /// Playing when the headphones left: only their coming back resumes.
+    headphones_playing: bool,
     /// The output stream may have been killed under us: reopened on the
     /// next Play.
     output_stale: bool,
@@ -1812,6 +1815,7 @@ impl Actor {
                 | Cmd::JumpAt(..)
         ) {
             self.interrupted_playing = false;
+            self.headphones_playing = false;
         }
         match cmd {
             Cmd::Wake => return,
@@ -1922,8 +1926,15 @@ impl Actor {
             Cmd::Interruption { began, resume, stale } => self.on_interruption(began, resume, stale),
             Cmd::OutputStale => {
                 self.output_stale = true;
-                if self.is_active() && self.refresh_output().is_err() {
+                if self.is_active()
+                    && let Err(e) = self.refresh_output()
+                {
                     self.pause_for_output();
+                    self.sink.error(&ErrorPayload {
+                        track_id: self.current_track().map(|t| t.id.clone()),
+                        kind: e.kind().into(),
+                        message: e.to_string(),
+                    });
                 }
             }
             Cmd::Next(reply) => {
@@ -2364,15 +2375,25 @@ impl Actor {
     /// A call or another app took the sound: pause, and say whether the
     /// end of it should play on. Play works afterwards either way, since the
     /// stream is rebuilt first.
+    /// `stale` false means headphones (see [`PlayerHandle::headphones`]):
+    /// their leaving cancels any pending resume, so nothing plays on out
+    /// loud, and only their coming back resumes what they left playing.
     fn on_interruption(&mut self, began: bool, resume: bool, stale: bool) {
         self.output_stale |= stale;
+        let headphones = !stale;
         if began {
-            // A second begin (a call during a video) keeps the first word.
-            self.interrupted_playing |= self.is_active();
+            if headphones {
+                self.headphones_playing = self.is_active();
+                self.interrupted_playing = false;
+            } else {
+                // A second begin (a call during a video) keeps the first word.
+                self.interrupted_playing |= self.is_active();
+            }
             let _ = self.do_pause();
             return;
         }
-        let was_playing = std::mem::take(&mut self.interrupted_playing);
+        let flag = if headphones { &mut self.headphones_playing } else { &mut self.interrupted_playing };
+        let was_playing = std::mem::take(flag);
         if was_playing && resume {
             let _ = self.do_resume();
         }
