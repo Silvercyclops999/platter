@@ -182,3 +182,96 @@ fn batches_stay_small() {
     assert!(b.len() >= 2, "{}", b.len());
     assert_eq!(b.iter().map(|m| m["lyrics"].len()).sum::<usize>(), 5);
 }
+
+// ---------------------------------------------------------------- a newer app
+
+fn future_entries() -> EntryMap {
+    let mut m = EntryMap::new();
+    let e = |v: serde_json::Value, ts| Entry { value: Some(v), ts, device: "newer".into() };
+    m.entry("savedLooks".into()).or_default().insert("look:1".into(), e(json!({"name": "Night", "accent": "#123"}), 50));
+    m.entry("savedLooks".into()).or_default().insert("look:2".into(), Entry { value: None, ts: 60, device: "newer".into() });
+    // A key and a value shape this build doesn't know, in a namespace it does.
+    m.entry("pins".into()).or_default().insert("crate:9".into(), e(json!({"shape": "future"}), 70));
+    // Names no build would make.
+    m.entry("../escape".into()).or_default().insert("k".into(), e(json!(1), 80));
+    m.entry("x".repeat(80)).or_default().insert("k".into(), e(json!(1), 80));
+    // A secret, in an unknown namespace too.
+    m.entry("vault".into()).or_default().insert("k".into(), e(json!({"apiKey": "nope"}), 90));
+    m
+}
+
+#[test]
+fn a_newer_apps_namespaces_are_kept_and_passed_on_but_not_applied() {
+    let b = dev("b");
+    let mut rx = b.store.subscribe();
+    let changed = b.store.merge(&future_entries(), &[PINS.name()]).unwrap();
+    assert_eq!(changed, ["pins"], "only a namespace this build knows counts as changed");
+    let _ = rx.try_recv();
+    assert_eq!(b.store.unknown_namespaces().unwrap(), ["savedLooks"], "bad names and secrets are dropped");
+    // The unknown value is kept but left out of the list.
+    assert!(b.store.list(&PINS).unwrap().is_empty());
+    assert!(b.store.has_entry(&PINS, "crate:9").unwrap());
+    // Digests and key lists carry it.
+    let d = b.store.digest(&["savedLooks"]).unwrap();
+    assert_eq!(d["savedLooks"].n, 2, "the deletion counts");
+    assert_eq!(b.store.stamps("savedLooks").unwrap().len(), 2);
+    // A third device gets all of it from this one.
+    let c = dev("c");
+    let ns = ["savedLooks", PINS.name()];
+    c.store.merge(&b.store.entries(&ns).unwrap(), &[PINS.name()]).unwrap();
+    assert_eq!(c.store.digest(&ns).unwrap(), b.store.digest(&ns).unwrap(), "nothing lost on the way");
+    assert_eq!(c.store.entries(&["savedLooks"]).unwrap()["savedLooks"]["look:1"].value, Some(json!({"name": "Night", "accent": "#123"})));
+    // An older entry doesn't replace a later one in the kept namespace.
+    let mut old = EntryMap::new();
+    old.entry("savedLooks".into()).or_default().insert("look:1".into(), Entry { value: Some(json!("old")), ts: 1, device: "a".into() });
+    c.store.merge(&old, &[]).unwrap();
+    assert_eq!(c.store.entries(&["savedLooks"]).unwrap()["savedLooks"]["look:1"].ts, 50);
+    // The unknown ones never land in the known table.
+    let n: i64 = c.db.read(|x| Ok(x.query_row("SELECT count(*) FROM sync_entries WHERE ns = 'savedLooks'", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(n, 0);
+}
+
+#[test]
+fn a_namespace_this_build_learns_is_taken_in() {
+    let b = dev("b");
+    // As an older build kept it, before this build knew "pins".
+    b.db
+        .write(|c| {
+            c.execute(
+                "INSERT INTO sync_entries_unknown (ns, key, value, ts, device) VALUES ('pins', 'album:7', ?1, 5, 'newer')",
+                [json!({"kind": "album", "id": "7", "title": "Seven"}).to_string()],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    assert!(b.store.get(&PINS, "album:7").unwrap().is_none());
+    assert_eq!(b.store.adopt_learned().unwrap(), ["pins"]);
+    assert_eq!(b.store.get(&PINS, "album:7").unwrap().unwrap().title, "Seven");
+    assert!(b.store.unknown_namespaces().unwrap().is_empty());
+    assert!(b.store.adopt_learned().unwrap().is_empty());
+}
+
+#[test]
+fn an_unknown_message_kind_or_field_is_ignored_not_an_error() {
+    use std::io::Write as _;
+
+    use crate::homeside::link::{Frame, Reassembler};
+    use crate::homeside::wire::Msg;
+    let m: Msg = serde_json::from_value(json!({"t": "syncTeleport", "anything": [1, 2]})).unwrap();
+    assert!(matches!(m, Msg::Unknown));
+    let h: Msg = serde_json::from_value(json!({
+        "t": "syncHello", "proto": 9, "device": "d", "name": "Studio PC", "clockMs": 5,
+        "digests": {}, "futureField": {"x": 1}
+    }))
+    .unwrap();
+    match h {
+        Msg::SyncHello(h) => assert_eq!((h.proto, h.answer, h.acct.as_str()), (9, false, "")),
+        _ => panic!("not a hello"),
+    }
+    // Through a frame, as it would arrive: decoded, not dropped.
+    let mut e = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+    e.write_all(br#"{"t":"syncTeleport","x":1}"#).unwrap();
+    let packed = e.finish().unwrap();
+    let f = Frame { f: "peer".into(), c: 1, x: 2, i: "i".into(), n: 0, t: 1, d: crate::social::listen::seal::b64(&packed) };
+    assert!(matches!(Reassembler::default().add(f, 1), Some(Msg::Unknown)));
+}

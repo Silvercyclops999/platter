@@ -1340,6 +1340,20 @@ CREATE INDEX IF NOT EXISTS album_facts_kind ON album_facts (kind, fact_key);
 CREATE INDEX IF NOT EXISTS tag_credits_role ON tag_credits (role, person_key);
 CREATE INDEX IF NOT EXISTS sleeve_credits_role ON sleeve_credits (role, person_key);
 "#,
+    // v45: sync entries in namespaces a newer Platter wrote and this build
+    // doesn't know yet (sync::store). Kept as they came, never applied,
+    // passed on to the user's other devices, and moved into sync_entries
+    // once a build learns the namespace.
+    r#"
+CREATE TABLE IF NOT EXISTS sync_entries_unknown (
+    ns     TEXT NOT NULL,
+    key    TEXT NOT NULL,
+    value  TEXT,
+    ts     INTEGER NOT NULL,
+    device TEXT NOT NULL,
+    PRIMARY KEY (ns, key)
+) WITHOUT ROWID;
+"#,
 ];
 
 #[cfg(test)]

@@ -453,6 +453,8 @@ impl Desktop {
                 let _ = self.forget(&link.id);
             }
             Msg::Config(_) | Msg::Get { .. } | Msg::Write { .. } | Msg::WavesPlan(_) => {}
+            // Device link messages and kinds from a newer build.
+            Msg::SyncHello(_) | Msg::SyncDiff { .. } | Msg::SyncWant { .. } | Msg::SyncEntries { .. } | Msg::SyncBye | Msg::Unknown => {}
         }
     }
 

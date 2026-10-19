@@ -347,29 +347,36 @@ fn row_entry(value: Option<String>, ts: i64, device: String) -> Option<Entry> {
     Some(Entry { value, ts: ts.max(0) as u64, device })
 }
 
+/// Where a namespace's entries live: known ones in `sync_entries`, ones a
+/// newer build wrote in `sync_entries_unknown` (kept, never applied).
+fn table(ns: &str) -> &'static str {
+    if NAMESPACES.contains(&ns) { "sync_entries" } else { "sync_entries_unknown" }
+}
+
+/// A namespace name a newer build could have made: short, plain letters.
+fn plausible_ns(ns: &str) -> bool {
+    !ns.is_empty() && ns.len() <= 40 && ns.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
 fn get_entry(c: &Connection, ns: &str, key: &str) -> AppResult<Option<Entry>> {
-    Ok(c
-        .query_row("SELECT value, ts, device FROM sync_entries WHERE ns = ?1 AND key = ?2", params![ns, key], |r| {
-            Ok(row_entry(r.get(0)?, r.get(1)?, r.get(2)?))
-        })
-        .optional()?
-        .flatten())
+    let sql = format!("SELECT value, ts, device FROM {} WHERE ns = ?1 AND key = ?2", table(ns));
+    Ok(c.query_row(&sql, params![ns, key], |r| Ok(row_entry(r.get(0)?, r.get(1)?, r.get(2)?))).optional()?.flatten())
 }
 
 fn set_entry(c: &Connection, ns: &str, key: &str, e: &Entry) -> AppResult<()> {
     let value = e.value.as_ref().map(|v| v.to_string());
-    c.execute(
-        "INSERT INTO sync_entries (ns, key, value, ts, device) VALUES (?1, ?2, ?3, ?4, ?5)
+    let sql = format!(
+        "INSERT INTO {} (ns, key, value, ts, device) VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT (ns, key) DO UPDATE SET value = excluded.value, ts = excluded.ts, device = excluded.device",
-        params![ns, key, value, e.ts as i64, e.device],
-    )?;
+        table(ns)
+    );
+    c.execute(&sql, params![ns, key, value, e.ts as i64, e.device])?;
     Ok(())
 }
 
-fn check(ns: &str, key: &str, value: Option<&Value>) -> AppResult<()> {
-    if !NAMESPACES.contains(&ns) {
-        return Err(AppError::Invalid(format!("unknown sync namespace {ns}")));
-    }
+/// The checks every entry passes, from this device or another one: a
+/// sensible key, no secret, not too big.
+fn check_entry(key: &str, value: Option<&Value>) -> AppResult<()> {
     if key.is_empty() || key.len() > KEY_MAX {
         return Err(AppError::Invalid("bad sync key".into()));
     }
@@ -382,6 +389,13 @@ fn check(ns: &str, key: &str, value: Option<&Value>) -> AppResult<()> {
         }
     }
     Ok(())
+}
+
+fn check(ns: &str, key: &str, value: Option<&Value>) -> AppResult<()> {
+    if !NAMESPACES.contains(&ns) {
+        return Err(AppError::Invalid(format!("unknown sync namespace {ns}")));
+    }
+    check_entry(key, value)
 }
 
 impl SyncStore {
@@ -592,46 +606,54 @@ impl SyncStore {
         Ok(done)
     }
 
-    /// Every entry (tombstones too) in these namespaces.
+    /// Every entry (tombstones too) in these namespaces. A namespace this
+    /// build doesn't know gives the entries kept for it.
     pub fn entries(&self, namespaces: &[&str]) -> AppResult<EntryMap> {
         let wanted: Vec<String> = namespaces.iter().map(|s| s.to_string()).collect();
+        let unknown = namespaces.iter().any(|n| !NAMESPACES.contains(n));
         self.inner.db.read(|c| {
-            let mut st = c.prepare_cached("SELECT ns, key, value, ts, device FROM sync_entries")?;
             let mut out = EntryMap::new();
-            let rows = st.query_map([], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, row_entry(r.get(2)?, r.get(3)?, r.get(4)?)))
-            })?;
-            for row in rows {
-                let (ns, key, e) = row?;
-                let Some(e) = e else { continue };
-                if wanted.contains(&ns) {
-                    out.entry(ns).or_default().insert(key, e);
+            let tables: &[&str] = if unknown { &["sync_entries", "sync_entries_unknown"] } else { &["sync_entries"] };
+            for t in tables {
+                let mut st = c.prepare_cached(&format!("SELECT ns, key, value, ts, device FROM {t}"))?;
+                let rows = st.query_map([], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, row_entry(r.get(2)?, r.get(3)?, r.get(4)?)))
+                })?;
+                for row in rows {
+                    let (ns, key, e) = row?;
+                    let Some(e) = e else { continue };
+                    if wanted.contains(&ns) {
+                        out.entry(ns).or_default().insert(key, e);
+                    }
                 }
             }
             Ok(out)
         })
     }
 
-    /// Take entries from elsewhere (the sync file) where they win. Only
-    /// these namespaces; values that look secret are dropped. Returns the
-    /// namespaces that changed and tells listeners.
+    /// Take entries from elsewhere (the sync file, another device) where
+    /// they win. Only these namespaces; values that look secret are
+    /// dropped. A namespace this build doesn't know (a newer one wrote it)
+    /// is kept aside as it came, not applied, and passed on to the other
+    /// devices. Returns the namespaces that changed and tells listeners.
     pub fn merge(&self, other: &EntryMap, namespaces: &[&str]) -> AppResult<Vec<String>> {
         let changed = self.inner.db.write(|c| {
             let tx = c.transaction()?;
             let mut changed: Vec<String> = Vec::new();
             for (ns, entries) in other {
-                if !namespaces.contains(&ns.as_str()) || !NAMESPACES.contains(&ns.as_str()) {
+                let known = NAMESPACES.contains(&ns.as_str());
+                if (known && !namespaces.contains(&ns.as_str())) || (!known && !plausible_ns(ns)) {
                     continue;
                 }
                 for (key, e) in entries {
-                    if check(ns, key, e.value.as_ref()).is_err() {
+                    if check_entry(key, e.value.as_ref()).is_err() {
                         continue;
                     }
                     let mine = get_entry(&tx, ns, key)?;
                     if mine.as_ref().is_none_or(|m| e.wins_over(m)) {
                         let differs = mine.as_ref().is_none_or(|m| m.value != e.value);
                         set_entry(&tx, ns, key, e)?;
-                        if differs && !changed.contains(ns) {
+                        if known && differs && !changed.contains(ns) {
                             changed.push(ns.clone());
                         }
                     }
@@ -644,10 +666,54 @@ impl SyncStore {
         Ok(changed)
     }
 
+    /// Namespaces kept for a newer build, by name.
+    pub fn unknown_namespaces(&self) -> AppResult<Vec<String>> {
+        self.inner.db.read(|c| {
+            let mut st = c.prepare_cached("SELECT DISTINCT ns FROM sync_entries_unknown ORDER BY ns")?;
+            let rows = st.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Move entries kept for namespaces this build now knows into the
+    /// store, where they win. Returns the namespaces that changed.
+    pub fn adopt_learned(&self) -> AppResult<Vec<String>> {
+        let learned: Vec<String> = self.unknown_namespaces()?.into_iter().filter(|n| NAMESPACES.contains(&n.as_str())).collect();
+        if learned.is_empty() {
+            return Ok(Vec::new());
+        }
+        let kept: EntryMap = self.inner.db.read(|c| {
+            let mut out = EntryMap::new();
+            let mut st = c.prepare_cached("SELECT ns, key, value, ts, device FROM sync_entries_unknown")?;
+            let rows = st.query_map([], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, row_entry(r.get(2)?, r.get(3)?, r.get(4)?)))
+            })?;
+            for row in rows {
+                let (ns, key, e) = row?;
+                if let Some(e) = e
+                    && learned.contains(&ns)
+                {
+                    out.entry(ns).or_default().insert(key, e);
+                }
+            }
+            Ok(out)
+        })?;
+        let all: Vec<&str> = learned.iter().map(String::as_str).collect();
+        let changed = self.merge(&kept, &all)?;
+        self.inner.db.write(|c| {
+            for ns in &learned {
+                c.execute("DELETE FROM sync_entries_unknown WHERE ns = ?1", [ns])?;
+            }
+            Ok(())
+        })?;
+        Ok(changed)
+    }
+
     /// Every entry's stamp in one namespace, by key.
     pub fn stamps(&self, ns: &str) -> AppResult<Vec<Stamp>> {
+        let sql = format!("SELECT key, ts, device FROM {} WHERE ns = ?1 ORDER BY key", table(ns));
         self.inner.db.read(|c| {
-            let mut st = c.prepare_cached("SELECT key, ts, device FROM sync_entries WHERE ns = ?1 ORDER BY key")?;
+            let mut st = c.prepare_cached(&sql)?;
             let rows = st
                 .query_map([ns], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?.max(0) as u64, r.get::<_, String>(2)?)))?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -680,7 +746,8 @@ impl SyncStore {
     /// Forget tombstones older than `before` (ms).
     pub fn prune(&self, before: u64) -> AppResult<usize> {
         self.inner.db.write(|c| {
-            Ok(c.execute("DELETE FROM sync_entries WHERE value IS NULL AND ts < ?1", [before as i64])?)
+            let n = c.execute("DELETE FROM sync_entries WHERE value IS NULL AND ts < ?1", [before as i64])?;
+            Ok(n + c.execute("DELETE FROM sync_entries_unknown WHERE value IS NULL AND ts < ?1", [before as i64])?)
         })
     }
 
