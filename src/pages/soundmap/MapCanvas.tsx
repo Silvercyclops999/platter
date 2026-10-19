@@ -5,7 +5,7 @@
  * zoom and step from song to song when the map has focus. Drawing happens
  * once per frame and only when something changed.
  */
-import { useEffect, useRef, type MutableRefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, type MutableRefObject } from "react";
 import { prefersReducedMotion } from "../../design/motion";
 import {
   buildGrid,
@@ -241,8 +241,9 @@ export function MapCanvas(p: Props) {
 
   // New points: index them, fit the view the first time there are some,
   // and after that keep the zoom where it was relative to the fitted view.
+  // Before the points are on screen, so a key pressed as they appear finds them.
   const hadPoints = useRef(false);
-  useEffect(() => {
+  useLayoutEffect(() => {
     grid.current = buildGrid(p.data);
     const [w, h] = size.current;
     const fit = fitView(p.data, w, h);
@@ -263,8 +264,9 @@ export function MapCanvas(p: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.legend, p.colours, p.selected, p.focus, p.ring, p.highlight]);
 
-  // Size, screen density, wheel (not passive, so the page doesn't scroll) and the api.
-  useEffect(() => {
+  // Size, screen density, wheel (not passive, so the page doesn't scroll) and the api,
+  // also in place before the map is on screen.
+  useLayoutEffect(() => {
     resize();
     const el = wrap.current;
     const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;

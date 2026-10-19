@@ -5,6 +5,7 @@
  */
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
@@ -441,6 +442,40 @@ describe("the map canvas", () => {
     expect(api.current!.zoom()).toBeCloseTo(1);
     expect(fireEvent.keyDown(canvas, { key: "+" })).toBe(false);
     expect(api.current!.zoom()).toBeCloseTo(1.4);
+  });
+
+  it("takes keys as soon as its points are on screen, before React's later effects run", async () => {
+    // Points that arrive from a load render outside act, and React runs passive
+    // effects in a later task: a key pressed in between must still find them.
+    const g = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const was = g.IS_REACT_ACT_ENVIRONMENT;
+    g.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      const api: { current: MapApi | null } = { current: null };
+      const onFocus = vi.fn();
+      let load: (d: typeof small) => void = () => {};
+      function Host() {
+        const [data, setData] = useState<typeof small | null>(null);
+        load = setData;
+        return data ? <MapCanvas {...props(data, api)} onFocus={onFocus} /> : <p>Loading</p>;
+      }
+      const { container } = render(<Host />);
+      const pressed = new Promise<void>((resolve) => {
+        const mo = new MutationObserver(() => {
+          const canvas = container.querySelector("canvas");
+          if (!canvas) return;
+          mo.disconnect();
+          fireEvent.keyDown(canvas, { key: "Enter" });
+          resolve();
+        });
+        mo.observe(container, { childList: true, subtree: true });
+      });
+      void Promise.resolve().then(() => load(small));
+      await pressed;
+      expect(onFocus).toHaveBeenCalledWith(1);
+    } finally {
+      g.IS_REACT_ACT_ENVIRONMENT = was;
+    }
   });
 
   it("keeps the zoom when the points change", () => {
