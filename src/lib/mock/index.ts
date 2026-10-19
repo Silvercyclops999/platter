@@ -3098,6 +3098,9 @@ export class MockBackend implements Backend {
   showRoutePicker() {
     return this.delay(() => undefined);
   }
+  haptic() {
+    return Promise.resolve();
+  }
   updateCheck() {
     return this.delay(() =>
       this.opts.updateAvailable

@@ -618,6 +618,8 @@ export interface Backend {
   appInfo(): Promise<AppInfo>;
   /** The phone's own AirPlay and Bluetooth picker (fails off the phone). */
   showRoutePicker(): Promise<void>;
+  /** A tap the phone can feel ("Haptics on controls"); nothing off the phone. */
+  haptic(kind: "light" | "medium" | "selection" | "success" | "error"): Promise<void>;
   /** Opens the project page in the default browser. */
   openProjectPage(): Promise<void>;
 
@@ -1474,6 +1476,7 @@ export function createTauriBackend(): Backend {
     artCacheClear: () => call("art_cache_clear"),
     appInfo: () => call("app_info"),
     showRoutePicker: () => call("show_route_picker"),
+    haptic: (kind) => call("haptic", { kind }),
     openProjectPage: () => call("open_project_page"),
     updateCheck: () => call("update_check"),
     updateInstallOnRestart: () => call("update_install_on_restart"),
