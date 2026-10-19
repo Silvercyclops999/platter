@@ -12,10 +12,10 @@ import { trackArtistLine } from "../../lib/format";
 import { useArtColours } from "../../lib/useTint";
 import { useApp } from "../../stores/app";
 import { player, usePlayer } from "../../stores/player";
-import { FormatPlate, ProgressLine, tap } from "../bits";
+import { ProgressLine, tap } from "../bits";
 import { nav } from "../../stores/router";
 import { phone, usePhoneUi } from "../phoneUi";
-import { Carousel, PageFailed, PageLoading, ShelfCard, itemInfo } from "./common";
+import { Carousel, PageFailed, PageLoading, PlayingBars, ShelfCard, itemInfo } from "./common";
 
 export function PhoneHome() {
   const { data, error, retry } = useLoad(() => backend.home(), []);
@@ -34,7 +34,7 @@ export function PhoneHome() {
         </button>
         <div className="ph-pills" role="group" aria-label="Show">
           {HOME_FILTERS.map((f) => (
-            <button key={f.id} type="button" className={`ph-chip ${filter === f.id ? "is-on" : ""}`} aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>
+            <button key={f.id} type="button" className={`ph-chip ${filter === f.id ? "is-on" : ""}`} aria-pressed={filter === f.id} onClick={() => (tap("selection"), setFilter(f.id))}>
               {f.label}
             </button>
           ))}
@@ -52,7 +52,7 @@ export function PhoneHome() {
                 <button type="button" className={`ph-shortcut ${live ? "is-playing" : ""}`} onClick={() => nav.go(info.route)}>
                   <Art path={info.thumb} size={56} round={info.round} kind={info.kind} sleeve={info.kind === "album" ? { title: info.title, artist: info.sub } : undefined} />
                   <span className="ph-shortcut__title">{info.title}</span>
-                  {live && <span className="ph-bars" aria-label="Playing" />}
+                  {live && <PlayingBars />}
                 </button>
               </li>
             );
@@ -114,7 +114,6 @@ export function NowCard() {
           <span className="ph-now__eyebrow">{playing ? "Now playing" : "Paused"}</span>
           <span className="ph-now__title">{track.title}</span>
           <span className="ph-now__artist">{trackArtistLine(track)}</span>
-          <FormatPlate track={track} />
         </span>
       </button>
       <button

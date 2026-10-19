@@ -5,7 +5,8 @@
  */
 import { create } from "zustand";
 import type { Album, Playlist, Track } from "../lib/types";
-import { useRouter, type Route } from "../stores/router";
+import { sameRoute, useRouter, type Route } from "../stores/router";
+import { stackSignals } from "./motion";
 
 export type PhoneTab = "home" | "search" | "library" | "you";
 
@@ -48,11 +49,21 @@ interface PhoneUi {
 export const usePhoneUi = create<PhoneUi>()(() => ({ tab: "home", nowPlaying: false, lyrics: false, sheets: [], crates: false, homeCard: false }));
 
 export const phone = {
-  /** A tab: its first page. Tapping the tab you're on goes back to its top. */
+  /**
+   * A tab: its first page. Tapping the tab you're on goes back to its first
+   * page, or, already there, scrolls it to the top.
+   */
   tab(id: PhoneTab) {
     const t = TABS.find((x) => x.id === id)!;
+    const from = usePhoneUi.getState().tab;
+    const r = useRouter.getState();
+    if (from === id && r.entries.length === 1 && sameRoute(r.entries[0].route, t.route)) {
+      stackSignals.toTop?.();
+      return;
+    }
+    stackSignals.tabSwitch = { from, to: id };
     usePhoneUi.setState({ tab: id });
-    useRouter.getState().reset(t.route);
+    r.reset(t.route);
   },
   openPlayer: () => usePhoneUi.setState({ nowPlaying: true }),
   closePlayer: () => usePhoneUi.setState({ nowPlaying: false, lyrics: false, sheets: [] }),

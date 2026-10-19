@@ -13,6 +13,7 @@ import { CRATE_PLATE, CRATE_TABS, CRATE_TAB_LABEL, crateLine, records } from "..
 import { player } from "../../stores/player";
 import { nav } from "../../stores/router";
 import { BackBar, PageFailed, PageLoading, ShelfCard } from "./common";
+import { tap } from "../bits";
 
 const NOTE_KEY = "platter.phone.cratesNoteSeen";
 
@@ -63,7 +64,7 @@ export function CratesBody({ start }: { start?: CrateKind }) {
       )}
       <div className="ph-seg" role="tablist" aria-label="Sort records by">
         {CRATE_TABS.map((k) => (
-          <button key={k} type="button" role="tab" className={`ph-seg__tab ${kind === k ? "is-on" : ""}`} aria-selected={kind === k} onClick={() => setKind(k)}>
+          <button key={k} type="button" role="tab" className={`ph-seg__tab ${kind === k ? "is-on" : ""}`} aria-selected={kind === k} onClick={() => (tap("selection"), setKind(k))}>
             {CRATE_TAB_LABEL[k]}
           </button>
         ))}

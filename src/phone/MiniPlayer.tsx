@@ -1,6 +1,6 @@
 /**
  * The floating mini player above the tabs: tinted from the cover, the song
- * over its artist with the format plate, the output button and play or
+ * over its artist, the output button and play or
  * pause, and a thin progress line along the bottom edge (paused too).
  * Tapping it opens now playing.
  */
@@ -10,7 +10,7 @@ import { Art } from "../components/Art";
 import { trackArtistLine } from "../lib/format";
 import { useArtColours } from "../lib/useTint";
 import { player, usePlayer } from "../stores/player";
-import { FormatPlate, ProgressLine, tap } from "./bits";
+import { ProgressLine, tap } from "./bits";
 import { OutputButton } from "./DeviceSheet";
 import { phone } from "./phoneUi";
 
@@ -31,7 +31,6 @@ export function MiniPlayer() {
           <span className="ph-mini__title">{track.title}</span>
           <span className="ph-mini__artist">
             <span className="ph-mini__artist-name">{trackArtistLine(track)}</span>
-            <FormatPlate track={track} />
           </span>
         </span>
       </button>

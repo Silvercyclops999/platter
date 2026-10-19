@@ -17,11 +17,14 @@
   --ph-ease: cubic-bezier(0.32, 0.72, 0, 1);
   --ph-quick: 220ms;
   --ph-slide: 300ms;
+  --ph-np-open: 380ms;
   position: fixed;
   inset: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* clip, not hidden: a hidden box can still be scrolled by focus() or a selection, which shoved the whole phone up. */
+  overflow: clip;
   background: var(--color-bg-base);
   background-image: var(--paper-grain, none);
   color: var(--color-text-primary);
@@ -51,6 +54,7 @@
 .phone .tabular { font-variant-numeric: tabular-nums lining-nums; }
 
 .ph-main { position: relative; flex: 1; min-height: 0; }
+.ph-stack { position: absolute; inset: 0; overflow: hidden; }
 .ph-page {
   position: absolute;
   inset: 0;
@@ -60,7 +64,6 @@
   padding: calc(var(--ph-safe-top) + 12px) var(--ph-gutter) calc(var(--ph-dock-h) + 32px);
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
-  animation: ph-page-in var(--ph-quick) var(--ph-ease);
 }
 @keyframes ph-page-in { from { opacity: 0; transform: translateY(8px); } }
 .ph-page::-webkit-scrollbar { display: none; }
@@ -98,7 +101,6 @@
   border-radius: 50%;
   color: var(--color-text-secondary);
 }
-.ph-icon-btn:active { background: var(--color-state-pressed); }
 .ph-icon-btn.is-on { color: var(--color-accent); }
 .ph-text-btn {
   display: inline-flex;
@@ -120,7 +122,6 @@
   color: var(--color-text-on-accent) !important;
   box-shadow: 0 6px 18px color-mix(in srgb, #000 28%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
-.ph-play:active { transform: scale(0.96); }
 .ph-play--page { width: 56px; height: 56px; }
 .ph-play--small { width: 56px; height: 56px; }
 .ph-play--row { width: 40px; height: 40px; box-shadow: none; }
@@ -184,7 +185,6 @@
   min-height: 64px;
   padding: 8px 0;
 }
-.ph-row:active { background: var(--color-state-hover); }
 .ph-row--text { min-height: 54px; font-size: 16px; justify-content: space-between; }
 .ph-row--text.is-on { color: var(--color-accent); font-weight: 600; }
 .ph-row--quiet { color: var(--color-text-muted); }
@@ -214,7 +214,7 @@
   height: calc(var(--ph-tabs-h) + var(--ph-safe-bottom));
   padding-bottom: var(--ph-safe-bottom);
   background: linear-gradient(180deg, color-mix(in srgb, var(--color-bg-base) 70%, transparent), var(--color-bg-base) 60%);
-  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
 }
 .ph-tab {
   position: relative;
@@ -228,7 +228,6 @@
 .ph-tab__label { font-size: 11px; font-weight: 600; letter-spacing: 0.01em; }
 .ph-tab.is-on { color: var(--color-accent) !important; }
 .ph-tab svg { transition: transform var(--ph-quick) var(--ph-ease); }
-.ph-tab:active svg { transform: scale(0.9); }
 /* The tab you're on is lit brass, icon and word together. */
 
 /* The mini player: dark, tinted from the cover, white text on every look. */
@@ -270,10 +269,10 @@
   background: linear-gradient(180deg, color-mix(in srgb, var(--ph-tint) 46%, var(--color-bg-base)) 0, color-mix(in srgb, var(--ph-tint) 12%, var(--color-bg-base)) 62%, var(--color-bg-base) 100%);
   background-attachment: local;
   transition: transform var(--ph-slide) var(--ph-ease);
-  animation: ph-rise var(--ph-slide) var(--ph-ease);
-  will-change: transform;
+  animation: ph-rise var(--ph-np-open) var(--ph-ease);
 }
-.ph-np.is-dragging { transition: none; }
+.ph-np.is-dragging { transition: none; will-change: transform; }
+.ph-np.is-closing { will-change: transform; }
 .ph-np.is-closing { transform: translateY(100%) !important; }
 @keyframes ph-rise { from { transform: translateY(100%); } to { transform: none; } }
 .ph-np__scroll { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding-bottom: calc(24px + var(--ph-safe-bottom)); }
@@ -434,9 +433,13 @@
 .ph-lyrics .ph-play { background: #fffaf0 !important; color: #141210 !important; }
 
 /* ---------------------------------------------------------------- sheets */
-.ph-sheet-layer { position: absolute; inset: 0; z-index: 80; }
+/* Sheets are fixed over the whole screen; nothing under them scrolls or moves when one opens. */
+.ph-sheet-layer { position: fixed; inset: 0; z-index: 80; }
+.ph-sheet-layer.is-closing { pointer-events: none; }
+.ph-sheet-layer.is-closing .ph-sheet-dim { opacity: 0; }
+.ph-sheet-layer.is-closing .ph-sheet { transform: translateY(100%) !important; transition: transform 260ms var(--ph-ease); }
 .ph-sheet-layer + .ph-sheet-layer .ph-sheet-dim { background: rgba(0, 0, 0, 0.22); }
-.ph-sheet-dim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.5); animation: ph-fade var(--ph-slide) var(--ph-ease); }
+.ph-sheet-dim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.5); animation: ph-fade 140ms ease-out; transition: opacity 240ms var(--ph-ease); }
 @keyframes ph-fade { from { opacity: 0; } }
 .ph-sheet {
   position: absolute;
@@ -533,7 +536,6 @@
 .ph-shortcut .art { border-radius: 0; flex: none; }
 .ph-shortcut__title { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .ph-shortcut.is-playing .ph-shortcut__title { color: var(--color-accent); }
-.ph-bars { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--color-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 25%, transparent); }
 
 .ph-shelf { margin-top: 28px; }
 .ph-shelf__title { margin: 0 0 12px; font-family: var(--ph-title-font); font-size: 20px; font-weight: 600; letter-spacing: -0.005em; }
@@ -569,7 +571,7 @@
   background: color-mix(in srgb, var(--color-ink) 9%, var(--color-bg-raised));
   color: var(--color-text-muted);
 }
-.ph-field__input { flex: 1; min-width: 0; height: 100%; border: 0; background: none; color: var(--color-text-primary); font: inherit; font-size: 17px; outline: none !important; box-shadow: none !important; user-select: text; }
+.ph-field__input { -webkit-user-select: text; flex: 1; min-width: 0; height: 100%; border: 0; background: none; color: var(--color-text-primary); font: inherit; font-size: 17px; outline: none !important; box-shadow: none !important; user-select: text; }
 .ph-field:focus-within { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--color-accent) 70%, transparent); }
 .ph-field__input::-webkit-search-cancel-button { display: none; }
 .ph-hit { display: flex; align-items: center; }
@@ -601,7 +603,7 @@
   margin: calc(-1 * (var(--ph-safe-top) + 12px)) calc(-1 * var(--ph-gutter)) 0;
   padding: calc(var(--ph-safe-top) + 4px) 8px 4px;
 }
-.ph-backbar.is-titled { background: color-mix(in srgb, var(--color-bg-base) 88%, transparent); backdrop-filter: blur(14px); }
+.ph-backbar.is-titled { background: color-mix(in srgb, var(--color-bg-base) 94%, transparent); -webkit-backdrop-filter: blur(16px) saturate(1.4); backdrop-filter: blur(16px) saturate(1.4); box-shadow: 0 0.5px 0 var(--ph-line); }
 .ph-backbar__back { color: var(--color-text-primary); background: color-mix(in srgb, var(--color-bg-base) 40%, transparent) !important; }
 .ph-backbar__title { text-align: center; font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; transition: opacity 200ms; }
 .ph-backbar.is-titled .ph-backbar__title { opacity: 1; }
@@ -670,7 +672,10 @@
   .ph-np, .ph-np__art, .ph-np__cover, .ph-dock .ph-mini { transition: none; }
   .ph-marquee.is-moving .ph-marquee__text { animation: none; }
 }
-:root[data-reduced-motion="true"] :is(.ph-np, .ph-sheet, .ph-sheet-dim, .ph-lyrics, .ph-page, .ph-marquee__text) { animation: none !important; }
+:root[data-reduced-motion="true"] :is(.ph-page, .ph-marquee__text) { animation: none !important; }
+/* Under reduced motion the player, lyrics and sheets fade in and out instead of sliding. */
+:root[data-reduced-motion="true"] :is(.ph-np, .ph-sheet, .ph-sheet-dim, .ph-lyrics) { animation: ph-fade 120ms ease-out !important; }
+:root[data-reduced-motion="true"] .ph-np.is-closing { transform: none !important; opacity: 0; transition: opacity 120ms ease-out; }
 
 /* ---------------------------------------------------------------- home: the player at the front */
 .ph-now {
@@ -687,7 +692,6 @@
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 .ph-now__open { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; }
-.ph-now__open:active { opacity: 0.85; }
 .ph-now__art { flex: none; width: 96px; border-radius: 6px; overflow: hidden; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4); }
 .ph-now__art .art { width: 100%; height: auto; border-radius: 0; }
 .ph-now__text { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
@@ -710,7 +714,7 @@
 /* ---------------------------------------------------------------- album discs */
 .ph-disc-group + .ph-disc-group { margin-top: 12px; }
 .ph-disc-head { display: flex; align-items: baseline; justify-content: space-between; margin: 12px 0 2px; padding-bottom: 8px; border-bottom: 1px solid var(--ph-line); font-family: var(--ph-title-font); font-size: 18px; font-weight: 600; }
-.ph-disc-head__count { font-family: var(--font-readout, var(--font-family)); font-size: 12px; font-weight: 500; color: var(--color-text-muted); }
+.ph-disc-head__count { font-family: var(--font-family); font-variant-numeric: tabular-nums; font-size: 12px; font-weight: 500; color: var(--color-text-muted); }
 
 /* ---------------------------------------------------------------- big buttons (sign-in) */
 .ph-big-btn {
@@ -729,7 +733,6 @@
   text-align: center !important;
   transition: transform var(--ph-quick) var(--ph-ease);
 }
-.ph-big-btn:active { transform: scale(0.98); }
 .ph-big-btn.is-primary { background: var(--color-accent) !important; color: var(--color-text-on-accent) !important; box-shadow: 0 6px 18px color-mix(in srgb, #000 22%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.22); }
 .ph-big-btn.is-quiet { background: none !important; box-shadow: none; color: var(--color-text-secondary) !important; }
 
@@ -792,10 +795,9 @@
   background: color-mix(in srgb, var(--color-ink) 6%, var(--color-bg-raised)) !important;
   box-shadow: var(--panel-highlight, inset 0 0 0 1px var(--ph-line));
 }
-.ph-server:active { transform: scale(0.99); }
 .ph-server--ghost { list-style: none; background: var(--ph-faint) !important; }
 .ph-server__icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 10px; background: var(--ph-faint); color: var(--color-text-secondary); flex: none; }
-.ph-server__state { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-readout, var(--font-family)); font-size: 12px; color: var(--color-text-muted); }
+.ph-server__state { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-family); font-size: 12px; color: var(--color-text-muted); }
 .ph-server__lamp { width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--color-text-muted) 50%, transparent); }
 .ph-server__state.is-on { color: var(--color-text-secondary); }
 .ph-server__state.is-on .ph-server__lamp { background: var(--color-accent); box-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 70%, transparent); }
@@ -837,7 +839,7 @@
 }
 .ph-readout { display: flex; flex-direction: column-reverse; gap: 4px; padding: 14px 12px 12px; min-width: 0; }
 .ph-readout + .ph-readout { box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.07); }
-.ph-readout__value { margin: 0; font-family: var(--font-readout, var(--font-family)); font-size: 24px; font-weight: 500; font-variant-numeric: tabular-nums lining-nums; color: var(--glass-text, #efe6d6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ph-readout__value { margin: 0; font-family: var(--font-family); font-weight: 600; font-size: 24px; font-weight: 500; font-variant-numeric: tabular-nums lining-nums; color: var(--glass-text, #efe6d6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ph-readout__label { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--glass-dim, #b9ae9c); }
 .ph-readout__wait { display: inline-block; width: 48px; height: 22px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); }
 .ph-you__top { margin: 10px 2px 0; font-size: 14px; color: var(--color-text-secondary); }
@@ -855,8 +857,7 @@
   background: color-mix(in srgb, var(--color-accent) 14%, var(--color-bg-raised)) !important;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
-.ph-wrapped:active { transform: scale(0.99); }
-.ph-wrapped__year { display: grid; place-items: center; align-self: stretch; width: 76px; flex: none; background: var(--color-accent); color: var(--color-text-on-accent); font-family: var(--font-readout, var(--font-family)); font-size: 18px; font-weight: 500; }
+.ph-wrapped__year { display: grid; place-items: center; align-self: stretch; width: 76px; flex: none; background: var(--color-accent); color: var(--color-text-on-accent); font-family: var(--font-family); font-weight: 700; font-size: 18px; font-weight: 500; }
 .ph-wrapped__text { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
 .ph-wrapped__title { font-size: 16px; font-weight: 700; }
 .ph-wrapped__sub { font-size: 13px; color: var(--color-text-secondary); }
@@ -867,11 +868,10 @@
 .ph-set-list { list-style: none; margin: 0; padding: 0; border-radius: 14px; overflow: hidden; background: color-mix(in srgb, var(--color-ink) 5%, var(--color-bg-raised)); box-shadow: var(--panel-highlight, none); }
 .ph-set-list > li + li .ph-set-link { box-shadow: inset 0 1px 0 var(--ph-line); }
 .ph-set-link { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 10px 12px 10px 16px !important; }
-.ph-set-link:active { background: var(--color-state-pressed) !important; }
 .ph-set-link__text { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
 .ph-set-link__title { font-size: 16px; font-weight: 600; }
 .ph-set-link__sub { font-size: 13px; line-height: 1.35; color: var(--color-text-secondary); }
-.ph-set-link__state { font-family: var(--font-readout, var(--font-family)); font-size: 12px; color: var(--color-text-muted); }
+.ph-set-link__state { font-family: var(--font-family); font-size: 12px; color: var(--color-text-muted); }
 .ph-set-link__state.is-on { color: var(--color-accent); }
 .ph-set-link__chev { flex: none; color: var(--color-text-muted); }
 .ph-set-list--pages { margin: 20px 0 8px; }
@@ -939,8 +939,8 @@
 .ph-chip { display: inline-flex; align-items: center; gap: 6px; }
 .ph-chip__x { margin-right: -4px; }
 /* The playing song in a list: small moving bars where its number was. */
-.ph-eq { display: inline-flex; align-items: flex-end; gap: 2px; width: 14px; height: 12px; }
-.ph-eq span { width: 3px; height: 100%; border-radius: 1px; background: var(--color-accent); transform-origin: bottom; animation: ph-eq 900ms ease-in-out infinite alternate; }
+.ph-eq { display: inline-flex; align-items: flex-end; gap: 2px; flex: none; width: 11px; height: 12px; }
+.ph-eq span { width: 2px; height: 100%; border-radius: 1px; background: var(--color-accent); transform-origin: bottom; animation: ph-eq 900ms ease-in-out infinite alternate; }
 .ph-eq span:nth-child(2) { animation-delay: -300ms; }
 .ph-eq span:nth-child(3) { animation-delay: -600ms; }
 .ph-eq.is-paused span { animation: none; transform: scaleY(0.4); }
@@ -954,7 +954,7 @@
 .ph-browse { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .ph-browse__tile { position: relative; display: flex; flex-direction: column; justify-content: space-between; width: 100%; height: 88px; padding: 12px 14px !important; border-radius: 10px; overflow: hidden; background: color-mix(in srgb, var(--color-ink) 7%, var(--color-bg-raised)) !important; box-shadow: var(--panel-highlight, none); }
 .ph-browse__name { position: relative; z-index: 1; max-width: 70%; font-size: 15px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
-.ph-browse__count { position: relative; z-index: 1; font-family: var(--font-readout, var(--font-family)); font-size: 12px; color: var(--color-text-muted); }
+.ph-browse__count { position: relative; z-index: 1; font-family: var(--font-family); font-variant-numeric: tabular-nums; font-size: 12px; color: var(--color-text-muted); }
 .ph-browse__art { position: absolute; right: -12px; bottom: -10px; transform: rotate(14deg); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); border-radius: 3px; overflow: hidden; }
 .ph-search .ph-pills--scroll { margin-top: 12px; }
 .ph-hit.is-top .ph-row { padding: 10px 12px; margin: 4px 0; border-radius: 12px; background: color-mix(in srgb, var(--color-ink) 6%, var(--color-bg-raised)); }
@@ -1002,3 +1002,168 @@
 .settings--phone .setting-checklist__item input:checked::before { transform: translateX(18px); background: var(--color-text-on-accent); }
 .settings--phone .setting-checklist__item input:disabled { opacity: 0.4; }
 .settings--phone .setting-checklist__off { padding-left: 0; }
+
+/* ---------------------------------------------------------------- press feedback */
+/* gestures.ts puts is-pressed on the control under the finger at once and
+   takes it off when the finger lifts or the press turns into a scroll. Rows
+   dim; tiles, pills and buttons give a little. In fast, out softer. */
+:where(.phone) :where(button, a[href], [role="button"], [role="tab"], [role="switch"], [role="radio"], [role="checkbox"]) {
+  transition: opacity 220ms var(--ph-ease), transform 260ms var(--ph-ease), background-color 220ms var(--ph-ease);
+}
+.phone .is-pressed { opacity: 0.6; transition-duration: 90ms; }
+.phone :is(.ph-card-tile, .ph-shortcut, .ph-browse__tile, .ph-pill, .ph-chip, .ph-play, .ph-big-btn, .ph-server, .ph-wrapped, .ph-crate, .ph-avatar, .ph-select, .ph-seg__tab, .btn).is-pressed { opacity: 1; transform: scale(0.96); }
+.phone :is(.ph-icon-btn, .ph-text-btn, .ph-output).is-pressed { opacity: 0.7; transform: scale(0.92); }
+.phone .ph-play.is-pressed { transform: scale(0.94); }
+.phone .ph-tab.is-pressed { opacity: 0.7; }
+.phone .ph-tab.is-pressed svg { transform: scale(0.88); transition-duration: 90ms; }
+/* Settings rows light up grey under the finger, as list rows do on a phone. */
+.phone .ph-set-link { transition: background-color 260ms var(--ph-ease); }
+.phone .ph-set-link.is-pressed { opacity: 1; background: var(--color-state-pressed) !important; transition-duration: 60ms; }
+:root[data-reduced-motion="true"] .phone .is-pressed { transform: none !important; }
+:root[data-reduced-motion="true"] .phone .ph-tab.is-pressed svg { transform: none; }
+
+/* ---------------------------------------------------------------- page stack */
+/* PageStack: each page sits in its own layer. During a push or a back the
+   page on top slides over the one under it, which shifts left and dims.
+   Only transform and opacity move, and only while they do. */
+.ph-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background-color: var(--color-bg-base);
+  background-image: var(--paper-grain, none);
+}
+.ph-layer.is-under { pointer-events: none; }
+.ph-layer.is-sliding { z-index: 2; box-shadow: -10px 0 28px rgba(0, 0, 0, 0.26); }
+.ph-layer.is-fading { z-index: 2; }
+.ph-stack-dim { position: absolute; inset: 0; z-index: 1; background: rgba(0, 0, 0, 0.2); opacity: 0; pointer-events: none; }
+
+/* ---------------------------------------------------------------- the cover's flight */
+/* A copy of the cover flies between the mini player and now playing while
+   the real ones hide; the mini player steps out of the way meanwhile. */
+.ph-flight {
+  position: absolute;
+  z-index: 45;
+  overflow: hidden;
+  border-radius: 6px;
+  transform-origin: 0 0;
+  pointer-events: none;
+  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.42);
+}
+.ph-flight > * { position: absolute !important; inset: 0; width: 100% !important; height: 100% !important; margin: 0; border-radius: 0 !important; box-shadow: none !important; }
+.ph-flight .art { width: 100% !important; height: 100% !important; border-radius: 0 !important; }
+.phone.is-cover-flying .ph-dock .ph-mini { opacity: 0; transition: none; }
+
+/* ---------------------------------------------------------------- the light look on the phone */
+/* Clean white paper and true ink: no beige, no grain. The look's accent stays. */
+:root[data-theme-base="light"] .phone {
+  --color-bg-base: #ffffff;
+  --color-bg-raised: #f5f5f4;
+  --color-bg-raised2: #ececea;
+  --color-bg-overlay: #ffffff;
+  --color-border: #dcdcd8;
+  --color-ink: #0d0d0d;
+  --color-text-primary: #0d0d0d;
+  --color-text-secondary: #55555a;
+  --color-text-muted: #7c7c82;
+  --color-state-hover: rgba(0, 0, 0, 0.04);
+  --color-state-pressed: rgba(0, 0, 0, 0.08);
+  --paper-grain: none;
+  --panel-highlight: none;
+  --ph-faint: rgba(0, 0, 0, 0.05);
+  --ph-line: rgba(0, 0, 0, 0.1);
+}
+/* The You tab's stats sit on a light card, not a black box. */
+:root[data-theme-base="light"] .phone .ph-readouts { background: var(--color-bg-raised); box-shadow: inset 0 0 0 1px var(--ph-line); }
+:root[data-theme-base="light"] .phone .ph-readout__value { color: var(--color-text-primary); }
+:root[data-theme-base="light"] .phone .ph-readout__label { color: var(--color-text-secondary); }
+:root[data-theme-base="light"] .phone .ph-readout + .ph-readout { box-shadow: inset 1px 0 0 var(--ph-line); }
+
+/* The mini player and Home's card take their colour from the cover in both
+   looks: a deep tint on the dark look, a pale one with ink on the light. */
+.ph-mini { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32), inset 0 0 0 0.5px rgba(255, 255, 255, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.1); }
+:root[data-theme-base="light"] .phone :is(.ph-mini, .ph-now) {
+  background: color-mix(in srgb, var(--ph-tint) 20%, #ffffff);
+  color: var(--color-text-primary);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12), inset 0 0 0 0.5px rgba(0, 0, 0, 0.08);
+}
+:root[data-theme-base="light"] .phone :is(.ph-mini__artist, .ph-now__artist, .ph-now__eyebrow) { color: var(--color-text-secondary); }
+:root[data-theme-base="light"] .phone :is(.ph-mini, .ph-now) :is(.ph-icon-btn, .ph-output) { color: var(--color-text-primary); }
+:root[data-theme-base="light"] .phone :is(.ph-mini__progress, .ph-now__progress) { background: rgba(0, 0, 0, 0.1); }
+:root[data-theme-base="light"] .phone :is(.ph-mini__progress-fill, .ph-now__progress-fill) { background: var(--color-text-primary); }
+
+/* A real bar behind the status bar: pages scroll under it, never through the clock. */
+.ph-stack::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 4;
+  height: var(--ph-safe-top);
+  background: color-mix(in srgb, var(--color-bg-base) 92%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  backdrop-filter: blur(16px) saturate(1.4);
+  pointer-events: none;
+}
+/* Now playing's top bar is solid where its words sit, so the cover never shows through them. */
+.ph-np__top { background: linear-gradient(180deg, color-mix(in srgb, var(--ph-tint) 46%, var(--color-bg-base)) 78%, transparent); }
+/* Inputs take a caret and a selection even though the rest of the phone doesn't. */
+.phone :is(input, textarea, [contenteditable="true"]) { -webkit-user-select: text; user-select: text; }
+:root[data-reduced-motion="true"] .ph-sheet-layer.is-closing .ph-sheet { opacity: 0; transition: opacity 120ms ease-out; }
+
+/* ---------------------------------------------------------------- like */
+/* The heart fills and gives one short pop; that is the whole confirmation. */
+.ph-like__pop { animation: ph-like-pop 320ms var(--ph-ease); }
+@keyframes ph-like-pop { 0% { transform: scale(0.7); } 45% { transform: scale(1.22); } 100% { transform: scale(1); } }
+:root[data-reduced-motion="true"] .ph-like__pop { animation: none; }
+
+/* ---------------------------------------------------------------- notes (toasts) */
+/* One small line above the tab bar: words and at most one action. No icon,
+   no cover, no close button; it goes by itself. */
+.phone .toaster {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: calc(var(--ph-dock-h) + 10px);
+  top: auto;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  transform: none;
+  pointer-events: none;
+}
+.phone .toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+  min-height: 40px;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-text-primary) 90%, transparent);
+  color: var(--color-bg-base);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  font-size: 14px;
+  font-weight: 600;
+  animation: ph-note-in 220ms var(--ph-ease);
+}
+/* Over now playing the note sits under its top bar, clear of the controls. */
+.phone:has(.ph-np:not(.is-closing)) .toaster { top: calc(var(--ph-safe-top) + 60px); bottom: auto; }
+.phone .toast :is(.toast__icon, .toast__art, .toast__close) { display: none; }
+.phone .toast__msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone .toast__action { flex: none; min-height: 32px; padding: 0 2px; background: none; border: 0; color: inherit; font: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.phone .toast--error { background: color-mix(in srgb, var(--color-error, #b3261e) 92%, #000); color: #fff; }
+@keyframes ph-note-in { from { opacity: 0; transform: translateY(8px); } }
+:root[data-reduced-motion="true"] .phone .toast { animation: ph-fade 120ms ease-out; }
+
+/* ---------------------------------------------------------------- plain marks */
+/* Status is said in words, not lit dots. */
+.ph-server__lamp, .ph-signin__pulse { display: none; }
+.ph-server__state.is-on { color: var(--color-accent); }
+.ph-wrapped__year { background: none; color: var(--color-accent); width: auto; padding: 0 4px 0 16px; font-size: 22px; }
+.ph-wrapped { background: color-mix(in srgb, var(--color-ink) 5%, var(--color-bg-raised)) !important; box-shadow: none; }

@@ -1,12 +1,11 @@
 /**
  * An album on the phone: the cover at about 55% of the width, its title,
- * artist, year and format plate; download, more, shuffle and a large play;
+ * artist and year; download, more, shuffle and a large play;
  * then the songs, each with the downloaded mark before its artist line.
  */
 import { MoreHorizontal, Pause, Play, Shuffle } from "lucide-react";
 import type { CSSProperties } from "react";
 import { Art } from "../../components/Art";
-import { Plate } from "../../components/Plate";
 import { discGroups } from "../../pages/album";
 import { DownloadButton } from "../../components/DownloadButton";
 import { backend } from "../../lib/backend";
@@ -16,7 +15,6 @@ import { useArtColours } from "../../lib/useTint";
 import { player, usePlayer } from "../../stores/player";
 import { nav } from "../../stores/router";
 import { phone } from "../phoneUi";
-import { albumPlate } from "../bits";
 import { SleeveCard } from "../NowPlaying";
 import { BackBar, Carousel, PageFailed, PageLoading, ShelfCard, SongRow, countLine } from "./common";
 
@@ -30,7 +28,6 @@ export function PhoneAlbum({ id }: { id: string }) {
   const { album, tracks } = data;
   const here = ctx?.kind === "album" && ctx.id === album.id;
   const playing = here && (status === "playing" || status === "loading" || status === "buffering");
-  const plate = albumPlate(tracks);
   const facts = [releaseTypeLabel(album), album.year ? String(album.year) : null].filter(Boolean).join(" · ");
   return (
     <div className="ph-page ph-album" style={{ "--ph-tint": colours?.vivid ?? "var(--color-bg-overlay)" } as CSSProperties}>
@@ -45,7 +42,6 @@ export function PhoneAlbum({ id }: { id: string }) {
         </button>
         <p className="ph-album__facts">
           <span className="tabular">{facts}</span>
-          {plate && <Plate size="sm">{plate}</Plate>}
         </p>
       </header>
       <div className="ph-actions">

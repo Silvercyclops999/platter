@@ -6,6 +6,7 @@
  */
 import { CircleUserRound, Home, Library, Search } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef } from "react";
+import { backend } from "../lib/backend";
 import { afterFirstPaint } from "../lib/idle";
 import { ShellHosts } from "../shell/AppShell";
 import { startLyricsTrust } from "../shell/lyrics";
@@ -30,6 +31,7 @@ import { PhoneYou } from "./pages/You";
 import { notchFromUrl } from "./form";
 import { installTapGuard } from "./gestures";
 import { TABS, phone, tabOf, usePhoneUi, type PhoneTab } from "./phoneUi";
+import { PageStack } from "./PageStack";
 import { SheetHost } from "./Sheets";
 import "./phone.css";
 
@@ -54,6 +56,7 @@ export function PhoneShell() {
   useEffect(() => void loadOwnLyricsIds(), []);
   useEffect(() => void startDownloads(), []);
   useEffect(() => afterFirstPaint(() => void startLyricsTrust()), []);
+  useEffect(() => followStatusBar(), []);
   // A page reached from elsewhere (a link in a sheet) lights its own tab.
   useEffect(() => {
     const t = tabOf(entry.route, usePhoneUi.getState().tab);
@@ -62,7 +65,7 @@ export function PhoneShell() {
   return (
     <div ref={root} className={`phone ${hasTrack ? "has-mini" : ""} ${NOTCH ? "ph-notch" : ""}`} data-testid="phone-shell" data-tab={tab}>
       <main className="ph-main" aria-hidden={playerOpen || undefined} inert={playerOpen || undefined}>
-        <PhonePage key={entry.key} route={entry.route} />
+        <PageStack render={(e) => <PhonePage route={e.route} />} />
       </main>
       <div className={`ph-dock ${cardShown ? "is-mini-away" : ""}`} aria-hidden={playerOpen || undefined} inert={playerOpen || undefined}>
         <MiniPlayer />
@@ -77,7 +80,7 @@ export function PhoneShell() {
                 className={`ph-tab ${on ? "is-on" : ""}`}
                 aria-current={on ? "page" : undefined}
                 onClick={() => {
-                  tap();
+                  tap("selection");
                   phone.tab(t.id);
                 }}
               >
@@ -149,6 +152,34 @@ export function PhonePage({ route }: { route: Route }) {
         </div>
       );
   }
+}
+
+/** The status bar's text for a look: dark on a light look, light on a dark one. */
+export function statusBarDark(base: string | undefined): boolean {
+  return base === "light";
+}
+
+/**
+ * Keeps the phone's status bar readable: told once at the start and again
+ * whenever the look turns light or dark. Off the phone it quietly does nothing.
+ */
+export function followStatusBar(root: HTMLElement = document.documentElement): () => void {
+  let last: boolean | null = null;
+  const tell = () => {
+    const dark = statusBarDark(root.dataset.themeBase);
+    if (dark === last) return;
+    last = dark;
+    try {
+      void backend.setStatusBarStyle(dark).catch(() => undefined);
+    } catch {
+      // No status bar here.
+    }
+  };
+  tell();
+  if (typeof MutationObserver === "undefined") return () => {};
+  const mo = new MutationObserver(tell);
+  mo.observe(root, { attributes: true, attributeFilter: ["data-theme-base"] });
+  return () => mo.disconnect();
 }
 
 /** Pages that work on files, drives or the computer's processor. */

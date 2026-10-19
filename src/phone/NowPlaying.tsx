@@ -6,7 +6,7 @@
  * pull down closes, straight down to the tab underneath.
  */
 import { ChevronDown, ListMusic, MicVocal, MoreHorizontal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { Art } from "../components/Art";
 import { Slider } from "../components/Slider";
 import { formatDuration, trackArtistLine } from "../lib/format";
@@ -20,7 +20,9 @@ import { FormatPlate, LikeControl, Marquee, remaining, tap } from "./bits";
 import { OutputButton } from "./DeviceSheet";
 import { useArtGestures } from "./gestures";
 import { LyricsCard } from "./LyricsScreen";
+import { NP_OPEN_MS, flyCover } from "./motion";
 import { phone, usePhoneUi } from "./phoneUi";
+import type { HapticKind } from "../lib/backend";
 
 /** The close slides straight down in this long. */
 export const CLOSE_MS = 300;
@@ -80,6 +82,7 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
     onClose: phone.closePlayer,
     size: () => ({ width: art.current?.clientWidth || 360, height: screen.current?.clientHeight || 800 }),
   });
+  useCoverFlight(screen, closing);
   const style = {
     "--ph-tint": colours?.vivid ?? "var(--color-bg-overlay)",
     transform: offset.y ? `translateY(${offset.y}px)` : undefined,
@@ -172,6 +175,50 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
   );
 }
 
+/**
+ * The small cover now playing grows from: the mini player's, or on Home
+ * the now-playing card's. Only one that is on screen counts.
+ */
+function smallCover(root: HTMLElement): HTMLElement | null {
+  const el = root.querySelector<HTMLElement>(".ph-dock:not(.is-mini-away) .ph-mini__art") ?? root.querySelector<HTMLElement>(".ph-layer:not(.is-under) .ph-now__art");
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.bottom > 0 && r.top < (root.clientHeight || window.innerHeight) ? el : null;
+}
+
+/**
+ * The cover's flight: opening, it grows out of the small cover into its
+ * place while the screen rises; closing, it shrinks back into the small
+ * cover while the screen falls away. The mini player hides meanwhile.
+ */
+function useCoverFlight(screen: React.RefObject<HTMLElement | null>, closing: boolean) {
+  const fly = (direction: "open" | "close") => {
+    const sec = screen.current;
+    const root = sec?.closest<HTMLElement>(".phone");
+    const big = sec?.querySelector<HTMLElement>(".ph-np__cover");
+    if (!sec || !root || !big || typeof big.animate !== "function") return;
+    const small = smallCover(root);
+    if (!small) return;
+    const b = big.getBoundingClientRect();
+    if (b.bottom < 0) return;
+    let bigRect;
+    if (direction === "open") {
+      // Where the cover lands once the screen has risen (it starts a screen lower).
+      const s = sec.getBoundingClientRect();
+      const r = root.getBoundingClientRect();
+      bigRect = { left: b.left - s.left + r.left, top: b.top - s.top + r.top, width: b.width, height: b.height };
+    }
+    root.classList.add("is-cover-flying");
+    void flyCover({ root, small, big, bigRect, direction, ms: direction === "open" ? NP_OPEN_MS : CLOSE_MS }).finally(() => root.classList.remove("is-cover-flying"));
+  };
+  useLayoutEffect(() => {
+    if (!closing) fly("open");
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => {
+    if (closing) fly("close");
+  }, [closing]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
 /** The tonearm seek line with the time gone left and the time left right. */
 export function PhoneSeek() {
   const positionMs = usePlayer((s) => s.positionMs);
@@ -209,13 +256,13 @@ function Transport({ playing }: { playing: boolean }) {
   const shuffle = usePlayer((s) => !!s.state?.shuffle);
   const repeat = usePlayer((s) => s.state?.repeat ?? "off");
   const RepeatIcon = repeat === "one" ? Repeat1 : Repeat;
-  const press = (f: () => unknown) => () => {
-    tap();
+  const press = (f: () => unknown, kind: HapticKind = "light") => () => {
+    tap(kind);
     void f();
   };
   return (
     <div className="ph-transport">
-      <button type="button" className={`ph-icon-btn ${shuffle ? "is-on" : ""}`} aria-label="Shuffle" aria-pressed={shuffle} onClick={press(() => player.toggleShuffle())}>
+      <button type="button" className={`ph-icon-btn ${shuffle ? "is-on" : ""}`} aria-label="Shuffle" aria-pressed={shuffle} onClick={press(() => player.toggleShuffle(), "selection")}>
         <Shuffle size={22} aria-hidden="true" />
       </button>
       <button type="button" className="ph-icon-btn ph-transport__skip" aria-label="Previous" onClick={press(player.previous)}>
@@ -232,7 +279,7 @@ function Transport({ playing }: { playing: boolean }) {
         className={`ph-icon-btn ${repeat !== "off" ? "is-on" : ""}`}
         aria-label={repeat === "one" ? "Repeat this song" : repeat === "all" ? "Repeat" : "Repeat off"}
         aria-pressed={repeat !== "off"}
-        onClick={press(player.cycleRepeatNow)}
+        onClick={press(player.cycleRepeatNow, "selection")}
       >
         <RepeatIcon size={22} aria-hidden="true" />
       </button>

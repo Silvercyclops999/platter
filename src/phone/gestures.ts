@@ -118,24 +118,65 @@ export function useArtGestures(opts: {
 /** A press that moves farther than this is a swipe or a scroll, never a tap. */
 export const TAP_SLOP_PX = 8;
 
+/** A tap shorter than this still shows its press for this long. */
+export const PRESS_MIN_MS = 90;
+
+/** The class a control wears while a finger is on it. */
+export const PRESSED = "is-pressed";
+
+/** What answers a press: buttons, links and anything acting as one. Sliders and drag handles don't. */
+const PRESSABLE = 'button, a[href], [role="button"], [role="tab"], [role="switch"], [role="radio"], [role="checkbox"], [role="option"], [role="menuitem"]';
+
+/** The control a press at `target` lights, if any. */
+export function pressTarget(target: EventTarget | null, root: HTMLElement): HTMLElement | null {
+  if (!(target instanceof Element)) return null;
+  const el = target.closest<HTMLElement>(PRESSABLE);
+  if (!el || !root.contains(el)) return null;
+  if (el.matches(':disabled, [aria-disabled="true"], .ph-handle, [data-no-press]')) return null;
+  return el;
+}
+
 /**
  * Keeps swipes from acting as taps anywhere under `root`: a press that
  * moved more than TAP_SLOP_PX, or during which anything scrolled, doesn't
- * click what it started on. Returns a function that removes it.
+ * click what it started on. The control under the finger wears PRESSED
+ * from the moment it goes down until it lifts, and loses it as soon as the
+ * press turns into a swipe or a scroll. Returns a function that removes it.
  */
 export function installTapGuard(root: HTMLElement): () => void {
-  let start: { x: number; y: number; id: number } | null = null;
+  let start: { x: number; y: number; id: number; target: Node | null } | null = null;
   let moved = false;
+  let lit: HTMLElement | null = null;
+  let litAt = 0;
+  const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+  const unlight = () => {
+    lit?.classList.remove(PRESSED);
+    lit = null;
+  };
   const down = (e: PointerEvent) => {
-    start = { x: e.clientX, y: e.clientY, id: e.pointerId };
+    start = { x: e.clientX, y: e.clientY, id: e.pointerId, target: e.target instanceof Node ? e.target : null };
     moved = false;
+    unlight();
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    lit = pressTarget(e.target, root);
+    litAt = now();
+    lit?.classList.add(PRESSED);
   };
   const move = (e: PointerEvent) => {
     if (!start || e.pointerId !== start.id || moved) return;
-    if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > TAP_SLOP_PX) moved = true;
+    if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > TAP_SLOP_PX) {
+      moved = true;
+      unlight();
+    }
   };
-  const scrolled = () => {
-    if (start) moved = true;
+  // Only a scroll of something the press is inside counts: a page still
+  // settling elsewhere (or the one under a sheet) mustn't eat a tab's tap.
+  const scrolled = (e: Event) => {
+    const box = e.target === document ? document.documentElement : e.target;
+    if (start && box instanceof Node && start.target && box.contains(start.target)) {
+      moved = true;
+      unlight();
+    }
   };
   const click = (e: MouseEvent) => {
     if (!moved) return;
@@ -143,8 +184,16 @@ export function installTapGuard(root: HTMLElement): () => void {
     e.preventDefault();
     e.stopPropagation();
   };
-  const up = () => {
+  // A quick tap still shows: the light stays at least PRESS_MIN_MS.
+  const up = (e: PointerEvent) => {
+    if (start && e.pointerId !== start.id) return;
     start = null;
+    const el = lit;
+    if (!el) return;
+    lit = null;
+    const held = now() - litAt;
+    if (e.type === "pointercancel" || held >= PRESS_MIN_MS) el.classList.remove(PRESSED);
+    else setTimeout(() => el !== lit && el.classList.remove(PRESSED), PRESS_MIN_MS - held);
   };
   root.addEventListener("pointerdown", down, true);
   root.addEventListener("pointermove", move, true);
@@ -153,6 +202,7 @@ export function installTapGuard(root: HTMLElement): () => void {
   root.addEventListener("scroll", scrolled, true);
   root.addEventListener("click", click, true);
   return () => {
+    unlight();
     root.removeEventListener("pointerdown", down, true);
     root.removeEventListener("pointermove", move, true);
     root.removeEventListener("pointerup", up, true);

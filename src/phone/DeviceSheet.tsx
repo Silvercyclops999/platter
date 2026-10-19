@@ -5,7 +5,6 @@
  * the move is confirmed, and the player stays open through a switch.
  */
 import { backend } from "../lib/backend";
-import { Plate } from "../components/Plate";
 import { Cast, ChevronDown, Laptop, Loader2, MonitorSpeaker, Smartphone, Speaker, Tv, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Slider } from "../components/Slider";
@@ -13,9 +12,8 @@ import type { PlayerKind, RemotePlayer } from "../lib/types";
 import { player, usePlayer } from "../stores/player";
 import { moveTo, returnHere, useRemote, watchPlayers } from "../stores/remote";
 import { toast } from "../stores/toasts";
-import { SheetFrame, plateText, tap } from "./bits";
+import { SheetFrame, tap } from "./bits";
 import { phone } from "./phoneUi";
-import { useIsDownloaded } from "../stores/downloads";
 
 const KIND_ICON: Record<PlayerKind, typeof Speaker> = {
   computer: Laptop,
@@ -61,8 +59,6 @@ export function DeviceSheet() {
   const busy = useRemote((s) => s.busy);
   const [help, setHelp] = useState(false);
   useEffect(() => watchPlayers(), []);
-  const downloaded = useIsDownloaded(track?.id ?? "");
-  const quality = track ? plateText(track, downloaded) : null;
   const others = (players ?? []).filter((p) => p.id !== remote?.playerId && p.online);
   const CardIcon = remote ? KIND_ICON[remote.kind] : Smartphone;
   return (
@@ -70,7 +66,6 @@ export function DeviceSheet() {
       <div className={`ph-device-card ${remote ? "is-remote" : ""}`}>
         <div className="ph-device-card__text">
           <span className="ph-device-card__name">{remote ? remote.playerName : "This phone"}</span>
-          {quality && <Plate size="sm">{quality}</Plate>}
           {track && (
             <span className="ph-device-card__now">
               {track.title} · {track.artistTitle}

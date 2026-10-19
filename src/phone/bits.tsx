@@ -2,13 +2,13 @@
  * Small pieces the phone screens share: the format plate, the bottom sheet
  * frame, row glyphs, a like control and a light tap of feedback.
  */
-import { Pin } from "lucide-react";
-import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Heart, Pin } from "lucide-react";
+import { createContext, useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Plate } from "../components/Plate";
+import { backend, type HapticKind } from "../lib/backend";
 import { prefersReducedMotion } from "../design/motion";
 import { usePlayer } from "../stores/player";
 import { DownloadedGlyph } from "../components/DownloadButton";
-import { PlusGlyph, TickGlyph } from "../components/SaveButton";
 import { qualityLabel } from "../lib/format";
 import { isLosslessCodec } from "../lib/libraryChips";
 import type { Track } from "../lib/types";
@@ -17,13 +17,31 @@ import { setLiked, useIsLiked } from "../stores/likes";
 import { useSettings } from "../stores/settings";
 import { phone } from "./phoneUi";
 
-/** A light tap of feedback on a control, while Haptics on controls is on. */
-export function tap() {
+/** Taps closer together than this buzz once. */
+export const HAPTIC_GAP_MS = 120;
+let lastHaptic = -Infinity;
+
+/** Forget the last buzz (tests). */
+export function resetHaptics() {
+  lastHaptic = -Infinity;
+}
+
+/**
+ * A tap of feedback from the phone's haptic engine, while Haptics on
+ * controls is on: light for play, pause, skip and like, selection for tabs,
+ * pills and sheet choices, success when a song lands in a playlist. A
+ * second tap within HAPTIC_GAP_MS doesn't buzz again. Off the phone, or on a
+ * core without haptics, nothing happens.
+ */
+export function tap(kind: HapticKind = "light") {
   if (useSettings.getState().settings?.phoneHaptics === false) return;
+  const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+  if (now - lastHaptic < HAPTIC_GAP_MS) return;
+  lastHaptic = now;
   try {
-    if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate?.(8);
+    void backend.haptic(kind).catch(() => undefined);
   } catch {
-    // No vibration on this device.
+    // No haptics here.
   }
 }
 
@@ -72,9 +90,14 @@ export function RowGlyphs({ pinned, downloaded }: { pinned?: boolean; downloaded
   );
 }
 
-/** Like a song (plus), or, once liked, open its sheet (tick) to unlike or add it to a playlist. */
+/**
+ * Like a song: the heart fills with a short pop and a light tap, and that
+ * is the whole answer (no toast). Once liked, the filled heart opens the
+ * song's sheet to unlike it or add it to a playlist.
+ */
 export function LikeControl({ track, size = 24 }: { track: Track; size?: number }) {
   const liked = useIsLiked(track.id);
+  const [pop, setPop] = useState(0);
   return (
     <button
       type="button"
@@ -85,13 +108,19 @@ export function LikeControl({ track, size = 24 }: { track: Track; size?: number 
       onClick={() => {
         tap();
         if (liked) phone.push({ kind: "track", track });
-        else void setLiked([track], true);
+        else {
+          setPop((n) => n + 1);
+          void setLiked([track], true, { toast: false });
+        }
       }}
     >
-      {liked ? <TickGlyph /> : <PlusGlyph />}
+      <Heart key={pop} size={size} aria-hidden="true" className={pop && liked ? "ph-like__pop" : undefined} fill={liked ? "currentColor" : "none"} strokeWidth={liked ? 0 : 1.75} />
     </button>
   );
 }
+
+/** True for a sheet that has been closed and is sliding away (SheetHost keeps it a moment). */
+export const SheetLeaving = createContext(false);
 
 /** How far down a sheet is dragged by its top before letting go closes it. */
 export const SHEET_CLOSE_PX = 90;
@@ -130,6 +159,7 @@ export function SheetFrame({
   dimBack?: boolean;
 }) {
   const id = useId();
+  const leaving = useContext(SheetLeaving);
   const box = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(typeof requestAnimationFrame === "undefined" || import.meta.env?.MODE === "test");
   useEffect(() => {
@@ -163,7 +193,12 @@ export function SheetFrame({
     },
   };
   useEffect(() => {
-    box.current?.focus();
+    // preventScroll: focusing the sheet while it is still below the screen
+    // would make the browser scroll the whole phone up to reveal it.
+    box.current?.focus({ preventScroll: true });
+  }, []);
+  useEffect(() => {
+    if (leaving) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
@@ -172,9 +207,9 @@ export function SheetFrame({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, leaving]);
   return (
-    <div className="ph-sheet-layer">
+    <div className={`ph-sheet-layer ${leaving ? "is-closing" : ""}`} aria-hidden={leaving || undefined} inert={leaving || undefined}>
       <div className="ph-sheet-dim" data-testid="sheet-dim" onClick={dimBack ? onClose : phone.closeSheets} aria-hidden="true" />
       <div
         ref={box}
@@ -183,7 +218,7 @@ export function SheetFrame({
         aria-modal="true"
         aria-labelledby={id}
         tabIndex={-1}
-        style={dy ? { transform: `translateY(${dy}px)` } : undefined}
+        style={dy && !leaving ? { transform: `translateY(${dy}px)` } : undefined}
       >
         <div className="ph-sheet__grab" {...grab}>
           <div className="ph-sheet__handle" aria-hidden="true" />

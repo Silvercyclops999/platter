@@ -9,7 +9,7 @@ import { Art } from "../../components/Art";
 import { LikedCover } from "../../components/LikedCover";
 import { KIND_LABEL, SORT_LABEL, subtitle, useLibraryView, type LibEntry, type LibKind } from "../../stores/library";
 import { openEntry, useLibraryLoader, useLibraryModel } from "../../shell/useLibrary";
-import { RowGlyphs } from "../bits";
+import { RowGlyphs, tap } from "../bits";
 import { phone, usePhoneUi } from "../phoneUi";
 import { CratesBody } from "./Crates";
 
@@ -56,13 +56,13 @@ export function PhoneLibrary() {
       </div>
       <div className="ph-pills ph-pills--scroll" role="group" aria-label="Show">
         {model.kinds.map((k) => (
-          <button key={k} type="button" className={`ph-chip ${model.filter === k && !crates ? "is-on" : ""}`} aria-pressed={model.filter === k && !crates} onClick={() => pick(k)}>
+          <button key={k} type="button" className={`ph-chip ${model.filter === k && !crates ? "is-on" : ""}`} aria-pressed={model.filter === k && !crates} onClick={() => (tap("selection"), pick(k))}>
             {KIND_LABEL[k]}
             {model.filter === k && !crates && <X size={14} aria-hidden="true" className="ph-chip__x" />}
           </button>
         ))}
         {cratesOn && (
-          <button type="button" className={`ph-chip ${crates ? "is-on" : ""}`} aria-pressed={crates} onClick={() => setCrates(!crates)}>
+          <button type="button" className={`ph-chip ${crates ? "is-on" : ""}`} aria-pressed={crates} onClick={() => (tap("selection"), setCrates(!crates))}>
             Crates
           </button>
         )}
@@ -71,7 +71,7 @@ export function PhoneLibrary() {
             type="button"
             className={`ph-chip ${model.downloaded.on ? "is-on" : ""}`}
             aria-pressed={model.downloaded.on}
-            onClick={() => useLibraryView.getState().setDownloaded(!model.downloaded.on)}
+            onClick={() => (tap("selection"), useLibraryView.getState().setDownloaded(!model.downloaded.on))}
           >
             Downloaded
           </button>

@@ -42,20 +42,66 @@ import { countLine } from "./pages/common";
 import { SORT_LABEL, useLibraryView, type LibSort } from "../stores/library";
 import { isLiked, setLiked } from "../stores/likes";
 import { player, usePlayer } from "../stores/player";
-import { addNow, askDelete, createPlaylist, editDetails, removeRows } from "../stores/playlists";
+import { askDelete, createPlaylist, editDetails, removeRows } from "../stores/playlists";
+import { useToasts } from "../stores/toasts";
 import { newSmartPlaylist } from "../stores/curate";
-import { SheetFrame, tap } from "./bits";
+import { SheetFrame, SheetLeaving, tap } from "./bits";
+import { FADE_MS, reduced } from "./motion";
 import { DeviceSheet } from "./DeviceSheet";
 import { phone, usePhoneUi, type Sheet } from "./phoneUi";
 import { CUSTOM_MAX, CUSTOM_MIN, SLEEP_CHOICES, cancelSleep, sleepLabel, startSleep, useSleep } from "./sleepTimer";
 import { playingFrom } from "./NowPlaying";
 
+/** How long a closed sheet takes to slide away (0 drops it at once). */
+let sheetLeaveMs = import.meta.env?.MODE === "test" ? 0 : 260;
+/** Tests: how long closed sheets stay to slide away. */
+export function setSheetLeaveMs(ms: number) {
+  sheetLeaveMs = ms;
+}
+
+interface Keyed {
+  key: string;
+  sheet: Sheet;
+}
+
+/**
+ * The open sheets, bottom to top. A sheet that closes, however it closes
+ * (the dim area, a drag, Escape, a choice, the player closing), stays a
+ * moment to slide down while its dim fades.
+ */
 export function SheetHost() {
   const sheets = usePhoneUi((s) => s.sheets);
+  const keyed: Keyed[] = sheets.map((s, i) => ({ key: `${i}-${s.kind}`, sheet: s }));
+  const [leaving, setLeaving] = useState<Keyed[]>([]);
+  const [prev, setPrev] = useState(sheets);
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const scheduled = useRef(new WeakSet<Keyed>());
+  // Worked out while rendering, so a closed sheet never leaves the page for a frame.
+  if (prev !== sheets) {
+    const now = new Set(keyed.map((k) => k.key));
+    const gone = prev.map((s, i) => ({ key: `${i}-${s.kind}`, sheet: s })).filter((k) => !now.has(k.key));
+    setPrev(sheets);
+    setLeaving((l) => [...l.filter((x) => !now.has(x.key)), ...(sheetLeaveMs > 0 ? gone : [])]);
+  }
+  // Each one goes once it has slid away.
+  useEffect(() => {
+    const due = leaving.filter((k) => !scheduled.current.has(k));
+    if (!due.length) return;
+    due.forEach((k) => scheduled.current.add(k));
+    const t = setTimeout(() => {
+      timers.current.delete(t);
+      setLeaving((l) => l.filter((x) => !due.includes(x)));
+    }, reduced() ? FADE_MS : sheetLeaveMs);
+    timers.current.add(t);
+  }, [leaving]);
+  useEffect(() => () => timers.current.forEach(clearTimeout), []);
+  const open = new Set(keyed.map((k) => k.key));
   return (
     <>
-      {sheets.map((s, i) => (
-        <SheetFor key={`${i}-${s.kind}`} sheet={s} />
+      {[...keyed, ...leaving.filter((k) => !open.has(k.key))].map((k) => (
+        <SheetLeaving.Provider key={k.key} value={!open.has(k.key)}>
+          <SheetFor sheet={k.sheet} />
+        </SheetLeaving.Provider>
       ))}
     </>
   );
@@ -149,7 +195,7 @@ export function QueueSheet() {
     start.current = null;
     setDrag(null);
     if (to !== drag.from) {
-      tap();
+      tap("selection");
       void player.queueMove(drag.id, to);
     }
   };
@@ -186,7 +232,7 @@ export function QueueSheet() {
           </div>
         ) : (
           <div className="ph-queue__pills">
-            <button type="button" className={`ph-pill ph-pill--big ${shuffle ? "is-on" : ""}`} aria-pressed={shuffle} onClick={() => void player.toggleShuffle()}>
+            <button type="button" className={`ph-pill ph-pill--big ${shuffle ? "is-on" : ""}`} aria-pressed={shuffle} onClick={() => (tap("selection"), void player.toggleShuffle())}>
               <Shuffle size={20} aria-hidden="true" />
               Shuffle
             </button>
@@ -290,7 +336,7 @@ export function SleepSheet() {
   const n = Number(minutes);
   const valid = Number.isInteger(n) && n >= CUSTOM_MIN && n <= CUSTOM_MAX;
   const pick = (f: () => void) => {
-    tap();
+    tap("selection");
     f();
     phone.pop();
   };
@@ -378,7 +424,7 @@ function cycleRepeat() {
   const now = Date.now();
   if (now - lastRepeat < 350) return;
   lastRepeat = now;
-  tap();
+  tap("selection");
   void player.cycleRepeatNow();
 }
 export { cycleRepeat };
@@ -391,7 +437,7 @@ export function TrackSheet({ track, inPlaylist }: { track: Track; inPlaylist?: i
   // "Remove from this playlist": only from that playlist's own page.
   const fromPlaylist = inPlaylist ?? null;
   const act = (f: () => unknown, keep = false) => () => {
-    tap();
+    tap("selection");
     if (!keep) phone.pop();
     void f();
   };
@@ -407,7 +453,7 @@ export function TrackSheet({ track, inPlaylist }: { track: Track; inPlaylist?: i
     </div>
   );
   const items: Action[] = [
-    { label: liked ? "Remove from Liked Songs" : "Add to Liked Songs", icon: liked ? HeartOff : Heart, run: act(() => setLiked([track], !liked)) },
+    { label: liked ? "Remove from Liked Songs" : "Add to Liked Songs", icon: liked ? HeartOff : Heart, run: act(() => setLiked([track], !liked, { toast: !liked ? false : undefined })) },
     { label: "Add to playlist", icon: ListPlus, run: act(() => phone.push({ kind: "addTo", track }), true) },
     { label: "Play next", icon: ListStart, run: act(() => player.queueAdd([track.id], "next")) },
     { label: "Add to queue", icon: ListEnd, run: act(() => player.addToQueue([track])) },
@@ -458,7 +504,7 @@ function ActionList({ items }: { items: Action[] }) {
 
 function AlbumSheet({ album }: { album: Album }) {
   const act = (f: () => unknown) => () => {
-    tap();
+    tap("selection");
     phone.closeSheets();
     void f();
   };
@@ -486,7 +532,7 @@ function AlbumSheet({ album }: { album: Album }) {
 
 function PlaylistSheet({ playlist }: { playlist: Playlist }) {
   const act = (f: () => unknown) => () => {
-    tap();
+    tap("selection");
     phone.closeSheets();
     void f();
   };
@@ -510,6 +556,26 @@ function PlaylistSheet({ playlist }: { playlist: Playlist }) {
       <ActionList items={items} />
     </SheetFrame>
   );
+}
+
+/** How long the one-line "Added to" note stays. */
+export const ADDED_NOTE_MS = 1500;
+
+/**
+ * Adds a song to a playlist: a success tap and a short one-line note with
+ * the playlist's name, no cover or icon. A failure says so plainly.
+ */
+export async function addQuietly(p: Pick<Playlist, "id" | "title">, track: Track): Promise<boolean> {
+  try {
+    const done = await backend.playlistAdd(p.id, [track.id]);
+    useLibraryView.getState().touch("playlist", done.id);
+    tap("success");
+    useToasts.getState().push({ kind: "info", message: `Added to ${done.title || p.title}` }, ADDED_NOTE_MS);
+    return true;
+  } catch {
+    useToasts.getState().push({ kind: "error", message: `Couldn't add to ${p.title}` }, 4000);
+    return false;
+  }
 }
 
 function AddToSheet({ track }: { track: Track }) {
@@ -543,7 +609,7 @@ function AddToSheet({ track }: { track: Track }) {
               className="ph-row"
               onClick={() => {
                 phone.closeSheets();
-                void addNow({ id: p.id, title: p.title, thumb: p.thumb ?? null }, [track.id]);
+                void addQuietly(p, track);
               }}
             >
               <Art path={p.thumb} size={48} kind="playlist" />
@@ -587,6 +653,7 @@ function SortSheet() {
               aria-checked={sort === s}
               className={`ph-row ph-row--text ${sort === s ? "is-on" : ""}`}
               onClick={() => {
+                tap("selection");
                 useLibraryView.getState().setSort(s);
                 phone.pop();
               }}

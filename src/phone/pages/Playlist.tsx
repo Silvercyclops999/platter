@@ -15,6 +15,7 @@ import type { Playlist, Track } from "../../lib/types";
 import { useLoad } from "../../lib/useLoad";
 import { player, usePlayer } from "../../stores/player";
 import { BackBar, PageFailed, PageLoading, SongRow, countLine } from "./common";
+import { tap } from "../bits";
 
 /** Genre pills shown. */
 export const GENRE_PILLS = 6;
@@ -131,7 +132,7 @@ function SongList({
       {genres.length > 1 && (
         <div className="ph-pills ph-pills--scroll" role="group" aria-label="Genres">
           {genres.map((g) => (
-            <button key={g} type="button" className={`ph-chip ${genre === g ? "is-on" : ""}`} aria-pressed={genre === g} onClick={() => setGenre(genre === g ? null : g)}>
+            <button key={g} type="button" className={`ph-chip ${genre === g ? "is-on" : ""}`} aria-pressed={genre === g} onClick={() => (tap("selection"), setGenre(genre === g ? null : g))}>
               {g}
             </button>
           ))}

@@ -12,6 +12,7 @@ import { hitInfo, hitOf, mixedHits, openHit, rememberHit, subtitleWithType } fro
 import { useLoad } from "../../lib/useLoad";
 import { nav, useRouter } from "../../stores/router";
 import { phone } from "../phoneUi";
+import { tap } from "../bits";
 
 /** Typing settles for this long before the search runs. */
 export const SEARCH_SETTLE_MS = 150;
@@ -91,7 +92,13 @@ export function PhoneSearch() {
     <div className="ph-page ph-search">
       <h1 className="ph-title">Search</h1>
       <div className="ph-search__bar">
-      <div className="ph-field">
+      <div
+        className="ph-field"
+        onClick={(e) => {
+          // Anywhere on the field puts the cursor in it, in the same tap.
+          if (!(e.target as HTMLElement).closest("button")) input.current?.focus();
+        }}
+      >
         <SearchIcon size={20} aria-hidden="true" />
         <input
           type="search"
@@ -109,7 +116,16 @@ export function PhoneSearch() {
           spellCheck={false}
         />
         {query && (
-          <button type="button" className="ph-icon-btn" aria-label="Clear search" onClick={() => setQuery("")}>
+          <button
+            type="button"
+            className="ph-icon-btn"
+            aria-label="Clear search"
+            onPointerDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setQuery("");
+              input.current?.focus();
+            }}
+          >
             <X size={18} aria-hidden="true" />
           </button>
         )}
@@ -131,7 +147,7 @@ export function PhoneSearch() {
       {q && kinds.length > 2 && (
         <div className="ph-pills ph-pills--scroll" role="group" aria-label="Show">
           {kinds.map((k) => (
-            <button key={k.id} type="button" className={`ph-chip ${kind === k.id ? "is-on" : ""}`} aria-pressed={kind === k.id} onClick={() => setKind(k.id)}>
+            <button key={k.id} type="button" className={`ph-chip ${kind === k.id ? "is-on" : ""}`} aria-pressed={kind === k.id} onClick={() => (tap("selection"), setKind(k.id))}>
               {k.label}
             </button>
           ))}
