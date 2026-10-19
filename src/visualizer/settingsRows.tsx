@@ -101,8 +101,10 @@ export function visualizerRows(s: Settings | null, phone: boolean): RowDef[] {
       key: "visualizerBatteryPause",
       section: "Playback",
       group: GROUP,
-      title: "Rest the visualizer on battery",
-      description: "On a phone or laptop running on battery, the visualizer waits. This device only.",
+      title: phone ? "Rest the visualizer in Low Power Mode" : "Rest the visualizer on battery",
+      description: phone
+        ? "When the phone is in Low Power Mode, the visualizer waits. This device only."
+        : "On a laptop running on battery, the visualizer waits. This device only.",
       control: (ids) => sw(s, "visualizerBatteryPause", ids),
     },
   ];
