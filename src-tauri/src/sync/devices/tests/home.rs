@@ -136,7 +136,8 @@ async fn a_computer_answers_lidarr_only_for_a_checked_device_of_the_same_account
     let hello = other.peer.hello(false).await.into_iter().collect();
     talk(&other, &lx, &pc, &lpx, hello, Net::default(), &mut tap).await;
     let (r, _) = ask(&other, &lx, &pc, &lpx, |id| get(id, "/system/status")).await;
-    assert!(matches!(r, Some(Err(ref m)) if m.contains("different account")), "{r:?}");
+    assert!(r.is_none(), "a paused link gets nothing at all: {r:?}");
+    assert!(pc.peer.handle(&lpx, get(9, "/system/status")).await.is_empty());
     assert_eq!(c.web.log.lock().len(), 1, "Lidarr was asked nothing for it");
     // Too many waiting from a link not checked yet: refused plainly.
     let quiet = dev("q");
@@ -377,4 +378,148 @@ async fn away_from_home_the_request_goes_through_the_relay_sealed() {
     assert_eq!(ntfy.published().len(), before);
     let _ = pc.stop.send(true);
     let _ = phone.stop.send(true);
+}
+
+// ---------------------------------------------------------------- limits
+
+/// Answers when told to, so requests can be kept in flight.
+struct Slow(Arc<tokio::sync::Notify>);
+
+#[async_trait]
+impl crate::homeside::computer::HomeServe for Slow {
+    fn offers(&self) -> bool {
+        true
+    }
+    async fn answer(&self, msg: &Msg) -> Option<Msg> {
+        self.0.notified().await;
+        Some(Msg::Answer { id: crate::homeside::computer::request_id(msg)?, status: 200, body: String::new() })
+    }
+}
+
+#[tokio::test]
+async fn a_device_that_asks_too_often_is_told_plainly() {
+    let pc = dev("pc");
+    let phone = dev("phone");
+    let (lpc, lph) = pair(&pc, &phone, "http://relay");
+    let c = computer(&pc);
+    met(&phone, &lph, &pc, &lpc).await;
+    let too_many = "Too many requests from Device phone right now. Try again in a moment.";
+    // A burst of ten goes, the eleventh doesn't.
+    for i in 0..10 {
+        let out = pc.peer.handle(&lpc, get(i, "/system/status")).await;
+        assert!(matches!(out[..], [Msg::Answer { .. }]), "request {i}");
+    }
+    let out = pc.peer.handle(&lpc, get(10, "/system/status")).await;
+    assert!(matches!(&out[..], [Msg::Failed { message, .. }] if message == too_many), "{out:?}", out = out.iter().map(Msg::kind).collect::<Vec<_>>());
+    assert_eq!(c.web.log.lock().len(), 10);
+    // About one every two seconds after that.
+    tick(&pc, 2_000);
+    assert!(matches!(pc.peer.handle(&lpc, get(11, "/system/status")).await[..], [Msg::Answer { .. }]));
+    assert!(matches!(pc.peer.handle(&lpc, get(12, "/system/status")).await[..], [Msg::Failed { .. }]));
+    // A write refused for asking too often isn't kept: asked again later, it's made.
+    let w = write(13, "PUT", "/album/monitor", r#"{"albumIds": [1], "monitored": false}"#);
+    assert!(matches!(pc.peer.handle(&lpc, w.clone()).await[..], [Msg::Failed { .. }]));
+    tick(&pc, 2_000);
+    c.web.route("/api/v1/album/monitor", None, 202, "[]");
+    assert!(matches!(pc.peer.handle(&lpc, w).await[..], [Msg::Answer { status: 202, .. }]));
+    // Reads aren't kept at all; the write is, small.
+    assert_eq!(pc.peer.served.len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn no_more_than_four_requests_from_one_device_at_once() {
+    let pc = dev("pc");
+    let phone = dev("phone");
+    let (lpc, lph) = pair(&pc, &phone, "http://relay");
+    met(&phone, &lph, &pc, &lpc).await;
+    let go = Arc::new(tokio::sync::Notify::new());
+    pc.peer.set_home(Some(Arc::new(Slow(go.clone()))));
+    let peer = pc.peer.clone();
+    let mut held = Vec::new();
+    for i in 0..4 {
+        let (p, l) = (peer.clone(), lpc.clone());
+        held.push(tokio::spawn(async move { p.handle(&l, get(i, "/system/status")).await }));
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let out = pc.peer.handle(&lpc, get(4, "/system/status")).await;
+    assert!(matches!(&out[..], [Msg::Failed { message, .. }] if message.starts_with("Too many requests from Device phone")));
+    // Once they're answered there's room again.
+    for _ in 0..20 {
+        go.notify_waiters();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    for h in held {
+        assert!(matches!(h.await.unwrap()[..], [Msg::Answer { .. }]));
+    }
+    let p = pc.peer.clone();
+    let l = lpc.clone();
+    let last = tokio::spawn(async move { p.handle(&l, get(5, "/system/status")).await });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    go.notify_waiters();
+    assert!(matches!(last.await.unwrap()[..], [Msg::Answer { .. }]));
+}
+
+// ---------------------------------------------------------------- what's sent and kept
+
+#[test]
+fn an_answer_that_isnt_json_goes_as_its_status_only() {
+    use base64::Engine;
+    let secrets = vec![Token::new(KEY).unwrap()];
+    let b64 = base64::engine::general_purpose::STANDARD.encode(KEY);
+    let html = format!("<html><body>Sign in<input value=\"{b64}\"></body></html>");
+    let m = scrub(Msg::Answer { id: 1, status: 401, body: crate::social::listen::seal::b64(html.as_bytes()) }, &secrets);
+    let Msg::Answer { status: 401, body, .. } = m else { panic!("{}", m.kind()) };
+    assert!(crate::homeside::route::response(401, &body).body.is_empty(), "the page itself isn't sent");
+    // The key in base64 inside JSON is held back too.
+    for enc in [base64::engine::general_purpose::STANDARD.encode(format!("x{KEY}")), base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(KEY)] {
+        let json = format!(r#"{{"note": "{enc}"}}"#);
+        let m = scrub(Msg::Answer { id: 2, status: 200, body: crate::social::listen::seal::b64(json.as_bytes()) }, &secrets);
+        if enc.contains(&base64::engine::general_purpose::STANDARD_NO_PAD.encode(KEY)) || enc.contains(&base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(KEY)) {
+            assert!(matches!(m, Msg::Failed { .. }), "{json}");
+        }
+    }
+    let json = format!(r#"{{"note": "{}"}}"#, base64::engine::general_purpose::STANDARD.encode(KEY));
+    assert!(matches!(scrub(Msg::Answer { id: 3, status: 200, body: crate::social::listen::seal::b64(json.as_bytes()) }, &secrets), Msg::Failed { .. }));
+}
+
+#[test]
+fn big_answers_are_refused_and_only_a_little_is_kept() {
+    use crate::homeside::computer::{ANSWER_MAX, ANSWER_TOO_BIG, cap, kept};
+    let huge = Msg::Answer { id: 1, status: 200, body: "A".repeat(ANSWER_MAX / 3 * 4 + 100) };
+    assert!(matches!(cap(huge), Msg::Failed { ref message, .. } if message == ANSWER_TOO_BIG));
+    let fine = Msg::Answer { id: 2, status: 200, body: "A".repeat(1000) };
+    assert_eq!(serde_json::to_string(&cap(fine.clone())).unwrap(), serde_json::to_string(&fine).unwrap());
+    let big = Msg::Answer { id: 3, status: 201, body: "A".repeat(200_000) };
+    assert!(matches!(kept(&big), Msg::Answer { id: 3, status: 201, ref body } if body.is_empty()));
+    assert!(matches!(kept(&fine), Msg::Answer { ref body, .. } if body.len() == 1000));
+}
+
+// ---------------------------------------------------------------- unpairing
+
+#[tokio::test]
+async fn unpairing_ends_it_at_once_on_both_ends() {
+    let pc = dev("pc");
+    let phone = dev("phone");
+    let (lpc, lph) = pair(&pc, &phone, "http://relay");
+    let c = computer(&pc);
+    met(&phone, &lph, &pc, &lpc).await;
+    c.web.route("/api/v1/album/monitor", None, 202, "[]");
+    pc.peer.handle(&lpc, write(1, "PUT", "/album/monitor", r#"{"albumIds": [1], "monitored": false}"#)).await;
+    assert_eq!(pc.peer.served.len(), 1);
+    let wire = Arc::new(Wire::new(phone.links.clone(), Arc::new(Ntfy::new().unwrap()) as Arc<dyn RelayFactory>, Arc::new(crate::sync::store::system_ms)));
+    let sync = Arc::new(DeviceSync::new(phone.peer.clone(), wire, Timing::default()));
+    assert_eq!(sync.home_computers().len(), 1);
+    // The phone forgets the computer: nothing offers Lidarr here any more.
+    let (_, waiting) = phone.peer.answers.add(&lph.id);
+    phone.peer.forget(&lph.id).unwrap();
+    assert!(sync.home_computers().is_empty() && sync.computer_route().is_none());
+    assert!(waiting.await.is_err(), "a request waiting on it is given up");
+    // Its bye reaches the computer: what it kept for it goes, and a late
+    // request on the old link gets nothing.
+    assert!(pc.peer.handle(&lpc, Msg::SyncBye).await.is_empty());
+    assert!(pc.peer.served.is_empty());
+    let before = c.web.log.lock().len();
+    assert!(pc.peer.handle(&lpc, get(2, "/system/status")).await.is_empty());
+    assert!(pc.peer.handle(&lpc, write(3, "PUT", "/album/monitor", "{}")).await.is_empty());
+    assert_eq!(c.web.log.lock().len(), before);
 }

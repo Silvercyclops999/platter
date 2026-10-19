@@ -2818,8 +2818,14 @@ away from home is on. The computer answers with `answer` or `failed`. It
 answers only once the other device's hello showed the same account, or its
 request on the local network was signed by it; before that the request
 waits and the computer says hello. A request that arrives twice (the local
-network gave up waiting, then the relay brought it) is answered once.
-Lidarr's answer bigger than the relay takes says so instead of going.
+network gave up waiting, then the relay brought it) is made once; only
+writes are remembered for that, with at most 64 KB of each answer. One
+device may have 4 requests in flight and about 30 a minute after a burst
+of 10; past that it gets "Too many requests from <device> right now". An
+answer that isn't JSON (a proxy's sign-in page) goes as its status only.
+Lidarr's answer bigger than 8 MB, or bigger than the relay takes, says so
+instead of going. A link that's paused (another account, or this computer
+signed out) or unpaired gets no answer at all.
 
 The hello says `lidarr: true` while the computer answers (the setting
 below is on and Lidarr is set up there). The field is left out otherwise,

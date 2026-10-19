@@ -90,9 +90,10 @@ pub fn scrub(msg: Msg, secrets: &[Token]) -> Msg {
     match msg {
         Msg::Answer { id, status, body } => {
             let bytes = seal::unb64(&body).unwrap_or_default();
-            let clean = if serde_json::from_slice::<serde_json::Value>(&bytes).is_ok() { relayed::strip_secrets(&bytes).to_vec() } else { bytes };
-            let text = String::from_utf8_lossy(&clean);
-            if secrets.iter().any(|s| !s.expose().is_empty() && text.contains(s.expose())) {
+            // Anything but JSON (a proxy's sign-in page, say) goes as its
+            // status only, as reads already do.
+            let clean = if serde_json::from_slice::<serde_json::Value>(&bytes).is_ok() { relayed::strip_secrets(&bytes).to_vec() } else { Vec::new() };
+            if has_secret(&String::from_utf8_lossy(&clean), secrets) {
                 tracing::warn!("home side: an answer had a key in it and was held back");
                 return Msg::Failed { id, message: HELD_BACK.into() };
             }
@@ -100,13 +101,113 @@ pub fn scrub(msg: Msg, secrets: &[Token]) -> Msg {
         }
         Msg::Failed { id, message } => {
             let message = as_computer(&message);
-            if secrets.iter().any(|s| !s.expose().is_empty() && message.contains(s.expose())) {
+            if has_secret(&message, secrets) {
                 return Msg::Failed { id, message: HELD_BACK.into() };
             }
             Msg::Failed { id, message }
         }
         m => m,
     }
+}
+
+/// Whether `text` has one of `secrets` in it, as it is or in base64.
+fn has_secret(text: &str, secrets: &[Token]) -> bool {
+    use base64::Engine;
+    use base64::engine::general_purpose::{STANDARD_NO_PAD, URL_SAFE_NO_PAD};
+    secrets.iter().map(Token::expose).filter(|s| !s.is_empty()).any(|s| {
+        // The base64 of a key, cut where it doesn't depend on what comes
+        // before or after it, so it's found wherever it starts.
+        let whole = [STANDARD_NO_PAD.encode(s), URL_SAFE_NO_PAD.encode(s)];
+        text.contains(s) || whole.iter().any(|w| text.contains(w.as_str()))
+    })
+}
+
+/// Most of Lidarr's answer one device gets at once (8 MB).
+pub const ANSWER_MAX: usize = 8 * 1024 * 1024;
+/// The answer when it's bigger than that.
+pub const ANSWER_TOO_BIG: &str = "Lidarr's answer is too big to send to another device.";
+/// Most of a write's answer kept to answer it again (it came twice).
+const KEEP_MAX: usize = 64 * 1024;
+
+/// An answer past [`ANSWER_MAX`] becomes a plain refusal.
+pub fn cap(msg: Msg) -> Msg {
+    match msg {
+        Msg::Answer { id, body, .. } if body.len() / 4 * 3 > ANSWER_MAX => Msg::Failed { id, message: ANSWER_TOO_BIG.into() },
+        m => m,
+    }
+}
+
+/// What's kept of a write's answer for answering it again: a big body is
+/// left out (the status still says how it went).
+pub fn kept(msg: &Msg) -> Msg {
+    match msg {
+        Msg::Answer { id, status, body } if body.len() > KEEP_MAX => Msg::Answer { id: *id, status: *status, body: String::new() },
+        m => m.clone(),
+    }
+}
+
+// ---------------------------------------------------------------- how often
+
+/// Requests one device may have in flight here at once.
+pub const IN_FLIGHT_MAX: usize = 4;
+/// Requests one device may make a minute, and in one burst.
+pub const PER_MINUTE: f64 = 30.0;
+pub const BURST: f64 = 10.0;
+
+#[derive(Debug, Clone, Copy)]
+struct Budget {
+    in_flight: usize,
+    tokens: f64,
+    at_ms: u64,
+}
+
+/// How often each linked device may ask: a few at once, and about one
+/// every two seconds after a short burst.
+#[derive(Default)]
+pub struct Limits {
+    links: Mutex<HashMap<String, Budget>>,
+}
+
+/// One request being answered; its place frees when dropped.
+pub struct Permit<'a> {
+    limits: &'a Limits,
+    link: String,
+}
+
+impl Drop for Permit<'_> {
+    fn drop(&mut self) {
+        if let Some(b) = self.limits.links.lock().get_mut(&self.link) {
+            b.in_flight = b.in_flight.saturating_sub(1);
+        }
+    }
+}
+
+impl Limits {
+    /// A place for one more request from `link` now, or None when it's
+    /// asking too much.
+    pub fn take(&self, link: &str, now_ms: u64) -> Option<Permit<'_>> {
+        let mut all = self.links.lock();
+        let b = all.entry(link.to_string()).or_insert(Budget { in_flight: 0, tokens: BURST, at_ms: now_ms });
+        let gained = now_ms.saturating_sub(b.at_ms) as f64 * PER_MINUTE / 60_000.0;
+        b.tokens = (b.tokens + gained).min(BURST);
+        b.at_ms = b.at_ms.max(now_ms);
+        if b.in_flight >= IN_FLIGHT_MAX || b.tokens < 1.0 {
+            return None;
+        }
+        b.tokens -= 1.0;
+        b.in_flight += 1;
+        Some(Permit { limits: self, link: link.to_string() })
+    }
+
+    /// Forget a link (it unpaired).
+    pub fn forget(&self, link: &str) {
+        self.links.lock().remove(link);
+    }
+}
+
+/// The answer when a device asks too often.
+pub fn too_many(name: &str) -> String {
+    format!("Too many requests from {name} right now. Try again in a moment.")
 }
 
 #[async_trait]
@@ -127,15 +228,16 @@ impl HomeServe for ComputerServes {
         // The Bridge's own checks, one code path.
         let out = route::serve(Some(&home), &staging, msg).await?;
         tracing::debug!(kind = msg.kind(), answer = out.kind(), "home side: answered another device");
-        Some(scrub(out, &secrets))
+        Some(cap(scrub(out, &secrets)))
     }
 }
 
 // ---------------------------------------------------------------- answered once
 
-/// Requests already answered (or being answered), per link, so one that
+/// Writes already answered (or being answered), per link, so one that
 /// comes twice (the local network gave up waiting, then the relay brought
-/// it) gets the same answer and a write is never made twice.
+/// it) gets the same answer and is never made twice. Reads aren't kept:
+/// asking again is harmless. What's kept of an answer is small ([`kept`]).
 #[derive(Default)]
 pub struct Served {
     list: Mutex<VecDeque<(ServedKey, watch::Receiver<Option<Msg>>)>>,
@@ -145,10 +247,10 @@ pub struct Served {
 type ServedKey = (String, u64);
 
 /// Requests remembered at most.
-const SERVED_MAX: usize = 128;
+const SERVED_MAX: usize = 64;
 
 pub enum Turn {
-    /// New: answer it, then [`Served::done`].
+    /// New: answer it, and send what's [`kept`] of the answer.
     New(watch::Sender<Option<Msg>>),
     /// Answered before, or being answered: wait on this.
     Again(watch::Receiver<Option<Msg>>),
@@ -172,6 +274,21 @@ impl Served {
     /// Forget a link's requests (it unpaired).
     pub fn forget(&self, link: &str) {
         self.list.lock().retain(|((l, _), _)| l != link);
+    }
+
+    /// Forget one request that wasn't made (refused before it started), so
+    /// asking again later is a new request.
+    pub fn forget_one(&self, link: &str, id: u64) {
+        self.list.lock().retain(|((l, i), _)| !(l == link && *i == id));
+    }
+
+    /// How many answers are kept (for tests).
+    pub fn len(&self) -> usize {
+        self.list.lock().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
@@ -205,6 +322,11 @@ impl Answers {
 
     fn drop_id(&self, id: u64) {
         self.waiting.lock().remove(&id);
+    }
+
+    /// Give up on every request that went to `link` (it unpaired).
+    pub fn forget(&self, link: &str) {
+        self.waiting.lock().retain(|_, (l, _)| l != link);
     }
 
     /// An answer (or a refusal) came on `link`: taken only for a request

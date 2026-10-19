@@ -35,7 +35,7 @@ use serde::Serialize;
 
 use super::clock;
 use crate::db::DbHandle;
-use crate::homeside::computer::{Answers, HomeServe, NOT_CHECKED, Served, Turn, request_id};
+use crate::homeside::computer::{Answers, HomeServe, Limits, NOT_CHECKED, Served, Turn, kept, request_id, too_many};
 use crate::homeside::link::Link;
 use crate::homeside::links::{Links, Outbox, batches};
 use crate::homeside::wire::{Apart, Msg, PROTO, SyncHello};
@@ -148,9 +148,10 @@ pub struct SyncPeer {
     /// What answers Lidarr requests from the other devices here (a
     /// computer with Lidarr set up); None: nothing does.
     home: parking_lot::RwLock<Option<Arc<dyn HomeServe>>>,
-    /// Lidarr requests answered here, so one that comes twice is answered
-    /// once.
-    served: Served,
+    /// Lidarr writes answered here, so one that comes twice is made once.
+    pub(crate) served: Served,
+    /// How often each linked device may ask for Lidarr.
+    limits: Limits,
 }
 
 /// Most messages kept per link while its hello hasn't come.
@@ -197,6 +198,7 @@ impl SyncPeer {
             answers: Answers::default(),
             home: parking_lot::RwLock::default(),
             served: Served::default(),
+            limits: Limits::default(),
         }
     }
 
@@ -568,16 +570,15 @@ impl SyncPeer {
     /// hello, and this device says hello so one comes.
     async fn on_home_request(self: &Arc<Self>, link: &Link, m: Msg) -> Vec<Msg> {
         let Some(id) = request_id(&m) else { return Vec::new() };
+        if self.d.links.get(&link.id).is_none() {
+            // Unpaired (or forgotten): nothing, not even a hello.
+            return Vec::new();
+        }
         let seen = self.seen(&link.id).unwrap_or_default();
-        match seen.paused {
-            Some(Paused::OtherAccount) => {
-                tracing::info!("home side: refused a Lidarr request from a device of another account");
-                return vec![Msg::Failed { id, message: "That computer is signed in to a different account.".into() }];
-            }
-            Some(Paused::SignedOut) => {
-                return vec![Msg::Failed { id, message: "That computer isn't signed in to Plex.".into() }];
-            }
-            None => {}
+        if seen.paused.is_some() {
+            // Another account, or this one signed out: nothing at all.
+            tracing::info!("home side: a Lidarr request from a paused link was dropped");
+            return Vec::new();
         }
         if !self.verified(&link.id) {
             let first = {
@@ -596,16 +597,36 @@ impl SyncPeer {
         self.serve_home(link, m).await
     }
 
-    /// Answer a checked link's Lidarr request (once, however often it comes).
+    /// Answer a checked link's Lidarr request (a write once, however often
+    /// it comes), within how often a device may ask.
     async fn serve_home(&self, link: &Link, m: Msg) -> Vec<Msg> {
         let Some(id) = request_id(&m) else { return Vec::new() };
+        // Still paired, and not paused since.
+        if self.d.links.get(&link.id).is_none() || self.seen(&link.id).is_some_and(|s| s.paused.is_some()) {
+            return Vec::new();
+        }
         let Some(home) = self.home.read().clone() else {
             return vec![Msg::Failed { id, message: crate::homeside::computer::SETTING_OFF.into() }];
         };
+        let refused = || {
+            let name = self.seen(&link.id).map(|s| s.name).filter(|n| !n.is_empty()).unwrap_or_else(|| "that device".into());
+            tracing::info!("home side: a device asked too often");
+            vec![Msg::Failed { id, message: too_many(&name) }]
+        };
+        let not_set_up = || Msg::Failed { id, message: crate::homeside::computer::NOT_SET_UP.into() };
+        if matches!(m, Msg::Get { .. }) {
+            let Some(_permit) = self.limits.take(&link.id, self.d.store.now()) else { return refused() };
+            return vec![home.answer(&m).await.unwrap_or_else(not_set_up)];
+        }
         match self.served.start(&link.id, id) {
             Turn::New(tx) => {
-                let answer = home.answer(&m).await.unwrap_or(Msg::Failed { id, message: crate::homeside::computer::NOT_SET_UP.into() });
-                let _ = tx.send(Some(answer.clone()));
+                let Some(_permit) = self.limits.take(&link.id, self.d.store.now()) else {
+                    drop(tx);
+                    self.served.forget_one(&link.id, id);
+                    return refused();
+                };
+                let answer = home.answer(&m).await.unwrap_or_else(not_set_up);
+                let _ = tx.send(Some(kept(&answer)));
                 vec![answer]
             }
             Turn::Again(mut rx) => {
@@ -901,6 +922,8 @@ impl SyncPeer {
         self.adopting.lock().remove(link_id);
         self.taken.lock().remove(link_id);
         self.served.forget(link_id);
+        self.limits.forget(link_id);
+        self.answers.forget(link_id);
     }
 
     /// Whether the other end keeps this namespace in step (from its hello).
