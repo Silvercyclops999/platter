@@ -65,7 +65,7 @@ pub enum PathState {
 }
 
 /// Why a round starts outside the usual times.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Wake {
     /// The app came to the foreground.
     Foreground,
@@ -148,12 +148,12 @@ pub struct DeviceSync {
     wifi_only: RwLock<Option<Switch>>,
     /// This device is on mobile data (as the window last said).
     metered: AtomicBool,
-    /// When a round last started on waking.
-    woke: Mutex<Option<tokio::time::Instant>>,
+    /// When a round last started on waking, for each reason.
+    woke: Mutex<HashMap<Wake, tokio::time::Instant>>,
     /// The app in the foreground or not (the phone); the platform's when not set.
     foreground: Mutex<Option<watch::Receiver<bool>>>,
-    /// A first copy is to stop.
-    pub(crate) copy_cancel: AtomicBool,
+    /// The running first copy's stop flag (each copy has its own).
+    pub(crate) copy_stop: Mutex<Option<Arc<AtomicBool>>>,
     /// One first copy at a time.
     pub(crate) copy_lock: tokio::sync::Mutex<()>,
     pub(crate) on_copy: Mutex<Option<OnCopy>>,
@@ -185,7 +185,7 @@ impl DeviceSync {
             metered: AtomicBool::new(false),
             woke: Mutex::default(),
             foreground: Mutex::default(),
-            copy_cancel: AtomicBool::new(false),
+            copy_stop: Mutex::default(),
             copy_lock: tokio::sync::Mutex::new(()),
             on_copy: Mutex::default(),
         }
@@ -221,25 +221,28 @@ impl DeviceSync {
     }
 
     /// The app came to the foreground or the network changed: a round with
-    /// every device now (not more often than [`WAKE_EVERY`]). A new network
-    /// may reach a device the old one didn't, so it's tried again there,
-    /// and the relay listeners connect again at once.
+    /// every device now (not more often than [`WAKE_EVERY`] for each
+    /// reason). A new network may reach a device the old one didn't, so
+    /// it's tried again there at once, however recent the last round.
     pub fn wake(&self, why: Wake) -> bool {
         if !self.is_on() {
             return false;
         }
+        if why == Wake::Network
+            && let Some(lan) = self.lan()
+        {
+            lan.network_changed();
+        }
         {
             let mut w = self.woke.lock();
-            if w.is_some_and(|t| t.elapsed() < WAKE_EVERY) {
+            if w.get(&why).is_some_and(|t| t.elapsed() < WAKE_EVERY) {
                 return false;
             }
-            *w = Some(tokio::time::Instant::now());
+            w.insert(why, tokio::time::Instant::now());
         }
         tracing::debug!(?why, "device sync: a round on waking");
         if why == Wake::Network {
-            if let Some(lan) = self.lan() {
-                lan.network_changed();
-            }
+            // The relay listeners connect again at once.
             for link in self.wire.links.links() {
                 self.listen_again(&link);
             }
@@ -419,7 +422,7 @@ impl DeviceSync {
         // The other end answers only once it has checked this one's account:
         // a hello goes first when this run hasn't met it yet.
         let hello = if self.peer.verified(&link.id) { None } else { self.peer.hello_to(&link.id, false).await };
-        self.copy_settings_on(&link, &name, hello, wait).await?;
+        self.copy_settings_on(&link, &name, hello, wait, None).await?;
         Ok(name)
     }
 
@@ -444,16 +447,20 @@ impl DeviceSync {
 
     /// Ask `link` for its synced settings (after `hello`, when there's one)
     /// and wait up to `wait` for them to be saved here.
-    pub(crate) async fn copy_settings_on(&self, link: &Link, name: &str, hello: Option<Msg>, wait: Duration) -> crate::error::AppResult<()> {
+    pub(crate) async fn copy_settings_on(&self, link: &Link, name: &str, hello: Option<Msg>, wait: Duration, stop: Option<&AtomicBool>) -> crate::error::AppResult<()> {
         use crate::error::AppError;
         if self.peer.peer_skips(&link.id, SETTINGS.name()) {
             return Err(AppError::Invalid(format!("{name} doesn't keep its settings in sync. Turn on Settings under What to sync there first.")));
         }
         let mut msgs: Vec<Msg> = hello.into_iter().collect();
         msgs.push(self.peer.copy_settings(link));
-        self.send(link, msgs).await;
+        let left = self.try_lan_with(link, msgs, stop).await;
+        if !left.is_empty() {
+            self.deliver(link, left).await;
+        }
+        let stopped = || stop.is_some_and(|s| s.load(Ordering::Relaxed));
         let until = tokio::time::Instant::now() + wait;
-        while self.peer.copying(&link.id) == Some(Copying::Waiting) && tokio::time::Instant::now() < until && !self.copy_cancel.load(Ordering::Relaxed) {
+        while self.peer.copying(&link.id) == Some(Copying::Waiting) && tokio::time::Instant::now() < until && !stopped() {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         let r = self.peer.copying(&link.id);
@@ -461,7 +468,7 @@ impl DeviceSync {
         match r {
             Some(Copying::Done) => Ok(()),
             Some(Copying::Failed(m)) => Err(AppError::Invalid(m)),
-            _ if self.copy_cancel.load(Ordering::Relaxed) => Err(AppError::Invalid("Stopped.".into())),
+            _ if stopped() => Err(AppError::Invalid("Stopped.".into())),
             _ => Err(AppError::Network(format!("{name} didn't answer. Open Platter there and try again."))),
         }
     }

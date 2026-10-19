@@ -927,21 +927,22 @@ impl SyncStore {
         })
     }
 
-    /// Let these entries go here without leaving a deletion behind (a
-    /// device back from a long time away drops what the others no longer
-    /// have; nothing is sent about it).
-    pub fn forget_entries(&self, ns: &str, keys: &[String]) -> AppResult<usize> {
+    /// Delete these entries here as if just after the version here: a
+    /// tombstone stamped one past it, so an edit made anywhere since still
+    /// wins, and the deletion reaches devices that still hold that version.
+    /// Entries already deleted are left as they are. How many were deleted.
+    pub fn bury(&self, ns: &str, keys: &[String]) -> AppResult<usize> {
         if keys.is_empty() {
             return Ok(0);
         }
-        let sql = format!("DELETE FROM {} WHERE ns = ?1 AND key = ?2", table(ns));
+        let own = self.inner.device.clone();
         let n = self.inner.db.write(|c| {
             let tx = c.transaction()?;
             let mut n = 0;
-            {
-                let mut st = tx.prepare_cached(&sql)?;
-                for k in keys {
-                    n += st.execute(rusqlite::params![ns, k])?;
+            for k in keys {
+                if let Some(e) = get_entry(&tx, ns, k)?.filter(|e| !e.is_tombstone()) {
+                    set_entry(&tx, ns, k, &Entry { value: None, ts: e.ts.saturating_add(1), device: own.clone() })?;
+                    n += 1;
                 }
             }
             tx.commit()?;

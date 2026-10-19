@@ -8,7 +8,8 @@
 //! everywhere); every other group merges as usual, so anything changed
 //! here later than there is kept. Keys never come this way.
 
-use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -103,12 +104,13 @@ pub fn steps(g: &Groups) -> Vec<(&'static str, &'static str, &'static str)> {
     STEPS.into_iter().filter(|(n, _, _)| on(g, n)).collect()
 }
 
-/// Resets the stop flag when a copy ends however it ends.
+/// Lets go of this copy's stop flag when it ends however it ends. A stop
+/// that comes later finds no copy, and sets nothing another round reads.
 struct Running<'a>(&'a DeviceSync);
 
 impl Drop for Running<'_> {
     fn drop(&mut self) {
-        self.0.copy_cancel.store(false, Ordering::Relaxed);
+        *self.0.copy_stop.lock() = None;
     }
 }
 
@@ -120,8 +122,8 @@ impl DeviceSync {
 
     /// Stop a first copy that's running (what came stays).
     pub fn cancel_copy(&self) {
-        if self.copy_lock.try_lock().is_err() {
-            self.copy_cancel.store(true, Ordering::Relaxed);
+        if let Some(stop) = self.copy_stop.lock().as_ref() {
+            stop.store(true, Ordering::Relaxed);
         }
     }
 
@@ -144,8 +146,11 @@ impl DeviceSync {
         let Ok(_one) = self.copy_lock.try_lock() else {
             return Err(AppError::Invalid("A copy is already running.".into()));
         };
+        // This copy's own stop flag: only its rounds read it.
+        let stop = Arc::new(AtomicBool::new(false));
+        *self.copy_stop.lock() = Some(stop.clone());
         let _running = Running(self);
-        self.copy_cancel.store(false, Ordering::Relaxed);
+        let stopped = || stop.load(Ordering::Relaxed);
         let (link, name) = self.pick_computer()?;
         let steps = steps(&(self.peer.deps().groups)());
         if steps.is_empty() {
@@ -156,7 +161,7 @@ impl DeviceSync {
         let mut later = None;
         let mut cancelled = false;
         for (i, (group, what, label)) in steps.into_iter().enumerate() {
-            if self.copy_cancel.load(Ordering::Relaxed) {
+            if stopped() {
                 cancelled = true;
                 break;
             }
@@ -164,16 +169,16 @@ impl DeviceSync {
             let ns: Vec<&str> = only(group).namespaces();
             let before = self.peer.taken(&link.id, &ns);
             // Only this group's namespaces, so each step is its own round.
-            let Some(hello) = self.peer.hello_for(&ns).await else {
+            let Some(hello) = self.peer.hello_for(&link.id, &ns).await else {
                 return Err(AppError::Auth("Sign in to Plex to copy from your computer.".into()));
             };
             if group == "settings" {
-                match self.copy_settings_on(&link, &name, Some(hello), wait).await {
+                match self.copy_settings_on(&link, &name, Some(hello), wait, Some(&stop)).await {
                     Ok(()) => {}
                     // Not there: nothing else will come either.
                     Err(e @ AppError::Network(_)) => return Err(e),
                     Err(e) => {
-                        if self.copy_cancel.load(Ordering::Relaxed) {
+                        if stopped() {
                             cancelled = true;
                             break;
                         }
@@ -182,14 +187,18 @@ impl DeviceSync {
                     }
                 }
             } else {
-                let left = self.try_lan(&link, vec![hello]).await;
+                let left = self.try_lan_with(&link, vec![hello], Some(&stop)).await;
                 if !left.is_empty() {
                     // Not on this network: small changes come through the relay, the rest when they meet.
                     self.deliver(&link, left).await;
-                    later = Some(format!("The rest comes over from {name} in the background, quickest when both are on the same Wi-Fi."));
+                    later = Some(if self.relay_allowed() {
+                        format!("The rest comes over from {name} in the background, quickest when both are on the same Wi-Fi.")
+                    } else {
+                        format!("The rest comes over from {name} when both are on your home network.")
+                    });
                 }
             }
-            if self.copy_cancel.load(Ordering::Relaxed) {
+            if stopped() {
                 cancelled = true;
             }
             groups.push(CopiedGroup { group: group.to_string(), label: label.to_string(), count: self.peer.taken(&link.id, &ns).saturating_sub(before) });
@@ -199,7 +208,6 @@ impl DeviceSync {
         }
         // Every group named as it is here again: with a round when the copy
         // ran to its end, and only the hello (no round) when it was stopped.
-        self.copy_cancel.store(false, Ordering::Relaxed);
         if let Some(h) = self.peer.hello_to(&link.id, cancelled).await {
             self.send(&link, vec![h]).await;
         }

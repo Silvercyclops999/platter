@@ -177,14 +177,20 @@ impl DeviceSync {
 
     /// The local network part of [`send`](Self::send): what's left for the
     /// relay (everything, when the other device isn't reachable here).
-    pub(crate) async fn try_lan(&self, link: &Link, mut msgs: Vec<Msg>) -> Vec<Msg> {
+    pub(crate) async fn try_lan(&self, link: &Link, msgs: Vec<Msg>) -> Vec<Msg> {
+        self.try_lan_with(link, msgs, None).await
+    }
+
+    /// [`try_lan`](Self::try_lan) that ends early once `stop` is set (a
+    /// first copy that was stopped; only that copy's rounds pass it).
+    pub(crate) async fn try_lan_with(&self, link: &Link, mut msgs: Vec<Msg>, stop: Option<&std::sync::atomic::AtomicBool>) -> Vec<Msg> {
         let Some(lan) = self.lan() else { return msgs };
         let Some(device) = self.wire.links.get(&link.id).and_then(|p| p.device) else { return msgs };
         let lock = self.wire.sending(link);
         let _one = lock.lock().await;
         let mut exchanges = 0;
         while !msgs.is_empty() {
-            if self.copy_cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            if stop.is_some_and(|s| s.load(std::sync::atomic::Ordering::Relaxed)) {
                 // A first copy was stopped; the next round finishes it.
                 return Vec::new();
             }

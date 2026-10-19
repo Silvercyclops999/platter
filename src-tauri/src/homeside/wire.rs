@@ -195,6 +195,10 @@ pub struct SyncHello {
     /// device: so both ends catch up the same careful way.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apart: Option<Apart>,
+    /// A round over some namespaces only (a first copy, one group at a
+    /// time): it never counts as being in step.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub partial: bool,
 }
 
 /// When the two were last in step by the sender's clock (ms), and what

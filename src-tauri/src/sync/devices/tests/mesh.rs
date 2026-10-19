@@ -180,6 +180,9 @@ async fn apart_100_days(lyrics_off_on_b: bool) -> (Dev, Dev, Link, Link) {
     set_clock(&a, t0);
     b.groups.lock().lyrics = !lyrics_off_on_b;
     round(&a, &la, &b, &lb).await;
+    // The next round (minutes later) finds them equal: both note being in step.
+    round(&b, &lb, &a, &la).await;
+    assert!(a.links.get(&la.id).unwrap().last_synced_at.is_some() && b.links.get(&lb.id).unwrap().last_synced_at.is_some());
     assert!(b.store.has_entry(&HIDDEN, "track:old").unwrap());
     b.groups.lock().lyrics = true;
     // a deletes it on day 5, adds something on day 20.
@@ -207,7 +210,7 @@ async fn back_after_a_long_time_a_deleted_and_forgotten_item_stays_gone() {
             round(&a, &la, &b, &lb).await;
         }
         for d in [&a, &b] {
-            assert!(!d.store.has_entry(&HIDDEN, "track:old").unwrap(), "{}: not brought back (b starts {b_starts})", d.id);
+            assert!(d.store.get(&HIDDEN, "track:old").unwrap().is_none(), "{}: not brought back (b starts {b_starts})", d.id);
             for k in ["track:keep", "track:new", "track:phone"] {
                 assert!(d.store.has_entry(&HIDDEN, k).unwrap(), "{}: {k} (b starts {b_starts})", d.id);
             }
@@ -231,7 +234,7 @@ async fn back_after_a_long_time_what_wasnt_kept_in_step_then_still_comes() {
     round(&b, &lb, &a, &la).await;
     assert!(b.store.has_entry(&store::LYRICS, "song:1").unwrap());
     assert!(a.store.has_entry(&store::LYRICS, "song:1").unwrap(), "and a keeps them");
-    assert!(!b.store.has_entry(&HIDDEN, "track:old").unwrap());
+    assert!(b.store.get(&HIDDEN, "track:old").unwrap().is_none());
 }
 
 #[tokio::test]
@@ -245,7 +248,7 @@ async fn a_round_cut_short_after_a_long_time_apart_still_goes_carefully() {
     round(&a, &la, &b, &lb).await;
     round(&b, &lb, &a, &la).await;
     assert!(same(&a, &b));
-    assert!(!a.store.has_entry(&HIDDEN, "track:old").unwrap() && !b.store.has_entry(&HIDDEN, "track:old").unwrap());
+    assert!(a.store.get(&HIDDEN, "track:old").unwrap().is_none() && b.store.get(&HIDDEN, "track:old").unwrap().is_none());
     assert!(a.store.has_entry(&HIDDEN, "track:phone").unwrap());
 }
 
@@ -264,6 +267,73 @@ async fn a_new_pairing_copies_old_entries_as_usual() {
     assert!(a.links.get(&la.id).unwrap().catching_up_since.is_none());
 }
 
+#[tokio::test]
+async fn a_peer_saying_long_apart_lets_nothing_go_here_unless_this_end_knows_it() {
+    // A link never in step here (from an older build, or just paired): the
+    // claim is ignored, whatever the other device's digest lacks.
+    let a = dev("a");
+    let b = dev("b");
+    set_clock(&a, 1_000 * DAY);
+    a.store.put(&HIDDEN, "track:mine", &hidden("kept")).unwrap();
+    set_clock(&a, 1_200 * DAY);
+    set_clock(&b, 1_200 * DAY);
+    let (la, lb) = pair(&a, &b, "http://relay");
+    let Some(Msg::SyncHello(mut h)) = b.peer.hello(false).await else { panic!("no hello") };
+    h.apart = Some(crate::homeside::wire::Apart { since: 1_200 * DAY, ns: NAMESPACES.iter().map(|s| s.to_string()).collect() });
+    let mut tap = Vec::new();
+    talk(&b, &lb, &a, &la, vec![Msg::SyncHello(h)], Net::default(), &mut tap).await;
+    assert!(a.store.get(&HIDDEN, "track:mine").unwrap().is_some(), "nothing let go of");
+    assert!(b.store.get(&HIDDEN, "track:mine").unwrap().is_some(), "it came over as usual");
+    assert!(a.links.get(&la.id).unwrap().catching_up_since.is_none());
+    // In step here lately, and the claim names a time later than that and
+    // namespaces this end never kept in step: still nothing goes.
+    let c = dev("c");
+    let d = dev("d");
+    set_clock(&c, 1_000 * DAY);
+    set_clock(&d, 1_000 * DAY);
+    let (lc, ld) = pair(&c, &d, "http://relay");
+    c.store.put(&HIDDEN, "track:c", &hidden("c")).unwrap();
+    round(&c, &lc, &d, &ld).await;
+    // d forgets it silently (an empty store, say), then claims a long time apart.
+    d.db.write(|x| {
+        x.execute("DELETE FROM sync_entries", [])?;
+        Ok(())
+    })
+    .unwrap();
+    tick(&c, DAY);
+    tick(&d, DAY);
+    let Some(Msg::SyncHello(mut h)) = d.peer.hello(false).await else { panic!("no hello") };
+    h.apart = Some(crate::homeside::wire::Apart { since: 5_000 * DAY, ns: vec!["lyrics".into()] });
+    let mut tap = Vec::new();
+    talk(&d, &ld, &c, &lc, vec![Msg::SyncHello(h)], Net::default(), &mut tap).await;
+    assert!(c.store.get(&HIDDEN, "track:c").unwrap().is_some(), "not in what it names, and named too late: kept");
+    assert!(d.store.get(&HIDDEN, "track:c").unwrap().is_some(), "and back on the other device");
+}
+
+#[tokio::test]
+async fn a_first_copy_one_group_at_a_time_after_a_long_time_apart_stays_careful() {
+    let (a, b, la, lb) = apart_100_days(false).await;
+    // b copies from a group by group: each round is for some namespaces only.
+    for group in [&[SETTINGS.name()][..], &[HIDDEN.name(), FOLLOWS.name()][..], &[store::LYRICS.name()][..]] {
+        let h = b.peer.hello_for(&lb.id, group).await.unwrap();
+        let mut tap = Vec::new();
+        talk(&b, &lb, &a, &la, vec![h], Net::default(), &mut tap).await;
+        // The end answering group-only rounds never counts them as in step.
+        assert!(a.links.get(&la.id).unwrap().catching_up_since.is_some(), "still catching up after {group:?}");
+        assert!(a.store.get(&HIDDEN, "track:old").unwrap().is_none(), "never back on a");
+    }
+    assert!(b.store.get(&HIDDEN, "track:old").unwrap().is_none(), "gone from b once its group came");
+    assert!(a.links.get(&la.id).unwrap().in_step.len() > 3, "a group-only round never names just that group as kept in step");
+    // Then the ordinary rounds finish it, and nothing old came back.
+    round(&b, &lb, &a, &la).await;
+    round(&b, &lb, &a, &la).await;
+    assert!(same(&a, &b));
+    for d in [&a, &b] {
+        assert!(d.store.get(&HIDDEN, "track:old").unwrap().is_none(), "{}", d.id);
+        assert!(d.store.get(&HIDDEN, "track:phone").unwrap().is_some(), "{}", d.id);
+    }
+    assert!(a.links.get(&la.id).unwrap().catching_up_since.is_none() && b.links.get(&lb.id).unwrap().catching_up_since.is_none(), "caught up after full rounds");
+}
 // ---------------------------------------------------------------- unpair and forget
 
 #[tokio::test]

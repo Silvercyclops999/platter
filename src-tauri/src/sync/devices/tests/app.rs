@@ -367,10 +367,71 @@ async fn coming_back_to_the_foreground_starts_a_round_at_once() {
     fg_tx.send(false).unwrap();
     fg_tx.send(true).unwrap();
     until("a round on coming back", || a.store.has_entry(&HIDDEN, "track:quiet").unwrap()).await;
-    // Not again straight away.
-    assert!(!a_sync.wake(Wake::Network), "at most once every few seconds");
+    // Not again straight away for the same reason; a network change still counts.
+    assert!(!a_sync.wake(Wake::Foreground), "at most once every few seconds");
+    assert!(a_sync.wake(Wake::Network));
+    assert!(!a_sync.wake(Wake::Network));
     let _ = (a_stop.send(true), b_stop.send(true));
     let _ = b_sync;
+}
+
+/// Counts how often the network path is told the network changed.
+#[derive(Default)]
+struct CountsChanges(std::sync::atomic::AtomicUsize);
+
+#[async_trait]
+impl LanSend for CountsChanges {
+    async fn post(&self, _: &str, _: &str, _: &LanBody) -> Result<LanBody, PeerError> {
+        Err(PeerError::Unreachable)
+    }
+    fn network_changed(&self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[tokio::test]
+async fn a_network_change_right_after_coming_back_still_tries_the_local_network_again() {
+    let a = dev("a");
+    let sync = relay_sync(&a);
+    let lan = Arc::new(CountsChanges::default());
+    sync.set_lan(lan.clone());
+    assert!(sync.wake(Wake::Foreground));
+    assert!(sync.wake(Wake::Network), "its own limit");
+    assert_eq!(lan.0.load(Ordering::SeqCst), 1);
+    // Even inside the limit, a new network is worth trying at once.
+    assert!(!sync.wake(Wake::Network));
+    assert_eq!(lan.0.load(Ordering::SeqCst), 2);
+    assert!(!sync.wake(Wake::Foreground));
+    assert_eq!(lan.0.load(Ordering::SeqCst), 2, "coming back alone doesn't");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_stop_that_comes_after_a_copy_ended_leaves_nothing_stopped() {
+    let (pc, phone) = paired().await;
+    computer_has_things(&pc.dev);
+    let r = phone.sync.copy_from_computer(Duration::from_secs(5)).await.unwrap();
+    assert!(!r.cancelled);
+    // The stop arrives late (the copy had just ended): nothing is stopped by it.
+    phone.sync.cancel_copy();
+    tick(&pc.dev, 5);
+    pc.dev.store.put(&HIDDEN, "track:late", &hidden("after")).unwrap();
+    phone.sync.sync_now().await;
+    assert!(phone.dev.store.has_entry(&HIDDEN, "track:late").unwrap(), "rounds still run on the local network");
+    let r = phone.sync.copy_from_computer(Duration::from_secs(5)).await.unwrap();
+    assert!(!r.cancelled && r.groups.len() == 7, "the next copy runs to its end: {r:?}");
+    // A stop while one copy runs touches only that copy: rounds after it go on.
+    let s = phone.sync.clone();
+    phone.sync.set_on_copy(Arc::new(move |p: &CopyProgress| {
+        if p.step == 1 {
+            s.cancel_copy();
+        }
+    }));
+    let r = phone.sync.copy_from_computer(Duration::from_secs(5)).await.unwrap();
+    assert!(r.cancelled);
+    tick(&pc.dev, 5);
+    pc.dev.store.put(&HIDDEN, "track:after-stop", &hidden("after")).unwrap();
+    phone.sync.sync_now().await;
+    assert!(phone.dev.store.has_entry(&HIDDEN, "track:after-stop").unwrap());
 }
 
 #[tokio::test]

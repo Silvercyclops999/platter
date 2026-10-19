@@ -92,6 +92,10 @@ pub struct PeerSeen {
     /// The two are back in touch after a long time apart (this round).
     #[serde(skip)]
     pub catching_up: Option<CatchUp>,
+    /// Its last hello was for some namespaces only (a first copy, one
+    /// group at a time): nothing in that round counts as being in step.
+    #[serde(skip)]
+    pub partial: bool,
 }
 
 /// A link not in step for longer than this catches up carefully: a
@@ -204,28 +208,32 @@ impl SyncPeer {
     }
 
     /// The other device says the two are catching up after a long time
-    /// apart (this one may never have noted being in step): its time, in
-    /// this device's clock, and what it kept in step then, kept here too.
-    fn apart_as_they_say(&self, link_id: &str, a: &Apart, offset: i64) -> CatchUp {
+    /// apart, though this one doesn't count it so (it noted being in step
+    /// later). Taken only within what this device knows itself: it must
+    /// have been in step with it, the time is never later than this
+    /// device's own last time in step (nor than now), and only namespaces
+    /// this device kept in step then and keeps now count. None otherwise:
+    /// a peer can't make this device let go of anything by saying so.
+    fn apart_as_they_say(&self, link_id: &str, a: &Apart, offset: i64) -> Option<CatchUp> {
+        let p = self.d.links.get(link_id)?;
+        let mine = p.last_synced_at?;
         let theirs = (a.since as i64).saturating_sub(offset).max(0) as u64;
-        let mine = self.d.links.get(link_id).and_then(|p| p.last_synced_at);
-        let since = mine.map_or(theirs, |m| m.min(theirs));
-        let ns: Vec<String> = a.ns.iter().take(NAMESPACES.len() + crate::sync::store::UNKNOWN_NS_MAX).cloned().collect();
-        let mut kept = ns.clone();
-        if let Err(e) = self.d.links.update(link_id, |p| {
-            p.catching_up_since = Some(since);
-            if p.in_step.is_empty() {
-                p.in_step = ns;
-            }
-            kept = p.in_step.clone();
-        }) {
+        let since = mine.min(theirs).min(self.d.store.now());
+        let namespaces: Vec<String> = p.in_step.iter().filter(|n| a.ns.contains(n) && self.moves(link_id, n)).cloned().collect();
+        if namespaces.is_empty() {
+            return None;
+        }
+        if let Err(e) = self.d.links.update(link_id, |p| p.catching_up_since = Some(since)) {
             tracing::warn!("device sync: couldn't note catching up: {e}");
         }
-        CatchUp { since, namespaces: kept }
+        Some(CatchUp { since, namespaces })
     }
 
     /// Fully in step again after a long time apart.
     fn caught_up(&self, link_id: &str) {
+        if self.seen(link_id).is_some_and(|s| s.partial) {
+            return;
+        }
         if self.d.links.get(link_id).is_some_and(|p| p.catching_up_since.is_some()) {
             self.set_seen(link_id, |s| s.catching_up = None);
             if let Err(e) = self.d.links.update(link_id, |p| p.catching_up_since = None) {
@@ -287,10 +295,11 @@ impl SyncPeer {
     /// A hello that starts a round over only these namespaces: the others
     /// are named as switched off for now (the next ordinary hello puts them
     /// back). A first copy goes one group at a time this way.
-    pub async fn hello_for(&self, only: &[&str]) -> Option<Msg> {
-        let Some(Msg::SyncHello(mut h)) = self.hello(false).await else { return None };
+    pub async fn hello_for(&self, link_id: &str, only: &[&str]) -> Option<Msg> {
+        let Some(Msg::SyncHello(mut h)) = self.hello_to(link_id, false).await else { return None };
         h.digests.retain(|n, _| only.contains(&n.as_str()));
         h.skip = NAMESPACES.iter().filter(|n| !only.contains(n)).map(|n| n.to_string()).collect();
+        h.partial = true;
         Some(Msg::SyncHello(h))
     }
 
@@ -317,6 +326,7 @@ impl SyncPeer {
             skip: self.skipped(),
             answer,
             apart: None,
+            partial: false,
         })))
     }
 
@@ -412,7 +422,7 @@ impl SyncPeer {
         let offset = clock::offset(h.clock_ms, self.d.store.now());
         let name: String = h.name.chars().take(60).collect();
         // Back in touch after a long time apart: this round goes carefully.
-        let apart = self.long_apart(&link.id).or_else(|| h.apart.as_ref().map(|a| self.apart_as_they_say(&link.id, a, offset)));
+        let apart = self.long_apart(&link.id).or_else(|| h.apart.as_ref().and_then(|a| self.apart_as_they_say(&link.id, a, offset)));
         if apart.is_some() {
             tracing::info!("device sync: catching up after a long time apart");
         }
@@ -426,6 +436,7 @@ impl SyncPeer {
             s.paused = None;
             s.verified = true;
             s.skip = h.skip.clone();
+            s.partial = h.partial;
         });
         let device: String = h.device.chars().take(100).collect();
         if let Err(e) = self.d.links.update(&link.id, |p| {
@@ -542,16 +553,21 @@ impl SyncPeer {
         let has_mine: HashMap<&str, u64> = mine.iter().map(|(k, t, _)| (k.as_str(), *t)).collect();
         let has_theirs: HashMap<&str, u64> = theirs.iter().map(|(k, t, _)| (k.as_str(), *t)).collect();
         let old = |k: &str, here: &HashMap<&str, u64>, there: &HashMap<&str, u64>| !there.contains_key(k) && here.get(k).is_some_and(|t| *t < before);
-        let (old_here, send): (Vec<String>, Vec<String>) = d.send.drain(..).partition(|k| old(k, &has_mine, &has_theirs));
-        d.send = send;
+        // Deleted here too, stamped just after the version here, so the
+        // deletion travels (the other end takes it, and so does any device
+        // still holding that version) while anything edited since still wins.
+        let old_here: Vec<String> = d.send.iter().filter(|k| old(k, &has_mine, &has_theirs)).cloned().collect();
         d.want.retain(|k| !old(k, &has_theirs, &has_mine));
         if old_here.is_empty() {
             return;
         }
-        let old = old_here;
-        match self.d.store.forget_entries(ns, &old) {
-            Ok(n) => tracing::info!(ns, n, "device sync: let go of entries the other device no longer has"),
-            Err(e) => tracing::warn!(ns, "device sync: couldn't let go of old entries: {e}"),
+        match self.d.store.bury(ns, &old_here) {
+            Ok(n) => tracing::info!(ns, n, "device sync: deleted entries the other device let go of"),
+            Err(e) => {
+                // Not sent either way until it can be.
+                tracing::warn!(ns, "device sync: couldn't delete old entries: {e}");
+                d.send.retain(|k| !old_here.contains(k));
+            }
         }
     }
 
@@ -679,7 +695,9 @@ impl SyncPeer {
 
     /// The two are in step now (not while changes from it couldn't be saved).
     pub(crate) fn mark_synced(&self, link_id: &str) {
-        if self.seen(link_id).is_some_and(|s| s.save_failed) {
+        // Not after changes that couldn't be saved, nor in a round over
+        // some namespaces only (it would name just those as kept in step).
+        if self.seen(link_id).is_some_and(|s| s.save_failed || s.partial) {
             return;
         }
         let now = self.d.store.now();
