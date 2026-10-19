@@ -10,6 +10,8 @@ pub mod art;
 pub mod audio_session;
 #[cfg(target_os = "ios")]
 mod ios_session;
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+pub mod route_move;
 #[cfg(target_os = "ios")]
 pub mod ios_webview;
 pub mod commands;

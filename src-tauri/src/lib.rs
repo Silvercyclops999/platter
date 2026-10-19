@@ -697,6 +697,8 @@ pub fn run() {
                     ..Default::default()
                 },
             );
+            #[cfg(target_os = "ios")]
+            platform::audio_session::watch(player.clone());
             downloads.attach(player.transfer_gate(), Some(player.transfer_host()), audio::http::http_client());
             tauri::async_runtime::spawn(downloads.clone().run());
             // Downloaded items follow library changes straight away.
