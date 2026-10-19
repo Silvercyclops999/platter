@@ -138,6 +138,7 @@ import type {
   DeckPluginStatus,
   DeckStatus,
   BridgeOverview,
+  HomeSides,
   BridgePairStart,
   DownloadKind,
   DownloadStatus,
@@ -775,6 +776,8 @@ export interface Backend {
   // Platter Bridge (docs/IPC.md "Platter Bridge")
   /** Paired Bridges, a pair code waiting to be used, queued Lidarr changes. */
   bridgeOverview(): Promise<BridgeOverview>;
+  /** Settings > Lidarr > Home side: computers at home and Bridges that answer Lidarr for this device. */
+  lidarrHomeSides(): Promise<HomeSides>;
   /** "Pair a Bridge": a new code, good for an hour. */
   bridgePairStart(): Promise<BridgePairStart>;
   bridgePairCancel(): Promise<void>;
@@ -1598,6 +1601,7 @@ export function createTauriBackend(): Backend {
     deckPluginStatus: () => call("deck_plugin_status"),
     deckPluginInstall: () => call("deck_plugin_install"),
     bridgeOverview: () => call("bridge_overview"),
+    lidarrHomeSides: () => call("lidarr_home_sides"),
     bridgePairStart: () => call("bridge_pair_start"),
     bridgePairCancel: () => call("bridge_pair_cancel"),
     bridgeUnpair: (id) => call("bridge_unpair", { id }),

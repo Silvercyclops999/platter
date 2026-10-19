@@ -9,6 +9,11 @@ catches up with everything Lidarr did while it was closed. The Bridge just
 means that happens as it goes instead of later. Nothing is installed on your
 server unless you set the Bridge up yourself.
 
+A computer can be the home side too. When Platter is open on a computer at
+home that has Lidarr set up, your phone and your other paired devices reach
+Lidarr through it, at home and away, with the same checks the Bridge makes.
+The Bridge is for when every computer is off.
+
 ## What it does
 
 Every few minutes, the same way an open Platter would:
@@ -22,8 +27,8 @@ Every few minutes, the same way an open Platter would:
 - With your music folder mounted read-write, adds new protected albums from
   the staging folder to your library (only the ones you said can be added
   automatically), following each artist's own folder and tag habits.
-- Lets a computer away from home reach Lidarr through it, if Lidarr has no
-  away address.
+- Lets a phone or a computer away from home reach Lidarr through it, if
+  Lidarr has no away address and no computer at home is on.
 - Runs Bring in my listening, so the waves of requests keep going while
   your computers are off (see below).
 
@@ -165,6 +170,27 @@ the waves, and shows its progress and anything that needs you. Turning Bring
 in my listening off on your computer stops the Bridge. If the Bridge stops
 answering for over an hour, your computer takes the waves back and carries
 on from where the Bridge got to.
+
+## A computer at home
+
+You may not need the Bridge at all. Pair your phone with your computer
+(Settings > Sync, Keep my devices in sync) and, as long as Platter is open
+on that computer and Lidarr is set up there, the phone can get albums, see
+what's missing and send requests through it. On the same network it goes
+straight across; away from home it goes through the same sealed relay.
+
+The computer answers only your own paired devices signed in to the same
+Plex account, and only after they've said who they are. It checks every
+request the way the Bridge does, takes keys and passwords out of what it
+sends back, and keeps the Lidarr key to itself. You can turn it off on the
+computer with Let my other devices use Lidarr through this computer, in
+Settings > Lidarr under Home side.
+
+Platter tries Lidarr's home address first, then its away address, then a
+computer at home, then the Bridge. Settings > Lidarr > Home side lists
+which of them you have, whether each is on now and which one answers. When
+none is on and there's no away address, it says "Lidarr isn't reachable
+away from home. Turn on a computer at home or add the Bridge."
 
 ## What needs a computer
 

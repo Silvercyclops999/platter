@@ -1225,6 +1225,8 @@ export interface Settings {
   deviceSyncAway: boolean;
   /** Send big things (a first copy, imported plays) only on Wi-Fi. This device only. */
   deviceSyncWifiOnly: boolean;
+  /** Let my other devices use Lidarr through this computer: your own paired devices reach Lidarr through this one, and the key stays here. This device only. */
+  homeSideLidarr: boolean;
   /** Bookmarks has a row in the library. */
   bookmarksInLibrary: boolean;
   showDlnaDevices: boolean;
@@ -1834,6 +1836,7 @@ export const DEFAULT_SETTINGS: Settings = {
   deviceSync: true,
   deviceSyncAway: true,
   deviceSyncWifiOnly: true,
+  homeSideLidarr: true,
   bookmarksInLibrary: true,
   showDlnaDevices: true,
   allowAutomation: false,
@@ -2736,8 +2739,12 @@ export interface LidarrStatus {
   headerNames: string[];
   /** Addresses that would send the key unencrypted over the internet. */
   unencrypted: string[];
-  /** Set up, with a key, and the last setup check passed: Request shows. */
+  /** Set up, with a key, and the last setup check passed: Request shows.
+   * Or, with nothing set up here, a home side answers and its check passed. */
   ready: boolean;
+  /** A computer at home or a Bridge answers Lidarr for this device now
+   * (no address or key needed here). */
+  homeSide?: boolean;
   /** The address came from another device with a host the key wasn't
    * entered for, so the key isn't sent there: the words to show. */
   moved?: string | null;
@@ -2785,7 +2792,7 @@ export interface LidarrReport {
   protectedCount: number;
   checkedAt: number;
   /** Which address answered. */
-  route: "home" | "away" | "bridge" | null;
+  route: LidarrRoute | null;
 }
 
 /** Managed: Lidarr owns the artist's folder. Protected: curated files Platter changes itself. */
@@ -3044,7 +3051,7 @@ export interface LidarrPreview {
   existing: LidarrRequestState | null;
   /** False: the request will wait until Platter can reach Lidarr. */
   reachable: boolean;
-  route: "home" | "away" | "bridge" | null;
+  route: LidarrRoute | null;
   /** The artist is new to Lidarr and will be added with only this album. */
   addsArtist: boolean;
   /** A protected artist: it downloads into the staging folder and waits there. */
@@ -5176,6 +5183,29 @@ export interface BridgeQueuedWrite {
   body: string;
   at: number;
   device: string;
+}
+
+/** How Lidarr was reached: its addresses, a computer at home, the Bridge. */
+export type LidarrRoute = "home" | "away" | "computer" | "bridge";
+
+/** One home side in Settings > Lidarr > Home side. */
+export interface HomeSide {
+  kind: "computer" | "bridge";
+  name: string;
+  /** "Your computer at home, on now", "Platter Bridge, on all the time". */
+  words: string;
+  on: boolean;
+  /** The one that answers first when the home and away addresses don't. */
+  answers: boolean;
+}
+
+/** Which home sides this device has, which answers, and what's wrong. */
+export interface HomeSides {
+  /** This device answers Lidarr for your other devices now. */
+  offering: boolean;
+  sides: HomeSide[];
+  /** Nothing answers away from home: the words to show. */
+  problem: string | null;
 }
 
 /** Settings > Bridge. */

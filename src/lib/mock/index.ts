@@ -118,6 +118,7 @@ import type {
   DeckPluginStatus,
   DeckStatus,
   BridgeOverview,
+  HomeSides,
   EditFields,
   EditKind,
   ImageKind,
@@ -4496,6 +4497,22 @@ export class MockBackend implements Backend {
   bridgePairAfterMs = 2500;
   bridgeOverview() {
     return this.delay(() => this.bridgeState);
+  }
+  /** Settings > Lidarr > Home side: computers at home that answer (tests set it) and the Bridges. */
+  homeComputers: { name: string; on: boolean }[] = [];
+  lidarrHomeSides() {
+    return this.delay((): HomeSides => {
+      const sides: HomeSides["sides"] = [
+        ...this.homeComputers.map((c) => ({ kind: "computer" as const, name: c.name, words: c.on ? "Your computer at home, on now" : "Your computer at home, off or away now", on: c.on, answers: false })),
+        ...this.bridgeState.bridges.map((b) => ({ kind: "bridge" as const, name: b.name, words: b.online ? "Platter Bridge, on all the time" : "Platter Bridge, not heard from lately", on: b.online, answers: false })),
+      ];
+      const first = sides.find((s) => s.on);
+      if (first) first.answers = true;
+      const offering = this.settings.homeSideLidarr && this.lidarr.status(this.settings).hasKey && !!(this.settings.lidarrUrl.trim() || this.settings.lidarrAwayUrl.trim());
+      const away = !!this.settings.lidarrAwayUrl.trim();
+      const problem = !first && !offering && !away ? "Lidarr isn't reachable away from home. Turn on a computer at home or add the Bridge." : null;
+      return { offering, sides, problem };
+    });
   }
   bridgePairStart() {
     return this.delay(() => {

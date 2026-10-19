@@ -439,6 +439,8 @@ export function resetPatch(keys: (keyof Settings)[], defaults: Settings): Partia
  * work that needs a desktop processor. The phone layout leaves them out.
  */
 export const DESKTOP_ONLY: ReadonlySet<string> = new Set([
+  // Integrations: a phone isn't the computer at home that answers for Lidarr.
+  "homeSideLidarr",
   // App: the tray, start-up, keys and the desktop updater.
   "closeToTray",
   "launchAtLogin",

@@ -2798,6 +2798,59 @@ makes one from this computer after the yes, through the same checks;
 read the overview again. Lidarr routes now include `bridge` (the setup
 check's and a request preview's `route`).
 
+### Lidarr through a computer at home
+
+A computer with Lidarr set up answers Lidarr for the user's other paired
+devices over their device link, so a phone or a laptop away from home can
+get albums, see what's missing and send requests with no Bridge and no
+away address. It runs the Bridge's own checks: the same list of pages a
+read may ask for, the same rebuilding of every write from only the fields
+Platter sends, and the same removal of keys and passwords from answers. A
+last look holds back any answer that still has the key in it. The Lidarr
+key never leaves the computer and only ever goes to a host it was entered
+for there.
+
+A device asks with the `get` and `write` messages the Bridge already
+understands, sealed on the device link: over the control port first
+(`POST /platter/v1/sync/entries`, waiting up to 45 seconds for Lidarr), and
+through the relay when the two aren't on one network and Sync when I'm
+away from home is on. The computer answers with `answer` or `failed`. It
+answers only once the other device's hello showed the same account, or its
+request on the local network was signed by it; before that the request
+waits and the computer says hello. A request that arrives twice (the local
+network gave up waiting, then the relay brought it) is answered once.
+Lidarr's answer bigger than the relay takes says so instead of going.
+
+The hello says `lidarr: true` while the computer answers (the setting
+below is on and Lidarr is set up there). The field is left out otherwise,
+so an older build's hello reads the same, and nothing is ever asked of a
+device whose hello doesn't say it.
+
+Lidarr is tried in this order: the home address, the away address, a
+computer at home that answers and was heard from in the last few minutes,
+then a paired Bridge. A device with no Lidarr address or key of its own
+uses only the last two. The setup check's and a request preview's `route`
+can now be `computer`. `LidarrStatus` gains `homeSide` (a computer or a
+Bridge answers now); `ready` is true with only a home side once a check
+through it passed.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `lidarr_home_sides` | – | `HomeSides` |
+
+`HomeSides = { offering, sides: HomeSide[], problem }`: `offering` is true
+while this device answers for the others, and `problem` holds "Lidarr isn't
+reachable away from home. Turn on a computer at home or add the Bridge."
+when no home side is on, this device doesn't answer itself and has no away
+address. `HomeSide = { kind: "computer" | "bridge", name, words, on, answers }`,
+computers first, then Bridges; `answers` marks the first one that's on.
+Read it again on `device-sync://status` and `bridge://changed`.
+
+The setting is `homeSideLidarr` (Let my other devices use Lidarr through
+this computer), on by default and kept on this device only. It does
+nothing until Lidarr is set up here. Off, the computer's hello stops saying
+it answers and any request gets a plain refusal.
+
 ## Release radar
 
 New official albums, EPs and singles from followed artists and the ten artists played most in the last 90 days. About once a day, when MusicBrainz is on, Platter asks MusicBrainz's release group search for a few artists at a time (by MusicBrainz id, first released in the last 90 days or later), through the shared one-a-second limiter, with answers cached for 18 hours. Only release groups that pass the same rules as a request are kept: at least one official release, album, EP or single, credited to the artist alone, no secondary type. What was found is kept on this device. An artist's first look announces nothing.

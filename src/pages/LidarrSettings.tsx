@@ -91,7 +91,8 @@ export function useLidarr() {
     }
   };
 
-  const ready = !!status && (status.urlSet || status.awaySet) && status.hasKey && !status.moved;
+  // Set up here, or a computer at home or a Bridge answers for this device.
+  const ready = !!status && (((status.urlSet || status.awaySet) && status.hasKey && !status.moved) || !!status.homeSide);
   return { status, report, error, checking, ready, check, setKey, setHeaders, confirmRoot };
 }
 
@@ -312,7 +313,14 @@ export function LidarrFindings({ lidarr }: { lidarr: LidarrState }) {
   const red = report.findings.filter((f) => f.level === "red");
   const amber = report.findings.filter((f) => f.level === "amber");
   const ok = report.findings.filter((f) => f.level === "ok");
-  const where = report.route === "away" ? "its away address" : report.route === "bridge" ? "your Platter Bridge" : "its home address";
+  const where =
+    report.route === "away"
+      ? "its away address"
+      : report.route === "bridge"
+        ? "your Platter Bridge"
+        : report.route === "computer"
+          ? "your computer at home"
+          : "its home address";
   const row = (f: LidarrFinding) => (
     <FindingRow
       key={`${f.id}:${f.emptyRoot?.path ?? f.title}`}

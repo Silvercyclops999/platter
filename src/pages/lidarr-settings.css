@@ -58,3 +58,11 @@
 .lidarr-findings--ok .lidarr-finding { padding: var(--space-1) var(--space-4); background: none; box-shadow: none; }
 .lidarr-findings--ok .lidarr-finding__title { font-weight: var(--font-weight-regular, 400); color: var(--color-text-secondary); }
 .lidarr-findings--ok .lidarr-finding__detail:empty { display: none; }
+
+/* Home side: the devices that answer for Lidarr away from home. */
+.lidarr-home-sides { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-2); }
+.lidarr-home-sides__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.lidarr-home-sides__side { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); }
+.lidarr-home-sides__name { font-size: var(--font-size-md); font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.lidarr-home-sides__side[data-on="false"] .lidarr-home-sides__name { color: var(--color-text-muted); }
+.lidarr-home-sides__line { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
