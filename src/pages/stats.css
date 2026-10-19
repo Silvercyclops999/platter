@@ -446,3 +446,5 @@ button.moment__btn:focus-visible { outline: 2px solid var(--color-focus-ring); o
 .ph-stats__genres .lg-row { padding: var(--space-3) 0; }
 .stats--phone > .stats-section:first-child { margin-top: var(--space-4); }
 .stats--phone > .stats-section:first-child > .lg-head { border-top: 0; padding-top: 0; }
+/* The story heads keep the small spaced capitals whatever level they sit at. */
+:root .story .story__heading { font-size: 11px; font-weight: var(--font-weight-semibold); letter-spacing: 0.1em; }

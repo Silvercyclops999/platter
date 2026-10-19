@@ -422,14 +422,33 @@ export function ListeningCalendar({ points, from, to, footnote }: { points: Stat
 /** "10 PM" and "Oct 14" never break across lines. */
 const keepTogether = (s: string) => s.replace(/(\d) (AM|PM)\b/g, "$1\u00a0$2").replace(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d)/g, "$1\u00a0$2");
 
-/** One story: a small heading, the sentence, the chart under it. */
-function Story({ id, heading, sentence, layout = "stack", children }: { id: string; heading: string; sentence: ReactNode; layout?: "stack" | "side"; children: ReactNode }) {
+/**
+ * One story: a small heading, the sentence, the chart under it. Stories in
+ * a section head at level 3; the minutes right under the page's hero are a
+ * section of their own, so theirs is level 2.
+ */
+function Story({
+  id,
+  heading,
+  sentence,
+  layout = "stack",
+  level = 3,
+  children,
+}: {
+  id: string;
+  heading: string;
+  sentence: ReactNode;
+  layout?: "stack" | "side";
+  level?: 2 | 3;
+  children: ReactNode;
+}) {
+  const H = level === 2 ? "h2" : "h3";
   return (
     <article className={`story story--${layout}`} aria-labelledby={id} data-testid={id}>
       <div className="story__text">
-        <h3 id={id} className="lg-eyebrow story__heading">
+        <H id={id} className="lg-eyebrow story__heading">
           {heading}
-        </h3>
+        </H>
         <p className="story__sentence">{typeof sentence === "string" ? keepTogether(sentence) : sentence}</p>
       </div>
       <div className="story__chart">{children}</div>
@@ -462,7 +481,7 @@ export function MinutesStory({ o, title, today }: { o: StatsOverview; title: str
   const croppedNote = slice.croppedFrom ? `From your first play here, ${o.bucket === "day" ? dayLabel(slice.croppedFrom, year) : monthName(slice.croppedFrom)}. ` : "";
   return (
     <div className="stats-minutes" data-shot="minutes">
-      <Story id="story-minutes" heading={`Minutes per ${o.bucket}`} sentence={minutesSentence(slice.points, o.bucket, year, albumInfo)}>
+      <Story id="story-minutes" level={2} heading={`Minutes per ${o.bucket}`} sentence={minutesSentence(slice.points, o.bucket, year, albumInfo)}>
         <BarChart points={slice.points} bucket={o.bucket} label={`Minutes listened per ${o.bucket}, ${title}`} best={album ? { thumb: album.thumb } : null} footnote={`${croppedNote}${minutesFootnote(slice.points, o.bucket)}`} />
       </Story>
     </div>

@@ -175,6 +175,8 @@ describe("Stats page", () => {
     expect(within(hero).getByText("New artists found")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Last 4 weeks/ })).toBeInTheDocument();
     expect(screen.getByRole("figure", { name: /Minutes listened per day/ })).toBeInTheDocument();
+    // The minutes under the hero are their own section, headed right under the page title's level.
+    expect(screen.getByRole("heading", { level: 2, name: "Minutes per day" })).toBeInTheDocument();
     // When you listened: every story opens with its sentence.
     // The stories load after the totals: wait for them rather than reading the skeleton.
     expect(await within(screen.getByTestId("story-days")).findByText(/^You listened on \d+ of these 28 days/)).toBeInTheDocument();
