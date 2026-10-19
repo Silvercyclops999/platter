@@ -392,6 +392,31 @@ async fn undecodable_original_falls_back_to_transcode() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn transcode_refused_once_with_400_is_tried_again() {
+    let mut r = rig().await;
+    let good = wav_tone(RATE, 2, 20_000, 500.0, 0.5);
+    r.server.add("/t/a", Route { body: vec![1u8; 5000], ..Default::default() });
+    r.server.add("/x/a", Route { body: good.clone(), status: Some(400), status_times: Some(1), ..Default::default() });
+    r.engine.load(t("a"), "ia".into(), 0, true).unwrap();
+    collect_until(&mut r.events, is_drained, Duration::from_secs(20)).await;
+    assert_eq!(r.resolver.transcode_calls.load(Ordering::SeqCst), 1, "the same transcode is asked again");
+    assert_eq!(r.server.state.ranges_for("/x/a").len(), 2);
+    let (want, _, _) = decode_all(&good, "wav");
+    assert_same(&settled_samples(&r.cap, want.len()).await, &want);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn transcode_refused_twice_fails_after_one_retry() {
+    let mut r = rig().await;
+    r.server.add("/t/a", Route { body: vec![1u8; 5000], ..Default::default() });
+    r.server.add("/x/a", Route { status: Some(400), ..Default::default() });
+    r.engine.load(t("a"), "ia".into(), 0, true).unwrap();
+    let ev = collect_until(&mut r.events, |e| matches!(e, EngineEvent::Failed { .. }), Duration::from_secs(10)).await;
+    assert!(matches!(ev.last().unwrap(), EngineEvent::Failed { error: AppError::Server(_), .. }), "{ev:?}");
+    assert_eq!(r.server.state.ranges_for("/x/a").len(), 2, "one retry, no more");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn transcode_also_failing_reports_failure() {
     let mut r = rig().await;
     r.server.add("/t/a", Route { body: vec![1u8; 5000], ..Default::default() });
