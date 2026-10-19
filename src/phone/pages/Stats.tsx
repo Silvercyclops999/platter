@@ -1,7 +1,8 @@
 /**
- * Stats on the phone: a range, the range told as the computer's Stats hero does,
- * then top artists, songs, records and genres, when you listened (each
- * chart led by its sentence), and Recaps and Compare as their own tabs.
+ * Stats on the phone: the computer's Stats page set for the phone. A range,
+ * the range in a sentence with the record played most and the minutes under
+ * it, the top songs, artists, albums and genres as ruled rows, when you
+ * listened and moments, and Recaps and Compare as their own tabs.
  * The same counts as the computer's Stats page, from the same core calls.
  */
 import { ListPlus, Play } from "lucide-react";
@@ -9,21 +10,24 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Art } from "../../components/Art";
 import { backend } from "../../lib/backend";
 import { failText } from "../../lib/errorText";
-import { WEEKDAYS, barFractions, hourLabel, minutes, rangeLabel, toRange, type RangeChoice } from "../../lib/stats";
+import { barFractions, formatPlays, rangeLabel, toRange, type RangeChoice } from "../../lib/stats";
+import { duration } from "../../lib/statsStory";
 import type { StatsOverview } from "../../lib/statsTypes";
 import { useLoad } from "../../lib/useLoad";
+import { MinutesStory, WhenYouListened } from "../../pages/StatsCharts";
 import { CompareSection } from "../../pages/StatsCompare";
+import { MomentsSection } from "../../pages/StatsMoments";
 import { MonthlySection, monthsIn } from "../../pages/StatsRecaps";
 import { WrappedSection } from "../../pages/StatsWrapped";
 import { StatsHero } from "../../pages/StatsHero";
+import "../../pages/ledger.css";
 import "../../pages/stats.css";
 import { player } from "../../stores/player";
 import { nav, useRouter, type StatsTab } from "../../stores/router";
 import { useSettings } from "../../stores/settings";
 import { toast } from "../../stores/toasts";
 import { PageFailed, SongRow } from "./common";
-import { Empty, GhostRows, GoPill, LinkList, PageFrame, Pills, Row, ShowMore, Tile, TileGrid } from "./kit";
-import "../../pages/stats.css";
+import { Empty, GhostRows, GoPill, LinkList, PageFrame, Pills, Row, ShowMore } from "./kit";
 
 const NEVER = new Promise<never>(() => {});
 const TABS: { id: StatsTab; label: string }[] = [
@@ -44,54 +48,20 @@ function chipOf(c: RangeChoice): ChipId {
   return c.kind === "custom" ? "4w" : c.kind;
 }
 
-/** "In the evening" from the busiest hour. */
-export function partOfDay(h: number): string {
-  if (h < 5) return "late at night";
-  if (h < 12) return "in the morning";
-  if (h < 17) return "in the afternoon";
-  if (h < 21) return "in the evening";
-  return "at night";
-}
-
-/** The sentence over the hours chart. */
-export function hoursLine(o: Pick<StatsOverview, "busiestHour">): string {
-  return o.busiestHour == null ? "No listening to chart yet." : `You listen most ${partOfDay(o.busiestHour)}, busiest around ${hourLabel(o.busiestHour)}.`;
-}
-
-/** The sentence over the weekdays chart. */
-export function weekdaysLine(o: Pick<StatsOverview, "busiestWeekday">): string {
-  return o.busiestWeekday == null ? "No listening to chart yet." : `${WEEKDAYS[o.busiestWeekday]} is your biggest day.`;
-}
-
-function Bars({ label, values, labels, mark }: { label: string; values: number[]; labels: string[]; mark: number | null }) {
-  const f = barFractions(values);
+function Section({ title, children, aside }: { title: string; children: ReactNode; aside?: ReactNode }) {
   return (
-    <div className="ph-bars-chart" role="img" aria-label={label}>
-      <div className="ph-bars-chart__bars">
-        {f.map((v, i) => (
-          <span key={i} className={`ph-bars-chart__bar ${i === mark ? "is-mark" : ""}`} style={{ height: `${Math.max(2, Math.round(v * 100))}%` }} />
-        ))}
+    <section className="stats-section ph-stats__section" aria-label={title}>
+      <div className="ledger-head">
+        <h2 className="ledger-head__title">{title}</h2>
+        {aside}
       </div>
-      <div className="ph-bars-chart__axis" aria-hidden="true">
-        {labels.map((l, i) => (
-          <span key={i}>{l}</span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Section({ title, children, note }: { title: string; children: ReactNode; note?: ReactNode }) {
-  return (
-    <section className="ph-x__section" aria-label={title}>
-      <h2 className="ph-section-title">{title}</h2>
-      {note && <p className="ph-section-sub">{note}</p>}
       {children}
     </section>
   );
 }
 
-function Overview({ o, title, isAll }: { o: StatsOverview; title: string; isAll: boolean }) {
+/** The overview, as the computer's: the hero and its minutes, the top lists, when you listened, moments. */
+function Overview({ o, title, isAll, isYear, today }: { o: StatsOverview; title: string; isAll: boolean; isYear: boolean; today: string }) {
   const moments = useLoad(() => backend.statsMoments({ from: isAll ? null : o.from, to: isAll ? null : o.to }), [o.from, o.to, isAll]);
   const [songsShown, setSongsShown] = useState(10);
   const [artistsShown, setArtistsShown] = useState(5);
@@ -105,30 +75,16 @@ function Overview({ o, title, isAll }: { o: StatsOverview; title: string; isAll:
       toast.error(failText("Couldn't save the playlist", e));
     }
   };
-  const hourLabels = Array.from({ length: 24 }, (_, h) => (h % 6 === 0 ? hourLabel(h).replace(" ", "").toLowerCase() : ""));
+  const genres = o.topGenres.slice(0, 8);
+  const genreShare = barFractions(genres.map((g) => g.ms));
+  const year = o.to.slice(0, 4);
   return (
-    <>
+    <div className="stats stats--phone">
       <StatsHero o={o} moments={moments.data} title={title} isAll={isAll} />
-
-      {o.topArtists.length > 0 && (
-        <Section title="Top artists">
-          <ul className="ph-rows">
-            {o.topArtists.slice(0, artistsShown).map((a, i) => (
-              <Row
-                key={a.key}
-                art={<Art path={a.thumb} size={48} round kind="artist" monogram={a.name} />}
-                title={`${i + 1}. ${a.name}`}
-                sub={`${a.plays.toLocaleString()} plays · ${minutes(a.ms).toLocaleString()} min`}
-                onOpen={a.artistId ? () => nav.go({ name: "artist", id: a.artistId! }) : undefined}
-              />
-            ))}
-          </ul>
-          <ShowMore total={o.topArtists.length} shown={artistsShown} noun="artists" onMore={() => setArtistsShown((n) => n + 10)} />
-        </Section>
-      )}
+      <MinutesStory o={o} title={title} today={today} />
 
       {songs.length > 0 && (
-        <Section title="Top songs">
+        <Section title="Your top songs">
           <div className="ph-x__pill-row">
             <button type="button" className="ph-pill is-primary" onClick={() => void player.playTracks(ids)}>
               <Play size={16} fill="currentColor" aria-hidden="true" /> Play these
@@ -139,45 +95,71 @@ function Overview({ o, title, isAll }: { o: StatsOverview; title: string; isAll:
           </div>
           <ul className="ph-songs">
             {songs.slice(0, songsShown).map((s, i) => (
-              <SongRow key={s.key} track={s.track!} index={i + 1} sub={`${s.artist} · ${s.plays.toLocaleString()} plays`} onPlay={() => void player.playTracks(ids, s.track!.id)} />
+              <SongRow key={s.key} track={s.track!} index={i + 1} sub={`${s.artist} · ${formatPlays(s.plays)}`} onPlay={() => void player.playTracks(ids, s.track!.id)} />
             ))}
           </ul>
           <ShowMore total={songs.length} shown={songsShown} noun="songs" onMore={() => setSongsShown((n) => n + 20)} />
         </Section>
       )}
 
-      {o.topAlbums.length > 0 && (
-        <Section title="Top records">
-          <TileGrid label="Top records">
-            {o.topAlbums.slice(0, 6).map((a) => (
-              <Tile key={a.key} title={a.title} sub={`${a.artist} · ${a.plays.toLocaleString()} plays`} sleeveArtist={a.artist} thumb={a.thumb} onOpen={a.albumId ? () => nav.go({ name: "album", id: a.albumId! }) : undefined} />
+      {o.topArtists.length > 0 && (
+        <Section title="Your top artists">
+          <ul className="ph-rows">
+            {o.topArtists.slice(0, artistsShown).map((a, i) => (
+              <Row
+                key={a.key}
+                art={<Art path={a.thumb} size={48} round kind="artist" monogram={a.name} />}
+                title={`${i + 1}. ${a.name}`}
+                sub={<span className="num">{`${formatPlays(a.plays)} · ${duration(a.ms)}`}</span>}
+                onOpen={a.artistId ? () => nav.go({ name: "artist", id: a.artistId! }) : undefined}
+              />
             ))}
-          </TileGrid>
+          </ul>
+          <ShowMore total={o.topArtists.length} shown={artistsShown} noun="artists" onMore={() => setArtistsShown((n) => n + 10)} />
         </Section>
       )}
 
-      {o.topGenres.length > 0 && (
-        <Section title="Top genres">
-          <ol className="ph-genres">
-            {o.topGenres.slice(0, 8).map((g, i) => (
-              <li key={g.name} className="ph-genres__row">
-                <span className="ph-genres__name">
-                  {i + 1}. {g.name}
+      {o.topAlbums.length > 0 && (
+        <Section title="Your top albums">
+          <ul className="ph-rows">
+            {o.topAlbums.slice(0, 6).map((a, i) => (
+              <Row
+                key={a.key}
+                art={<Art path={a.thumb} size={48} sleeve={{ title: a.title, artist: a.artist }} />}
+                title={`${i + 1}. ${a.title}`}
+                sub={
+                  <>
+                    {a.artist} <span className="num">{formatPlays(a.plays)}</span>
+                  </>
+                }
+                onOpen={a.albumId ? () => nav.go({ name: "album", id: a.albumId! }) : undefined}
+              />
+            ))}
+          </ul>
+        </Section>
+      )}
+
+      {genres.length > 0 && (
+        <Section title="Your top genres">
+          <ol className="ledger ph-stats__genres">
+            {genres.map((g, i) => (
+              <li key={g.name} className="ledger__row">
+                <span className="ledger__label ph-stats__genre">
+                  <span className="num">{i + 1}</span> {g.name}
+                  <span className="ph-stats__genre-share" aria-hidden="true">
+                    <span style={{ width: `${Math.round(genreShare[i] * 100)}%` }} />
+                  </span>
                 </span>
-                <span className="ph-genres__bar" style={{ width: `${Math.round(barFractions(o.topGenres.slice(0, 8).map((x) => x.ms))[i] * 100)}%` }} />
-                <span className="ph-x__count">{g.plays.toLocaleString()} plays</span>
+                <span className="ledger__value">{formatPlays(g.plays)}</span>
               </li>
             ))}
           </ol>
         </Section>
       )}
 
-      <Section title="When you listened" note={hoursLine(o)}>
-        <Bars label={`Listening by hour. ${hoursLine(o)}`} values={o.hours} labels={hourLabels} mark={o.busiestHour} />
-        <p className="ph-section-sub ph-stats__second">{weekdaysLine(o)}</p>
-        <Bars label={`Listening by weekday. ${weekdaysLine(o)}`} values={o.weekdays} labels={WEEKDAYS.map((d) => d.slice(0, 1))} mark={o.busiestWeekday} />
-      </Section>
-    </>
+      <WhenYouListened o={o} today={today} />
+      <MomentsSection moments={moments.data} rangeTitle={title} isYear={isYear} year={year} error={!!moments.error} />
+    </div>
   );
 }
 
@@ -237,11 +219,11 @@ export function PhoneStats({ tab: openTab, month, friend }: { tab?: StatsTab; mo
             ) : (
               <>
                 <h2 className="sr-only ph-stats__range">{title}</h2>
-                <Overview key={`${range?.from}:${range?.to}`} o={o.data} title={title} isAll={!range?.from && !range?.to} />
+                <Overview key={`${range?.from}:${range?.to}`} o={o.data} title={title} isAll={!range?.from && !range?.to} isYear={choice.kind === "year" || choice.kind === "pickYear"} today={span.data?.today ?? o.data.to} />
               </>
             ))}
           {tab === "recaps" && (
-            <div className="ph-wrap-in">
+            <div className="ph-wrap-in stats stats--phone">
               {!monthly && !wrappedOn ? (
                 <Empty title="Recaps are off" text="Turn on monthly recaps or Wrapped in Settings to see them here." />
               ) : (

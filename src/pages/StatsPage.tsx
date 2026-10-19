@@ -21,13 +21,14 @@ import type { StatsMoments, StatsOverview, StatsSpan } from "../lib/statsTypes";
 import { useLoad } from "../lib/useLoad";
 import { nav, useRouter, type StatsTab } from "../stores/router";
 import { useSettings } from "../stores/settings";
-import { WhenYouListened } from "./StatsCharts";
+import { MinutesStory, WhenYouListened } from "./StatsCharts";
 import { CompareSection } from "./StatsCompare";
 import { WrappedSection } from "./StatsWrapped";
 import { StatsHero, StatsHeroSkeleton } from "./StatsHero";
 import { MomentsSection } from "./StatsMoments";
 import { MonthlySection, monthsIn } from "./StatsRecaps";
 import { TopLists } from "./StatsTopLists";
+import "./ledger.css";
 import "./stats.css";
 
 export { BarChart } from "./StatsCharts";
@@ -226,8 +227,9 @@ export function StatsPage({ tab: openTab, month, friend }: { tab?: StatsTab; mon
     return (
       <>
         <StatsHero o={o} moments={moments.data} title={title} isAll={isAll} />
+        <MinutesStory o={o} title={title} today={span?.today ?? o.to} />
         <TopLists key={`${range.from}:${range.to}`} o={o} range={range} title={title} />
-        <WhenYouListened o={o} title={title} today={span?.today ?? o.to} />
+        <WhenYouListened o={o} today={span?.today ?? o.to} />
         <MomentsSection moments={moments.data} rangeTitle={title} isYear={isYear} year={o.to.slice(0, 4)} error={!!moments.error} />
       </>
     );

@@ -1,0 +1,98 @@
+/* The ledger: shared type and rules for the pages that tell your listening
+   (Stats, the diary, the sound map, eras, lineage and the mixes). A page
+   leads with one sentence in the display face, numbers sit in the readout
+   face, and sections and rows are split by hairlines, not boxed in cards.
+   Classic has no display face, so the same rules read in the body face.
+   Colours come from theme tokens only; the accent is kept for one mark. */
+:root {
+  --ledger-line: color-mix(in srgb, var(--color-ink) 12%, transparent);
+  --ledger-faint: color-mix(in srgb, var(--color-ink) 7%, transparent);
+  --ledger-stem: color-mix(in srgb, var(--color-ink) 34%, transparent);
+  --ledger-stem-hover: color-mix(in srgb, var(--color-ink) 62%, transparent);
+}
+
+/* The lead sentence: what this page says about you. */
+.lead {
+  margin: 0;
+  max-width: 24em;
+  font-family: var(--font-headings, var(--font-family));
+  font-optical-sizing: auto;
+  font-size: clamp(28px, 3.4cqi, 42px);
+  font-weight: 420;
+  line-height: 1.16;
+  letter-spacing: -0.012em;
+  color: var(--color-text-primary);
+  text-wrap: pretty;
+  font-variant-numeric: lining-nums;
+}
+.lead strong { font-weight: 640; }
+.lead--sm { font-size: clamp(20px, 2.2cqi, 26px); line-height: 1.25; font-weight: 440; }
+.lead--xs { font-size: var(--font-size-xl); line-height: 1.3; font-weight: 460; }
+/* Under the lead: the plain facts, in the readout face. */
+.lead-facts {
+  margin: var(--space-3) 0 0;
+  font-family: var(--font-readout, var(--font-family));
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: 0.01em;
+}
+
+/* A small label over a section or a value: readout face, spaced capitals. */
+.eyebrow {
+  display: block;
+  margin: 0;
+  font-family: var(--font-readout, var(--font-family));
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* Section heads: a hairline across, then the head in the display face. */
+.ledger-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--ledger-line);
+}
+.ledger-head__title {
+  margin: 0;
+  font-family: var(--font-headings, var(--font-family));
+  font-optical-sizing: auto;
+  font-size: var(--font-size-2xl);
+  font-weight: 600;
+  letter-spacing: -0.008em;
+}
+.ledger-head__aside { font-family: var(--font-readout, var(--font-family)); font-size: var(--font-size-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+
+/* Rows split by hairlines: a label, then its value set flush right. */
+.ledger { list-style: none; margin: 0; padding: 0; }
+.ledger__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-4);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--ledger-faint);
+}
+.ledger__row:last-child { border-bottom: 1px solid var(--ledger-faint); }
+.ledger__label { min-width: 0; color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+.ledger__value {
+  min-width: 0;
+  text-align: right;
+  font-family: var(--font-readout, var(--font-family));
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.ledger__value small { display: block; font-size: var(--font-size-xs); color: var(--color-text-muted); }
+
+/* A number in the readout face inside running text. */
+.num { font-family: var(--font-readout, var(--font-family)); font-variant-numeric: tabular-nums lining-nums; letter-spacing: 0; }

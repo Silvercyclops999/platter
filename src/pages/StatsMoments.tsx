@@ -1,8 +1,8 @@
 /**
  * Moments: small stories from a range. The first song, the day one song
  * was played over and over, the artist found that you played most, and a
- * song you came back to after a long break. Cards play the song or open
- * the artist.
+ * song you came back to after a long break, as ruled rows with the cover.
+ * A row plays the song or opens the artist.
  */
 import { Art } from "../components/Art";
 import { Skeleton } from "../components/Skeleton";
@@ -99,13 +99,13 @@ function Card({ c }: { c: MomentCard }) {
   const body = (
     <>
       <span className={`moment__art ${c.round ? "is-round" : ""}`}>
-        <Art path={c.thumb} fluid requestSize={88} round={c.round} kind={c.round ? "artist" : "album"} />
+        <Art path={c.thumb} fluid requestSize={64} round={c.round} kind={c.round ? "artist" : "album"} />
       </span>
       <span className="moment__text">
-        <span className="moment__eyebrow">{c.eyebrow}</span>
+        <span className="eyebrow moment__eyebrow">{c.eyebrow}</span>
         <span className="moment__title truncate">{c.title}</span>
         <span className="moment__sub truncate">{c.sub}</span>
-        <span className="moment__detail">{c.detail}</span>
+        <span className="moment__detail num">{c.detail}</span>
       </span>
     </>
   );
@@ -128,16 +128,18 @@ export function MomentsSection({ moments, rangeTitle, isYear, year, error }: { m
   if (cards && !cards.length) return null;
   return (
     <section className="stats-section" aria-labelledby="stats-moments" data-shot="moments">
-      <h2 id="stats-moments" className="stats-section__title">
-        Moments
-      </h2>
+      <div className="ledger-head">
+        <h2 id="stats-moments" className="ledger-head__title stats-section__title">
+          Moments
+        </h2>
+      </div>
       <ul className={`moments moments--n${cards?.length ?? 4}`}>
         {cards
           ? cards.map((c) => <Card key={c.id} c={c} />)
           : [0, 1, 2, 3].map((i) => (
               <li key={i} className="moment" aria-hidden="true">
                 <span className="moment__btn">
-                  <Skeleton width={88} height={88} radius="card" />
+                  <Skeleton width={64} height={64} radius="row" />
                   <span className="moment__text">
                     <Skeleton width="50%" height={12} />
                     <Skeleton width="80%" height={16} style={{ marginTop: 8 }} />

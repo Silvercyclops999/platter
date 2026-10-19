@@ -1,7 +1,8 @@
 /**
- * Monthly recaps: a card per month built from that month's covers, with
- * its minutes and the change on the month before, the daily listening,
- * and its top artist and song. Share opens the month as an image.
+ * Monthly recaps: a ruled row per month. The sleeve of the month's top
+ * record, the month, a sentence with its minutes, the change on the month
+ * before and who and what led it, and the month's days as thin stems.
+ * Share opens the month as an image.
  */
 import { Share2 } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
@@ -12,6 +13,7 @@ import { backend } from "../lib/backend";
 import { barFractions, change, minutes, monthName } from "../lib/stats";
 import type { MonthRecap, StatsRange, StatsSpan } from "../lib/statsTypes";
 import { useLoad } from "../lib/useLoad";
+import "./ledger.css";
 
 const RecapCardDialog = lazy(() => import("./RecapCardDialog").then((m) => ({ default: m.RecapCardDialog })));
 
@@ -22,69 +24,62 @@ export function recapCovers(r: MonthRecap): (string | null)[] {
   return [0, 1, 2, 3].map((i) => own[i % own.length]);
 }
 
+function RecapLine({ r }: { r: MonthRecap }) {
+  const song = r.topSongs[0];
+  const artist = r.topArtists[0];
+  const pct = change(r.totals.ms, r.prevMs);
+  return (
+    <p className="recap__line">
+      <span className="num">{minutes(r.totals.ms).toLocaleString()}</span> minutes
+      {pct && (
+        <>
+          , <span className="num">{pct}</span> on the month before
+        </>
+      )}
+      .
+      {artist && (
+        <>
+          {" "}
+          Mostly <strong>{artist.name}</strong>
+          {song ? (
+            <>
+              , and <strong>{song.title}</strong>
+              {song.unreleased && <span className="stats-mark">Unreleased</span>} played most.
+            </>
+          ) : (
+            "."
+          )}
+        </>
+      )}
+    </p>
+  );
+}
+
 function RecapCard({ month, onShare }: { month: string; onShare: (r: MonthRecap) => void }) {
   const { data: r, error } = useLoad(() => backend.statsMonthRecap(month), [month]);
   const fr = r ? barFractions(r.daily.map((d) => d.ms)) : [];
-  const song = r?.topSongs[0];
-  const artist = r?.topArtists[0];
-  const pct = r ? change(r.totals.ms, r.prevMs) : null;
+  const record = r?.topAlbums[0];
   const name = monthName(month);
+  const [m, y] = name.split(" ");
   return (
-    <li className="recap-card" data-testid="recap-card">
-      <div className="recap-card__covers" aria-hidden="true">
-        {r ? recapCovers(r).map((c, i) => <Art key={i} path={c} fluid requestSize={120} />) : [0, 1, 2, 3].map((i) => <Skeleton key={i} width="100%" height="100%" radius="row" />)}
-      </div>
-      <div className="recap-card__body">
-        <h3 className="recap-card__month">
-          {name.split(" ")[0]} <span>{name.split(" ")[1]}</span>
+    <li className="recap" data-testid="recap-card">
+      <span className="recap__sleeve" aria-hidden="true">
+        {r ? <Art path={record?.thumb} fluid requestSize={120} sleeve={record ? { title: record.title, artist: record.artist } : { title: m }} /> : <Skeleton width="100%" height="100%" radius="row" />}
+      </span>
+      <div className="recap__text">
+        <h3 className="recap__month">
+          {m} <span className="num">{y}</span>
         </h3>
-        {error ? (
-          <p className="stats-muted">Couldn't load this month.</p>
-        ) : !r ? (
-          <>
-            <Skeleton width="60%" height={28} />
-            <Skeleton width="80%" height={14} style={{ marginTop: 12 }} />
-          </>
-        ) : (
-          <>
-            <p className="recap-card__minutes">
-              {minutes(r.totals.ms).toLocaleString()} <span>minutes</span>
-              {pct && <span className={`recap-card__change ${pct.startsWith("-") ? "is-down" : ""}`}>{pct}</span>}
-            </p>
-            <div className="recap-card__bars" aria-hidden="true">
-              {fr.map((f, i) => (
-                <span key={i} style={{ height: `${Math.max(r.daily[i].ms > 0 ? 8 : 0, f * 100)}%` }} />
-              ))}
-            </div>
-            <div className="recap-card__tops">
-              <div className="recap-card__top">
-                <span className="recap-card__face" aria-hidden="true">
-                  <Art path={artist?.thumb} size={28} round kind="artist" />
-                </span>
-                <span className="recap-card__top-text">
-                  <span className="recap-card__label">Top artist</span>
-                  <span className="recap-card__value truncate">{artist?.name ?? "None"}</span>
-                </span>
-              </div>
-              <div className="recap-card__top">
-                <span className="recap-card__face" aria-hidden="true">
-                  <Art path={song?.track?.thumb} size={28} />
-                </span>
-                <span className="recap-card__top-text">
-                  <span className="recap-card__label">Top song</span>
-                  <span className="recap-card__value truncate">
-                    {song ? song.title : "None"}
-                    {song?.unreleased && <span className="stats-mark">Unreleased</span>}
-                  </span>
-                </span>
-              </div>
-            </div>
-            <Button size="sm" icon={<Share2 size={14} />} onClick={() => onShare(r)} aria-label={`Share ${name}`}>
-              Share
-            </Button>
-          </>
-        )}
+        {error ? <p className="stats-muted">Couldn't load this month.</p> : !r ? <Skeleton width="80%" height={16} style={{ marginTop: 8 }} /> : <RecapLine r={r} />}
       </div>
+      <span className="recap__days" aria-hidden="true">
+        {r && fr.map((f, i) => <span key={i} className={r.daily[i].ms > 0 ? "" : "is-off"} style={{ height: `${Math.max(r.daily[i].ms > 0 ? 10 : 0, f * 100)}%` }} />)}
+      </span>
+      {r && (
+        <Button size="sm" variant="ghost" className="recap__share" icon={<Share2 size={14} />} onClick={() => onShare(r)} aria-label={`Share ${name}`}>
+          Share
+        </Button>
+      )}
     </li>
   );
 }
@@ -100,13 +95,15 @@ export function MonthlySection({ months }: { months: string[] }) {
   const [sharing, setSharing] = useState<MonthRecap | null>(null);
   return (
     <section className="stats-section" aria-labelledby="stats-months" data-shot="recaps">
-      <h2 id="stats-months" className="stats-section__title">
-        Monthly recaps
-      </h2>
+      <div className="ledger-head">
+        <h2 id="stats-months" className="ledger-head__title stats-section__title">
+          Monthly recaps
+        </h2>
+      </div>
       {months.length === 0 ? (
         <p className="stats-muted">No month in this range has plays. Pick a longer range to see more months.</p>
       ) : (
-        <ul className="recap-cards">
+        <ul className="recaps">
           {months.map((m) => (
             <RecapCard key={m} month={m} onShare={setSharing} />
           ))}

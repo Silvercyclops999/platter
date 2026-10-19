@@ -1,9 +1,10 @@
 /**
- * The Stats page's "When you listened": three short stories, each a plain
- * sentence written from the numbers with a small chart under it. Listening
- * days as month calendars from the first play, minutes per day or month as
- * bars on a light scale with the best one marked, and your day as 24 hourly
- * bars with the peak marked, beside the weekdays. Charts are plain HTML;
+ * The Stats page's charts, each a plain sentence written from the numbers
+ * with a small chart under it. Minutes per day or month as thin stems on a
+ * minutes scale with the best one marked (right under the hero), then "When
+ * you listened": listening days as printed month calendars from the first
+ * play, and your day as 24 hourly stems with the peak marked, beside the
+ * weekdays. Charts are plain HTML;
  * each is one keyboard stop (arrow keys move, the line under it says the
  * numbers) with a summary and a table for screen readers.
  */
@@ -305,9 +306,10 @@ function DowRow() {
 }
 
 /**
- * Listening days as calendars from the first play in the range: whole
- * months, or for a mostly empty range only the weeks you listened in, with
- * the quiet weeks between them counted. The best day takes the accent.
+ * Listening days as calendars from the first play in the range: months,
+ * cut to the weeks with a day in the range, or for a mostly empty range
+ * only the weeks you listened in, with the quiet weeks between them
+ * counted. The best day takes the accent.
  */
 export function ListeningCalendar({ points, from, to, footnote }: { points: StatsPoint[]; from: string; to: string; footnote: string }) {
   const id = useId();
@@ -388,7 +390,7 @@ export function ListeningCalendar({ points, from, to, footnote }: { points: Stat
             <span className="cal__label">{m.label}</span>
             <span className="cal__grid">
               <DowRow />
-              {m.weeks.flat().map((c, i) => day(c, `p${i}`))}
+              {m.weeks.filter((w) => w.some((c) => c?.inRange)).flat().map((c, i) => day(c, `p${i}`))}
             </span>
           </div>
         ))}
@@ -425,7 +427,7 @@ function Story({ id, heading, sentence, layout = "stack", children }: { id: stri
   return (
     <article className={`story story--${layout}`} aria-labelledby={id} data-testid={id}>
       <div className="story__text">
-        <h3 id={id} className="story__heading">
+        <h3 id={id} className="eyebrow story__heading">
           {heading}
         </h3>
         <p className="story__sentence">{typeof sentence === "string" ? keepTogether(sentence) : sentence}</p>
@@ -442,12 +444,13 @@ function useDaily(o: StatsOverview, end: string): { points: StatsPoint[] | undef
   return { points: data, from, error: !!error };
 }
 
-/** "When you listened": listening days, minutes per day or month, and your day, each led by a sentence. */
-export function WhenYouListened({ o, title, today }: { o: StatsOverview; title: string; today: string }) {
-  // A range can end after today (this whole year); stories stop at today.
+/**
+ * Minutes per day or month, right under the hero: the chart that backs the
+ * range's sentence up, with the biggest one's own sentence over it.
+ */
+export function MinutesStory({ o, title, today }: { o: StatsOverview; title: string; today: string }) {
   const end = o.to < today ? o.to : today;
   const year = end.slice(0, 4);
-  const daily = useDaily(o, end);
   const series = useMemo(() => o.series.filter((p) => p.key <= (o.bucket === "day" ? end : end.slice(0, 7))), [o.series, o.bucket, end]);
   const slice = useMemo(() => activeSlice(series), [series]);
   const best = bestPoint(slice.points);
@@ -455,8 +458,24 @@ export function WhenYouListened({ o, title, today }: { o: StatsOverview; title: 
   const top = useLoad(() => (bestRange ? backend.statsOverview(bestRange, 1) : Promise.resolve(null)), [best?.key, o.bucket]);
   const album = top.data?.topAlbums[0];
   const albumInfo = album && top.data && top.data.totals.ms > 0 ? { title: album.title, share: album.ms / top.data.totals.ms } : null;
-  const empty = o.totals.plays === 0;
+  if (o.totals.plays === 0) return null;
   const croppedNote = slice.croppedFrom ? `From your first play here, ${o.bucket === "day" ? dayLabel(slice.croppedFrom, year) : monthName(slice.croppedFrom)}. ` : "";
+  return (
+    <div className="stats-minutes" data-shot="minutes">
+      <Story id="story-minutes" heading={`Minutes per ${o.bucket}`} sentence={minutesSentence(slice.points, o.bucket, year, albumInfo)}>
+        <BarChart points={slice.points} bucket={o.bucket} label={`Minutes listened per ${o.bucket}, ${title}`} best={album ? { thumb: album.thumb } : null} footnote={`${croppedNote}${minutesFootnote(slice.points, o.bucket)}`} />
+      </Story>
+    </div>
+  );
+}
+
+/** "When you listened": listening days and your day, each led by a sentence. */
+export function WhenYouListened({ o, today }: { o: StatsOverview; today: string }) {
+  // A range can end after today (this whole year); stories stop at today.
+  const end = o.to < today ? o.to : today;
+  const year = end.slice(0, 4);
+  const daily = useDaily(o, end);
+  const empty = o.totals.plays === 0;
   const firstOn = daily.points?.find((p) => p.ms > 0 && p.key >= daily.from);
   const calNote = [
     daily.from > o.from ? "The last 12 months." : firstOn && firstOn.key > o.from ? `Nothing before ${dayLabel(firstOn.key, year)}.` : "",
@@ -466,9 +485,11 @@ export function WhenYouListened({ o, title, today }: { o: StatsOverview; title: 
     .join(" ");
   return (
     <section className="stats-section stats-when" aria-labelledby="stats-charts" data-shot="charts">
-      <h2 id="stats-charts" className="stats-section__title">
-        When you listened
-      </h2>
+      <div className="ledger-head">
+        <h2 id="stats-charts" className="ledger-head__title stats-section__title">
+          When you listened
+        </h2>
+      </div>
       {empty ? (
         <p className="story__sentence">Nothing played in this range yet.</p>
       ) : (
@@ -481,9 +502,6 @@ export function WhenYouListened({ o, title, today }: { o: StatsOverview; title: 
             ) : (
               <ListeningCalendar points={daily.points} from={daily.from} to={end} footnote={calNote} />
             )}
-          </Story>
-          <Story id="story-minutes" heading={`Minutes per ${o.bucket}`} sentence={minutesSentence(slice.points, o.bucket, year, albumInfo)}>
-            <BarChart points={slice.points} bucket={o.bucket} label={`Minutes listened per ${o.bucket}, ${title}`} best={album ? { thumb: album.thumb } : null} footnote={`${croppedNote}${minutesFootnote(slice.points, o.bucket)}`} />
           </Story>
           <Story id="story-day" heading="Your day" sentence={daySentence(o.hours, o.weekdays, o.totals.days)}>
             <DayCharts hours={o.hours} weekdays={o.weekdays} />

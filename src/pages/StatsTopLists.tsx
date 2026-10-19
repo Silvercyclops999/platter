@@ -1,6 +1,6 @@
 /**
- * Top songs, artists, albums and genres for a range. The #1 gets a large
- * card; every row has its artwork and a slim bar for its plays next to the
+ * Top songs, artists, albums and genres for a range. The #1 leads with its
+ * cover; every row has its artwork and a slim bar for its plays next to the
  * #1's. Play these and Save as playlist play or keep the list's songs.
  */
 import { ListPlus, Play } from "lucide-react";
@@ -130,11 +130,9 @@ function Feature({ r, kind, playSongs }: { r: Row; kind: StatsTopKind; playSongs
         ) : (
           <Art path={r.thumb} fluid requestSize={240} round={r.round} kind={kind === "artists" ? "artist" : "album"} />
         )}
-        <span className="stats-feature__rank" aria-hidden="true">
-          #1
-        </span>
+
       </span>
-      <span className="stats-feature__eyebrow">{label}</span>
+      <span className="eyebrow stats-feature__eyebrow">{label}</span>
       {r.open ? (
         <TextLink className="stats-feature__title" onActivate={r.open}>
           {r.title}
@@ -148,7 +146,7 @@ function Feature({ r, kind, playSongs }: { r: Row; kind: StatsTopKind; playSongs
           {r.sub}
         </span>
       )}
-      <span className="stats-feature__count">{countLine(r.plays, r.ms)}</span>
+      <span className="stats-feature__count num">{countLine(r.plays, r.ms)}</span>
       {trackId && (
         <Button size="sm" variant="primary" className="stats-feature__play" icon={<Play size={14} fill="currentColor" />} onClick={() => playSongs(trackId)} aria-label={`Play ${r.title}`}>
           Play
@@ -255,8 +253,8 @@ export function TopLists({ o, range, title }: { o: StatsOverview; range: ReturnT
   const shown = rows.slice(1, more ? 50 : SHORT_LIST);
   return (
     <section className="stats-section" aria-labelledby={`${panel}-h`} data-shot="tops">
-      <div className="stats-section__head">
-        <h2 id={`${panel}-h`} className="stats-section__title">
+      <div className="ledger-head stats-section__head">
+        <h2 id={`${panel}-h`} className="ledger-head__title stats-section__title">
           Your top {kind}
         </h2>
         <span className="stats-section__actions">

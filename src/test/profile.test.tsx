@@ -215,7 +215,9 @@ describe("Stats tabs", () => {
     render(<StatsPage />);
     const hero = await screen.findByTestId("stats-hero");
     expect(within(hero).getAllByRole("listitem").map((li) => li.firstChild?.textContent)).toEqual(["Longest streak", "New artists found"]);
-    expect(hero.querySelector("img, .art")).toBeNull();
+    // The only cover beside the sentence is the record played most.
+    expect(hero.querySelectorAll(".art")).toHaveLength(1);
+    expect(within(hero).getByTestId("stats-record")).toHaveTextContent(/^Played most/);
     expect(await screen.findByTestId("stats-feature")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Monthly recaps" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "On your shelf" })).toBeNull();
