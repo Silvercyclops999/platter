@@ -2256,6 +2256,15 @@ fn source_info(track: &Track, o: &Opened, fallback: bool, audio: Option<TrackAud
     }
 }
 
+/// Plex can answer a new transcode with a 400 for a moment after the old
+/// sessions are stopped (the first play after a start); a second try a
+/// little later gets through.
+const TRANSCODE_RETRY: Duration = Duration::from_millis(400);
+
+fn refused_400(e: &OpenFail) -> bool {
+    matches!(e, OpenFail::Retry(AppError::Server(m)) if m == "http 400")
+}
+
 fn open_track(
     env: &Env,
     track: &Track,
@@ -2267,7 +2276,14 @@ fn open_track(
             .rt
             .block_on(env.resolver.transcode(track))
             .map_err(OpenFail::Fatal)?;
-        return open_from(env, track, src, Origin::Transcode, prio);
+        return match open_from(env, track, src.clone(), Origin::Transcode, prio) {
+            Err(e) if refused_400(&e) => {
+                tracing::info!("transcode of {} refused (http 400); trying once more", track.id);
+                std::thread::sleep(TRANSCODE_RETRY);
+                open_from(env, track, src, Origin::Transcode, prio)
+            }
+            r => r,
+        };
     }
     // A downloaded copy first; its format can differ from the server's file
     // (an MP3 download), so the file name gives the hint.

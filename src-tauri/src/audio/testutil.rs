@@ -150,6 +150,8 @@ pub struct Route {
     pub then_status: Option<u16>,
     /// Answer without a length and ignore ranges (a live transcode).
     pub no_length: bool,
+    /// Answer only the first this many requests with `status`.
+    pub status_times: Option<usize>,
 }
 
 #[derive(Default)]
@@ -231,6 +233,11 @@ impl TestServer {
                                 }
                                 if r.drops > 0 {
                                     r.drops -= 1;
+                                }
+                                match &mut r.status_times {
+                                    Some(0) => snapshot.status = None,
+                                    Some(n) => *n -= 1,
+                                    None => {}
                                 }
                                 Some(snapshot)
                             }
