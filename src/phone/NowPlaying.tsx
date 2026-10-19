@@ -6,8 +6,8 @@
  * pull down closes, straight down to the tab underneath.
  */
 import { AudioLines, ChevronDown, ListMusic, MicVocal, MoreHorizontal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { Art, preloadArt } from "../components/Art";
+import { useDeferredValue, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { preloadArt } from "../components/Art";
 import { nextInQueue } from "../shell/nowPlaying";
 import { holdLightStatusBar, mixIsDark } from "./statusBar";
 import { Slider } from "../components/Slider";
@@ -22,7 +22,7 @@ import { player, usePlayer } from "../stores/player";
 import { FormatPlate, LikeControl, Marquee, remaining, RowGlyphs, tap } from "./bits";
 
 import { OutputButton } from "./DeviceSheet";
-import { useArtGestures } from "./gestures";
+import { CoverDeck, NP_ART_CSS } from "./CoverDeck";
 import { LyricsCard } from "./LyricsScreen";
 import { NP_OPEN_MS, flyCover } from "./motion";
 import { phone, usePhoneUi } from "./phoneUi";
@@ -55,8 +55,7 @@ export function playingFrom(ctx: { kind: string; title?: string | null } | null 
   return ctx.kind === "liked" ? "Liked Songs" : `This ${CONTEXT_NOUN[ctx.kind] ?? "queue"}`;
 }
 
-/** Now playing's cover is asked for at this CSS size (the phone's ladder caps it at 1200 px). */
-export const NP_ART_CSS = 400;
+export { NP_ART_CSS };
 /** How much of the cover's colour tints the top of now playing (phone.css .ph-np). */
 export const NP_TOP_TINT = 0.46;
 
@@ -86,19 +85,8 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
   const colours = useArtColours(null, track.thumb);
   const playing = status === "playing" || status === "loading" || status === "buffering";
   const screen = useRef<HTMLElement>(null);
-  const art = useRef<HTMLDivElement>(null);
-  const { offset, handlers } = useArtGestures({
-    onNext: () => {
-      tap();
-      void player.next();
-    },
-    onPrevious: () => {
-      tap();
-      void player.previous();
-    },
-    onClose: phone.closePlayer,
-    size: () => ({ width: art.current?.clientWidth || 360, height: screen.current?.clientHeight || 800 }),
-  });
+  // The cards under the player follow a new song a moment later, in pieces that give way to the screen.
+  const below = useDeferredValue(track);
   useCoverFlight(screen, closing);
   // The visualizer in the cover's place, when its button is on.
   const visButton = useSettings((s) => s.settings?.visualizerButton !== false);
@@ -109,14 +97,12 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
     if (closing || document.documentElement.dataset.themeBase !== "light" || !mixIsDark(vivid, NP_TOP_TINT)) return;
     return holdLightStatusBar();
   }, [vivid, closing]);
-  const style = {
-    "--ph-tint": colours?.vivid ?? "var(--color-bg-overlay)",
-    transform: offset.y ? `translateY(${offset.y}px)` : undefined,
-  } as CSSProperties;
+  // The pull down writes its transform and is-dragging straight onto the screen (CoverDeck).
+  const style = { "--ph-tint": colours?.vivid ?? "var(--color-bg-overlay)" } as CSSProperties;
   return (
     <section
       ref={screen}
-      className={`ph-np ${closing ? "is-closing" : ""} ${offset.dragging ? "is-dragging" : ""}`}
+      className={`ph-np ${closing ? "is-closing" : ""}`}
       role="dialog"
       aria-modal="true"
       aria-label="Now playing"
@@ -137,21 +123,11 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
             </button>
           </header>
           {vis ? (
-            <div ref={art} className="ph-np__art ph-np__art--vis" data-testid="np-visualizer">
+            <div className="ph-np__art ph-np__art--vis" data-testid="np-visualizer">
               <VisualizerView phone />
             </div>
           ) : (
-            <div
-              ref={art}
-              className="ph-np__art"
-              data-testid="np-art"
-              {...handlers}
-              style={{ transform: offset.x ? `translateX(${offset.x}px)` : undefined }}
-            >
-              <div className={`ph-np__cover ${playing ? "is-playing" : ""}`}>
-                <Art path={track.thumb} fluid requestSize={NP_ART_CSS} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} />
-              </div>
-            </div>
+            <CoverDeck screen={screen} onClose={phone.closePlayer} />
           )}
           <div className="ph-np__deck">
           <div className="ph-np__meta">
@@ -216,9 +192,9 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
           </div>
           </div>
         </div>
-        <LyricsCard track={track} />
-        <SleeveCard track={track} />
-        <CreditsCard track={track} />
+        <LyricsCard track={below} />
+        <SleeveCard track={below} />
+        <CreditsCard track={below} />
       </div>
     </section>
   );
@@ -244,7 +220,7 @@ function useCoverFlight(screen: React.RefObject<HTMLElement | null>, closing: bo
   const fly = (direction: "open" | "close") => {
     const sec = screen.current;
     const root = sec?.closest<HTMLElement>(".phone");
-    const big = sec?.querySelector<HTMLElement>(".ph-np__cover");
+    const big = sec?.querySelector<HTMLElement>(".ph-np__slide--cur .ph-np__cover");
     if (!sec || !root || !big || typeof big.animate !== "function") return;
     const small = smallCover(root);
     if (!small) return;

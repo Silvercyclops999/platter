@@ -3,6 +3,7 @@
  * swipe skips (left for the next song, right for the previous one) and a
  * pull down closes the player. The art follows the finger; letting go short
  * of the distance, without a flick, snaps it back. Nothing else (no swipe up).
+ * The hook only reports; NowPlaying's cover deck moves things.
  */
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
@@ -60,59 +61,74 @@ interface Track {
   v: { x: number; y: number };
 }
 
+/** Where a drag of the art ended up when the finger lifted, and how fast it was going. */
+export interface ArtRelease {
+  axis: Axis | null;
+  dx: number;
+  dy: number;
+  vx: number;
+  vy: number;
+  /** Where the art or the screen sat when the finger lifted (follow()). */
+  at: { x: number; y: number };
+}
+
 /**
- * Pointer handlers for the artwork, and its offset while dragged. `size`
- * gives the width (for skips) and the screen height (for the pull).
+ * Pointer handlers for the artwork. Nothing here renders: every move goes
+ * straight to `place` (which writes a transform), and letting go hands the
+ * outcome to `done`, so a drag never redraws the screen. `size` gives the
+ * width (for skips) and the screen height (for the pull). The handlers keep
+ * their identity across renders.
  */
 export function useArtGestures(opts: {
-  onNext: () => void;
-  onPrevious: () => void;
-  onClose: () => void;
   size: () => { width: number; height: number };
+  /** The finger moved: put the art (x) or the screen (y) here. */
+  place: (at: { x: number; y: number }, axis: Axis) => void;
+  /** The finger lifted or was cancelled (a cancel is always "snap"). */
+  done: (outcome: Outcome, g: ArtRelease) => void;
+  /** A press began (so a settle still running can finish first). */
+  start?: () => void;
 }) {
   const t = useRef<Track | null>(null);
-  const [offset, setOffset] = useState<{ x: number; y: number; dragging: boolean }>({ x: 0, y: 0, dragging: false });
-  const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
-
-  const onPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
-    if (e.button !== 0 && e.pointerType === "mouse") return;
-    t.current = { id: e.pointerId, x0: e.clientX, y0: e.clientY, axis: null, last: { x: e.clientX, y: e.clientY, t: now() }, v: { x: 0, y: 0 } };
-    e.currentTarget.setPointerCapture?.(e.pointerId);
-  };
-  const onPointerMove = (e: ReactPointerEvent<HTMLElement>) => {
-    const g = t.current;
-    if (!g || g.id !== e.pointerId) return;
-    const dx = e.clientX - g.x0;
-    const dy = e.clientY - g.y0;
-    g.axis ??= lockAxis(dx, dy);
-    const at = now();
-    const dt = Math.max(1, at - g.last.t);
-    g.v = { x: (e.clientX - g.last.x) / dt, y: (e.clientY - g.last.y) / dt };
-    g.last = { x: e.clientX, y: e.clientY, t: at };
-    if (g.axis) setOffset({ ...follow(g.axis, dx, dy), dragging: true });
-  };
-  const end = (e: ReactPointerEvent<HTMLElement>, cancelled: boolean) => {
-    const g = t.current;
-    if (!g || g.id !== e.pointerId) return;
-    t.current = null;
-    const { width, height } = opts.size();
-    const outcome = cancelled
-      ? "snap"
-      : release({ axis: g.axis, dx: e.clientX - g.x0, dy: e.clientY - g.y0, vx: g.v.x, vy: g.v.y, width, height });
-    setOffset({ x: 0, y: 0, dragging: false });
-    if (outcome === "next") opts.onNext();
-    else if (outcome === "previous") opts.onPrevious();
-    else if (outcome === "close") opts.onClose();
-  };
-  return {
-    offset,
-    handlers: {
+  const o = useRef(opts);
+  o.current = opts;
+  const [handlers] = useState(() => {
+    const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+    const onPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
+      if (e.button !== 0 && e.pointerType === "mouse") return;
+      o.current.start?.();
+      t.current = { id: e.pointerId, x0: e.clientX, y0: e.clientY, axis: null, last: { x: e.clientX, y: e.clientY, t: now() }, v: { x: 0, y: 0 } };
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+    };
+    const onPointerMove = (e: ReactPointerEvent<HTMLElement>) => {
+      const g = t.current;
+      if (!g || g.id !== e.pointerId) return;
+      const dx = e.clientX - g.x0;
+      const dy = e.clientY - g.y0;
+      g.axis ??= lockAxis(dx, dy);
+      const at = now();
+      const dt = Math.max(1, at - g.last.t);
+      g.v = { x: (e.clientX - g.last.x) / dt, y: (e.clientY - g.last.y) / dt };
+      g.last = { x: e.clientX, y: e.clientY, t: at };
+      if (g.axis) o.current.place(follow(g.axis, dx, dy), g.axis);
+    };
+    const end = (e: ReactPointerEvent<HTMLElement>, cancelled: boolean) => {
+      const g = t.current;
+      if (!g || g.id !== e.pointerId) return;
+      t.current = null;
+      const { width, height } = o.current.size();
+      const dx = e.clientX - g.x0;
+      const dy = e.clientY - g.y0;
+      const outcome = cancelled ? "snap" : release({ axis: g.axis, dx, dy, vx: g.v.x, vy: g.v.y, width, height });
+      o.current.done(outcome, { axis: g.axis, dx, dy, vx: g.v.x, vy: g.v.y, at: follow(g.axis, dx, dy) });
+    };
+    return {
       onPointerDown,
       onPointerMove,
       onPointerUp: (e: ReactPointerEvent<HTMLElement>) => end(e, false),
       onPointerCancel: (e: ReactPointerEvent<HTMLElement>) => end(e, true),
-    },
-  };
+    };
+  });
+  return handlers;
 }
 
 /**

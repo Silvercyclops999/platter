@@ -324,7 +324,9 @@
 .ph-np__from-name { max-width: 100%; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The cover is the hero: as wide as the screen less its margins (less when
    the screen is short), square and sharp, a real shadow and a thin edge.
-   Paused, it settles back a little. */
+   Paused, it settles back a little. It sits in a row with the previous and
+   the next song's covers just off each side, the same size; the row slides
+   under a sideways drag and the screen's edges cut it off. */
 .ph-np__art {
   flex: 1;
   display: flex;
@@ -333,8 +335,18 @@
   min-height: 0;
   padding: 16px 0 8px;
   touch-action: none;
-  transition: transform var(--ph-quick) var(--ph-ease);
 }
+.ph-np__art:not(.ph-np__art--vis) {
+  margin: 0 calc(-1 * var(--ph-gutter));
+  padding-inline: var(--ph-gutter);
+  overflow-x: clip;
+}
+/* The gap keeps a neighbour's shadow off the screen while the row is still. */
+.ph-np__deck-row { --np-deck-gap: calc(var(--ph-gutter) + 48px); position: relative; display: flex; align-items: center; justify-content: center; width: 100%; }
+.ph-np__slide { display: flex; align-items: center; justify-content: center; width: 100%; }
+.ph-np__slide--prev, .ph-np__slide--next { position: absolute; inset: 0; pointer-events: none; }
+.ph-np__slide--prev { transform: translateX(calc(-100% - var(--np-deck-gap))); }
+.ph-np__slide--next { transform: translateX(calc(100% + var(--np-deck-gap))); }
 .ph-np__cover {
   width: min(100%, 440px, max(220px, calc(100dvh - var(--ph-safe-top) - var(--ph-safe-bottom) - 400px)));
   aspect-ratio: 1;
@@ -347,7 +359,6 @@
 .ph-np__cover.is-playing { transform: none; }
 .ph-np__cover .art { width: 100%; height: 100%; border-radius: 0; }
 .ph-np__deck { flex: none; }
-.ph-np.is-dragging .ph-np__art { transition: none; }
 .ph-np__meta { display: flex; align-items: flex-end; gap: 12px; padding-top: 12px; }
 .ph-np__names { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
 /* Up to two lines of title; the artists drift sideways while playing when they don't fit. */
@@ -750,12 +761,13 @@
 
 @media (prefers-reduced-motion: reduce) {
   .ph-np, .ph-sheet, .ph-sheet-dim, .ph-lyrics, .ph-page { animation: none; }
-  .ph-np, .ph-np__art, .ph-np__cover, .ph-dock .ph-mini { transition: none; }
+  .ph-np, .ph-np__cover, .ph-dock .ph-mini { transition: none; }
   .ph-marquee.is-moving .ph-marquee__text { animation: none; }
 }
 :root[data-reduced-motion="true"] :is(.ph-page, .ph-marquee__text) { animation: none !important; }
 /* Under reduced motion the player, lyrics and sheets fade in and out instead of sliding. */
 :root[data-reduced-motion="true"] :is(.ph-np, .ph-sheet, .ph-sheet-dim, .ph-lyrics) { animation: ph-fade 120ms ease-out !important; }
+:root[data-reduced-motion="true"] .ph-np__cover { transition: none; }
 :root[data-reduced-motion="true"] .ph-np.is-closing { transform: none !important; opacity: 0; transition: opacity 120ms ease-out; }
 
 /* ---------------------------------------------------------------- home: the player at the front */

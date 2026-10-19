@@ -222,17 +222,23 @@ describe("artwork gestures", () => {
     return art;
   }
 
-  it("a slow swipe past the distance skips; the art follows the finger and snaps back", async () => {
+  const row = () => screen.getByTestId("np-deck");
+  const covers = () => [...document.querySelectorAll<HTMLElement>(".ph-np__cover")];
+  const after = (t: Track[], at: number, status: PlayerState["status"]) =>
+    play(t[at], { status, queue: { current: item(t[at], at), userQueue: [], nextUp: t.slice(at + 1, at + 4).map((x, i) => item(x, at + 1 + i)), history: [item(t[at - 1], at - 1)], context: null } });
+
+  it("a slow swipe past the distance skips; the covers follow the finger and settle on the next one", async () => {
     const next = vi.spyOn(player, "next").mockImplementation(() => Promise.resolve());
     const prev = vi.spyOn(player, "previous").mockImplementation(() => Promise.resolve());
     const art = await openPlayer();
     const g = drag(art, [300, 400], [140, 400], 800);
-    expect(g.offset()).toBe("translateX(-160px)");
-    g.up();
-    expect(next).toHaveBeenCalledTimes(1);
+    expect(row().style.transform).toBe("translateX(-160px)");
+    // The art box itself never moves: the row inside it does.
     expect(art.style.transform).toBe("");
+    await act(async () => g.up());
+    expect(next).toHaveBeenCalledTimes(1);
     const back = drag(art, [100, 400], [250, 400], 800);
-    back.up();
+    await act(async () => back.up());
     expect(prev).toHaveBeenCalledTimes(1);
   });
 
@@ -240,12 +246,62 @@ describe("artwork gestures", () => {
     const next = vi.spyOn(player, "next").mockImplementation(() => Promise.resolve());
     const art = await openPlayer();
     const slow = drag(art, [300, 400], [240, 400], 1000);
-    slow.up();
+    await act(async () => slow.up());
     expect(next).not.toHaveBeenCalled();
-    expect(art.style.transform).toBe("");
+    expect(row().style.transform).toBe("");
     const flick = drag(art, [300, 400], [240, 400], 50);
-    flick.up();
+    await act(async () => flick.up());
     expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it("the previous, this and the next cover sit side by side at one size, and stay that size through a skip", async () => {
+    vi.spyOn(player, "next").mockImplementation(() => Promise.resolve());
+    const art = await openPlayer();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const t = tracks();
+      // This song's cover, the next one's, and this one's again on the left (Previous restarts it 30 s in).
+      expect(covers()).toHaveLength(3);
+      expect(document.querySelector(".ph-np__slide--next")).toHaveAttribute("aria-hidden", "true");
+      const sizes = () => covers().map((c) => c.className);
+      const before = sizes();
+      expect(new Set(before).size).toBe(1);
+      const g = drag(art, [300, 400], [100, 400], 800);
+      // While the finger is down a pause flickers by (as between two songs): nothing changes size.
+      play(t[0], { status: "paused" });
+      act(() => void vi.advanceTimersByTime(100));
+      play(t[0], { status: "playing" });
+      expect(sizes()).toEqual(before);
+      await act(async () => g.up());
+      // The row carried on to the next cover, which is the one now playing once the player answers.
+      after(t, 1, "loading");
+      act(() => void vi.advanceTimersByTime(100));
+      after(t, 1, "playing");
+      act(() => void vi.advanceTimersByTime(1000));
+      expect(new Set(sizes()).size).toBe(1);
+      expect(sizes()).toEqual(before);
+      for (const c of covers()) expect(c.style.transform).toBe("");
+      expect(row().style.transform).toBe("");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a pause that lasts lets the cover settle back a little, all three together", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      play(tracks()[0], { status: "playing" });
+      render(<PhoneShell />);
+      act(() => phone.openPlayer());
+      expect(covers()).toHaveLength(3);
+      expect(covers().every((c) => c.classList.contains("is-playing"))).toBe(true);
+      play(tracks()[0], { status: "paused" });
+      expect(covers().every((c) => c.classList.contains("is-playing"))).toBe(true);
+      act(() => void vi.advanceTimersByTime(400));
+      expect(covers().some((c) => c.classList.contains("is-playing"))).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("pulling down far enough closes the player; a short pull snaps back", async () => {
