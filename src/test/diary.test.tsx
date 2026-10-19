@@ -12,7 +12,7 @@ import { byMonth, longDate, monthKey, monthLabel, playedLine, whereLine } from "
 import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS, type Album, type DiaryItem } from "../lib/types";
 import { AlbumPage } from "../pages/AlbumPage";
-import { DiaryPage } from "../pages/DiaryPage";
+import { DiaryPage, latestEntry } from "../pages/DiaryPage";
 import { FirstHeard } from "../pages/FirstHeard";
 import { StarInput } from "../pages/StarRating";
 import { SettingsPage } from "../pages/SettingsPage";
@@ -93,6 +93,12 @@ describe("the diary page", () => {
     // The page leads with the whole diary in a sentence: how many, since when, the latest.
     expect(screen.getByTestId("diary-lead")).toHaveTextContent(new RegExp(`^${entries.length} records in your diary since \\w+ \\d{4}\\. The latest is ${entries[0].title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}, on `));
     expect(screen.getByText("Only on this computer.")).toBeInTheDocument();
+  });
+
+  it("the sentence names the entry played last, whatever order the list is in", () => {
+    const e = (id: string, at: number) => ({ id, at }) as DiaryItem;
+    expect(latestEntry([e("a", 5), e("b", 9), e("c", 1)])?.id).toBe("b");
+    expect(latestEntry([])).toBeNull();
   });
 
   it("the year view lays out a year's covers by month with counts", async () => {

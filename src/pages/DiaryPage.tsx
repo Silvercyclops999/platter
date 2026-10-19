@@ -179,8 +179,13 @@ function YearView({ year, list, onMonth }: { year: number; list: DiaryList; onMo
  * how you rated them. Only for the whole diary (no filter or search), when
  * every entry is in hand.
  */
+/** The entry finished or logged last, whatever order the list came in (an edited date can move one). */
+export function latestEntry(entries: DiaryItem[]): DiaryItem | null {
+  return entries.reduce<DiaryItem | null>((best, e) => (!best || e.at > best.at ? e : best), null);
+}
+
 function DiaryLead({ list }: { list: DiaryList }) {
-  const latest = list.entries[0];
+  const latest = latestEntry(list.entries)!;
   const since = list.firstAt != null ? new Date(list.firstAt) : null;
   const rated = list.entries.filter((e) => e.rating != null);
   const high = rated.filter((e) => (e.rating ?? 0) >= 4).length;
