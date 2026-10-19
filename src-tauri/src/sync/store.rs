@@ -18,6 +18,7 @@ use serde_json::Value;
 use tokio::sync::{Notify, broadcast};
 
 use crate::db::DbHandle;
+use crate::db::store::{kv_get, kv_set};
 use crate::error::{AppError, AppResult};
 
 /// One entry as stored and as written to the sync file.
@@ -204,6 +205,39 @@ pub struct Changed {
     pub namespaces: Vec<String>,
     /// From the sync file (another device), not from this one.
     pub remote: bool,
+}
+
+/// An entry from another device stamped more than this after this
+/// device's clock isn't taken (that device's clock is far ahead).
+pub const FUTURE_MS: u64 = 24 * 3_600_000;
+/// Held entries kept at most.
+const QUARANTINE_MAX: usize = 1000;
+/// The latest time of any entry taken from another device (ms).
+const HIGH_KEY: &str = "sync.mergedHigh";
+const QUARANTINE_KEY: &str = "sync.quarantine";
+
+fn merged_high(c: &Connection) -> AppResult<Option<u64>> {
+    Ok(kv_get(c, HIGH_KEY)?.and_then(|s| s.parse().ok()))
+}
+
+/// What a merge from another device did.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MergeOutcome {
+    /// Namespaces that changed here.
+    pub changed: Vec<String>,
+    /// Entries held back (namespace, key, entry).
+    pub held: Vec<(String, String, Entry)>,
+}
+
+/// An entry held back because it was stamped far in the future.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Quarantined {
+    pub ns: String,
+    pub key: String,
+    pub entry: Entry,
+    /// The device it came from (its name).
+    pub from: String,
 }
 
 /// The longest key and value the store takes.
@@ -549,6 +583,10 @@ impl SyncStore {
         let mut touched: Vec<String> = Vec::new();
         self.inner.db.write(|c| {
             let tx = c.transaction()?;
+            // Never earlier than a change already taken from another
+            // device, so an edit made here after seeing it wins even when
+            // this device's clock is behind.
+            let now = now.max(merged_high(&tx)?.map_or(0, |h| h + 1));
             for op in &ops {
                 let (ns, key, value) = match op {
                     Op::Put { ns, key, value } => (*ns, key, Some(value.clone())),
@@ -637,9 +675,40 @@ impl SyncStore {
     /// is kept aside as it came, not applied, and passed on to the other
     /// devices. Returns the namespaces that changed and tells listeners.
     pub fn merge(&self, other: &EntryMap, namespaces: &[&str]) -> AppResult<Vec<String>> {
-        let changed = self.inner.db.write(|c| {
+        Ok(self.merge_inner(other, namespaces, None)?.changed)
+    }
+
+    /// [`merge`](Self::merge) for entries straight from another device:
+    /// an entry stamped more than [`FUTURE_MS`] after this device's clock
+    /// (the other device's clock is far ahead) isn't taken but kept in the
+    /// quarantine list, to show and to take anyway.
+    pub fn merge_from_device(&self, other: &EntryMap, namespaces: &[&str], from: &str) -> AppResult<MergeOutcome> {
+        let limit = self.now().saturating_add(FUTURE_MS);
+        let out = self.merge_inner(other, namespaces, Some(limit))?;
+        if !out.held.is_empty() {
+            let mut list = self.quarantined()?;
+            for (ns, key, entry) in &out.held {
+                match list.iter_mut().find(|q| &q.ns == ns && &q.key == key) {
+                    Some(q) if entry.wins_over(&q.entry) => *q = Quarantined { ns: ns.clone(), key: key.clone(), entry: entry.clone(), from: from.to_string() },
+                    Some(_) => {}
+                    None => list.push(Quarantined { ns: ns.clone(), key: key.clone(), entry: entry.clone(), from: from.to_string() }),
+                }
+            }
+            if list.len() > QUARANTINE_MAX {
+                list.drain(..list.len() - QUARANTINE_MAX);
+            }
+            self.save_quarantine(&list)?;
+        }
+        Ok(out)
+    }
+
+    fn merge_inner(&self, other: &EntryMap, namespaces: &[&str], future: Option<u64>) -> AppResult<MergeOutcome> {
+        let own = self.inner.device.clone();
+        let out = self.inner.db.write(|c| {
             let tx = c.transaction()?;
-            let mut changed: Vec<String> = Vec::new();
+            let mut out = MergeOutcome::default();
+            let mut high = merged_high(&tx)?.unwrap_or(0);
+            let before = high;
             for (ns, entries) in other {
                 let known = NAMESPACES.contains(&ns.as_str());
                 if (known && !namespaces.contains(&ns.as_str())) || (!known && !plausible_ns(ns)) {
@@ -649,20 +718,58 @@ impl SyncStore {
                     if check_entry(key, e.value.as_ref()).is_err() {
                         continue;
                     }
+                    if future.is_some_and(|limit| e.ts > limit) {
+                        out.held.push((ns.clone(), key.clone(), e.clone()));
+                        continue;
+                    }
                     let mine = get_entry(&tx, ns, key)?;
                     if mine.as_ref().is_none_or(|m| e.wins_over(m)) {
                         let differs = mine.as_ref().is_none_or(|m| m.value != e.value);
                         set_entry(&tx, ns, key, e)?;
-                        if known && differs && !changed.contains(ns) {
-                            changed.push(ns.clone());
+                        if e.device != own {
+                            high = high.max(e.ts);
+                        }
+                        if known && differs && !out.changed.contains(ns) {
+                            out.changed.push(ns.clone());
                         }
                     }
                 }
             }
+            if high > before {
+                kv_set(&tx, HIGH_KEY, &high.to_string())?;
+            }
             tx.commit()?;
-            Ok(changed)
+            Ok(out)
         })?;
-        self.emit(changed.clone(), true);
+        self.emit(out.changed.clone(), true);
+        Ok(out)
+    }
+
+    /// Entries held back because they were stamped far in the future.
+    pub fn quarantined(&self) -> AppResult<Vec<Quarantined>> {
+        Ok(self
+            .inner
+            .db
+            .read(|c| kv_get(c, QUARANTINE_KEY))?
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default())
+    }
+
+    fn save_quarantine(&self, list: &[Quarantined]) -> AppResult<()> {
+        let json = serde_json::to_string(list).map_err(|e| AppError::Internal(e.to_string()))?;
+        self.inner.db.write(|c| kv_set(c, QUARANTINE_KEY, &json))
+    }
+
+    /// "Take anyway": merge every held entry as it is. Returns the
+    /// namespaces that changed.
+    pub fn take_quarantined(&self) -> AppResult<Vec<String>> {
+        let list = self.quarantined()?;
+        let mut m = EntryMap::new();
+        for q in list {
+            m.entry(q.ns).or_default().insert(q.key, q.entry);
+        }
+        let changed = self.merge_inner(&m, &NAMESPACES, None)?.changed;
+        self.save_quarantine(&[])?;
         Ok(changed)
     }
 

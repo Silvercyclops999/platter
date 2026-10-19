@@ -40,6 +40,7 @@
 
 pub mod commands;
 pub mod detect;
+pub mod devices;
 pub mod engine;
 pub mod file;
 pub mod folders;
