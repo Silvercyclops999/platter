@@ -1688,7 +1688,9 @@ impl PlexClient {
         }
         // Plex picks a built-in profile from X-Plex-Platform; the iOS one
         // only streams music over HLS and answers 400 to a plain MP3 over
-        // HTTP. Naming the target keeps every platform on the same answer.
+        // HTTP. Naming the target keeps phones on the same answer as the
+        // desktop profiles, which already allow it.
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         headers.insert(
             "x-plex-client-profile-extra",
             reqwest::header::HeaderValue::from_static(
