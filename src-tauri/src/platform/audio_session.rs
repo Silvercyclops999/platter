@@ -85,6 +85,11 @@ unsafe fn route_headphones(route: &AVAudioSessionRouteDescription) -> Option<Str
 /// Follows interruptions, route changes and media services resets for the
 /// app's life. Call once, after the player starts.
 pub fn watch(player: PlayerHandle) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| observe_session(player));
+}
+
+fn observe_session(player: PlayerHandle) {
     use block2::RcBlock;
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
@@ -138,10 +143,11 @@ pub fn watch(player: PlayerHandle) {
             AVAudioSessionRouteChangeNotification,
             Box::new(move |note| {
                 let Some(reason) = info_number(note, AVAudioSessionRouteChangeReasonKey) else { return };
-                let before = AVAudioSessionRouteChangePreviousRouteKey.and_then(|key| {
+                // None: the notification didn't say what the route was.
+                let before: Option<Option<String>> = AVAudioSessionRouteChangePreviousRouteKey.and_then(|key| {
                     let info: *mut AnyObject = msg_send![note, userInfo];
                     let route: *mut AVAudioSessionRouteDescription = msg_send![info.as_ref()?, objectForKey: key];
-                    route_headphones(route.as_ref()?)
+                    Some(route_headphones(route.as_ref()?))
                 });
                 let now = headphones_name();
                 let mut left = LEFT.lock().unwrap_or_else(|e| e.into_inner());
@@ -149,12 +155,12 @@ pub fn watch(player: PlayerHandle) {
                     RouteMove::Left(name) => {
                         tracing::info!("headphones left: pausing");
                         *left = Some((name, Instant::now()));
-                        p.interruption(true, false);
+                        p.headphones(false);
                     }
                     RouteMove::Back => {
                         tracing::info!("headphones back: playing on");
                         *left = None;
-                        p.interruption(false, true);
+                        p.headphones(true);
                     }
                     RouteMove::Nothing => {}
                 }
@@ -166,8 +172,12 @@ pub fn watch(player: PlayerHandle) {
             AVAudioSessionMediaServicesWereResetNotification,
             Box::new(move |_| {
                 tracing::info!("audio media services reset");
-                start();
-                p.output_stale(true);
+                // setActive can block: off the posting (often main) thread.
+                let p = p.clone();
+                std::thread::spawn(move || {
+                    start();
+                    p.output_stale();
+                });
             }),
         );
     }
