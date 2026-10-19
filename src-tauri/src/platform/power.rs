@@ -30,7 +30,31 @@ mod imp {
     }
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+/// The phone: on battery unless it's charging or full (UIDevice's
+/// battery state: 1 unplugged, 2 charging, 3 full; 0 unknown counts as
+/// plugged in, as elsewhere).
+#[cfg(target_os = "ios")]
+mod imp {
+    use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject};
+
+    pub fn on_battery() -> bool {
+        // SAFETY: UIDevice's shared instance and two documented properties;
+        // reading the battery state needs monitoring switched on.
+        unsafe {
+            let Some(class) = AnyClass::get(c"UIDevice") else { return false };
+            let device: *mut AnyObject = msg_send![class, currentDevice];
+            if device.is_null() {
+                return false;
+            }
+            let _: () = msg_send![device, setBatteryMonitoringEnabled: true];
+            let state: isize = msg_send![device, batteryState];
+            state == 1
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "ios")))]
 mod imp {
     pub fn on_battery() -> bool {
         false

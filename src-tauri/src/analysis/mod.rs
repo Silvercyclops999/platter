@@ -240,7 +240,9 @@ impl Analyzer {
     }
 
     pub fn is_on(&self) -> bool {
-        enabled()
+        // A phone analyses only while it's charging: the songs come over its
+        // connection (often mobile data) and the work costs battery.
+        enabled() && !(cfg!(target_os = "ios") && crate::platform::power::on_battery())
     }
 
     /// Analyse these songs before any others (they're about to be mixed).
