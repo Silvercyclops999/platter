@@ -37,6 +37,9 @@ import { correlation } from "../visualizer/Scope";
 import { glowAt } from "../visualizer/Glow";
 import { PanelStrip } from "../visualizer/places";
 import { DeckFaceplate } from "../shell/DeckFrame";
+import { NowPlaying as PhoneNowPlaying } from "../phone/NowPlaying";
+import { usePhoneUi } from "../phone/phoneUi";
+import { setPhoneVis, usePhoneVis } from "../visualizer/phoneVis";
 
 const mock = backend as MockBackend;
 
@@ -477,6 +480,40 @@ describe("the panel strip and the Deck's meters", () => {
     act(() => fullWindow.setMode("visualizer"));
     await act(async () => void useSettings.setState({ settings: { ...DEFAULT_SETTINGS, visualizerButton: false } }));
     expect(within(face).queryByTestId("deck-meters")).toBeNull();
+  });
+});
+
+describe("the phone", () => {
+  afterEach(() => {
+    setPhoneVis(false);
+    act(() => usePhoneUi.setState({ nowPlaying: false }));
+  });
+
+  it("has the same button, swapping the cover for the same styles at no more than 30 frames", async () => {
+    act(() => usePhoneUi.setState({ nowPlaying: true }));
+    render(<PhoneNowPlaying />);
+    expect(screen.getByTestId("np-art")).toBeInTheDocument();
+    const button = screen.getByRole("button", { name: "Visualizer" });
+    expect(button).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(button);
+    expect(screen.getByRole("button", { name: "Visualizer" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByTestId("np-art")).toBeNull();
+    const vis = within(screen.getByTestId("np-visualizer")).getByTestId("visualizer");
+    expect(vis).toHaveClass("vis--phone");
+    for (const s of ["Analyser", "Meters", "Scope", "Glow"]) expect(within(vis).getByRole("radio", { name: s })).toBeInTheDocument();
+    // The desktop's 60 is capped at 30 on the phone.
+    await waitFor(() => expect(lastCall()).toEqual({ on: true, fps: 30, scope: false }));
+    // Remembered on this device.
+    expect(usePhoneVis.getState().open).toBe(true);
+  });
+
+  it("hides the button with the setting off", async () => {
+    await act(async () => void useSettings.setState({ settings: { ...DEFAULT_SETTINGS, visualizerButton: false } }));
+    setPhoneVis(true);
+    act(() => usePhoneUi.setState({ nowPlaying: true }));
+    render(<PhoneNowPlaying />);
+    expect(screen.queryByRole("button", { name: "Visualizer" })).toBeNull();
+    expect(screen.getByTestId("np-art")).toBeInTheDocument();
   });
 });
 

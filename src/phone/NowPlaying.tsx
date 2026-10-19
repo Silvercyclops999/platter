@@ -5,7 +5,7 @@
  * card, sleeve notes and credits. A sideways swipe on the cover skips; a
  * pull down closes, straight down to the tab underneath.
  */
-import { ChevronDown, ListMusic, MicVocal, MoreHorizontal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from "lucide-react";
+import { AudioLines, ChevronDown, ListMusic, MicVocal, MoreHorizontal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { Art, preloadArt } from "../components/Art";
 import { nextInQueue } from "../shell/nowPlaying";
@@ -27,6 +27,9 @@ import { LyricsCard } from "./LyricsScreen";
 import { NP_OPEN_MS, flyCover } from "./motion";
 import { phone, usePhoneUi } from "./phoneUi";
 import type { HapticKind } from "../lib/backend";
+import { useSettings } from "../stores/settings";
+import { VisualizerView } from "../visualizer/VisualizerView";
+import { togglePhoneVis, usePhoneVis } from "../visualizer/phoneVis";
 
 /** The close slides straight down in this long. */
 export const CLOSE_MS = 300;
@@ -97,6 +100,9 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
     size: () => ({ width: art.current?.clientWidth || 360, height: screen.current?.clientHeight || 800 }),
   });
   useCoverFlight(screen, closing);
+  // The visualizer in the cover's place, when its button is on.
+  const visButton = useSettings((s) => s.settings?.visualizerButton !== false);
+  const vis = usePhoneVis((s) => s.open) && visButton;
   // Over a dark cover colour the top of the screen is dark even on the light look: light status bar text then.
   const vivid = colours?.vivid ?? null;
   useEffect(() => {
@@ -130,17 +136,23 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
               <MoreHorizontal size={24} aria-hidden="true" />
             </button>
           </header>
-          <div
-            ref={art}
-            className="ph-np__art"
-            data-testid="np-art"
-            {...handlers}
-            style={{ transform: offset.x ? `translateX(${offset.x}px)` : undefined }}
-          >
-            <div className={`ph-np__cover ${playing ? "is-playing" : ""}`}>
-              <Art path={track.thumb} fluid requestSize={NP_ART_CSS} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} />
+          {vis ? (
+            <div ref={art} className="ph-np__art ph-np__art--vis" data-testid="np-visualizer">
+              <VisualizerView phone />
             </div>
-          </div>
+          ) : (
+            <div
+              ref={art}
+              className="ph-np__art"
+              data-testid="np-art"
+              {...handlers}
+              style={{ transform: offset.x ? `translateX(${offset.x}px)` : undefined }}
+            >
+              <div className={`ph-np__cover ${playing ? "is-playing" : ""}`}>
+                <Art path={track.thumb} fluid requestSize={NP_ART_CSS} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} />
+              </div>
+            </div>
+          )}
           <div className="ph-np__deck">
           <div className="ph-np__meta">
             <div className="ph-np__names">
@@ -164,6 +176,20 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
               <FormatPlate track={track} />
             </div>
             <div className="ph-np__right">
+            {visButton && (
+              <button
+                type="button"
+                className={`ph-icon-btn ${vis ? "is-on" : ""}`}
+                aria-label="Visualizer"
+                aria-pressed={vis}
+                onClick={() => {
+                  tap("selection");
+                  togglePhoneVis();
+                }}
+              >
+                <AudioLines size={22} aria-hidden="true" />
+              </button>
+            )}
             <button
               type="button"
               className="ph-icon-btn"

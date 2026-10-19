@@ -188,3 +188,15 @@
 @media (max-width: 800px) {
   .vis__panel { padding: var(--space-4) var(--space-3) var(--space-3); }
 }
+
+/* ---- the phone: the same instrument in the cover's place, scaled down */
+.ph-np__art--vis { transform: none; }
+.vis--phone {
+  width: min(100%, 440px, max(220px, calc(100dvh - var(--ph-safe-top, 0px) - var(--ph-safe-bottom, 0px) - 400px)));
+  height: auto;
+  gap: 4px;
+}
+.vis--phone .vis__panel { flex: none; aspect-ratio: 1 / 0.84; padding: 12px 10px 8px; border-radius: 6px; }
+.vis--phone .vis-meters__dials { max-height: none; }
+.vis--phone .vis__style { min-width: 44px; min-height: 44px; padding: 0 10px; }
+.ph-np__right .ph-icon-btn.is-on { color: var(--color-accent); }
