@@ -626,7 +626,9 @@ async fn sync_playlists(ctx: &Ctx, force_items: bool, owner: Option<&str>) -> Ap
                         Ok(drop)
                     })
                     .await?;
-                tracing::warn!(dropped, "playlist {id} can't be listed by the server ({})", e.kind());
+                // Usually a Plex smart playlist its server can't list (Plex answers 500), so a
+                // note, not a warning; a second failure in a row drops it.
+                tracing::info!(dropped, "playlist {id} skipped: the server couldn't list it ({})", e.kind());
                 continue;
             }
             Err(e) => return Err(e),
