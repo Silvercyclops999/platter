@@ -1340,6 +1340,12 @@ CREATE INDEX IF NOT EXISTS album_facts_kind ON album_facts (kind, fact_key);
 CREATE INDEX IF NOT EXISTS tag_credits_role ON tag_credits (role, person_key);
 CREATE INDEX IF NOT EXISTS sleeve_credits_role ON sleeve_credits (role, person_key);
 "#,
+    // v45: the MusicBrainz id Plex matched each artist to, so an artist who
+    // renamed (two Plex artists, one id) counts as one in stats (stats::aliases).
+    r#"
+ALTER TABLE artists ADD COLUMN mbid TEXT;
+CREATE INDEX IF NOT EXISTS artists_mbid ON artists (mbid) WHERE mbid IS NOT NULL;
+"#,
 ];
 
 #[cfg(test)]

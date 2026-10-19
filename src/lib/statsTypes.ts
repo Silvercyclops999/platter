@@ -52,6 +52,25 @@ export interface TopArtist {
   ms: number;
 }
 
+/** "Same artist as...": an artist counted as another in stats, Wrapped and top lists. */
+export interface ArtistAlias {
+  /** The artist's stats key (its name in lower case). */
+  key: string;
+  name: string;
+  /** The other artist's key. */
+  sameAs: string;
+  sameAsName: string;
+  /** Unix seconds. */
+  addedAt: number;
+}
+
+/** A played artist, for the "Same artist as..." picker. */
+export interface PlayedArtist {
+  key: string;
+  name: string;
+  plays: number;
+}
+
 export interface TopAlbum {
   key: string;
   albumId: string | null;

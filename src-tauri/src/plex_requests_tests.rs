@@ -346,7 +346,7 @@ const EXPECTED: &str = r#"# sections
 GET /library/sections
 # pages
 GET /library/sections/3/all?type=10 [x-plex-container-start=0,x-plex-container-size=0]
-GET /library/sections/3/all?type=8 [x-plex-container-start=0,x-plex-container-size=500]
+GET /library/sections/3/all?type=8&includeGuids=1 [x-plex-container-start=0,x-plex-container-size=500]
 GET /library/sections/3/format?type=9
 GET /library/sections/3/subformat?type=9
 GET /library/sections/3/style?type=9
@@ -355,7 +355,7 @@ GET /library/sections/3/all?type=9&includeGuids=1&format=ep [x-plex-container-st
 GET /library/sections/3/all?type=9&includeGuids=1 [x-plex-container-start=0,x-plex-container-size=500]
 GET /library/sections/3/all?type=10&includeGuids=1 [x-plex-container-start=500,x-plex-container-size=500]
 # changed
-GET /library/sections/3/all?type=8&updatedAt>=1700000000 [x-plex-container-start=0,x-plex-container-size=500]
+GET /library/sections/3/all?type=8&includeGuids=1&updatedAt>=1700000000 [x-plex-container-start=0,x-plex-container-size=500]
 GET /library/sections/3/all?type=9&includeGuids=1&updatedAt>=1700000000 [x-plex-container-start=0,x-plex-container-size=500]
 GET /library/sections/3/all?type=10&includeGuids=1&updatedAt>=1700000000 [x-plex-container-start=0,x-plex-container-size=500]
 # items, ids, history

@@ -140,12 +140,19 @@ pub fn recently_played(c: &Connection, limit: usize) -> AppResult<Vec<HomeItem>>
     items_by_keys(c, &recent_keys(c, limit)?)
 }
 
-/// Artists by play count (played ones only).
+/// Artists by play count (played ones only). Artists matched to one
+/// MusicBrainz id (one artist under two names) are one row: their plays
+/// added up, under the one played most.
 pub fn top_artists(c: &Connection, limit: usize) -> AppResult<Vec<Artist>> {
-    let mut st = c.prepare_cached(&format!(
-        "SELECT {ARTIST_COLS} FROM artists ar WHERE ar.view_count > 0
-         ORDER BY ar.view_count DESC, ar.sort_title COLLATE NOCASE LIMIT ?1"
-    ))?;
+    let mut st = c.prepare_cached(
+        "SELECT ar.id, ar.title, ar.sort_title, ar.thumb, ar.art,
+                CASE WHEN ar.mbid IS NULL THEN ar.view_count
+                     ELSE (SELECT sum(o.view_count) FROM artists o WHERE o.mbid = ar.mbid) END AS plays
+         FROM artists ar WHERE ar.view_count > 0
+           AND NOT EXISTS (SELECT 1 FROM artists o WHERE ar.mbid IS NOT NULL AND o.mbid = ar.mbid
+                           AND (o.view_count > ar.view_count OR (o.view_count = ar.view_count AND o.id < ar.id)))
+         ORDER BY plays DESC, ar.sort_title COLLATE NOCASE LIMIT ?1",
+    )?;
     Ok(st.query_map([limit as i64], row_artist)?.collect::<Result<Vec<_>, _>>()?)
 }
 
@@ -594,6 +601,7 @@ pub fn credited_page(
         art: None,
         view_count: plays.min(u32::MAX as u64) as u32,
         summary: None,
+        mbid: None,
     };
     let popular_pending = popular_pending(c, id, source)?;
     Ok(ArtistPage { artist, popular, sections: Vec::new(), plays, about: None, similar: Vec::new(), appears_on, popular_pending, eras: Vec::new() })

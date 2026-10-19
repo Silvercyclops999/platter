@@ -177,3 +177,11 @@
 .mix-exclusions__remove:hover { color: var(--color-text-primary); background: var(--color-state-hover); }
 .mix-exclusions__add { display: flex; gap: var(--space-2); }
 .mix-exclusions__add .setting-text { flex: 1; min-width: 0; }
+
+/* "Same artist as..." in Settings: each merge a sentence, then the two fields. */
+.artist-aliases { display: flex; flex-direction: column; gap: var(--space-2); }
+.artist-aliases__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.artist-aliases__row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.artist-aliases__text em { font-style: normal; color: var(--color-text-primary); }
+.artist-aliases__add { flex-wrap: wrap; align-items: center; }
+.artist-aliases__join { font-size: var(--font-size-sm); color: var(--color-text-secondary); white-space: nowrap; }

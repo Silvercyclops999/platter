@@ -34,6 +34,8 @@ import type {
   TopSongsList,
   TopSongsRow,
   Wrapped,
+  ArtistAlias,
+  PlayedArtist,
 } from "../statsTypes";
 import { addDays, localDay, monthBounds, parseDay } from "../stats";
 import { mockMatched, type Fixtures } from "./fixtures";
@@ -158,6 +160,75 @@ export class MockStats {
   ) {}
 
   private byId: Map<string, Track> | null = null;
+  /** "Same artist as..." merges, by artist key (the core keeps them in the sync store). */
+  private aliases = new Map<string, ArtistAlias>();
+
+  private artistKey(id: string): string {
+    return (this.fx.artists.find((a) => a.id === id)?.title ?? id).toLowerCase();
+  }
+
+  /** The key standing for an artist's group: the smallest key it's joined to. */
+  private groupOf(id: string): string {
+    const links = new Map<string, Set<string>>();
+    const link = (a: string, b: string) => {
+      if (!links.has(a)) links.set(a, new Set());
+      links.get(a)!.add(b);
+    };
+    for (const [k, a] of this.aliases) {
+      link(k, a.sameAs);
+      link(a.sameAs, k);
+    }
+    const start = this.artistKey(id);
+    const seen = new Set([start]);
+    const todo = [start];
+    while (todo.length) for (const n of links.get(todo.pop()!) ?? []) if (!seen.has(n)) (seen.add(n), todo.push(n));
+    return [...seen].sort()[0];
+  }
+
+  /** Artists' counts folded by group, under the member played most. */
+  private foldArtists(rows: [string, Tally][]): [string, Tally][] {
+    if (!this.aliases.size) return rows;
+    const at = new Map<string, number>();
+    const out: [string, Tally][] = [];
+    for (const [id, t] of rows) {
+      const g = this.groupOf(id);
+      const i = at.get(g);
+      if (i === undefined) {
+        at.set(g, out.length);
+        out.push([id, { ...t }]);
+      } else {
+        out[i][1].plays += t.plays;
+        out[i][1].ms += t.ms;
+      }
+    }
+    return out.sort((a, z) => z[1].plays - a[1].plays || z[1].ms - a[1].ms);
+  }
+
+  aliasList(): ArtistAlias[] {
+    return [...this.aliases.values()].sort((a, z) => z.addedAt - a.addedAt || a.key.localeCompare(z.key));
+  }
+
+  aliasSet(a: { key: string; name?: string; sameAs?: string; sameAsName?: string }, on: boolean): ArtistAlias[] {
+    const key = a.key.trim().toLowerCase();
+    if (!key) throw { kind: "invalid", message: "Pick an artist." };
+    if (!on) {
+      this.aliases.delete(key);
+      return this.aliasList();
+    }
+    const sameAs = (a.sameAs ?? "").trim().toLowerCase();
+    if (!sameAs) throw { kind: "invalid", message: "Pick the artist they're the same as." };
+    if (sameAs === key) throw { kind: "invalid", message: "That's the same name." };
+    this.aliases.set(key, { key, name: a.name?.trim() || key, sameAs, sameAsName: a.sameAsName?.trim() || sameAs, addedAt: Math.floor(Date.now() / 1000) });
+    return this.aliasList();
+  }
+
+  playedArtists(query: string, limit = 20): PlayedArtist[] {
+    const q = query.trim().toLowerCase();
+    return this.tops(this.plays())
+      .rawArtists.map(([id, t]) => ({ key: this.artistKey(id), name: this.fx.artists.find((a) => a.id === id)?.title ?? id, plays: t.plays }))
+      .filter((a) => a.key.includes(q))
+      .slice(0, Math.max(1, Math.min(limit, 100)));
+  }
 
   private track(id: string): Track | undefined {
     this.byId ??= new Map(this.fx.tracks.map((t) => [t.id, t]));
@@ -216,7 +287,8 @@ export class MockStats {
       bump(albums, t.albumId, p.ms);
       for (const g of this.genres(t)) bump(genres, g, p.ms);
     }
-    return { songs: ranked(songs), artists: ranked(artists), albums: ranked(albums), genres: ranked(genres) };
+    const rawArtists = ranked(artists);
+    return { songs: ranked(songs), artists: this.foldArtists(rawArtists), rawArtists, albums: ranked(albums), genres: ranked(genres) };
   }
 
   private totals(plays: MockPlay[]): StatsTotals {
@@ -226,7 +298,7 @@ export class MockStats {
       ms: plays.reduce((s, p) => s + p.ms, 0),
       plays: plays.length,
       songs: new Set(tr.map((t) => t.id)).size,
-      artists: new Set(tr.map((t) => t.artistId)).size,
+      artists: new Set(tr.map((t) => (this.aliases.size ? this.groupOf(t.artistId) : t.artistId))).size,
       albums: new Set(tr.map((t) => t.albumId)).size,
       days: days.size,
     };
@@ -451,7 +523,7 @@ export class MockStats {
       kind === "songs"
         ? songs
         : kind === "artists"
-          ? songs.filter((s) => t.artists.slice(0, 10).some(([a]) => a === s.artistId))
+          ? songs.filter((s) => t.artists.slice(0, 10).some(([a]) => a === s.artistId || (this.aliases.size > 0 && this.groupOf(a) === this.groupOf(s.artistId))))
           : kind === "albums"
             ? songs.filter((s) => t.albums.slice(0, 10).some(([a]) => a === s.albumId))
             : songs.filter((s) => this.genres(s).some((g) => t.genres.slice(0, 5).some(([x]) => x === g)));

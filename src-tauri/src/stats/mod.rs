@@ -13,6 +13,9 @@
 //! when it wasn't a skip. Private-session plays never reach the listen log,
 //! so they never count.
 
+pub mod aliases;
+#[cfg(test)]
+mod aliases_tests;
 pub mod commands;
 pub mod compare;
 #[cfg(test)]
@@ -651,8 +654,24 @@ pub fn top_songs(c: &Connection, d: Days, limit: u32) -> AppResult<Vec<TopSong>>
     songs_for(c, &top_keys(c, "stats_song_day", "song_key", "stats_song", d, limit)?)
 }
 
+/// The most played artists, an artist under two names (stats::aliases) as one.
 pub fn top_artists(c: &Connection, d: Days, limit: u32) -> AppResult<Vec<TopArtist>> {
-    artists_for(c, &top_keys(c, "stats_artist_day", "artist_key", "stats_artist", d, limit)?)
+    let g = aliases::groups(c)?;
+    if g.is_empty() {
+        return artists_for(c, &top_keys(c, "stats_artist_day", "artist_key", "stats_artist", d, limit)?);
+    }
+    let mut rows = aliases::fold(&aliases::artist_counts(c, d)?, &g);
+    rows.truncate(limit as usize);
+    artists_for(c, &rows)
+}
+
+/// How many artists have plays in the range, each counted once under all its names.
+pub fn distinct_artists(c: &Connection, d: Days) -> AppResult<i64> {
+    let g = aliases::groups(c)?;
+    if g.is_empty() {
+        return distinct(c, "stats_artist_day", "artist_key", "stats_artist", d);
+    }
+    aliases::distinct_artists(c, d, &g)
 }
 
 pub fn top_albums(c: &Connection, d: Days, limit: u32) -> AppResult<Vec<TopAlbum>> {
@@ -677,7 +696,7 @@ pub fn overview(c: &Connection, d: Days, limit: u32) -> AppResult<StatsOverview>
         ..Default::default()
     };
     totals.songs = distinct(c, "stats_song_day", "song_key", "stats_song", d)?;
-    totals.artists = distinct(c, "stats_artist_day", "artist_key", "stats_artist", d)?;
+    totals.artists = distinct_artists(c, d)?;
     totals.albums = distinct(c, "stats_album_day", "album_key", "stats_album", d)?;
 
     let mut hours = vec![0i64; 24];
@@ -758,7 +777,7 @@ pub fn play_ids(c: &Connection, d: Days, kind: TopKind, limit: u32) -> AppResult
     let limit = limit.clamp(1, TOP_MAX);
     let filter = match kind {
         TopKind::Songs => String::new(),
-        TopKind::Artists => "AND s.artist_key IN (SELECT k FROM top)".into(),
+        TopKind::Artists => "AND s.artist_key IN (SELECT value FROM json_each(?4))".into(),
         TopKind::Albums => "AND s.album_key IN (SELECT k FROM top)".into(),
         TopKind::Genres => "AND EXISTS (SELECT 1 FROM tracks t, json_each(CASE WHEN json_valid(t.genres) THEN t.genres ELSE '[]' END) g
                              WHERE t.id = s.rating_key AND g.value IN (SELECT k FROM top))"
@@ -766,7 +785,7 @@ pub fn play_ids(c: &Connection, d: Days, kind: TopKind, limit: u32) -> AppResult
     };
     let top = match kind {
         TopKind::Songs => "SELECT NULL AS k".to_string(),
-        TopKind::Artists => "SELECT artist_key AS k FROM stats_artist_day WHERE day BETWEEN ?1 AND ?2 GROUP BY artist_key ORDER BY sum(plays) DESC, sum(ms) DESC LIMIT 10".into(),
+        TopKind::Artists => "SELECT NULL AS k".into(),
         TopKind::Albums => "SELECT album_key AS k FROM stats_album_day WHERE day BETWEEN ?1 AND ?2 GROUP BY album_key ORDER BY sum(plays) DESC, sum(ms) DESC LIMIT 10".into(),
         TopKind::Genres => "SELECT genre AS k FROM stats_genre_day WHERE day BETWEEN ?1 AND ?2 GROUP BY genre ORDER BY sum(plays) DESC, sum(ms) DESC LIMIT 5".into(),
     };
@@ -778,8 +797,18 @@ pub fn play_ids(c: &Connection, d: Days, kind: TopKind, limit: u32) -> AppResult
          GROUP BY s.song_key ORDER BY sum(d.plays) DESC, sum(d.ms) DESC, s.song_key LIMIT ?3"
     );
     let mut st = c.prepare(&sql)?;
-    let rows = st.query_map(params![d.lo, d.hi, limit], |r| r.get(0))?;
-    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    let rows = if kind == TopKind::Artists {
+        // The top artists under every name they were played as.
+        let g = aliases::groups(c)?;
+        let mut top = aliases::fold(&aliases::artist_counts(c, d)?, &g);
+        top.truncate(10);
+        let keys: Vec<String> = top.into_iter().map(|(k, _, _)| k).collect();
+        let all = serde_json::to_string(&aliases::members(&keys, &g)).unwrap_or_default();
+        st.query_map(params![d.lo, d.hi, limit, all], |r| r.get(0))?.collect::<Result<Vec<_>, _>>()?
+    } else {
+        st.query_map(params![d.lo, d.hi, limit], |r| r.get(0))?.collect::<Result<Vec<_>, _>>()?
+    };
+    Ok(rows)
 }
 
 // ---------------------------------------------------------------- one item
@@ -1007,7 +1036,7 @@ pub fn month_recap(c: &Connection, month: &str) -> AppResult<MonthRecap> {
         ..Default::default()
     };
     totals.songs = distinct(c, "stats_song_day", "song_key", "stats_song", d)?;
-    totals.artists = distinct(c, "stats_artist_day", "artist_key", "stats_artist", d)?;
+    totals.artists = distinct_artists(c, d)?;
     totals.albums = distinct(c, "stats_album_day", "album_key", "stats_album", d)?;
     let (_, daily_pts) = series(&days, d);
     let biggest_day = daily_pts.iter().filter(|p| p.ms > 0).max_by_key(|p| p.ms).cloned();
@@ -1118,15 +1147,7 @@ pub fn moments(c: &Connection, d: Days) -> AppResult<Moments> {
     let (discovery, new_artists) = if d.all {
         (None, None)
     } else {
-        let mut st = c.prepare_cached(
-            "SELECT n.artist_key, sum(n.plays) AS p, sum(n.ms) AS m, min(n.day) AS f FROM stats_artist_day n
-             WHERE n.day BETWEEN ?1 AND ?2
-               AND NOT EXISTS (SELECT 1 FROM stats_artist_day o WHERE o.artist_key = n.artist_key AND o.day < ?1)
-             GROUP BY n.artist_key ORDER BY p DESC, m DESC, n.artist_key",
-        )?;
-        let rows = st
-            .query_map([d.lo, d.hi], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?)))?
-            .collect::<Result<Vec<_>, _>>()?;
+        let rows = aliases::new_artists(c, d, &aliases::groups(c)?)?;
         let found = match rows.first() {
             Some((k, p, m, f)) => artists_for(c, &[(k.clone(), *p, *m)])?.pop().map(|artist| Discovery { artist, day: format_day(*f) }),
             None => None,

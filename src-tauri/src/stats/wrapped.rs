@@ -291,7 +291,7 @@ pub fn wrapped(c: &Connection, year: i64) -> AppResult<Wrapped> {
     let days = daily(c, d)?;
     let mut totals = Totals { plays: days.iter().map(|x| x.1).sum(), ms: days.iter().map(|x| x.2).sum(), days: days.len() as i64, ..Default::default() };
     totals.songs = distinct(c, "stats_song_day", "song_key", "stats_song", d)?;
-    totals.artists = distinct(c, "stats_artist_day", "artist_key", "stats_artist", d)?;
+    totals.artists = super::distinct_artists(c, d)?;
     totals.albums = distinct(c, "stats_album_day", "album_key", "stats_album", d)?;
     let p = year_days(year - 1);
     let prev_ms = one(c, "SELECT sum(ms) FROM stats_hour WHERE day BETWEEN ?1 AND ?2", [p.lo, p.hi])?;
@@ -333,12 +333,7 @@ pub fn wrapped(c: &Connection, year: i64) -> AppResult<Wrapped> {
         Some((day, key, plays, ms, at)) => songs_for(c, &[(key, plays, ms)])?.pop().map(|song| MomentSong { song, day: format_day(day), at: Some(at) }),
         None => None,
     };
-    let new_artists = one(
-        c,
-        "SELECT count(*) FROM (SELECT DISTINCT artist_key FROM stats_artist_day WHERE day BETWEEN ?1 AND ?2) n
-         WHERE NOT EXISTS (SELECT 1 FROM stats_artist_day o WHERE o.artist_key = n.artist_key AND o.day < ?1)",
-        [d.lo, d.hi],
-    )?;
+    let new_artists = super::aliases::new_artists(c, d, &super::aliases::groups(c)?)?.len() as i64;
     Ok(Wrapped {
         year,
         prev_ms,

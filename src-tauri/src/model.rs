@@ -39,6 +39,10 @@ pub struct Artist {
     /// page (as `ArtistPage.about`), never with artist lists.
     #[serde(skip)]
     pub summary: Option<String>,
+    /// The MusicBrainz artist id the server matched it to (Plex `Guid`
+    /// `mbid://`). Stored by sync; never sent to the UI.
+    #[serde(skip)]
+    pub mbid: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

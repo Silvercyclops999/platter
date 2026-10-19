@@ -605,6 +605,7 @@ impl PlexMetadata {
             art: non_empty(&self.art),
             view_count: u32_of(self.view_count),
             summary: non_empty(&self.summary),
+            mbid: self.mbid(),
         }
     }
 
@@ -1177,9 +1178,9 @@ impl PlexClient {
         filters: &[(&str, String)],
     ) -> AppResult<Page<PlexMetadata>> {
         let mut q: Vec<(&str, String)> = vec![("type", ty.code().to_string())];
-        // Album and track list items carry their MusicBrainz ids only when
-        // asked (finding the same music on another server).
-        if matches!(ty, MetaType::Album | MetaType::Track) {
+        // List items carry their MusicBrainz ids only when asked (finding
+        // the same music on another server, one artist under two names).
+        if matches!(ty, MetaType::Artist | MetaType::Album | MetaType::Track) {
             q.push(("includeGuids", "1".to_string()));
         }
         q.extend(filters.iter().cloned());
