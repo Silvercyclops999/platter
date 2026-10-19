@@ -166,8 +166,8 @@ fn show_tabs() {
 
 /// An SF Symbol, for tab icons.
 fn symbol_image(name: &str) -> Option<Retained<objc2_ui_kit::UIImage>> {
-    // SAFETY: a class method that returns nil for an unknown name.
-    unsafe { objc2_ui_kit::UIImage::systemImageNamed(&ns(name)) }
+    // A class method that returns nil for an unknown name.
+    objc2_ui_kit::UIImage::systemImageNamed(&ns(name))
 }
 
 fn list_template(mtm: MainThreadMarker, title: &str, items: &[CarItem], loading: bool) -> Retained<CPListTemplate> {
