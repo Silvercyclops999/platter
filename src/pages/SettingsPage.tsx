@@ -7,6 +7,7 @@ import { SearchField } from "../components/SearchField";
 import { Select, type SelectOption } from "../components/Select";
 import { usePhoneForm } from "../phone/form";
 import { phoneRows } from "../phone/phoneSettings";
+import { visualizerRows } from "../visualizer/settingsRows";
 import { Skeleton } from "../components/Skeleton";
 import { Switch } from "../components/Switch";
 import { useSidebarArt, useUi } from "../stores/ui";
@@ -2589,6 +2590,8 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
     },
     // On this phone (the phone layout only)
     ...(isPhone ? phoneRows(s) : []),
+    // Visualizer
+    ...visualizerRows(s, isPhone),
     // Transitions
     {
       key: "crossfade",

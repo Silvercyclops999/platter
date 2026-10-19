@@ -1,4 +1,4 @@
-import { Disc3, Ellipsis, Maximize, MicVocal, Minimize, Minimize2, PenLine, RefreshCcw, UserRound } from "lucide-react";
+import { AudioLines, Disc3, Ellipsis, Maximize, MicVocal, Minimize, Minimize2, PenLine, RefreshCcw, UserRound } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { Art } from "../components/Art";
 import { ArtistLinks, TextLink } from "../components/ArtistLinks";
@@ -21,6 +21,7 @@ import { useDeckLyrics } from "./deckLyrics";
 import { useFlipPause } from "./useFlipPause";
 import { SignalLink } from "./SignalPath";
 import { VOLUME_KEY_STEP } from "./useShortcuts";
+import { VisualizerView } from "../visualizer/VisualizerView";
 import "./full-window.css";
 
 /**
@@ -88,6 +89,7 @@ function onFullWindowKey(e: KeyboardEvent) {
   else if ((key === "ArrowUp" || key === "ArrowDown") && !modified(e) && !inSlider(e.target) && !(e.target as Element | null)?.closest?.(".lyrics__scroll"))
     player.nudgeVolume(key === "ArrowUp" ? VOLUME_KEY_STEP : -VOLUME_KEY_STEP);
   else if (key.toLowerCase() === "l" && !modified(e)) fullWindow.toggleLyrics();
+  else if (key.toLowerCase() === "v" && !modified(e) && useSettings.getState().settings?.visualizerButton !== false) fullWindow.toggleVisualizer();
   else if (key.toLowerCase() === "f" && !modified(e)) void fullWindow.toggleOsFullscreen();
   else handled = false;
   if (handled) {
@@ -117,7 +119,7 @@ function ModeToggle({ mode, current, label, off, offTip, icon }: { mode: FullWin
   return (
     <IconButton
       label={label}
-      tooltip={off && !on ? offTip : mode === "lyrics" ? `${label} (L)` : label}
+      tooltip={off && !on ? offTip : mode === "lyrics" ? `${label} (L)` : mode === "visualizer" ? `${label} (V)` : label}
       tooltipPlacement="bottom"
       pressed={on}
       softDisabled={off && !on}
@@ -161,6 +163,7 @@ function FullWindowView() {
   const playing = usePlayer((s) => s.state?.status === "playing");
   const osFull = useFullWindow((s) => s.osFullscreen);
   const hideControls = useSettings((s) => s.settings?.fullWindowHideControls ?? true);
+  const visButton = useSettings((s) => s.settings?.visualizerButton !== false);
   const idle = useIdle(hideControls, CONTROLS_HIDE_MS);
   useRootClasses(idle);
   const tint = useLyricsBackground(track?.thumb);
@@ -189,7 +192,8 @@ function FullWindowView() {
   const ownLyrics = useLyricsEditor((s) => !!track && s.ownIds.has(track.id));
   const artistPhoto = details?.artist ? details.artist.art || details.artist.thumb : null;
   // A song whose artist has no image shows its artwork; the mode stays for the next song.
-  const shown: FullWindowMode = mode === "artist" && !artistPhoto ? "artwork" : mode;
+  // The visualizer with its button turned off shows the artwork too.
+  const shown: FullWindowMode = (mode === "artist" && !artistPhoto) || (mode === "visualizer" && !visButton) ? "artwork" : mode;
   const { flip, play: flipOver } = useFlipPause(turntable && shown === "artwork");
 
   const onDoubleClick = (e: MouseEvent) => {
@@ -212,6 +216,18 @@ function FullWindowView() {
         <div className="fw__lyrics">
           <LyricsPane />
         </div>
+      </div>
+    );
+  else if (shown === "visualizer")
+    stage = (
+      <div className="fw__vis-mode" key="visualizer">
+        <div className="fw__now fw__now--row fw__chrome">
+          <div className="fw__cover">
+            <Art path={track.thumb} fluid requestSize={COVER_ART} />
+          </div>
+          <Meta track={track} />
+        </div>
+        <VisualizerView />
       </div>
     );
   else if (shown === "artist" && artistPhoto)
@@ -287,6 +303,7 @@ function FullWindowView() {
             <ModeToggle mode="artwork" current={mode} label="Artwork" icon={<Disc3 size={18} />} />
             <ModeToggle mode="artist" current={mode} label="Artist image" off={!artistPhoto} offTip="No artist image" icon={<UserRound size={18} />} />
             <ModeToggle mode="lyrics" current={mode} label="Lyrics" off={noLyrics || !track} offTip="No lyrics for this song" icon={<MicVocal size={18} />} />
+            {visButton && <ModeToggle mode="visualizer" current={shown} label="Visualizer" icon={<AudioLines size={18} />} />}
           </div>
           <span className="fw__divider" aria-hidden="true" />
           {track && (

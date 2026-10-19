@@ -558,6 +558,13 @@ export interface Backend {
   outputSelect(deviceId: string | null): Promise<OutputState>;
   /** What happens to the sound now, from the file to the output device. */
   signalPath(): Promise<SignalPath>;
+  /**
+   * Start, renew or end a visualizer watch: `player://spectrum` frames come
+   * at `fps` until it's turned off or not renewed within 3 s. Resolves to
+   * whether it runs (not while the window is hidden, nor on battery with
+   * `pauseOnBattery`).
+   */
+  visualizerWatch(on: boolean, fps: number, scope: boolean, pauseOnBattery: boolean): Promise<boolean>;
 
   // Listen on (docs/IPC.md "Listen on")
   /** Plex players to play on (empty when the setting hides them). */
@@ -1487,6 +1494,7 @@ export function createTauriBackend(): Backend {
     outputDevices: () => call("output_devices"),
     outputSelect: (deviceId) => call("output_select", { deviceId }),
     signalPath: () => call("signal_path"),
+    visualizerWatch: (on, fps, scope, pauseOnBattery) => call("visualizer_watch", { on, fps, scope, pauseOnBattery }),
     remotePlayers: () => call("remote_players"),
     remoteState: () => call("remote_state"),
     remoteMove: (playerId) => call("remote_move", { playerId }),

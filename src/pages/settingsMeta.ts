@@ -197,6 +197,11 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "miniplayerSideBySide",
   // The phone shows the cover in now playing, never a record player.
   "recordMotion",
+  // Visualizer: its tuning, the panel strip and resting on battery.
+  "visualizerFps",
+  "visualizerSmoothing",
+  "visualizerPanelStrip",
+  "visualizerBatteryPause",
   // Looks: building and files.
   "showLookBuilder",
   "themeFile",
@@ -474,6 +479,8 @@ export const DESKTOP_ONLY: ReadonlySet<string> = new Set([
   // Discord lives on the computer.
   "discordShowUnreleased",
   "discordUnreleasedArt",
+  // Visualizer: the phone has no side panel.
+  "visualizerPanelStrip",
 ]);
 
 /** Pages the phone layout leaves out, for the same reason. */

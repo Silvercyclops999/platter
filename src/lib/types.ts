@@ -849,6 +849,12 @@ export type MobileQuality = "auto" | StreamQuality;
 /** How many recently played songs a phone may keep for offline play (0 is off). */
 export const PHONE_KEEP_RECENT_CHOICES = [0, 25, 50, 100, 250, 500] as const;
 export type PopularSource = "global" | "myPlays";
+/** The visualizer's picture: a spectrum analyser line, needle meters, a stereo phase scope, or the cover's colours breathing. */
+export type VisualizerStyle = "analyser" | "meters" | "scope" | "glow";
+/** How slowly the visualizer's lines settle. */
+export type VisualizerSmoothing = "low" | "medium" | "high";
+/** Frame rates the visualizer offers. */
+export const VISUALIZER_FPS = [15, 30, 60] as const;
 export type ReduceMotion = "system" | "on" | "off";
 
 /** The Theme setting: a built-in theme, or follow the computer's light or dark mode. */
@@ -1117,6 +1123,18 @@ export interface Settings {
   phoneMobileQuality: MobileQuality;
   /** Phone: a light tap of feedback on the player's controls. This device only. */
   phoneHaptics: boolean;
+  /** Now playing has a Visualizer button. Synced. */
+  visualizerButton: boolean;
+  /** The visualizer's picture. Synced. */
+  visualizerStyle: VisualizerStyle;
+  /** Visualizer frames a second (15, 30 or 60): 60 on a computer, 30 on a phone until picked. This device only. */
+  visualizerFps: number;
+  /** How slowly the visualizer's lines settle. Synced. */
+  visualizerSmoothing: VisualizerSmoothing;
+  /** A slim analyser under the cover in the now playing panel. This device only. */
+  visualizerPanelStrip: boolean;
+  /** The visualizer rests on battery power. This device only. */
+  visualizerBatteryPause: boolean;
   /** Sync to a device: what songs become on a device without its own format. Synced. */
   deviceFormat: DeviceFormat;
   /** Sync to a device: remove Platter's own files for songs no longer chosen. Synced. */
@@ -1761,6 +1779,12 @@ export const DEFAULT_SETTINGS: Settings = {
   phoneKeepRecent: 50,
   phoneMobileQuality: "auto",
   phoneHaptics: true,
+  visualizerButton: true,
+  visualizerStyle: "analyser",
+  visualizerFps: 60,
+  visualizerSmoothing: "medium",
+  visualizerPanelStrip: false,
+  visualizerBatteryPause: true,
   deviceFormat: "original",
   deviceDeleteRemoved: false,
   homeMixes: true,
@@ -4120,6 +4144,22 @@ export interface RemoteSession {
   repeat: RepeatMode;
 }
 
+/**
+ * One visualizer frame (docs/IPC.md "Visualizer"). Levels are dBFS floored
+ * at -90; a full-scale sine reads 0 in its band.
+ */
+export interface SpectrumFrame {
+  /** Milliseconds of audio heard since the watch began. */
+  t: number;
+  /** 64 log-spaced bands from 20 Hz to 20 kHz (see visualizer/scale.ts). */
+  bands: number[];
+  /** Left, right. */
+  rms: [number, number];
+  peak: [number, number];
+  /** 256 stereo pairs, interleaved left, right, in -1..1 (when asked for). */
+  scope?: number[];
+}
+
 export interface RemoteState {
   session: RemoteSession | null;
   /** The device stopped by itself (someone stopped it there); controls are local again. */
@@ -4344,6 +4384,8 @@ export interface EventMap {
   "output://changed": OutputState;
   /** What happens to the sound changed (track, device or sound settings). */
   "audio://signal-path": SignalPath;
+  /** A visualizer frame, only while a window watches (`visualizerWatch`). */
+  "player://spectrum": SpectrumFrame;
   /** The chosen output device went away; playback paused and moved to the system default. */
   "output://lost": { device: string };
   /** Playback on another device started, changed, stopped or came back. */
