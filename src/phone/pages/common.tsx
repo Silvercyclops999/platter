@@ -122,10 +122,19 @@ export function itemInfo(i: HomeItem): { key: string; title: string; sub: string
 }
 
 /** A titled shelf that scrolls sideways. */
-export function Carousel({ title, children }: { title: string; children: ReactNode }) {
+export function Carousel({ title, children, onAll }: { title: string; children: ReactNode; onAll?: () => void }) {
   return (
     <section className="ph-shelf" aria-label={title}>
-      <h2 className="ph-shelf__title">{title}</h2>
+      {onAll ? (
+        <div className="ph-shelf__head">
+          <h2 className="ph-shelf__title">{title}</h2>
+          <button type="button" className="ph-shelf__all" onClick={onAll} aria-label={`Show all: ${title}`}>
+            Show all
+          </button>
+        </div>
+      ) : (
+        <h2 className="ph-shelf__title">{title}</h2>
+      )}
       <div className="ph-shelf__row">{children}</div>
     </section>
   );
@@ -175,7 +184,15 @@ export function PageLoading() {
   );
 }
 
-export function PageFailed({ what, retry }: { what: string; retry: () => void }) {
+/** A page that couldn't load. `framed`: it is the whole page, so it brings its own margins and Back. */
+export function PageFailed({ what, retry, framed }: { what: string; retry: () => void; framed?: boolean }) {
+  if (framed)
+    return (
+      <div className="ph-page" data-phone-failed={what}>
+        <BackBar />
+        <PageFailed what={what} retry={retry} />
+      </div>
+    );
   return (
     <div className="ph-empty">
       <p className="ph-empty__title">Couldn't load {what}</p>

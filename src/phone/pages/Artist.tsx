@@ -1,22 +1,35 @@
 /**
  * An artist on the phone: a large photo with the name over it, which the
- * page slides up over as it scrolls; what of theirs is in your library; top
- * tracks ranked by your own plays; then the discography as shelves.
+ * page slides up over as it scrolls; what of theirs is in your library;
+ * follow, radio, shuffle and play; top tracks ranked by your own plays;
+ * their eras; the discography with the records you can get (Get, through
+ * Lidarr); Appears on and Fans also like, each with See all.
  */
-import { Pause, Play, Shuffle } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Pause, Play, Radio, Shuffle } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Art } from "../../components/Art";
 import { backend } from "../../lib/backend";
-import { SECTION_LABELS, plural } from "../../lib/format";
+import { isCreditId } from "../../lib/credits";
+import { plural } from "../../lib/format";
 import type { Track } from "../../lib/types";
 import { useLoad } from "../../lib/useLoad";
-import { photoPath } from "../../pages/artist";
+import { photoPath, type DiscographyFilter } from "../../pages/artist";
+import { useCatalogueFans } from "../../pages/catalogue";
+import { eraRange, showEraCards } from "../../pages/era";
+import { useArtistDiscography } from "../../pages/discographySources";
+import { useLidarrReady } from "../../pages/lidarrShared";
 import { player, usePlayer } from "../../stores/player";
-import { nav } from "../../stores/router";
+import { nav, type Route } from "../../stores/router";
+import { useSettings } from "../../stores/settings";
+import { setFollow, useSocial } from "../../stores/social";
 import { BackBar, Carousel, PageFailed, PageLoading, ShelfCard, SongRow } from "./common";
+import { DiscoShelf } from "./DiscoShelf";
+import { CataloguePhoto } from "./kit";
 
-/** Top tracks shown. */
+/** Top tracks shown at first. */
 export const TOP_TRACKS = 5;
+/** Top tracks after See all. */
+export const TOP_TRACKS_ALL = 20;
 
 /** The artist's songs most played here, most first (ties keep the server's order). */
 export function topByPlays(tracks: Track[], n = TOP_TRACKS): Track[] {
@@ -33,10 +46,39 @@ export function inLibraryLine(albums: number, tracks: number): string {
   return tracks > 0 ? `In your library: ${plural(albums, "album")}, ${plural(tracks, "song")}` : `In your library: ${plural(albums, "album")}`;
 }
 
+/** The discography's See all: the full page, on the type that was picked. */
+export function discographyRoute(id: string, f: DiscographyFilter): Route {
+  return { name: "discography", id, ...(f === "popular" ? {} : { type: f }) };
+}
+
+/** A sideways shelf with its title and See all. */
+function Shelf({ title, onAll, children }: { title: string; onAll?: () => void; children: ReactNode }) {
+  return (
+    <section className="ph-shelf ph-shelf--all" aria-label={title}>
+      <div className="ph-disco__head">
+        <h2 className="ph-shelf__title">{title}</h2>
+        {onAll && (
+          <button type="button" className="ph-link-btn" onClick={onAll} aria-label={`See all: ${title}`}>
+            See all
+          </button>
+        )}
+      </div>
+      <div className="ph-shelf__row">{children}</div>
+    </section>
+  );
+}
+
 export function PhoneArtist({ id }: { id: string }) {
   const { data, error, retry } = useLoad(() => backend.artistPage(id), [id]);
   const ctx = usePlayer((s) => s.state?.queue.context ?? null);
   const status = usePlayer((s) => s.state?.status ?? "idle");
+  const following = useSocial((s) => s.followIds.has(id));
+  const erasOn = useSettings((s) => s.settings?.showEraCards);
+  const credited = isCreditId(id);
+  const disco = useArtistDiscography(id, data?.artist.title, data?.sections);
+  const fans = useCatalogueFans(credited ? null : id, data?.artist.title);
+  const lidarrReady = useLidarrReady();
+  const [allTop, setAllTop] = useState(false);
   const hero = useRef<HTMLDivElement>(null);
   // The shelves come a frame after the header, so the page opens at once.
   const [rest, setRest] = useState(false);
@@ -64,25 +106,40 @@ export function PhoneArtist({ id }: { id: string }) {
       cancelAnimationFrame(frame);
     };
   }, [data]);
-  if (error && !data) return <PageFailed what="this artist" retry={retry} />;
+  if (error && !data) return <PageFailed what="this artist" retry={retry} framed />;
   if (!data) return <PageLoading />;
   const { artist, sections } = data;
   const albums = sections.flatMap((s) => s.albums);
   const songs = albums.reduce((n, a) => n + a.trackCount, 0);
-  const top = topByPlays(data.popular);
+  const top = topByPlays(data.popular, allTop ? TOP_TRACKS_ALL : TOP_TRACKS);
   const here = ctx?.kind === "artist" && ctx.id === artist.id;
   const playing = here && (status === "playing" || status === "loading" || status === "buffering");
+  const eras = showEraCards(data.eras, erasOn) ? (data.eras ?? []) : [];
   return (
     <div className="ph-page ph-artist" data-testid="artist-page">
       <div ref={hero} className="ph-artist__hero">
-        <Art path={photoPath(artist)} fluid requestSize={600} kind="artist" monogram={artist.title} />
+        <Art path={photoPath(artist) ?? disco.photo} fluid requestSize={600} kind="artist" monogram={artist.title} />
       </div>
       <BackBar title={artist.title} after={220} />
       <h1 className="ph-artist__name">{artist.title}</h1>
       <div className="ph-artist__body">
+        <p className="ph-artist__lib tabular">{inLibraryLine(albums.length, songs)}</p>
         <div className="ph-actions">
           <div className="ph-actions__left">
-            <span className="ph-artist__lib tabular">{inLibraryLine(albums.length, songs)}</span>
+            {!credited && (
+              <button
+                type="button"
+                className={`ph-chip ph-artist__follow ${following ? "is-on" : ""}`}
+                aria-pressed={following}
+                aria-label={following ? `Following ${artist.title}` : `Follow ${artist.title}`}
+                onClick={() => void setFollow({ id, title: artist.title, thumb: artist.thumb }, !following)}
+              >
+                {following ? "Following" : "Follow"}
+              </button>
+            )}
+            <button type="button" className="ph-icon-btn" aria-label={`${artist.title} radio`} onClick={() => nav.go({ name: "radio", seed: `artist:${artist.id}` })}>
+              <Radio size={22} aria-hidden="true" />
+            </button>
           </div>
           <div className="ph-actions__right">
             <button type="button" className="ph-icon-btn" aria-label={`Shuffle ${artist.title}`} onClick={() => void player.playArtist(artist.id, undefined, true)}>
@@ -100,7 +157,14 @@ export function PhoneArtist({ id }: { id: string }) {
         </div>
         {top.length > 0 && (
           <section aria-label="Top tracks">
-            <h2 className="ph-section-title">Top tracks</h2>
+            <div className="ph-disco__head">
+              <h2 className="ph-section-title">Top tracks</h2>
+              {data.popular.length > TOP_TRACKS && (
+                <button type="button" className="ph-link-btn" aria-expanded={allTop} onClick={() => setAllTop(!allTop)}>
+                  {allTop ? "Show fewer" : "See all"}
+                </button>
+              )}
+            </div>
             <p className="ph-section-sub">By your plays</p>
             <ul className="ph-songs">
               {top.map((t, i) => (
@@ -115,13 +179,45 @@ export function PhoneArtist({ id }: { id: string }) {
             </ul>
           </section>
         )}
-        {rest && sections.map((s) => (
-          <Carousel key={`${s.section}:${s.custom ?? ""}`} title={s.custom ?? SECTION_LABELS[s.section]}>
-            {s.albums.map((a) => (
-              <ShelfCard key={a.id} title={a.title} sub={a.year ? String(a.year) : undefined} artist={a.artistTitle} thumb={a.thumb} kind="album" onOpen={() => nav.go({ name: "album", id: a.id })} />
+        {rest && eras.length > 0 && (
+          <Carousel title="Eras">
+            {eras.map((e) => (
+              <ShelfCard key={e.name} title={e.name} sub={[eraRange(e), plural(e.trackCount, "song")].filter(Boolean).join(" · ")} thumb={e.cover ?? null} kind="album" onOpen={() => nav.go({ name: "era", id, era: e.name })} />
             ))}
           </Carousel>
-        ))}
+        )}
+        {rest && (
+          <DiscoShelf
+            entries={disco.entries}
+            lidarrReady={lidarrReady}
+            artistLibraryId={credited ? null : id}
+            onChanged={disco.reload}
+            onShowAll={(f) => nav.go(discographyRoute(id, f))}
+          />
+        )}
+        {rest && data.appearsOn.length > 0 && (
+          <Shelf title="Appears on" onAll={() => nav.go({ name: "artistShelf", id, shelf: "appearsOn" })}>
+            {data.appearsOn.slice(0, 12).map((a) => (
+              <ShelfCard key={a.id} title={a.title} sub={a.artistTitle} thumb={a.thumb} kind="album" onOpen={() => nav.go({ name: "album", id: a.id })} />
+            ))}
+          </Shelf>
+        )}
+        {rest && data.similar.length + fans.length > 0 && (
+          <Shelf title="Fans also like" onAll={() => nav.go({ name: "artistShelf", id, shelf: "fansAlsoLike" })}>
+            {data.similar.slice(0, 12).map((a) => (
+              <ShelfCard key={a.id} title={a.title} thumb={a.thumb} round kind="artist" onOpen={() => nav.go({ name: "artist", id: a.id })} />
+            ))}
+            {fans.slice(0, 8).map((a) => (
+              <button key={a.mbid} type="button" className="ph-card-tile is-round" onClick={() => nav.go({ name: "catalogueArtist", mbid: a.mbid })}>
+                <span className="ph-x__round-112">
+                  <CataloguePhoto mbid={a.mbid} name={a.name} given={a.photo} size={112} />
+                </span>
+                <span className="ph-card-tile__title">{a.name}</span>
+                <span className="ph-card-tile__sub">Not in your library</span>
+              </button>
+            ))}
+          </Shelf>
+        )}
       </div>
     </div>
   );

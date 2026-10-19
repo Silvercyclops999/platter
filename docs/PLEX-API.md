@@ -107,6 +107,12 @@ Status comes back as standard media status messages.
 ## Findings log
 Anything surprising goes here as it's tested (date, endpoint, what happened).
 
+### 2026-10-19: a library whose audio playlists are all smart (read-only)
+- `GET /playlists?playlistType=audio` on a real server answered 8 playlists,
+  every one with `smart: true` (leafCount 1 to 1439). None of them takes songs
+  added by hand, so an Add to playlist list is rightly empty there; the phone's
+  sheet says why and keeps New playlist.
+
 ### 2026-10-14: several items in one metadata call (read-only)
 - `GET /library/metadata/{k1},{k2},{k3}` with two album keys and a track key
   answered one `Metadata` list in the asked order with mixed `type`s

@@ -5,8 +5,10 @@
  * one under it.
  */
 import {
+  Bookmark,
   Check,
   Disc3,
+  GitBranch,
   GripVertical,
   Heart,
   HeartOff,
@@ -21,6 +23,7 @@ import {
   Radio,
   Repeat,
   Repeat1,
+  Search,
   Share,
   Shuffle,
   Pencil,
@@ -37,6 +40,10 @@ import { backend } from "../lib/backend";
 import type { Album, Playlist, QueueItem, Track } from "../lib/types";
 import { useLoad } from "../lib/useLoad";
 import { openShareCard } from "../stores/shareCard";
+import { bookmarkPage, bookmarkTrack } from "../stores/curate";
+import { useApp } from "../stores/app";
+import { useCircle } from "../stores/circle";
+import { collaboratorPlaylists, editablePlaylists } from "../components/PlaylistPicker";
 import { openSongCredits } from "../stores/songCredits";
 import { countLine } from "./pages/common";
 import { SORT_LABEL, useLibraryView, type LibSort } from "../stores/library";
@@ -471,6 +478,8 @@ export function TrackSheet({ track, inPlaylist }: { track: Track; inPlaylist?: i
     { label: "Go to album", icon: Disc3, run: act(() => phone.go({ name: "album", id: track.albumId }), true) },
     { label: "Go to artist", icon: UserRound, run: act(() => phone.go({ name: "artist", id: track.artistId }), true) },
     { label: "Song radio", icon: Radio, run: act(() => player.playRadio(`track:${track.id}`)) },
+    ...((track.otherVersions ?? 0) > 0 ? [{ label: "All versions", icon: GitBranch, run: act(() => phone.go({ name: "lineage", id: track.id }), true) }] : []),
+    { label: "Bookmark this moment", icon: Bookmark, run: act(() => bookmarkTrack(track)) },
   ];
   return (
     <SheetFrame title={track.title} onClose={phone.pop} head={head}>
@@ -520,6 +529,7 @@ function AlbumSheet({ album }: { album: Album }) {
   const items: Action[] = [
     { label: "Add to queue", icon: ListEnd, run: act(() => player.queueAlbum(album.id)) },
     { label: "Artist radio", icon: Radio, run: act(() => player.playRadio(`artist:${album.artistId}`)) },
+    { label: "Bookmark", icon: Bookmark, run: act(() => bookmarkPage("album", album.id, album.title, { subtitle: album.artistTitle, thumb: album.thumb })) },
     { label: "Share", icon: Share, run: act(() => openShareCard({ kind: "album", id: album.id, title: album.title, subtitle: album.artistTitle, thumb: album.thumb })) },
     { label: "Go to artist", icon: UserRound, run: act(() => phone.go({ name: "artist", id: album.artistId })) },
   ];
@@ -578,12 +588,30 @@ export async function addQuietly(p: Pick<Playlist, "id" | "title">, track: Track
   }
 }
 
+/**
+ * Add a song to one of your playlists: the same list the computer's Add to
+ * playlist offers (your own playlists that take songs, and ones shared with
+ * you as a collaborator), most recently changed first, with a find field
+ * once there are a few. The sheet is as tall as its rows.
+ */
 function AddToSheet({ track }: { track: Track }) {
-  const { data, error, retry } = useLoad(() => backend.playlists(), []);
-  // Only lists you can add to: not smart playlists, Blends or ones shared with you.
-  const lists = (data ?? []).filter((p) => !p.smart && !/^(smart|blend|shared):/.test(p.id));
+  // The app's own playlist list (kept current as playlists change), read
+  // fresh as well in case it hasn't arrived yet.
+  const known = useApp((s) => s.playlists);
+  const shared = useCircle((s) => s.view.playlists);
+  const { data: loaded, error, retry } = useLoad(() => backend.playlists(), []);
+  const [query, setQuery] = useState("");
+  const all = known && known.length ? known : loaded;
+  const data = all ?? null;
+  const lists = useMemo(() => (data ? editablePlaylists([...data.filter((p) => !/^(smart|blend):/.test(p.id)), ...collaboratorPlaylists(shared)], query) : []), [data, shared, query]);
   return (
-    <SheetFrame title="Add to playlist" subtitle={track.title} onClose={phone.pop} tall>
+    <SheetFrame title="Add to playlist" subtitle={track.title} onClose={phone.pop}>
+      {(data?.length ?? 0) > 6 && (
+        <label className="ph-field ph-addto__find">
+          <Search size={18} aria-hidden="true" />
+          <input type="search" className="ph-field__input" placeholder="Find a playlist" aria-label="Find a playlist" value={query} onChange={(e) => setQuery(e.target.value)} />
+        </label>
+      )}
       <ul className="ph-rows">
         <li>
           <button
@@ -620,6 +648,7 @@ function AddToSheet({ track }: { track: Track }) {
             </button>
           </li>
         ))}
+        {data && lists.length === 0 && <li className="ph-rows__note">{query ? `No playlist called "${query}".` : data.length ? "Your playlists are smart playlists, which fill themselves from their rules. Make a new playlist to add songs by hand." : "No playlists yet. Make one to add this song."}</li>}
         {!data && !error && [0, 1, 2].map((i) => <li key={i} className="ph-lib-row--ghost" />)}
         {error && !data && (
           <li>

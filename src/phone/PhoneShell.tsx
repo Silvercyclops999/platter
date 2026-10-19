@@ -32,10 +32,10 @@ import { notchFromUrl } from "./form";
 import { installTapGuard } from "./gestures";
 import { TABS, phone, tabOf, usePhoneUi, type PhoneTab } from "./phoneUi";
 import { PageStack } from "./PageStack";
+import { PhoneRoutePage } from "./routes";
 import { SheetHost } from "./Sheets";
 import "./phone.css";
 
-const DesktopPage = lazy(() => import("../shell/MainView").then((m) => ({ default: m.Page })));
 const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 
 const TAB_ICON: Record<PhoneTab, typeof Home> = { home: Home, search: Search, library: Library, you: CircleUserRound };
@@ -130,25 +130,7 @@ export function PhonePage({ route }: { route: Route }) {
         </div>
       );
     default:
-      if (COMPUTER_ONLY.has(route.name))
-        return (
-          <div className="ph-page">
-            <BackBar />
-            <div className="ph-empty">
-              <p className="ph-empty__title">On your computer</p>
-              <p className="ph-empty__text">This works with files and drives, so it opens in Platter on your computer.</p>
-            </div>
-          </div>
-        );
-      // Pages with no phone version yet: the computer's page, in one narrow column.
-      return (
-        <div className="ph-page ph-desk" data-route={route.name}>
-          <BackBar />
-          <Suspense fallback={<PageLoading />}>
-            <DesktopPage route={route} />
-          </Suspense>
-        </div>
-      );
+      return <PhoneRoutePage route={route} />;
   }
 }
 
@@ -180,5 +162,3 @@ export function followStatusBar(root: HTMLElement = document.documentElement): (
   return () => mo.disconnect();
 }
 
-/** Pages that work on files, drives or the computer's processor. */
-export const COMPUTER_ONLY: ReadonlySet<Route["name"]> = new Set<Route["name"]>(["devices", "import", "doctor", "soundMap"]);

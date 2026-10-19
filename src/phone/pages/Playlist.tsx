@@ -32,7 +32,7 @@ export function topGenres(tracks: Track[], n = GENRE_PILLS): string[] {
 
 export function PhonePlaylist({ id }: { id: string }) {
   const { data, error, retry } = useLoad(() => backend.playlistPage(id), [id]);
-  if (error && !data) return <PageFailed what="this playlist" retry={retry} />;
+  if (error && !data) return <PageFailed what="this playlist" retry={retry} framed />;
   if (!data) return <PageLoading />;
   const order = data.itemIds;
   return (
@@ -51,7 +51,7 @@ export function PhonePlaylist({ id }: { id: string }) {
 
 export function PhoneLiked() {
   const { data, error, retry } = useLoad(() => backend.likedPage(), []);
-  if (error && !data) return <PageFailed what="Liked Songs" retry={retry} />;
+  if (error && !data) return <PageFailed what="Liked Songs" retry={retry} framed />;
   if (!data) return <PageLoading />;
   return (
     <SongList

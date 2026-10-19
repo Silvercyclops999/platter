@@ -56,7 +56,7 @@ export function openSettingsAt(selector: string, to: { page?: PageId; row?: stri
 }
 
 /** The whole map, chunk by chunk. */
-async function loadAll(): Promise<MapData> {
+export async function loadAll(): Promise<MapData> {
   const chunks: SoundMapChunk[] = [];
   let after: string | null = null;
   for (;;) {
@@ -94,7 +94,7 @@ export function walkOrder(d: MapData, picked: number[]): number[] {
 }
 
 /** The theme's colours for the dots (read from CSS so light and dark themes each get theirs). */
-function useColours(el: HTMLElement | null, by: ColourBy, groups: { slot: number }[]) {
+export function useColours(el: HTMLElement | null, by: ColourBy, groups: { slot: number }[]) {
   const theme = useSettings((s) => s.settings?.theme);
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -443,7 +443,7 @@ function EmptyState({ info }: { info: SoundMapInfo }) {
   );
 }
 
-function Legend({ groups, colours, by }: { groups: { label: string; count: number }[]; colours: string[]; by: ColourBy }) {
+export function Legend({ groups, colours, by }: { groups: { label: string; count: number }[]; colours: string[]; by: ColourBy }) {
   return (
     <ul className="soundmap__legend" aria-label={by === "genre" ? "Genres" : "Eras"}>
       {groups.map((g, i) =>

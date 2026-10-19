@@ -88,11 +88,20 @@ export function PhoneYou() {
   ];
   const topArtist = o?.topArtists[0];
   const diaryOn = useSettings((s) => s.settings?.keepDiary !== false);
+  const bookmarksOn = useSettings((s) => s.settings?.bookmarksInLibrary !== false);
   const links: { title: string; route: Route }[] = [
     ...(statsOn ? [{ title: "All your stats", route: { name: "stats" } as Route }] : []),
+    ...(wrappedOn ? [{ title: "Your Top Songs", route: { name: "topSongs", year } as Route }] : []),
     { title: "Everything you played", route: { name: "recents" } },
     { title: "Mixes made for you", route: { name: "mixes" } },
     ...(diaryOn ? [{ title: "Listening diary", route: { name: "diary" } as Route }] : []),
+    ...(bookmarksOn ? [{ title: "Bookmarks", route: { name: "bookmarks" } as Route }] : []),
+  ];
+  const tools: { title: string; route: Route }[] = [
+    { title: "Library import and Missing", route: { name: "import" } },
+    { title: "Library doctor", route: { name: "doctor" } },
+    { title: "Create a Blend", route: { name: "blendNew" } },
+    { title: "Devices", route: { name: "devices" } },
     { title: "Settings", route: { name: "settings" } },
   ];
 
@@ -192,6 +201,19 @@ export function PhoneYou() {
 
       <ul className="ph-set-list ph-you__links" aria-label="More">
         {links.map((l) => (
+          <li key={l.title}>
+            <button type="button" className="ph-set-link" onClick={() => nav.go(l.route)}>
+              <span className="ph-set-link__text">
+                <span className="ph-set-link__title">{l.title}</span>
+              </span>
+              <ChevronRight size={18} aria-hidden="true" className="ph-set-link__chev" />
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      <ul className="ph-set-list ph-you__links" aria-label="Tools">
+        {tools.map((l) => (
           <li key={l.title}>
             <button type="button" className="ph-set-link" onClick={() => nav.go(l.route)}>
               <span className="ph-set-link__text">

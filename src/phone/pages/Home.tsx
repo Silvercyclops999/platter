@@ -14,13 +14,14 @@ import { tap } from "../bits";
 import { nav } from "../../stores/router";
 import { phone } from "../phoneUi";
 import { Carousel, PageFailed, PageLoading, PlayingBars, ShelfCard, itemInfo } from "./common";
+import { HomeExplore, HomeMixes } from "./HomeExtras";
 
 export function PhoneHome() {
   const { data, error, retry } = useLoad(() => backend.home(), []);
   const [filter, setFilter] = useState<HomeFilter>("all");
   const avatar = useApp((s) => s.auth?.avatar ?? null);
   const playingCtx = usePlayer((s) => s.state?.queue.context ?? null);
-  if (error && !data) return <PageFailed what="Home" retry={retry} />;
+  if (error && !data) return <PageFailed what="Home" retry={retry} framed />;
   if (!data) return <PageLoading />;
   const grid = filterItems(data.shortcuts, filter).slice(0, GRID_TILES);
   const shelves = visibleShelves(data, filter);
@@ -56,14 +57,16 @@ export function PhoneHome() {
           })}
         </ul>
       )}
+      {filter === "all" && <HomeMixes />}
       {shelves.map((s) => (
-        <Carousel key={s.id} title={s.title}>
+        <Carousel key={s.id} title={s.title} onAll={() => nav.go(s.id === "recentlyPlayed" ? { name: "recents" } : { name: "homeShelf", shelf: s.id })}>
           {s.items.slice(0, 12).map((i) => {
             const info = itemInfo(i);
             return <ShelfCard key={info.key} title={info.title} sub={info.sub} thumb={info.thumb} round={info.round} kind={info.kind} onOpen={() => nav.go(info.route)} />;
           })}
         </Carousel>
       ))}
+      {filter === "all" && <HomeExplore />}
       {!grid.length && !shelves.length && (
         <div className="ph-empty">
           <p className="ph-empty__title">Nothing played yet</p>

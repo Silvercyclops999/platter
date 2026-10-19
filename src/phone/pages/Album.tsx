@@ -16,14 +16,47 @@ import { player, usePlayer } from "../../stores/player";
 import { nav } from "../../stores/router";
 import { phone } from "../phoneUi";
 import { SleeveCard } from "../NowPlaying";
-import { BackBar, Carousel, PageFailed, PageLoading, ShelfCard, SongRow, countLine } from "./common";
+import { BackBar, PageFailed, PageLoading, ShelfCard, SongRow, countLine } from "./common";
+import { UpgradeCard, useAlbumUpgrade } from "../../pages/LidarrUpgrade";
+import { useSleeveNotes } from "../../lib/useSleeveNotes";
+import { roleLabel } from "../../lib/sleeve";
+
+/** The record's people, by role; each opens their credits page. */
+function AlbumPeople({ albumId }: { albumId: string }) {
+  const { data } = useSleeveNotes(albumId);
+  const groups = data?.groups.filter((g) => g.people.length) ?? [];
+  if (!groups.length) return null;
+  return (
+    <section className="ph-card ph-people-card" aria-label="Credits">
+      <div className="ph-card__head">
+        <h3 className="ph-card__title">Credits</h3>
+      </div>
+      <div className="ph-people">
+        {groups.slice(0, 6).map((g) => (
+          <div key={g.role}>
+            <p className="ph-people__role">{roleLabel(g.role)}</p>
+            <div className="ph-people__names">
+              {g.people.slice(0, 8).map((p) => (
+                <button key={p.key} type="button" className="ph-pill" onClick={() => nav.go({ name: "credits", person: p.name })}>
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 export function PhoneAlbum({ id }: { id: string }) {
   const { data, error, retry } = useLoad(() => backend.albumPage(id), [id]);
   const ctx = usePlayer((s) => s.state?.queue.context ?? null);
   const status = usePlayer((s) => s.state?.status ?? "idle");
   const colours = useArtColours(data?.album.tint, data?.album.thumb);
-  if (error && !data) return <PageFailed what="this album" retry={retry} />;
+  // Lidarr: a better copy of this record, offered when one is known.
+  const upgrade = useAlbumUpgrade(data ? id : null);
+  if (error && !data) return <PageFailed what="this album" retry={retry} framed />;
   if (!data) return <PageLoading />;
   const { album, tracks } = data;
   const here = ctx?.kind === "album" && ctx.id === album.id;
@@ -44,6 +77,11 @@ export function PhoneAlbum({ id }: { id: string }) {
           <span className="tabular">{facts}</span>
         </p>
       </header>
+      {data.archive?.era && (
+        <button type="button" className="ph-album__era" onClick={() => nav.go({ name: "era", id: album.artistId, era: data.archive!.era! })}>
+          From the {data.archive.era} era
+        </button>
+      )}
       <div className="ph-actions">
         <div className="ph-actions__left">
           <DownloadButton kind="album" id={album.id} title={album.title} size="md" />
@@ -65,6 +103,9 @@ export function PhoneAlbum({ id }: { id: string }) {
           </button>
         </div>
       </div>
+      <div className="ph-get ph-album__upgrade">
+        <UpgradeCard upgrade={upgrade} onChanged={upgrade.reload} />
+      </div>
       {discGroups(tracks).map((g) => (
         <section key={g.disc ?? "all"} className="ph-disc-group" aria-label={g.disc !== null ? `Disc ${g.disc}` : undefined}>
           {g.disc !== null && (
@@ -84,12 +125,21 @@ export function PhoneAlbum({ id }: { id: string }) {
         {countLine(tracks.length, "song")}, {formatLongDuration(data.totalDurationMs)}
       </p>
       <SleeveCard track={{ albumId: album.id, albumTitle: album.title, artistTitle: album.artistTitle, thumb: album.thumb }} link={false} />
+      <AlbumPeople albumId={album.id} />
       {data.moreByArtist.length > 0 && (
-        <Carousel title={`More by ${album.artistTitle}`}>
-          {data.moreByArtist.slice(0, 12).map((a) => (
-            <ShelfCard key={a.id} title={a.title} sub={a.year ? String(a.year) : undefined} artist={a.artistTitle} thumb={a.thumb} kind="album" onOpen={() => nav.go({ name: "album", id: a.id })} />
-          ))}
-        </Carousel>
+        <section className="ph-shelf" aria-label={`More by ${album.artistTitle}`}>
+          <div className="ph-disco__head">
+            <h2 className="ph-shelf__title">More by {album.artistTitle}</h2>
+            <button type="button" className="ph-link-btn" onClick={() => nav.go({ name: "discography", id: album.artistId })}>
+              See discography
+            </button>
+          </div>
+          <div className="ph-shelf__row">
+            {data.moreByArtist.slice(0, 12).map((a) => (
+              <ShelfCard key={a.id} title={a.title} sub={a.year ? String(a.year) : undefined} artist={a.artistTitle} thumb={a.thumb} kind="album" onOpen={() => nav.go({ name: "album", id: a.id })} />
+            ))}
+          </div>
+        </section>
       )}
     </div>
   );
