@@ -243,13 +243,12 @@ describe("crates in Library", () => {
 });
 
 describe("Home and now playing", () => {
-  it("Home starts with the playing song as a big card that opens the player", async () => {
+  it("the player lives at the bottom: Home has no playing card, the mini player opens the player", async () => {
     play(mock.fx.tracks[0]);
     render(<PhoneShell />);
-    const card = await screen.findByTestId("home-now");
-    expect(within(card).getByText(mock.fx.tracks[0].title)).toBeInTheDocument();
-    expect(within(card).getByText("Paused")).toBeInTheDocument();
-    fireEvent.click(within(card).getByRole("button", { name: /Open the player/ }));
+    const mini = await screen.findByRole("button", { name: new RegExp(`Now playing: ${mock.fx.tracks[0].title}.*Open the player`) });
+    expect(screen.queryByTestId("home-now")).toBeNull();
+    fireEvent.click(mini);
     expect(usePhoneUi.getState().nowPlaying).toBe(true);
     const np = await screen.findByRole("dialog", { name: "Now playing" });
     // Cover first: no record or tonearm drawn on the phone.

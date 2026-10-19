@@ -2,19 +2,17 @@
  * Home on the phone: a type row, the 2 by 4 grid of recent and pinned
  * shortcuts, then the shelves as sideways carousels. Records first.
  */
-import { Pause, Play, UserRound } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { UserRound } from "lucide-react";
+import { useState } from "react";
 import { Art } from "../../components/Art";
 import { backend } from "../../lib/backend";
 import { useLoad } from "../../lib/useLoad";
 import { GRID_TILES, HOME_FILTERS, filterItems, visibleShelves, type HomeFilter } from "../../pages/home";
-import { trackArtistLine } from "../../lib/format";
-import { useArtColours } from "../../lib/useTint";
 import { useApp } from "../../stores/app";
-import { player, usePlayer } from "../../stores/player";
-import { ProgressLine, tap } from "../bits";
+import { usePlayer } from "../../stores/player";
+import { tap } from "../bits";
 import { nav } from "../../stores/router";
-import { phone, usePhoneUi } from "../phoneUi";
+import { phone } from "../phoneUi";
 import { Carousel, PageFailed, PageLoading, PlayingBars, ShelfCard, itemInfo } from "./common";
 
 export function PhoneHome() {
@@ -40,7 +38,6 @@ export function PhoneHome() {
           ))}
         </div>
       </div>
-      <NowCard />
       {grid.length > 0 && (
         <ul className="ph-shortcuts" aria-label="Recent and pinned">
           {grid.map((i) => {
@@ -80,54 +77,3 @@ export function PhoneHome() {
   );
 }
 
-/**
- * The record on the player, at the front of Home: art, the song, play or
- * pause and how far in. Tapping it opens now playing. While it is on screen
- * the mini player steps aside, so the song isn't shown twice.
- */
-export function NowCard() {
-  const track = usePlayer((s) => s.state?.track ?? null);
-  const status = usePlayer((s) => s.state?.status ?? "idle");
-  const colours = useArtColours(null, track?.thumb);
-  const box = useRef<HTMLDivElement>(null);
-  const has = !!track;
-  useEffect(() => {
-    const el = box.current;
-    if (!el || typeof IntersectionObserver === "undefined") return;
-    const io = new IntersectionObserver(([e]) => usePhoneUi.setState({ homeCard: e.isIntersecting }), { threshold: 0.25 });
-    io.observe(el);
-    return () => {
-      io.disconnect();
-      usePhoneUi.setState({ homeCard: false });
-    };
-  }, [has]);
-  if (!track) return null;
-  const playing = status === "playing" || status === "loading" || status === "buffering";
-  const style = { "--ph-tint": colours?.vivid ?? "var(--color-bg-overlay)" } as CSSProperties;
-  return (
-    <div ref={box} className="ph-now" style={style} data-testid="home-now">
-      <button type="button" className="ph-now__open" aria-label={`${track.title} by ${trackArtistLine(track)}. Open the player`} onClick={phone.openPlayer}>
-        <span className="ph-now__art">
-          <Art path={track.thumb} fluid requestSize={240} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} />
-        </span>
-        <span className="ph-now__text">
-          <span className="ph-now__eyebrow">{playing ? "Now playing" : "Paused"}</span>
-          <span className="ph-now__title">{track.title}</span>
-          <span className="ph-now__artist">{trackArtistLine(track)}</span>
-        </span>
-      </button>
-      <button
-        type="button"
-        className="ph-play ph-now__play"
-        aria-label={playing ? "Pause" : "Play"}
-        onClick={() => {
-          tap();
-          void player.toggle();
-        }}
-      >
-        {playing ? <Pause size={26} fill="currentColor" aria-hidden="true" /> : <Play size={26} fill="currentColor" aria-hidden="true" />}
-      </button>
-      <ProgressLine className="ph-now__progress" />
-    </div>
-  );
-}

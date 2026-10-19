@@ -48,8 +48,6 @@ export function PhoneShell() {
   const tab = usePhoneUi((s) => s.tab);
   const playerOpen = usePhoneUi((s) => s.nowPlaying);
   const hasTrack = usePlayer((s) => !!s.state?.track);
-  // On Home, the big now-playing card stands in for the mini player.
-  const cardShown = usePhoneUi((s) => s.homeCard) && entry.route.name === "home";
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => (root.current ? installTapGuard(root.current) : undefined), []);
   useLibraryRecents();
@@ -67,7 +65,7 @@ export function PhoneShell() {
       <main className="ph-main" aria-hidden={playerOpen || undefined} inert={playerOpen || undefined}>
         <PageStack render={(e) => <PhonePage route={e.route} />} />
       </main>
-      <div className={`ph-dock ${cardShown ? "is-mini-away" : ""}`} aria-hidden={playerOpen || undefined} inert={playerOpen || undefined}>
+      <div className="ph-dock" aria-hidden={playerOpen || undefined} inert={playerOpen || undefined}>
         <MiniPlayer />
         <nav className="ph-tabs" aria-label="Tabs">
           {TABS.map((t) => {
