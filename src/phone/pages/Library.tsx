@@ -9,7 +9,6 @@ import { Art } from "../../components/Art";
 import { LikedCover } from "../../components/LikedCover";
 import { KIND_LABEL, SORT_LABEL, subtitle, useLibraryView, type LibEntry, type LibKind } from "../../stores/library";
 import { openEntry, useLibraryLoader, useLibraryModel } from "../../shell/useLibrary";
-import { useSettings } from "../../stores/settings";
 import { RowGlyphs } from "../bits";
 import { phone, usePhoneUi } from "../phoneUi";
 import { CratesBody } from "./Crates";
@@ -29,7 +28,9 @@ export function PhoneLibrary() {
   useLibraryLoader();
   const model = useLibraryModel("", false);
   const [view, setView] = useState<PhoneLibView>(loadView);
-  const cratesOn = useSettings((s) => s.settings?.showCrates !== false);
+  // Crates stay off the phone's Library for now: the owner found them
+  // confusing there. They're still on the computer and in Settings.
+  const cratesOn = false;
   const crates = usePhoneUi((u) => u.crates) && cratesOn;
   const setCrates = (on: boolean) => usePhoneUi.setState({ crates: on });
   const pick = (k: LibKind) => {

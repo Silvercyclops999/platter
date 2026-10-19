@@ -12,7 +12,6 @@ import { DEFAULT_SETTINGS, type PlayerState, type QueueItem, type Track } from "
 import { SettingsPage } from "../pages/SettingsPage";
 import { DESKTOP_ONLY, onPhone, phoneText } from "../pages/settingsMeta";
 import { usePhoneForm } from "../phone/form";
-import { CRATES_NOTE } from "../phone/pages/Crates";
 import { PhoneShell } from "../phone/PhoneShell";
 import { PhoneServerPick, PhoneSignIn } from "../phone/PhoneSignIn";
 import { phoneLookOf, phoneLookPatch } from "../phone/phoneSettings";
@@ -219,19 +218,12 @@ describe("phone settings screens", () => {
 });
 
 describe("crates in Library", () => {
-  it("are a type pill with a one-line note the first time only", async () => {
+  it("stay off the phone's Library for now, even with Show crates on", async () => {
     render(<PhoneShell />);
     act(() => phone.tab("library"));
-    const pill = await screen.findByRole("button", { name: "Crates", pressed: false });
-    fireEvent.click(pill);
-    expect(await screen.findByTestId("crates-note")).toHaveTextContent(CRATES_NOTE);
-    expect(screen.getByRole("tablist", { name: "Sort records by" })).toBeInTheDocument();
-    // Another type turns crates off; coming back, the note has been seen.
-    fireEvent.click(screen.getByRole("button", { name: "Albums" }));
-    expect(screen.queryByTestId("crates-note")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Crates" }));
-    expect(await screen.findByRole("tablist", { name: "Sort records by" })).toBeInTheDocument();
-    expect(screen.queryByTestId("crates-note")).not.toBeInTheDocument();
+    await screen.findByRole("heading", { name: "Library" });
+    expect(screen.getByRole("button", { name: "Albums" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Crates" })).not.toBeInTheDocument();
   });
 
   it("hide with Show crates off", async () => {

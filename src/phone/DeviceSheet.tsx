@@ -4,6 +4,7 @@
  * as rows with a type icon. A tapped row shows its progress at once until
  * the move is confirmed, and the player stays open through a switch.
  */
+import { backend } from "../lib/backend";
 import { Plate } from "../components/Plate";
 import { Cast, ChevronDown, Laptop, Loader2, MonitorSpeaker, Smartphone, Speaker, Tv, Users } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -116,7 +117,7 @@ export function DeviceSheet() {
       <button
         type="button"
         className="ph-pill ph-pill--wide"
-        onClick={() => toast.info("AirPlay and Bluetooth open from the system's own picker in the phone app.")}
+        onClick={() => void backend.showRoutePicker().catch(() => toast.info("AirPlay and Bluetooth open from the phone's own picker."))}
       >
         <Speaker size={18} aria-hidden="true" />
         AirPlay and Bluetooth
