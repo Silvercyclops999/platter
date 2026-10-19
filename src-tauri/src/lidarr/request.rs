@@ -1271,7 +1271,7 @@ impl Lidarr {
             return Ok(hidden);
         }
         let st = self.status();
-        if !(st.url_set || st.away_set) || !st.has_key || !self.last_check().is_some_and(|l| l.managed_ok.unwrap_or(l.passed)) {
+        if !st.usable() || !self.last_check().is_some_and(|l| l.managed_ok.unwrap_or(l.passed)) {
             return Ok(hidden);
         }
         let want = self.want(artist, Some(artist_id), None).await;

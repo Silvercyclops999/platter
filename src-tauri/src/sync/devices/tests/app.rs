@@ -22,7 +22,7 @@ impl LanSend for Direct {
 }
 
 /// Two hosts paired with the 6-digit code, on one network.
-async fn paired() -> (Host, Host) {
+pub(super) async fn paired() -> (Host, Host) {
     let pc = host(real_clock("pc", ACCT), ACCT_TOKEN, "http://relay").await;
     let phone = host(real_clock("phone", ACCT), ACCT_TOKEN, "http://relay").await;
     let code = pc.pairing.start().await.unwrap().code.unwrap();

@@ -41,6 +41,13 @@ pub trait LanSend: Send + Sync {
     /// Post sealed messages to the device with this id; its sealed answers.
     async fn post(&self, device: &str, path: &str, body: &LanBody) -> Result<LanBody, PeerError>;
 
+    /// As [`post`](Self::post), waiting up to `timeout` for the answer (a
+    /// Lidarr request the other device passes on before it answers).
+    async fn post_wait(&self, device: &str, path: &str, body: &LanBody, timeout: Duration) -> Result<LanBody, PeerError> {
+        let _ = timeout;
+        self.post(device, path, body).await
+    }
+
     /// The network changed: devices not reached before are worth trying
     /// again at once, and addresses found before may be wrong now.
     fn network_changed(&self) {}
@@ -125,11 +132,15 @@ impl PeerLan {
 #[async_trait]
 impl LanSend for PeerLan {
     async fn post(&self, device: &str, path: &str, body: &LanBody) -> Result<LanBody, PeerError> {
+        self.post_wait(device, path, body, self.timeout).await
+    }
+
+    async fn post_wait(&self, device: &str, path: &str, body: &LanBody, timeout: Duration) -> Result<LanBody, PeerError> {
         let client = self.client.client().await.ok_or_else(|| PeerError::Refused(SIGNED_OUT.into()))?;
         if self.is_down(device) {
             return Err(PeerError::Unreachable);
         }
-        let r = self.post_now(&client, device, path, body).await;
+        let r = self.post_now(&client, device, path, body, timeout).await;
         self.mark(device, !matches!(r, Err(PeerError::Unreachable)));
         r
     }
@@ -141,7 +152,7 @@ impl LanSend for PeerLan {
 }
 
 impl PeerLan {
-    async fn post_now(&self, client: &PeerClient, device: &str, path: &str, body: &LanBody) -> Result<LanBody, PeerError> {
+    async fn post_now(&self, client: &PeerClient, device: &str, path: &str, body: &LanBody, timeout: Duration) -> Result<LanBody, PeerError> {
         let cached = self.known.lock().get(device).cloned();
         let tries = match cached {
             Some(c) => vec![c, Vec::new()],
@@ -150,7 +161,7 @@ impl PeerLan {
         for bases in tries {
             let bases = if bases.is_empty() { self.find(device).await } else { bases };
             for b in &bases {
-                match client.sync_exchange(b, device, path, body, self.timeout).await {
+                match client.sync_exchange(b, device, path, body, timeout).await {
                     Err(PeerError::Unreachable) => continue,
                     r => return r,
                 }

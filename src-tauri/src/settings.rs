@@ -825,6 +825,11 @@ pub struct Settings {
     /// Send big things (a first copy, imported plays) only on Wi-Fi, not
     /// on mobile data (this device only).
     pub device_sync_wifi_only: bool,
+    /// Let my other devices use Lidarr through this computer: the user's
+    /// own paired devices (same account, checked) reach Lidarr through this
+    /// one over their device link, and the key stays here (this device
+    /// only). On by default; does nothing until Lidarr is set up here.
+    pub home_side_lidarr: bool,
     /// Bookmarks has a row in the library.
     pub bookmarks_in_library: bool,
     /// The Stats page (profile menu and library row).
@@ -1122,7 +1127,9 @@ fn discography_chip(c: &str) -> AppResult<String> {
 /// turns it on (`risky_features_start_off` checks the list). Kept on on
 /// purpose: reporting plays to your own Plex server (it's what a Plex player
 /// does; Private session stops it), looking for speakers on your own network
-/// (nothing about you is sent), and offers that ask before each send.
+/// (nothing about you is sent), offers that ask before each send, and
+/// answering Lidarr for your own paired devices (homeSideLidarr: only your
+/// own devices, checked, and nothing goes to anyone else).
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -1321,6 +1328,7 @@ impl Default for Settings {
             device_sync: true,
             device_sync_away: true,
             device_sync_wifi_only: true,
+            home_side_lidarr: true,
             bookmarks_in_library: true,
             stats_page: true,
             stats_strip: true,
@@ -1719,6 +1727,7 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "deviceSync",
     "deviceSyncAway",
     "deviceSyncWifiOnly",
+    "homeSideLidarr",
     // Signed in, and keys kept, per device.
     "scrobbleLastfm",
     "scrobbleListenbrainz",
@@ -1933,6 +1942,7 @@ pub struct SettingsPatch {
     pub device_sync: Option<bool>,
     pub device_sync_away: Option<bool>,
     pub device_sync_wifi_only: Option<bool>,
+    pub home_side_lidarr: Option<bool>,
     pub bookmarks_in_library: Option<bool>,
     pub stats_page: Option<bool>,
     pub stats_strip: Option<bool>,
@@ -2294,6 +2304,7 @@ impl Settings {
         set(&mut self.device_sync, p.device_sync);
         set(&mut self.device_sync_away, p.device_sync_away);
         set(&mut self.device_sync_wifi_only, p.device_sync_wifi_only);
+        set(&mut self.home_side_lidarr, p.home_side_lidarr);
         if let Some(h) = p.daylist_hours {
             if !DAYLIST_HOURS.contains(&h) {
                 return Err(AppError::Invalid("The daylist refreshes every 1, 3 or 6 hours.".into()));
@@ -2997,6 +3008,8 @@ pub struct Live {
     pub device_sync_away: Arc<AtomicBool>,
     /// Send big things only on Wi-Fi.
     pub device_sync_wifi_only: Arc<AtomicBool>,
+    /// Let my other devices use Lidarr through this computer.
+    pub home_side_lidarr: Arc<AtomicBool>,
     /// Scrobbling.
     pub scrobble: crate::scrobble::ScrobbleSwitches,
     /// The now-playing feed for widgets.
@@ -3120,6 +3133,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.device_sync.store(s.device_sync, Ordering::Relaxed);
     live.device_sync_away.store(s.device_sync_away, Ordering::Relaxed);
     live.device_sync_wifi_only.store(s.device_sync_wifi_only, Ordering::Relaxed);
+    live.home_side_lidarr.store(s.home_side_lidarr, Ordering::Relaxed);
     live.discord.set(s.discord());
     db.set_tag_view(s.tag_view());
     let before = (crate::db::release::count_unmatched(), crate::db::release::use_musicbrainz());
@@ -3780,6 +3794,14 @@ mod tests {
         for k in ["translationService", "lidarrUrl", "tautulliUrl", "listenRelay"] {
             assert_eq!(v[k], serde_json::json!(""), "{k} must start empty");
         }
+        // Deliberate exceptions, on from the start:
+        // - homeSideLidarr: Let my other devices use Lidarr through this
+        //   computer. It answers only the user's own paired devices (same
+        //   account, checked hello or signed request), sends nothing to a
+        //   third party, keeps the Lidarr key on this computer, and does
+        //   nothing until Lidarr is set up here.
+        assert_eq!(v["homeSideLidarr"], serde_json::json!(true));
+        assert!(DEVICE_SETTINGS.contains(&"homeSideLidarr") && !SYNCED_SETTINGS.contains(&"homeSideLidarr"));
         assert_eq!(s.ai_provider, crate::smart::prompt::AiProvider::None);
     }
 

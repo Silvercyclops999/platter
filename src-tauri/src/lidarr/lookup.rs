@@ -11,8 +11,7 @@ use crate::error::AppResult;
 impl Lidarr {
     /// An address and a key are set, so lookups can be asked.
     pub fn lookups_ready(&self) -> bool {
-        let s = self.status();
-        (s.url_set || s.away_set) && s.has_key
+        self.status().usable()
     }
 
     /// Artists matching search words.

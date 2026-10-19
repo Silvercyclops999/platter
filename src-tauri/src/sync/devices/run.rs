@@ -313,6 +313,19 @@ impl DeviceSync {
         self.paths.lock().insert(id.to_string(), s);
     }
 
+    pub(crate) fn set_path_state(&self, id: &str, s: PathState) {
+        self.set_path(id, s);
+    }
+
+    /// How the last send on a link went.
+    pub(crate) fn path(&self, id: &str) -> PathState {
+        self.paths.lock().get(id).copied().unwrap_or_default()
+    }
+
+    pub(crate) fn timing(&self) -> Timing {
+        self.timing
+    }
+
     /// Send messages on a link through the relay, in order. Stops at the
     /// first that doesn't go (the next round repairs what's missing).
     /// Entries past [`RELAY_MAX`] in one go wait for the local network or
@@ -330,6 +343,13 @@ impl DeviceSync {
         let mut sent = Vec::new();
         let mut failed = None;
         for m in msgs {
+            let size = link::packed_len(&m);
+            // Lidarr's answer for another device: too big for the relay
+            // says so plainly (the device asking waits for nothing).
+            let m = match m {
+                Msg::Answer { id, .. } if size > RELAY_MAX => Msg::Failed { id, message: crate::homeside::computer::TOO_BIG.into() },
+                m => m,
+            };
             let size = link::packed_len(&m);
             let bulk = matches!(m, Msg::SyncEntries { .. } | Msg::SyncDiff { .. });
             if size > RELAY_MAX || (bulk && size > budget) {

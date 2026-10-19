@@ -13,6 +13,8 @@
 //!   promotions and swaps when the music folder is mounted read-write, the
 //!   home Platter route, shared state with the desktops.
 //! - [`desktop`]: Settings > Bridge, and the desktop's half of the link.
+//! - [`computer`]: a computer as the home side for the user's other
+//!   devices, over device links (no Bridge needed).
 //! - [`route`]: the home Platter route, both halves.
 //! - [`links`]: pairings and per-link state; [`keys`]: the Bridge's secrets file.
 //! - [`health`]: `/health` on 127.0.0.1 for Docker's healthcheck.
@@ -22,6 +24,7 @@
 
 pub mod code;
 pub mod commands;
+pub mod computer;
 pub mod desktop;
 pub mod health;
 pub mod keys;

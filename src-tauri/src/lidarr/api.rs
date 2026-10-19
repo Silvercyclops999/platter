@@ -573,6 +573,9 @@ pub enum Route {
     Away,
     /// Through the user's Platter Bridge at home, over the sealed relay.
     Bridge,
+    /// Through one of the user's own computers that has Lidarr set up, over
+    /// the device link (the local network first, the sealed relay away).
+    Computer,
 }
 
 /// How GETs reach Lidarr. Only GETs exist at this layer, so nothing built

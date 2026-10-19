@@ -21,6 +21,11 @@
 //! Only devices of the same Plex account: a hello whose account tag isn't
 //! this device's is refused and nothing is sent to that link, and nothing
 //! but a hello is taken from a link until a hello has been checked.
+//!
+//! The same link carries Lidarr requests to a computer that offers the
+//! home side (`crate::homeside::computer`): a `Get` or `Write` is answered
+//! only once the link is checked, and only by a device whose hello said
+//! `lidarr`. A device that doesn't know these kinds ignores them.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,6 +35,7 @@ use serde::Serialize;
 
 use super::clock;
 use crate::db::DbHandle;
+use crate::homeside::computer::{Answers, HomeServe, NOT_CHECKED, Served, Turn, request_id};
 use crate::homeside::link::Link;
 use crate::homeside::links::{Links, Outbox, batches};
 use crate::homeside::wire::{Apart, Msg, PROTO, SyncHello};
@@ -89,6 +95,10 @@ pub struct PeerSeen {
     /// Which entries `held` counts.
     #[serde(skip)]
     pub held_keys: std::collections::BTreeSet<String>,
+    /// It answers Lidarr requests for this device (its last hello).
+    pub lidarr: bool,
+    /// When anything last came from it (this device's clock, ms).
+    pub heard_ms: Option<u64>,
     /// The two are back in touch after a long time apart (this round).
     #[serde(skip)]
     pub catching_up: Option<CatchUp>,
@@ -133,6 +143,14 @@ pub struct SyncPeer {
     /// Entries taken from each link this run, by namespace (for the counts
     /// a first copy shows).
     taken: Mutex<HashMap<String, std::collections::BTreeMap<String, usize>>>,
+    /// Lidarr requests this device sent to a computer, waiting for answers.
+    pub answers: Answers,
+    /// What answers Lidarr requests from the other devices here (a
+    /// computer with Lidarr set up); None: nothing does.
+    home: parking_lot::RwLock<Option<Arc<dyn HomeServe>>>,
+    /// Lidarr requests answered here, so one that comes twice is answered
+    /// once.
+    served: Served,
 }
 
 /// Most messages kept per link while its hello hasn't come.
@@ -170,7 +188,27 @@ fn entries_msgs(m: EntryMap) -> Vec<Msg> {
 
 impl SyncPeer {
     pub fn new(d: SyncDeps) -> Self {
-        Self { d, seen: Mutex::default(), waiting: Mutex::default(), adopting: Mutex::default(), taken: Mutex::default() }
+        Self {
+            d,
+            seen: Mutex::default(),
+            waiting: Mutex::default(),
+            adopting: Mutex::default(),
+            taken: Mutex::default(),
+            answers: Answers::default(),
+            home: parking_lot::RwLock::default(),
+            served: Served::default(),
+        }
+    }
+
+    /// Answer Lidarr requests from the other devices with this (a computer
+    /// with Lidarr set up), or with None stop.
+    pub fn set_home(&self, h: Option<Arc<dyn HomeServe>>) {
+        *self.home.write() = h;
+    }
+
+    /// Whether this device answers Lidarr requests for the others now.
+    pub fn offers_lidarr(&self) -> bool {
+        self.home.read().as_ref().is_some_and(|h| h.offers())
     }
 
     /// Entries taken from a link this run in these namespaces.
@@ -327,6 +365,7 @@ impl SyncPeer {
             answer,
             apart: None,
             partial: false,
+            lidarr: self.offers_lidarr(),
         })))
     }
 
@@ -342,8 +381,21 @@ impl SyncPeer {
     /// with.
     pub async fn handle(self: &Arc<Self>, link: &Link, msg: Msg) -> Vec<Msg> {
         tracing::debug!(kind = msg.kind(), "device sync: in");
+        let now = self.d.store.now();
+        self.set_seen(&link.id, |s| s.heard_ms = Some(now));
         match msg {
             Msg::SyncHello(h) => self.on_hello(link, *h).await,
+            // A computer's answer to a Lidarr request this device sent on
+            // this link (taken only for a request that went there).
+            Msg::Answer { id, status, body } => {
+                self.answers.resolve(&link.id, id, Ok(crate::homeside::route::response(status, &body)));
+                Vec::new()
+            }
+            Msg::Failed { id, message } => {
+                self.answers.resolve(&link.id, id, Err(message.chars().take(300).collect()));
+                Vec::new()
+            }
+            m @ (Msg::Get { .. } | Msg::Write { .. }) => self.on_home_request(link, m).await,
             Msg::SyncBye => {
                 tracing::info!("A device unpaired itself.");
                 if let Err(e) = self.d.links.remove(&link.id) {
@@ -428,6 +480,7 @@ impl SyncPeer {
         }
         let catching_up = apart.is_some();
         self.set_seen(&link.id, |s| {
+            s.lidarr = h.lidarr;
             s.catching_up = apart;
             s.name = name.clone();
             s.platform = h.platform.chars().take(30).collect();
@@ -439,10 +492,12 @@ impl SyncPeer {
             s.partial = h.partial;
         });
         let device: String = h.device.chars().take(100).collect();
+        let offers = h.lidarr;
         if let Err(e) = self.d.links.update(&link.id, |p| {
             p.name = name;
             p.version = h.version.chars().take(20).collect();
             p.device = Some(device);
+            p.offers_lidarr = offers;
         }) {
             tracing::warn!("device sync: couldn't save what a device said about itself: {e}");
         }
@@ -494,13 +549,74 @@ impl SyncPeer {
             // so each lets go of what the other let go of.
             out.append(&mut diffs);
         }
-        // Anything that came ahead of this hello.
+        // Anything that came ahead of this hello: Lidarr requests answered
+        // now it's checked, the rest as usual.
         let early = self.waiting.lock().remove(&link.id).unwrap_or_default();
+        let (asks, early): (Vec<Msg>, Vec<Msg>) = early.into_iter().partition(|m| request_id(m).is_some());
         if !early.is_empty() {
             let link = link.clone();
             out.extend(self.blocking(move |p| early.into_iter().flat_map(|m| p.on_checked(&link, m)).collect::<Vec<_>>()).await);
         }
+        for m in asks {
+            out.extend(self.serve_home(link, m).await);
+        }
         out
+    }
+
+    /// A Lidarr request from the other end of `link`. Answered only once
+    /// the link is checked (same account); before that it waits for the
+    /// hello, and this device says hello so one comes.
+    async fn on_home_request(self: &Arc<Self>, link: &Link, m: Msg) -> Vec<Msg> {
+        let Some(id) = request_id(&m) else { return Vec::new() };
+        let seen = self.seen(&link.id).unwrap_or_default();
+        match seen.paused {
+            Some(Paused::OtherAccount) => {
+                tracing::info!("home side: refused a Lidarr request from a device of another account");
+                return vec![Msg::Failed { id, message: "That computer is signed in to a different account.".into() }];
+            }
+            Some(Paused::SignedOut) => {
+                return vec![Msg::Failed { id, message: "That computer isn't signed in to Plex.".into() }];
+            }
+            None => {}
+        }
+        if !self.verified(&link.id) {
+            let first = {
+                let mut w = self.waiting.lock();
+                let q = w.entry(link.id.clone()).or_default();
+                let first = !q.iter().any(|x| request_id(x).is_some());
+                if q.len() >= WAITING_MAX {
+                    return vec![Msg::Failed { id, message: NOT_CHECKED.into() }];
+                }
+                q.push(m);
+                first
+            };
+            // Its hello hasn't come this run: ask for one.
+            return if first { self.hello_to(&link.id, false).await.into_iter().collect() } else { Vec::new() };
+        }
+        self.serve_home(link, m).await
+    }
+
+    /// Answer a checked link's Lidarr request (once, however often it comes).
+    async fn serve_home(&self, link: &Link, m: Msg) -> Vec<Msg> {
+        let Some(id) = request_id(&m) else { return Vec::new() };
+        let Some(home) = self.home.read().clone() else {
+            return vec![Msg::Failed { id, message: crate::homeside::computer::SETTING_OFF.into() }];
+        };
+        match self.served.start(&link.id, id) {
+            Turn::New(tx) => {
+                let answer = home.answer(&m).await.unwrap_or(Msg::Failed { id, message: crate::homeside::computer::NOT_SET_UP.into() });
+                let _ = tx.send(Some(answer.clone()));
+                vec![answer]
+            }
+            Turn::Again(mut rx) => {
+                // Answered already (or being answered): the same answer.
+                let got = tokio::time::timeout(crate::homeside::route::ANSWER_WAIT, rx.wait_for(Option::is_some)).await;
+                match got {
+                    Ok(Ok(a)) => a.clone().into_iter().collect(),
+                    _ => Vec::new(),
+                }
+            }
+        }
     }
 
     fn on_diff(&self, link: &Link, ns: &str, theirs: &[crate::sync::store::Stamp]) -> Vec<Msg> {
@@ -784,6 +900,7 @@ impl SyncPeer {
         self.waiting.lock().remove(link_id);
         self.adopting.lock().remove(link_id);
         self.taken.lock().remove(link_id);
+        self.served.forget(link_id);
     }
 
     /// Whether the other end keeps this namespace in step (from its hello).

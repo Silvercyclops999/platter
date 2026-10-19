@@ -43,6 +43,8 @@ mod changes_tests;
 #[cfg(test)]
 mod get_tests;
 #[cfg(test)]
+mod homeside_tests;
+#[cfg(test)]
 mod modes_tests;
 #[cfg(test)]
 mod request_keep_tests;
@@ -175,6 +177,8 @@ pub fn library_has_unreleased(c: &rusqlite::Connection) -> AppResult<bool> {
 
 /// The last check's outcome, kept on this device.
 const LAST_CHECK_KEY: &str = "lidarr.lastCheck";
+/// What the last check is kept under on a device with no Lidarr address.
+const HOME_SIDE_KEY: &str = "homeside";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -208,9 +212,24 @@ pub struct LidarrStatus {
     /// entered for, so the key isn't sent there: the words to show.
     pub moved: Option<String>,
     /// Set up, with a key, and the last setup check for this address passed:
-    /// Request buttons show (each request still checks again first).
+    /// Request buttons show (each request still checks again first). Or,
+    /// with nothing set up here, a home side answers and its check passed.
     pub ready: bool,
+    /// One of the user's computers at home, or a Bridge, answers Lidarr
+    /// requests for this device now (no address or key needed here).
+    pub home_side: bool,
 }
+
+impl LidarrStatus {
+    /// Lidarr can be asked from this device: set up here, or through a
+    /// home side.
+    pub fn usable(&self) -> bool {
+        ((self.url_set || self.away_set) && self.has_key) || self.home_side
+    }
+}
+
+/// When nothing answers for Lidarr away from home.
+pub const HOME_SIDE_OFF: &str = "Lidarr isn't reachable away from home. Turn on a computer at home or add the Bridge.";
 
 /// Worked-out modes and when (unix seconds).
 type ModesAt = (i64, Vec<modes::ArtistMode>);
@@ -305,11 +324,14 @@ impl Lidarr {
         let has_key = self.inner.keys.get(KEY_ACCOUNT).ok().flatten().is_some();
         let set = !home.trim().is_empty() || !away.trim().is_empty();
         let moved = if has_key { self.moved(&home, &away) } else { None };
+        let home_side = self.home_side_up();
+        let direct = set && has_key && moved.is_none();
         LidarrStatus {
             url_set: !home.trim().is_empty(),
             away_set: !away.trim().is_empty(),
             has_key,
-            ready: set && has_key && moved.is_none() && self.last_check().is_some_and(|l| l.managed_ok.unwrap_or(l.passed)),
+            ready: (direct || home_side) && self.last_check().is_some_and(|l| l.managed_ok.unwrap_or(l.passed)),
+            home_side,
             header_names: self.headers().into_iter().map(|(n, _)| n).collect(),
             unencrypted: [home, away].into_iter().filter(|u| unencrypted(u)).collect(),
             moved,
@@ -391,34 +413,41 @@ impl Lidarr {
             .map(|u| crate::keyhost::moved_words("Lidarr", u))
     }
 
-    /// The routes to try: home first, then away, then a paired Bridge. An
-    /// address whose host the key wasn't entered for (one that came from
-    /// another device) is left out: the key never goes there.
+    /// The routes to try: home first, then away, then one of the user's
+    /// computers at home that answers for this device, then a paired
+    /// Bridge. An address whose host the key wasn't entered for (one that
+    /// came from another device) is left out: the key never goes there.
+    /// With no address or key here, only the home sides (they hold the key).
     fn routes(&self) -> AppResult<Vec<Arc<dyn LidarrRoute>>> {
         let (home_set, away_set) = self.urls();
-        if home_set.trim().is_empty() && away_set.trim().is_empty() {
+        let computer = self.computer_route();
+        let bridge = self.bridge_route();
+        let home_sides = computer.is_some() || bridge.is_some();
+        let nothing_here = home_set.trim().is_empty() && away_set.trim().is_empty();
+        if nothing_here && !home_sides {
             return Err(AppError::Invalid("Set Lidarr's address first.".into()));
         }
         let keep = |u: &str| if !u.trim().is_empty() && self.key_goes_to(u, &home_set, &away_set) { u.to_string() } else { String::new() };
         let (home, away) = (keep(&home_set), keep(&away_set));
-        let key = self
-            .inner
-            .keys
-            .get(KEY_ACCOUNT)?
-            .ok_or_else(|| AppError::Invalid("Add Lidarr's API key first.".into()))?;
-        let bridge = self.bridge_route();
+        let key = self.inner.keys.get(KEY_ACCOUNT)?;
+        if key.is_none() && !home_sides {
+            return Err(AppError::Invalid("Add Lidarr's API key first.".into()));
+        }
         let mut out: Vec<Arc<dyn LidarrRoute>> = Vec::new();
-        if !home.trim().is_empty() {
-            let mut r = DirectRoute::new(self.inner.web.clone(), &home, key.clone(), vec![], Route::Home)?;
-            if !away.trim().is_empty() || bridge.is_some() {
-                r = r.with_timeout(HOME_TRY);
+        if let Some(key) = key {
+            if !home.trim().is_empty() {
+                let mut r = DirectRoute::new(self.inner.web.clone(), &home, key.clone(), vec![], Route::Home)?;
+                if !away.trim().is_empty() || home_sides {
+                    r = r.with_timeout(HOME_TRY);
+                }
+                out.push(Arc::new(r));
             }
-            out.push(Arc::new(r));
+            if !away.trim().is_empty() {
+                let headers = self.headers().into_iter().filter_map(|(n, v)| Token::new(v).ok().map(|t| (n, t))).collect();
+                out.push(Arc::new(DirectRoute::new(self.inner.web.clone(), &away, key, headers, Route::Away)?));
+            }
         }
-        if !away.trim().is_empty() {
-            let headers = self.headers().into_iter().filter_map(|(n, v)| Token::new(v).ok().map(|t| (n, t))).collect();
-            out.push(Arc::new(DirectRoute::new(self.inner.web.clone(), &away, key, headers, Route::Away)?));
-        }
+        out.extend(computer);
         out.extend(bridge);
         if out.is_empty() {
             return Err(AppError::Invalid(self.moved(&home_set, &away_set).unwrap_or_else(|| "Set Lidarr's address first.".into())));
@@ -501,8 +530,7 @@ impl Lidarr {
     /// The last check's outcome on this device, when it was for the
     /// address set now.
     pub fn last_check(&self) -> Option<LastCheck> {
-        let (home, away) = self.urls();
-        let url = url_key(if home.trim().is_empty() { &away } else { &home });
+        let url = self.check_key();
         self.inner
             .db
             .read(|c| kv_get(c, LAST_CHECK_KEY))
@@ -512,13 +540,20 @@ impl Lidarr {
             .filter(|l| l.url == url && !url.is_empty())
     }
 
-    fn remember_check(&self, report: &CheckReport, snap: &LidarrSnapshot) {
+    /// What the last check is kept under: the address set here, or the
+    /// home side when none is (a phone that reaches Lidarr only that way).
+    fn check_key(&self) -> String {
         let (home, away) = self.urls();
+        let url = url_key(if home.trim().is_empty() { &away } else { &home });
+        if url.is_empty() { HOME_SIDE_KEY.to_string() } else { url }
+    }
+
+    fn remember_check(&self, report: &CheckReport, snap: &LidarrSnapshot) {
         let last = LastCheck {
             passed: report.passed,
             managed_ok: Some(report.managed_ok),
             checked_at: report.checked_at,
-            url: url_key(if home.trim().is_empty() { &away } else { &home }),
+            url: self.check_key(),
             roots: snap.roots.iter().map(|r| r.path.clone()).collect(),
         };
         if let Ok(json) = serde_json::to_string(&last) {

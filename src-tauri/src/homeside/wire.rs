@@ -122,14 +122,15 @@ pub enum Msg {
     /// From the Bridge.
     Status(Box<BridgeStatus>),
     /// The home Platter route: a desktop away from home asks the Bridge to
-    /// read Lidarr.
+    /// read Lidarr. Also on a device link, to a computer that offers the
+    /// home side (its hello says `lidarr`).
     Get { id: u64, path: String, query: Vec<(String, String)> },
     /// The home Platter route: one of Lidarr's fixed writes, checked again
-    /// on the Bridge.
+    /// on the Bridge (or the computer answering on a device link).
     Write { id: u64, method: String, path: String, body: String },
     /// Lidarr's answer (body base64).
     Answer { id: u64, status: u16, body: String },
-    /// Lidarr couldn't be reached, or the Bridge refused.
+    /// Lidarr couldn't be reached, or the home side refused.
     Failed { id: u64, message: String },
     /// Either side forgets the other.
     Unpair,
@@ -199,6 +200,11 @@ pub struct SyncHello {
     /// time): it never counts as being in step.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub partial: bool,
+    /// This device answers Lidarr requests for the user's other devices
+    /// (Let my other devices use Lidarr through this computer). Left out
+    /// when not, so an older build's hello and a newer one's read the same.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub lidarr: bool,
 }
 
 /// When the two were last in step by the sender's clock (ms), and what

@@ -62,6 +62,10 @@ pub struct Paired {
     /// when the two were last in step before that.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catching_up_since: Option<u64>,
+    /// The other device said it answers Lidarr requests for this one (its
+    /// last hello), for Settings' list of home sides.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub offers_lidarr: bool,
 }
 
 #[derive(Clone)]
@@ -134,6 +138,7 @@ impl Links {
             last_synced_at: None,
             in_step: Vec::new(),
             catching_up_since: None,
+            offers_lidarr: false,
         });
         self.save(&list)
     }

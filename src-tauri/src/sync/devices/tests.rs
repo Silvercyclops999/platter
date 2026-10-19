@@ -976,5 +976,6 @@ mod lan {
 }
 
 mod app;
+mod home;
 mod mesh;
 mod pairing;

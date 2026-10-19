@@ -1497,6 +1497,21 @@ pub fn run() {
                     platform: id.platform.clone(),
                     version: id.version.clone(),
                 });
+                // The home side: this computer answers Lidarr for the user's
+                // other devices over their device links (while Let my other
+                // devices use Lidarr through this computer is on), and Lidarr
+                // here can go through a computer at home that does.
+                {
+                    let lidarr = app.state::<lidarr::Lidarr>().inner().clone();
+                    let on = live.home_side_lidarr.clone();
+                    devices.sync.peer.set_home(Some(Arc::new(homeside::computer::ComputerServes {
+                        lidarr: lidarr.clone(),
+                        db: db.clone(),
+                        on: Arc::new(move || on.load(std::sync::atomic::Ordering::Relaxed)),
+                    })));
+                    let weak = Arc::downgrade(&devices.sync);
+                    lidarr.set_computer_route(Some(Arc::new(move || weak.upgrade().and_then(|d| d.computer_route()))));
+                }
                 app.manage(devices);
             }
 
@@ -1978,6 +1993,7 @@ pub fn run() {
             homeside::commands::bridge_queued_apply,
             homeside::commands::bridge_queued_dismiss,
             homeside::commands::bridge_send_settings,
+            homeside::commands::lidarr_home_sides,
             lidarr::commands::lidarr_status,
             lidarr::commands::lidarr_key_set,
             lidarr::commands::lidarr_headers_set,

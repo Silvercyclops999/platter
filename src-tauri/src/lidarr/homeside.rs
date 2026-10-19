@@ -8,8 +8,10 @@
 //!   library's tags, which only a desktop reads. Desktops publish the modes
 //!   they work out (`mode:<server>:<key>`, Lidarr artists only), and the
 //!   Bridge works from those; with none yet it doesn't catch up.
-//! - **The home Platter route**: a desktop away from home can reach Lidarr
-//!   through its paired Bridge, after the home and away addresses.
+//! - **The home Platter route**: a phone or a desktop away from home can
+//!   reach Lidarr through one of the user's own computers that has it set up
+//!   (over the device link), and then through a paired Bridge, after the
+//!   home and away addresses.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,6 +27,7 @@ use super::shared::Shared;
 use super::write::{LidarrWrite, LidarrWriter, RelayedWrite, WriteCall};
 use crate::artistinfo::http::HttpResponse;
 use crate::error::{AppError, AppResult};
+use crate::plex::token::Token;
 
 /// Gives the Bridge route when a Bridge is paired and answering.
 pub type RouteFn = Arc<dyn Fn() -> Option<Arc<dyn LidarrRoute>> + Send + Sync>;
@@ -33,6 +36,8 @@ pub type RouteFn = Arc<dyn Fn() -> Option<Arc<dyn LidarrRoute>> + Send + Sync>;
 pub struct Hooks {
     bridge: AtomicBool,
     route: RwLock<Option<RouteFn>>,
+    /// A computer at home answering over a device link (`crate::homeside::computer`).
+    computer: RwLock<Option<RouteFn>>,
     /// On the Bridge: the desktops' name for this Lidarr in the shared
     /// store, whatever address the Bridge itself uses.
     server: RwLock<Option<String>>,
@@ -208,6 +213,49 @@ impl Lidarr {
             return None;
         }
         self.home.route.read().as_ref().and_then(|f| f())
+    }
+
+    /// How to reach Lidarr through one of the user's own computers that
+    /// answers for this device (set by the app's device sync).
+    pub fn set_computer_route(&self, f: Option<RouteFn>) {
+        *self.home.computer.write() = f;
+    }
+
+    pub(super) fn computer_route(&self) -> Option<Arc<dyn LidarrRoute>> {
+        if self.bridge_mode() {
+            return None;
+        }
+        self.home.computer.read().as_ref().and_then(|f| f())
+    }
+
+    /// A computer at home or a Bridge answers for this device now.
+    pub fn home_side_up(&self) -> bool {
+        self.computer_route().is_some() || self.bridge_route().is_some()
+    }
+
+    /// How this device reaches Lidarr itself, to answer for the user's
+    /// other devices: the home address, else the away address, each only
+    /// when the key was entered for its host here. Never through another
+    /// home side. With the secrets that must never be in an answer (the key
+    /// and any proxy header values).
+    pub fn home_side_route(&self) -> Option<(super::api::DirectRoute, Vec<Token>)> {
+        if self.bridge_mode() {
+            return None;
+        }
+        let (home, away) = self.urls();
+        let key = self.inner.keys.get(super::KEY_ACCOUNT).ok().flatten()?;
+        if !home.trim().is_empty() && self.key_goes_to(&home, &home, &away) {
+            let r = super::api::DirectRoute::new(self.inner.web.clone(), &home, key.clone(), vec![], Route::Home).ok()?;
+            return Some((r, vec![key]));
+        }
+        if !away.trim().is_empty() && self.key_goes_to(&away, &home, &away) {
+            let headers: Vec<(String, Token)> = self.headers().into_iter().filter_map(|(n, v)| Token::new(v).ok().map(|t| (n, t))).collect();
+            let mut secrets = vec![key.clone()];
+            secrets.extend(headers.iter().map(|(_, t)| t.clone()));
+            let r = super::api::DirectRoute::new(self.inner.web.clone(), &away, key, headers, Route::Away).ok()?;
+            return Some((r, secrets));
+        }
+        None
     }
 
     /// The writer for a connection (guarded on the Bridge).
