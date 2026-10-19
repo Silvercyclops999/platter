@@ -620,6 +620,8 @@ export interface Backend {
   showRoutePicker(): Promise<void>;
   /** A tap the phone can feel ("Haptics on controls"); nothing off the phone. */
   haptic(kind: "light" | "medium" | "selection" | "success" | "error"): Promise<void>;
+  /** The phone's status bar text: dark on a light look (nothing off the phone). */
+  setStatusBarStyle(dark: boolean): Promise<void>;
   /** Opens the project page in the default browser. */
   openProjectPage(): Promise<void>;
 
@@ -1477,6 +1479,7 @@ export function createTauriBackend(): Backend {
     appInfo: () => call("app_info"),
     showRoutePicker: () => call("show_route_picker"),
     haptic: (kind) => call("haptic", { kind }),
+    setStatusBarStyle: (dark) => call("set_status_bar_style", { dark }),
     openProjectPage: () => call("open_project_page"),
     updateCheck: () => call("update_check"),
     updateInstallOnRestart: () => call("update_install_on_restart"),

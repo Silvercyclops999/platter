@@ -3101,6 +3101,9 @@ export class MockBackend implements Backend {
   haptic() {
     return Promise.resolve();
   }
+  setStatusBarStyle() {
+    return Promise.resolve();
+  }
   updateCheck() {
     return this.delay(() =>
       this.opts.updateAvailable

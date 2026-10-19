@@ -26,6 +26,7 @@ pub mod power;
 pub mod haptics;
 pub mod reveal;
 pub mod route_picker;
+pub mod status_bar;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 pub mod session;
 #[cfg(target_os = "windows")]

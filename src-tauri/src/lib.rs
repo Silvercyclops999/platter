@@ -1550,6 +1550,7 @@ pub fn run() {
             import::commands::import_overview, import::commands::import_choose, import::commands::import_run, import::commands::import_review_queue, import::commands::import_review, import::commands::import_list_page, import::commands::import_missing, import::commands::import_missing_albums, import::commands::import_missing_album_add, import::commands::import_missing_album_remove, import::commands::import_open_link, import::commands::import_forget, import::commands::import_list_remove, import::commands::import_played, import::commands::import_played_hide, import::commands::import_played_hidden, import::account::commands::streaming_account_status, import::account::commands::streaming_account_sign_in, import::account::commands::streaming_account_read, import::account::commands::streaming_account_cancel, import::account::commands::streaming_account_sign_out, import::account::commands::streaming_account_client_id_set,
             platform::route_picker::show_route_picker,
             platform::haptics::haptic,
+            platform::status_bar::set_status_bar_style,
             plex::commands::auth_status,
             plex::commands::auth_start,
             plex::commands::auth_cancel,
