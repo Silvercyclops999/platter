@@ -7,13 +7,13 @@ import { create } from "zustand";
 import type { Album, Playlist, Track } from "../lib/types";
 import { useRouter, type Route } from "../stores/router";
 
-export type PhoneTab = "home" | "search" | "library" | "crates";
+export type PhoneTab = "home" | "search" | "library" | "you";
 
 export const TABS: { id: PhoneTab; label: string; route: Route }[] = [
   { id: "home", label: "Home", route: { name: "home" } },
   { id: "search", label: "Search", route: { name: "search" } },
   { id: "library", label: "Library", route: { name: "library" } },
-  { id: "crates", label: "Crates", route: { name: "crates" } },
+  { id: "you", label: "You", route: { name: "profile" } },
 ];
 
 /** A song's place in a playlist page, so its sheet can offer "Remove from this playlist". */
@@ -38,9 +38,13 @@ interface PhoneUi {
   nowPlaying: boolean;
   lyrics: boolean;
   sheets: Sheet[];
+  /** Library shows crates instead of the mixed list (its Crates pill). */
+  crates: boolean;
+  /** Home's now-playing card is on screen (the mini player steps aside). */
+  homeCard: boolean;
 }
 
-export const usePhoneUi = create<PhoneUi>()(() => ({ tab: "home", nowPlaying: false, lyrics: false, sheets: [] }));
+export const usePhoneUi = create<PhoneUi>()(() => ({ tab: "home", nowPlaying: false, lyrics: false, sheets: [], crates: false, homeCard: false }));
 
 export const phone = {
   /** A tab: its first page. Tapping the tab you're on goes back to its top. */
@@ -70,6 +74,7 @@ export const phone = {
 /** The tab a route belongs to when it is reached some other way. */
 export function tabOf(route: Route, current: PhoneTab): PhoneTab {
   if (route.name === "home" || route.name === "search" || route.name === "library") return route.name;
-  if (route.name === "crates" || route.name === "crate") return "crates";
+  if (route.name === "crates" || route.name === "crate") return "library";
+  if (route.name === "profile" || route.name === "settings" || route.name === "stats" || route.name === "diary") return "you";
   return current;
 }

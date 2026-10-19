@@ -78,7 +78,7 @@ describe("when the phone layout is used", () => {
 });
 
 describe("tabs", () => {
-  it("switch between Home, Search, Library and Crates", async () => {
+  it("switch between Home, Search, Library and You", async () => {
     render(<PhoneShell />);
     const tabs = screen.getByRole("navigation", { name: "Tabs" });
     expect(within(tabs).getByRole("button", { name: "Home" })).toHaveAttribute("aria-current", "page");
@@ -87,8 +87,10 @@ describe("tabs", () => {
     expect(within(tabs).getByRole("button", { name: "Search" })).toHaveAttribute("aria-current", "page");
     fireEvent.click(within(tabs).getByRole("button", { name: "Library" }));
     expect(await screen.findByRole("heading", { name: "Library" })).toBeInTheDocument();
-    fireEvent.click(within(tabs).getByRole("button", { name: "Crates" }));
-    expect(await screen.findByRole("heading", { name: "Crates" })).toBeInTheDocument();
+    fireEvent.click(within(tabs).getByRole("button", { name: "You" }));
+    expect(await screen.findByTestId("phone-you")).toBeInTheDocument();
+    expect(within(tabs).getAllByRole("button")).toHaveLength(4);
+    expect(within(tabs).queryByRole("button", { name: "Crates" })).not.toBeInTheDocument();
     expect(useRouter.getState().entries).toHaveLength(1);
   });
 
@@ -387,7 +389,7 @@ describe("pages", () => {
 
 describe("phone settings", () => {
   it("show on the phone only, and persist", async () => {
-    const { unmount } = render(<SettingsPage />);
+    const { unmount } = render(<SettingsPage section="Downloads and devices" />);
     expect(await screen.findByText("Haptics on controls")).toBeInTheDocument();
     const row = (key: string) => document.querySelector(`[data-setting="${key}"]`) as HTMLElement;
     fireEvent.click(within(row("phoneHaptics")).getByRole("switch"));

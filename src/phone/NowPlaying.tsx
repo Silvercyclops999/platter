@@ -1,8 +1,8 @@
 /**
- * Now playing, full screen: where the music is playing from, the record,
+ * Now playing, full screen: where the music is playing from, the cover,
  * the song, the tonearm seek line, the transport within thumb reach, and
  * output, format and queue along the bottom. Under the player: the lyrics
- * card, sleeve notes and credits. A sideways swipe on the record skips; a
+ * card, sleeve notes and credits. A sideways swipe on the cover skips; a
  * pull down closes, straight down to the tab underneath.
  */
 import { ChevronDown, ListMusic, MoreHorizontal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from "lucide-react";
@@ -15,17 +15,15 @@ import { useArtColours } from "../lib/useTint";
 import { useSleeveNotes } from "../lib/useSleeveNotes";
 import { useCreditRows } from "../shell/creditRows";
 import { SEEK_KEY_STEP, SEEK_PAGE_STEP } from "../shell/PlayerBar";
-import { Turntable } from "../shell/Turntable";
 import { player, usePlayer } from "../stores/player";
-import { useSettings } from "../stores/settings";
-import { FormatPlate, LikeControl, remaining, tap } from "./bits";
+import { FormatPlate, LikeControl, Marquee, remaining, tap } from "./bits";
 import { OutputButton } from "./DeviceSheet";
 import { useArtGestures } from "./gestures";
 import { LyricsCard } from "./LyricsScreen";
 import { phone, usePhoneUi } from "./phoneUi";
 
 /** The close slides straight down in this long. */
-export const CLOSE_MS = 350;
+export const CLOSE_MS = 300;
 
 const CONTEXT_NOUN: Record<string, string> = {
   album: "album",
@@ -62,7 +60,6 @@ export function NowPlaying() {
 function Player({ track, closing }: { track: Track; closing: boolean }) {
   const ctx = usePlayer((s) => s.state?.queue.context ?? null);
   const status = usePlayer((s) => s.state?.status ?? "idle");
-  const spin = useSettings((s) => (s.settings?.recordMotion ?? "off") !== "off");
   const colours = useArtColours(null, track.thumb);
   const playing = status === "playing" || status === "loading" || status === "buffering";
   const screen = useRef<HTMLElement>(null);
@@ -113,15 +110,18 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
             {...handlers}
             style={{ transform: offset.x ? `translateX(${offset.x}px)` : undefined }}
           >
-            <Turntable thumb={track.thumb} playing={playing && spin} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} requestSize={600} />
+            <div className={`ph-np__cover ${playing ? "is-playing" : ""}`}>
+              <Art path={track.thumb} fluid requestSize={900} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} />
+            </div>
           </div>
+          <div className="ph-np__deck">
           <div className="ph-np__meta">
             <div className="ph-np__names">
               <button type="button" className="ph-np__title" onClick={() => phone.go({ name: "album", id: track.albumId })}>
                 {track.title}
               </button>
-              <button type="button" className="ph-np__artist" onClick={() => phone.go({ name: "artist", id: track.artistId })}>
-                {trackArtistLine(track)}
+              <button type="button" className="ph-np__artist" aria-label={trackArtistLine(track)} onClick={() => phone.go({ name: "artist", id: track.artistId })}>
+                <Marquee text={trackArtistLine(track)} moving={playing} />
               </button>
             </div>
             <LikeControl track={track} />
@@ -144,6 +144,7 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
             >
               <ListMusic size={24} aria-hidden="true" />
             </button>
+          </div>
           </div>
         </div>
         <LyricsCard track={track} />

@@ -9,6 +9,7 @@
  * URL switches (plain browser only):
  *   ?latency=ms     delay every command (default 120; 0 in tests)
  *   ?signedOut=1    start on the sign-in screen
+ *   ?serverPick=1   start signed in with a server still to pick
  *   ?albums=5000    pad the album list to N items (virtual grid perf check)
  *   ?httpArt=1      art URLs in the Windows app's form (http://art.localhost/…?w=&h=)
  *                   instead of generated SVGs, for memory checks that serve
@@ -230,6 +231,8 @@ const MOCK_LABELS = ["Northlight Records", "Harbor Sound", "Quiet Hours Music", 
 export interface MockOptions {
   latencyMs: number;
   signedOut: boolean;
+  /** Signed in, with a server still to pick (?serverPick=1). */
+  serverPick?: boolean;
   albumCount?: number;
   /** Art URLs in the app's http://art.localhost form (see the header). */
   httpArt?: boolean;
@@ -322,6 +325,7 @@ export function shapeFixtures(fx: Fixtures, o: Partial<MockOptions>): Fixtures {
       for (const t of fx.tracksByAlbum.get(a.id) ?? []) {
         t.albumTitle = a.title;
         t.title = `${t.title} (Extended Version, Recorded Live at the Old Exchange Hall)`;
+        t.trackArtist = `${t.artistTitle} feat. Mara Quill, Odessa Fenn, The Low Orchard and Jun Takeda`;
       }
     });
     const long = fx.artists[0];
@@ -346,6 +350,7 @@ export function optionsFromUrl(search: string): MockOptions {
   return {
     latencyMs: p.has("latency") ? Number(p.get("latency")) : isTestEnv ? 0 : 120,
     signedOut: p.get("signedOut") === "1",
+    serverPick: p.get("serverPick") === "1",
     albumCount: p.has("albums") ? Number(p.get("albums")) : undefined,
     httpArt: p.get("httpArt") === "1",
     timelines: !isTestEnv,
@@ -863,7 +868,9 @@ export class MockBackend implements Backend {
       ? { state: "signedOut", needsServerPick: false }
       : this.opts.health === "signIn"
         ? { state: "signedOut", username: "listener", avatar: AVATAR, needsServerPick: false, reauthRequired: true }
-        : { state: "signedIn", username: "listener", avatar: AVATAR, server: SERVER, needsServerPick: false };
+        : this.opts.serverPick
+          ? { state: "signedIn", username: "listener", avatar: AVATAR, needsServerPick: true }
+          : { state: "signedIn", username: "listener", avatar: AVATAR, server: SERVER, needsServerPick: false };
     const startStatus = this.opts.health ?? (this.opts.timelines ? "starting" : "local");
     this.healthState = this.makeHealth(startStatus);
 

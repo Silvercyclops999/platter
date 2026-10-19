@@ -10,19 +10,16 @@ import { Art } from "../components/Art";
 import { trackArtistLine } from "../lib/format";
 import { useArtColours } from "../lib/useTint";
 import { player, usePlayer } from "../stores/player";
-import { FormatPlate, tap } from "./bits";
+import { FormatPlate, ProgressLine, tap } from "./bits";
 import { OutputButton } from "./DeviceSheet";
 import { phone } from "./phoneUi";
 
 export function MiniPlayer() {
   const track = usePlayer((s) => s.state?.track ?? null);
   const status = usePlayer((s) => s.state?.status ?? "idle");
-  const positionMs = usePlayer((s) => s.positionMs);
-  const durationMs = usePlayer((s) => s.durationMs);
   const colours = useArtColours(null, track?.thumb);
   if (!track) return null;
   const playing = status === "playing" || status === "loading" || status === "buffering";
-  const progress = durationMs > 0 ? Math.min(1, positionMs / durationMs) : 0;
   const style = { "--ph-tint": colours?.vivid ?? "var(--color-bg-overlay)" } as CSSProperties;
   return (
     <div className="ph-mini" style={style} data-testid="mini-player">
@@ -50,9 +47,7 @@ export function MiniPlayer() {
       >
         {playing ? <Pause size={24} fill="currentColor" aria-hidden="true" /> : <Play size={24} fill="currentColor" aria-hidden="true" />}
       </button>
-      <span className="ph-mini__progress" aria-hidden="true">
-        <span className="ph-mini__progress-fill" style={{ transform: `scaleX(${progress})` }} />
-      </span>
+      <ProgressLine className="ph-mini__progress" />
     </div>
   );
 }

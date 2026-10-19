@@ -124,13 +124,17 @@ import { toast } from "../stores/toasts";
 import { HelpButton, LearnMore } from "../help/HelpButton";
 import {
   ADVANCED,
+  DESKTOP_ONLY_PAGES,
   GROUPS,
+  GROUP_BLURB,
   GROUP_HELP,
   PAGES,
   advancedView,
   groupId,
   helpFor,
+  onPhone,
   pageMeta,
+  phoneWords,
   resetPatch,
   settingsOfRows,
   settingsView,
@@ -832,9 +836,11 @@ function GroupMenu({ title, onReset }: { title: string; onReset: () => void }) {
 }
 
 /** Settings (opened from the header or with Ctrl/Cmd+,). `page` opens one of its pages (tests; the app uses the route). */
-export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
+export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: PageId; section?: GroupName } = {}) {
   const entry = useCurrentEntry();
   const routePage = entry.route.name === "settings" ? entry.route.page : undefined;
+  /** The phone shows one group at a time. */
+  const routeSection = entry.route.name === "settings" ? entry.route.section : undefined;
   /** A row a link opened Settings at: its page shows, with its Advanced fold open. */
   const routeRow = entry.route.name === "settings" ? entry.route.row : undefined;
   const prevRoute = useRouter((x) => x.entries[x.index - 1]?.route);
@@ -3665,7 +3671,7 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
   ];
 
 
-  const usable = rows.filter((r) => !r.cap || caps[r.cap]);
+  const usable = rows.filter((r) => (!r.cap || caps[r.cap]) && (!isPhone || onPhone(r))).map((r) => (isPhone ? phoneWords(r) : r));
   const q = query.trim();
   const inline = settingsView.inlinePages;
   const transcribing = !!s?.transcribeLyrics;
@@ -3900,7 +3906,7 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
           {title}
         </h2>
         {more && <HelpButton page={more[0]} anchor={more[1]} label={`Help with ${title}`} />}
-        {!searching && scopeSettings(scope).length > 0 && <GroupMenu title={title} onReset={() => setResetSection(scope)} />}
+        {!searching && !isPhone && scopeSettings(scope).length > 0 && <GroupMenu title={title} onReset={() => setResetSection(scope)} />}
       </div>
     );
   };
@@ -3922,7 +3928,7 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
     </div>
   );
 
-  const groupPages = (g: GroupName) => PAGES.filter((p) => p.group === g && pageOn(p.id));
+  const groupPages = (g: GroupName) => PAGES.filter((p) => p.group === g && pageOn(p.id) && (!isPhone || !DESKTOP_ONLY_PAGES.has(p.id)));
 
   /** One group on the main view. */
   const groupSection = (g: GroupName) => {
@@ -4045,6 +4051,146 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       )
     : true;
 
+  const dialogs = (
+    <>
+      <ConfirmDialog
+        open={dialog === "signOut"}
+        title="Sign out of Plex?"
+        body={`Platter forgets your Plex sign-in on this ${isPhone ? "phone" : "computer"}. You'll need to sign in again to play your music.`}
+        confirm="Sign out"
+        onConfirm={() => void signOut()}
+        onClose={() => setDialog(null)}
+      />
+      <ConfirmDialog
+        open={removeHistory !== null}
+        title={`Remove your plays from ${removeHistory ? SOURCE_NAMES[removeHistory] : ""}?`}
+        body={`Platter deletes the plays it brought in from ${removeHistory ? SOURCE_NAMES[removeHistory] : ""} and turns this source off. Nothing changes there, and Platter's own plays stay. Turn it on again to bring them back.`}
+        confirm="Remove plays"
+        onConfirm={() => removeHistory && void history.remove(removeHistory)}
+        onClose={() => setRemoveHistory(null)}
+      />
+      <ConfirmDialog
+        open={resetSection !== null}
+        title={`Reset ${resetSection ? scopeTitle(resetSection) : ""} settings?`}
+        body={`The ${resetSection ? scopeTitle(resetSection) : ""} settings go back to how they are on a new install. Addresses, folders and keys you set up stay as they are.`}
+        confirm="Reset"
+        onConfirm={() => resetSection && void reset(resetSection)}
+        onClose={() => setResetSection(null)}
+      />
+      <ConfirmDialog
+        open={pendingRule !== null}
+        title="Undo your exceptions?"
+        body={`${pendingRule?.lost === 1 ? "1 feature is" : `${pendingRule?.lost ?? 0} features are`} set differently under Advanced. This rule sets ${pendingRule?.lost === 1 ? "it" : "them"} back.`}
+        confirm="Change the rule"
+        onConfirm={() => pendingRule && void updateSettings(patchForRule(pendingRule.rule, useSettings.getState().settings))}
+        onClose={() => setPendingRule(null)}
+      />
+      <ServerDialog open={dialog === "server"} onClose={() => setDialog(null)} current={auth?.server?.machineId} />
+      <NoticesDialog open={dialog === "notices"} onClose={() => setDialog(null)} />
+    </>
+  );
+
+  if (isPhone) {
+    const g = page ? undefined : (sectionProp ?? routeSection);
+    const offline = usable.filter((r) => r.key === "goOffline");
+    let body: ReactNode;
+    if (page) body = pageView(page);
+    else if (g) {
+      const domId = groupId(g);
+      const pages = groupPages(g);
+      body = (
+        <section className="settings__group ph-set-section" aria-labelledby={domId} data-group={g}>
+          <h1 id={domId} className="ph-title" tabIndex={-1}>
+            {g}
+          </h1>
+          {foldedRows(
+            g,
+            // The phone's Look leads Appearance, where Theme stands on a computer.
+            usable.filter((r) => r.section === g && !r.page).sort((a, b) => Number(b.key === "phoneLook") - Number(a.key === "phoneLook")),
+            domId,
+            pages.length > 0 && (
+              <ul className="ph-set-list ph-set-list--pages" aria-label={`More in ${g}`}>
+                {pages.map((p) => (
+                  <li key={p.id}>
+                    <button type="button" className="ph-set-link" onClick={() => openPage(p.id)} data-page={p.id}>
+                      <span className="ph-set-link__text">
+                        <span className="ph-set-link__title">{p.title}</span>
+                        <span className="ph-set-link__sub">{p.blurb}</span>
+                      </span>
+                      {p.kind === "integration" && <span className={`ph-set-link__state${connected[p.id] ? " is-on" : ""}`}>{connected[p.id] ? "On" : "Off"}</span>}
+                      <ChevronRight size={18} aria-hidden="true" className="ph-set-link__chev" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ),
+          )}
+          {scopeSettings(g).length > 0 && (
+            <button type="button" className="ph-set-reset" onClick={() => setResetSection(g)}>
+              Reset {g} settings
+            </button>
+          )}
+        </section>
+      );
+    } else
+      body = (
+        <>
+          <h1 className="ph-title">Settings</h1>
+          <label className="ph-field ph-set-search">
+            <span className="sr-only">Search settings</span>
+            <input
+              type="search"
+              className="ph-field__input"
+              value={query}
+              placeholder="Search settings"
+              enterKeyHint="search"
+              autoCorrect="off"
+              autoCapitalize="none"
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </label>
+          {searching ? (
+            <>
+              {results()}
+              {!anyResult && (
+                <div className="ph-empty" role="status">
+                  <p className="ph-empty__title">No settings match "{q}"</p>
+                  <p className="ph-empty__text">Try another word, like quality, cache or motion.</p>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {offline.length > 0 && (
+                <div className="ph-set-card">
+                  <RowList rows={offline} />
+                </div>
+              )}
+              <ul className="ph-set-list" aria-label="Settings sections">
+                {GROUPS.filter((x) => usable.some((r) => r.section === x) || groupPages(x).length > 0).map((x) => (
+                  <li key={x}>
+                    <button type="button" className="ph-set-link" onClick={() => nav.go({ name: "settings", section: x })}>
+                      <span className="ph-set-link__text">
+                        <span className="ph-set-link__title">{x}</span>
+                        <span className="ph-set-link__sub">{GROUP_BLURB[x]}</span>
+                      </span>
+                      <ChevronRight size={18} aria-hidden="true" className="ph-set-link__chev" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </>
+      );
+    return (
+      <div className="settings settings--phone">
+        {body}
+        {dialogs}
+      </div>
+    );
+  }
+
   return (
     <div className="page-pad settings">
       <h1 className="page-title">Settings</h1>
@@ -4090,40 +4236,7 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
           <p className="settings__hint">Shortcut: {modKey}+,</p>
         </div>
       </div>
-      <ConfirmDialog
-        open={dialog === "signOut"}
-        title="Sign out of Plex?"
-        body="Platter forgets your Plex sign-in on this computer. You'll need to sign in again to play your music."
-        confirm="Sign out"
-        onConfirm={() => void signOut()}
-        onClose={() => setDialog(null)}
-      />
-      <ConfirmDialog
-        open={removeHistory !== null}
-        title={`Remove your plays from ${removeHistory ? SOURCE_NAMES[removeHistory] : ""}?`}
-        body={`Platter deletes the plays it brought in from ${removeHistory ? SOURCE_NAMES[removeHistory] : ""} and turns this source off. Nothing changes there, and Platter's own plays stay. Turn it on again to bring them back.`}
-        confirm="Remove plays"
-        onConfirm={() => removeHistory && void history.remove(removeHistory)}
-        onClose={() => setRemoveHistory(null)}
-      />
-      <ConfirmDialog
-        open={resetSection !== null}
-        title={`Reset ${resetSection ? scopeTitle(resetSection) : ""} settings?`}
-        body={`The ${resetSection ? scopeTitle(resetSection) : ""} settings go back to how they are on a new install. Addresses, folders and keys you set up stay as they are.`}
-        confirm="Reset"
-        onConfirm={() => resetSection && void reset(resetSection)}
-        onClose={() => setResetSection(null)}
-      />
-      <ConfirmDialog
-        open={pendingRule !== null}
-        title="Undo your exceptions?"
-        body={`${pendingRule?.lost === 1 ? "1 feature is" : `${pendingRule?.lost ?? 0} features are`} set differently under Advanced. This rule sets ${pendingRule?.lost === 1 ? "it" : "them"} back.`}
-        confirm="Change the rule"
-        onConfirm={() => pendingRule && void updateSettings(patchForRule(pendingRule.rule, useSettings.getState().settings))}
-        onClose={() => setPendingRule(null)}
-      />
-      <ServerDialog open={dialog === "server"} onClose={() => setDialog(null)} current={auth?.server?.machineId} />
-      <NoticesDialog open={dialog === "notices"} onClose={() => setDialog(null)} />
+      {dialogs}
     </div>
   );
 }

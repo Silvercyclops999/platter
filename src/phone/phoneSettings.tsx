@@ -33,8 +33,47 @@ function sw(s: Settings | null, key: "phoneMobileDownloads" | "phoneHaptics", id
 
 const GROUP = "On this phone";
 
+/** The phone's one look choice: follow the phone's light or dark, or one look. */
+export type PhoneLook = "device" | "studio" | "studioBlack" | "sleeve" | "other";
+
+export function phoneLookOf(s: Pick<Settings, "theme" | "followSystem" | "themeFile">): PhoneLook {
+  if (s.themeFile) return "other";
+  const studio = s.theme === "studio" || s.theme === "studioBlack" || s.theme === "sleeve";
+  if (!studio) return "other";
+  if (s.followSystem) return "device";
+  return s.theme as PhoneLook;
+}
+
+/** What picking a look sets. Match device pairs Studio (dark) with Sleeve (light). */
+export function phoneLookPatch(v: PhoneLook, current: Pick<Settings, "theme">): Partial<Settings> {
+  if (v === "device") return { theme: current.theme === "studioBlack" ? "studioBlack" : "studio", followSystem: true, themeFile: null };
+  if (v === "other") return {};
+  return { theme: v, followSystem: false, themeFile: null };
+}
+
+export function phoneLookOptions(current: PhoneLook): SelectOption<PhoneLook>[] {
+  const base: SelectOption<PhoneLook>[] = [
+    { value: "device", label: "Match device" },
+    { value: "studio", label: "Studio" },
+    { value: "studioBlack", label: "Studio Black" },
+    { value: "sleeve", label: "Sleeve" },
+  ];
+  return current === "other" ? [...base, { value: "other", label: "Another look" }] : base;
+}
+
 export function phoneRows(s: Settings | null): RowDef[] {
   return [
+    {
+      key: "phoneLook",
+      section: "Appearance",
+      title: "Look",
+      description: "Match device follows the phone's light or dark: Studio when dark, Sleeve when light.",
+      control: (ids) => {
+        if (!s) return wait;
+        const cur = phoneLookOf(s);
+        return <Select value={cur} options={phoneLookOptions(cur)} onChange={(v) => void updateSettings(phoneLookPatch(v, s))} labelledBy={ids.title} describedBy={ids.desc} />;
+      },
+    },
     {
       key: "phoneMobileDownloads",
       section: "Downloads and devices",

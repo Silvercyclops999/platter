@@ -4,6 +4,7 @@
  * as rows with a type icon. A tapped row shows its progress at once until
  * the move is confirmed, and the player stays open through a switch.
  */
+import { Plate } from "../components/Plate";
 import { Cast, ChevronDown, Laptop, Loader2, MonitorSpeaker, Smartphone, Speaker, Tv, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Slider } from "../components/Slider";
@@ -68,7 +69,7 @@ export function DeviceSheet() {
       <div className={`ph-device-card ${remote ? "is-remote" : ""}`}>
         <div className="ph-device-card__text">
           <span className="ph-device-card__name">{remote ? remote.playerName : "This phone"}</span>
-          {quality && <span className="ph-plate tabular">{quality}</span>}
+          {quality && <Plate size="sm">{quality}</Plate>}
           {track && (
             <span className="ph-device-card__now">
               {track.title} · {track.artistTitle}

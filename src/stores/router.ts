@@ -30,7 +30,7 @@ export type Route =
   /** Liked Songs. */
   | { name: "liked" }
   /** Settings, or one of its pages (an integration or a tool with its own page); `row` opens where that row is. */
-  | { name: "settings"; page?: import("../pages/settingsMeta").PageId; row?: string }
+  | { name: "settings"; page?: import("../pages/settingsMeta").PageId; row?: string; section?: import("../pages/settingsMeta").GroupName }
   /** What was played here, by day and listening session. */
   | { name: "recents" }
   /** New releases by followed artists (the top bar's bell). */

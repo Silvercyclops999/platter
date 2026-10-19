@@ -11,6 +11,11 @@ export function phoneFromUrl(search: string): boolean {
   return new URLSearchParams(search).get("phone") === "1";
 }
 
+/** `?notch=1`: the browser mock draws a notch's and home indicator's safe areas. */
+export function notchFromUrl(search: string): boolean {
+  return new URLSearchParams(search).get("notch") === "1";
+}
+
 /** A phone's web view, before the core has answered. */
 export function phoneFromAgent(ua: string): boolean {
   return /iPhone|iPod|Android.+Mobile/i.test(ua);

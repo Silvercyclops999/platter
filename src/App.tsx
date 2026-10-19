@@ -6,6 +6,7 @@ import { installTheme, motionPreference } from "./stores/theme";
 import { SignInPage, ServerPickPage } from "./pages/SignInPage";
 import { AppShell } from "./shell/AppShell";
 import { PhoneShell } from "./phone/PhoneShell";
+import { PhoneServerPick, PhoneSignIn } from "./phone/PhoneSignIn";
 import { checkFormWithCore, usePhoneForm } from "./phone/form";
 import { connectApp, useApp } from "./stores/app";
 import { connectFileTags } from "./stores/fileTags";
@@ -104,9 +105,10 @@ function MainApp() {
   // still plays) and the sign-in screen opens from the banner.
   // Without Plex, the saved servers decide (until they're known, the frame shows).
   let page;
-  if (auth && auth.state !== "signedIn" && servers !== null && ((!auth.reauthRequired && !otherServer) || signInOpen))
-    page = <SignInPage onBack={auth.reauthRequired || otherServer ? () => useUi.getState().setSignInOpen(false) : undefined} />;
-  else if (auth?.needsServerPick) page = <ServerPickPage />;
+  if (auth && auth.state !== "signedIn" && servers !== null && ((!auth.reauthRequired && !otherServer) || signInOpen)) {
+    const onBack = auth.reauthRequired || otherServer ? () => useUi.getState().setSignInOpen(false) : undefined;
+    page = isPhone ? <PhoneSignIn onBack={onBack} /> : <SignInPage onBack={onBack} />;
+  } else if (auth?.needsServerPick) page = isPhone ? <PhoneServerPick /> : <ServerPickPage />;
   else page = isPhone ? <PhoneShell /> : <AppShell />;
   return (
     <>

@@ -3,7 +3,10 @@
  * frame, row glyphs, a like control and a light tap of feedback.
  */
 import { Pin } from "lucide-react";
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Plate } from "../components/Plate";
+import { prefersReducedMotion } from "../design/motion";
+import { usePlayer } from "../stores/player";
 import { DownloadedGlyph } from "../components/DownloadButton";
 import { PlusGlyph, TickGlyph } from "../components/SaveButton";
 import { qualityLabel } from "../lib/format";
@@ -33,7 +36,12 @@ export function FormatPlate({ track, className = "" }: { track: Track; className
   const downloaded = useIsDownloaded(track.id);
   const text = plateText(track, downloaded);
   if (!text) return null;
-  return <span className={`ph-plate tabular ${className}`}>{text}</span>;
+  const hiRes = !downloaded && ((track.bitDepth ?? 0) > 16 || (track.sampleRate ?? 0) > 48_000);
+  return (
+    <Plate size="sm" tone={hiRes ? "lit" : "plain"} className={`ph-plate ${className}`}>
+      {text}
+    </Plate>
+  );
 }
 
 /** Glyphs before a library row's grey line: pinned, downloaded. */
@@ -144,6 +152,51 @@ export function SheetFrame({
         {footer && <div className="ph-sheet__foot">{footer}</div>}
       </div>
     </div>
+  );
+}
+
+/** A thin progress line: only it follows the position, so its parent stays still on each tick. */
+export function ProgressLine({ className }: { className: string }) {
+  const progress = usePlayer((s) => (s.durationMs > 0 ? Math.min(1, s.positionMs / s.durationMs) : 0));
+  return (
+    <span className={className} aria-hidden="true">
+      <span className={`${className}-fill`} style={{ transform: `scaleX(${progress})` }} />
+    </span>
+  );
+}
+
+/**
+ * One line that may be too long: it sits still and fades at the edge, and
+ * while `moving` it drifts slowly sideways to show the rest, resting at each
+ * end. Under reduced motion it never moves.
+ */
+export function Marquee({ text, moving, className = "" }: { text: string; moving: boolean; className?: string }) {
+  const box = useRef<HTMLSpanElement>(null);
+  const inner = useRef<HTMLSpanElement>(null);
+  const [over, setOver] = useState(0);
+  useEffect(() => {
+    const measure = () => {
+      const b = box.current;
+      const i = inner.current;
+      if (!b || !i) return;
+      setOver(Math.max(0, Math.ceil(i.scrollWidth - b.clientWidth)));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined" || !box.current) return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(box.current);
+    return () => ro.disconnect();
+  }, [text]);
+  const run = moving && over > 0 && !prefersReducedMotion();
+  // About 24 pt a second, plus a rest at each end.
+  const seconds = Math.max(6, over / 24 + 4);
+  const style = { "--ph-marquee-shift": `-${over}px`, "--ph-marquee-time": `${seconds}s` } as CSSProperties;
+  return (
+    <span ref={box} className={`ph-marquee ${over > 0 ? "is-over" : ""} ${run ? "is-moving" : ""} ${className}`} style={style}>
+      <span ref={inner} className="ph-marquee__text">
+        {text}
+      </span>
+    </span>
   );
 }
 

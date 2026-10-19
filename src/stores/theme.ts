@@ -105,9 +105,30 @@ export function installTheme(win: Window = window): () => void {
     if (useSettings.getState().settings) update(doc);
   };
   mq?.addEventListener?.("change", onChange);
+  // A phone's web view can answer "light" while the app is still starting,
+  // and miss the change while it sleeps in the background: ask again once
+  // it has settled and whenever it comes back to the front.
+  const recheck = () => {
+    if (!mq) return;
+    const dark = mq.matches;
+    if (dark === useTheme.getState().systemDark) return;
+    useTheme.setState({ systemDark: dark });
+    if (useSettings.getState().settings) update(doc);
+  };
+  const onVisible = () => {
+    if (doc.visibilityState === "visible") recheck();
+  };
+  const settle = win.setTimeout(recheck, 600);
+  doc.addEventListener("visibilitychange", onVisible);
+  win.addEventListener("focus", recheck);
+  win.addEventListener("pageshow", recheck);
   return () => {
     unSettings();
     mq?.removeEventListener?.("change", onChange);
+    win.clearTimeout(settle);
+    doc.removeEventListener("visibilitychange", onVisible);
+    win.removeEventListener("focus", recheck);
+    win.removeEventListener("pageshow", recheck);
   };
 }
 

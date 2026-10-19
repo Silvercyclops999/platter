@@ -6,6 +6,8 @@
 import { MoreHorizontal, Pause, Play, Shuffle } from "lucide-react";
 import type { CSSProperties } from "react";
 import { Art } from "../../components/Art";
+import { Plate } from "../../components/Plate";
+import { discGroups } from "../../pages/album";
 import { DownloadButton } from "../../components/DownloadButton";
 import { backend } from "../../lib/backend";
 import { formatLongDuration, qualityLabel, releaseTypeLabel } from "../../lib/format";
@@ -42,7 +44,7 @@ export function PhoneAlbum({ id }: { id: string }) {
         </button>
         <p className="ph-album__facts">
           <span className="tabular">{facts}</span>
-          {plate && <span className="ph-plate tabular">{plate}</span>}
+          {plate && <Plate size="sm">{plate}</Plate>}
         </p>
       </header>
       <div className="ph-actions">
@@ -66,11 +68,21 @@ export function PhoneAlbum({ id }: { id: string }) {
           </button>
         </div>
       </div>
-      <ul className="ph-songs" aria-label="Songs">
-        {tracks.map((t) => (
-          <SongRow key={t.id} track={t} index={t.trackNumber} art={false} onPlay={() => void player.playAlbum(album.id, t.id)} />
-        ))}
-      </ul>
+      {discGroups(tracks).map((g) => (
+        <section key={g.disc ?? "all"} className="ph-disc-group" aria-label={g.disc !== null ? `Disc ${g.disc}` : undefined}>
+          {g.disc !== null && (
+            <h2 className="ph-disc-head">
+              <span>Disc {g.disc}</span>
+              <span className="ph-disc-head__count tabular">{countLine(g.tracks.length, "song")}</span>
+            </h2>
+          )}
+          <ul className="ph-songs" aria-label={g.disc !== null ? `Disc ${g.disc} songs` : "Songs"}>
+            {g.tracks.map((t) => (
+              <SongRow key={t.id} track={t} index={t.trackNumber} art={false} onPlay={() => void player.playAlbum(album.id, t.id)} />
+            ))}
+          </ul>
+        </section>
+      ))}
       <p className="ph-foot tabular">
         {countLine(tracks.length, "song")}, {formatLongDuration(data.totalDurationMs)}
       </p>

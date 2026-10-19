@@ -194,6 +194,8 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "miniplayerTint",
   "miniplayerQueue",
   "miniplayerSideBySide",
+  // The phone shows the cover in now playing, never a record player.
+  "recordMotion",
   // Looks: building and files.
   "showLookBuilder",
   "themeFile",
@@ -421,3 +423,91 @@ export function resetPatch(keys: (keyof Settings)[], defaults: Settings): Partia
   for (const k of keys) (p as Record<string, unknown>)[k] = defaults[k];
   return p;
 }
+
+/**
+ * Rows that only make sense on a computer: the tray, the window, global
+ * keys, the miniplayer, layouts, folders on disk, this computer's name and
+ * work that needs a desktop processor. The phone layout leaves them out.
+ */
+export const DESKTOP_ONLY: ReadonlySet<string> = new Set([
+  // App: the tray, start-up, keys and the desktop updater.
+  "closeToTray",
+  "launchAtLogin",
+  "keyboardShortcuts",
+  "mediaKeys",
+  "powerKeys",
+  "hintKey",
+  "updates",
+  "settingsFile",
+  // Appearance: layouts, the window, the sidebar, the player bar and the miniplayer.
+  "layout",
+  "layoutOffered",
+  "sidebarArt",
+  "upNextLine",
+  "volumePercent",
+  "fullWindowHideControls",
+  "fullWindowRememberMode",
+  "miniplayerOnTop",
+  "miniplayerTint",
+  "miniplayerQueue",
+  "miniplayerSideBySide",
+  // The phone shows the cover in now playing, never a record player.
+  "recordMotion",
+  // Looks: building looks and theme files want a mouse and a folder.
+  "makeOwn",
+  "showLookBuilder",
+  "themeFile",
+  // Library: mouse dragging and the shelf's spines.
+  "dragAndDrop",
+  "spineWidthByTracks",
+  // Sound: the phone picks its output through the system.
+  "outputDevice",
+  // Downloads and devices: folders and this computer as a player.
+  "downloadFolder",
+  "computerName",
+  "showToMyDevices",
+  "actAsPlexPlayer",
+  // Lyrics: transcription runs on a computer.
+  "transcribeLyrics",
+  // Discord lives on the computer.
+  "discordShowUnreleased",
+  "discordUnreleasedArt",
+]);
+
+/** Pages the phone layout leaves out, for the same reason. */
+export const DESKTOP_ONLY_PAGES: ReadonlySet<PageId> = new Set<PageId>(["discord", "streamDeck", "widgetFeed", "devices", "tags", "soundId", "transcription"]);
+
+/** Whether a row shows in the phone layout. */
+export function onPhone(row: { key: string; page?: PageId }): boolean {
+  return !DESKTOP_ONLY.has(row.key) && !PHONE_REPLACED.has(row.key) && !(row.page && DESKTOP_ONLY_PAGES.has(row.page));
+}
+
+/** Rows the phone shows its own way: Theme and Follow system become one Look row. */
+export const PHONE_REPLACED: ReadonlySet<string> = new Set(["theme", "followSystem"]);
+
+/** A row's words said for a phone: "this computer" becomes "this phone". */
+export function phoneText(text: string): string {
+  return text
+    .replace(/\b(this|your|the) computer's\b/gi, (_, w: string) => `${w} phone's`)
+    .replace(/\b(this|your|the) computer\b/gi, (_, w: string) => `${w} phone`)
+    .replace(/\bon your computers\b/gi, "on your devices");
+}
+
+/** The same row with its words said for a phone. */
+export function phoneWords<T extends { title: string; description: string; more?: string }>(row: T): T {
+  return { ...row, title: phoneText(row.title), description: phoneText(row.description), more: row.more === undefined ? undefined : phoneText(row.more) };
+}
+
+/** One line under each group on the phone's list of sections. */
+export const GROUP_BLURB: Readonly<Record<GroupName, string>> = {
+  "Account and servers": "Your sign-in, servers and libraries",
+  Playback: "Shuffle, crossfade, Automix and the queue",
+  Sound: "Quality, loudness and the equalizer",
+  Library: "Search, mixes, crates and what pages show",
+  "Downloads and devices": "Offline music, mobile data and other players",
+  Appearance: "Theme, colours and the record player",
+  Lyrics: "Where lyrics come from and how they show",
+  Integrations: "Last.fm, Lidarr and other services",
+  "Sharing and friends": "Share links, sessions and friends",
+  App: "Notifications, help and the cache",
+};

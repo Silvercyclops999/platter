@@ -240,18 +240,22 @@ function ClassicShell({ children }: { children: ReactNode }) {
   );
 }
 
-/** Dialogs, menus and hosts every frame carries (the phone shell too). */
-export function ShellHosts() {
+/**
+ * Dialogs, menus and hosts every frame carries. The phone shell leaves out
+ * the ones that need a keyboard, a mouse or a desktop window.
+ */
+export function ShellHosts({ phone = false }: { phone?: boolean } = {}) {
+  const desk = !phone;
   return (
     <>
       <NewLookOffer />
-      <LayoutOffer />
-      <CommandPalette />
+      {desk && <LayoutOffer />}
+      {desk && <CommandPalette />}
       <LazyGuideHost />
       <WhatsNewDialog />
       <ShareMusicDialog />
-      <ShortcutsHelp />
-      <PowerHints />
+      {desk && <ShortcutsHelp />}
+      {desk && <PowerHints />}
       <ContextMenuHost />
       <SavedInHost />
       <Toaster />
@@ -266,18 +270,18 @@ export function ShellHosts() {
       <LazySmartEditorHost />
       <FolderDialogs />
       <DownloadDialogs />
-      <DragAnnouncer />
+      {desk && <DragAnnouncer />}
       <LazyLyricsEditorHost />
       <LazyWrongLyricsHost />
-      <FullWindow />
+      {desk && <FullWindow />}
       <LazyShareCardHost />
-      <DeckActions />
-      <DeckPairPrompt />
+      {desk && <DeckActions />}
+      {desk && <DeckPairPrompt />}
       <LazyStatsDialogHost />
       <LazyWrappedHost />
-      <LazyLookBuilderHost />
+      {desk && <LazyLookBuilderHost />}
       <LazyPickLookHost />
-      <LookDrop />
+      {desk && <LookDrop />}
       <CoverLightSource />
     </>
   );

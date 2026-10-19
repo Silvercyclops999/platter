@@ -4,7 +4,7 @@
  * It is a different arrangement of the same stores and core calls the
  * desktop uses; nothing here talks to a server.
  */
-import { Home, Library, Package, Search } from "lucide-react";
+import { CircleUserRound, Home, Library, Search } from "lucide-react";
 import { lazy, Suspense, useEffect } from "react";
 import { afterFirstPaint } from "../lib/idle";
 import { ShellHosts } from "../shell/AppShell";
@@ -26,19 +26,26 @@ import { PhoneHome } from "./pages/Home";
 import { PhoneLibrary } from "./pages/Library";
 import { PhoneLiked, PhonePlaylist } from "./pages/Playlist";
 import { PhoneSearch } from "./pages/Search";
+import { PhoneYou } from "./pages/You";
+import { notchFromUrl } from "./form";
 import { TABS, phone, tabOf, usePhoneUi, type PhoneTab } from "./phoneUi";
 import { SheetHost } from "./Sheets";
 import "./phone.css";
 
 const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 
-const TAB_ICON: Record<PhoneTab, typeof Home> = { home: Home, search: Search, library: Library, crates: Package };
+const TAB_ICON: Record<PhoneTab, typeof Home> = { home: Home, search: Search, library: Library, you: CircleUserRound };
+
+/** The browser mock's stand-in for a notch and home indicator (`?notch=1`). */
+export const NOTCH = typeof window !== "undefined" && notchFromUrl(window.location.search);
 
 export function PhoneShell() {
   const entry = useCurrentEntry();
   const tab = usePhoneUi((s) => s.tab);
   const playerOpen = usePhoneUi((s) => s.nowPlaying);
   const hasTrack = usePlayer((s) => !!s.state?.track);
+  // On Home, the big now-playing card stands in for the mini player.
+  const cardShown = usePhoneUi((s) => s.homeCard) && entry.route.name === "home";
   useLibraryRecents();
   useEffect(() => void loadOwnLyricsIds(), []);
   useEffect(() => void startDownloads(), []);
@@ -49,11 +56,11 @@ export function PhoneShell() {
     if (t !== usePhoneUi.getState().tab) usePhoneUi.setState({ tab: t });
   }, [entry.route]);
   return (
-    <div className={`phone ${hasTrack ? "has-mini" : ""}`} data-testid="phone-shell" data-tab={tab}>
+    <div className={`phone ${hasTrack ? "has-mini" : ""} ${NOTCH ? "ph-notch" : ""}`} data-testid="phone-shell" data-tab={tab}>
       <main className="ph-main" aria-hidden={playerOpen || undefined} inert={playerOpen || undefined}>
         <PhonePage key={entry.key} route={entry.route} />
       </main>
-      <div className="ph-dock" aria-hidden={playerOpen || undefined} inert={playerOpen || undefined}>
+      <div className={`ph-dock ${cardShown ? "is-mini-away" : ""}`} aria-hidden={playerOpen || undefined} inert={playerOpen || undefined}>
         <MiniPlayer />
         <nav className="ph-tabs" aria-label="Tabs">
           {TABS.map((t) => {
@@ -80,7 +87,7 @@ export function PhoneShell() {
       <NowPlaying />
       <LyricsScreen />
       <SheetHost />
-      <ShellHosts />
+      <ShellHosts phone />
     </div>
   );
 }
@@ -106,10 +113,12 @@ export function PhonePage({ route }: { route: Route }) {
       return <PhonePlaylist id={route.id} />;
     case "liked":
       return <PhoneLiked />;
+    case "profile":
+      return <PhoneYou />;
     case "settings":
       return (
         <div className="ph-page ph-settings">
-          <BackBar title="Settings" />
+          <BackBar />
           <Suspense fallback={<PageLoading />}>
             <SettingsPage page={route.page} />
           </Suspense>

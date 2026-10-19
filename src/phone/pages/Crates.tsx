@@ -1,26 +1,58 @@
 /**
  * Crates on the phone: the library sorted into labels, producers, studios,
- * eras and genres. Pick a kind, then a crate to see its records.
+ * eras and genres. They live in Library under the Crates pill; a crate opens
+ * its own page of records.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Art } from "../../components/Art";
 import { backend } from "../../lib/backend";
 import type { CrateKind } from "../../lib/types";
 import { useLoad } from "../../lib/useLoad";
-import { CRATE_TABS, CRATE_TAB_LABEL, crateLine, records } from "../../pages/crates";
+import { CRATE_PLATE, CRATE_TABS, CRATE_TAB_LABEL, crateLine, records } from "../../pages/crates";
 import { player } from "../../stores/player";
 import { nav } from "../../stores/router";
 import { BackBar, PageFailed, PageLoading, ShelfCard } from "./common";
 
-export function PhoneCrates({ kind: start }: { kind?: CrateKind }) {
+const NOTE_KEY = "platter.phone.cratesNoteSeen";
+
+/** Whether the one-line explanation of crates has been shown on this phone. */
+export function cratesNoteSeen(): boolean {
+  try {
+    return localStorage.getItem(NOTE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markNoteSeen() {
+  try {
+    localStorage.setItem(NOTE_KEY, "1");
+  } catch {
+    // Shown again next time; no harm.
+  }
+}
+
+export const CRATES_NOTE = "Crates are hand-picked piles of records, like a crate at a record shop.";
+
+/** The crate kinds as a quiet row of tabs, then the crates of that kind. */
+export function CratesBody({ start }: { start?: CrateKind }) {
   const [kind, setKind] = useState<CrateKind>(start ?? CRATE_TABS[0]);
+  // The note shows on the first visit only, and stays for that visit.
+  const [note] = useState(() => !cratesNoteSeen());
+  useEffect(() => {
+    if (note) markNoteSeen();
+  }, [note]);
   const { data, error, retry } = useLoad(() => backend.crates(kind), [kind]);
   return (
-    <div className="ph-page ph-crates">
-      <h1 className="ph-title">Crates</h1>
-      <div className="ph-pills ph-pills--scroll" role="group" aria-label="Sort records by">
+    <div className="ph-crates">
+      {note && (
+        <p className="ph-note" role="note" data-testid="crates-note">
+          {CRATES_NOTE}
+        </p>
+      )}
+      <div className="ph-seg" role="tablist" aria-label="Sort records by">
         {CRATE_TABS.map((k) => (
-          <button key={k} type="button" className={`ph-chip ${kind === k ? "is-on" : ""}`} aria-pressed={kind === k} onClick={() => setKind(k)}>
+          <button key={k} type="button" role="tab" className={`ph-seg__tab ${kind === k ? "is-on" : ""}`} aria-selected={kind === k} onClick={() => setKind(k)}>
             {CRATE_TAB_LABEL[k]}
           </button>
         ))}
@@ -28,7 +60,11 @@ export function PhoneCrates({ kind: start }: { kind?: CrateKind }) {
       {error && !data ? (
         <PageFailed what="crates" retry={retry} />
       ) : !data ? (
-        <PageLoading />
+        <ul className="ph-crate-list" aria-busy="true">
+          {[0, 1, 2, 3].map((i) => (
+            <li key={i} className="ph-lib-row--ghost" />
+          ))}
+        </ul>
       ) : data.crates.length === 0 ? (
         <p className="ph-rows__note">No crates of this kind yet. They fill in from your records' tags and sleeve notes.</p>
       ) : (
@@ -56,24 +92,44 @@ export function PhoneCrates({ kind: start }: { kind?: CrateKind }) {
   );
 }
 
+/** Crates reached by a link: the same list on a page of its own. */
+export function PhoneCrates({ kind }: { kind?: CrateKind }) {
+  return (
+    <div className="ph-page">
+      <BackBar />
+      <h1 className="ph-title">Crates</h1>
+      <CratesBody start={kind} />
+    </div>
+  );
+}
+
 export function PhoneCrate({ kind, crateKey }: { kind: CrateKind; crateKey: string }) {
   const { data, error, retry } = useLoad(() => backend.cratePage(kind, crateKey), [kind, crateKey]);
-  if (error && !data) return <PageFailed what="this crate" retry={retry} />;
+  if (error && !data)
+    return (
+      <div className="ph-page">
+        <BackBar />
+        <PageFailed what="this crate" retry={retry} />
+      </div>
+    );
   if (data === undefined) return <PageLoading />;
   if (data === null)
     return (
       <div className="ph-page">
         <BackBar />
-        <p className="ph-rows__note">This crate is empty now.</p>
+        <div className="ph-empty">
+          <p className="ph-empty__title">This crate is empty now</p>
+          <p className="ph-empty__text">Its records were moved or retagged.</p>
+        </div>
       </div>
     );
   return (
     <div className="ph-page ph-crate-page">
-      <BackBar />
-      <h1 className="ph-title">{data.name}</h1>
-      <p className="ph-section-sub tabular">{records(data.albums.length)}</p>
+      <BackBar title={data.name} />
+      <p className="ph-eyebrow">{CRATE_PLATE[kind]}</p>
+      <h1 className="ph-title ph-title--page">{data.name}</h1>
       <div className="ph-actions">
-        <span />
+        <p className="ph-section-sub tabular">{records(data.albums.length)}</p>
         <button type="button" className="ph-pill is-primary" onClick={() => void player.playTracks(data.trackIds)}>
           Play the crate
         </button>
