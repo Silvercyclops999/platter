@@ -16,6 +16,7 @@
 //!   for tests).
 //! - [`publish`]: telling plex.tv where this computer answers.
 //! - [`keys`]: the requests that copy keys between devices.
+//! - [`sync`]: the requests that keep the user's devices in step.
 
 pub mod auth;
 #[cfg(target_os = "ios")]
@@ -27,6 +28,7 @@ pub mod keys;
 pub mod publish;
 pub mod runtime;
 pub mod server;
+pub mod sync;
 
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};

@@ -11,6 +11,7 @@ use url::Url;
 
 use super::auth::{AUTH_HEADER, PeerKey, nonce, now_ms, sign};
 use super::keys::{KeysDeliver, KeysHello, KeysHelloReply, KeysWaiting, PATH_KEYS_DELIVER, PATH_KEYS_HELLO, PATH_KEYS_WAITING};
+use super::sync::{LanBody, PATH_SYNC_ENTRIES, PATH_SYNC_HELLO};
 use super::{Hello, PATH_COMMAND, PATH_HELLO, PATH_PLAY, PATH_STATE, PATH_STOP, PeerTimeline, PlayRequest};
 use crate::error::{AppError, AppResult};
 use crate::remote::companion::Timeline;
@@ -213,6 +214,16 @@ impl PeerClient {
 
     pub async fn keys_deliver(&self, base: &Url, to: &str, req: &KeysDeliver, timeout: Duration) -> Result<(), PeerError> {
         self.call::<serde_json::Value>(base, to, PATH_KEYS_DELIVER, Some(Self::json(req)), timeout).await.map(|_| ())
+    }
+
+    /// Sealed device sync messages to `to`, and its sealed answers.
+    /// `path`: [`PATH_SYNC_HELLO`](super::sync::PATH_SYNC_HELLO) or
+    /// [`PATH_SYNC_ENTRIES`](super::sync::PATH_SYNC_ENTRIES).
+    pub async fn sync_exchange(&self, base: &Url, to: &str, path: &str, req: &LanBody, timeout: Duration) -> Result<LanBody, PeerError> {
+        if path != PATH_SYNC_HELLO && path != PATH_SYNC_ENTRIES {
+            return Err(PeerError::Failed("not a sync request".into()));
+        }
+        self.call(base, to, path, Some(Self::json(req)), timeout).await
     }
 }
 
