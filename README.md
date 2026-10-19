@@ -35,6 +35,7 @@ side for the stuff that never got an official release.
 - Smart shuffle mixes similar songs from your library into a playlist or album, marked so you can tell them apart.
 - Downloads of albums, playlists, Liked Songs and mixes, in original quality or as smaller MP3s, that keep playing with no server.
 - A miniplayer with its own queue you can reorder, laid out side by side when the window is wide.
+- A visualizer in now playing: a spectrum analyser, a pair of VU meters, a stereo scope or a soft glow from the cover. It only runs while it's on screen.
 - Go Offline stops all network use, and a dropped server dims what isn't on this computer instead of breaking.
 - Works with media keys and the Windows media flyout, and has a Mac menu bar, close to tray and start at sign-in.
 
@@ -106,6 +107,7 @@ The tagging rules are in [docs/TAGGING.md](docs/TAGGING.md).
 - Listen along with friends on your server or theirs, through an encrypted relay where nobody sees anyone's address.
 - Server owners can see what others on the server are playing.
 - Settings, pins, follows and your own lyrics can sync through a cloud folder you already use.
+- Keep my devices in sync pairs your computers and phone with a short code and keeps settings, pins, looks and imported plays the same on each, over your home network first and an encrypted relay when you're away. Keys and passwords stay on the device they were entered on. In beta.
 - Sync playlists, albums and Liked Songs to a USB drive, SD card or Rockbox player, as the original files or converted, copying only what changed.
 
 ### Stats
@@ -125,7 +127,8 @@ The tagging rules are in [docs/TAGGING.md](docs/TAGGING.md).
 - A release radar for artists you follow, with requests through Lidarr if you have it.
 - Library import reads exports from other services and transfer tools, and keeps a Missing list.
 - Played a lot lists what your imported listening history played most that isn't in your library. Bring in my listening asks Lidarr for those albums a few a day, and pauses when Lidarr's queue or disk fills up.
-- Platter Bridge is an optional small container for your server. Once paired, it keeps Lidarr work like Bring in my listening going while your computer is off. See [docs/BRIDGE.md](docs/BRIDGE.md).
+- Away from home, your other devices reach Lidarr through a computer at home that has it set up. The key never leaves that computer.
+- Platter Bridge is an optional small container for your server that does the same while every computer is off, and keeps Lidarr work like Bring in my listening going. It can start from its own settings and shows a pairing code in its log. See [docs/BRIDGE.md](docs/BRIDGE.md).
 - Scrobbling to Last.fm and ListenBrainz, with unreleased songs left out unless you say so.
 - Tautulli, read for plays from before you used Platter.
 - Discord status with the album cover.
