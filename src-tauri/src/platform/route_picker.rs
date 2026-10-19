@@ -4,7 +4,9 @@
 
 use tauri::{AppHandle, Runtime};
 
-use crate::error::{AppError, AppResult};
+#[cfg(not(target_os = "ios"))]
+use crate::error::AppError;
+use crate::error::AppResult;
 
 #[tauri::command]
 pub async fn show_route_picker<R: Runtime>(app: AppHandle<R>) -> AppResult<()> {

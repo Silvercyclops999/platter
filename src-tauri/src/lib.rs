@@ -3,6 +3,7 @@ pub mod archive;
 pub mod artistinfo;
 pub mod audio;
 pub mod backend;
+pub mod carplay;
 pub mod bookmarks;
 pub mod bridge;
 pub mod db;
@@ -453,6 +454,8 @@ pub fn run() {
     }
     #[cfg(target_os = "ios")]
     platform::audio_session::start();
+    #[cfg(target_os = "ios")]
+    carplay::ios::install();
 
     desktop_plugins(tauri::Builder::default())
         .plugin(tauri_plugin_deep_link::init())
@@ -1534,6 +1537,8 @@ pub fn run() {
             app.manage(art);
             app.manage(artist_info);
             app.manage(player);
+            #[cfg(target_os = "ios")]
+            carplay::ios::attach(app.handle());
             app.manage(audio::compare::CompareState::default());
             app.manage(app_settings);
             app.manage(live.platform.clone());

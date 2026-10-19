@@ -3628,6 +3628,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-car-play"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2aaa052307955aa8276f2ab3a2d6aac6637ae4a533846f406d8fa45b5d160ee1"
+dependencies = [
+ "block2",
+ "dispatch2",
+ "objc2",
+ "objc2-foundation",
+ "objc2-ui-kit",
+]
+
+[[package]]
 name = "objc2-cloud-kit"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4228,6 +4241,7 @@ dependencies = [
  "mp3lame-encoder",
  "objc2",
  "objc2-avf-audio",
+ "objc2-car-play",
  "objc2-core-audio",
  "objc2-core-foundation",
  "objc2-foundation",
