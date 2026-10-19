@@ -176,13 +176,14 @@ enum Cmd {
     Toggle(Reply<()>),
     Pause(Reply<()>),
     Resume(Reply<()>),
-    /// The system took the sound away (a call, another app's video) or
-    /// gave it back; `resume` is the system's word that playing on is fine.
-    Interruption { began: bool, resume: bool },
-    /// The output stream may be dead (the session was reset or deactivated
-    /// by another app): rebuild it before the next sound, or at once when
-    /// `now` and something is playing.
-    OutputStale { now: bool },
+    /// The system took the sound away (a call, another app's video, or
+    /// headphones leaving) or gave it back; `resume` is the system's word
+    /// that playing on is fine. `stale`: the stream may have been killed
+    /// meanwhile (not so for headphones leaving).
+    Interruption { began: bool, resume: bool, stale: bool },
+    /// The output stream may be dead (the media services were reset):
+    /// rebuild it now if playing, else before the next sound.
+    OutputStale,
     Next(Reply<()>),
     Previous(Reply<()>),
     Seek(u64, Reply<()>),
@@ -633,14 +634,18 @@ impl PlayerHandle {
     pub async fn resume(&self) -> AppResult<()> {
         self.call(Cmd::Resume).await
     }
-    /// A system interruption began or ended (see [`Cmd::Interruption`]).
+    /// A system interruption (a call, another app) began or ended.
     pub fn interruption(&self, began: bool, resume: bool) {
-        let _ = self.tx.send(Cmd::Interruption { began, resume });
+        let _ = self.tx.send(Cmd::Interruption { began, resume, stale: true });
     }
-    /// The output stream may be dead: rebuild it before the next sound
-    /// (and at once while playing, when `now`).
-    pub fn output_stale(&self, now: bool) {
-        let _ = self.tx.send(Cmd::OutputStale { now });
+    /// Headphones left (pause) or the same ones came back (play on, unless
+    /// the user played or paused meanwhile).
+    pub fn headphones(&self, back: bool) {
+        let _ = self.tx.send(Cmd::Interruption { began: !back, resume: back, stale: false });
+    }
+    /// The media services were reset: rebuild the stream.
+    pub fn output_stale(&self) {
+        let _ = self.tx.send(Cmd::OutputStale);
     }
     pub async fn next(&self) -> AppResult<()> {
         self.call(Cmd::Next).await
@@ -1792,6 +1797,22 @@ impl Actor {
     // ------------------------------------------------------------ commands
 
     fn handle(&mut self, cmd: Cmd) {
+        // The user decided: the end of an interruption doesn't overrule it.
+        if matches!(
+            cmd,
+            Cmd::SetContext { .. }
+                | Cmd::SetContextAt { .. }
+                | Cmd::Adopt { .. }
+                | Cmd::Toggle(_)
+                | Cmd::Pause(_)
+                | Cmd::Resume(_)
+                | Cmd::Next(_)
+                | Cmd::Previous(_)
+                | Cmd::QueueJump(..)
+                | Cmd::JumpAt(..)
+        ) {
+            self.interrupted_playing = false;
+        }
         match cmd {
             Cmd::Wake => return,
             Cmd::State(tx) => {
@@ -1898,11 +1919,11 @@ impl Actor {
             Cmd::Resume(reply) => {
                 let _ = reply.send(self.do_resume());
             }
-            Cmd::Interruption { began, resume } => self.on_interruption(began, resume),
-            Cmd::OutputStale { now } => {
+            Cmd::Interruption { began, resume, stale } => self.on_interruption(began, resume, stale),
+            Cmd::OutputStale => {
                 self.output_stale = true;
-                if now && self.is_active() {
-                    self.refresh_output();
+                if self.is_active() && self.refresh_output().is_err() {
+                    self.pause_for_output();
                 }
             }
             Cmd::Next(reply) => {
@@ -2343,10 +2364,11 @@ impl Actor {
     /// A call or another app took the sound: pause, and say whether the
     /// end of it should play on. Play works afterwards either way, since the
     /// stream is rebuilt first.
-    fn on_interruption(&mut self, began: bool, resume: bool) {
-        self.output_stale = true;
+    fn on_interruption(&mut self, began: bool, resume: bool, stale: bool) {
+        self.output_stale |= stale;
         if began {
-            self.interrupted_playing = self.is_active();
+            // A second begin (a call during a video) keeps the first word.
+            self.interrupted_playing |= self.is_active();
             let _ = self.do_pause();
             return;
         }
@@ -2356,25 +2378,36 @@ impl Actor {
         }
     }
 
-    /// Reopens a stream another app may have killed, keeping position.
-    fn refresh_output(&mut self) {
-        self.output_stale = false;
+    /// Reopens a stream another app may have killed, keeping position. On
+    /// failure it stays stale, so the next Play tries again.
+    fn refresh_output(&mut self) -> AppResult<()> {
         #[cfg(target_os = "ios")]
         crate::platform::audio_session::activate();
-        if self.engine.published_format().is_none() {
-            return; // Closed: the next load opens it fresh.
-        }
-        if let Err(e) = self.engine.reopen_output() {
+        if self.engine.published_format().is_some()
+            && let Err(e) = self.engine.reopen_output()
+        {
             tracing::warn!("audio output did not reopen: {e}");
+            return Err(e);
         }
+        // Closed: the next load opens it fresh.
+        self.output_stale = false;
+        Ok(())
     }
 
     fn do_resume(&mut self) -> AppResult<()> {
         if self.queue.current().is_none() {
             return Ok(());
         }
-        if self.output_stale {
-            self.refresh_output();
+        if self.output_stale
+            && let Err(e) = self.refresh_output()
+        {
+            self.pause_for_output();
+            self.sink.error(&ErrorPayload {
+                track_id: self.current_track().map(|t| t.id.clone()),
+                kind: e.kind().into(),
+                message: e.to_string(),
+            });
+            return Err(e);
         }
         if self.cur_key.is_none() || self.engine.position().is_none() {
             // Nothing loaded (fresh start / restored / ended / lost

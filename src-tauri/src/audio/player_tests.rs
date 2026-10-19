@@ -660,6 +660,48 @@ async fn after_another_app_takes_the_sound_play_works() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn headphones_back_dont_overrule_a_pause_by_hand() {
+    let mut r = rig(&["a"], 3.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.headphones(false);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    // Played on the speaker, then paused, before the AirPods came back.
+    r.player.resume().await.unwrap();
+    wait_state(&r.player, |s| s.status == PlayerStatus::Playing).await;
+    r.player.pause().await.unwrap();
+    r.player.headphones(true);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Paused);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_call_ending_doesnt_overrule_a_pause_by_hand() {
+    let mut r = rig(&["a"], 3.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.interruption(true, false);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    r.player.resume().await.unwrap();
+    wait_state(&r.player, |s| s.status == PlayerStatus::Playing).await;
+    r.player.pause().await.unwrap();
+    r.player.interruption(false, true);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Paused);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_media_services_reset_while_playing_keeps_playing() {
+    let mut r = rig(&["a"], 3.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.output_stale();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Playing);
+    audio_flows(&r).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_paused_song_stays_paused_after_an_interruption() {
     let mut r = rig(&["a"], 3.0, true, PlayerConfig::default()).await;
     r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
