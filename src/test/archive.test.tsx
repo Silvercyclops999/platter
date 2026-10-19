@@ -349,6 +349,14 @@ describe("artist page sections and eras", () => {
     const t = (s: string) => ({ songStatus: s }) as never;
     const page = { era: { name: "Glass Season", start: "2018-09", end: "2019-02", trackCount: 3, albumCount: 2 }, groups: [{ tracks: [t("released"), t("unreleased"), t("probablyAlternate")] }] } as never;
     expect(eraSentence(page)).toEqual({ lead: "Glass Season", rest: " ran from Sep 2018 to Feb 2019: 3 songs over 2 releases, 2 of them unreleased." });
+    // One month, or no songs at all, read plainly.
+    const one = { era: { name: "Kite", start: "2019-02-01", end: "2019-02-20", trackCount: 1, albumCount: 1 }, groups: [{ tracks: [t("released")] }] } as never;
+    expect(eraSentence(one).rest).toBe(" is from Feb 2019: 1 song over 1 release.");
+    const none = { era: { name: "Kite", start: "2019", end: null, trackCount: 0, albumCount: 0 }, groups: [] } as never;
+    expect(eraSentence(none).rest).toBe(" has no songs here yet.");
+    // One album in two groups (two editions) still gets a mark each, with its own key.
+    const twice = eraMarks([g("same", "2019-01"), g("same", "2019-06"), g("other", "2019-12")]);
+    expect(new Set(twice.map((m) => m.key)).size).toBe(3);
   });
 
   it("an unreleased build gets its era banner", async () => {

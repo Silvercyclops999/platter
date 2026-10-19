@@ -21,6 +21,8 @@ export function monthIndex(d: string | null | undefined): number | null {
 
 export interface EraMark {
   id: string;
+  /** Unique on the line: one album can be two groups (two editions). */
+  key: string;
   title: string;
   date: string;
   /** 0 to 1 along the span. */
@@ -50,16 +52,19 @@ export function eraMarks(groups: EraPage["groups"], gap = 0.28): EraMark[] {
     let row = lastAt.findIndex((p) => at - p >= gap);
     if (row < 0) row = lastAt.length < 3 ? lastAt.length : 0;
     lastAt[row] = at;
-    return { id: x.g.album.id, title: x.g.album.title, date: formatArchiveDate(x.date), at, row, newest: x === newest };
+    return { id: x.g.album.id, key: `${x.g.album.id}:${x.i}`, title: x.g.album.title, date: formatArchiveDate(x.date), at, row, newest: x === newest };
   });
 }
 
 /** "Glass Season ran from Sep 2018 to Feb 2019: 15 songs over 3 releases, 6 of them unreleased." */
 export function eraSentence(data: EraPage): { lead: string; rest: string } {
   const era = data.era;
-  const range = eraRange(era);
+  // The first and last month on their own, so "from A to B" needs no reading back of a string.
+  const from = eraRange({ start: era.start });
+  const to = era.end ? eraRange({ start: era.end }) : from;
   const unreleased = data.groups.reduce((n, g) => n + g.tracks.filter((t) => t.songStatus && t.songStatus !== "released").length, 0);
-  const when = !range ? " holds" : range.includes(" to ") ? ` ran from ${range}:` : ` is from ${range}:`;
+  if (era.trackCount === 0) return { lead: era.name, rest: " has no songs here yet." };
+  const when = !from ? " holds" : to && to !== from ? ` ran from ${from} to ${to}:` : ` is from ${from}:`;
   const count = `${plural(era.trackCount, "song")} over ${plural(era.albumCount, "release")}`;
   const unrel = unreleased === 0 ? "" : unreleased >= era.trackCount ? ", all of them unreleased" : `, ${unreleased.toLocaleString()} of them unreleased`;
   return { lead: era.name, rest: `${when} ${count}${unrel}.` };
@@ -88,7 +93,7 @@ export function EraStory({ data, className = "", gap }: { data: EraPage; classNa
           <span className="era-line__rule" aria-hidden="true" />
           {marks.map((m) => (
             <span
-              key={m.id}
+              key={m.key}
               className={`era-line__mark ${m.newest ? "is-newest" : ""} ${m.at > 0.7 ? "is-end" : ""}`}
               style={{ left: `${m.at * 100}%`, "--row": m.row } as React.CSSProperties}
               aria-hidden="true"
