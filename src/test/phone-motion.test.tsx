@@ -111,6 +111,7 @@ describe("press feedback", () => {
     fireEvent.pointerUp(row, { clientX: 10, clientY: 40, pointerId: 1 });
 
     fireEvent.pointerDown(row, { clientX: 10, clientY: 10, pointerId: 1 });
+    Object.defineProperty(scroller, "scrollTop", { value: 40, configurable: true });
     fireEvent.scroll(scroller);
     expect(row).not.toHaveClass(PRESSED);
     const click = vi.fn();
@@ -118,6 +119,37 @@ describe("press feedback", () => {
     fireEvent.pointerUp(row, { clientX: 10, clientY: 10, pointerId: 1 });
     fireEvent.click(row);
     expect(click).not.toHaveBeenCalled();
+    stop();
+    root.remove();
+  });
+
+  it("an ordinary tap acts the first time: a little wobble, a long still press, or a scroll still settling", () => {
+    const { row, scroller, root, stop } = setup();
+    const click = vi.fn();
+    row.addEventListener("click", click);
+    // 9 px of wobble.
+    fireEvent.pointerDown(row, { clientX: 10, clientY: 10, pointerId: 1 });
+    fireEvent.pointerMove(row, { clientX: 16, clientY: 17, pointerId: 1 });
+    fireEvent.pointerUp(row, { clientX: 16, clientY: 17, pointerId: 1 });
+    fireEvent.click(row);
+    expect(click).toHaveBeenCalledTimes(1);
+    // The last couple of pixels of a scroll that was settling when the finger came down.
+    Object.defineProperty(scroller, "scrollTop", { value: 100, configurable: true });
+    fireEvent.pointerDown(row, { clientX: 10, clientY: 10, pointerId: 2 });
+    Object.defineProperty(scroller, "scrollTop", { value: 102, configurable: true });
+    fireEvent.scroll(scroller);
+    expect(row).toHaveClass(PRESSED);
+    fireEvent.pointerUp(row, { clientX: 10, clientY: 10, pointerId: 2 });
+    fireEvent.click(row);
+    expect(click).toHaveBeenCalledTimes(2);
+    // A still press held a long time is still a tap.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    fireEvent.pointerDown(row, { clientX: 10, clientY: 10, pointerId: 3 });
+    vi.advanceTimersByTime(3000);
+    fireEvent.pointerUp(row, { clientX: 10, clientY: 10, pointerId: 3 });
+    fireEvent.click(row);
+    expect(click).toHaveBeenCalledTimes(3);
+    vi.useRealTimers();
     stop();
     root.remove();
   });

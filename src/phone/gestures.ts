@@ -115,8 +115,12 @@ export function useArtGestures(opts: {
   };
 }
 
-/** A press that moves farther than this is a swipe or a scroll, never a tap. */
-export const TAP_SLOP_PX = 8;
+/**
+ * A press that moves farther than this is a swipe or a scroll, never a tap.
+ * A still press can last as long as it likes. (8 was tight enough that an
+ * ordinary thumb tap sometimes failed it and needed a second try.)
+ */
+export const TAP_SLOP_PX = 10;
 
 /** A tap shorter than this still shows its press for this long. */
 export const PRESS_MIN_MS = 90;
@@ -144,7 +148,7 @@ export function pressTarget(target: EventTarget | null, root: HTMLElement): HTML
  * press turns into a swipe or a scroll. Returns a function that removes it.
  */
 export function installTapGuard(root: HTMLElement): () => void {
-  let start: { x: number; y: number; id: number; target: Node | null } | null = null;
+  let start: { x: number; y: number; id: number; target: Node | null; scrolls: Map<Element, [number, number]> } | null = null;
   let moved = false;
   let lit: HTMLElement | null = null;
   let litAt = 0;
@@ -154,7 +158,13 @@ export function installTapGuard(root: HTMLElement): () => void {
     lit = null;
   };
   const down = (e: PointerEvent) => {
-    start = { x: e.clientX, y: e.clientY, id: e.pointerId, target: e.target instanceof Node ? e.target : null };
+    // Where every box around the press was scrolled, so only a real scroll (not the
+    // last tick of one that is settling) turns the press into a scroll.
+    const scrolls = new Map<Element, [number, number]>();
+    for (let el = e.target instanceof Element ? e.target : null; el; el = el.parentElement) scrolls.set(el, [el.scrollTop, el.scrollLeft]);
+    const doc = document.scrollingElement;
+    if (doc) scrolls.set(doc, [doc.scrollTop, doc.scrollLeft]);
+    start = { x: e.clientX, y: e.clientY, id: e.pointerId, target: e.target instanceof Node ? e.target : null, scrolls };
     moved = false;
     unlight();
     if (e.pointerType === "mouse" && e.button !== 0) return;
@@ -172,11 +182,15 @@ export function installTapGuard(root: HTMLElement): () => void {
   // Only a scroll of something the press is inside counts: a page still
   // settling elsewhere (or the one under a sheet) mustn't eat a tab's tap.
   const scrolled = (e: Event) => {
-    const box = e.target === document ? document.documentElement : e.target;
-    if (start && box instanceof Node && start.target && box.contains(start.target)) {
+    const box = e.target === document ? (document.scrollingElement ?? document.documentElement) : e.target;
+    if (!start || !(box instanceof Element) || !start.target || !box.contains(start.target)) return;
+    const was = start.scrolls.get(box);
+    const far = was ? Math.abs(box.scrollTop - was[0]) + Math.abs(box.scrollLeft - was[1]) : Infinity;
+    if (far > TAP_SLOP_PX) {
       moved = true;
       unlight();
     }
+
   };
   const click = (e: MouseEvent) => {
     if (!moved) return;
