@@ -1,4 +1,4 @@
-//! CarPlay: Platter on the car's screen (dev/docs/specs/phase-5/02-carplay.md).
+//! CarPlay: Platter on the car's screen.
 //!
 //! The car only gets Apple's templates: a tab bar of lists, and the shared
 //! Now Playing screen (fed by the same session as the lock screen). This

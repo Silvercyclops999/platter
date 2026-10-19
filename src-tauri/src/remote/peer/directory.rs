@@ -230,8 +230,8 @@ mod bonjour_tests {
 
     #[test]
     fn sockaddrs_read_as_addresses() {
-        let v4 = [16u8, 2, 0x7f, 0x50, 192, 168, 1, 20, 0, 0, 0, 0, 0, 0, 0, 0];
-        assert_eq!(ip_of(&v4), Some("192.168.1.20".parse().unwrap()));
+        let v4 = [16u8, 2, 0x7f, 0x50, 10, 20, 30, 20, 0, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(ip_of(&v4), Some("10.20.30.20".parse().unwrap()));
         let mut v6 = [0u8; 28];
         v6[1] = 30;
         v6[8] = 0xfe;
