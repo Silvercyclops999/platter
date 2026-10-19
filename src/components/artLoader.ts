@@ -5,10 +5,17 @@
  * cover never draws half-finished. It also remembers which sizes of a cover
  * are already decoded, so a page can show a smaller one it has while the
  * right one comes (never a smaller one it would have to fetch).
+ *
+ * Scrolling comes first: while anything scrolls no new cover starts and none
+ * that finished is handed to its page (decoding and drawing a cover are main
+ * thread work a scroll would wait for). They carry on SCROLL_REST_MS after the
+ * last scroll.
  */
 
 /** Covers loading at once, at most. */
 export const MAX_ART_LOADS = 6;
+/** Covers wait this long after the last scroll before they load or show again. */
+export const SCROLL_REST_MS = 150;
 
 const ready = new Set<string>();
 const rungsByPath = new Map<string, Set<number>>();
@@ -47,6 +54,38 @@ let running = 0;
 let seq = 0;
 const queue: Job[] = [];
 
+let scrolling = false;
+let restTimer: ReturnType<typeof setTimeout> | null = null;
+let watching = false;
+/** Covers that finished while a scroll was going, waiting to show. */
+let landed: (() => void)[] = [];
+
+function rest() {
+  restTimer = null;
+  scrolling = false;
+  const due = landed;
+  landed = [];
+  due.forEach((f) => f());
+  pump();
+}
+
+/** Something scrolled: covers hold off until it has been still a moment. */
+export function noteScroll() {
+  scrolling = true;
+  if (restTimer) clearTimeout(restTimer);
+  restTimer = setTimeout(rest, SCROLL_REST_MS);
+}
+
+/** Every scroll on the page counts (scroll events don't bubble, so this listens as they go down). */
+function watchScrolls() {
+  if (watching || typeof document === "undefined") return;
+  watching = true;
+  document.addEventListener("scroll", noteScroll, { capture: true, passive: true });
+}
+
+/** Whether covers are holding off for a scroll (tests). */
+export const artWaitingForScroll = () => scrolling;
+
 /** Fetch and decode one image off screen. */
 function fetchAndDecode(url: string): Promise<void> {
   if (typeof Image === "undefined") return Promise.reject(new Error("no images here"));
@@ -61,7 +100,7 @@ function fetchAndDecode(url: string): Promise<void> {
 }
 
 function pump() {
-  while (running < MAX_ART_LOADS && queue.length) {
+  while (!scrolling && running < MAX_ART_LOADS && queue.length) {
     // On-screen covers first, then the oldest request.
     let at = queue.findIndex((j) => j.visible);
     if (at < 0) at = 0;
@@ -71,7 +110,9 @@ function pump() {
     fetchAndDecode(job.url).then(
       () => {
         ready.add(job.url);
-        job.resolve();
+        // Mid-scroll it waits to be drawn until the scroll rests.
+        if (scrolling) landed.push(job.resolve);
+        else job.resolve();
       },
       (e) => job.reject(e),
     ).finally(() => {
@@ -92,6 +133,7 @@ export interface ArtLoad {
 /** Queue a cover. Resolves once it is decoded and can show at once. */
 export function loadArt(url: string, opts: { visible: boolean }): ArtLoad {
   if (ready.has(url)) return { done: Promise.resolve(), cancel: () => {}, promote: () => {} };
+  watchScrolls();
   let job!: Job;
   const done = new Promise<void>((resolve, reject) => {
     job = { url, visible: opts.visible, seq: ++seq, cancelled: false, resolve, reject };
@@ -120,4 +162,8 @@ export function resetArtLoader() {
   rungsByPath.clear();
   queue.length = 0;
   running = 0;
+  scrolling = false;
+  landed = [];
+  if (restTimer) clearTimeout(restTimer);
+  restTimer = null;
 }

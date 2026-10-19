@@ -8,7 +8,7 @@
 import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Art, PHONE_ART_FADE_MS, preloadArt, tintColour, watchNear } from "../components/Art";
-import { artLoadState, isArtReady, loadArt, markArtReady, MAX_ART_LOADS, resetArtLoader } from "../components/artLoader";
+import { artLoadState, artWaitingForScroll, isArtReady, loadArt, markArtReady, MAX_ART_LOADS, resetArtLoader, SCROLL_REST_MS } from "../components/artLoader";
 import { NP_ART_CSS } from "../phone/NowPlaying";
 import { artPixelSize, PHONE_ART_MAX, PHONE_ART_SAMPLE, PHONE_ART_STEPS, phoneArtPixelSize } from "../lib/artSize";
 import { artSampleUrl, artUrl, backend } from "../lib/backend";
@@ -217,6 +217,41 @@ describe("a cover loading on the phone", () => {
     expect(images.map((i) => i.src)).not.toContain("/a/6");
     expect(images[8].src).toBe("/a/7");
     void seen;
+  });
+
+  it("gives way to a scroll: nothing new starts or shows while it scrolls, and it carries on once the scroll rests", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const page = document.createElement("div");
+      document.body.appendChild(page);
+      const first = Array.from({ length: MAX_ART_LOADS }, (_, i) => loadArt(`/s/${i}`, { visible: true }));
+      const shown: string[] = [];
+      first.forEach((j, i) => void j.done.then(() => shown.push(`/s/${i}`)));
+      const waiting = loadArt("/s/later", { visible: true });
+      void waiting.done.then(() => shown.push("/s/later"));
+      expect(artLoadState()).toEqual({ running: MAX_ART_LOADS, queued: 1 });
+      // A scroll of any box on the page: a cover that finishes meanwhile waits, and the free slot isn't used.
+      page.dispatchEvent(new Event("scroll"));
+      expect(artWaitingForScroll()).toBe(true);
+      await act(async () => images[0].decode());
+      expect(shown).toEqual([]);
+      expect(images.map((i) => i.src)).not.toContain("/s/later");
+      // Scrolling on keeps it holding off.
+      act(() => void vi.advanceTimersByTime(SCROLL_REST_MS - 50));
+      page.dispatchEvent(new Event("scroll"));
+      act(() => void vi.advanceTimersByTime(SCROLL_REST_MS - 50));
+      await act(async () => {});
+      expect(shown).toEqual([]);
+      // Still a moment: what finished shows and the next one starts.
+      act(() => void vi.advanceTimersByTime(60));
+      await act(async () => {});
+      expect(artWaitingForScroll()).toBe(false);
+      expect(shown).toEqual(["/s/0"]);
+      expect(images.map((i) => i.src)).toContain("/s/later");
+      page.remove();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("now playing's next cover is fetched ahead, at now playing's size", async () => {
