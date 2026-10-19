@@ -153,6 +153,236 @@ async fn settings_hears_when_a_devices_status_changes() {
     let _ = phone;
 }
 
+// ---------------------------------------------------------------- copy from my computer
+
+use crate::sync::devices::copy::CopyProgress;
+use crate::sync::devices::run::Wake;
+
+fn pin(id: &str) -> crate::sync::pins::Pin {
+    serde_json::from_value(json!({"kind": "album", "id": id, "title": "A"})).unwrap()
+}
+
+/// The computer as it is before the phone is set up.
+fn computer_has_things(pc: &Dev) {
+    pc.store.put(&SETTINGS, "accent", &json!("#c90")).unwrap();
+    pc.store.put(&PINS, "album:a1", &pin("a1")).unwrap();
+    pc.store.put(&PINS, "album:a2", &pin("a2")).unwrap();
+    pc.store.put(&FOLLOWS, "ar1", &serde_json::from_value(json!({"id": "ar1", "title": "B", "followedAt": 1})).unwrap()).unwrap();
+    pc.store.put(&HIDDEN, "track:1", &hidden("One")).unwrap();
+    pc.store.put(&store::LYRICS, "song:1", &store::UserLyricsEntry { text: "words".into(), prefer: false }).unwrap();
+}
+
+fn heard(sync: &DeviceSync) -> Arc<Mutex<Vec<CopyProgress>>> {
+    let all: Arc<Mutex<Vec<CopyProgress>>> = Arc::default();
+    let a = all.clone();
+    sync.set_on_copy(Arc::new(move |p: &CopyProgress| a.lock().push(p.clone())));
+    all
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn copy_from_my_computer_goes_group_by_group_with_counts() {
+    let (pc, phone) = paired().await;
+    computer_has_things(&pc.dev);
+    let steps = heard(&phone.sync);
+    let r = phone.sync.copy_from_computer(Duration::from_secs(5)).await.unwrap();
+    assert_eq!(r.name, "Device pc");
+    assert!(!r.cancelled && r.later.is_none(), "{r:?}");
+    let got: Vec<(&str, usize)> = r.groups.iter().map(|g| (g.label.as_str(), g.count)).collect();
+    assert_eq!(
+        got,
+        [("Settings", 1), ("Pins and folders", 2), ("Follows and hidden items", 2), ("Lyrics", 1), ("Looks", 0), ("Download choices", 0), ("Imported plays", 0)]
+    );
+    let steps = steps.lock().clone();
+    assert_eq!(steps.len(), 7);
+    assert_eq!(steps[1], CopyProgress { name: "Device pc".into(), step: 2, of: 7, label: "Copying your pins and folders".into() });
+    assert!(steps.iter().enumerate().all(|(i, s)| s.step == i + 1 && s.of == 7));
+    assert!(same(&pc.dev, &phone.dev));
+    // The computer sees the phone's groups as they are again.
+    let link = pc.dev.links.all()[0].id.clone();
+    assert!(pc.dev.peer.seen(&link).unwrap().skip.iter().all(|n| n != "pins"), "pins aren't left switched off");
+    assert_eq!(phone.sync.status()[0].words, "In sync");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_stopped_copy_keeps_what_came_and_the_next_round_brings_the_rest() {
+    let (pc, phone) = paired().await;
+    computer_has_things(&pc.dev);
+    let steps = heard(&phone.sync);
+    {
+        // Stop it as it moves to the second group.
+        let s = phone.sync.clone();
+        let st = steps.clone();
+        phone.sync.set_on_copy(Arc::new(move |p: &CopyProgress| {
+            st.lock().push(p.clone());
+            if p.step == 2 {
+                s.cancel_copy();
+            }
+        }));
+    }
+    let r = phone.sync.copy_from_computer(Duration::from_secs(5)).await.unwrap();
+    assert!(r.cancelled);
+    assert_eq!(r.groups.iter().map(|g| (g.label.as_str(), g.count)).collect::<Vec<_>>(), [("Settings", 1), ("Pins and folders", 0)]);
+    assert_eq!(phone.dev.store.get(&SETTINGS, "accent").unwrap(), Some(json!("#c90")), "what came stays");
+    assert!(phone.dev.store.list(&PINS).unwrap().is_empty(), "nothing after the stop");
+    let link = pc.dev.links.all()[0].id.clone();
+    assert!(pc.dev.peer.seen(&link).unwrap().skip.iter().all(|n| n != "pins"));
+    // A stop with no copy running does nothing.
+    phone.sync.cancel_copy();
+    phone.sync.sync_now().await;
+    assert!(same(&pc.dev, &phone.dev), "the next round finishes it");
+    assert_eq!(phone.dev.store.list(&PINS).unwrap().len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_copy_waits_for_wifi_and_needs_a_paired_computer() {
+    let lone = host(real_clock("lone", ACCT), ACCT_TOKEN, "http://relay").await;
+    let e = lone.sync.copy_from_computer(Duration::from_millis(200)).await.unwrap_err();
+    assert!(e.to_string().contains("Pair this device"), "{e}");
+    let (pc, phone) = paired().await;
+    computer_has_things(&pc.dev);
+    phone.sync.set_metered(true);
+    let e = phone.sync.copy_from_computer(Duration::from_secs(5)).await.unwrap_err();
+    assert!(e.to_string().contains("Copying waits for Wi-Fi"), "{e}");
+    assert!(phone.dev.store.list(&PINS).unwrap().is_empty());
+    // Send big things only on Wi-Fi off: it goes on mobile data too.
+    phone.sync.set_rules(Arc::new(|| true), Arc::new(|| false));
+    let r = phone.sync.copy_from_computer(Duration::from_secs(5)).await.unwrap();
+    assert_eq!(r.groups[1].count, 2);
+    // Off here: refused.
+    phone.sync.set_switch(Arc::new(|| false));
+    let e = phone.sync.copy_from_computer(Duration::from_secs(5)).await.unwrap_err();
+    assert!(e.to_string().contains("Turn on Keep my devices in sync"), "{e}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_copy_from_a_computer_with_its_settings_off_brings_the_rest() {
+    let (pc, phone) = paired().await;
+    computer_has_things(&pc.dev);
+    pc.dev.groups.lock().settings = false;
+    phone.sync.sync_now().await;
+    let r = phone.sync.copy_from_computer(Duration::from_secs(5)).await.unwrap();
+    assert_eq!(r.groups[0].count, 0, "no settings");
+    assert_eq!(phone.dev.store.list(&PINS).unwrap().len(), 2, "but the pins came");
+}
+
+// ---------------------------------------------------------------- away from home and mobile data
+
+fn relay_sync(d: &Dev) -> DeviceSync {
+    let wire = Arc::new(Wire::new(d.links.clone(), Arc::new(Ntfy::new().unwrap()), Arc::new(crate::sync::store::system_ms)));
+    DeviceSync::new(d.peer.clone(), wire, Timing::default())
+}
+
+#[tokio::test]
+async fn with_sync_away_from_home_off_nothing_goes_through_the_relay() {
+    let ntfy = FakeNtfy::start().await;
+    let a = dev("a");
+    let b = dev("b");
+    let (la, lb) = pair(&a, &b, &ntfy.url);
+    round(&a, &la, &b, &lb).await;
+    let sync = relay_sync(&a);
+    sync.set_rules(Arc::new(|| false), Arc::new(|| true));
+    tick(&a, 5);
+    a.store.put(&HIDDEN, "track:2", &hidden("Two")).unwrap();
+    let msgs = a.peer.push(&la).await;
+    assert!(!msgs.is_empty());
+    sync.deliver(&la, msgs).await;
+    assert!(ntfy.published().is_empty(), "nothing on the relay");
+    assert_eq!(sync.status()[0].words, "Waiting for Device b on your home network");
+    assert!(!a.peer.push(&la).await.is_empty(), "kept for later");
+    // On again: it goes.
+    sync.set_rules(Arc::new(|| true), Arc::new(|| true));
+    sync.deliver(&la, a.peer.push(&la).await).await;
+    assert!(!ntfy.published().is_empty());
+}
+
+#[tokio::test]
+async fn on_mobile_data_imported_plays_wait_for_wifi_and_the_rest_goes() {
+    let ntfy = FakeNtfy::start().await;
+    let a = dev("a");
+    let b = dev("b");
+    let (la, lb) = pair(&a, &b, &ntfy.url);
+    round(&a, &la, &b, &lb).await;
+    let play = crate::db::listens::ImportedPlay {
+        source: crate::db::listens::ImportSource::Lastfm,
+        source_id: "lf1".into(),
+        played_at: 1_700_000_000_000,
+        ms_played: None,
+        title: "Lullaby".into(),
+        artist: None,
+        album: None,
+        rating_key: None,
+    };
+    a.db.write(|c| crate::db::listens::insert_imported(c, &[play], 1)).unwrap();
+    tick(&a, 5);
+    crate::sync::imported_plays::publish(&a.store).unwrap();
+    a.store.put(&HIDDEN, "track:2", &hidden("Two")).unwrap();
+    let sync = relay_sync(&a);
+    sync.set_metered(true);
+    sync.deliver(&la, a.peer.push(&la).await).await;
+    assert!(!ntfy.published().is_empty(), "the small change went");
+    assert_eq!(sync.status()[0].words, "Imported plays wait for Wi-Fi");
+    let left = a.peer.push(&la).await;
+    let ns: Vec<String> = left.iter().flat_map(|m| if let Msg::SyncEntries { entries } = m { entries.keys().cloned().collect() } else { Vec::new() }).collect();
+    assert_eq!(ns, [store::IMPORTED_PLAYS.name()], "only the plays wait");
+    // On Wi-Fi again they go.
+    sync.set_metered(false);
+    sync.deliver(&la, left).await;
+    assert!(a.peer.push(&la).await.is_empty());
+    assert_eq!(sync.status()[0].words, "In sync");
+}
+
+// ---------------------------------------------------------------- waking up
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn coming_back_to_the_foreground_starts_a_round_at_once() {
+    let ntfy = FakeNtfy::start().await;
+    let a = real_clock("a", ACCT);
+    let b = real_clock("b", ACCT);
+    pair(&a, &b, &ntfy.url);
+    let slow = Timing { debounce: Duration::from_millis(200), every: Duration::from_secs(3600), ..Timing::default() };
+    let start = |d: Dev, fg: Option<tokio::sync::watch::Receiver<bool>>| {
+        let wire = Arc::new(Wire::new(d.links.clone(), Arc::new(Ntfy::new().unwrap()) as Arc<dyn RelayFactory>, Arc::new(crate::sync::store::system_ms)));
+        let sync = Arc::new(DeviceSync::new(d.peer.clone(), wire, slow));
+        if let Some(fg) = fg {
+            sync.set_foreground(fg);
+        }
+        let (stop, rx) = tokio::sync::watch::channel(false);
+        tokio::spawn(sync.clone().run(rx));
+        (d, sync, stop)
+    };
+    let (fg_tx, fg_rx) = tokio::sync::watch::channel(true);
+    let (a, a_sync, a_stop) = start(a, Some(fg_rx));
+    let (b, b_sync, b_stop) = start(b, None);
+    until("the first round", || a_sync.status().first().is_some_and(|s| s.words == "In sync")).await;
+    // Something new on b that nothing announces (as if it came in while a slept).
+    b.db
+        .write(|c| {
+            c.execute("INSERT INTO sync_entries (ns, key, value, ts, device) VALUES ('hidden', 'track:quiet', '{\"kind\":\"track\",\"title\":\"Q\"}', ?1, 'b')", [crate::sync::store::system_ms() as i64])?;
+            Ok(())
+        })
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    assert!(!a.store.has_entry(&HIDDEN, "track:quiet").unwrap(), "no round by itself for an hour");
+    // The phone goes to the background and comes back.
+    fg_tx.send(false).unwrap();
+    fg_tx.send(true).unwrap();
+    until("a round on coming back", || a.store.has_entry(&HIDDEN, "track:quiet").unwrap()).await;
+    // Not again straight away.
+    assert!(!a_sync.wake(Wake::Network), "at most once every few seconds");
+    let _ = (a_stop.send(true), b_stop.send(true));
+    let _ = b_sync;
+}
+
+#[tokio::test]
+async fn waking_does_nothing_while_keep_my_devices_in_sync_is_off() {
+    let a = dev("a");
+    let sync = relay_sync(&a);
+    sync.set_switch(Arc::new(|| false));
+    assert!(!sync.wake(Wake::Foreground));
+    sync.set_switch(Arc::new(|| true));
+    assert!(sync.wake(Wake::Network));
+}
+
 // ---------------------------------------------------------------- feeds
 
 const LOOK: &str = r##"{"version":1,"name":"Dusk","base":"dark","tokens":{"color-accent":"#c08a3e"}}"##;

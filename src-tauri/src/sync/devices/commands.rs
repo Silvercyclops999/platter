@@ -14,7 +14,8 @@ use super::feeds::{FeedTiming, Feeds};
 use super::lan::PeerLan;
 use super::pair::{DevicePairing, PairDeps, PairState, Paired};
 use super::protocol::{SyncDeps, SyncPeer};
-use super::run::{DeviceStatus, DeviceSync, Timing};
+use super::copy::{CopyProgress, CopyResult};
+use super::run::{DeviceStatus, DeviceSync, Timing, Wake};
 use crate::downloads::Downloads;
 use crate::downloads::store::{ItemKey, ItemKind};
 use crate::error::{AppError, AppResult};
@@ -32,6 +33,8 @@ use crate::sync::store::{Quarantined, system_ms};
 
 pub const EV_STATUS: &str = "device-sync://status";
 pub const EV_PAIR: &str = "device-sync://pair";
+/// A first copy moved on to its next group.
+pub const EV_COPY: &str = "device-sync://copy";
 
 /// Managed state.
 #[derive(Clone)]
@@ -64,6 +67,10 @@ pub struct Setup {
     pub remote: RemoteService,
     pub groups: ConfigSwitch,
     pub on: Arc<AtomicBool>,
+    /// Sync when I'm away from home (through the relay).
+    pub away: Arc<AtomicBool>,
+    /// Send big things only on Wi-Fi.
+    pub wifi_only: Arc<AtomicBool>,
     pub relays: Arc<dyn RelayFactory>,
     /// The user's own relay (Settings > Listen along), or empty.
     pub relay: Arc<parking_lot::RwLock<String>>,
@@ -101,6 +108,14 @@ pub fn start(s: Setup) -> DeviceService {
     {
         let on = s.on.clone();
         sync.set_switch(Arc::new(move || on.load(Ordering::Relaxed)));
+        let (away, wifi) = (s.away.clone(), s.wifi_only.clone());
+        sync.set_rules(Arc::new(move || away.load(Ordering::Relaxed)), Arc::new(move || wifi.load(Ordering::Relaxed)));
+    }
+    {
+        let app = s.app.clone();
+        sync.set_on_copy(Arc::new(move |p: &CopyProgress| {
+            let _ = app.emit(EV_COPY, p);
+        }));
     }
     {
         let app = s.app.clone();
@@ -281,9 +296,29 @@ pub async fn device_download_dismiss(d: State<'_, DeviceService>, kind: String, 
     d.store.run(move |s| download_intent::dismiss(s, kind, &id)).await
 }
 
-/// Copy settings from my computer: the synced settings a paired computer
-/// has win here and everywhere. Returns the computer's name.
+/// Copy from my computer: everything this device keeps in step, from the
+/// paired computer, one group at a time (progress on `device-sync://copy`).
+/// Its settings win here and everywhere; the rest merges as usual.
 #[tauri::command]
-pub async fn pair_copy_settings(d: State<'_, DeviceService>) -> AppResult<String> {
-    d.sync.copy_settings(Duration::from_secs(20)).await
+pub async fn pair_copy_settings(d: State<'_, DeviceService>) -> AppResult<CopyResult> {
+    d.sync.copy_from_computer(Duration::from_secs(20)).await
+}
+
+/// Stop a copy from the computer (what came stays).
+#[tauri::command]
+pub async fn pair_copy_cancel(d: State<'_, DeviceService>) -> AppResult<()> {
+    d.sync.cancel_copy();
+    Ok(())
+}
+
+/// The window saw the network change (`metered`: on mobile data, when it
+/// can tell): a round with every device now, and big things wait for
+/// Wi-Fi while on mobile data.
+#[tauri::command]
+pub async fn device_sync_network(d: State<'_, DeviceService>, metered: Option<bool>) -> AppResult<()> {
+    if let Some(m) = metered {
+        d.sync.set_metered(m);
+    }
+    d.sync.wake(Wake::Network);
+    Ok(())
 }

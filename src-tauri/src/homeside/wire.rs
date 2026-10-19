@@ -191,6 +191,19 @@ pub struct SyncHello {
     pub skip: Vec<String>,
     #[serde(default)]
     pub answer: bool,
+    /// The sender is back in touch after a long time apart from this
+    /// device: so both ends catch up the same careful way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apart: Option<Apart>,
+}
+
+/// When the two were last in step by the sender's clock (ms), and what
+/// they kept in step then.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Apart {
+    pub since: u64,
+    #[serde(default)]
+    pub ns: Vec<String>,
 }
 
 impl Msg {

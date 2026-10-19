@@ -819,6 +819,12 @@ pub struct Settings {
     /// home or away (this device only). On by default; does nothing until
     /// a device is paired.
     pub device_sync: bool,
+    /// Sync when I'm away from home: paired devices not on this network
+    /// swap changes through the sealed relay (this device only).
+    pub device_sync_away: bool,
+    /// Send big things (a first copy, imported plays) only on Wi-Fi, not
+    /// on mobile data (this device only).
+    pub device_sync_wifi_only: bool,
     /// Bookmarks has a row in the library.
     pub bookmarks_in_library: bool,
     /// The Stats page (profile menu and library row).
@@ -1313,6 +1319,8 @@ impl Default for Settings {
             sync_downloads: true,
             sync_plays: true,
             device_sync: true,
+            device_sync_away: true,
+            device_sync_wifi_only: true,
             bookmarks_in_library: true,
             stats_page: true,
             stats_strip: true,
@@ -1709,6 +1717,8 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "syncDownloads",
     "syncPlays",
     "deviceSync",
+    "deviceSyncAway",
+    "deviceSyncWifiOnly",
     // Signed in, and keys kept, per device.
     "scrobbleLastfm",
     "scrobbleListenbrainz",
@@ -1921,6 +1931,8 @@ pub struct SettingsPatch {
     pub sync_downloads: Option<bool>,
     pub sync_plays: Option<bool>,
     pub device_sync: Option<bool>,
+    pub device_sync_away: Option<bool>,
+    pub device_sync_wifi_only: Option<bool>,
     pub bookmarks_in_library: Option<bool>,
     pub stats_page: Option<bool>,
     pub stats_strip: Option<bool>,
@@ -2280,6 +2292,8 @@ impl Settings {
         set(&mut self.sync_downloads, p.sync_downloads);
         set(&mut self.sync_plays, p.sync_plays);
         set(&mut self.device_sync, p.device_sync);
+        set(&mut self.device_sync_away, p.device_sync_away);
+        set(&mut self.device_sync_wifi_only, p.device_sync_wifi_only);
         if let Some(h) = p.daylist_hours {
             if !DAYLIST_HOURS.contains(&h) {
                 return Err(AppError::Invalid("The daylist refreshes every 1, 3 or 6 hours.".into()));
@@ -2979,6 +2993,10 @@ pub struct Live {
     pub sync: crate::sync::engine::ConfigSwitch,
     /// Keep my devices in sync.
     pub device_sync: Arc<AtomicBool>,
+    /// Sync when I'm away from home (through the relay).
+    pub device_sync_away: Arc<AtomicBool>,
+    /// Send big things only on Wi-Fi.
+    pub device_sync_wifi_only: Arc<AtomicBool>,
     /// Scrobbling.
     pub scrobble: crate::scrobble::ScrobbleSwitches,
     /// The now-playing feed for widgets.
@@ -3100,6 +3118,8 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.platform.set(s.platform());
     live.sync.set(s.sync_config());
     live.device_sync.store(s.device_sync, Ordering::Relaxed);
+    live.device_sync_away.store(s.device_sync_away, Ordering::Relaxed);
+    live.device_sync_wifi_only.store(s.device_sync_wifi_only, Ordering::Relaxed);
     live.discord.set(s.discord());
     db.set_tag_view(s.tag_view());
     let before = (crate::db::release::count_unmatched(), crate::db::release::use_musicbrainz());

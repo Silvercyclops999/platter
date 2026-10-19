@@ -936,6 +936,11 @@ mod lan {
         let t = std::time::Instant::now();
         assert_eq!(lan.post("b", PATH_SYNC_ENTRIES, &body).await.unwrap_err(), PeerError::Unreachable);
         assert!(t.elapsed() < Duration::from_millis(100), "not tried again so soon: the relay goes at once");
+        // Another network: worth trying again at once.
+        lan.network_changed();
+        let t = std::time::Instant::now();
+        assert_eq!(lan.post("b", PATH_SYNC_ENTRIES, &body).await.unwrap_err(), PeerError::Unreachable);
+        assert!(t.elapsed() >= Duration::from_millis(250), "tried again after the network changed");
         drop(hang);
         let _ = _a.stop.send(true);
     }
@@ -971,4 +976,5 @@ mod lan {
 }
 
 mod app;
+mod mesh;
 mod pairing;

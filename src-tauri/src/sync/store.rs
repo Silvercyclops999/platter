@@ -246,6 +246,8 @@ pub struct MergeOutcome {
     pub changed: Vec<String>,
     /// Entries held back (namespace, key, entry).
     pub held: Vec<(String, String, Entry)>,
+    /// Entries that won here and were saved, by namespace.
+    pub taken: std::collections::BTreeMap<String, usize>,
 }
 
 /// An entry held back because it was stamped far in the future.
@@ -798,6 +800,7 @@ impl SyncStore {
                     if mine.as_ref().is_none_or(|m| e.wins_over(m)) {
                         let differs = mine.as_ref().is_none_or(|m| m.value != e.value);
                         set_entry(&tx, ns, key, e)?;
+                        *out.taken.entry(ns.clone()).or_default() += 1;
                         if e.device != own {
                             high = high.max(e.ts);
                         }
@@ -922,6 +925,32 @@ impl SyncStore {
             }
             Ok(out)
         })
+    }
+
+    /// Let these entries go here without leaving a deletion behind (a
+    /// device back from a long time away drops what the others no longer
+    /// have; nothing is sent about it).
+    pub fn forget_entries(&self, ns: &str, keys: &[String]) -> AppResult<usize> {
+        if keys.is_empty() {
+            return Ok(0);
+        }
+        let sql = format!("DELETE FROM {} WHERE ns = ?1 AND key = ?2", table(ns));
+        let n = self.inner.db.write(|c| {
+            let tx = c.transaction()?;
+            let mut n = 0;
+            {
+                let mut st = tx.prepare_cached(&sql)?;
+                for k in keys {
+                    n += st.execute(rusqlite::params![ns, k])?;
+                }
+            }
+            tx.commit()?;
+            Ok(n)
+        })?;
+        if n > 0 && NAMESPACES.contains(&ns) {
+            self.emit(vec![ns.to_string()], true);
+        }
+        Ok(n)
     }
 
     /// Forget tombstones older than `before` (ms).

@@ -21,6 +21,7 @@
 
 pub mod clock;
 pub mod commands;
+pub mod copy;
 pub mod feeds;
 pub mod lan;
 pub mod pair;

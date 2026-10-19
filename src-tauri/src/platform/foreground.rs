@@ -20,6 +20,11 @@ pub fn set(foreground: bool) {
     channel().send_if_modified(|v| std::mem::replace(v, foreground) != foreground);
 }
 
+/// Follow the app moving to the foreground and back.
+pub fn subscribe() -> watch::Receiver<bool> {
+    channel().subscribe()
+}
+
 pub fn is_foreground() -> bool {
     *channel().borrow()
 }

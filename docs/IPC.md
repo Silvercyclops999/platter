@@ -3162,7 +3162,9 @@ away. The sync file stays optional and works beside it.
 | `device_pair_join` | `{ code }` | `{ id, name }` |
 | `device_download_suggestions` | – | `DownloadSuggestion[]`, newest first |
 | `device_download_dismiss` | `{ kind, id: string \| null }` | – (this device only) |
-| `pair_copy_settings` | – | the computer's name |
+| `pair_copy_settings` | – | `CopyResult` once everything kept in step here came over |
+| `pair_copy_cancel` | – | – (stops a copy; what came stays) |
+| `device_sync_network` | `{ metered: boolean \| null }` | – (the network changed: a round now) |
 
 `DeviceSyncOverview = { on, devices: DeviceStatus[], quarantined, pairing: PairState }`
 
@@ -3174,8 +3176,13 @@ away. The sync file stays optional and works beside it.
 
 `DownloadSuggestion = { kind, id, title, devices: string[], addedAt }`
 
+`CopyResult = { name, groups: { group, label, count }[], later?, cancelled }`
+
+`CopyProgress = { name, step, of, label }`
+
 Events: `device-sync://status` → `DeviceStatus[]` when any device's status
-changes, and `device-sync://pair` → `PairState`.
+changes, `device-sync://pair` → `PairState`, and `device-sync://copy` →
+`CopyProgress` as a copy from the computer moves to its next group.
 
 ### Pairing
 
@@ -3224,9 +3231,27 @@ cover light, readout face) syncs with the settings; `layout` and
 `homeShortcuts` never sync (`FORM_FACTOR_ONLY`). Each group follows What to
 sync, and `deviceSync` turns the whole of it off on this device.
 
-`pair_copy_settings` asks the paired computer (the one in step most
-recently) for its synced settings and takes them as new choices, so they
-win here and on every other device.
+`pair_copy_settings` is the phone's Copy from my computer. It asks the
+paired computer (the one in step most recently) for its synced settings and
+takes them as new choices, so they win here and on every other device. Then
+it runs one round per group this device keeps (pins and folders, follows,
+lyrics, looks, download choices, imported plays, the diary), over the local
+network, and gives the count taken for each. When the computer isn't on
+this network the small things come through the relay and `later` says the
+rest follows. On mobile data with `deviceSyncWifiOnly` on it refuses and
+says to connect to Wi-Fi; imported plays wait for Wi-Fi the same way in
+ordinary rounds. With `deviceSyncAway` off nothing goes through the relay
+and devices sync only when they meet on the local network.
+
+A round also runs when the app comes back to the foreground and when the
+network changes (`device_sync_network`), at most once every 10 seconds.
+
+A device back after more than 80 days out of step with another takes the
+other's state first: it starts the round itself, takes what it lacks, and
+lets go of entries the other no longer has unless they changed here within
+the 90 days deletions are kept. Unpairing tells the other device, which
+forgets the link too; forgetting a device that's offline removes the link
+here, and its messages are no longer opened.
 
 ## Search
 | Command | Args | Returns |

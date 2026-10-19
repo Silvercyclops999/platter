@@ -40,6 +40,10 @@ const DOWN_MAX: Duration = Duration::from_secs(5 * 60);
 pub trait LanSend: Send + Sync {
     /// Post sealed messages to the device with this id; its sealed answers.
     async fn post(&self, device: &str, path: &str, body: &LanBody) -> Result<LanBody, PeerError>;
+
+    /// The network changed: devices not reached before are worth trying
+    /// again at once, and addresses found before may be wrong now.
+    fn network_changed(&self) {}
 }
 
 /// A client signed with this device's key; None when signed out.
@@ -129,6 +133,11 @@ impl LanSend for PeerLan {
         self.mark(device, !matches!(r, Err(PeerError::Unreachable)));
         r
     }
+
+    fn network_changed(&self) {
+        self.down.lock().clear();
+        self.known.lock().clear();
+    }
 }
 
 impl PeerLan {
@@ -168,13 +177,17 @@ impl DeviceSync {
 
     /// The local network part of [`send`](Self::send): what's left for the
     /// relay (everything, when the other device isn't reachable here).
-    async fn try_lan(&self, link: &Link, mut msgs: Vec<Msg>) -> Vec<Msg> {
+    pub(crate) async fn try_lan(&self, link: &Link, mut msgs: Vec<Msg>) -> Vec<Msg> {
         let Some(lan) = self.lan() else { return msgs };
         let Some(device) = self.wire.links.get(&link.id).and_then(|p| p.device) else { return msgs };
         let lock = self.wire.sending(link);
         let _one = lock.lock().await;
         let mut exchanges = 0;
         while !msgs.is_empty() {
+            if self.copy_cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                // A first copy was stopped; the next round finishes it.
+                return Vec::new();
+            }
             if exchanges == EXCHANGES_MAX {
                 tracing::debug!("device sync: more next round");
                 return Vec::new();

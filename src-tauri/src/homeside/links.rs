@@ -55,6 +55,13 @@ pub struct Paired {
     /// When the two were last in step, by this device's clock (ms).
     #[serde(default)]
     pub last_synced_at: Option<u64>,
+    /// The namespaces both kept in step then.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub in_step: Vec<String>,
+    /// Back in touch after a long time apart, and not fully in step yet:
+    /// when the two were last in step before that.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catching_up_since: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -125,6 +132,8 @@ impl Links {
             peer: link.peer.clone(),
             device: None,
             last_synced_at: None,
+            in_step: Vec::new(),
+            catching_up_since: None,
         });
         self.save(&list)
     }

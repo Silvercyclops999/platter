@@ -32,7 +32,7 @@ use super::clock;
 use crate::db::DbHandle;
 use crate::homeside::link::Link;
 use crate::homeside::links::{Links, Outbox, batches};
-use crate::homeside::wire::{Msg, PROTO, SyncHello};
+use crate::homeside::wire::{Apart, Msg, PROTO, SyncHello};
 use crate::sync::SyncStore;
 use crate::sync::engine::{AccountTag, Groups};
 use crate::sync::store::{EntryMap, NAMESPACES, SETTINGS, diff_keys, looks_secret};
@@ -89,6 +89,25 @@ pub struct PeerSeen {
     /// Which entries `held` counts.
     #[serde(skip)]
     pub held_keys: std::collections::BTreeSet<String>,
+    /// The two are back in touch after a long time apart (this round).
+    #[serde(skip)]
+    pub catching_up: Option<CatchUp>,
+}
+
+/// A link not in step for longer than this catches up carefully: a
+/// deletion made meanwhile may be forgotten already (they're kept 90 days),
+/// so an old entry only one end still has isn't brought back.
+pub const LONG_AWAY_MS: u64 = 80 * 86_400_000;
+/// Entries stamped this close to the last time in step count as newer than
+/// it (clocks differ a little).
+const CATCH_UP_MARGIN_MS: u64 = 86_400_000;
+
+/// What a round after a long time apart goes by: when the two were last in
+/// step, and what they kept in step then.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CatchUp {
+    pub since: u64,
+    pub namespaces: Vec<String>,
 }
 
 /// A settings copy asked for on a link.
@@ -107,6 +126,9 @@ pub struct SyncPeer {
     adopting: Mutex<HashMap<String, Copying>>,
     /// Messages that came before the hello they follow, by link.
     waiting: Mutex<HashMap<String, Vec<Msg>>>,
+    /// Entries taken from each link this run, by namespace (for the counts
+    /// a first copy shows).
+    taken: Mutex<HashMap<String, std::collections::BTreeMap<String, usize>>>,
 }
 
 /// Most messages kept per link while its hello hasn't come.
@@ -144,7 +166,72 @@ fn entries_msgs(m: EntryMap) -> Vec<Msg> {
 
 impl SyncPeer {
     pub fn new(d: SyncDeps) -> Self {
-        Self { d, seen: Mutex::default(), waiting: Mutex::default(), adopting: Mutex::default() }
+        Self { d, seen: Mutex::default(), waiting: Mutex::default(), adopting: Mutex::default(), taken: Mutex::default() }
+    }
+
+    /// Entries taken from a link this run in these namespaces.
+    pub fn taken(&self, link_id: &str, namespaces: &[&str]) -> usize {
+        self.taken.lock().get(link_id).map_or(0, |t| namespaces.iter().filter_map(|n| t.get(*n)).sum())
+    }
+
+    fn count_taken(&self, link_id: &str, t: &std::collections::BTreeMap<String, usize>) {
+        let mut all = self.taken.lock();
+        let mine = all.entry(link_id.to_string()).or_default();
+        for (ns, n) in t {
+            *mine.entry(ns.clone()).or_default() += n;
+        }
+    }
+
+    /// A link last in step more than [`LONG_AWAY_MS`] ago: when, and what
+    /// was kept in step then. None for a link never in step (a new pairing
+    /// copies everything as usual).
+    fn long_apart(&self, link_id: &str) -> Option<CatchUp> {
+        let p = self.d.links.get(link_id)?;
+        // Already catching up (a round that didn't finish): the same again.
+        if let Some(since) = p.catching_up_since {
+            return Some(CatchUp { since, namespaces: p.in_step });
+        }
+        let since = p.last_synced_at?;
+        if self.d.store.now().saturating_sub(since) <= LONG_AWAY_MS {
+            return None;
+        }
+        // Kept until the two are fully in step, so a round cut short
+        // doesn't leave the next one to bring old things back.
+        if let Err(e) = self.d.links.update(link_id, |p| p.catching_up_since = Some(since)) {
+            tracing::warn!("device sync: couldn't note catching up: {e}");
+        }
+        Some(CatchUp { since, namespaces: p.in_step })
+    }
+
+    /// The other device says the two are catching up after a long time
+    /// apart (this one may never have noted being in step): its time, in
+    /// this device's clock, and what it kept in step then, kept here too.
+    fn apart_as_they_say(&self, link_id: &str, a: &Apart, offset: i64) -> CatchUp {
+        let theirs = (a.since as i64).saturating_sub(offset).max(0) as u64;
+        let mine = self.d.links.get(link_id).and_then(|p| p.last_synced_at);
+        let since = mine.map_or(theirs, |m| m.min(theirs));
+        let ns: Vec<String> = a.ns.iter().take(NAMESPACES.len() + crate::sync::store::UNKNOWN_NS_MAX).cloned().collect();
+        let mut kept = ns.clone();
+        if let Err(e) = self.d.links.update(link_id, |p| {
+            p.catching_up_since = Some(since);
+            if p.in_step.is_empty() {
+                p.in_step = ns;
+            }
+            kept = p.in_step.clone();
+        }) {
+            tracing::warn!("device sync: couldn't note catching up: {e}");
+        }
+        CatchUp { since, namespaces: kept }
+    }
+
+    /// Fully in step again after a long time apart.
+    fn caught_up(&self, link_id: &str) {
+        if self.d.links.get(link_id).is_some_and(|p| p.catching_up_since.is_some()) {
+            self.set_seen(link_id, |s| s.catching_up = None);
+            if let Err(e) = self.d.links.update(link_id, |p| p.catching_up_since = None) {
+                tracing::warn!("device sync: couldn't note being caught up: {e}");
+            }
+        }
     }
 
     pub fn deps(&self) -> &SyncDeps {
@@ -192,9 +279,19 @@ impl SyncPeer {
     /// Whether entries in `ns` move on this link: this device keeps it (or
     /// doesn't know it, and keeps it for a newer build) and the other end
     /// hasn't switched it off.
-    fn moves(&self, link_id: &str, ns: &str) -> bool {
+    pub(crate) fn moves(&self, link_id: &str, ns: &str) -> bool {
         let here = !NAMESPACES.contains(&ns) || (self.d.groups)().namespaces().contains(&ns);
         here && !self.seen(link_id).is_some_and(|s| s.skip.iter().any(|x| x == ns))
+    }
+
+    /// A hello that starts a round over only these namespaces: the others
+    /// are named as switched off for now (the next ordinary hello puts them
+    /// back). A first copy goes one group at a time this way.
+    pub async fn hello_for(&self, only: &[&str]) -> Option<Msg> {
+        let Some(Msg::SyncHello(mut h)) = self.hello(false).await else { return None };
+        h.digests.retain(|n, _| only.contains(&n.as_str()));
+        h.skip = NAMESPACES.iter().filter(|n| !only.contains(n)).map(|n| n.to_string()).collect();
+        Some(Msg::SyncHello(h))
     }
 
     /// This device's hello, or None when it isn't signed in (nothing is
@@ -219,7 +316,16 @@ impl SyncPeer {
             digests,
             skip: self.skipped(),
             answer,
+            apart: None,
         })))
+    }
+
+    /// This device's hello to one linked device: as [hello](Self::hello),
+    /// and saying so when the two are catching up after a long time apart.
+    pub async fn hello_to(&self, link_id: &str, answer: bool) -> Option<Msg> {
+        let Some(Msg::SyncHello(mut h)) = self.hello(answer).await else { return None };
+        h.apart = self.long_apart(link_id).map(|c| Apart { since: c.since, ns: c.namespaces });
+        Some(Msg::SyncHello(h))
     }
 
     /// One message from the other end of `link`: the messages to answer
@@ -305,7 +411,14 @@ impl SyncPeer {
         }
         let offset = clock::offset(h.clock_ms, self.d.store.now());
         let name: String = h.name.chars().take(60).collect();
+        // Back in touch after a long time apart: this round goes carefully.
+        let apart = self.long_apart(&link.id).or_else(|| h.apart.as_ref().map(|a| self.apart_as_they_say(&link.id, a, offset)));
+        if apart.is_some() {
+            tracing::info!("device sync: catching up after a long time apart");
+        }
+        let catching_up = apart.is_some();
         self.set_seen(&link.id, |s| {
+            s.catching_up = apart;
             s.name = name.clone();
             s.platform = h.platform.chars().take(30).collect();
             s.proto = h.proto;
@@ -356,13 +469,18 @@ impl SyncPeer {
                 }
                 if diffs.is_empty() && ok {
                     p.mark_synced(&id);
+                    p.caught_up(&id);
                 }
                 diffs
             })
             .await;
         let mut out: Vec<Msg> = Vec::new();
         if !h.answer {
-            out.extend(self.hello(true).await);
+            out.extend(self.hello_to(&link.id, true).await);
+            out.append(&mut diffs);
+        } else if catching_up {
+            // After a long time apart both ends see the other's key lists,
+            // so each lets go of what the other let go of.
             out.append(&mut diffs);
         }
         // Anything that came ahead of this hello.
@@ -389,7 +507,10 @@ impl SyncPeer {
         if let Err(e) = Outbox::new(&self.d.db, &link.id).mark_stamps(ns, theirs) {
             tracing::warn!("device sync: couldn't note what the other device has: {e}");
         }
-        let d = diff_keys(&mine, theirs);
+        let mut d = diff_keys(&mine, theirs);
+        if let Some(c) = self.seen(&link.id).and_then(|s| s.catching_up).filter(|c| c.namespaces.iter().any(|n| n == ns)) {
+            self.let_go_of_old(ns, &c, &mine, theirs, &mut d);
+        }
         let mut ok = true;
         let mut out = match self.d.store.entries_for(ns, &d.send) {
             Ok(m) => entries_msgs(m),
@@ -407,6 +528,31 @@ impl SyncPeer {
             self.mark_synced(&link.id);
         }
         out
+    }
+
+    /// After a long time apart, an entry only one end has and that is older
+    /// than the last time the two were in step was on both ends then: the
+    /// other end deleted it since, and may have forgotten the deletion by
+    /// now. So it isn't sent from here (and goes here, quietly), nor asked
+    /// for when it's the other end that has it. Anything stamped after the
+    /// two were last in step is new on the end that has it and moves as
+    /// usual.
+    fn let_go_of_old(&self, ns: &str, c: &CatchUp, mine: &[crate::sync::store::Stamp], theirs: &[crate::sync::store::Stamp], d: &mut crate::sync::store::KeyDiff) {
+        let before = c.since.saturating_sub(CATCH_UP_MARGIN_MS);
+        let has_mine: HashMap<&str, u64> = mine.iter().map(|(k, t, _)| (k.as_str(), *t)).collect();
+        let has_theirs: HashMap<&str, u64> = theirs.iter().map(|(k, t, _)| (k.as_str(), *t)).collect();
+        let old = |k: &str, here: &HashMap<&str, u64>, there: &HashMap<&str, u64>| !there.contains_key(k) && here.get(k).is_some_and(|t| *t < before);
+        let (old_here, send): (Vec<String>, Vec<String>) = d.send.drain(..).partition(|k| old(k, &has_mine, &has_theirs));
+        d.send = send;
+        d.want.retain(|k| !old(k, &has_theirs, &has_mine));
+        if old_here.is_empty() {
+            return;
+        }
+        let old = old_here;
+        match self.d.store.forget_entries(ns, &old) {
+            Ok(n) => tracing::info!(ns, n, "device sync: let go of entries the other device no longer has"),
+            Err(e) => tracing::warn!(ns, "device sync: couldn't let go of old entries: {e}"),
+        }
     }
 
     fn on_want(&self, link: &Link, ns: &str, keys: &[String]) -> Vec<Msg> {
@@ -486,7 +632,10 @@ impl SyncPeer {
             e.ts = e.ts.max(now).max(here.get(k).map_or(0, |t| t + 1));
         }
         match self.d.store.merge_from_device(&entries, &[SETTINGS.name()], &name) {
-            Ok(_) => done(Copying::Done),
+            Ok(out) => {
+                self.count_taken(&link.id, &out.taken);
+                done(Copying::Done)
+            }
             Err(e) => {
                 tracing::warn!("device sync: couldn't save copied settings: {e}");
                 done(Copying::Failed(format!("Couldn't save the settings from {name}.")));
@@ -504,6 +653,7 @@ impl SyncPeer {
                 if !out.held.is_empty() {
                     tracing::info!(held = out.held.len(), "device sync: held entries from a clock far ahead");
                 }
+                self.count_taken(&link.id, &out.taken);
                 self.set_seen(&link.id, |s| {
                     // Counted once per entry, however often it comes again.
                     s.held_keys.extend(out.held.iter().map(|(ns, key, _)| format!("{ns}/{key}")));
@@ -533,7 +683,14 @@ impl SyncPeer {
             return;
         }
         let now = self.d.store.now();
-        if let Err(e) = self.d.links.update(link_id, |p| p.last_synced_at = Some(now)) {
+        let in_step: Vec<String> = self.namespaces().into_iter().filter(|n| self.moves(link_id, n)).collect();
+        if let Err(e) = self.d.links.update(link_id, |p| {
+            p.last_synced_at = Some(now);
+            // While catching up, what was kept in step before stays the guide.
+            if p.catching_up_since.is_none() {
+                p.in_step = in_step;
+            }
+        }) {
             tracing::warn!("device sync: couldn't note the time in step: {e}");
         }
     }
@@ -542,7 +699,7 @@ impl SyncPeer {
     /// account is checked: then a hello goes instead.
     pub async fn push(self: &Arc<Self>, link: &Link) -> Vec<Msg> {
         if !self.verified(&link.id) {
-            return self.hello(false).await.into_iter().collect();
+            return self.hello_to(&link.id, false).await.into_iter().collect();
         }
         let id = link.id.clone();
         self.blocking(move |p| {
@@ -608,6 +765,7 @@ impl SyncPeer {
         self.seen.lock().remove(link_id);
         self.waiting.lock().remove(link_id);
         self.adopting.lock().remove(link_id);
+        self.taken.lock().remove(link_id);
     }
 
     /// Whether the other end keeps this namespace in step (from its hello).
