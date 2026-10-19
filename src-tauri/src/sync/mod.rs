@@ -53,6 +53,8 @@ pub mod store;
 pub mod transcripts;
 
 #[cfg(test)]
+mod digest_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod transcripts_tests;

@@ -387,7 +387,7 @@ impl Desktop {
     pub async fn flush_entries(&self) {
         for link in self.wire.links.links() {
             let ob = Outbox::new(&self.d.db, &link.id);
-            let Ok(batches) = ob.pending(&self.d.store) else { continue };
+            let Ok(batches) = ob.pending(&self.d.store, &[LIDARR.name()]) else { continue };
             for b in batches {
                 if self.wire.send(&link, &Msg::Entries { entries: b.clone() }).await.is_ok() {
                     let _ = ob.mark(&b);

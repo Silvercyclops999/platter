@@ -134,8 +134,10 @@ fn sent_key(id: &str) -> String {
     format!("bridge.sent.{id}")
 }
 
-/// Which shared Lidarr entries the other end of a link already has: the
-/// entry's time and device, by key. What's missing or different is sent.
+/// Which shared entries the other end of a link already has: the entry's
+/// time and device, by namespace and key. What's missing or different is
+/// sent. Only a shortcut: a lost outbox means some entries go again, and
+/// the digest round between devices repairs anything it got wrong.
 pub struct Outbox<'a> {
     db: &'a DbHandle,
     id: &'a str,
@@ -143,8 +145,36 @@ pub struct Outbox<'a> {
 
 /// Most entries in one message.
 pub const BATCH: usize = 250;
+/// Most JSON in one message's entries, so a batch stays well inside one
+/// relay message and one request on the local network.
+pub const BATCH_BYTES: usize = 160 * 1024;
 
-type Sent = BTreeMap<String, (u64, String)>;
+/// Namespace, then key, to the stamp the other end has.
+type Sent = BTreeMap<String, BTreeMap<String, (u64, String)>>;
+
+/// Entries cut into batches of at most [`BATCH`] entries and about
+/// [`BATCH_BYTES`] of JSON.
+pub fn batches(all: EntryMap) -> Vec<EntryMap> {
+    let mut out: Vec<EntryMap> = Vec::new();
+    let mut cur = EntryMap::new();
+    let (mut n, mut bytes) = (0, 0);
+    for (ns, entries) in all {
+        for (k, e) in entries {
+            let size = k.len() + e.device.len() + e.value.as_ref().map_or(0, |v| v.to_string().len()) + 32;
+            if n > 0 && (n == BATCH || bytes + size > BATCH_BYTES) {
+                out.push(std::mem::take(&mut cur));
+                (n, bytes) = (0, 0);
+            }
+            cur.entry(ns.clone()).or_default().insert(k, e);
+            n += 1;
+            bytes += size;
+        }
+    }
+    if n > 0 {
+        out.push(cur);
+    }
+    out
+}
 
 impl<'a> Outbox<'a> {
     pub fn new(db: &'a DbHandle, id: &'a str) -> Self {
@@ -152,7 +182,14 @@ impl<'a> Outbox<'a> {
     }
 
     fn load(&self) -> Sent {
-        self.db.read(|c| kv_get(c, &sent_key(self.id))).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+        let Some(s) = self.db.read(|c| kv_get(c, &sent_key(self.id))).ok().flatten() else { return Sent::new() };
+        if let Ok(sent) = serde_json::from_str::<Sent>(&s) {
+            return sent;
+        }
+        // Before outboxes knew namespaces they held only Lidarr's keys.
+        serde_json::from_str::<BTreeMap<String, (u64, String)>>(&s)
+            .map(|old| Sent::from([(LIDARR.name().to_string(), old)]))
+            .unwrap_or_default()
     }
 
     fn save(&self, s: &Sent) -> AppResult<()> {
@@ -160,40 +197,58 @@ impl<'a> Outbox<'a> {
         self.db.write(|c| kv_set(c, &sent_key(self.id), &json))
     }
 
-    /// Entries the other end doesn't have yet, in batches.
-    pub fn pending(&self, store: &SyncStore) -> AppResult<Vec<EntryMap>> {
+    /// Entries in these namespaces the other end doesn't have yet, in
+    /// batches. Anything that looks like a secret is never sent.
+    pub fn pending(&self, store: &SyncStore, namespaces: &[&str]) -> AppResult<Vec<EntryMap>> {
+        Ok(batches(self.unsent(store.entries(namespaces)?)))
+    }
+
+    /// The entries of `all` the other end doesn't have yet.
+    pub fn unsent(&self, all: EntryMap) -> EntryMap {
         let sent = self.load();
-        let all = store.entries(&[LIDARR.name()])?;
-        let mut out: Vec<EntryMap> = Vec::new();
-        let mut cur = EntryMap::new();
-        let mut n = 0;
+        let mut out = EntryMap::new();
         for (ns, entries) in all {
+            let had = sent.get(&ns);
             for (k, e) in entries {
-                if sent.get(&k).is_some_and(|(ts, dev)| *ts == e.ts && *dev == e.device) {
+                if had.and_then(|h| h.get(&k)).is_some_and(|(ts, dev)| *ts == e.ts && *dev == e.device) {
                     continue;
                 }
-                cur.entry(ns.clone()).or_default().insert(k, e);
-                n += 1;
-                if n == BATCH {
-                    out.push(std::mem::take(&mut cur));
-                    n = 0;
+                if e.value.as_ref().is_some_and(crate::sync::store::looks_secret) {
+                    continue;
                 }
+                out.entry(ns.clone()).or_default().insert(k, e);
             }
         }
-        if n > 0 {
-            out.push(cur);
-        }
-        Ok(out)
+        out
     }
 
     /// The other end has these now (sent, or received from it).
     pub fn mark(&self, m: &EntryMap) -> AppResult<()> {
         let mut sent = self.load();
-        for e in m.values() {
+        for (ns, e) in m {
+            let s = sent.entry(ns.clone()).or_default();
             for (k, v) in e {
-                sent.insert(k.clone(), (v.ts, v.device.clone()));
+                s.insert(k.clone(), (v.ts, v.device.clone()));
             }
         }
         self.save(&sent)
+    }
+
+    /// The other end has these stamps (from its key list).
+    pub fn mark_stamps(&self, ns: &str, stamps: &[crate::sync::store::Stamp]) -> AppResult<()> {
+        let mut sent = self.load();
+        let s = sent.entry(ns.to_string()).or_default();
+        for (k, ts, dev) in stamps {
+            s.insert(k.clone(), (*ts, dev.clone()));
+        }
+        self.save(&sent)
+    }
+
+    /// Forget what the other end has (everything goes again).
+    pub fn clear(&self) -> AppResult<()> {
+        self.db.write(|c| {
+            c.execute("DELETE FROM kv WHERE key = ?1", [sent_key(self.id)])?;
+            Ok(())
+        })
     }
 }

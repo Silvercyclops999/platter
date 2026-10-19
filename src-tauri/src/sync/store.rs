@@ -229,6 +229,67 @@ pub fn looks_secret(v: &Value) -> bool {
     }
 }
 
+// ---------------------------------------------------------------- digests
+
+/// One entry's place in a namespace, without its value: key, time, device.
+/// Two devices compare these to work out who has the later change.
+pub type Stamp = (String, u64, String);
+
+/// A namespace in short: how many entries (deletions too) and a hash of
+/// their sorted stamps. Equal digests mean nothing to swap.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Digest {
+    pub n: usize,
+    pub h: String,
+}
+
+/// Namespace to digest.
+pub type Digests = BTreeMap<String, Digest>;
+
+/// The digest of a list of stamps, in any order.
+pub fn digest_of(stamps: &[Stamp]) -> Digest {
+    use sha2::{Digest as _, Sha256};
+    let mut sorted: Vec<&Stamp> = stamps.iter().collect();
+    sorted.sort();
+    let mut h = Sha256::new();
+    for (k, ts, dev) in &sorted {
+        h.update(k.as_bytes());
+        h.update([0]);
+        h.update(ts.to_be_bytes());
+        h.update(dev.as_bytes());
+        h.update([0]);
+    }
+    Digest { n: sorted.len(), h: crate::remote::peer::auth::hex(&h.finalize()[..16]) }
+}
+
+/// What two key lists say should move: keys to send (this side has them
+/// later, or the other lacks them) and keys to ask for.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KeyDiff {
+    pub send: Vec<String>,
+    pub want: Vec<String>,
+}
+
+/// Compare this side's stamps with the other side's.
+pub fn diff_keys(mine: &[Stamp], theirs: &[Stamp]) -> KeyDiff {
+    let m: BTreeMap<&str, (u64, &str)> = mine.iter().map(|(k, ts, d)| (k.as_str(), (*ts, d.as_str()))).collect();
+    let t: BTreeMap<&str, (u64, &str)> = theirs.iter().map(|(k, ts, d)| (k.as_str(), (*ts, d.as_str()))).collect();
+    let mut out = KeyDiff::default();
+    for (k, a) in &m {
+        match t.get(k) {
+            Some(b) if b >= a => {}
+            _ => out.send.push(k.to_string()),
+        }
+    }
+    for (k, b) in &t {
+        match m.get(k) {
+            Some(a) if a >= b => {}
+            _ => out.want.push(k.to_string()),
+        }
+    }
+    out
+}
+
 pub type Clock = Arc<dyn Fn() -> u64 + Send + Sync>;
 
 pub fn system_ms() -> u64 {
@@ -581,6 +642,39 @@ impl SyncStore {
         })?;
         self.emit(changed.clone(), true);
         Ok(changed)
+    }
+
+    /// Every entry's stamp in one namespace, by key.
+    pub fn stamps(&self, ns: &str) -> AppResult<Vec<Stamp>> {
+        self.inner.db.read(|c| {
+            let mut st = c.prepare_cached("SELECT key, ts, device FROM sync_entries WHERE ns = ?1 ORDER BY key")?;
+            let rows = st
+                .query_map([ns], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?.max(0) as u64, r.get::<_, String>(2)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// A digest per namespace (an empty namespace has one too).
+    pub fn digest(&self, namespaces: &[&str]) -> AppResult<Digests> {
+        let mut out = Digests::new();
+        for ns in namespaces {
+            out.insert(ns.to_string(), digest_of(&self.stamps(ns)?));
+        }
+        Ok(out)
+    }
+
+    /// These keys' entries (tombstones too) in one namespace.
+    pub fn entries_for(&self, ns: &str, keys: &[String]) -> AppResult<EntryMap> {
+        self.inner.db.read(|c| {
+            let mut out = EntryMap::new();
+            for k in keys {
+                if let Some(e) = get_entry(c, ns, k)? {
+                    out.entry(ns.to_string()).or_default().insert(k.clone(), e);
+                }
+            }
+            Ok(out)
+        })
     }
 
     /// Forget tombstones older than `before` (ms).
