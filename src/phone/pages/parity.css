@@ -7,8 +7,8 @@
 .ph-x__lede { margin: 0 0 16px; font-size: 14px; line-height: 1.45; color: var(--color-text-secondary); }
 .ph-x__pills { margin-bottom: 12px; }
 .ph-x .ph-chip, .ph-x__pills .ph-chip { height: 40px; }
-/* A pill's whole 44 pt row takes the tap; the drawn pill stays slim. */
-.ph-x__pills { padding-top: 2px; padding-bottom: 2px; }
+/* Room for the 44 px tap frame round each 40 px chip; the drawn pill stays slim. */
+.ph-x__pills { margin-top: 0; padding-top: 2px; padding-bottom: 2px; }
 .ph-x__grid { margin-top: 4px; }
 .ph-x__tile { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .ph-x__tile-art { display: block; width: 100%; aspect-ratio: 1; border-radius: 4px; overflow: hidden; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22); }

@@ -321,11 +321,11 @@ function FindingRow({
       <div className="doctor-item__body">
         <h3 className="doctor-item__title">{f.title}</h3>
         <p className="doctor-item__meta">
-          <button type="button" className="link doctor-item__link" onClick={() => nav.go({ name: "album", id: f.albumId })}>
+          <button type="button" className="link doctor-item__link" data-tap-inline onClick={() => nav.go({ name: "album", id: f.albumId })}>
             {f.album}
           </button>
           <span aria-hidden="true"> · </span>
-          <button type="button" className="link doctor-item__link" onClick={() => nav.go({ name: "artist", id: f.artistId })}>
+          <button type="button" className="link doctor-item__link" data-tap-inline onClick={() => nav.go({ name: "artist", id: f.artistId })}>
             {f.artist}
           </button>
         </p>

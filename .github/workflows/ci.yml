@@ -58,6 +58,21 @@ jobs:
           PLATTER_SPEECH_GPU=1 target/debug/platter --speech-probe | tee probe.txt
           grep -qx '\[\]' probe.txt
 
+  # Every phone page in the browser mock at 390, 430 and 440 px, in both looks:
+  # no text spilling sideways or cut off, no clipped icons, no tap target under 44 px.
+  phone-layout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright-core install --with-deps --only-shell chromium
+      - run: node scripts/phone-layout-guard.mjs
+
   # The Stream Deck plugin: types, tests, and that it builds and packs.
   streamdeck:
     runs-on: ubuntu-latest

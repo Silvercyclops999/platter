@@ -129,6 +129,21 @@
 .ph-play--small { width: 56px; height: 56px; }
 .ph-play--row { width: 40px; height: 40px; box-shadow: none; }
 
+/* Controls drawn smaller than a finger (chips, switches, title links) still
+   take a 44 px tap: an invisible frame around them, never smaller than the
+   control itself. */
+.phone :is(.ph-chip, .ph-play--row, .tab, .chip, .diary-entry__link, .ph-lineage__album, .doctor-item__why) { position: relative; }
+.phone :is(.ph-chip, .ph-play--row, .tab, .chip, .switch, .setting-more__button, .chips-scroll__btn, .diary-entry__link, .ph-lineage__album, .doctor-item__why)::before {
+  content: "";
+  position: absolute;
+  top: min(0px, calc(50% - 22px));
+  bottom: min(0px, calc(50% - 22px));
+  left: min(0px, calc(50% - 22px));
+  right: min(0px, calc(50% - 22px));
+}
+.phone .diary-bar__year select { min-height: 44px; }
+.phone .ph-seg__tab { min-width: 44px; }
+
 .ph-pill {
   display: inline-flex;
   align-items: center;
@@ -147,9 +162,10 @@
 .ph-pill--big { flex-direction: column; gap: 4px; min-height: 60px; padding: 0 8px; font-size: 13px; }
 
 .ph-pills { display: flex; gap: 8px; }
+/* Room above and below the chips for their 44 px tap frame (a scroller cuts it off). */
 .ph-pills--scroll {
-  margin: 0 calc(-1 * var(--ph-gutter)) 4px;
-  padding: 0 var(--ph-gutter) 4px;
+  margin: -5px calc(-1 * var(--ph-gutter)) 3px;
+  padding: 5px var(--ph-gutter);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -562,7 +578,7 @@
 
 /* ---------------------------------------------------------------- home */
 .ph-home__top { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; }
-.ph-home__top .ph-pills { overflow-x: auto; scrollbar-width: none; min-width: 0; }
+.ph-home__top .ph-pills { overflow-x: auto; scrollbar-width: none; min-width: 0; margin-block: -5px; padding-block: 5px; }
 .ph-avatar { display: grid; place-items: center; flex: none; width: 36px; height: 36px; margin: 4px; border-radius: 50%; overflow: hidden; background: var(--ph-faint) !important; color: var(--color-text-secondary); }
 .ph-avatar::before { content: ""; position: absolute; inset: -4px; }
 .ph-avatar { position: relative; }
@@ -668,7 +684,7 @@
 .ph-songs { list-style: none; margin: 0; padding: 0; }
 .ph-song { display: flex; align-items: center; height: 64px; }
 .ph-song__main { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; height: 100%; }
-.ph-song__num { flex: none; width: 22px; text-align: right; font-size: 14px; color: var(--color-text-muted); }
+.ph-song__num { flex: none; min-width: 22px; text-align: right; font-size: 14px; color: var(--color-text-muted); }
 .ph-song__num.is-playing { color: var(--color-accent); }
 .ph-foot { margin: 16px 0 0; font-size: 13px; color: var(--color-text-muted); }
 .ph-album .ph-card { margin: 24px 0 0; }
@@ -870,7 +886,7 @@
 .ph-you__face .avatar-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; }
 .ph-you__face .avatar-img.is-loaded { opacity: 1; }
 .ph-you__who { min-width: 0; }
-.ph-you__name { margin: 0 0 4px; font-size: 28px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ph-you__name { margin: 0 0 4px; font-size: 28px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ph-you__meta { margin: 0; font-size: 14px; color: var(--color-text-secondary); }
 .ph-you__cog { align-self: start; margin: -4px -10px 0 0; }
 .ph-you__month { margin-bottom: 16px; }
