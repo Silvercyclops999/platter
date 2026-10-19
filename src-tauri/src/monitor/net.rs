@@ -92,6 +92,23 @@ impl NetWatch {
     }
 }
 
+/// What kind of change a route change was, without the addresses: the
+/// families and, within one family, whether it's another network or the
+/// same network with a new address (an IPv6 privacy address rotating, a
+/// carrier handing out another IPv4 address).
+pub fn describe_change(old: Option<IpAddr>, new: Option<IpAddr>) -> &'static str {
+    match (old, new) {
+        (None, Some(_)) => "network back",
+        (Some(IpAddr::V4(_)), Some(IpAddr::V6(_))) => "IPv4 to IPv6",
+        (Some(IpAddr::V6(_)), Some(IpAddr::V4(_))) => "IPv6 to IPv4",
+        (Some(IpAddr::V6(a)), Some(IpAddr::V6(b))) if a.segments()[..4] == b.segments()[..4] => "same IPv6 /64, new address",
+        (Some(IpAddr::V6(_)), Some(IpAddr::V6(_))) => "another IPv6 /64",
+        (Some(IpAddr::V4(a)), Some(IpAddr::V4(b))) if a.octets()[..3] == b.octets()[..3] => "same IPv4 /24, new address",
+        (Some(IpAddr::V4(_)), Some(IpAddr::V4(_))) => "another IPv4 network",
+        _ => "no change",
+    }
+}
+
 /// Background loop: wake or network change → reconnect now; no network →
 /// "You're offline" at once.
 pub fn spawn(plex: PlexState) {
@@ -99,8 +116,12 @@ pub fn spawn(plex: PlexState) {
         let mut watch = NetWatch::new(SystemTime::now());
         loop {
             let route = tokio::task::spawn_blocking(route_ip).await.ok().flatten();
+            let before = watch.route;
             for s in watch.tick(route, SystemTime::now(), TICK) {
-                tracing::info!("network: {s:?}");
+                match s {
+                    NetSignal::Changed => tracing::info!("network: Changed ({})", describe_change(before, route)),
+                    _ => tracing::info!("network: {s:?}"),
+                }
                 match s {
                     NetSignal::Woke | NetSignal::Changed => plex.reconnect().await,
                     NetSignal::Lost => {
@@ -167,6 +188,19 @@ mod tests {
             w.tick(CAFE, at(900), TICK),
             vec![NetSignal::Woke, NetSignal::Changed]
         );
+    }
+
+    #[test]
+    fn changes_are_described_without_addresses() {
+        use std::net::Ipv6Addr;
+        let v6 = |last: u16| Some(IpAddr::V6(Ipv6Addr::new(0x2600, 1, 2, 3, 0, 0, 0, last)));
+        let other64 = Some(IpAddr::V6(Ipv6Addr::new(0x2600, 9, 2, 3, 0, 0, 0, 1)));
+        assert_eq!(describe_change(HOME, v6(1)), "IPv4 to IPv6");
+        assert_eq!(describe_change(v6(1), HOME), "IPv6 to IPv4");
+        assert_eq!(describe_change(v6(1), v6(2)), "same IPv6 /64, new address");
+        assert_eq!(describe_change(v6(1), other64), "another IPv6 /64");
+        assert_eq!(describe_change(HOME, CAFE), "another IPv4 network");
+        assert_eq!(describe_change(None, HOME), "network back");
     }
 
     #[test]
