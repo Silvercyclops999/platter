@@ -286,11 +286,6 @@ fn fx_with(fetch: Arc<FakeFetch>) -> Fx {
     fx_build(fetch, None, gpu::Gpu::none())
 }
 
-/// With another recognizer (a fake helper process).
-fn fx_rec(rec: Arc<dyn Recognizer>) -> Fx {
-    fx_build(FakeFetch::new(model_body()), Some(rec), gpu::Gpu::none())
-}
-
 /// A computer with these graphics cards.
 fn fx_gpu(cards: Vec<gpu::Device>) -> Fx {
     fx_build(FakeFetch::new(model_body()), None, gpu_with(cards))
@@ -372,16 +367,22 @@ fn fx() -> Fx {
     fx_with(FakeFetch::new(model_body()))
 }
 
-/// Waits (up to 5 s) until the status matches.
+/// How long a wait gives up after: long, so a slow machine only makes a test slower.
+const WAIT: Duration = Duration::from_secs(20);
+
+/// Waits (up to `WAIT`) until the status matches.
 async fn until(t: &Transcriber, what: &str, f: impl Fn(&TranscribeStatus) -> bool) -> TranscribeStatus {
-    for _ in 0..500 {
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
         let s = t.status();
         if f(&s) {
             return s;
         }
+        if std::time::Instant::now() > deadline {
+            panic!("timed out waiting for {what}: {s:?}");
+        }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    panic!("timed out waiting for {what}: {:?}", t.status());
 }
 
 fn idle(s: &TranscribeStatus) -> bool {
@@ -746,17 +747,11 @@ async fn a_song_asked_for_stops_the_batch_song_in_progress_which_resumes_after()
     until(&f.t, "801 transcribing", |s| s.current.as_ref().is_some_and(|c| c.track_id == "801" && c.stage == Stage::Transcribing)).await;
     let reads = f.songs.reads.load(Ordering::SeqCst);
     f.t.transcribe_track("501").unwrap();
-    // Within a moment the asked-for song is the one running, and it finishes.
-    for _ in 0..100 {
-        if f.t.status().current.is_some_and(|c| c.track_id == "501") || f.events.done.lock().iter().any(|d| d.0 == "501") {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert!(
-        f.t.status().current.is_some_and(|c| c.track_id == "501") || f.events.done.lock().iter().any(|d| d.0 == "501"),
-        "the song asked for started within a second"
-    );
+    // The asked-for song runs (the batch song would block forever), and it finishes.
+    until_true("the song asked for started", || {
+        f.t.status().current.is_some_and(|c| c.track_id == "501") || f.events.done.lock().iter().any(|d| d.0 == "501")
+    })
+    .await;
     until(&f.t, "501 done", |_| f.events.done.lock().iter().any(|d| d.0 == "501")).await;
     // Then the batch song goes on, from the audio already read.
     let s = until(&f.t, "801 again", |s| s.current.as_ref().is_some_and(|c| c.track_id == "801" && c.stage == Stage::Transcribing)).await;
@@ -913,15 +908,15 @@ async fn a_transcription_never_replaces_lyrics_the_user_saved() {
 
 // ---------------------------------------------------------------- official lyrics first
 
-/// Waits (up to 5 s) for a condition outside the status.
+/// Waits (up to `WAIT`) for a condition outside the status.
 async fn until_true(what: &str, f: impl Fn() -> bool) {
-    for _ in 0..500 {
-        if f() {
-            return;
+    let deadline = std::time::Instant::now() + WAIT;
+    while !f() {
+        if std::time::Instant::now() > deadline {
+            panic!("timed out waiting for {what}");
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    panic!("timed out waiting for {what}");
 }
 
 #[tokio::test]
@@ -1344,11 +1339,16 @@ struct Hx {
 }
 
 async fn hx(idle: Duration) -> Hx {
+    hx_timed(idle, pace::fake::timing()).await
+}
+
+async fn hx_timed(idle: Duration, timing: pace::Timing) -> Hx {
     let script = Arc::new(Script::default());
     let n = Arc::new(Processes::default());
     let helper =
         Arc::new(helper::Helper::new(Arc::new(ScriptLaunch { script: script.clone(), n: n.clone() }), Arc::new(|| false), idle));
-    let f = fx_rec(Arc::new(Available(helper.clone())));
+    let rec: Arc<dyn Recognizer> = Arc::new(Available(helper.clone()));
+    let f = fx_timed(FakeFetch::new(model_body()), Some(rec), gpu::Gpu::none(), timing);
     install(&f).await;
     Hx { f, script, n, helper }
 }
@@ -1359,7 +1359,10 @@ fn is(s: &TranscribeStatus, id: &str, stage: Stage, percent: u8) -> bool {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn progress_from_the_helper_reaches_the_status_and_events() {
-    let h = hx(IDLE_EXIT_TEST).await;
+    // "Quiet" after a second: far longer than a slow machine takes to send the
+    // move, so the first event can't already be quiet; the test then waits it out.
+    let timing = pace::Timing { stuck: Duration::from_secs(1), ..pace::fake::timing() };
+    let h = hx_timed(IDLE_EXIT_TEST, timing).await;
     let f = &h.f;
     f.t.transcribe_track("501").unwrap();
     until(&f.t, "40%", |s| is(s, "501", Stage::Transcribing, 40)).await;
@@ -1372,27 +1375,17 @@ async fn progress_from_the_helper_reaches_the_status_and_events() {
         .collect();
     assert!(seen.contains(&(Stage::Loading, 0)), "loading the model was said: {seen:?}");
     // The 40% came right after the 0%, inside the emit gap: the next tick sends it.
-    for _ in 0..100 {
-        if f.events.statuses.lock().iter().any(|s| is(s, "501", Stage::Transcribing, 40)) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert!(f.events.statuses.lock().iter().any(|s| is(s, "501", Stage::Transcribing, 40)), "an event says 40%");
+    until_true("an event says 40%", || f.events.statuses.lock().iter().any(|s| is(s, "501", Stage::Transcribing, 40))).await;
     let moved = f.events.statuses.lock().iter().filter(|s| is(s, "501", Stage::Transcribing, 40)).all(|s| s.current.as_ref().unwrap().quiet_secs.is_none());
     assert!(moved, "not quiet right after it moved");
-    // Nothing moves for a while (the test's "long time" is 300 ms): the status says so.
+    // Nothing moves for a while (here a second): the status says so.
     let s = until(&f.t, "quiet", |s| s.current.as_ref().is_some_and(|c| c.quiet_secs.is_some())).await;
     assert_eq!(s.current.unwrap().percent, 40);
     // The next tick (every 50 ms) sends it.
-    let said = || f.events.statuses.lock().iter().any(|s| s.current.as_ref().is_some_and(|c| c.quiet_secs.is_some()));
-    for _ in 0..100 {
-        if said() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert!(said(), "and an event went out");
+    until_true("an event saying it's quiet", || {
+        f.events.statuses.lock().iter().any(|s| s.current.as_ref().is_some_and(|c| c.quiet_secs.is_some()))
+    })
+    .await;
     h.script.gate.store(true, Ordering::SeqCst);
     until(&f.t, "done", |_| f.events.done.lock().iter().any(|d| d.0 == "501")).await;
     assert_eq!(*h.script.threads.lock(), vec![4], "the thread budget reaches the speech library as is");
@@ -1466,13 +1459,7 @@ async fn cancel_reaches_the_helper_and_resets_the_song() {
     assert!(f.events.done.lock().is_empty());
     assert_eq!(h.n.ended.load(Ordering::SeqCst), 0, "it stopped when asked: the helper stays a moment");
     // Nothing else to do: it ends on its idle timer.
-    for _ in 0..200 {
-        if !h.helper.running() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert!(!h.helper.running());
+    until_true("the helper ended on its idle timer", || !h.helper.running()).await;
     // A helper that doesn't stop when asked is ended within about a second.
     h.script.deaf.store(true, Ordering::SeqCst);
     f.t.transcribe_track("502").unwrap();
