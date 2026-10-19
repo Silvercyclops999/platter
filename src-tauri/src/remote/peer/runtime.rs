@@ -70,11 +70,28 @@ pub async fn run(remote: RemoteService, dir: Arc<dyn PeerDirectory>, addrs: Addr
     let keys = remote.peer_keys();
     let server = Arc::new(PeerServer::new(own_id.clone(), handler, keys.clone()).with_extra(remote.extra_routes()));
     let mut running: Option<Running> = None;
+    // Addresses seen at the last check while running: a new set (or none)
+    // takes over only once it holds for two checks in a row, so a phone's
+    // network flapping between checks doesn't take the port down and up.
+    let mut last_seen: Vec<Ipv4Addr> = Vec::new();
     loop {
         let want = *on.borrow_and_update();
         let _ = name_rx.borrow_and_update();
         let tag = if want { remote.account_tag().await } else { None };
-        let ips = if want { addrs() } else { Vec::new() };
+        let mut ips = if want { addrs() } else { Vec::new() };
+        ips.sort_unstable();
+        ips.dedup();
+        let moved = want && running.as_ref().is_some_and(|r| r.ips != ips);
+        let settled = !moved || ips == last_seen;
+        last_seen = ips.clone();
+        if !settled {
+            tokio::select! {
+                r = on.changed() => if r.is_err() { break },
+                r = name_rx.changed() => if r.is_err() { break },
+                _ = tokio::time::sleep(cfg.recheck) => {}
+            }
+            continue;
+        }
         match (want, tag) {
             (true, Some(tag)) if !ips.is_empty() => {
                 if running.as_ref().is_some_and(|r| r.ips != ips) {
