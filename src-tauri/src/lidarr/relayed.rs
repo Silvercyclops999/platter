@@ -300,7 +300,11 @@ pub fn read_allowed(path: &str, query: &[(String, String)]) -> bool {
         || number_after(path, "/trackfile/").is_some()
         || path == "/filesystem"
         || path == "/manualimport";
-    page && query.len() <= 20 && query.iter().all(|(k, v)| READ_QUERY.contains(&k.as_str()) && v.len() <= 1000 && !v.contains('\0'))
+    // A name given twice is refused: the folder check reads the first one,
+    // and Lidarr might read another.
+    let mut seen = std::collections::HashSet::new();
+    page && query.len() <= 20
+        && query.iter().all(|(k, v)| READ_QUERY.contains(&k.as_str()) && v.len() <= 1000 && !v.contains('\0') && seen.insert(k.to_ascii_lowercase()))
 }
 
 /// A folder read is only for a folder inside one of Lidarr's root folders
@@ -466,6 +470,11 @@ mod tests {
             assert!(!read_allowed(p, &[]), "{p}");
         }
         assert!(!read_allowed("/artist", &q("apikey", "x")));
+        // A name given twice: the folder check and Lidarr could read different ones.
+        let two = |a: (&str, &str), b: (&str, &str)| vec![(a.0.to_string(), a.1.to_string()), (b.0.to_string(), b.1.to_string())];
+        assert!(!read_allowed("/filesystem", &two(("path", "/data/media/Music/A"), ("path", "/config"))));
+        assert!(!read_allowed("/track", &two(("albumId", "1"), ("AlbumId", "2"))));
+        assert!(read_allowed("/track", &two(("albumId", "1"), ("artistId", "2"))));
         let l = lidarr();
         assert!(folder_read_ok(&l, "/filesystem", &q("path", "/data/media/Music/A"), STAGING).await.unwrap());
         assert!(folder_read_ok(&l, "/manualimport", &q("folder", "/data/staging/music/A"), STAGING).await.unwrap());
