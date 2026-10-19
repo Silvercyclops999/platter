@@ -78,7 +78,7 @@ export const PAGES: readonly PageMeta[] = [
   { id: "devices", title: "Devices", group: "Downloads and devices", kind: "manage", blurb: "USB drives and players you copy music to." },
   { id: "looks", title: "Looks", group: "Appearance", kind: "manage", blurb: "Ready-made looks, your own, and theme files." },
   { id: "transcription", title: "Lyrics transcription", group: "Lyrics", kind: "manage", blurb: "The speech model and how hard it may work." },
-  { id: "sync", title: "Sync", group: "App", kind: "manage", blurb: "Keep settings the same on your computers, and copy keys." },
+  { id: "sync", title: "Sync", group: "App", kind: "manage", blurb: "Keep your devices in sync, sync with a folder, and copy keys." },
   { id: "guides", title: "Setup guides", group: "App", kind: "manage", blurb: "Short walk-throughs for features that need setting up." },
 ];
 
@@ -252,6 +252,9 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "syncLibrary",
   "syncFollows",
   "syncLyrics",
+  "syncLooks",
+  "syncDownloads",
+  "syncPlays",
   "keysReceive",
   "keysSend",
   // App: keyboard power use, system integration that's on already, help and cache.

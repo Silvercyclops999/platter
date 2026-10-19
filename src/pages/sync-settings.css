@@ -58,3 +58,9 @@
 .keys-send__key input { width: 16px; height: 16px; accent-color: var(--color-accent); }
 .keys-send__none { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
 .keys-send__error { margin: 0 0 var(--space-3); font-size: var(--font-size-sm); color: var(--color-error); }
+
+/* Keep my devices in sync: the two codes to show, and the code to type. */
+.device-pair__label { margin: 0 0 var(--space-1); font-size: var(--font-size-sm); font-weight: var(--font-weight-bold); color: var(--color-text-secondary); }
+.device-pair__long { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); min-width: 0; }
+.device-pair__text { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.keys-send__code.device-pair__input { width: 100%; font-size: var(--font-size-md); letter-spacing: 0.02em; }

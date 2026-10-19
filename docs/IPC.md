@@ -3094,6 +3094,92 @@ control port requests are signed with the account key like the others.
 | `POST /platter/v1/keys/hello` | `{ msg (hex), name }` | `{ msg (hex), confirm (hex) }`, 404 when no code is showing |
 | `POST /platter/v1/keys/deliver` | `{ nonce (hex), sealed (hex) }` | `{}` |
 
+## Keep my devices in sync
+
+Paired devices of the same Plex account keep their sync stores in step
+directly, with no sync file and no server: over the control port on the
+local network when both are home, and through the sealed relay when one is
+away. The sync file stays optional and works beside it.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `device_sync_status` | – | `DeviceSyncOverview` |
+| `device_sync_now` | – | `DeviceSyncOverview` after a round with every paired device |
+| `device_sync_forget` | `{ id }` | `DeviceSyncOverview` (the other device is told, and forgets this one) |
+| `device_sync_quarantined` | – | `Quarantined[]` |
+| `device_sync_take_quarantined` | – | `DeviceSyncOverview` |
+| `device_pair_start` | – | `PairState` with new codes |
+| `device_pair_cancel` | – | – |
+| `device_pair_state` | – | `PairState` |
+| `device_pair_join` | `{ code }` | `{ id, name }` |
+| `device_download_suggestions` | – | `DownloadSuggestion[]`, newest first |
+| `device_download_dismiss` | `{ kind, id: string \| null }` | – (this device only) |
+| `pair_copy_settings` | – | the computer's name |
+
+`DeviceSyncOverview = { on, devices: DeviceStatus[], quarantined, pairing: PairState }`
+
+`DeviceStatus = { id, name, lastSyncedAt? (ms), words, updateOther?, clock?, held }`
+
+`PairState = { phase: "idle"|"waiting"|"paired"|"expired"|"locked", code?, longCode?, qr?: { size, rows: string[] }, expiresAt? (ms), with? }`
+
+`Quarantined = { ns, key, entry: { value?, ts, device }, from }`
+
+`DownloadSuggestion = { kind, id, title, devices: string[], addedAt }`
+
+Events: `device-sync://status` → `DeviceStatus[]` when any device's status
+changes, and `device-sync://pair` → `PairState`.
+
+### Pairing
+
+`device_pair_start` shows two codes for 10 minutes. The 6-digit one is for
+a device on the same network: `device_pair_join` there finds the device
+showing it over mDNS (same account only, every request signed), runs a
+SPAKE2 exchange over the code through the control port, checks the
+confirmation and swaps each end's side of the link sealed under the agreed
+key. 5 wrong codes stop it (`locked`). A 6-digit code never touches the
+relay: a relay topic made from 6 digits could be guessed. The long code
+(`PB1-...`, and a QR code of `platter://pair-device/PB1-...`) is for a
+device somewhere else: it pairs through the relay like a Bridge, under
+labels of its own, so a device code never pairs a Bridge. Either way both
+ends say which account they're signed in to inside the sealed exchange and
+refuse another, and both keep the same device link (kept apart from Bridge
+links) with the other device's id.
+
+| Route on the control port | Body | Answer |
+| --- | --- | --- |
+| `GET /platter/v1/pair/waiting` | – | `{ waiting }` |
+| `POST /platter/v1/pair/hello` | `{ msg (hex) }` | `{ msg (hex), confirm (hex), sealed }`, 404 when no code is showing |
+| `POST /platter/v1/pair/finish` | `{ sealed }` | `{}` |
+| `POST /platter/v1/sync/hello` | `{ link, msgs: string[][] }` | the same, the other device's answers |
+| `POST /platter/v1/sync/entries` | `{ link, msgs: string[][] }` | the same |
+
+### What moves
+
+A round starts with a hello holding a digest per namespace; namespaces that
+differ swap key lists, then the entries each side lacks. Changes go out a
+moment after they're made, and a round runs on start, every 5 minutes, on
+`device_sync_now`, after pairing, and on the phone when it opens again.
+Nothing but a hello is taken from a device until its hello (or, on the local
+network, its signed request) shows the same account. Every message is
+sealed for its link on both paths. Keys and tokens never travel: the store
+refuses values that look like secrets, and every send and every merge
+checks again. Entries stamped more than a day after this device's clock are
+held back (`device_sync_quarantined`).
+
+On top of the sync file's namespaces, devices carry `looks` (saved look
+and theme files, by file name), `downloadIntent` (what each device has
+downloaded, keyed `<device>|<kind>:<id>`; only ever a suggestion, nothing
+downloads by itself) and `importedPlays` (plays brought in from elsewhere, a
+day of one source at a time, keyed `<source>:<day>:<part>`; between paired
+devices only, never in the sync file). The look (theme, accent, fonts,
+cover light, readout face) syncs with the settings; `layout` and
+`homeShortcuts` never sync (`FORM_FACTOR_ONLY`). Each group follows What to
+sync, and `deviceSync` turns the whole of it off on this device.
+
+`pair_copy_settings` asks the paired computer (the one in step most
+recently) for its synced settings and takes them as new choices, so they
+win here and on every other device.
+
 ## Search
 | Command | Args | Returns |
 | --- | --- | --- |

@@ -67,6 +67,17 @@ import { ChangeFolderControl, FolderNote, QueueNote, RemoveAllControl, StorageNo
 import { DeviceFormatSetting, DeviceListSetting, OpenDevicesButton } from "./DeviceSyncSettings";
 import { BatchControl, BatchNote, GPU_OPTIONS, GpuNote, ModelControl, PROCESSOR_OPTIONS, TranscribeNote } from "./TranscribeSettings";
 import { ChangeSyncFolder, KeyCopyButton, SyncNowControl, SyncSwitch, syncNote, useSyncFile } from "./SyncSettings";
+import { suggestionLine, useDownloadSuggestions } from "../components/DownloadSuggestions";
+import {
+  DeviceSyncNowButton,
+  ForgetDeviceButton,
+  PairButton,
+  TakeHeldButton,
+  deviceLine,
+  deviceNote,
+  deviceSyncNote,
+  useDeviceSync,
+} from "./KeepInSyncSettings";
 import {
   AiKeyControl,
   AiModelField,
@@ -907,6 +918,10 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
   const downloads = useDownloadStatus();
   const [syncFile, setSyncFile] = useSyncFile();
   const syncOn = !!s?.syncEnabled && !!s?.syncFolder;
+  const [devSync, setDevSync] = useDeviceSync();
+  const suggested = useDownloadSuggestions();
+  const reloadDevSync = () => void backend.deviceSyncStatus().then(setDevSync, () => {});
+  const devSyncOn = s?.deviceSync !== false;
   const limitGb = s?.downloadLimitGb;
   const limitOptions: SelectOption<string>[] = [...new Set([...DOWNLOAD_LIMITS_GB, ...(limitGb ? [limitGb] : [])])]
     .sort((a, b) => a - b)
@@ -1307,6 +1322,23 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       note: <StorageNote />,
       control: () => <RemoveAllControl />,
     },
+    ...(suggested.list.map((x) => ({
+      key: `downloadSuggestion-${x.kind}-${x.id}`,
+      section: "Downloads and devices",
+      group: "From your other devices",
+      title: x.title,
+      description: suggestionLine(x),
+      control: () => (
+        <>
+          <Button size="sm" variant="ghost" onClick={() => suggested.dismiss(x)}>
+            Not now
+          </Button>
+          <Button size="sm" onClick={() => void suggested.download(x)}>
+            Download here
+          </Button>
+        </>
+      ),
+    })) satisfies RowDef[]),
     {
       key: "downloadLimit",
       section: "Downloads and devices",
@@ -1445,6 +1477,75 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
           },
         ] satisfies RowDef[])
       : []),
+    // Keep my devices in sync
+    {
+      key: "deviceSync",
+      section: "App",
+      page: "sync",
+      group: "Keep my devices in sync",
+      title: "Keep my devices in sync",
+      description: "Paired devices swap changes directly, at home and away. This device only.",
+      more: "Paired devices of the same Plex account swap changes directly: over your network at home, and through the sealed relay when one is away. There's no server, and your sign-in and keys never travel. Your look syncs; each device keeps its own layout, and downloads stay on the device that made them. This device only.",
+      note: deviceSyncNote(s, devSync),
+      control: (ids) => toggle(s, "deviceSync", ids),
+    },
+    ...((devSync?.devices ?? []).map((d) => ({
+      key: `deviceSync-${d.id}`,
+      section: "App",
+      page: "sync",
+      group: "Keep my devices in sync",
+      title: d.name,
+      description: deviceLine(devSyncOn ? d : { ...d, words: "Keep my devices in sync is off" }),
+      note: deviceNote(d),
+      control: () => <ForgetDeviceButton device={d} onOv={setDevSync} />,
+    })) satisfies RowDef[]),
+    {
+      key: "deviceSyncAdd",
+      section: "App",
+      page: "sync",
+      group: "Keep my devices in sync",
+      title: "Add a device",
+      description: "Shows codes here for your other device to type, at home or away.",
+      more: "Shows a 6-digit code for a device on the same network, and a long code with its QR code for a device somewhere else. Both devices must be signed in to the same Plex account. The codes work for 10 minutes.",
+      control: () => <PairButton kind="add" onPaired={reloadDevSync} />,
+    },
+    {
+      key: "deviceSyncJoin",
+      section: "App",
+      page: "sync",
+      group: "Keep my devices in sync",
+      title: "Pair with a code",
+      description: "Type the 6 digits another device shows, or paste its long code when away.",
+      more: "The 6-digit code works only on the same network. Away from home, use the long code or scan its QR code: it pairs through the sealed relay.",
+      control: () => <PairButton kind="join" onPaired={reloadDevSync} />,
+    },
+    ...((devSync?.devices.length
+      ? [
+          {
+            key: "deviceSyncNow",
+            section: "App",
+            page: "sync",
+            group: "Keep my devices in sync",
+            title: "Sync now",
+            description: "Platter syncs a moment after each change, and every few minutes.",
+            control: () => <DeviceSyncNowButton ov={devSync} on={devSyncOn} onOv={setDevSync} />,
+          },
+        ]
+      : []) satisfies RowDef[]),
+    ...((devSync?.quarantined
+      ? [
+          {
+            key: "deviceSyncHeld",
+            section: "App",
+            page: "sync",
+            group: "Keep my devices in sync",
+            title: "Changes held back",
+            description: `${devSync.quarantined === 1 ? "1 change" : `${devSync.quarantined} changes`} came from a device whose clock is days ahead.`,
+            more: "A change stamped more than a day after this device's clock is held back, so a wrong clock can't win over everything you do. Set the other device's clock right, or take them anyway.",
+            control: () => <TakeHeldButton onOv={setDevSync} />,
+          },
+        ]
+      : []) satisfies RowDef[]),
     {
       key: "syncSettings",
       section: "App",
@@ -1480,6 +1581,33 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       title: "Lyrics you wrote",
       description: "Lyrics from the lyrics editor, and transcriptions when Sync transcriptions to my devices is on.",
       control: (ids) => toggle(s, "syncLyrics", ids),
+    },
+    {
+      key: "syncLooks",
+      section: "App",
+      page: "sync",
+      group: "What to sync",
+      title: "Saved looks and themes",
+      description: "The looks and themes you saved or imported. Each device keeps its own layout.",
+      control: (ids) => toggle(s, "syncLooks", ids),
+    },
+    {
+      key: "syncDownloads",
+      section: "App",
+      page: "sync",
+      group: "What to sync",
+      title: "What each device downloaded",
+      description: "Offered on your other devices with one tap. Nothing downloads by itself.",
+      control: (ids) => toggle(s, "syncDownloads", ids),
+    },
+    {
+      key: "syncPlays",
+      section: "App",
+      page: "sync",
+      group: "What to sync",
+      title: "Imported plays",
+      description: "Plays brought in from Plex history, Tautulli, Last.fm or a file. Paired devices only.",
+      control: (ids) => toggle(s, "syncPlays", ids),
     },
     {
       key: "keysReceive",

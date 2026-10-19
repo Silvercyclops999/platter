@@ -162,6 +162,11 @@ import type {
   KeyKind,
   KeyReceiveState,
   KeySendOutcome,
+  DeviceSyncOverview,
+  DevicePairState,
+  DevicePaired,
+  SyncQuarantined,
+  DownloadSuggestion,
   UpdateInfo,
   TagIndex,
   TagScanStatus,
@@ -980,6 +985,28 @@ export interface Backend {
   keysReceiveCancel(): Promise<void>;
   /** Send the ticked keys to the device showing `code`. */
   keysSend(code: string, kinds: KeyKind[]): Promise<KeySendOutcome>;
+  // Keep my devices in sync (docs/IPC.md "Keep my devices in sync")
+  deviceSyncStatus(): Promise<DeviceSyncOverview>;
+  /** A round with every paired device now. */
+  deviceSyncNow(): Promise<DeviceSyncOverview>;
+  /** Unpair a device (it forgets this one too). */
+  deviceSyncForget(id: string): Promise<DeviceSyncOverview>;
+  /** Changes held back from a device whose clock is far ahead. */
+  deviceSyncQuarantined(): Promise<SyncQuarantined[]>;
+  /** Take the held changes anyway. */
+  deviceSyncTakeQuarantined(): Promise<DeviceSyncOverview>;
+  /** Show codes for another device to pair with this one. */
+  devicePairStart(): Promise<DevicePairState>;
+  devicePairCancel(): Promise<void>;
+  devicePairState(): Promise<DevicePairState>;
+  /** Pair with the device showing `code`: 6 digits on the same network, or the long code anywhere. */
+  devicePairJoin(code: string): Promise<DevicePaired>;
+  /** What other devices downloaded that this one hasn't. */
+  deviceDownloadSuggestions(): Promise<DownloadSuggestion[]>;
+  /** Stop suggesting this one here. */
+  deviceDownloadDismiss(kind: DownloadKind, id: string | null): Promise<void>;
+  /** Take the synced settings your computer has, here and everywhere. Resolves to its name. */
+  pairCopySettings(): Promise<string>;
   // Hide, bookmarks, smart playlists, scrobbling (docs/IPC.md)
   /** Hidden songs and artists, newest first. */
   hiddenList(): Promise<HiddenItem[]>;
@@ -1615,6 +1642,18 @@ export function createTauriBackend(): Backend {
     keysReceiveState: () => call("keys_receive_state"),
     keysReceiveCancel: () => call("keys_receive_cancel"),
     keysSend: (code, kinds) => call("keys_send", { code, kinds }),
+    deviceSyncStatus: () => call("device_sync_status"),
+    deviceSyncNow: () => call("device_sync_now"),
+    deviceSyncForget: (id) => call("device_sync_forget", { id }),
+    deviceSyncQuarantined: () => call("device_sync_quarantined"),
+    deviceSyncTakeQuarantined: () => call("device_sync_take_quarantined"),
+    devicePairStart: () => call("device_pair_start"),
+    devicePairCancel: () => call("device_pair_cancel"),
+    devicePairState: () => call("device_pair_state"),
+    devicePairJoin: (code) => call("device_pair_join", { code }),
+    deviceDownloadSuggestions: () => call("device_download_suggestions"),
+    deviceDownloadDismiss: (kind, id) => call("device_download_dismiss", { kind, id }),
+    pairCopySettings: () => call("pair_copy_settings"),
     followSet: (artist, on) => call("follow_set", { id: artist.id, title: artist.title, thumb: artist.thumb ?? null, on }),
     whatsNew: () => call("whats_new"),
     whatsNewSeen: () => call("whats_new_seen"),
