@@ -24,7 +24,13 @@ use crate::error::{AppError, AppResult};
 use super::source::{ArtBytes, ArtFetcher};
 
 pub const DEFAULT_CAP_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+/// The largest cover side fetched. A phone never shows one bigger than its
+/// screen (1600 px is past a Pro Max's width at 3x), and a 4096 px cover is
+/// megabytes to fetch over mobile data and to decode.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 const MAX_DIM: u32 = 4096;
+#[cfg(any(target_os = "ios", target_os = "android"))]
+const MAX_DIM: u32 = 1600;
 const MAX_PATH_LEN: usize = 2048;
 /// A cover that takes longer than this to come from the server is logged.
 const SLOW_FETCH: std::time::Duration = std::time::Duration::from_millis(1500);
