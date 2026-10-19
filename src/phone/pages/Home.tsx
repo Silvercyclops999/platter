@@ -48,7 +48,7 @@ export function PhoneHome() {
             return (
               <li key={info.key}>
                 <button type="button" className={`ph-shortcut ${live ? "is-playing" : ""}`} onClick={() => nav.go(info.route)}>
-                  <Art path={info.thumb} size={56} round={info.round} kind={info.kind} sleeve={info.kind === "album" ? { title: info.title, artist: info.sub } : undefined} />
+                  <Art path={info.thumb} size={56} round={info.round} kind={info.kind} tint={info.tint} sleeve={info.kind === "album" ? { title: info.title, artist: info.sub } : undefined} />
                   <span className="ph-shortcut__title">{info.title}</span>
                   {live && <PlayingBars />}
                 </button>

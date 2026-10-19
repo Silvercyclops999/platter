@@ -145,6 +145,7 @@ function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof use
                     path={e.thumb}
                     fluid
                     requestSize={200}
+                    tint={e.tint}
                     round={e.kind === "artist"}
                     kind={e.kind}
                     monogram={e.kind === "artist" ? e.title : undefined}
@@ -227,7 +228,7 @@ function LibRow({ e, typed, letter }: { e: LibEntry; typed: boolean; letter?: st
         {e.liked || e.bookmarks || e.stats ? (
           <LikedCover size={56} icon={e.liked ? "heart" : e.bookmarks ? "bookmark" : "stats"} />
         ) : (
-          <Art path={e.thumb} size={56} round={round} kind={e.kind} monogram={round ? e.title : undefined} sleeve={e.kind === "album" ? { title: e.title, artist: e.creator } : undefined} />
+          <Art path={e.thumb} size={56} round={round} kind={e.kind} tint={e.tint} monogram={round ? e.title : undefined} sleeve={e.kind === "album" ? { title: e.title, artist: e.creator } : undefined} />
         )}
         <span className="ph-row__text">
           <span className="ph-row__title">{e.title}</span>

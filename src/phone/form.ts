@@ -4,6 +4,7 @@
  * layout can be worked on at a phone's width.
  */
 import { create } from "zustand";
+import { setPhoneArtLadder } from "../lib/artSize";
 import { backend, isTauri } from "../lib/backend";
 
 /** `?phone=1` in the address (the browser mock). */
@@ -39,3 +40,7 @@ export function checkFormWithCore(): Promise<void> {
     () => {},
   );
 }
+
+// Art on the phone comes off its own ladder (lib/artSize): set now, and whenever the form changes.
+setPhoneArtLadder(usePhoneForm.getState().phone);
+usePhoneForm.subscribe((s) => setPhoneArtLadder(s.phone));

@@ -32,3 +32,32 @@ export function artBucket(px: number): number {
 export function artPixelSize(css: number, dpr: number = devicePixelRatio()): number {
   return artBucket(css * dpr);
 }
+
+/**
+ * The phone's ladder. A phone's screen is 3x, so the computer's steps would
+ * ask for covers far bigger than they show (a now playing cover came back
+ * at 4096 px, 7 MB). The phone asks for at most 3x what it shows, never
+ * more than PHONE_ART_MAX, and snaps to a few steps so the same record at
+ * the same size (the mini player, a row, a Home tile) is one cached image.
+ */
+export const PHONE_ART_STEPS = [96, 192, 360, 600, 1200] as const;
+export const PHONE_ART_MAX = 1200;
+/** Covers the phone only samples for colour or blurs (tints, cover light, backgrounds). */
+export const PHONE_ART_SAMPLE = 96;
+
+let phoneLadder = false;
+
+/** The phone layout turns its ladder on (the computer's stays as it was). */
+export function setPhoneArtLadder(on: boolean) {
+  phoneLadder = on;
+}
+
+/** Whether art is asked for on the phone's ladder. */
+export const onPhoneLadder = () => phoneLadder;
+
+/** Pixel size the phone asks for, for art shown at `css` CSS px. */
+export function phoneArtPixelSize(css: number, dpr: number = devicePixelRatio()): number {
+  const need = Math.min(Math.max(1, css) * Math.min(dpr, 3), PHONE_ART_MAX);
+  for (const s of PHONE_ART_STEPS) if (s >= need) return s;
+  return PHONE_ART_MAX;
+}

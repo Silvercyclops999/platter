@@ -5,7 +5,7 @@
  * taken from the cover.
  */
 import { useEffect, useState } from "react";
-import { artUrl, backend } from "../lib/backend";
+import { artSampleUrl, backend } from "../lib/backend";
 import { headerColorsFromImageUrl, type HeaderColors } from "../lib/color";
 import { creditKey, type ArtistLookup, type Credit } from "../lib/credits";
 import type { AlbumCreditRow, Contributor, CreditRole, NowPlayingDetails, QueueContextInfo, QueueItem, QueueView } from "../lib/types";
@@ -178,7 +178,7 @@ export function useCoverColors(thumb: string | null | undefined): HeaderColors |
   const [colors, setColors] = useState<{ thumb: string | null; c: HeaderColors | null }>({ thumb: null, c: null });
   useEffect(() => {
     let alive = true;
-    const url = artUrl(thumb, 64);
+    const url = artSampleUrl(thumb);
     if (!url) return;
     headerColorsFromImageUrl(url).then((c) => alive && setColors({ thumb: thumb ?? null, c }));
     return () => {

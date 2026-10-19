@@ -67,7 +67,7 @@ export function PhoneAlbum({ id }: { id: string }) {
       <BackBar title={album.title} after={320} />
       <header className="ph-album__head">
         <div className="ph-album__cover">
-          <Art path={album.thumb} fluid requestSize={480} sleeve={{ title: album.title, artist: album.artistTitle }} />
+          <Art path={album.thumb} fluid requestSize={480} tint={album.tint} sleeve={{ title: album.title, artist: album.artistTitle }} />
         </div>
         <h1 className="ph-album__title">{album.title}</h1>
         <button type="button" className="ph-album__artist" onClick={() => nav.go({ name: "artist", id: album.artistId })}>
@@ -136,7 +136,7 @@ export function PhoneAlbum({ id }: { id: string }) {
           </div>
           <div className="ph-shelf__row">
             {data.moreByArtist.slice(0, 12).map((a) => (
-              <ShelfCard key={a.id} title={a.title} sub={a.year ? String(a.year) : undefined} artist={a.artistTitle} thumb={a.thumb} kind="album" onOpen={() => nav.go({ name: "album", id: a.id })} />
+              <ShelfCard key={a.id} title={a.title} sub={a.year ? String(a.year) : undefined} artist={a.artistTitle} thumb={a.thumb} tint={a.tint} kind="album" onOpen={() => nav.go({ name: "album", id: a.id })} />
             ))}
           </div>
         </section>

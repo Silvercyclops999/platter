@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
-import { artUrl } from "./backend";
+import { artSampleUrl } from "./backend";
 import { NEUTRAL_HEADER, headerColorsFromImageUrl, headerColorsFromServer, type HeaderColors } from "./color";
 
 /**
@@ -12,7 +12,7 @@ import { NEUTRAL_HEADER, headerColorsFromImageUrl, headerColorsFromServer, type 
 function artColours(serverTint: string | null | undefined, artPath: string | null | undefined, set: (c: HeaderColors | null) => void): () => void {
   let alive = true;
   const fromServer = headerColorsFromServer(serverTint);
-  const url = artUrl(artPath, 64);
+  const url = artSampleUrl(artPath);
   if (!url) {
     set(fromServer);
     return () => {};

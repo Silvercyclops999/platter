@@ -119,7 +119,7 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
             style={{ transform: offset.x ? `translateX(${offset.x}px)` : undefined }}
           >
             <div className={`ph-np__cover ${playing ? "is-playing" : ""}`}>
-              <Art path={track.thumb} fluid requestSize={900} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} />
+              <Art path={track.thumb} fluid requestSize={400} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} />
             </div>
           </div>
           <div className="ph-np__deck">

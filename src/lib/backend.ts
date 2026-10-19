@@ -9,7 +9,8 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { artPixelSize } from "./artSize";
+import { artPixelSize, onPhoneLadder, PHONE_ART_SAMPLE, phoneArtPixelSize } from "./artSize";
+
 import { createMockBackend } from "./mock";
 import type {
   DiscogsReport,
@@ -1836,8 +1837,27 @@ export function selectBackend(win?: unknown): Backend {
 
 export const backend: Backend = selectBackend();
 
-/** Image URL for a Plex art path shown at a size in CSS px (scaled for the display). */
+/**
+ * Image URL for a Plex art path shown at a size in CSS px (scaled for the
+ * display). On the phone the size comes off its own short ladder, capped
+ * at PHONE_ART_MAX; a wide image keeps its shape.
+ */
 export function artUrl(path: string | null | undefined, w: number, h: number = w): string | undefined {
   if (!path) return undefined;
+  if (onPhoneLadder()) {
+    const long = Math.max(w, h);
+    const px = phoneArtPixelSize(long);
+    return backend.artUrl(path, Math.round((px * w) / long), Math.round((px * h) / long));
+  }
   return backend.artUrl(path, artPixelSize(w), artPixelSize(h));
+}
+
+/**
+ * A small copy of a cover, for what only samples its colour or blurs it
+ * (tints, cover light, backgrounds): 64 CSS px on the computer, as before,
+ * and the phone's PHONE_ART_SAMPLE step, so a 3x screen doesn't fetch 192.
+ */
+export function artSampleUrl(path: string | null | undefined): string | undefined {
+  if (!path) return undefined;
+  return onPhoneLadder() ? backend.artUrl(path, PHONE_ART_SAMPLE, PHONE_ART_SAMPLE) : artUrl(path, 64);
 }

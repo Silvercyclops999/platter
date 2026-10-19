@@ -112,9 +112,9 @@ export function PlayingBars() {
 }
 
 /** What a Home item shows and where it goes. */
-export function itemInfo(i: HomeItem): { key: string; title: string; sub: string; thumb: string | null; round: boolean; route: Route; kind: "album" | "artist" | "playlist" } {
+export function itemInfo(i: HomeItem): { key: string; title: string; sub: string; thumb: string | null; tint?: string | null; round: boolean; route: Route; kind: "album" | "artist" | "playlist" } {
   if (i.kind === "album")
-    return { key: `album:${i.album.id}`, title: i.album.title, sub: i.album.artistTitle, thumb: i.album.thumb, round: false, route: { name: "album", id: i.album.id }, kind: "album" };
+    return { key: `album:${i.album.id}`, title: i.album.title, sub: i.album.artistTitle, thumb: i.album.thumb, tint: i.album.tint, round: false, route: { name: "album", id: i.album.id }, kind: "album" };
   if (i.kind === "artist")
     return { key: `artist:${i.artist.id}`, title: i.artist.title, sub: "", thumb: i.artist.thumb, round: true, route: { name: "artist", id: i.artist.id }, kind: "artist" };
   return {
@@ -155,10 +155,13 @@ export function ShelfCard({
   thumb,
   round,
   kind,
+  tint,
   onOpen,
 }: {
   title: string;
   sub?: string;
+  /** The cover's colour, shown until it loads. */
+  tint?: string | null;
   /** Printed on the sleeve when a record has no cover (defaults to `sub`). */
   artist?: string;
   thumb: string | null;
@@ -168,7 +171,7 @@ export function ShelfCard({
 }) {
   return (
     <button type="button" className={`ph-card-tile ${round ? "is-round" : ""}`} onClick={onOpen}>
-      <Art path={thumb} size={round ? 112 : 136} round={round} kind={kind} sleeve={kind === "album" ? { title, artist: artist ?? sub } : undefined} monogram={kind === "artist" ? title : undefined} />
+      <Art path={thumb} size={round ? 112 : 136} round={round} kind={kind} tint={tint} sleeve={kind === "album" ? { title, artist: artist ?? sub } : undefined} monogram={kind === "artist" ? title : undefined} />
       <span className="ph-card-tile__title">{title}</span>
       {sub && <span className="ph-card-tile__sub">{sub}</span>}
     </button>

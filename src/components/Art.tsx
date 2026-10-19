@@ -1,5 +1,6 @@
 import { Disc3, ListMusic, User } from "lucide-react";
-import { createContext, useContext, useLayoutEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+
 import { artUrl } from "../lib/backend";
 import { usePhoneForm } from "../phone/form";
 
@@ -31,7 +32,90 @@ export interface ArtProps {
   monogram?: string;
   /** A record with no cover: its title and artist set like a printed sleeve stand in. */
   sleeve?: SleeveText | null;
+  /** The cover's colour (the server's tint, "rrggbb" or any CSS colour): on the phone it fills the box until the cover loads. */
+  tint?: string | null;
 }
+
+/** A tint as a CSS colour: the server sends "rrggbb" without the hash. */
+export function tintColour(tint: string | null | undefined): string | null {
+  const t = tint?.trim();
+  if (!t) return null;
+  return /^[0-9a-f]{6}$/i.test(t) ? `#${t}` : t;
+}
+
+/**
+ * On the phone, how far past the screen covers start loading: about one
+ * screen ahead, down a page and along a shelf, so the next screenful is
+ * ready when it scrolls in, without asking for a whole long list at once.
+ */
+export const PREFETCH_MARGIN = "100%";
+
+/** One observer per scrolling box, shared by everything watched in it. */
+const observers = new WeakMap<Element, IntersectionObserver>();
+const nearCallbacks = new WeakMap<Element, Set<() => void>>();
+
+/** The box `el` scrolls in: a shelf, a page or a sheet (not `el` itself). */
+function scrollBox(el: Element): Element | null {
+  return el.parentElement?.closest(".ph-shelf__row, .ph-page, .ph-sheet__body") ?? null;
+}
+
+/** Calls `onNear` once, when `el` comes within PREFETCH_MARGIN of its scrolling box's view. */
+function observeNear(el: Element, onNear: () => void): () => void {
+  const root = scrollBox(el);
+  const key = root ?? document.documentElement;
+  let io = observers.get(key);
+  if (!io) {
+    io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) if (e.isIntersecting) for (const cb of [...(nearCallbacks.get(e.target) ?? [])]) cb();
+      },
+      { root, rootMargin: PREFETCH_MARGIN },
+    );
+    observers.set(key, io);
+  }
+  const watcher = io;
+  const set = nearCallbacks.get(el) ?? new Set();
+  nearCallbacks.set(el, set);
+  const stop = () => {
+    set.delete(cb);
+    if (!set.size) {
+      watcher.unobserve(el);
+      nearCallbacks.delete(el);
+    }
+  };
+  const cb = () => {
+    stop();
+    onNear();
+  };
+  set.add(cb);
+  watcher.observe(el);
+  return stop;
+}
+
+/**
+ * Calls `onNear` once `el` is within about a screen of being seen. A cover
+ * on a shelf waits for its shelf to come near the page's view first, so a
+ * long Home doesn't fetch every shelf's covers at once.
+ */
+export function watchNear(el: Element, onNear: () => void): () => void {
+  if (typeof IntersectionObserver === "undefined") {
+    onNear();
+    return () => {};
+  }
+  const box = scrollBox(el);
+  if (box?.matches(".ph-shelf__row")) {
+    let inner: (() => void) | null = null;
+    const outer = observeNear(box, () => {
+      inner = observeNear(el, onNear);
+    });
+    return () => {
+      outer();
+      inner?.();
+    };
+  }
+  return observeNear(el, onNear);
+}
+
 
 /** What a fallback sleeve prints. */
 export interface SleeveText {
@@ -98,7 +182,7 @@ export function initials(name: string): string {
  * rounded up to a shared step (see lib/artSize), since decoded art is most of
  * the WebView's memory.
  */
-export function Art({ path, size = 48, fluid, requestSize, round, kind = "album", alt = "", className = "", onLoad, monogram, sleeve }: ArtProps) {
+export function Art({ path, size = 48, fluid, requestSize, round, kind = "album", alt = "", className = "", onLoad, monogram, sleeve, tint }: ArtProps) {
   const fluidSize = useContext(FluidArtSize);
   const cssSize = fluid ? (fluidSize ?? requestSize ?? 200) : size;
   const active = useContext(ArtActive);
@@ -126,10 +210,25 @@ export function Art({ path, size = 48, fluid, requestSize, round, kind = "album"
     if (src && el?.complete && el.naturalWidth > 0) setLoadedSrc(src);
   }, [src]);
 
-  // On the phone a record's printed sleeve stands in while its cover loads
-  // (a page of blank squares reads as broken there); the cover fades in over it.
+  // On the phone the cover's own colour stands in while it loads, or, with
+  // no colour known, a record's printed sleeve (a page of blank squares
+  // reads as broken there); the cover fades in over it once decoded.
   const phone = usePhoneForm((s) => s.phone);
-  const printWhileLoading = phone && !!sleeve && kind === "album" && !round && !!wanted && !failed && !loaded;
+  const fill = phone ? tintColour(tint) : null;
+  const tintWhileLoading = !!fill && !!wanted && !failed && !loaded;
+  const printWhileLoading = phone && !fill && !!sleeve && kind === "album" && !round && !!wanted && !failed && !loaded;
+  // The phone starts loading a cover about a screen before it scrolls in.
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    const el = img.current;
+    if (!phone || near || !el || !src) return;
+    return watchNear(el, () => setNear(true));
+  }, [phone, near, src]);
+  const shown = (s: string | undefined) => {
+    if (!s || loadedSrc === s) return;
+    setLoadedSrc(s);
+    setFadeSrc(s);
+  };
   const style = fluid ? undefined : { width: size, height: size };
   const Fallback = kind === "artist" ? User : kind === "playlist" ? ListMusic : Disc3;
   const box = Math.round(cssSize);
@@ -155,7 +254,8 @@ export function Art({ path, size = 48, fluid, requestSize, round, kind = "album"
           {sleeve!.artist && <span className="art__sleeve-artist" data-text={sleeve!.artist} />}
         </span>
       )}
-      {wanted && !failed && !loaded && !printWhileLoading && <span className="art__skeleton skeleton" aria-hidden="true" />}
+      {tintWhileLoading && <span className="art__tint" aria-hidden="true" style={{ background: fill! }} />}
+      {wanted && !failed && !loaded && !printWhileLoading && !tintWhileLoading && <span className="art__skeleton skeleton" aria-hidden="true" />}
       {src && !failed && (
         <img
           ref={img}
@@ -164,14 +264,19 @@ export function Art({ path, size = 48, fluid, requestSize, round, kind = "album"
           height={box}
           alt={alt}
           draggable={false}
-          loading="lazy"
+          loading={phone && near ? "eager" : "lazy"}
           decoding="async"
           onLoad={(e) => {
-            if (loadedSrc !== src) {
-              setLoadedSrc(src ?? null);
-              setFadeSrc(src ?? null);
-            }
-            onLoad?.(e.currentTarget);
+            const el = e.currentTarget;
+            // The phone waits for the decode, so the fade never starts on a half-drawn cover.
+            if (phone && typeof el.decode === "function") {
+              const at = src;
+              void el.decode().then(
+                () => at === img.current?.getAttribute("src") && shown(at),
+                () => shown(at),
+              );
+            } else shown(src);
+            onLoad?.(el);
           }}
           onError={() => setFailedSrc(src ?? null)}
         />

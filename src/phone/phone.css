@@ -178,6 +178,10 @@
 .ph-glyph--dl svg { display: block; }
 .ph-glyph--pin { display: inline-flex; color: var(--color-accent); }
 .ph-glyph--pin svg { transform: rotate(35deg); }
+n/* A cover on the phone: its own colour while it loads, then a 150 ms fade once decoded (none from the cache, none under reduced motion). */
+.phone .art__tint { position: absolute; inset: 0; }
+.phone .art.is-loaded.is-fading img { animation: fade-in 150ms var(--ph-ease); }
+:root[data-reduced-motion="true"] .phone .art.is-loaded.is-fading img { animation: none; }
 
 /* ---------------------------------------------------------------- rows */
 .ph-rows { list-style: none; margin: 0; padding: 0; }
