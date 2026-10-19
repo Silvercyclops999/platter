@@ -33,6 +33,10 @@ import {
   vuPosition,
 } from "../visualizer/scale";
 import { CALM_FPS, VisualizerView, shownStyle, visFps } from "../visualizer/VisualizerView";
+import { correlation } from "../visualizer/Scope";
+import { glowAt } from "../visualizer/Glow";
+import { PanelStrip } from "../visualizer/places";
+import { DeckFaceplate } from "../shell/DeckFrame";
 
 const mock = backend as MockBackend;
 
@@ -80,7 +84,9 @@ let gl: Record<string, unknown> | null = null;
 /** Drive animation frames by hand. */
 function frames() {
   let queue: FrameRequestCallback[] = [];
-  let now = 0;
+  // A clock that moves 20 ms a frame, which frames from the core read too.
+  let now = 10_000;
+  vi.spyOn(performance, "now").mockImplementation(() => now);
   vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
     queue.push(cb);
     return queue.length;
@@ -90,11 +96,14 @@ function frames() {
     for (let i = 0; i < n; i++) {
       const run = queue;
       queue = [];
-      now = performance.now();
+      now += 20;
       act(() => run.forEach((cb) => cb(now)));
     }
   };
 }
+
+/** The last watch the mock was asked for. */
+const lastCall = () => mock.visualizer.calls[mock.visualizer.calls.length - 1];
 
 function track(): Track {
   return mock.fx.tracks[0];
@@ -245,12 +254,12 @@ describe("the feed", () => {
     vi.useFakeTimers();
     const stop = watchFeed({ fps: 60, scope: false });
     await vi.advanceTimersByTimeAsync(0);
-    expect(mock.visualizer.calls.at(-1)).toEqual({ on: true, fps: 60, scope: false });
+    expect(lastCall()).toEqual({ on: true, fps: 60, scope: false });
     expect(useFeed.getState().running).toBe(true);
     // A second view asks for the scope: one watch, with the scope.
     const stop2 = watchFeed({ fps: 30, scope: true });
     await vi.advanceTimersByTimeAsync(0);
-    expect(mock.visualizer.calls.at(-1)).toEqual({ on: true, fps: 60, scope: true });
+    expect(lastCall()).toEqual({ on: true, fps: 60, scope: true });
     // Renewed about once a second, well inside the core's 3 s.
     const before = mock.visualizer.calls.length;
     await vi.advanceTimersByTimeAsync(2_100);
@@ -258,7 +267,7 @@ describe("the feed", () => {
     stop2();
     stop();
     await vi.advanceTimersByTimeAsync(0);
-    expect(mock.visualizer.calls.at(-1)?.on).toBe(false);
+    expect(lastCall()?.on).toBe(false);
     expect(mock.visualizer.watched).toBe(false);
     // Nothing more once nobody watches.
     const after = mock.visualizer.calls.length;
@@ -272,13 +281,13 @@ describe("the feed", () => {
     await vi.advanceTimersByTimeAsync(0);
     setHidden(true);
     await vi.advanceTimersByTimeAsync(0);
-    expect(mock.visualizer.calls.at(-1)?.on).toBe(false);
+    expect(lastCall()?.on).toBe(false);
     const n = mock.visualizer.calls.length;
     await vi.advanceTimersByTimeAsync(5_000);
     expect(mock.visualizer.calls.length).toBe(n);
     setHidden(false);
     await vi.advanceTimersByTimeAsync(0);
-    expect(mock.visualizer.calls.at(-1)?.on).toBe(true);
+    expect(lastCall()?.on).toBe(true);
     stop();
   });
 
@@ -312,7 +321,7 @@ describe("each style", () => {
     expect(drawn.calls.filter((c) => c === "lineTo").length).toBeGreaterThanOrEqual(BANDS - 1);
     expect(drawn.calls).toContain("stroke");
     // The core watches at the frame rate setting, no scope.
-    await waitFor(() => expect(mock.visualizer.calls.at(-1)).toEqual({ on: true, fps: 60, scope: false }));
+    await waitFor(() => expect(lastCall()).toEqual({ on: true, fps: 60, scope: false }));
   });
 
   it("Analyser uses WebGL2 when it's there, and Canvas 2D after the GPU context is lost", async () => {
@@ -375,7 +384,7 @@ describe("each style", () => {
     expect(screen.getByRole("radio", { name: "Scope" })).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByRole("radio", { name: "Glow" })).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByRole("radio", { name: "Analyser" })).toHaveAttribute("aria-checked", "true");
-    await waitFor(() => expect(mock.visualizer.calls.at(-1)).toEqual({ on: true, fps: 15, scope: false }));
+    await waitFor(() => expect(lastCall()).toEqual({ on: true, fps: 15, scope: false }));
   });
 
   it("says so and asks for nothing when playback is on another device or nothing plays", async () => {
@@ -391,6 +400,83 @@ describe("each style", () => {
     render(<VisualizerView />);
     expect(screen.getByRole("status")).toHaveTextContent("Nothing is playing on this device.");
     expect(mock.visualizer.calls).toEqual([]);
+  });
+});
+
+describe("Scope and Glow", () => {
+  it("Scope draws the stereo trace on its L, R, M and S frame and reads the correlation", async () => {
+    await act(async () => void useSettings.setState({ settings: { ...DEFAULT_SETTINGS, visualizerStyle: "scope" } }));
+    const run = frames();
+    render(<VisualizerView />);
+    const scope = await screen.findByRole("img", { name: "Stereo phase scope" });
+    for (const l of ["L", "R", "M", "S"]) expect(within(scope).getByText(l)).toBeInTheDocument();
+    // The scope needs the stereo pairs.
+    await waitFor(() => expect(lastCall()).toEqual({ on: true, fps: 60, scope: true }));
+    frame(1_000, true);
+    run(2);
+    expect(drawn.calls.filter((c) => c === "lineTo").length).toBeGreaterThan(200);
+    expect(within(scope).getByText(/Correlation/)).toHaveTextContent(/Correlation [+−]0\.\d\d/);
+  });
+
+  it("works out the correlation: +1 mono, -1 out of phase, nothing for silence", () => {
+    expect(correlation([0.5, 0.5, -0.2, -0.2])).toBeCloseTo(1);
+    expect(correlation([0.5, -0.5, -0.2, 0.2])).toBeCloseTo(-1);
+    expect(correlation([0, 0, 0, 0])).toBeNull();
+  });
+
+  it("Glow breathes the cover's light with the bass, softly", async () => {
+    await act(async () => void useSettings.setState({ settings: { ...DEFAULT_SETTINGS, visualizerStyle: "glow" } }));
+    const run = frames();
+    render(<VisualizerView />);
+    const glow = await screen.findByRole("img", { name: "The cover's colours, moving with the bass" });
+    const light = glow.querySelector<HTMLElement>(".vis-glow__light")!;
+    run(1);
+    const quiet = Number(light.style.opacity);
+    for (let i = 0; i < 30; i++) {
+      frame(0, false);
+      run(1);
+    }
+    const loud = Number(light.style.opacity);
+    expect(loud).toBeGreaterThan(quiet);
+    // Never more than a soft light, and only a few percent of size.
+    expect(glowAt(1).opacity).toBeLessThanOrEqual(0.75);
+    expect(glowAt(1).scale).toBeLessThanOrEqual(1.06);
+  });
+});
+
+describe("the panel strip and the Deck's meters", () => {
+  it("puts a slim Analyser under the panel's cover only with its setting on, and not under the expanded view", async () => {
+    const { rerender } = render(<PanelStrip />);
+    expect(screen.queryByTestId("panel-visualizer")).toBeNull();
+    await act(async () => void useSettings.setState({ settings: { ...DEFAULT_SETTINGS, visualizerPanelStrip: true } }));
+    rerender(<PanelStrip />);
+    const strip = screen.getByTestId("panel-visualizer");
+    expect(within(strip).getByRole("img", { name: "Spectrum analyser" })).toHaveClass("vis-analyser--slim");
+    // No labels in the strip.
+    expect(within(strip).queryByText("1k")).toBeNull();
+    await waitFor(() => expect(lastCall()?.on).toBe(true));
+    act(() => fullWindow.open("artwork"));
+    expect(screen.queryByTestId("panel-visualizer")).toBeNull();
+  });
+
+  it("shows needle meters on the Deck faceplate only while the visualizer is on", async () => {
+    render(<DeckFaceplate />);
+    const face = screen.getByTestId("deck-faceplate");
+    expect(within(face).queryByTestId("deck-meters")).toBeNull();
+    expect(face.querySelector(".deck-face__body")).not.toHaveClass("has-meters");
+    act(() => fullWindow.open("visualizer"));
+    expect(within(face).getByTestId("deck-meters")).toBeInTheDocument();
+    expect(face.querySelector(".deck-face__body")).toHaveClass("has-meters");
+    // Still on with the view closed: it opens in the visualizer next time.
+    await act(async () => void (await fullWindow.close()));
+    expect(within(face).getByTestId("deck-meters")).toBeInTheDocument();
+    // Another mode turns them off.
+    act(() => fullWindow.open("lyrics"));
+    expect(within(face).queryByTestId("deck-meters")).toBeNull();
+    // So does the Visualizer button setting.
+    act(() => fullWindow.setMode("visualizer"));
+    await act(async () => void useSettings.setState({ settings: { ...DEFAULT_SETTINGS, visualizerButton: false } }));
+    expect(within(face).queryByTestId("deck-meters")).toBeNull();
   });
 });
 
