@@ -3,7 +3,9 @@
 //! two-instance checks ([`MemoryLan`]).
 
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr};
+#[cfg(any(target_os = "ios", test))]
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -23,6 +25,7 @@ pub struct Announce {
 }
 
 /// IPv4 and IPv6 from Bonjour's `sockaddr` blobs.
+#[cfg(any(target_os = "ios", test))]
 pub(crate) fn ip_of(sockaddr: &[u8]) -> Option<IpAddr> {
     match sockaddr.get(1)? {
         2 if sockaddr.len() >= 8 => Some(IpAddr::V4(Ipv4Addr::new(sockaddr[4], sockaddr[5], sockaddr[6], sockaddr[7]))),

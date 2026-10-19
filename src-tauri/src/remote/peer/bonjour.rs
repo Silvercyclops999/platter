@@ -27,8 +27,9 @@ static SEEN: Mutex<Option<HashMap<String, MdnsAnswer>>> = Mutex::new(None);
 
 /// The Bonjour objects, which live on the main thread.
 struct Live {
-    browser: Retained<AnyObject>,
-    delegate: Retained<BrowseDelegate>,
+    /// Held so the browse keeps running (Bonjour doesn't keep it).
+    _browser: Retained<AnyObject>,
+    _delegate: Retained<BrowseDelegate>,
     /// Services found and being resolved (Bonjour needs them kept).
     resolving: Vec<Retained<AnyObject>>,
     published: Option<Retained<AnyObject>>,
@@ -138,7 +139,7 @@ impl BonjourPeers {
                 let delegate: Retained<BrowseDelegate> = msg_send![BrowseDelegate::alloc(), init];
                 let _: () = msg_send![&*browser, setDelegate: &*delegate];
                 let _: () = msg_send![&*browser, searchForServicesOfType: &*NSString::from_str(TYPE), inDomain: &*NSString::from_str(DOMAIN)];
-                LIVE.with(|l| *l.borrow_mut() = Some(Live { browser, delegate, resolving: Vec::new(), published: None }));
+                LIVE.with(|l| *l.borrow_mut() = Some(Live { _browser: browser, _delegate: delegate, resolving: Vec::new(), published: None }));
             }
         });
         Arc::new(Self { started: Instant::now() })
