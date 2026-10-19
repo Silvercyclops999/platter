@@ -3095,6 +3095,9 @@ export class MockBackend implements Backend {
   openProjectPage() {
     return this.delay(() => undefined);
   }
+  showRoutePicker() {
+    return this.delay(() => undefined);
+  }
   updateCheck() {
     return this.delay(() =>
       this.opts.updateAvailable

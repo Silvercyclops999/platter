@@ -616,6 +616,8 @@ export interface Backend {
 
   // App
   appInfo(): Promise<AppInfo>;
+  /** The phone's own AirPlay and Bluetooth picker (fails off the phone). */
+  showRoutePicker(): Promise<void>;
   /** Opens the project page in the default browser. */
   openProjectPage(): Promise<void>;
 
@@ -1471,6 +1473,7 @@ export function createTauriBackend(): Backend {
     artCacheInfo: () => call("art_cache_info"),
     artCacheClear: () => call("art_cache_clear"),
     appInfo: () => call("app_info"),
+    showRoutePicker: () => call("show_route_picker"),
     openProjectPage: () => call("open_project_page"),
     updateCheck: () => call("update_check"),
     updateInstallOnRestart: () => call("update_install_on_restart"),

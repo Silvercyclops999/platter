@@ -24,6 +24,7 @@ pub mod menubar;
 pub mod miniplayer;
 pub mod power;
 pub mod reveal;
+pub mod route_picker;
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 pub mod session;
 #[cfg(target_os = "windows")]
