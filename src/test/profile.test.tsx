@@ -96,10 +96,11 @@ describe("Profile page", () => {
     const artists = await screen.findByRole("region", { name: "Top artists this month" });
     await waitFor(() => expect(within(artists).getAllByRole("listitem")).toHaveLength(Math.min(6, o.topArtists.length)));
     expect(within(artists).getByText("Only visible to you")).toBeInTheDocument();
-    expect(within(artists).getByText(o.topArtists[0].name)).toBeInTheDocument();
+    // Names and titles can repeat (two songs share a title on some days).
+    expect(within(artists).getAllByText(o.topArtists[0].name).length).toBeGreaterThan(0);
     const tracks = screen.getByRole("region", { name: "Top songs this month" });
     expect(within(tracks).getByText("Only visible to you")).toBeInTheDocument();
-    await waitFor(() => expect(within(tracks).getByText(o.topSongs[0].title)).toBeInTheDocument());
+    await waitFor(() => expect(within(tracks).getAllByText(o.topSongs[0].title).length).toBeGreaterThan(0));
     expect(within(tracks).getAllByText(formatPlays(o.topSongs[0].plays)).length).toBeGreaterThan(0);
     await user.click(within(artists).getByRole("button", { name: "Show all" }));
     expect(route()).toEqual({ name: "stats", tab: "overview", month: span.today.slice(0, 7) });
