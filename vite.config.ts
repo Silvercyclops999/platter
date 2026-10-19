@@ -1,10 +1,15 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from "vite";
+import { configDefaults } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import process from "node:process";
 import path from "node:path";
 
 const host = process.env.TAURI_DEV_HOST;
+
+// Tests that read computed styles (getComputedStyle, or visibility that comes
+// from a stylesheet) and so need the app's real CSS loaded.
+const STYLE_TESTS = ["src/test/sleeve-notes.test.tsx"];
 
 // https://vite.dev/config/
 export default defineConfig(() => ({
@@ -40,13 +45,27 @@ export default defineConfig(() => ({
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
-    // CI machines run the suite several times slower than a desktop, and
-    // role queries on big pages grow with the app's CSS: more room there.
-    testTimeout: process.env.CI ? 30000 : 15000,
+    testTimeout: 15000,
     // Every core by default; a few workers keep a desktop cool. CI uses them all.
     maxWorkers: process.env.CI ? undefined : 4,
-    include: ["src/**/*.test.{ts,tsx}"],
-    // Process CSS so `?raw` imports (token tests) see real file contents.
-    css: true,
+    // Role queries compute styles for every element they name, against every
+    // stylesheet on the page, so the app's CSS stays out of most tests. Only
+    // `?raw` imports are processed (token tests read real file contents).
+    // Tests that check computed styles go in STYLE_TESTS and get all the CSS.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "ui",
+          include: ["src/**/*.test.{ts,tsx}"],
+          exclude: [...configDefaults.exclude, ...STYLE_TESTS],
+          css: { include: [/\?raw$/] },
+        },
+      },
+      {
+        extends: true,
+        test: { name: "styles", include: STYLE_TESTS, css: true },
+      },
+    ],
   },
 }));
