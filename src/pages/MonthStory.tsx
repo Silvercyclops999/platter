@@ -1,8 +1,8 @@
 /**
  * This month in words, for the profile page and the phone's You tab: one
  * sentence (how long, and mostly to whom), then a quieter one with the plays,
- * the days and the longest run. Set like the Stats page's hero, in the
- * app's own type; no boxes, no labels in capitals.
+ * the days and the longest run. Set like the Stats page's hero, the
+ * sentence in the display face; no boxes, no labels in capitals.
  */
 import { Skeleton } from "../components/Skeleton";
 import type { StatsOverview } from "../lib/statsTypes";

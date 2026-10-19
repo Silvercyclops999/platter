@@ -932,6 +932,10 @@
 .phone .ph-you__wrapped { grid-template-columns: 44px 56px minmax(0, 1fr) auto; gap: 12px; margin: 8px 0 4px; padding: 10px 0; border-bottom: 1px solid var(--ph-line, var(--ledger-faint)); border-top-color: var(--ph-line, var(--ledger-faint)); }
 .phone .ph-you__wrapped .lg-year__sleeve { width: 44px; height: 44px; }
 .ph-you__links { margin-top: 24px; }
+/* On You the way on to Stats and the tools are ruled rows, like the Wrapped row above them. */
+.phone .ph-you__links.ph-set-list { border-radius: 0; background: none; box-shadow: none; border-top: 1px solid var(--ph-line); border-bottom: 1px solid var(--ph-line); }
+.phone .ph-you__links .ph-set-link { padding-left: 0 !important; padding-right: 4px !important; }
+.phone .ph-you__links .ph-set-link__title { font-family: var(--font-headings, var(--font-family)); font-weight: 600; }
 
 /* ---------------------------------------------------------------- settings, phone-sized */
 .ph-set-list { list-style: none; margin: 0; padding: 0; border-radius: 14px; overflow: hidden; background: color-mix(in srgb, var(--color-ink) 5%, var(--color-bg-raised)); box-shadow: var(--panel-highlight, none); }
