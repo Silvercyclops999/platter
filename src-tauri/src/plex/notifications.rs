@@ -186,7 +186,7 @@ struct AutoUpdateNotification {
 
 /// Parse one websocket text frame. Unknown types yield no events.
 pub fn parse(text: &str) -> Vec<PlexEvent> {
-    let Ok(outer) = serde_json::from_str::<Outer>(text) else {
+    let Ok(outer) = super::client::decode_json::<Outer>(text.as_bytes()) else {
         return Vec::new();
     };
     let c = outer.container;

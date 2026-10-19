@@ -416,7 +416,7 @@ impl PlexClient {
         let rb = self.request(Method::GET, path)?.query(query);
         let body = self.edit_send(rb).await?.bytes().await.map_err(map_send_error)?;
         let env: Envelope<T> =
-            serde_json::from_slice(&body).map_err(|e| AppError::Decode(format!("{}: {e}", path.split('?').next().unwrap_or(""))))?;
+            super::client::decode_json(&body).map_err(|e| AppError::Decode(format!("{}: {e}", path.split('?').next().unwrap_or(""))))?;
         Ok(env.media_container)
     }
 
