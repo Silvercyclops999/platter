@@ -69,24 +69,6 @@
 .tt-plinth__open:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-text-primary) 18%, transparent); }
 
 .tt-plates { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
-.tt-plate {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 22px;
-  padding: 0 7px;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  box-shadow: inset 0 1px 0 var(--engrave-dark, transparent), 0 1px 0 var(--engrave-light, transparent);
-  font-size: 11px;
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: 0.04em;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-}
-.tt-plate__lamp { width: 5px; height: 5px; border-radius: 50%; background: color-mix(in srgb, var(--color-text-muted) 45%, transparent); transition: background-color var(--motion-medium) var(--motion-easing); }
-.tt-plate.is-on .tt-plate__lamp { background: var(--color-accent); box-shadow: 0 0 5px color-mix(in srgb, var(--color-accent) 70%, transparent); }
 .tt-plates .hifi-mark { height: 22px; margin-left: auto; }
 
 /* The song. */
@@ -150,16 +132,10 @@
   min-width: 18px;
   height: 16px;
   padding: 0 var(--space-1);
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--color-bg-base) 82%, transparent);
-  box-shadow: inset 0 1px 0 var(--engrave-light, transparent), 0 0 0 1px var(--engrave-dark, var(--color-border));
-  font-size: 11px;
-  font-weight: var(--font-weight-semibold);
-  font-variant-numeric: tabular-nums;
-  line-height: 16px;
-  text-align: center;
-  color: var(--color-text-primary);
+  justify-content: center;
 }
+/* Classic's plates are outlines; over a cover this one needs a face. */
+:root:not([data-identity]) .tt-next__count { background: color-mix(in srgb, var(--color-bg-base) 82%, transparent); color: var(--color-text-primary); }
 .tt-next__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .tt-next__label { font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); color: var(--color-text-muted); }
 .tt-next__title { font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }

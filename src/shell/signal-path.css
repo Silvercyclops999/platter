@@ -2,26 +2,8 @@
    draws plain rows; the Studio looks (identity.css tokens) make each stage an
    engraved plate with brass only on the bit-perfect verdict. */
 
-.signal-badge {
-  flex: none;
-  height: 22px;
-  padding: 0 7px;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 11px;
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: 0.04em;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: color var(--motion-very-quick) var(--motion-easing), border-color var(--motion-very-quick) var(--motion-easing);
-}
-.signal-badge:hover,
-.signal-badge.is-open { color: var(--color-text-primary); border-color: var(--color-text-secondary); }
-.signal-badge:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
-.signal-badge.is-perfect { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 55%, transparent); }
+/* The badge is a plate (components/Plate.tsx, design/instruments.css). */
+.signal-badge { flex: none; }
 
 .signal-link {
   padding: 2px 0;
@@ -139,31 +121,19 @@
 }
 
 /* ---------------------------------------------------------------- Studio */
-:root[data-identity] .signal-badge {
-  border: 0;
-  border-radius: 2px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--color-ink) 10%, transparent), color-mix(in srgb, var(--color-ink) 4%, transparent));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-ink) 10%, transparent), inset 0 -1px 0 var(--engrave-dark);
-  letter-spacing: 0.06em;
-}
-:root[data-identity] .signal-badge.is-perfect { color: var(--color-accent); }
 :root[data-identity] .signal-panel {
   border-color: var(--engrave-dark);
   border-radius: 4px;
   background-image: var(--panel-sheen);
   box-shadow: var(--panel-highlight), 0 18px 44px rgba(0, 0, 0, 0.5);
 }
+/* Each stage is a plate on the look's plate tokens (instruments.css), its
+   name engraved. Values stay in the body face: some are device names. */
 :root[data-identity] .signal-plate {
-  border-radius: 2px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--color-ink) 8%, var(--color-bg-raised)), color-mix(in srgb, var(--color-ink) 3%, var(--color-bg-raised)));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-ink) 9%, transparent), inset 0 -1px 0 var(--engrave-dark), 0 0 0 1px var(--engrave-dark);
+  border-radius: 3px;
+  background: var(--plate-bg);
+  box-shadow: inset 0 0 0 1px var(--plate-edge), inset 0 1px 0 var(--plate-hi);
 }
-/* Engraved lettering: a dark cut with a lit edge under it. */
-:root[data-identity] .signal-plate__name { text-shadow: 0 1px 0 var(--engrave-light); }
+:root[data-identity] .signal-plate__name { color: var(--plate-text); }
 :root[data-identity] .signal-why { border-top-color: var(--engrave-dark); box-shadow: inset 0 1px 0 var(--engrave-light); }
-:root[data-identity="sleeve"] .signal-badge,
-:root[data-identity="sleeve"] .signal-plate {
-  background: linear-gradient(180deg, #fbf8f1, #e9e1d1);
-  box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 var(--engrave-dark), 0 0 0 1px var(--engrave-dark);
-}
 :root[data-identity="sleeve"] .signal-panel { background-image: var(--paper-grain); box-shadow: var(--panel-highlight), 0 14px 34px rgba(43, 33, 23, 0.22); }

@@ -245,8 +245,6 @@
   line-height: 1;
 }
 .badge--neutral { background: var(--color-state-selected); color: var(--color-text-secondary); }
-.badge--quality { border: 1px solid color-mix(in srgb, var(--color-ink) 18%, transparent); color: var(--color-text-muted); }
-.badge--hires { border: 1px solid var(--color-accent-strong); color: var(--color-accent-hover); }
 .badge--version { background: rgba(90, 169, 245, 0.16); color: var(--color-version); }
 .badge--accent { background: var(--color-accent); color: var(--color-text-on-accent); }
 

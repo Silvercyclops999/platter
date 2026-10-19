@@ -1,0 +1,248 @@
+/* Instruments: the engraved plates, the readout face, the dark glass of the
+   now playing readouts and the cover's light. Plates are one system on every
+   look (Classic draws them as plain outlines); the rest belongs to Platter's
+   own looks (data-identity). The plate and glass colours match
+   design/instruments.ts, which a test holds to WCAG AA.
+
+   Restraint: nothing here animates. The cover's light changes only when the
+   song does (480 ms; instant under reduced motion), so an idle window paints
+   nothing. */
+
+/* ---------------------------------------------------------------- tokens */
+:root {
+  /* Classic and the other themes: outline plates in the theme's own ink. */
+  --plate-bg: transparent;
+  --plate-edge: color-mix(in srgb, var(--color-ink) 18%, transparent);
+  --plate-hi: transparent;
+  --plate-text: var(--color-text-secondary);
+  --plate-lit: var(--color-accent);
+  --plate-warn: var(--color-warning);
+  --font-readout: var(--font-family);
+}
+:root[data-theme="studio"] {
+  --plate-bg: #2D2A26;
+  --plate-text: #D3CABC;
+  --plate-lit: #D9BB7B;
+  --plate-warn: #F2B13D;
+  --plate-edge: #4D4842;
+  --plate-hi: rgba(255, 243, 224, 0.07);
+  --glass-top: #0E0D0B;
+  --glass-bottom: #161411;
+  --glass-text: #EFE6D6;
+  --glass-dim: #B9AE9C;
+  --glass-lit: #DDBF80;
+}
+:root[data-theme="studioBlack"] {
+  --plate-bg: #1C1A18;
+  --plate-text: #CFC6B8;
+  --plate-lit: #D4B575;
+  --plate-warn: #F2B13D;
+  --plate-edge: #3E3A35;
+  --plate-hi: rgba(255, 243, 224, 0.06);
+  --glass-top: #050504;
+  --glass-bottom: #0C0B0A;
+  --glass-text: #EFE6D6;
+  --glass-dim: #B3A896;
+  --glass-lit: #DDBF80;
+}
+:root[data-theme="sleeve"] {
+  --plate-bg: #FAF6EC;
+  --plate-text: #3F372D;
+  --plate-lit: #6A4C14;
+  --plate-warn: #7A4E00;
+  --plate-edge: #B9AC92;
+  --plate-hi: rgba(255, 255, 255, 0.9);
+  --glass-top: #1E1A15;
+  --glass-bottom: #27221C;
+  --glass-text: #F3EADB;
+  --glass-dim: #C4B8A4;
+  --glass-lit: #E2C68C;
+}
+/* Views drawn over artwork stay dark on Sleeve (tokens.css), so their plates
+   are Studio's. */
+:root[data-theme="sleeve"] :is(.fw, .np-about__heading.on-photo, .mix-header--photo, .pl-cover__hint, .mini),
+:root[data-theme="sleeve"].fw-open :is(.topbar, .player-bar) {
+  --plate-bg: #2D2A26;
+  --plate-text: #D3CABC;
+  --plate-lit: #D9BB7B;
+  --plate-warn: #F2B13D;
+  --plate-edge: #4D4842;
+  --plate-hi: rgba(255, 243, 224, 0.07);
+}
+
+/* The readout face: times, formats and counts, never names or titles. With
+   the Readout face setting off they stay in the body face with even figures. */
+:root[data-identity]:not([data-readout="off"]) {
+  --font-readout: "IBM Plex Mono", ui-monospace, "Cascadia Mono", "SF Mono", Menlo, monospace;
+}
+
+/* ---------------------------------------------------------------- plates */
+.plate {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--plate-bg);
+  box-shadow: inset 0 0 0 1px var(--plate-edge), inset 0 1px 0 var(--plate-hi);
+  color: var(--plate-text);
+  font-family: var(--font-readout);
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.plate--sm { height: 18px; padding: 0 6px; font-size: 10.5px; }
+.plate.is-lit { color: var(--plate-lit); }
+.plate.is-warn { color: var(--plate-warn); }
+.plate__lamp {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-text-muted) 45%, transparent);
+  transition: background-color var(--motion-medium) var(--motion-easing);
+}
+.plate__lamp.is-on { background: var(--color-accent); box-shadow: 0 0 5px color-mix(in srgb, var(--color-accent) 70%, transparent); }
+.plate--button { cursor: pointer; transition: color var(--motion-very-quick) var(--motion-easing), box-shadow var(--motion-very-quick) var(--motion-easing); }
+.plate--button:hover,
+.plate--button[aria-expanded="true"] { color: var(--color-text-primary); box-shadow: inset 0 0 0 1px var(--color-text-secondary), inset 0 1px 0 var(--plate-hi); }
+.plate--button.is-lit:hover,
+.plate--button.is-lit[aria-expanded="true"] { color: var(--plate-lit); }
+.plate--button:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+/* In the readout face the plate's mono runs a touch wider: one step quieter in weight. */
+:root[data-identity]:not([data-readout="off"]) .plate { font-weight: 500; letter-spacing: 0.04em; }
+
+/* The bit-perfect mark sits with the plates in Platter's looks. Its rate
+   keeps its case ("96 kHz"). */
+:root[data-identity] .hifi-mark {
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 3px;
+  background: var(--plate-bg);
+  box-shadow: inset 0 0 0 1px var(--plate-edge), inset 0 1px 0 var(--plate-hi);
+  color: var(--plate-text);
+}
+:root[data-identity] .hifi-mark:hover { background: var(--plate-bg); color: var(--color-text-primary); }
+:root[data-identity] .hifi-mark.is-on { color: var(--plate-lit); }
+:root[data-identity] .hifi-mark.is-fallback { color: var(--plate-warn); }
+:root[data-identity] .hifi-mark__rate { font-family: var(--font-readout); font-weight: 500; }
+
+/* ---------------------------------------------------------------- engraved labels */
+/* Section labels cut into the panel: a dark cut above, a lit edge below. The
+   colour alone carries the contrast; the shadow is only the cut. */
+:root[data-identity] :is(.signal-panel__title, .signal-plate__name, .settings__subheading, .tt-next__label) {
+  text-shadow: 0 -1px 0 var(--engrave-dark), 0 1px 0 var(--engrave-light);
+}
+
+/* ---------------------------------------------------------------- readout face */
+/* Times, counts and table numbers line up and read as instruments. One mono
+   run per row at most: a row's duration, never its title. */
+:root[data-identity] :is(.seek__time, .track-row__duration, .queue-row__dur, .tt-next__count, .console-cell--length, .console-node__count) {
+  font-family: var(--font-readout);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+:root[data-identity]:not([data-readout="off"]) :is(.track-row__duration, .queue-row__dur, .console-cell--length, .console-node__count) {
+  font-size: 0.92em;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+/* ---------------------------------------------------------------- glass readouts */
+/* The now playing readouts are windows of dark glass let into the panel: an
+   inset edge, a faint reflection along the top and lit text with the softest
+   glow. No blur, no scanlines, nothing moving. The glass is dark on every
+   look, so its text tokens are its own. */
+:root[data-identity] :is(.seek--strip .seek__time, .deck-display__screen) {
+  border: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 250, 240, 0.05) 0, rgba(255, 250, 240, 0) 45%),
+    linear-gradient(180deg, var(--glass-top), var(--glass-bottom));
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(0, 0, 0, 0.55), 0 1px 0 var(--engrave-light);
+  color: var(--glass-text);
+  text-shadow: 0 0 6px color-mix(in srgb, var(--glass-text) 26%, transparent);
+}
+:root[data-identity] .seek--strip .seek__time { font-weight: 500; letter-spacing: 0.02em; }
+:root[data-identity] .seek--strip .seek__time--end { color: var(--glass-dim); text-shadow: none; }
+/* Inside the Deck's display everything reads as lit text on glass. */
+:root[data-identity] .deck-display__screen {
+  --color-text-primary: var(--glass-text);
+  --color-text-secondary: var(--glass-dim);
+  --color-text-muted: var(--glass-dim);
+  --color-accent: var(--glass-lit);
+  --color-accent-hover: var(--glass-text);
+  --color-playing: var(--glass-lit);
+  --color-focus-ring: var(--glass-text);
+  --color-state-hover: rgba(255, 243, 224, 0.08);
+  --color-state-pressed: rgba(255, 243, 224, 0.12);
+  border-radius: 5px;
+}
+:root[data-identity] .deck-display__screen :is(.deck-display__line--sub, .deck-display__sep) { text-shadow: none; }
+/* The display shows the song like a sleeve: the title in the display face,
+   the names in the body face. Mono is only for readouts. */
+:root[data-identity] .deck-display__line { font-family: var(--font-family); letter-spacing: 0; }
+:root[data-identity] .deck-display__line--title {
+  font-family: var(--font-headings, var(--font-family));
+  font-size: var(--font-size-lg);
+  font-weight: 560;
+  letter-spacing: -0.005em;
+}
+
+/* ---------------------------------------------------------------- cover light */
+/* The playing cover lights the now playing area: one static radial pool and
+   a lit top edge, a little of the colour over the panel and never on text.
+   --cover-light comes from CoverLightSource (unset: no light). */
+@property --cover-light {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+:root[data-identity] {
+  --cover-light-mix: 16%;
+  --cover-light-edge: 34%;
+}
+:root[data-identity][data-theme-base="light"] {
+  --cover-light-mix: 12%;
+  --cover-light-edge: 28%;
+}
+:root[data-identity][data-cover-light="less"] {
+  --cover-light-mix: 8%;
+  --cover-light-edge: 18%;
+}
+:root[data-identity][data-theme-base="light"][data-cover-light="less"] {
+  --cover-light-mix: 6%;
+  --cover-light-edge: 14%;
+}
+:root[data-identity]:not([data-cover-light="off"]) :is(.transport-strip, .deck-face, .tt-plinth, .gf-leaf, .console-status, .player-bar) {
+  --cover-pool: color-mix(in srgb, var(--cover-light) var(--cover-light-mix), transparent);
+  transition: --cover-light var(--motion-long) var(--motion-easing);
+}
+/* Index's strip and Classic's bar: the pool behind the cover at the left. */
+:root[data-identity]:not([data-cover-light="off"]) :is(.transport-strip, .console-status, .player-bar) {
+  background-image: radial-gradient(ellipse 420px 180% at 0 0, var(--cover-pool), transparent 70%);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--cover-light) var(--cover-light-edge), transparent);
+}
+:root[data-identity]:not([data-cover-light="off"]) .player-bar {
+  box-shadow: 0 -1px 0 var(--engrave-light) inset, inset 0 1px 0 color-mix(in srgb, var(--cover-light) var(--cover-light-edge), transparent);
+}
+/* Deck: the light falls from the cover's window across the faceplate. */
+:root[data-identity]:not([data-cover-light="off"]) .deck-face {
+  background-image:
+    radial-gradient(ellipse 520px 160% at 0 0, var(--cover-pool), transparent 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-bg-raised2) 55%, var(--color-bg-raised)), var(--color-bg-raised) 60%);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--cover-light) var(--cover-light-edge), var(--engrave-light, transparent));
+}
+/* Turntable: a pool under the platter, as if lit from the label. */
+:root[data-identity]:not([data-cover-light="off"]) .tt-plinth {
+  background-image: radial-gradient(ellipse 70% 55% at 45% 42%, var(--cover-pool), transparent 72%);
+}
+/* Gatefold: the left page catches the light behind the cover. */
+:root[data-identity]:not([data-cover-light="off"]) .gf-leaf {
+  background-image: radial-gradient(ellipse 90% 40% at 50% 18%, var(--cover-pool), transparent 75%);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--cover-light) var(--cover-light-edge), var(--engrave-light, transparent));
+}

@@ -856,6 +856,9 @@ export type ThemeSetting = "dark" | "light" | "system" | "midnight" | "forest" |
 /** Record-player motion: full screen now playing only, the side panel too, or none. */
 export type RecordMotion = "full" | "both" | "off";
 
+/** Light from the playing cover behind now playing: on, softer, or off. */
+export type CoverLight = "on" | "less" | "off";
+
 /** A theme or look file that passed the checks (also what the `themeFile` setting holds). */
 export type ThemeFile = UserTheme;
 export type { Layout };
@@ -1385,6 +1388,10 @@ export interface Settings {
   recordMotion: RecordMotion;
   /** The seek bar is a needle on a groove line. */
   tonearmSeek: boolean;
+  /** Times, formats and counts in Platter's own looks use the readout face. */
+  readoutFace: boolean;
+  /** The playing cover's colour as a soft light behind now playing. */
+  coverLight: CoverLight;
   /** The theme file in use, carried whole so it travels in the sync file. */
   themeFile: ThemeFile | null;
   /**
@@ -1890,6 +1897,8 @@ export const DEFAULT_SETTINGS: Settings = {
   newLookOffered: true,
   recordMotion: "full",
   tonearmSeek: true,
+  readoutFace: true,
+  coverLight: "on",
   themeFile: null,
   // The mock starts where an existing install is (Classic), so the shell's
   // tests cover the layout people have used all along; the first-run step

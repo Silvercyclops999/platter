@@ -15,6 +15,7 @@ import { Art } from "../components/Art";
 import { ArtistLinks, TextLink } from "../components/ArtistLinks";
 import { ExplicitMark } from "../components/FileTagBadges";
 import { openContextMenu } from "../components/ContextMenu";
+import { Plate } from "../components/Plate";
 import { SaveButton } from "../components/SaveButton";
 import { Skeleton } from "../components/Skeleton";
 import { trackMenuItems } from "../components/TrackRow";
@@ -98,10 +99,9 @@ function Platter({ compact }: { compact: boolean }) {
       </div>
       <div className="tt-plates">
         {/* The motor lamp is lit while the record turns. */}
-        <span className={`tt-plate tt-plate--speed ${track && playing ? "is-on" : ""}`} title="Record speed">
-          <span className="tt-plate__lamp" aria-hidden="true" />
+        <Plate lamp lampOn={!!track && playing} className={`tt-plate--speed ${track && playing ? "is-on" : ""}`} title="Record speed">
           33⅓
-        </span>
+        </Plate>
         <SignalBadge />
         <HifiMark />
       </div>
@@ -173,7 +173,7 @@ function UpNext() {
             <span key={sl.item.itemId} className="tt-next__sleeve" style={{ "--i": all.length - 1 - i } as React.CSSProperties}>
               <Art path={sl.item.track.thumb} size={56} sleeve={{ title: sl.item.track.albumTitle, artist: sl.item.track.artistTitle }} />
               {sl.count > 1 && (
-                <span className="tt-next__count" data-testid="tt-next-count">
+                <span className="plate plate--sm tt-next__count" data-testid="tt-next-count">
                   {sl.count}
                 </span>
               )}

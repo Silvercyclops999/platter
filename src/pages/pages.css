@@ -124,7 +124,6 @@
   border-color: color-mix(in srgb, var(--color-ink) 22%, transparent);
   color: var(--color-text-secondary);
 }
-.detail-header__badges .badge--hires { color: var(--color-accent-hover); }
 .detail-header__badges .badge--version { color: var(--color-version); }
 /* Under the header, a short fade from the shade into the page background,
    behind the action row. It starts at the header's full shade so there's no

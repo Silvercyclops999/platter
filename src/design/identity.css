@@ -39,18 +39,25 @@
 }
 
 /* ---------------------------------------------------------------- Type */
-/* Page titles in the display face, sentence case and not giant. */
+/* Page titles in the display face, sentence case and not giant. The face is
+   the look's own (the display serif unless a theme file sets another); its
+   optical size follows the type size, so big titles draw finer. */
 :root[data-identity] :is(h1, h2, .detail-header__title, .shelf__title, .home__greeting, .empty-state__title) {
   font-weight: 600;
   letter-spacing: -0.005em;
 }
+:root[data-identity] :is(h1.page-title, .detail-header__title, .home__greeting, .empty-state__title, .profile-head__name, .shelf__title) {
+  font-family: var(--font-headings, var(--font-family));
+  font-optical-sizing: auto;
+}
+:root[data-identity] :is(.detail-header__title, .profile-head__name) { font-weight: 560; letter-spacing: -0.012em; }
 :root[data-identity] .detail-header__title[data-step="1"] { font-size: 56px; line-height: 1.04; }
 :root[data-identity] .detail-header__title[data-step="2"] { font-size: 48px; line-height: 1.06; }
 :root[data-identity] .detail-header__title[data-step="3"] { font-size: 40px; }
 :root[data-identity] .empty-state__title { font-size: var(--font-size-2xl); }
 /* Times, bitrates and counts never jiggle. */
 :root[data-identity] :is(.track-row__duration, .track-row__num, .seek__time, .badge, .hifi-mark, .stats-strip, .queue-row__dur),
-.app.frame :is(.seek__time, .console-cell--year, .console-cell--length, .console-cell--plays, .console-cell--format, .console-node__count, .console-status, .library__count, .track-row__duration, .track-row__num, .track-row__plays, .detail-header__meta, .tt-plate, .deck-display, .facet) {
+.app.frame :is(.seek__time, .console-cell--year, .console-cell--length, .console-cell--plays, .console-cell--format, .console-node__count, .console-status, .library__count, .track-row__duration, .track-row__num, .track-row__plays, .detail-header__meta, .plate, .deck-display, .facet) {
   font-variant-numeric: tabular-nums lining-nums;
 }
 
@@ -147,7 +154,7 @@
 
 /* Big names elsewhere: set in the display face, never poster-sized. */
 :root[data-identity] .profile-head__name { font-size: clamp(36px, 5.5cqi, 56px); letter-spacing: -0.01em; line-height: 1.05; }
-:root[data-identity] .fw__artist-name { font-family: var(--font-headings, var(--font-family)); font-weight: 600; font-size: clamp(40px, 4.5vw, 64px); letter-spacing: -0.005em; }
+:root[data-identity] .fw__artist-name { font-family: var(--font-headings, var(--font-family)); font-weight: 600; font-size: clamp(40px, 4.5vw, 56px); letter-spacing: -0.005em; }
 
 /* Sleeve: paper takes a soft shadow, not a dark pool. */
 :root[data-identity="sleeve"] .mix-art { box-shadow: 0 4px 14px rgba(43, 33, 23, 0.22); }
@@ -195,21 +202,7 @@
 :root[data-identity] .mini.is-tinted { background-color: color-mix(in srgb, var(--mini-tint) 24%, #171513); }
 :root[data-identity] .mini__edge-fill { background: var(--color-playing); }
 
-/* ---------------------------------------------------------------- Hi-fi plates */
-/* Quality badges as small engraved plates, like labels on gear. */
-:root[data-identity] :is(.badge--quality, .badge--hires) {
-  border: 0;
-  border-radius: 2px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--color-ink) 10%, transparent), color-mix(in srgb, var(--color-ink) 4%, transparent));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-ink) 10%, transparent), inset 0 -1px 0 var(--engrave-dark);
-  color: var(--color-text-secondary);
-  letter-spacing: 0.06em;
-}
-:root[data-identity] .badge--hires { color: var(--color-accent); }
-:root[data-identity="sleeve"] :is(.badge--quality, .badge--hires) {
-  background: linear-gradient(180deg, #fbf8f1, #e6dece);
-  box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 var(--engrave-dark), 0 0 0 1px var(--engrave-dark);
-}
+/* Hi-fi plates, the readout glass and cover light are in instruments.css. */
 
 /* ---------------------------------------------------------------- Mix covers */
 /* The mix's name on a small printed label rather than a coloured band. */

@@ -25,6 +25,7 @@ import type {
   PopularSource,
   ReduceMotion,
   RecordMotion,
+  CoverLight,
   ServerInfo,
   Settings,
   StreamQuality,
@@ -219,6 +220,11 @@ const RECORD_MOTION = [
   { value: "both", label: "Expanded view and side panel" },
   { value: "off", label: "Off" },
 ] as const satisfies SelectOption<RecordMotion>[];
+const COVER_LIGHT = [
+  { value: "on", label: "On" },
+  { value: "less", label: "Less" },
+  { value: "off", label: "Off" },
+] as const satisfies SelectOption<CoverLight>[];
 const LIKED_MEANS = [
   { value: "five", label: "5 stars" },
   { value: "fourUp", label: "4 stars or more" },
@@ -347,6 +353,7 @@ export const NOTICES: { name: string; licence: string }[] = [
   { name: "Atkinson Hyperlegible typeface", licence: "SIL Open Font License 1.1" },
   { name: "Manrope typeface", licence: "SIL Open Font License 1.1" },
   { name: "Fraunces typeface", licence: "SIL Open Font License 1.1" },
+  { name: "IBM Plex Mono typeface", licence: "SIL Open Font License 1.1" },
   { name: "Tokio", licence: "MIT" },
   { name: "Serde", licence: "MIT or Apache-2.0" },
   { name: "reqwest", licence: "MIT or Apache-2.0" },
@@ -1745,6 +1752,29 @@ export function SettingsPage({ page: pageProp }: { page?: PageId } = {}) {
       title: "Tonearm seek bar",
       description: "The seek bar is a stylus on a groove line. It works the same.",
       control: (ids) => toggle(s, "tonearmSeek", ids),
+    },
+    {
+      key: "readoutFace",
+      section: "Appearance",
+      title: "Readout face",
+      description: "Times, formats and counts in a fixed-width face, like a display.",
+      more: "Times, formats, bitrates and counts use a fixed-width face, so they read like the display on a piece of gear and never shift as they change. Names and titles stay as they are. Off uses the interface face with even-width figures.",
+      note: s && !identityOf(theme.id) ? "Only applies in Studio, Studio Black and Sleeve." : undefined,
+      control: (ids) => toggle(s, "readoutFace", ids),
+    },
+    {
+      key: "coverLight",
+      section: "Appearance",
+      title: "Cover light",
+      description: "The playing cover's colour as a soft light behind now playing.",
+      more: "The cover of the song playing lights the player area a little, like a lamp behind it: a soft pool and a lit edge, never on the text. It changes only when the song does. Less makes it fainter.",
+      note:
+        s && !identityOf(theme.id)
+          ? "Only applies in Studio, Studio Black and Sleeve."
+          : s && !s.artworkColours
+            ? "Turn on Artwork colours to use this."
+            : undefined,
+      control: (ids) => select(s, (x) => x.coverLight, COVER_LIGHT, ids, (v) => updateSettings({ coverLight: v })),
     },
     {
       key: "upNextLine",

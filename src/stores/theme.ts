@@ -6,6 +6,7 @@ import { create } from "zustand";
 import { DEFAULT_CHOICE, applyTheme, resolveTheme, safeLayout, type Layout, type ResolvedTheme, type ThemeBase, type ThemeChoice } from "../design/themes";
 import { DEFAULT_PARTS, STUDIO_FONTS, applyLook, cacheLook, type LookParts } from "../design/looks/apply";
 import { isStudioLook } from "../design/themes/builtins";
+import { loadReadoutFace } from "../design/looks/fonts";
 import type { Settings } from "../lib/types";
 import { useSettings } from "./settings";
 
@@ -40,12 +41,25 @@ export function lookPartsFrom(s: Settings | null): LookParts {
   return { style: f?.style ?? DEFAULT_PARTS.style, fonts: f?.fonts ?? own, layout: spinRecord === layout.spinRecord ? layout : { ...layout, spinRecord } };
 }
 
+/**
+ * The readout face and cover light, as data attributes on <html> that the
+ * Studio looks' CSS reads (Classic and the other themes never use them).
+ * The readout face loads the first time a Studio look shows it.
+ */
+export function applyIdentityOptions(root: HTMLElement, s: Settings | null): void {
+  const readout = s?.readoutFace !== false;
+  root.dataset.readout = readout ? "on" : "off";
+  root.dataset.coverLight = s?.coverLight ?? "on";
+  if (readout && root.dataset.identity) void loadReadoutFace(root.ownerDocument);
+}
+
 function update(doc: Document) {
   const { systemDark } = useTheme.getState();
   const settings = useSettings.getState().settings;
   const resolved = resolveTheme(choiceFrom(settings), systemDark);
   useTheme.setState({ resolved });
   applyTheme(resolved, doc);
+  applyIdentityOptions(doc.documentElement, settings);
   const parts = lookPartsFrom(settings);
   applyLook(doc.documentElement, parts);
   cacheLook(parts);
@@ -62,9 +76,11 @@ export function installTheme(win: Window = window): () => void {
   let last: ThemeChoice | null = null;
   let lastLayout: unknown = null;
   let lastMotion: unknown = null;
+  let lastOptions = "";
   const onSettings = (s: Settings | null) => {
     if (!s) return;
     const c = choiceFrom(s);
+    const options = `${s.readoutFace}|${s.coverLight}`;
     if (
       last &&
       last.theme === c.theme &&
@@ -72,12 +88,14 @@ export function installTheme(win: Window = window): () => void {
       last.themeFile === c.themeFile &&
       last.followSystem === c.followSystem &&
       lastLayout === s.layout &&
-      lastMotion === s.recordMotion
+      lastMotion === s.recordMotion &&
+      lastOptions === options
     )
       return;
     last = c;
     lastLayout = s.layout;
     lastMotion = s.recordMotion;
+    lastOptions = options;
     update(doc);
   };
   onSettings(useSettings.getState().settings);

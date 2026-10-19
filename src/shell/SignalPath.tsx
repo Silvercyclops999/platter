@@ -7,6 +7,7 @@
 import { ArrowDown, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { PlateButton } from "../components/Plate";
 import { qualityLabel } from "../lib/format";
 import { formatRate } from "../lib/hifi";
 import type { SignalPath } from "../lib/types";
@@ -156,8 +157,8 @@ export function SignalBadge() {
   if (!text) return null;
   const perfect = current?.verdict.kind === "bitPerfect";
   return (
-    <button
-      type="button"
+    <PlateButton
+      tone={perfect ? "lit" : "plain"}
       className={`signal-badge ${perfect ? "is-perfect" : ""} ${open ? "is-open" : ""}`}
       aria-haspopup="dialog"
       aria-expanded={open}
@@ -167,7 +168,7 @@ export function SignalBadge() {
       onClick={() => (open ? closeSignal() : openSignal())}
     >
       {text}
-    </button>
+    </PlateButton>
   );
 }
 

@@ -3676,6 +3676,8 @@ The rest of the fields, with their defaults:
 | `newLookOffered` | bool, true | The one-time offer to try Studio was shown, or wasn't needed. False for settings saved before Studio existed. This device only. |
 | `recordMotion` | `"full"` (default), `"both"`, `"off"` | The record player in now playing: the spinning record and tonearm in the expanded view, there and on the side panel's cover, or neither. `"off"` for settings saved before it existed. |
 | `tonearmSeek` | bool, true | The player bar's seek bar is drawn as a stylus on a groove line. It is the same slider either way. False for settings saved before it existed. |
+| `readoutFace` | bool, true | In Studio, Studio Black and Sleeve, times, formats and counts use the bundled fixed-width readout face. False keeps them in the interface face with even-width figures. |
+| `coverLight` | `"on"` (default), `"less"`, `"off"` | In Studio, Studio Black and Sleeve, the playing cover's colour is a soft light behind the now playing area. Less makes it fainter. Needs `artworkColours`. Any other value is refused. |
 | `themeFile` | `ThemeFile` or null | The theme or look file in use, held whole so it travels in the sync file. Checked like a file in the folder; a bad one is refused. Null clears it. |
 | `layoutOffered` | bool, true | The one-time offer to try the Index layout was shown, or wasn't needed. False for settings saved before frames existed. This device only. |
 | `turntableColumn` | `small`, `medium` or `large`, `medium` | The Turntable layout's player column width. Any other value is refused. This device only. |

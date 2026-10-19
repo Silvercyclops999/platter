@@ -1,7 +1,7 @@
 /* Deck (DeckFrame.tsx): a faceplate across the top, the source rail under
    it, the page at full width. One instrument: machined panel, a recessed
-   window for the cover, a sunk display that is the only mono type in the
-   app, keys that travel when pressed. Colours are the look's tokens; brass
+   window for the cover, a sunk display (dark glass in Platter's own looks,
+   instruments.css), keys that travel when pressed. Colours are the look's tokens; brass
    (the accent) marks only what is on. */
 
 .frame--deck .frame-center { gap: 0; }

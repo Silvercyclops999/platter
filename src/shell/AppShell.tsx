@@ -1,6 +1,7 @@
 import { PanelRightOpen } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ContextMenuHost } from "../components/ContextMenu";
+import { CoverLightSource } from "./CoverLightSource";
 import { DragAnnouncer } from "../components/DragAnnouncer";
 import { LinkAskDialog } from "../components/LinkAskDialog";
 import { PlaylistDialogs } from "../components/PlaylistDialogs";
@@ -277,6 +278,7 @@ export function ShellHosts() {
       <LazyLookBuilderHost />
       <LazyPickLookHost />
       <LookDrop />
+      <CoverLightSource />
     </>
   );
 }

@@ -37,8 +37,43 @@ const FACES: Partial<Record<FontId, Face[]>> = {
     { family: "Atkinson Hyperlegible", weight: "700", url: () => import("@fontsource/atkinson-hyperlegible/files/atkinson-hyperlegible-latin-700-normal.woff2?url") },
   ],
   manrope: [{ family: "Manrope Variable", weight: "200 800", url: () => import("@fontsource-variable/manrope/files/manrope-latin-wght-normal.woff2?url") }],
-  fraunces: [{ family: "Fraunces Variable", weight: "100 900", url: () => import("@fontsource-variable/fraunces/files/fraunces-latin-wght-normal.woff2?url") }],
+  // Weight and optical size: large titles draw finer than small ones.
+  fraunces: [{ family: "Fraunces Variable", weight: "100 900", url: () => import("@fontsource-variable/fraunces/files/fraunces-latin-standard-normal.woff2?url") }],
 };
+
+/**
+ * The readout face: a monospaced face for times, formats and counts in
+ * Platter's own looks (never for names or titles). Two weights of one small
+ * Latin file each, kept beside their licence in ./fonts.
+ */
+export const READOUT_FAMILY = "IBM Plex Mono";
+export const READOUT_NOTICE = "IBM Plex Mono typeface";
+const READOUT_FACES: Face[] = [
+  { family: READOUT_FAMILY, weight: "400", url: () => import("./fonts/ibm-plex-mono-latin-400-normal.woff2?url") },
+  { family: READOUT_FAMILY, weight: "500", url: () => import("./fonts/ibm-plex-mono-latin-500-normal.woff2?url") },
+];
+
+let readout: Promise<void> | null = null;
+
+/** Make the readout face available (once; a failure falls back to the system mono). */
+export function loadReadoutFace(doc: Document = document): Promise<void> {
+  if (typeof FontFace === "undefined" || !doc.fonts) return Promise.resolve();
+  if (!readout) {
+    readout = Promise.all(
+      READOUT_FACES.map(async (f) => {
+        const { default: url } = await f.url();
+        const face = new FontFace(f.family, `url(${JSON.stringify(url)}) format("woff2")`, { weight: f.weight, style: "normal", display: "swap" });
+        doc.fonts.add(await face.load());
+      }),
+    ).then(
+      () => undefined,
+      () => {
+        readout = null;
+      },
+    );
+  }
+  return readout;
+}
 
 const loaded = new Map<FontId, Promise<void>>();
 

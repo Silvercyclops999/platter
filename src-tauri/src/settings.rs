@@ -214,6 +214,20 @@ pub enum RecordMotion {
     Off,
 }
 
+/// Light from the playing cover on the now playing area: on, softer, or off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CoverLight {
+    #[default]
+    On,
+    Less,
+    Off,
+}
+
+fn yes() -> bool {
+    true
+}
+
 /// Deserialize a field that can be absent (leave alone) or null (clear).
 fn some_or_null<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
 where
@@ -372,6 +386,12 @@ pub struct Settings {
     /// settings saved before Studio).
     #[serde(default)]
     pub tonearm_seek: bool,
+    /// Times, formats and counts in Platter's own looks use the readout face.
+    #[serde(default = "yes")]
+    pub readout_face: bool,
+    /// The playing cover's colour as a soft light behind now playing.
+    #[serde(default)]
+    pub cover_light: CoverLight,
     /// The theme file in use, held whole so it travels in the sync file.
     pub theme_file: Option<crate::themes::ThemeFile>,
     /// Layout options: Index for new installs; settings saved without one
@@ -1059,6 +1079,8 @@ impl Default for Settings {
             new_look_offered: true,
             record_motion: RecordMotion::Full,
             tonearm_seek: true,
+            readout_face: true,
+            cover_light: CoverLight::On,
             theme_file: None,
             layout: crate::themes::Layout::index(),
             layout_offered: true,
@@ -1342,6 +1364,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "followSystem",
     "recordMotion",
     "tonearmSeek",
+    "readoutFace",
+    "coverLight",
     "themeFile",
     "layout",
     "showLookBuilder",
@@ -1632,6 +1656,8 @@ pub struct SettingsPatch {
     pub new_look_offered: Option<bool>,
     pub record_motion: Option<RecordMotion>,
     pub tonearm_seek: Option<bool>,
+    pub readout_face: Option<bool>,
+    pub cover_light: Option<CoverLight>,
     /// Null clears it.
     #[serde(default, deserialize_with = "some_or_null")]
     pub theme_file: Option<Option<crate::themes::ThemeFile>>,
@@ -1971,6 +1997,8 @@ impl Settings {
         set(&mut self.new_look_offered, p.new_look_offered);
         set(&mut self.record_motion, p.record_motion);
         set(&mut self.tonearm_seek, p.tonearm_seek);
+        set(&mut self.readout_face, p.readout_face);
+        set(&mut self.cover_light, p.cover_light);
         if let Some(a) = &p.accent {
             self.accent = crate::themes::accent_value(a)
                 .ok_or_else(|| AppError::Invalid("Accent colours are a preset or a colour like #A1B2C3.".into()))?;
@@ -4791,12 +4819,30 @@ mod tests {
     }
 
     #[test]
+    fn readout_face_and_cover_light_default_on_and_take_patches() {
+        let s = Settings::default();
+        assert!(s.readout_face);
+        assert_eq!(s.cover_light, CoverLight::On);
+        // Saved before they existed: both on.
+        let old: Settings = serde_json::from_str(r#"{"volume":0.5}"#).unwrap();
+        assert!(old.readout_face);
+        assert_eq!(old.cover_light, CoverLight::On);
+        let mut s = Settings::default();
+        let p: SettingsPatch = serde_json::from_str(r#"{"readoutFace":false,"coverLight":"less"}"#).unwrap();
+        s.apply(&p).unwrap();
+        assert!(!s.readout_face);
+        assert_eq!(s.cover_light, CoverLight::Less);
+        assert_eq!(serde_json::to_value(&s).unwrap()["coverLight"], "less");
+        assert!(serde_json::from_str::<SettingsPatch>(r#"{"coverLight":"bright"}"#).is_err());
+    }
+
+    #[test]
     fn theme_settings_default_validate_and_sync() {
         let s = Settings::default();
         assert_eq!((s.theme, s.accent.as_str(), s.theme_file.is_none()), (ThemeMode::Studio, "brass", true));
         assert!(s.follow_system && s.new_look_offered && s.tonearm_seek);
         assert_eq!(s.record_motion, RecordMotion::Full);
-        for k in ["theme", "accent", "themeFile", "followSystem", "recordMotion", "tonearmSeek"] {
+        for k in ["theme", "accent", "themeFile", "followSystem", "recordMotion", "tonearmSeek", "readoutFace", "coverLight"] {
             assert!(SYNCED_SETTINGS.contains(&k), "{k}");
         }
 

@@ -42,7 +42,8 @@
 .transport-strip .player-bar__play:hover:not([aria-disabled="true"]) { background: color-mix(in srgb, var(--color-text-primary) 86%, var(--color-bg-base)); }
 .transport-strip .player-bar__play:active:not([aria-disabled="true"]) { background: color-mix(in srgb, var(--color-text-primary) 74%, var(--color-bg-base)); }
 
-/* The line: times in engraved plates either side of the tonearm. */
+/* The line: times in small windows either side of the tonearm (dark glass
+   in Platter's own looks, instruments.css). */
 .ts-line { grid-area: line; min-width: 0; }
 .seek--strip::before { display: none; }
 .seek--strip { gap: var(--space-3); }

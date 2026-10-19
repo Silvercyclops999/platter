@@ -9,6 +9,7 @@ import "./shell/shell.css";
 import "./pages/pages.css";
 import "./design/looks/looks.css";
 import "./design/identity.css";
+import "./design/instruments.css";
 
 applyCachedTheme();
 applyCachedLook();
