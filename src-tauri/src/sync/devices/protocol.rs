@@ -288,8 +288,8 @@ impl SyncPeer {
         // This end's namespaces, and ones the other keeps that this build
         // doesn't know (kept and passed on).
         let mut ns = self.namespaces();
-        for k in h.digests.keys() {
-            if !NAMESPACES.contains(&k.as_str()) && !ns.contains(k) {
+        for k in h.digests.keys().take(NAMESPACES.len() + crate::sync::store::UNKNOWN_NS_MAX) {
+            if !NAMESPACES.contains(&k.as_str()) && !ns.contains(k) && crate::sync::store::plausible_ns(k) {
                 ns.push(k.clone());
             }
         }

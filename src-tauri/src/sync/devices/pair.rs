@@ -5,13 +5,17 @@
 //! - A 6-digit code, for a device on the same network. The other device
 //!   types it, finds this one over mDNS (same Plex account only, every
 //!   request signed), and the two run a SPAKE2 exchange over the code
-//!   through the control port ([`crate::remote::peer::pair`]). A wrong code
-//!   fails the exchange; [`TRIES`] attempts per code.
+//!   through the control port ([`crate::remote::peer::pair`]). The joining
+//!   device proves it reached the key first, in its finish; only then does
+//!   this one answer with anything derived from the key. A wrong code fails
+//!   that finish; [`TRIES`] failed finishes per code. A hello alone uses up
+//!   nothing, so another device can't spend the tries.
 //! - A long `PB1-` code and its QR code, for a device somewhere else. It
 //!   goes through the sealed relay ([`crate::homeside::pair`], under device
 //!   labels). The relay topic comes from the code's 128 random bits; a
 //!   topic from 6 digits could be guessed, so a 6-digit code never touches
-//!   the relay.
+//!   the relay. When a device joins with it, this one asks "Pair with
+//!   <name>?" and answers only once the user says yes.
 //!
 //! Either way both ends say which Plex account they're signed in to inside
 //! the sealed exchange and refuse another one, and both end up with the
@@ -25,7 +29,7 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use tokio::sync::watch;
+use tokio::sync::{oneshot, watch};
 
 use crate::error::{AppError, AppResult};
 use crate::homeside::code::PairCode;
@@ -36,7 +40,7 @@ use crate::homeside::peer::relay_error;
 use crate::remote::peer::PeerDevice;
 use crate::remote::peer::auth::hex;
 use crate::remote::peer::client::{PeerClient, PeerError};
-use crate::remote::peer::pair::{PairFinish, PairHello, PairHelloReply, PeerPair};
+use crate::remote::peer::pair::{PairFinish, PairFinishReply, PairHello, PairHelloReply, PeerPair};
 use crate::social::listen::DEFAULT_RELAY;
 use crate::social::listen::invite::relay_url;
 use crate::social::listen::relay::{RelayEvent, RelayFactory};
@@ -50,12 +54,20 @@ use crate::sync::store::Clock;
 pub const CODE_TTL_MS: u64 = 10 * 60 * 1000;
 /// Wrong 6-digit codes allowed before the code stops working.
 pub const TRIES: u8 = 5;
+/// Exchanges started and not finished kept at once (one per device).
+const PENDING_MAX: usize = 4;
 const STEP_TIMEOUT: Duration = Duration::from_secs(5);
-/// How long a device joining with the long code waits for the answer.
+/// How long a device joining with the long code waits for the answer (the
+/// other device's user has to say yes).
 const RELAY_WAIT: Duration = if cfg!(test) { Duration::from_secs(4) } else { Duration::from_secs(90) };
+/// Longest wait between tries at the relay while showing the long code.
+const RELAY_RETRY_MAX: Duration = Duration::from_secs(60);
 
 const WELCOME_AAD: &str = "platter-device pair welcome";
 const FINISH_AAD: &str = "platter-device pair finish";
+
+/// Shown when the relay can't be reached while the codes are up.
+pub const RELAY_DOWN: &str = "The relay can't be reached. The 6-digit code still works on this network.";
 
 /// What pairing needs from the app.
 #[derive(Clone)]
@@ -81,10 +93,14 @@ pub enum PairPhase {
     Idle,
     /// Showing the codes.
     Waiting,
+    /// A device joined with the long code: "Pair with <with>?"
+    Confirm,
     Paired,
     Expired,
     /// Too many wrong 6-digit codes; these stopped working.
     Locked,
+    /// The user said no to the device that joined.
+    Declined,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -93,12 +109,15 @@ pub struct PairState {
     pub phase: PairPhase,
     /// For a device on the same network.
     pub code: Option<String>,
-    /// For a device somewhere else, and its QR code.
+    /// For a device somewhere else, and its QR code (not while the relay
+    /// can't be reached).
     pub long_code: Option<String>,
     pub qr: Option<Qr>,
     pub expires_at: Option<u64>,
-    /// The device it paired with.
+    /// The device it paired with, or the one asking to.
     pub with: Option<String>,
+    /// Something to say beside the codes (the relay can't be reached).
+    pub note: Option<String>,
 }
 
 /// A pairing that finished.
@@ -125,16 +144,27 @@ struct End {
     relay: String,
 }
 
+/// A 6-digit exchange started by `from`: the key reached, this end's frame
+/// id and the relay offered.
+struct Pending {
+    from: String,
+    key: SharedKey,
+    frame: String,
+    relay: String,
+}
+
 struct Showing {
     code: String,
     long: PairCode,
     expires_at: u64,
     tries_left: u8,
-    /// The exchange in progress: the joining device, the key reached, this
-    /// end's frame id and the relay offered.
-    pending: Option<(String, SharedKey, String, String)>,
+    pending: Vec<Pending>,
     phase: PairPhase,
     with: Option<String>,
+    /// The relay can't be reached: the long code is hidden.
+    relay_down: bool,
+    /// The user's answer to "Pair with <with>?"
+    asking: Option<oneshot::Sender<bool>>,
     stop: watch::Sender<bool>,
 }
 
@@ -150,7 +180,7 @@ type OnPaired = Arc<dyn Fn(&Paired) + Send + Sync>;
 type OnState = Arc<dyn Fn(&PairState) + Send + Sync>;
 
 fn new_code() -> String {
-    format!("{:06}", rand::random::<u32>() % 1_000_000)
+    format!("{:06}", rand::random_range(0..1_000_000u32))
 }
 
 /// The 6-digit code as the SPAKE2 password, apart from key copy's.
@@ -175,20 +205,25 @@ fn seal_side(key: &SharedKey, aad: &str, s: &End) -> AppResult<String> {
     seal::seal_with(&key.derive("platter-device-pair-v1 seal"), aad, &plain)
 }
 
+const NO_MATCH: &str = "That code doesn't match. Check the code on the other device.";
+
 fn open_side(key: &SharedKey, aad: &str, text: &str) -> AppResult<End> {
-    let bad = || AppError::Invalid("That code doesn't match. Check the code on the other device.".into());
+    let bad = || AppError::Invalid(NO_MATCH.into());
     let plain = seal::open_with(&key.derive("platter-device-pair-v1 seal"), aad, text).map_err(|_| bad())?;
     serde_json::from_slice(&plain).map_err(|_| bad())
 }
 
+const OTHER_ACCOUNT: &str = "That device is signed in to a different Plex account or Home user.";
+
 fn other_account() -> AppError {
-    AppError::Auth("That device is signed in to a different Plex account or Home user.".into())
+    AppError::Auth(OTHER_ACCOUNT.into())
 }
 
 fn peer_err(e: PeerError) -> AppError {
     match e {
         PeerError::Unreachable => AppError::Network("Couldn't reach the other device.".into()),
         PeerError::Refused(m) => AppError::Auth(m),
+        PeerError::Failed(m) if m == OTHER_ACCOUNT => other_account(),
         PeerError::Failed(m) => AppError::Invalid(m),
     }
 }
@@ -230,25 +265,27 @@ impl DevicePairing {
     fn view(s: Option<&Showing>) -> PairState {
         let Some(s) = s else { return PairState::default() };
         let showing = s.phase == PairPhase::Waiting;
-        let long = showing.then(|| s.long.text());
+        let long = (showing && !s.relay_down).then(|| s.long.text());
         PairState {
             phase: s.phase,
             code: showing.then(|| s.code.clone()),
             qr: long.as_deref().and_then(qr),
             long_code: long,
-            expires_at: showing.then_some(s.expires_at),
+            expires_at: matches!(s.phase, PairPhase::Waiting | PairPhase::Confirm).then_some(s.expires_at),
             with: s.with.clone(),
+            note: (showing && s.relay_down).then(|| RELAY_DOWN.to_string()),
         }
     }
 
     fn tick(&self, s: &mut Option<Showing>) {
         let now = self.now();
         if let Some(x) = s.as_mut()
-            && x.phase == PairPhase::Waiting
+            && matches!(x.phase, PairPhase::Waiting | PairPhase::Confirm)
             && now >= x.expires_at
         {
             x.phase = PairPhase::Expired;
-            x.pending = None;
+            x.pending.clear();
+            x.asking = None;
             let _ = x.stop.send(true);
         }
     }
@@ -289,9 +326,11 @@ impl DevicePairing {
             long: long.clone(),
             expires_at: now + CODE_TTL_MS,
             tries_left: TRIES,
-            pending: None,
+            pending: Vec::new(),
             phase: PairPhase::Waiting,
             with: None,
+            relay_down: false,
+            asking: None,
             stop: stop_tx,
         });
         if let Some(old) = old {
@@ -314,15 +353,45 @@ impl DevicePairing {
         self.notify();
     }
 
+    /// The user's answer to "Pair with <name>?" for a device that joined
+    /// with the long code.
+    pub fn confirm(&self, yes: bool) -> AppResult<PairState> {
+        let tx = self.showing.lock().as_mut().filter(|s| s.phase == PairPhase::Confirm).and_then(|s| s.asking.take());
+        let tx = tx.ok_or_else(|| AppError::NotFound("No device is asking to pair.".into()))?;
+        let _ = tx.send(yes);
+        if !yes {
+            self.end(PairPhase::Declined, None);
+        }
+        Ok(self.state())
+    }
+
     /// The codes are used: stop showing them.
     fn done(&self, with: &str) {
+        self.end(PairPhase::Paired, Some(with));
+    }
+
+    fn end(&self, phase: PairPhase, with: Option<&str>) {
         if let Some(s) = self.showing.lock().as_mut() {
-            s.phase = PairPhase::Paired;
-            s.with = Some(with.to_string());
-            s.pending = None;
+            s.phase = phase;
+            if let Some(w) = with {
+                s.with = Some(w.to_string());
+            }
+            s.pending.clear();
+            s.asking = None;
             let _ = s.stop.send(true);
         }
         self.notify();
+    }
+
+    fn set_relay_down(&self, down: bool) {
+        let changed = self.showing.lock().as_mut().is_some_and(|s| {
+            let was = s.relay_down;
+            s.relay_down = down;
+            was != down
+        });
+        if changed {
+            self.notify();
+        }
     }
 
     fn add(&self, link: &Link, name: &str, version: &str, device: &str) -> AppResult<Paired> {
@@ -330,48 +399,125 @@ impl DevicePairing {
         let name = if name.trim().is_empty() { "Your other device".to_string() } else { name };
         self.d.links.add(link, &name, &version.chars().take(20).collect::<String>(), (self.now() / 1000) as i64)?;
         let device: String = device.chars().take(100).collect();
-        self.d.links.update(&link.id, |p| p.device = Some(device))?;
+        if let Err(e) = self.d.links.update(&link.id, |p| p.device = Some(device)) {
+            // Half a link is no link: take it back out.
+            if let Err(e) = self.d.links.remove(&link.id) {
+                tracing::warn!("device pairing: couldn't take back a half-made link: {e}");
+            }
+            return Err(e);
+        }
         Ok(Paired { id: link.id.clone(), name })
     }
 
     // ------------------------------------------------------------ the long code
 
-    /// Wait on the relay for a device joining with the long code.
+    /// How long the long code has left (ms).
+    fn left(&self, code: &PairCode) -> u64 {
+        (i64::from(code.expires) * 1000 - self.now() as i64).max(0) as u64
+    }
+
+    /// Wait on the relay for a device joining with the long code. When the
+    /// relay can't be reached, the long code is hidden (the 6-digit code
+    /// still works) and the relay is tried again, waiting longer each time.
     async fn wait_on_relay(self: &Arc<Self>, code: PairCode, relay_url: String, mut stop: watch::Receiver<bool>) -> AppResult<()> {
         let Some(acct) = self.d.account.tag().await else { return Ok(()) };
         let relay = self.d.relays.relay(&relay_url);
         let mut offer = Offer::for_device(code.clone(), &(self.d.name)(), DeviceMe { device: self.d.own_id.clone(), acct });
         let topic = offer.listen_topic();
+        let mut wait = Duration::from_secs(2);
         loop {
-            let mut rx = relay.subscribe(std::slice::from_ref(&topic), None).await.map_err(|e| AppError::Network(relay_error(e)))?;
-            loop {
-                let left = (i64::from(code.expires) * 1000 - self.now() as i64).max(1) as u64;
-                tokio::select! {
-                    _ = stop.changed() => return Ok(()),
-                    _ = tokio::time::sleep(Duration::from_millis(left)) => {
-                        self.notify();
-                        return Ok(());
-                    }
-                    ev = rx.recv() => match ev {
-                        Some(RelayEvent::Message { body, .. }) => {
-                            if self.state().phase != PairPhase::Waiting {
-                                return Ok(());
+            let mut opened = false;
+            if self.left(&code) == 0 {
+                self.notify();
+                return Ok(());
+            }
+            match relay.subscribe(std::slice::from_ref(&topic), None).await {
+                Err(e) => {
+                    tracing::info!("device pairing: {}", relay_error(e));
+                    self.set_relay_down(true);
+                }
+                Ok(mut rx) => loop {
+                    let left = self.left(&code).max(1);
+                    // Closed before it opened: the relay can't be reached.
+                    tokio::select! {
+                        _ = stop.changed() => return Ok(()),
+                        _ = tokio::time::sleep(Duration::from_millis(left)) => {
+                            self.notify();
+                            return Ok(());
+                        }
+                        ev = rx.recv() => match ev {
+                            Some(RelayEvent::Message { body, .. }) => {
+                                if self.state().phase != PairPhase::Waiting {
+                                    return Ok(());
+                                }
+                                if let Some(((wtopic, wbody), joined)) = offer.answer(&body, self.now()) {
+                                    return self.ask_then_welcome(&*relay, (wtopic, wbody), joined, &code, &mut stop).await;
+                                }
                             }
-                            if let Some(((wtopic, wbody), joined)) = offer.answer(&body, self.now()) {
-                                relay.publish(&wtopic, &wbody).await.map_err(|e| AppError::Network(relay_error(e)))?;
-                                let p = self.add(&joined.link, &joined.name, &joined.version, &joined.device)?;
-                                self.done(&p.name);
-                                self.paired(&p);
-                                return Ok(());
+                            Some(RelayEvent::Open) => {
+                                opened = true;
+                                self.set_relay_down(false);
+                                wait = Duration::from_secs(2);
+                            }
+                            None => {
+                                if !opened {
+                                    self.set_relay_down(true);
+                                }
+                                break;
                             }
                         }
-                        Some(RelayEvent::Open) => {}
-                        None => break,
                     }
-                }
+                },
             }
-            tokio::time::sleep(Duration::from_secs(2)).await;
+            tokio::select! {
+                _ = stop.changed() => return Ok(()),
+                _ = tokio::time::sleep(wait) => {}
+            }
+            wait = (wait * 2).min(RELAY_RETRY_MAX);
         }
+    }
+
+    /// Ask "Pair with <name>?" and send the welcome only on a yes.
+    async fn ask_then_welcome(
+        &self,
+        relay: &dyn crate::social::listen::relay::Relay,
+        (wtopic, wbody): (String, String),
+        joined: crate::homeside::pair::PairedBridge,
+        code: &PairCode,
+        stop: &mut watch::Receiver<bool>,
+    ) -> AppResult<()> {
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut g = self.showing.lock();
+            let Some(s) = g.as_mut().filter(|s| s.phase == PairPhase::Waiting) else { return Ok(()) };
+            s.phase = PairPhase::Confirm;
+            s.with = Some(joined.name.clone());
+            s.pending.clear();
+            s.asking = Some(tx);
+        }
+        self.notify();
+        let left = self.left(code).max(1);
+        let yes = tokio::select! {
+            _ = stop.changed() => return Ok(()),
+            _ = tokio::time::sleep(Duration::from_millis(left)) => {
+                self.notify();
+                return Ok(());
+            }
+            r = rx => r.unwrap_or(false),
+        };
+        if !yes {
+            tracing::info!("device pairing: the user turned a device away");
+            self.end(PairPhase::Declined, None);
+            return Ok(());
+        }
+        if let Err(e) = relay.publish(&wtopic, &wbody).await {
+            self.end(PairPhase::Expired, None);
+            return Err(AppError::Network(relay_error(e)));
+        }
+        let p = self.add(&joined.link, &joined.name, &joined.version, &joined.device)?;
+        self.done(&p.name);
+        self.paired(&p);
+        Ok(())
     }
 
     /// Join the device showing this long code, through the relay.
@@ -393,6 +539,7 @@ impl DevicePairing {
         }
         relay.publish(&topic, &body).await.map_err(|e| AppError::Network(relay_error(e)))?;
         let gave_up = tokio::time::Instant::now() + RELAY_WAIT;
+        let mut retry = Duration::from_millis(500);
         loop {
             match tokio::time::timeout_at(gave_up, rx.recv()).await {
                 Ok(Some(RelayEvent::Message { body, .. })) if joining.is_welcome(&body, self.now()) => {
@@ -401,11 +548,16 @@ impl DevicePairing {
                 }
                 Ok(Some(_)) => {}
                 Ok(None) => {
+                    // The relay closed the stream: listen again, not at once.
+                    if tokio::time::timeout_at(gave_up, tokio::time::sleep(retry)).await.is_err() {
+                        continue;
+                    }
+                    retry = (retry * 2).min(Duration::from_secs(8));
                     rx = relay.subscribe(&[joining.listen_topic()], None).await.map_err(|_| unreachable())?;
                 }
                 Err(_) => {
                     return Err(AppError::Network(
-                        "Your other device didn't answer. Keep its code showing, check it's online, and try again.".into(),
+                        "Your other device didn't answer. Check it's online and still showing its code, say yes there when it asks, and try again.".into(),
                     ));
                 }
             }
@@ -441,17 +593,18 @@ impl DevicePairing {
         let reply: PairHelloReply =
             client.pair_hello(&base, &device.id, &PairHello { msg: crypto::hex(&msg_a) }, STEP_TIMEOUT).await.map_err(peer_err)?;
         let key = crypto::sender_finish(state, &crypto::unhex(&reply.msg)?)?;
-        if !crypto::same(&confirmation(&key), &crypto::unhex(&reply.confirm)?) {
-            return Err(AppError::Invalid("That code doesn't match. Check the code on the other device.".into()));
+        // This end proves it has the code first; the other answers only then.
+        let frame = hex(&seal::random16()[..8]);
+        let mine = End { frame: frame.clone(), name: (self.d.name)(), acct: acct.clone(), version: self.d.version.clone(), relay: String::new() };
+        let sealed = seal_side(&key, FINISH_AAD, &mine)?;
+        let done: PairFinishReply = client.pair_finish(&base, &device.id, &PairFinish { sealed }, STEP_TIMEOUT).await.map_err(peer_err)?;
+        if !crypto::same(&confirmation(&key), &crypto::unhex(&done.confirm)?) {
+            return Err(AppError::Invalid(NO_MATCH.into()));
         }
-        let theirs = open_side(&key, WELCOME_AAD, &reply.sealed)?;
+        let theirs = open_side(&key, WELCOME_AAD, &done.sealed)?;
         if theirs.acct != acct {
             return Err(other_account());
         }
-        let frame = hex(&seal::random16()[..8]);
-        let mine = End { frame: frame.clone(), name: (self.d.name)(), acct, version: self.d.version.clone(), relay: String::new() };
-        let sealed = seal_side(&key, FINISH_AAD, &mine)?;
-        client.pair_finish(&base, &device.id, &PairFinish { sealed }, STEP_TIMEOUT).await.map_err(peer_err)?;
         let secret = link_secret(&key);
         let relay = relay_url(&theirs.relay).unwrap_or_else(|| DEFAULT_RELAY.to_string());
         let link = Link { id: link_id(&secret), secret, relay, side: Side::Device, me: frame, peer: theirs.frame };
@@ -488,54 +641,59 @@ impl PeerPair for DevicePairing {
         self.state().phase == PairPhase::Waiting
     }
 
+    /// The first half of the exchange. Answers with this end's half only:
+    /// nothing derived from the key, and no try used up.
     async fn hello(&self, from: &str, req: PairHello) -> AppResult<PairHelloReply> {
-        let acct = self.d.account.tag().await.ok_or_else(|| AppError::Auth("This device isn't signed in to Plex.".into()))?;
+        if self.d.account.tag().await.is_none() {
+            return Err(AppError::Auth("This device isn't signed in to Plex.".into()));
+        }
         let msg_a = crypto::unhex(&req.msg)?;
         let frame = hex(&seal::random16()[..8]);
         let relay = self.relay();
-        let mine = End { frame: frame.clone(), name: (self.d.name)(), acct, version: self.d.version.clone(), relay: relay.clone() };
-        let reply = {
-            let mut guard = self.showing.lock();
-            self.tick(&mut guard);
-            let s = guard
-                .as_mut()
-                .filter(|s| s.phase == PairPhase::Waiting)
-                .ok_or_else(|| AppError::NotFound("That device isn't showing a code.".into()))?;
-            if s.tries_left == 0 {
-                s.phase = PairPhase::Locked;
-                let _ = s.stop.send(true);
-                return Err(AppError::Invalid("Too many wrong codes.".into()));
-            }
-            // Every exchange uses up a try until the pairing finishes.
-            s.tries_left -= 1;
-            let (msg_b, key) = crypto::receiver_answer(&password(&s.code), from, &self.d.own_id, &msg_a)?;
-            let sealed = seal_side(&key, WELCOME_AAD, &mine)?;
-            let reply = PairHelloReply { msg: crypto::hex(&msg_b), confirm: crypto::hex(&confirmation(&key)), sealed };
-            s.pending = Some((from.to_string(), key, frame, relay));
-            reply
-        };
-        Ok(reply)
+        let mut guard = self.showing.lock();
+        self.tick(&mut guard);
+        let s = guard
+            .as_mut()
+            .filter(|s| s.phase == PairPhase::Waiting)
+            .ok_or_else(|| AppError::NotFound("That device isn't showing a code.".into()))?;
+        if s.tries_left == 0 {
+            return Err(AppError::Invalid("Too many wrong codes.".into()));
+        }
+        let (msg_b, key) = crypto::receiver_answer(&password(&s.code), from, &self.d.own_id, &msg_a)?;
+        s.pending.retain(|p| p.from != from);
+        if s.pending.len() >= PENDING_MAX {
+            s.pending.remove(0);
+        }
+        s.pending.push(Pending { from: from.to_string(), key, frame, relay });
+        Ok(PairHelloReply { msg: crypto::hex(&msg_b) })
     }
 
-    async fn finish(&self, from: &str, req: PairFinish) -> AppResult<()> {
+    /// The joining device's proof. A wrong code uses up a try; the right
+    /// one makes the link here and answers with this end's side.
+    async fn finish(&self, from: &str, req: PairFinish) -> AppResult<PairFinishReply> {
         let acct = self.d.account.tag().await.ok_or_else(|| AppError::Auth("This device isn't signed in to Plex.".into()))?;
-        let (theirs, key, frame, relay) = {
+        let (theirs, p) = {
             let mut guard = self.showing.lock();
             self.tick(&mut guard);
             let s = guard
                 .as_mut()
                 .filter(|s| s.phase == PairPhase::Waiting)
                 .ok_or_else(|| AppError::NotFound("That device isn't showing a code.".into()))?;
-            let Some((_, key, frame, relay)) = s.pending.take().filter(|(id, ..)| id == from) else {
+            let Some(i) = s.pending.iter().position(|p| p.from == from) else {
                 return Err(AppError::Invalid("Start again with the code.".into()));
             };
-            match open_side(&key, FINISH_AAD, &req.sealed) {
-                Ok(t) => (t, key, frame, relay),
+            let p = s.pending.remove(i);
+            match open_side(&p.key, FINISH_AAD, &req.sealed) {
+                Ok(t) => (t, p),
                 Err(e) => {
+                    s.tries_left = s.tries_left.saturating_sub(1);
                     if s.tries_left == 0 {
                         s.phase = PairPhase::Locked;
+                        s.pending.clear();
                         let _ = s.stop.send(true);
                     }
+                    drop(guard);
+                    self.notify();
                     return Err(e);
                 }
             }
@@ -543,11 +701,13 @@ impl PeerPair for DevicePairing {
         if theirs.acct != acct {
             return Err(other_account());
         }
-        let secret = link_secret(&key);
-        let link = Link { id: link_id(&secret), secret, relay, side: Side::Device, me: frame, peer: theirs.frame };
-        let p = self.add(&link, &theirs.name, &theirs.version, from)?;
-        self.done(&p.name);
-        self.paired(&p);
-        Ok(())
+        let mine = End { frame: p.frame.clone(), name: (self.d.name)(), acct, version: self.d.version.clone(), relay: p.relay.clone() };
+        let reply = PairFinishReply { confirm: crypto::hex(&confirmation(&p.key)), sealed: seal_side(&p.key, WELCOME_AAD, &mine)? };
+        let secret = link_secret(&p.key);
+        let link = Link { id: link_id(&secret), secret, relay: p.relay, side: Side::Device, me: p.frame, peer: theirs.frame };
+        let paired = self.add(&link, &theirs.name, &theirs.version, from)?;
+        self.done(&paired.name);
+        self.paired(&paired);
+        Ok(reply)
     }
 }

@@ -219,7 +219,7 @@ export function TautulliKeyControl({ history, ids }: { history: PlayHistoryState
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   if (!history.tautulli) return <Skeleton width={160} height={32} radius="pill" />;
-  if (history.tautulli.hasKey) {
+  if (history.tautulli.hasKey && !history.tautulli.moved) {
     return (
       <Button size="sm" onClick={() => void history.setKey(null)}>
         Remove key
@@ -227,6 +227,8 @@ export function TautulliKeyControl({ history, ids }: { history: PlayHistoryState
     );
   }
   return (
+    <>
+    {history.tautulli.moved && <p className="setting-note" role="status">{history.tautulli.moved}</p>}
     <form
       className="info-key"
       onSubmit={(e) => {
@@ -254,5 +256,6 @@ export function TautulliKeyControl({ history, ids }: { history: PlayHistoryState
         Save key
       </Button>
     </form>
+    </>
   );
 }

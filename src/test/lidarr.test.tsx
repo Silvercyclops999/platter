@@ -35,6 +35,18 @@ async function setUp(home = "http://192.168.x.x:8686", away = "") {
 }
 
 describe("Lidarr settings", () => {
+  it("asks for the key again when the address came from another device with a new host", async () => {
+    await setUp();
+    mock.lidarr.moved = "Lidarr moved to 10.20.30.41:8686. Enter its key on this device to use it.";
+    render(<SettingsPage />);
+    expect(await screen.findByText("Lidarr moved to 10.20.30.41:8686. Enter its key on this device to use it.")).toBeTruthy();
+    expect(within(row("lidarrKey")!).queryByRole("button", { name: "Remove key" })).toBeNull();
+    await userEvent.type(screen.getByLabelText("Lidarr key"), "abc123");
+    await userEvent.click(within(row("lidarrKey")!).getByRole("button", { name: "Save key" }));
+    await within(row("lidarrKey")!).findByRole("button", { name: "Remove key" });
+    expect(screen.queryByText(/Lidarr moved to/)).toBeNull();
+  });
+
   it("shows only the address and key fields until both are set", async () => {
     render(<SettingsPage />);
     await screen.findByRole("textbox", { name: "Lidarr address at home" });

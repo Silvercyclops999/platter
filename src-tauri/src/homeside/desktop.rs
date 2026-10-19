@@ -353,8 +353,12 @@ impl Desktop {
         };
         BridgeConfig {
             desktop: (self.d.name)(),
-            lidarr_url: url,
-            lidarr_key: self.d.keys.get(crate::lidarr::KEY_ACCOUNT).ok().flatten().map(|t| t.expose().to_string()),
+            lidarr_url: url.clone(),
+            // Only for an address the key was entered for on this computer
+            // (not one that came from another device).
+            lidarr_key: crate::keyhost::trusted(&self.d.db, crate::lidarr::KEY_ACCOUNT, &url, &[&s.lidarr_url, &s.lidarr_away_url])
+                .then(|| self.d.keys.get(crate::lidarr::KEY_ACCOUNT).ok().flatten().map(|t| t.expose().to_string()))
+                .flatten(),
             plex_token: self.d.keys.get(ACCOUNT_TOKEN).ok().flatten().map(|t| t.expose().to_string()),
             plex_server,
             staging_folder: s.lidarr_staging_folder,

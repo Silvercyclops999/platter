@@ -1458,7 +1458,6 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "shareActivity",
     "whatsNewAnnouncements",
     "listenGuestsControl",
-    "listenRelay",
     "listenInviteHours",
     "listenName",
     "listenHideUnreleased",
@@ -1566,6 +1565,9 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "privateSession",
     "allowAutomation",
     "translationService",
+    // The relay this device talks through: chosen per device, so another
+    // device can never point this one at a host of its choosing.
+    "listenRelay",
     "lookStepDone",
     "newLookOffered",
     "layoutOffered",
@@ -3226,6 +3228,32 @@ pub async fn settings_get(
     Ok(s)
 }
 
+/// Integration addresses in a change made on this device's Settings page,
+/// with the keychain account whose key may go there.
+pub fn typed_addresses(p: &SettingsPatch) -> Vec<(&'static str, String)> {
+    let mut out = Vec::new();
+    for (account, url) in [
+        (crate::lidarr::KEY_ACCOUNT, &p.lidarr_url),
+        (crate::lidarr::KEY_ACCOUNT, &p.lidarr_away_url),
+        (crate::playhistory::tautulli::KEY_ACCOUNT, &p.tautulli_url),
+    ] {
+        if let Some(u) = url {
+            out.push((account, u.clone()));
+        }
+    }
+    out
+}
+
+/// The user typed these addresses here, so their keys may go to them.
+/// Addresses that arrive from another device never pass through here.
+pub fn allow_typed_addresses(db: &DbHandle, typed: &[(&'static str, String)]) {
+    for (account, url) in typed {
+        if let Err(e) = crate::keyhost::allow(db, account, url) {
+            tracing::warn!("key hosts not saved: {e}");
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn settings_set(
     settings: State<'_, SettingsState>,
@@ -3237,7 +3265,9 @@ pub async fn settings_set(
 ) -> AppResult<()> {
     let mini = patch.touches_miniplayer();
     let queue_on = patch.miniplayer_queue == Some(true);
+    let typed = typed_addresses(&patch);
     apply_patch(&settings, &player, &downloads, &mixes, patch).await?;
+    allow_typed_addresses(settings.db(), &typed);
     if mini {
         // The miniplayer has its own window; tell both, and keep it on top or not.
         let s = settings.get().await?;

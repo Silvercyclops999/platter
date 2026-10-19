@@ -132,6 +132,8 @@ export class MockLidarr {
   private confirmed = new Set<string>();
   private lastPassed = false;
   private typedOnce = false;
+  /** Test hook: the address came from another device with a new host. */
+  moved: string | null = null;
   requests: LidarrRequest[] = [];
 
   constructor(private demo: LidarrDemo = "demo") {
@@ -157,6 +159,7 @@ export class MockLidarr {
     this.hasKey = demo === "ready" || demo === "offline";
     this.lastPassed = this.hasKey;
     this.typedOnce = false;
+    this.moved = null;
     this.headers = [];
     this.confirmed.clear();
     this.requests = [];
@@ -319,7 +322,8 @@ export class MockLidarr {
       hasKey: this.hasKey,
       headerNames: this.headers.map(([n]) => n),
       unencrypted: [s.lidarrUrl, s.lidarrAwayUrl].filter((u) => u && unencrypted(u)),
-      ready: this.setUp(s) && this.lastPassed,
+      ready: this.setUp(s) && this.lastPassed && !this.moved,
+      moved: this.hasKey ? this.moved : null,
     };
   }
 
@@ -327,6 +331,8 @@ export class MockLidarr {
     const k = (key ?? "").trim();
     if (k && !/^[A-Za-z0-9]{1,200}$/.test(k)) throw invalid("A Lidarr API key is letters and numbers, from Lidarr's Settings > General.");
     this.hasKey = !!k;
+    // Entered here for the address set now.
+    if (k) this.moved = null;
     return this.status(s);
   }
 

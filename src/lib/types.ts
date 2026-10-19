@@ -2019,7 +2019,7 @@ export interface DeviceSyncDevice {
   held: number;
 }
 
-export type DevicePairPhase = "idle" | "waiting" | "paired" | "expired" | "locked";
+export type DevicePairPhase = "idle" | "waiting" | "confirm" | "paired" | "expired" | "locked" | "declined";
 
 /** The Add a device dialog on the device being added. */
 export interface DevicePairState {
@@ -2031,8 +2031,10 @@ export interface DevicePairState {
   /** The long code as a QR code: rows of "0" and "1" (dark). */
   qr: { size: number; rows: string[] } | null;
   expiresAt: number | null;
-  /** The device it paired with. */
+  /** The device it paired with, or ("confirm") the one asking to. */
   with: string | null;
+  /** Said beside the codes: the relay can't be reached. */
+  note?: string | null;
 }
 
 export interface DevicePaired {
@@ -2682,6 +2684,9 @@ export interface LidarrStatus {
   unencrypted: string[];
   /** Set up, with a key, and the last setup check passed: Request shows. */
   ready: boolean;
+  /** The address came from another device with a host the key wasn't
+   * entered for, so the key isn't sent there: the words to show. */
+  moved?: string | null;
 }
 
 export type LidarrLevel = "red" | "amber" | "ok";
@@ -4811,6 +4816,8 @@ export interface PlayHistoryStatus {
 export interface TautulliStatus {
   urlSet: boolean;
   hasKey: boolean;
+  /** The address came from another device with a new host: the words to show. */
+  moved?: string | null;
 }
 
 /** `discogs_status`. The token itself never comes back. */

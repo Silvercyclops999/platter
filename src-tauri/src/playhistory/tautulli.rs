@@ -32,11 +32,14 @@ const COMPLETE_PERCENT: i64 = 90;
 pub struct TautulliStatus {
     pub url_set: bool,
     pub has_key: bool,
+    /// The address came from another device with a host the key wasn't
+    /// entered for, so the key isn't sent there: the words to show.
+    pub moved: Option<String>,
 }
 
 impl TautulliStatus {
     pub fn ready(&self) -> bool {
-        self.url_set && self.has_key
+        self.url_set && self.has_key && self.moved.is_none()
     }
 }
 
@@ -53,7 +56,15 @@ impl Tautulli {
     }
 
     pub fn status(&self) -> TautulliStatus {
-        TautulliStatus { url_set: !self.url().trim().is_empty(), has_key: self.keys.get(KEY_ACCOUNT).ok().flatten().is_some() }
+        let url = self.url();
+        let has_key = self.keys.get(KEY_ACCOUNT).ok().flatten().is_some();
+        let moved = (has_key && !url.trim().is_empty() && !self.key_goes_to(&url)).then(|| crate::keyhost::moved_words("Tautulli", &url));
+        TautulliStatus { url_set: !url.trim().is_empty(), has_key, moved }
+    }
+
+    /// Whether the key may go to this address (it was entered for its host).
+    fn key_goes_to(&self, url: &str) -> bool {
+        crate::keyhost::trusted(&self.db, KEY_ACCOUNT, url, &[url])
     }
 
     /// Save (or with None remove) the API key in the keychain.
@@ -65,7 +76,9 @@ impl Tautulli {
                         "A Tautulli API key is letters and numbers, from Tautulli's Settings > Web Interface.".into(),
                     ));
                 }
-                self.keys.set(KEY_ACCOUNT, &Token::new(k)?)?
+                self.keys.set(KEY_ACCOUNT, &Token::new(k)?)?;
+                // Entered for the address set now: only its host gets it.
+                crate::keyhost::bind(&self.db, KEY_ACCOUNT, &[&self.url()])?;
             }
             None => self.keys.delete(KEY_ACCOUNT)?,
         }
@@ -199,6 +212,9 @@ impl Feed for Tautulli {
 
     async fn page(&self, page: u64, size: u64, since_ms: Option<i64>) -> AppResult<Page> {
         let url = self.url();
+        if !url.trim().is_empty() && !self.key_goes_to(&url) {
+            return Err(AppError::Invalid(crate::keyhost::moved_words("Tautulli", &url)));
+        }
         let key = self.keys.get(KEY_ACCOUNT)?.ok_or_else(|| AppError::Invalid("Add Tautulli's API key first.".into()))?;
         let user = self
             .plex

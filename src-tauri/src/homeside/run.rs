@@ -309,6 +309,9 @@ impl Bridge {
     /// Lidarr's home address, for requests from desktops away from home.
     fn home_route(&self) -> Option<DirectRoute> {
         let url = crate::settings::load(&self.p.db).lidarr_url;
+        if !crate::keyhost::trusted(&self.p.db, crate::lidarr::KEY_ACCOUNT, &url, &[&url]) {
+            return None;
+        }
         let key = self.p.keys.get(crate::lidarr::KEY_ACCOUNT).ok().flatten()?;
         DirectRoute::new(self.p.web.clone(), &url, key, vec![], Route::Home).ok()
     }

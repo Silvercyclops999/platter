@@ -1000,6 +1000,8 @@ export interface Backend {
   /** Show codes for another device to pair with this one. */
   devicePairStart(): Promise<DevicePairState>;
   devicePairCancel(): Promise<void>;
+  /** The answer to "Pair with <name>?" for a device that used the long code. */
+  devicePairConfirm(yes: boolean): Promise<DevicePairState>;
   devicePairState(): Promise<DevicePairState>;
   /** Pair with the device showing `code`: 6 digits on the same network, or the long code anywhere. */
   devicePairJoin(code: string): Promise<DevicePaired>;
@@ -1657,6 +1659,7 @@ export function createTauriBackend(): Backend {
     deviceSyncTakeQuarantined: () => call("device_sync_take_quarantined"),
     devicePairStart: () => call("device_pair_start"),
     devicePairCancel: () => call("device_pair_cancel"),
+    devicePairConfirm: (yes) => call("device_pair_confirm", { yes }),
     devicePairState: () => call("device_pair_state"),
     devicePairJoin: (code) => call("device_pair_join", { code }),
     deviceDownloadSuggestions: () => call("device_download_suggestions"),

@@ -11,7 +11,7 @@ use url::Url;
 
 use super::auth::{AUTH_HEADER, PeerKey, nonce, now_ms, sign};
 use super::keys::{KeysDeliver, KeysHello, KeysHelloReply, KeysWaiting, PATH_KEYS_DELIVER, PATH_KEYS_HELLO, PATH_KEYS_WAITING};
-use super::pair::{PATH_PAIR_FINISH, PATH_PAIR_HELLO, PATH_PAIR_WAITING, PairFinish, PairHello, PairHelloReply, PairWaiting};
+use super::pair::{PATH_PAIR_FINISH, PATH_PAIR_HELLO, PATH_PAIR_WAITING, PairFinish, PairFinishReply, PairHello, PairHelloReply, PairWaiting};
 use super::sync::{LanBody, PATH_SYNC_ENTRIES, PATH_SYNC_HELLO};
 use super::{Hello, PATH_COMMAND, PATH_HELLO, PATH_PLAY, PATH_STATE, PATH_STOP, PeerTimeline, PlayRequest};
 use crate::error::{AppError, AppResult};
@@ -167,7 +167,11 @@ impl PeerClient {
     }
 
     fn json<T: Serialize>(v: &T) -> Vec<u8> {
-        serde_json::to_vec(v).unwrap_or_default()
+        serde_json::to_vec(v).unwrap_or_else(|e| {
+            // The other end refuses an empty body; say why here.
+            tracing::warn!("couldn't write a request: {e}");
+            Vec::new()
+        })
     }
 
     pub async fn hello(&self, base: &Url, to: &str, timeout: Duration) -> Result<Hello, PeerError> {
@@ -226,8 +230,8 @@ impl PeerClient {
         self.call(base, to, PATH_PAIR_HELLO, Some(Self::json(req)), timeout).await
     }
 
-    pub async fn pair_finish(&self, base: &Url, to: &str, req: &PairFinish, timeout: Duration) -> Result<(), PeerError> {
-        self.call::<serde_json::Value>(base, to, PATH_PAIR_FINISH, Some(Self::json(req)), timeout).await.map(|_| ())
+    pub async fn pair_finish(&self, base: &Url, to: &str, req: &PairFinish, timeout: Duration) -> Result<PairFinishReply, PeerError> {
+        self.call(base, to, PATH_PAIR_FINISH, Some(Self::json(req)), timeout).await
     }
 
     /// Sealed device sync messages to `to`, and its sealed answers.

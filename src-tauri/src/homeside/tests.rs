@@ -113,6 +113,26 @@ fn frames_from_elsewhere_late_or_twice_are_dropped() {
     assert!(Counter::default().next(NOW + 1) > c.last());
 }
 
+#[test]
+fn a_frame_opened_twice_at_once_is_taken_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = DbHandle::open(dir.path().join("l.db")).unwrap();
+    let links = super::links::Links::new(db, Arc::new(MemoryStore::new()));
+    let (d, b) = pair_links();
+    links.add(&b, "Desk", "1", 1).unwrap();
+    let mut c = Counter::default();
+    let x = link::seal_msg(&d.outbox(), &d.me, &mut c, &Msg::Unpair, NOW).unwrap().remove(0);
+    let f = link::open_frame(&b.inbox(), &x, NOW).unwrap();
+    // Many at once: only one gets past the guard.
+    let taken: usize = std::thread::scope(|s| {
+        let hs: Vec<_> = (0..8).map(|_| s.spawn(|| links.accept("l1", &[&f]) as usize)).collect();
+        hs.into_iter().map(|h| h.join().unwrap()).sum()
+    });
+    assert_eq!(taken, 1);
+    assert!(!links.accept("l1", &[&f]), "and never again");
+    assert!(!links.accept("gone", &[&f]), "a link that isn't there takes nothing");
+}
+
 // ---------------------------------------------------------------- pairing
 
 #[test]

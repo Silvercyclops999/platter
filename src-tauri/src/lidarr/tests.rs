@@ -650,6 +650,50 @@ async fn a_whole_check_sends_nothing_but_gets_with_the_key_in_a_header() {
 }
 
 #[tokio::test]
+async fn an_address_from_another_device_with_a_new_host_never_gets_the_key() {
+    let r = rig("http://10.20.30.40:8686");
+    r.lidarr.set_key(Some("abc123")).unwrap();
+    assert!(r.lidarr.check().await.is_ok());
+    assert!(r.lidarr.status().moved.is_none());
+    // Synced settings arrive with Lidarr somewhere else (not typed here).
+    let mut s = crate::settings::load(&r.db);
+    s.lidarr_url = "http://10.20.30.41:8686".into();
+    crate::settings::save(&r.db, &s).unwrap();
+    r.web.log.lock().clear();
+    let e = r.lidarr.check().await.unwrap_err();
+    assert_eq!(e.to_string(), "invalid: Lidarr moved to 10.20.30.41:8686. Enter its key on this device to use it.");
+    assert!(r.web.log.lock().is_empty(), "nothing at all goes to the new host");
+    let st = r.lidarr.status();
+    assert_eq!(st.moved.as_deref(), Some("Lidarr moved to 10.20.30.41:8686. Enter its key on this device to use it."));
+    assert!(st.url_set && !st.ready, "the address stays, filled in");
+    // Same host, another path: still the key's host.
+    s.lidarr_url = "http://10.20.30.40:8686/".into();
+    crate::settings::save(&r.db, &s).unwrap();
+    assert!(r.lidarr.check().await.is_ok());
+    // Entering the key here for the new address confirms it.
+    s.lidarr_url = "http://10.20.30.41:8686".into();
+    crate::settings::save(&r.db, &s).unwrap();
+    r.lidarr.set_key(Some("abc123")).unwrap();
+    r.web.log.lock().clear();
+    assert!(r.lidarr.check().await.is_ok());
+    assert!(r.web.log.lock().iter().all(|(_, u, k)| *k && u.starts_with("http://10.20.30.41:8686/")));
+}
+
+#[tokio::test]
+async fn an_address_typed_on_this_device_gets_the_key() {
+    let r = rig("http://10.20.30.40:8686");
+    r.lidarr.set_key(Some("abc123")).unwrap();
+    let patch = crate::settings::SettingsPatch { lidarr_url: Some("http://10.20.30.42:8686".into()), ..Default::default() };
+    let mut s = crate::settings::load(&r.db);
+    s.apply(&patch).unwrap();
+    crate::settings::save(&r.db, &s).unwrap();
+    crate::settings::allow_typed_addresses(&r.db, &crate::settings::typed_addresses(&patch));
+    r.web.log.lock().clear();
+    assert!(r.lidarr.check().await.is_ok());
+    assert!(r.web.log.lock().iter().all(|(_, u, k)| *k && u.starts_with("http://10.20.30.42:8686/")));
+}
+
+#[tokio::test]
 async fn the_key_lives_in_the_keychain_not_in_settings() {
     let r = rig("http://nas:8686");
     assert!(!r.lidarr.status().has_key);

@@ -1011,3 +1011,25 @@ fn theme_design_tokens_are_not_secrets() {
     // A plain value named tokens is still treated as a secret.
     assert!(looks_secret(&json!({"tokens": "abc123"})));
 }
+
+#[test]
+fn values_carrying_a_key_are_secrets_whatever_their_name() {
+    use super::store::looks_secret;
+    assert!(looks_secret(&json!("http://admin:hunter2@10.20.30.40:8686")));
+    assert!(looks_secret(&json!({"lidarrAwayUrl": "https://user@lidarr.example.com/"})));
+    assert!(looks_secret(&json!("http://10.20.30.40:8181/api/v2?apikey=abc123")));
+    assert!(looks_secret(&json!(["https://x.example.com/?X-Plex-Token=abc"])));
+    assert!(!looks_secret(&json!("http://10.20.30.40:8686/lidarr")));
+    assert!(!looks_secret(&json!("Write to me at someone@example.com")));
+    assert!(!looks_secret(&json!("https://example.com/path/a@b")));
+}
+
+#[test]
+fn the_relay_address_stays_on_each_device() {
+    use crate::settings::{DEVICE_SETTINGS, SYNCED_SETTINGS};
+    assert!(!SYNCED_SETTINGS.contains(&"listenRelay") && DEVICE_SETTINGS.contains(&"listenRelay"));
+    // Lidarr's and Tautulli's addresses travel; their keys never do.
+    for k in ["lidarrUrl", "lidarrAwayUrl", "tautulliUrl"] {
+        assert!(SYNCED_SETTINGS.contains(&k), "{k}");
+    }
+}

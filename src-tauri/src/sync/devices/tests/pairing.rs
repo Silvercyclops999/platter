@@ -11,7 +11,7 @@ use crate::homeside::pair::{DeviceMe, Joining, Offer};
 use crate::remote::peer::PeerDevice;
 use crate::remote::peer::client::PeerClient;
 use crate::remote::peer::keys::RouteList;
-use crate::remote::peer::pair::{PairFinish, PairHello, PairHelloReply, PairRoutes, PeerPair};
+use crate::remote::peer::pair::{PairFinish, PairFinishReply, PairHello, PairHelloReply, PairRoutes, PeerPair};
 use crate::remote::peer::server::{self, ExtraSlot, PeerServer};
 use crate::remote::peer::sync::SyncRoutes;
 use crate::sync::devices::pair::{CODE_TTL_MS, DevicePairing, PairDeps, PairPhase, TRIES};
@@ -37,9 +37,13 @@ impl PeerPair for Tap {
         }
         r
     }
-    async fn finish(&self, from: &str, req: PairFinish) -> AppResult<()> {
+    async fn finish(&self, from: &str, req: PairFinish) -> AppResult<PairFinishReply> {
         self.wire.lock().push(serde_json::to_string(&req).unwrap());
-        self.inner.finish(from, req).await
+        let r = self.inner.finish(from, req).await;
+        if let Ok(r) = &r {
+            self.wire.lock().push(serde_json::to_string(r).unwrap());
+        }
+        r
     }
 }
 
@@ -188,6 +192,27 @@ async fn a_wrong_6_digit_code_fails_and_too_many_lock_the_code() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_hello_answer_holds_nothing_from_the_key_and_spends_no_try() {
+    let phone = host(real_clock("phone", ACCT), ACCT_TOKEN, "http://relay").await;
+    let pc = host(real_clock("pc", ACCT), ACCT_TOKEN, "http://relay").await;
+    let code = phone.pairing.start().await.unwrap().code.unwrap();
+    // Another device of the account sends hello after hello and never
+    // finishes: the answer is the other half of the exchange only, so it
+    // can't test a guess, and no try is used up.
+    for _ in 0..(TRIES as usize + 3) {
+        let (_, msg_a) = crate::sync::keycopy::crypto::sender_start("platter device pair 123456", "rogue", "phone");
+        let reply = phone.pairing.hello("rogue", PairHello { msg: crate::sync::keycopy::crypto::hex(&msg_a) }).await.unwrap();
+        let v = serde_json::to_value(&reply).unwrap();
+        let keys: Vec<&String> = v.as_object().unwrap().keys().collect();
+        assert_eq!(keys, ["msg"], "nothing but the exchange's half: {v}");
+    }
+    assert_eq!(phone.pairing.state().phase, PairPhase::Waiting);
+    // The right code still pairs.
+    pc.pairing.join(&code, Some((pc.client.clone(), vec![phone.device.clone()]))).await.unwrap();
+    linked(&pc.dev, &phone.dev);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_device_of_another_account_cant_pair_with_the_6_digit_code() {
     let phone = host(real_clock("phone", ACCT), ACCT_TOKEN, "http://relay").await;
     // Another account: signs with another key, says another tag.
@@ -283,7 +308,17 @@ async fn the_long_code_pairs_two_devices_through_the_relay_sealed() {
     let long = host_side.start().await.unwrap().long_code.unwrap();
     tokio::time::sleep(Duration::from_millis(300)).await;
     // Scanned from the QR code: the link form works too.
-    let p = joiner.join(&format!("platter://pair-device/{long}"), None).await.unwrap();
+    let join = {
+        let joiner = joiner.clone();
+        let long = long.clone();
+        tokio::spawn(async move { joiner.join(&format!("platter://pair-device/{long}"), None).await })
+    };
+    // The phone asks first, naming the device, and links nothing yet.
+    until("the phone to ask", || host_side.state().phase == PairPhase::Confirm).await;
+    assert_eq!(host_side.state().with.as_deref(), Some("Device pc"));
+    assert!(phone.links.all().is_empty() && pc.links.all().is_empty());
+    host_side.confirm(true).unwrap();
+    let p = join.await.unwrap().unwrap();
     assert_eq!(p.name, "Device phone");
     until("the phone to record the link", || !phone.links.all().is_empty()).await;
     linked(&pc, &phone);
@@ -302,6 +337,41 @@ async fn the_long_code_pairs_two_devices_through_the_relay_sealed() {
     assert!(matches!(e, AppError::Network(_)), "{e}");
     assert!(third.links.all().is_empty());
     assert_eq!(phone.links.all().len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn saying_no_to_a_device_that_joined_with_the_long_code_pairs_nothing() {
+    let ntfy = FakeNtfy::start().await;
+    let phone = real_clock("phone", ACCT);
+    let pc = real_clock("pc", ACCT);
+    let host_side = DevicePairing::new(deps(&phone, &ntfy.url));
+    let joiner = DevicePairing::new(deps(&pc, &ntfy.url));
+    let long = host_side.start().await.unwrap().long_code.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let join = tokio::spawn(async move { joiner.join(&long, None).await });
+    until("the phone to ask", || host_side.state().phase == PairPhase::Confirm).await;
+    assert!(host_side.state().code.is_none(), "the codes stop while it asks");
+    host_side.confirm(false).unwrap();
+    assert_eq!(host_side.state().phase, PairPhase::Declined);
+    let e = join.await.unwrap().unwrap_err();
+    assert!(matches!(e, AppError::Network(_)), "{e}");
+    assert!(phone.links.all().is_empty() && pc.links.all().is_empty());
+    assert_eq!(ntfy.published().len(), 1, "the join only, no welcome");
+    assert!(host_side.confirm(true).is_err(), "nothing is asking now");
+}
+
+#[tokio::test]
+async fn a_relay_that_cant_be_reached_hides_the_long_code_and_says_so() {
+    let d = dev("phone");
+    // Nothing listens here.
+    let pairing = DevicePairing::new(deps(&d, "http://127.0.0.1:9"));
+    pairing.start().await.unwrap();
+    until("the note", || pairing.state().note.is_some()).await;
+    let st = pairing.state();
+    assert_eq!(st.note.as_deref(), Some(crate::sync::devices::pair::RELAY_DOWN));
+    assert_eq!(st.phase, PairPhase::Waiting, "the 6-digit code still works");
+    assert!(st.code.is_some() && st.long_code.is_none() && st.qr.is_none());
+    pairing.cancel();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

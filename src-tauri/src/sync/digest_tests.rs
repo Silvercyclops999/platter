@@ -303,6 +303,31 @@ fn a_newer_apps_namespaces_are_kept_and_passed_on_but_not_applied() {
 }
 
 #[test]
+fn a_device_cant_fill_the_store_with_made_up_namespaces() {
+    let b = dev("b");
+    let mut m = EntryMap::new();
+    for i in 0..(store::UNKNOWN_NS_MAX + 5) {
+        m.entry(format!("madeUp{i:02}")).or_default().insert("k".into(), Entry { value: Some(json!(1)), ts: 5, device: "x".into() });
+    }
+    m.entry("bad name!".into()).or_default().insert("k".into(), Entry { value: Some(json!(1)), ts: 5, device: "x".into() });
+    b.store.merge(&m, &[]).unwrap();
+    let kept = b.store.unknown_namespaces().unwrap();
+    assert_eq!(kept.len(), store::UNKNOWN_NS_MAX);
+    assert!(!kept.iter().any(|n| n.contains(' ')));
+    // And rows in one: capped too, while what's there can still change.
+    let mut big = EntryMap::new();
+    let rows = big.entry("madeUp00".into()).or_default();
+    for i in 0..(store::UNKNOWN_ROWS_MAX + 10) {
+        rows.insert(format!("r{i}"), Entry { value: Some(json!(i)), ts: 6, device: "x".into() });
+    }
+    rows.insert("k".into(), Entry { value: Some(json!(2)), ts: 9, device: "x".into() });
+    b.store.merge(&big, &[]).unwrap();
+    let got = &b.store.entries(&["madeUp00"]).unwrap()["madeUp00"];
+    assert_eq!(got.len(), store::UNKNOWN_ROWS_MAX);
+    assert_eq!(got["k"].value, Some(json!(2)));
+}
+
+#[test]
 fn a_namespace_this_build_learns_is_taken_in() {
     let b = dev("b");
     // As an older build kept it, before this build knew "pins".

@@ -2624,7 +2624,7 @@ view, so they hold whichever play arrived first.
 | `play_history_update` | – | the status; every source set up and turned on is read now, failed ones too |
 | `play_history_cancel` | – | the status; the read going on stops after its page and goes on later |
 | `play_history_remove` | `{ source: "plexHistory"\|"tautulli"\|"lastfm" }` | the status; deletes only that source's imported plays. Nothing comes in from it again until its setting is turned off and on (the UI turns it off) |
-| `tautulli_status` | – | `{ urlSet, hasKey }` |
+| `tautulli_status` | – | `{ urlSet, hasKey, moved? }`; `moved` says Tautulli's address came from another device with a host its key wasn't entered for, so the key isn't sent there until it's entered again on this device |
 | `tautulli_key_set` | `{ key: string \| null }` | the same, after saving the key in the OS keychain (`tautulli-api-key`) or removing it; `invalid` unless letters and numbers. Never returned, logged or put in settings |
 
 `PlayHistorySourceStatus = { source, setUp, included, plays, notInLibrary, shortPlays, updatedAt, firstReadDone, importing, done, total, error, removed }`.
@@ -2651,7 +2651,7 @@ Lidarr's home and away addresses are the `lidarrUrl` and `lidarrAwayUrl` setting
 
 | Command | Args | Returns |
 | --- | --- | --- |
-| `lidarr_status` | – | `{ urlSet, awaySet, hasKey, headerNames: string[], unencrypted: string[], ready }`; `ready` is true when Lidarr is set up with a key and its last check for this address passed |
+| `lidarr_status` | – | `{ urlSet, awaySet, hasKey, headerNames: string[], unencrypted: string[], ready, moved? }`; `ready` is true when Lidarr is set up with a key and its last check for this address passed; `moved` says an address came from another device with a host the key wasn't entered for, so the key isn't sent there until it's entered again on this device |
 | `lidarr_key_set` | `{ key: string \| null }` | the same, after saving or removing the key |
 | `lidarr_headers_set` | `{ text: string \| null }` (`Name: value` lines; blank removes) | the same; `invalid` for a bad line, a reserved header or more than 5 |
 | `lidarr_check` | – | `LidarrReport`, or `network` (unreachable), `auth` (key refused), `invalid` (too old, not Lidarr, not set up), `decode` |
@@ -3119,6 +3119,7 @@ away. The sync file stays optional and works beside it.
 | `device_sync_take_quarantined` | – | `DeviceSyncOverview` |
 | `device_pair_start` | – | `PairState` with new codes |
 | `device_pair_cancel` | – | – |
+| `device_pair_confirm` | `{ yes }` | `PairState`; the answer to "Pair with <name>?" when a device used the long code |
 | `device_pair_state` | – | `PairState` |
 | `device_pair_join` | `{ code }` | `{ id, name }` |
 | `device_download_suggestions` | – | `DownloadSuggestion[]`, newest first |
@@ -3129,7 +3130,7 @@ away. The sync file stays optional and works beside it.
 
 `DeviceStatus = { id, name, lastSyncedAt? (ms), words, updateOther?, clock?, held }`
 
-`PairState = { phase: "idle"|"waiting"|"paired"|"expired"|"locked", code?, longCode?, qr?: { size, rows: string[] }, expiresAt? (ms), with? }`
+`PairState = { phase: "idle"|"waiting"|"confirm"|"paired"|"expired"|"locked"|"declined", code?, longCode?, qr?: { size, rows: string[] }, expiresAt? (ms), with?, note? }`. In `confirm` a device used the long code and `with` names it; nothing is paired until `device_pair_confirm`. `note` says the relay can't be reached (the long code is hidden then; the 6-digit code still works).
 
 `Quarantined = { ns, key, entry: { value?, ts, device }, from }`
 

@@ -7,7 +7,7 @@
 //!
 //! - `GET  /platter/v1/pair/waiting` → [`PairWaiting`]: is a code showing here?
 //! - `POST /platter/v1/pair/hello`   ← [`PairHello`] → [`PairHelloReply`]
-//! - `POST /platter/v1/pair/finish`  ← [`PairFinish`]
+//! - `POST /platter/v1/pair/finish`  ← [`PairFinish`] → [`PairFinishReply`]
 
 use std::sync::Arc;
 
@@ -35,19 +35,34 @@ pub struct PairHello {
     pub msg: String,
 }
 
-/// The showing device's half (hex), proof it reached the same key (hex),
-/// and its side of the link, sealed with that key.
+/// The showing device's half of the key exchange (hex). Nothing derived
+/// from the key: the joining device proves it has the code first, in its
+/// finish, so a wrong guess can only be tested against the showing device
+/// (which counts it).
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairHelloReply {
     pub msg: String,
-    pub confirm: String,
-    pub sealed: String,
 }
 
 impl std::fmt::Debug for PairHelloReply {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("PairHelloReply(..)")
+    }
+}
+
+/// The showing device's answer to a finish that proved the code: proof it
+/// reached the same key (hex) and its side of the link, sealed with it.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairFinishReply {
+    pub confirm: String,
+    pub sealed: String,
+}
+
+impl std::fmt::Debug for PairFinishReply {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PairFinishReply(..)")
     }
 }
 
@@ -70,7 +85,7 @@ pub trait PeerPair: Send + Sync {
     async fn waiting(&self) -> bool;
     /// `from` is the joining device's id, from its request signature.
     async fn hello(&self, from: &str, req: PairHello) -> AppResult<PairHelloReply>;
-    async fn finish(&self, from: &str, req: PairFinish) -> AppResult<()>;
+    async fn finish(&self, from: &str, req: PairFinish) -> AppResult<PairFinishReply>;
 }
 
 /// The pairing requests as extra routes on the control port.
@@ -108,21 +123,32 @@ impl ExtraRoutes for PairRoutes {
         };
         let h = &self.handler;
         match path {
-            PATH_PAIR_WAITING => (200, serde_json::to_string(&PairWaiting { waiting: h.waiting().await }).unwrap_or_default()),
+            PATH_PAIR_WAITING => ok_json(&PairWaiting { waiting: h.waiting().await }),
             PATH_PAIR_HELLO => match serde_json::from_slice::<PairHello>(body) {
                 Ok(req) => match h.hello(&from, req).await {
-                    Ok(reply) => (200, serde_json::to_string(&reply).unwrap_or_default()),
+                    Ok(reply) => ok_json(&reply),
                     Err(e) => app_err(e),
                 },
                 Err(_) => (400, json_err("invalid", "Bad request")),
             },
             _ => match serde_json::from_slice::<PairFinish>(body) {
                 Ok(req) => match h.finish(&from, req).await {
-                    Ok(()) => (200, "{}".into()),
+                    Ok(reply) => ok_json(&reply),
                     Err(e) => app_err(e),
                 },
                 Err(_) => (400, json_err("invalid", "Bad request")),
             },
+        }
+    }
+}
+
+/// A 200 with this answer, or a 500 (logged) when it can't be written.
+pub(crate) fn ok_json<T: Serialize>(v: &T) -> (u16, String) {
+    match serde_json::to_string(v) {
+        Ok(text) => (200, text),
+        Err(e) => {
+            tracing::warn!("couldn't write an answer: {e}");
+            (500, json_err("internal", "Couldn't write the answer"))
         }
     }
 }

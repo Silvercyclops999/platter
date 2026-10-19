@@ -91,7 +91,7 @@ export function useLidarr() {
     }
   };
 
-  const ready = !!status && (status.urlSet || status.awaySet) && status.hasKey;
+  const ready = !!status && (status.urlSet || status.awaySet) && status.hasKey && !status.moved;
   return { status, report, error, checking, ready, check, setKey, setHeaders, confirmRoot };
 }
 
@@ -138,7 +138,7 @@ export function LidarrKeyControl({ lidarr, ids }: { lidarr: LidarrState; ids: Id
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   if (!lidarr.status) return <Skeleton width={160} height={32} radius="pill" />;
-  if (lidarr.status.hasKey) {
+  if (lidarr.status.hasKey && !lidarr.status.moved) {
     return (
       <Button size="sm" onClick={() => void lidarr.setKey(null)}>
         Remove key
@@ -146,6 +146,8 @@ export function LidarrKeyControl({ lidarr, ids }: { lidarr: LidarrState; ids: Id
     );
   }
   return (
+    <>
+    {lidarr.status.moved && <p className="setting-note" role="status">{lidarr.status.moved}</p>}
     <form
       className="info-key"
       onSubmit={(e) => {
@@ -173,6 +175,7 @@ export function LidarrKeyControl({ lidarr, ids }: { lidarr: LidarrState; ids: Id
         Save key
       </Button>
     </form>
+    </>
   );
 }
 

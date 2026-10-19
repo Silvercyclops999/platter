@@ -151,6 +151,28 @@ impl Links {
         self.save(&list)
     }
 
+    /// Check frames against the link's replay guard and record them, all
+    /// in one step under the list's lock (two at once can't both pass the
+    /// same counter). All or nothing: false when any is a replay or the
+    /// link is gone.
+    pub fn accept(&self, id: &str, frames: &[&super::link::Frame]) -> bool {
+        let _one = self.lock.lock();
+        let mut list = self.all();
+        let Some(p) = list.iter_mut().find(|p| p.id == id) else { return false };
+        let mut guard = p.guard.clone();
+        if frames.iter().any(|f| guard.accept(f).is_err()) {
+            return false;
+        }
+        p.guard = guard;
+        match self.save(&list) {
+            Ok(()) => true,
+            Err(e) => {
+                tracing::warn!("link replay guard not saved: {e}");
+                false
+            }
+        }
+    }
+
     /// The counter for frames sent on this link, carried on from the last run.
     pub fn counter(&self, id: &str) -> Counter {
         Counter::starting_at(self.get(id).map_or(0, |p| p.counter))

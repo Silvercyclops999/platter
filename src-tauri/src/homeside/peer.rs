@@ -105,16 +105,22 @@ impl Wire {
         let (inbox, _) = link.lan_channels();
         let now = self.now_ms();
         let want = lan_sender(&link.peer, reply);
-        let mut parts = Reassembler::default();
-        let mut out = None;
+        let mut frames = Vec::with_capacity(bodies.len());
         for b in bodies {
             let frame = link::open_frame(&inbox, b, now).ok()?;
             if frame.f != want {
                 return None;
             }
-            let mut guard = self.links.get(&link.id)?.guard;
-            guard.accept(&frame).ok()?;
-            let _ = self.links.update(&link.id, |p| p.guard = guard);
+            frames.push(frame);
+        }
+        // Every piece checked and recorded at once.
+        if !self.links.accept(&link.id, &frames.iter().collect::<Vec<_>>()) {
+            tracing::debug!("device link: dropped a replay");
+            return None;
+        }
+        let mut parts = Reassembler::default();
+        let mut out = None;
+        for frame in frames {
             out = parts.add(frame, now);
         }
         out
@@ -131,12 +137,10 @@ impl Wire {
                 return None;
             }
         };
-        let mut guard = self.links.get(&link.id)?.guard;
-        if guard.accept(&frame).is_err() {
+        if !self.links.accept(&link.id, &[&frame]) {
             tracing::debug!("bridge link: dropped a replay");
             return None;
         }
-        let _ = self.links.update(&link.id, |p| p.guard = guard);
         self.parts.lock().entry(link.id.clone()).or_default().add(frame, now)
     }
 }

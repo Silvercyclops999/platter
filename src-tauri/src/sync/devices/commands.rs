@@ -235,6 +235,13 @@ pub async fn device_pair_cancel(d: State<'_, DeviceService>) -> AppResult<()> {
     Ok(())
 }
 
+/// The answer to "Pair with <name>?" for a device that joined with the
+/// long code.
+#[tauri::command]
+pub async fn device_pair_confirm(d: State<'_, DeviceService>, yes: bool) -> AppResult<PairState> {
+    d.pairing.confirm(yes)
+}
+
 #[tauri::command]
 pub async fn device_pair_state(d: State<'_, DeviceService>) -> AppResult<PairState> {
     Ok(d.pairing.state())

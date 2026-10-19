@@ -278,8 +278,31 @@ pub fn looks_secret(v: &Value) -> bool {
             (!design_tokens && SECRET_WORDS.iter().any(|w| k.contains(w))) || looks_secret(v)
         }),
         Value::Array(a) => a.iter().any(looks_secret),
+        Value::String(s) => text_looks_secret(s),
         _ => false,
     }
+}
+
+/// Query parameters that carry a key in an address.
+const SECRET_PARAMS: [&str; 6] = ["apikey=", "api_key=", "token=", "password=", "secret=", "access_key="];
+
+/// A string holding a key: an address with a user and password in it, or
+/// a key passed in its query.
+fn text_looks_secret(s: &str) -> bool {
+    let low = s.to_ascii_lowercase();
+    if SECRET_PARAMS.iter().any(|p| low.contains(p)) {
+        return true;
+    }
+    // scheme://user:pass@host
+    let mut rest = low.as_str();
+    while let Some(i) = rest.find("://") {
+        rest = &rest[i + 3..];
+        let authority = rest.split(['/', '?', '#', ' ', '\n', '"']).next().unwrap_or("");
+        if authority.contains('@') {
+            return true;
+        }
+    }
+    false
 }
 
 // ---------------------------------------------------------------- digests
@@ -406,8 +429,13 @@ fn table(ns: &str) -> &'static str {
     if NAMESPACES.contains(&ns) { "sync_entries" } else { "sync_entries_unknown" }
 }
 
+/// Most namespaces kept for a newer build, and most entries in each: a
+/// device can't fill this one's store with names it made up.
+pub const UNKNOWN_NS_MAX: usize = 16;
+pub const UNKNOWN_ROWS_MAX: usize = 20_000;
+
 /// A namespace name a newer build could have made: short, plain letters.
-fn plausible_ns(ns: &str) -> bool {
+pub(crate) fn plausible_ns(ns: &str) -> bool {
     !ns.is_empty() && ns.len() <= 40 && ns.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
@@ -671,22 +699,16 @@ impl SyncStore {
     /// Every entry (tombstones too) in these namespaces. A namespace this
     /// build doesn't know gives the entries kept for it.
     pub fn entries(&self, namespaces: &[&str]) -> AppResult<EntryMap> {
-        let wanted: Vec<String> = namespaces.iter().map(|s| s.to_string()).collect();
-        let unknown = namespaces.iter().any(|n| !NAMESPACES.contains(n));
         self.inner.db.read(|c| {
             let mut out = EntryMap::new();
-            let tables: &[&str] = if unknown { &["sync_entries", "sync_entries_unknown"] } else { &["sync_entries"] };
-            for t in tables {
-                let mut st = c.prepare_cached(&format!("SELECT ns, key, value, ts, device FROM {t}"))?;
-                let rows = st.query_map([], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, row_entry(r.get(2)?, r.get(3)?, r.get(4)?)))
-                })?;
+            // One namespace at a time, by its index: not the whole store.
+            for ns in namespaces {
+                let mut st = c.prepare_cached(&format!("SELECT key, value, ts, device FROM {} WHERE ns = ?1", table(ns)))?;
+                let rows = st.query_map([ns], |r| Ok((r.get::<_, String>(0)?, row_entry(r.get(1)?, r.get(2)?, r.get(3)?))))?;
                 for row in rows {
-                    let (ns, key, e) = row?;
+                    let (key, e) = row?;
                     let Some(e) = e else { continue };
-                    if wanted.contains(&ns) {
-                        out.entry(ns).or_default().insert(key, e);
-                    }
+                    out.entry(ns.to_string()).or_default().insert(key, e);
                 }
             }
             Ok(out)
@@ -733,10 +755,27 @@ impl SyncStore {
             let mut out = MergeOutcome::default();
             let mut high = merged_high(&tx)?.unwrap_or(0);
             let before = high;
+            let mut kept_ns: Vec<String> = {
+                let mut st = tx.prepare_cached("SELECT DISTINCT ns FROM sync_entries_unknown")?;
+                st.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?
+            };
             for (ns, entries) in other {
                 let known = NAMESPACES.contains(&ns.as_str());
                 if (known && !namespaces.contains(&ns.as_str())) || (!known && !plausible_ns(ns)) {
                     continue;
+                }
+                // Room for a newer build's namespace, and rows in it.
+                let mut room = usize::MAX;
+                if !known {
+                    if !kept_ns.contains(ns) {
+                        if kept_ns.len() >= UNKNOWN_NS_MAX {
+                            tracing::info!("sync: too many namespaces from a newer build, one left out");
+                            continue;
+                        }
+                        kept_ns.push(ns.clone());
+                    }
+                    let n: i64 = tx.query_row("SELECT COUNT(*) FROM sync_entries_unknown WHERE ns = ?1", [ns], |r| r.get(0))?;
+                    room = UNKNOWN_ROWS_MAX.saturating_sub(n.max(0) as usize);
                 }
                 for (key, e) in entries {
                     if check_entry(key, e.value.as_ref()).is_err() {
@@ -747,6 +786,12 @@ impl SyncStore {
                         continue;
                     }
                     let mine = get_entry(&tx, ns, key)?;
+                    if !known && mine.is_none() {
+                        if room == 0 {
+                            continue;
+                        }
+                        room -= 1;
+                    }
                     if mine.as_ref().is_none_or(|m| e.wins_over(m)) {
                         let differs = mine.as_ref().is_none_or(|m| m.value != e.value);
                         set_entry(&tx, ns, key, e)?;

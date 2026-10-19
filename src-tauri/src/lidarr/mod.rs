@@ -204,6 +204,9 @@ pub struct LidarrStatus {
     pub header_names: Vec<String>,
     /// Addresses that would send the key unencrypted over the internet.
     pub unencrypted: Vec<String>,
+    /// An address came from another device with a host the key wasn't
+    /// entered for, so the key isn't sent there: the words to show.
+    pub moved: Option<String>,
     /// Set up, with a key, and the last setup check for this address passed:
     /// Request buttons show (each request still checks again first).
     pub ready: bool,
@@ -301,13 +304,15 @@ impl Lidarr {
         let (home, away) = self.urls();
         let has_key = self.inner.keys.get(KEY_ACCOUNT).ok().flatten().is_some();
         let set = !home.trim().is_empty() || !away.trim().is_empty();
+        let moved = if has_key { self.moved(&home, &away) } else { None };
         LidarrStatus {
             url_set: !home.trim().is_empty(),
             away_set: !away.trim().is_empty(),
             has_key,
-            ready: set && has_key && self.last_check().is_some_and(|l| l.managed_ok.unwrap_or(l.passed)),
+            ready: set && has_key && moved.is_none() && self.last_check().is_some_and(|l| l.managed_ok.unwrap_or(l.passed)),
             header_names: self.headers().into_iter().map(|(n, _)| n).collect(),
             unencrypted: [home, away].into_iter().filter(|u| unencrypted(u)).collect(),
+            moved,
         }
     }
 
@@ -318,7 +323,10 @@ impl Lidarr {
                 if k.len() > 200 || !k.chars().all(|c| c.is_ascii_alphanumeric()) {
                     return Err(AppError::Invalid("A Lidarr API key is letters and numbers, from Lidarr's Settings > General.".into()));
                 }
-                self.inner.keys.set(KEY_ACCOUNT, &Token::new(k)?)?
+                self.inner.keys.set(KEY_ACCOUNT, &Token::new(k)?)?;
+                // Entered for the addresses set now: only their hosts get it.
+                let (home, away) = self.urls();
+                crate::keyhost::bind(&self.inner.db, KEY_ACCOUNT, &[&home, &away])?;
             }
             None => self.inner.keys.delete(KEY_ACCOUNT)?,
         }
@@ -370,12 +378,29 @@ impl Lidarr {
         self.inner.db.write(|c| kv_set(c, CONFIRMED_KEY, &json))
     }
 
-    /// The routes to try: home first, then away, then a paired Bridge.
+    /// Whether the key may go to this address (it was entered for its host).
+    fn key_goes_to(&self, url: &str, home: &str, away: &str) -> bool {
+        crate::keyhost::trusted(&self.inner.db, KEY_ACCOUNT, url, &[home, away])
+    }
+
+    /// Words for an address set here whose host the key wasn't entered for.
+    fn moved(&self, home: &str, away: &str) -> Option<String> {
+        [home, away]
+            .into_iter()
+            .find(|u| !u.trim().is_empty() && !self.key_goes_to(u, home, away))
+            .map(|u| crate::keyhost::moved_words("Lidarr", u))
+    }
+
+    /// The routes to try: home first, then away, then a paired Bridge. An
+    /// address whose host the key wasn't entered for (one that came from
+    /// another device) is left out: the key never goes there.
     fn routes(&self) -> AppResult<Vec<Arc<dyn LidarrRoute>>> {
-        let (home, away) = self.urls();
-        if home.trim().is_empty() && away.trim().is_empty() {
+        let (home_set, away_set) = self.urls();
+        if home_set.trim().is_empty() && away_set.trim().is_empty() {
             return Err(AppError::Invalid("Set Lidarr's address first.".into()));
         }
+        let keep = |u: &str| if !u.trim().is_empty() && self.key_goes_to(u, &home_set, &away_set) { u.to_string() } else { String::new() };
+        let (home, away) = (keep(&home_set), keep(&away_set));
         let key = self
             .inner
             .keys
@@ -395,6 +420,9 @@ impl Lidarr {
             out.push(Arc::new(DirectRoute::new(self.inner.web.clone(), &away, key, headers, Route::Away)?));
         }
         out.extend(bridge);
+        if out.is_empty() {
+            return Err(AppError::Invalid(self.moved(&home_set, &away_set).unwrap_or_else(|| "Set Lidarr's address first.".into())));
+        }
         Ok(out)
     }
 

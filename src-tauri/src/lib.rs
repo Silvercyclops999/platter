@@ -20,6 +20,7 @@ pub mod homeside;
 pub mod identity;
 pub mod import;
 pub mod jellyfin;
+pub mod keyhost;
 pub mod libraries;
 pub mod lidarr;
 pub mod likes;
@@ -625,6 +626,9 @@ pub fn run() {
             // Mixes, radio and the daylist, made here from the cache.
             let mix_service = mixes::MixService::new(db.clone());
             mix_service.set_options(initial.mix_options());
+            // Keys saved before their hosts were recorded: bound to the
+            // addresses set now, before synced settings can change them.
+            keyhost::startup_adopt(&db);
             // App-only state that can travel in the sync file (sync::).
             let sync_store = sync::SyncStore::new(db.clone(), plex.identity().client_id.clone());
             // Release status marks feed the unreleased rule from the start.
@@ -1934,6 +1938,7 @@ pub fn run() {
             sync::devices::commands::device_sync_take_quarantined,
             sync::devices::commands::device_pair_start,
             sync::devices::commands::device_pair_cancel,
+            sync::devices::commands::device_pair_confirm,
             sync::devices::commands::device_pair_state,
             sync::devices::commands::device_pair_join,
             sync::devices::commands::device_download_suggestions,
