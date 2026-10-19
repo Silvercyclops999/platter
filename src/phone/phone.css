@@ -68,6 +68,8 @@
 }
 @keyframes ph-page-in { from { opacity: 0; transform: translateY(8px); } }
 .ph-page::-webkit-scrollbar { display: none; }
+/* A full-screen view over the pages (Wrapped) holds them still. */
+.phone.is-under-full .ph-page { overflow: hidden; }
 
 /* ---------------------------------------------------------------- type */
 .ph-title {
@@ -217,6 +219,8 @@
   pointer-events: none;
 }
 .ph-dock > * { pointer-events: auto; }
+/* With the mini player up, the dock is one opaque strip from its top to the bottom of the screen: no see-through gap between it and the tabs. */
+.phone.has-mini .ph-dock:not(.is-mini-away) { background-color: var(--color-bg-base); background-image: var(--paper-grain, none); pointer-events: auto; }
 .ph-dock .ph-mini { transition: transform var(--ph-slide) var(--ph-ease), opacity var(--ph-quick) var(--ph-ease); }
 .ph-dock.is-mini-away .ph-mini { transform: translateY(24px); opacity: 0; pointer-events: none; }
 .ph-tabs {

@@ -32,6 +32,7 @@ import { useWrapped, wrapped } from "../stores/wrapped";
 import { usePhoneForm } from "../phone/form";
 import { lockAxis, release as swipeOutcome, type Axis } from "../phone/gestures";
 import { EDGE_PX, edgeClaims, edgeRelease } from "../phone/motion";
+import { holdLightStatusBar } from "../phone/statusBar";
 import "./wrapped.css";
 
 /** How long a card stays before the next one. */
@@ -384,7 +385,39 @@ function CardBody({ kind, w, onRestart }: { kind: CardKind; w: WrappedData; onRe
 
 const isControl = (t: EventTarget | null) => t instanceof Element && !!t.closest("button, a, input, label, [role='switch'], canvas");
 
-const clock = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+/**
+ * Keeps the page under a full-screen view still: its touches stop at
+ * `el`, the document and the phone's pages don't scroll, and whatever
+ * scrolled anyway is put back. Returns the undo.
+ */
+export function lockUnder(el: HTMLElement): () => void {
+  const stop = (e: TouchEvent) => {
+    if (e.cancelable) e.preventDefault();
+  };
+  el.addEventListener("touchmove", stop, { passive: false });
+  const doc = document.documentElement;
+  const phone = el.closest(".phone");
+  const pages = [...document.querySelectorAll<HTMLElement>(".ph-page")].filter((p) => !el.contains(p));
+  const tops = pages.map((p) => p.scrollTop);
+  const before = { html: doc.style.overflow, body: document.body.style.overflow };
+  doc.style.overflow = "hidden";
+  document.body.style.overflow = "hidden";
+  phone?.classList.add("is-under-full");
+  return () => {
+    el.removeEventListener("touchmove", stop);
+    doc.style.overflow = before.html;
+    document.body.style.overflow = before.body;
+    phone?.classList.remove("is-under-full");
+    pages.forEach((p, i) => {
+      if (p.isConnected && p.scrollTop !== tops[i]) p.scrollTop = tops[i];
+    });
+    if (document.scrollingElement && document.scrollingElement.scrollTop) document.scrollingElement.scrollTop = 0;
+    if (phone && phone.scrollTop) phone.scrollTop = 0;
+  };
+}
+
+const clock = () =>
+ (typeof performance !== "undefined" ? performance.now() : Date.now());
 
 /** A finger or button down on the cards. */
 interface Press {
@@ -450,15 +483,27 @@ export function WrappedView({ year, onClose }: { year: number; onClose: () => vo
     return () => window.removeEventListener("keydown", onKey, true);
   }, [go, onClose]);
 
+  // Focus moves in and back without scrolling anything (a focus that
+  // scrolled once left the page under Wrapped pulled down after closing).
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
-    root.current?.focus();
-    return () => before?.focus?.();
+    root.current?.focus({ preventScroll: true });
+    return () => before?.focus?.({ preventScroll: true });
   }, []);
+
+  // On the phone Wrapped owns every touch while it's open: nothing under it
+  // scrolls or rubber-bands, and the page is as it was when it closes.
+  useEffect(() => (onPhone && root.current ? lockUnder(root.current) : undefined), [onPhone]);
+  // The stories are dark on every look: light status bar text while they show.
+  useEffect(() => (onPhone ? holdLightStatusBar() : undefined), [onPhone]);
 
   const onDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     // One finger at a time: a second one while the first is down is ignored.
     if (press.current || e.button !== 0 || isControl(e.target)) return;
+    // The header strip (progress, title, close) is never a tap zone.
+    const bar = root.current?.querySelector(".wrapped__bar")?.getBoundingClientRect();
+    if (bar && bar.height > 0 && e.clientY <= bar.bottom) return;
+
     const timer = window.setTimeout(() => {
       if (!press.current || press.current.axis) return;
       press.current.hold = true;
@@ -553,7 +598,8 @@ export function WrappedView({ year, onClose }: { year: number; onClose: () => vo
       data-paused={paused ? "true" : "false"}
       data-held={held ? "true" : "false"}
     >
-      <div className="wrapped__bar">
+      {/* The bar sits above the cards' tap zones and keeps its presses to itself (the close mark once paged on instead). */}
+      <div className="wrapped__bar" onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
         <div className="wrapped__progress" aria-hidden="true">
           {cards.map((c, n) => (
             <span key={c} className={`wrapped__seg ${n < i ? "is-done" : n === i ? "is-current" : ""}`}>

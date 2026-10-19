@@ -31,6 +31,8 @@ import { PhoneSearch } from "./pages/Search";
 import { PhoneYou } from "./pages/You";
 import { notchFromUrl } from "./form";
 import { followDock } from "./dockInset";
+import { lightTextHeld, onLightHoldChange } from "./statusBar";
+
 import { installTapGuard } from "./gestures";
 import { TABS, phone, tabOf, usePhoneUi, type PhoneTab } from "./phoneUi";
 import { PageStack } from "./PageStack";
@@ -150,7 +152,8 @@ export function statusBarDark(base: string | undefined): boolean {
 export function followStatusBar(root: HTMLElement = document.documentElement): () => void {
   let last: boolean | null = null;
   const tell = () => {
-    const dark = statusBarDark(root.dataset.themeBase);
+    // A dark full-screen view (Wrapped, lyrics, now playing on dark art) asks for light text meanwhile.
+    const dark = !lightTextHeld() && statusBarDark(root.dataset.themeBase);
     if (dark === last) return;
     last = dark;
     try {
@@ -160,9 +163,13 @@ export function followStatusBar(root: HTMLElement = document.documentElement): (
     }
   };
   tell();
-  if (typeof MutationObserver === "undefined") return () => {};
+  const unHold = onLightHoldChange(tell);
+  if (typeof MutationObserver === "undefined") return unHold;
   const mo = new MutationObserver(tell);
   mo.observe(root, { attributes: true, attributeFilter: ["data-theme-base"] });
-  return () => mo.disconnect();
+  return () => {
+    mo.disconnect();
+    unHold();
+  };
 }
 

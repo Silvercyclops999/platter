@@ -29,7 +29,7 @@
 }
 
 /* ------------------------------------------------------------ bar */
-.wrapped__bar { position: absolute; z-index: 3; top: 0; left: 0; right: 0; padding: 18px 32px 0; pointer-events: none; }
+.wrapped__bar { position: absolute; z-index: 5; top: 0; left: 0; right: 0; padding: 18px 32px 0; pointer-events: none; }
 .wrapped__bar > * { pointer-events: auto; }
 .wrapped__progress { display: flex; gap: 6px; }
 .wrapped__seg { position: relative; flex: 1; height: 3px; border-radius: var(--radius-pill); background: rgba(255, 240, 220, 0.2); overflow: hidden; }

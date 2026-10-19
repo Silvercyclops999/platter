@@ -4,7 +4,7 @@
  * Tapping a timed line plays from there and keeps play or pause.
  */
 import { ChevronDown, Maximize2, Pause, PenLine, Play, RotateCw } from "lucide-react";
-import { useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { backend } from "../lib/backend";
 import { trackArtistLine } from "../lib/format";
 import type { Lyrics, LyricLine, Track } from "../lib/types";
@@ -19,6 +19,8 @@ import { tap } from "./bits";
 import { useLyricFollow } from "./lyricsFollow";
 import { phone, usePhoneUi } from "./phoneUi";
 import { PhoneSeek } from "./NowPlaying";
+import { holdLightStatusBar } from "./statusBar";
+
 
 /** Lines the card shows around the current one. */
 export const CARD_LINES = 4;
@@ -67,6 +69,8 @@ export function LyricsScreen() {
 }
 
 function LyricsFull({ track }: { track: Track }) {
+  // Full-screen lyrics are dark on every look: light status bar text while they show.
+  useEffect(() => holdLightStatusBar(), []);
   const { lyrics } = useLyrics(track.id);
   const colours = useArtColours(null, track.thumb);
   const status = usePlayer((s) => s.state?.status ?? "idle");

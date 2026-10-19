@@ -9,6 +9,7 @@ import { ChevronDown, ListMusic, MicVocal, MoreHorizontal, Pause, Play, Repeat, 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { Art, preloadArt } from "../components/Art";
 import { nextInQueue } from "../shell/nowPlaying";
+import { holdLightStatusBar, mixIsDark } from "./statusBar";
 import { Slider } from "../components/Slider";
 import { formatDuration, trackArtistLine } from "../lib/format";
 import type { Track } from "../lib/types";
@@ -53,6 +54,9 @@ export function playingFrom(ctx: { kind: string; title?: string | null } | null 
 
 /** Now playing's cover is asked for at this CSS size (the phone's ladder caps it at 1200 px). */
 export const NP_ART_CSS = 400;
+/** How much of the cover's colour tints the top of now playing (phone.css .ph-np). */
+export const NP_TOP_TINT = 0.46;
+
 
 export function NowPlaying() {
 
@@ -93,6 +97,12 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
     size: () => ({ width: art.current?.clientWidth || 360, height: screen.current?.clientHeight || 800 }),
   });
   useCoverFlight(screen, closing);
+  // Over a dark cover colour the top of the screen is dark even on the light look: light status bar text then.
+  const vivid = colours?.vivid ?? null;
+  useEffect(() => {
+    if (closing || document.documentElement.dataset.themeBase !== "light" || !mixIsDark(vivid, NP_TOP_TINT)) return;
+    return holdLightStatusBar();
+  }, [vivid, closing]);
   const style = {
     "--ph-tint": colours?.vivid ?? "var(--color-bg-overlay)",
     transform: offset.y ? `translateY(${offset.y}px)` : undefined,

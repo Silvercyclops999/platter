@@ -44,6 +44,7 @@ import { loadSettings, useSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
 import { useWrapped } from "../stores/wrapped";
 import { usePhoneForm } from "../phone/form";
+import { followStatusBar } from "../phone/PhoneShell";
 
 const mock = backend as MockBackend;
 
@@ -559,6 +560,62 @@ describe("Wrapped cards", () => {
       expect(onClose).toHaveBeenCalledOnce();
       key("GoBack");
       expect(onClose).toHaveBeenCalledTimes(2);
+    });
+
+    it("the close mark closes, and the header strip is never a tap zone", async () => {
+      const { view, stage, onClose } = await open();
+      box(stage);
+      const bar = view.querySelector(".wrapped__bar") as HTMLElement;
+      bar.getBoundingClientRect = () => ({ left: 0, top: 0, width: 390, height: 120, right: 390, bottom: 120, x: 0, y: 0, toJSON: () => ({}) });
+      // A press in the strip that reaches the cards (beside the title) doesn't page.
+      fireEvent.pointerDown(stage, { button: 0, pointerId: 1, clientX: 360, clientY: 90 });
+      fireEvent.pointerUp(stage, { button: 0, pointerId: 1, clientX: 360, clientY: 90 });
+      expect(view).toHaveAttribute("data-card", "minutes");
+      // The X keeps its press to itself and closes.
+      const close = screen.getByRole("button", { name: "Close" });
+      fireEvent.pointerDown(close, { button: 0, pointerId: 2, clientX: 360, clientY: 90 });
+      fireEvent.pointerUp(close, { button: 0, pointerId: 2, clientX: 360, clientY: 90 });
+      fireEvent.click(close);
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(view).toHaveAttribute("data-card", "minutes");
+    });
+
+    it("holds the page under it still, takes its touches, and puts things back on close", async () => {
+      const phoneEl = document.createElement("div");
+      phoneEl.className = "phone";
+      const page = document.createElement("div");
+      page.className = "ph-page";
+      phoneEl.appendChild(page);
+      document.body.appendChild(phoneEl);
+      Object.defineProperty(page, "scrollTop", { value: 0, writable: true, configurable: true });
+      vi.spyOn(backend, "statsWrapped").mockResolvedValue(year());
+      const { unmount } = render(<WrappedView year={2025} onClose={() => {}} />, { container: phoneEl.appendChild(document.createElement("div")) });
+      const view = await screen.findByTestId("wrapped");
+      expect(phoneEl).toHaveClass("is-under-full");
+      expect(document.documentElement.style.overflow).toBe("hidden");
+      const move = new Event("touchmove", { bubbles: true, cancelable: true });
+      view.dispatchEvent(move);
+      expect(move.defaultPrevented).toBe(true);
+      // Something scrolled the page anyway (a focus, a bounce): it goes back.
+      page.scrollTop = 370;
+      unmount();
+      expect(phoneEl).not.toHaveClass("is-under-full");
+      expect(document.documentElement.style.overflow).toBe("");
+      expect(page.scrollTop).toBe(0);
+      phoneEl.remove();
+    });
+
+    it("asks for light status bar text while it shows, and gives the look its own back after", async () => {
+      const style = vi.spyOn(backend, "setStatusBarStyle").mockResolvedValue(undefined);
+      document.documentElement.dataset.themeBase = "light";
+      const stop = followStatusBar();
+      expect(style).toHaveBeenLastCalledWith(true);
+      const { unmount } = render(<WrappedView year={2025} onClose={() => {}} />);
+      expect(style).toHaveBeenLastCalledWith(false);
+      unmount();
+      expect(style).toHaveBeenLastCalledWith(true);
+      stop();
+      delete document.documentElement.dataset.themeBase;
     });
 
     it("one finger at a time: a second finger is ignored, and only the first one's cancel counts", async () => {

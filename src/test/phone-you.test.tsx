@@ -18,6 +18,7 @@ import { PhoneServerPick, PhoneSignIn } from "../phone/PhoneSignIn";
 import { phoneLookOf, phoneLookPatch } from "../phone/phoneSettings";
 import { phone, usePhoneUi } from "../phone/phoneUi";
 import { installTapGuard } from "../phone/gestures";
+import { holdLightStatusBar, lightTextHeld, mixIsDark, resetStatusBarHolds } from "../phone/statusBar";
 import { albumPlate, plateText } from "../phone/bits";
 import { playingFrom, shownDate, SleeveCard } from "../phone/NowPlaying";
 import { PhoneAlbum, SONG_BY_SONG_OPEN_UP_TO } from "../phone/pages/Album";
@@ -310,6 +311,31 @@ describe("safe areas", () => {
     expect(phoneCss).toMatch(/env\(safe-area-inset-bottom/);
     // Tabs and the mini player sit above the home indicator.
     expect(phoneCss).toMatch(/\.ph-tabs \{[^}]*padding-bottom: var\(--ph-safe-bottom\)/);
+  });
+});
+
+describe("the dock and the status bar", () => {
+  it("with the mini player up the dock is one opaque strip down to the bottom, and takes its own taps", () => {
+    expect(phoneCss).toMatch(/\.phone\.has-mini \.ph-dock:not\(\.is-mini-away\) \{[^}]*background-color: var\(--color-bg-base\);[^}]*pointer-events: auto;/);
+  });
+
+  it("light text over a dark cover colour, dark text over a light one", () => {
+    expect(mixIsDark("#1a1410", 0.46)).toBe(false);
+    expect(mixIsDark("#1a1410", 0.9)).toBe(true);
+    expect(mixIsDark("#f2e6c8", 0.9)).toBe(false);
+    expect(mixIsDark("#101010", 0.46, "#000000")).toBe(true);
+    expect(mixIsDark(null, 1)).toBe(false);
+  });
+
+  it("holds stack, and each lets go once", () => {
+    resetStatusBarHolds();
+    const a = holdLightStatusBar();
+    const b = holdLightStatusBar();
+    a();
+    a();
+    expect(lightTextHeld()).toBe(true);
+    b();
+    expect(lightTextHeld()).toBe(false);
   });
 });
 
