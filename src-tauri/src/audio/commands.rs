@@ -407,7 +407,7 @@ pub async fn visualizer_watch(
     #[cfg(mobile)]
     let seen = true;
     let rest_on_battery = pause_on_battery.unwrap_or(true);
-    let battery = || BATTERY.get(now_s(), |f| drop(tauri::async_runtime::spawn(f)), crate::platform::power::on_battery);
+    let battery = || BATTERY.get(now_s(), |f| drop(tauri::async_runtime::spawn(f)), crate::platform::power::visualizer_should_rest);
     let run = visualizer_allowed(on, seen, rest_on_battery, battery);
     Ok(player.visualizer_watch(window.label(), run, fps, scope.unwrap_or(false)) && run)
 }

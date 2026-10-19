@@ -6,6 +6,16 @@ pub fn on_battery() -> bool {
     imp::on_battery()
 }
 
+/// Whether the visualizer should rest to save the battery. A phone is on
+/// battery nearly all the time, so there it rests only in Low Power Mode;
+/// a computer rests whenever it's on battery.
+pub fn visualizer_should_rest() -> bool {
+    #[cfg(target_os = "ios")]
+    return imp::saving_power();
+    #[cfg(not(target_os = "ios"))]
+    on_battery()
+}
+
 #[cfg(target_os = "windows")]
 mod imp {
     use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
@@ -50,6 +60,19 @@ mod imp {
             let _: () = msg_send![device, setBatteryMonitoringEnabled: true];
             let state: isize = msg_send![device, batteryState];
             state == 1
+        }
+    }
+
+    pub fn saving_power() -> bool {
+        // SAFETY: NSProcessInfo's shared instance and a documented property.
+        unsafe {
+            let Some(class) = AnyClass::get(c"NSProcessInfo") else { return false };
+            let info: *mut AnyObject = msg_send![class, processInfo];
+            if info.is_null() {
+                return false;
+            }
+            let on: bool = msg_send![info, isLowPowerModeEnabled];
+            on
         }
     }
 }
