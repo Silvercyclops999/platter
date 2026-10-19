@@ -1221,6 +1221,10 @@ export interface Settings {
   syncPlays: boolean;
   /** Keep my devices in sync: paired devices swap changes directly, at home or away. This device only. */
   deviceSync: boolean;
+  /** Sync when I'm away from home: paired devices not on this network swap changes through the sealed relay. This device only. */
+  deviceSyncAway: boolean;
+  /** Send big things (a first copy, imported plays) only on Wi-Fi. This device only. */
+  deviceSyncWifiOnly: boolean;
   /** Bookmarks has a row in the library. */
   bookmarksInLibrary: boolean;
   showDlnaDevices: boolean;
@@ -1828,6 +1832,8 @@ export const DEFAULT_SETTINGS: Settings = {
   syncDownloads: true,
   syncPlays: true,
   deviceSync: true,
+  deviceSyncAway: true,
+  deviceSyncWifiOnly: true,
   bookmarksInLibrary: true,
   showDlnaDevices: true,
   allowAutomation: false,
@@ -2067,6 +2073,27 @@ export interface DevicePairState {
 export interface DevicePaired {
   id: string;
   name: string;
+}
+
+/** Copy from my computer: where it is (docs/IPC.md `device-sync://copy`). */
+export interface DeviceCopyProgress {
+  /** The computer it copies from. */
+  name: string;
+  /** This step, from 1. */
+  step: number;
+  of: number;
+  /** `Copying your pins and folders`. */
+  label: string;
+}
+
+/** How Copy from my computer ended. */
+export interface DeviceCopyResult {
+  name: string;
+  groups: { group: string; label: string; count: number }[];
+  /** What still comes later, in words (the computer wasn't on this network). */
+  later: string | null;
+  /** Stopped before the end; what came stays. */
+  cancelled: boolean;
 }
 
 export interface DeviceSyncOverview {
@@ -4467,6 +4494,8 @@ export interface EventMap {
   "device-sync://status": DeviceSyncDevice[];
   /** The Add a device dialog's state (codes, paired, expiry). */
   "device-sync://pair": DevicePairState;
+  /** Copy from my computer moved on to its next group. */
+  "device-sync://copy": DeviceCopyProgress;
   /** The hidden songs and artists changed. */
   "hidden://changed": HiddenItem[];
   /** Bookmarks changed (newest first). */

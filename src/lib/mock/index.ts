@@ -749,6 +749,7 @@ export class MockBackend implements Backend {
       },
       emitStatus: (s) => this.emit("device-sync://status", s),
       emitPair: (s) => this.emit("device-sync://pair", s),
+      emitCopy: (p) => this.emit("device-sync://copy", p),
     });
     this.social = new MockSocial(this.fx, {
       settings: () => this.settings,
@@ -3912,8 +3913,14 @@ export class MockBackend implements Backend {
   deviceDownloadDismiss(kind: DownloadKind, id: string | null) {
     return this.delay(() => this.deviceSync.dismiss(kind, id));
   }
+  pairCopyCancel() {
+    return this.delay(() => this.deviceSync.cancelCopy());
+  }
+  deviceSyncNetwork(metered: boolean | null) {
+    return this.delay(() => this.deviceSync.network(metered));
+  }
   pairCopySettings() {
-    return this.delay(() => this.deviceSync.copySettings());
+    return this.delay(() => null).then(() => this.deviceSync.copySettings());
   }
 
   // ---------------------------------------------------------------- hide, bookmarks, smart playlists, scrobbling

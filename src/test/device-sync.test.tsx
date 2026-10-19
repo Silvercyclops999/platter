@@ -2,8 +2,8 @@
  * Settings > Sync > Keep my devices in sync: the switch and its note, the
  * paired devices, adding a device (the codes to show), pairing with a code
  * (6 digits at home, the long code away) and every way it fails, unpairing,
- * Sync now, held changes, what to sync, and Copy settings from my computer
- * on the phone.
+ * Sync now, held changes and what to sync. The phone's Copy from my
+ * computer is in phone-sync.test.tsx.
  */
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -16,7 +16,6 @@ import { pairCodeReady } from "../pages/KeepInSyncSettings";
 import { SettingsPage } from "../pages/SettingsPage";
 import { usePhoneForm } from "../phone/form";
 import { PhoneShell } from "../phone/PhoneShell";
-import { usePhoneUi } from "../phone/phoneUi";
 import { useApp } from "../stores/app";
 import { useRouter } from "../stores/router";
 import { loadSettings, useSettings } from "../stores/settings";
@@ -274,52 +273,6 @@ describe("Keep my devices in sync", () => {
     expect(pairCodeReady(`platter://pair-device/${mock.deviceSync.otherLong}`)).toBe(true);
     expect(pairCodeReady("PB1-short")).toBe(false);
     expect(pairCodeReady("platter://copy-keys/135790")).toBe(false);
-  });
-});
-
-describe("Copy settings from my computer, on the phone", () => {
-  beforeEach(() => {
-    usePhoneForm.setState({ phone: true });
-    usePhoneUi.setState({ tab: "home", nowPlaying: false, lyrics: false, sheets: [], crates: false, homeCard: false });
-    useRouter.getState().reset({ name: "home" });
-    act(() => useApp.setState({ auth: { state: "signedIn", username: "listener", needsServerPick: false } }));
-  });
-  afterEach(() => usePhoneForm.setState({ phone: false }));
-
-  const openYou = async () => {
-    render(
-      <>
-        <PhoneShell />
-        <Toaster />
-      </>,
-    );
-    fireEvent.click(within(screen.getByRole("navigation", { name: "Tabs" })).getByRole("button", { name: "You" }));
-    const you = await screen.findByTestId("phone-you");
-    return within(you).getByRole("button", { name: /Copy settings from my computer/ });
-  };
-
-  it("takes the computer's settings", async () => {
-    mock.deviceSync.addDevice("Studio PC");
-    await backend.settingsSet({ ...DEFAULT_SETTINGS, accent: "#0099CC" });
-    fireEvent.click(await openYou());
-    expect((await screen.findAllByText("Settings copied from your computer"))[0]).toBeInTheDocument();
-    expect((await backend.settingsGet()).accent).toBe("brass");
-  });
-
-  it("says what's wrong: not paired, the computer not answering, sync off", async () => {
-    const button = await openYou();
-    fireEvent.click(button);
-    expect((await screen.findAllByText(/Couldn't copy settings from your computer: Pair this device with your computer first/))[0]).toBeInTheDocument();
-    act(() => useToasts.setState({ toasts: [] }));
-    mock.deviceSync.addDevice("Studio PC");
-    mock.deviceSync.copyFails = true;
-    fireEvent.click(button);
-    expect((await screen.findAllByText(/Studio PC didn't answer/))[0]).toBeInTheDocument();
-    act(() => useToasts.setState({ toasts: [] }));
-    mock.deviceSync.copyFails = false;
-    await backend.settingsSet({ ...DEFAULT_SETTINGS, deviceSync: false });
-    fireEvent.click(button);
-    expect((await screen.findAllByText(/Turn on Keep my devices in sync first/))[0]).toBeInTheDocument();
   });
 });
 

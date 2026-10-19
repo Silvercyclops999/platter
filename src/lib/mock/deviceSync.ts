@@ -10,9 +10,14 @@
  * read), `pairArrives(name)` (a device joins the codes this one shows),
  * `pairAsks(name)` (a device used the long code and waits for a yes),
  * `expirePair()`, `hold(n)` (changes held from
- * a clock far ahead), `suggest(...)`.
+ * a clock far ahead), `suggest(...)`. Copy from my computer: `copyStepMs`
+ * (the pause per group), `copyHangs` (it waits at that group until
+ * stopped), `copyElsewhere` (the computer isn't on this network),
+ * `metered` (on mobile data).
  */
 import type {
+  DeviceCopyProgress,
+  DeviceCopyResult,
   DevicePairState,
   DevicePaired,
   DeviceSyncDevice,
@@ -29,7 +34,20 @@ export interface DeviceSyncHooks {
   setSettings: (patch: Partial<Settings>) => void;
   emitStatus: (s: DeviceSyncDevice[]) => void;
   emitPair: (s: DevicePairState) => void;
+  emitCopy?: (p: DeviceCopyProgress) => void;
 }
+
+/** The groups a copy goes through: the setting that keeps it in step, the progress words, the label, a count. */
+const COPY_STEPS: [Extract<keyof Settings, string>, string, string, number][] = [
+  ["syncSettings", "your settings", "Settings", 48],
+  ["syncLibrary", "your pins and folders", "Pins and folders", 12],
+  ["syncFollows", "who you follow", "Follows and hidden items", 31],
+  ["syncLyrics", "your lyrics", "Lyrics", 4],
+  ["syncLooks", "your looks", "Looks", 2],
+  ["syncDownloads", "what your computer keeps offline", "Download choices", 9],
+  ["syncPlays", "your imported plays", "Imported plays", 1840],
+  ["syncDiary", "your diary", "Listening diary", 0],
+];
 
 const TTL_MS = 10 * 60 * 1000;
 const IDLE: DevicePairState = { phase: "idle", code: null, longCode: null, qr: null, expiresAt: null, with: null };
@@ -43,6 +61,13 @@ export class MockDeviceSync {
   relayDown = false;
   copyFails = false;
   statusFails = false;
+  copyStepMs = 0;
+  copyHangs: number | null = null;
+  copyElsewhere = false;
+  metered = false;
+  private copying = false;
+  private stop = false;
+  private release: (() => void) | null = null;
   devices: DeviceSyncDevice[] = [];
   held: SyncQuarantined[] = [];
   suggestions: DownloadSuggestion[] = [];
@@ -59,6 +84,14 @@ export class MockDeviceSync {
     this.relayDown = false;
     this.copyFails = false;
     this.statusFails = false;
+    this.copyStepMs = 0;
+    this.copyHangs = null;
+    this.copyElsewhere = false;
+    this.metered = false;
+    this.copying = false;
+    this.stop = false;
+    this.release?.();
+    this.release = null;
     this.devices = [];
     this.held = [];
     this.suggestions = [];
@@ -209,12 +242,59 @@ export class MockDeviceSync {
     this.suggestions = this.suggestions.filter((s) => !(s.kind === kind && s.id === (id ?? "")));
   }
 
-  copySettings(): string {
+  /** Copy from my computer: one group at a time, with progress, until done or stopped. */
+  async copySettings(): Promise<DeviceCopyResult> {
     if (!this.on()) throw { kind: "invalid", message: "Turn on Keep my devices in sync first." };
+    const s = this.hooks.settings();
+    if (this.metered && s.deviceSyncWifiOnly !== false)
+      throw { kind: "invalid", message: "Copying waits for Wi-Fi. Connect to Wi-Fi, or turn off Send big things only on Wi-Fi." };
+    if (this.copying) throw { kind: "invalid", message: "A copy is already running." };
     const pc = this.devices[0];
     if (!pc) throw { kind: "notFound", message: "Pair this device with your computer first, in Settings under Keep my devices in sync." };
     if (this.copyFails) throw { kind: "network", message: `${pc.name} didn't answer. Open Platter there and try again.` };
-    this.hooks.setSettings({ accent: "brass", theme: "studio" });
-    return pc.name;
+    const steps = COPY_STEPS.filter(([key]) => s[key] !== false && (key !== "syncDiary" || s.syncDiary === true));
+    this.copying = true;
+    this.stop = false;
+    const groups: DeviceCopyResult["groups"] = [];
+    try {
+      for (const [i, [key, what, label, n]] of steps.entries()) {
+        if (this.stop) break;
+        this.hooks.emitCopy?.({ name: pc.name, step: i + 1, of: steps.length, label: `Copying ${what}` });
+        if (this.copyHangs === i + 1) await new Promise<void>((r) => (this.release = r));
+        else await new Promise((r) => setTimeout(r, this.copyStepMs));
+        if (this.stop) {
+          groups.push({ group: key, label, count: 0 });
+          break;
+        }
+        if (key === "syncSettings") this.hooks.setSettings({ accent: "brass", theme: "studio" });
+        groups.push({ group: key, label, count: this.copyElsewhere && key !== "syncSettings" ? 0 : n });
+      }
+      const cancelled = this.stop;
+      if (!cancelled) {
+        this.devices = this.devices.map((d) => (d.id === pc.id ? { ...d, lastSyncedAt: Date.now(), words: "In sync" } : d));
+        this.changed();
+      }
+      return {
+        name: pc.name,
+        groups,
+        later: this.copyElsewhere ? `The rest comes over from ${pc.name} in the background, quickest when both are on the same Wi-Fi.` : null,
+        cancelled,
+      };
+    } finally {
+      this.copying = false;
+      this.stop = false;
+      this.release = null;
+    }
+  }
+
+  cancelCopy() {
+    if (!this.copying) return;
+    this.stop = true;
+    this.release?.();
+  }
+
+  /** The window saw the network change. */
+  network(metered: boolean | null) {
+    if (metered !== null) this.metered = metered;
   }
 }

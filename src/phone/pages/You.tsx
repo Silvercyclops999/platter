@@ -1,7 +1,8 @@
 /**
  * You, the phone's fourth tab: your picture and name, this month in words
  * (the profile page's own sentence), your year's Wrapped as a ruled row
- * with its record, what you played lately, and the way into Settings. Drawn from what the core already has, like the profile page on
+ * with its record, how your devices are keeping in sync (or the way to
+ * copy from your computer), what you played lately, and the way into Settings. Drawn from what the core already has, like the profile page on
  * a computer; nothing here is published.
  */
 import { ChevronRight, Settings as Cog, UsersRound } from "lucide-react";
@@ -23,6 +24,11 @@ import { wrapped } from "../../stores/wrapped";
 import { tap } from "../bits";
 import { toast } from "../../stores/toasts";
 import { failText } from "../../lib/errorText";
+import { useState } from "react";
+import { useDeviceSync } from "../../pages/KeepInSyncSettings";
+import type { DeviceSyncDevice } from "../../lib/types";
+import { openSyncStep } from "../SyncSetup";
+import "../sync-setup.css";
 
 const NONE_YET = new Promise<never>(() => {});
 
@@ -102,8 +108,6 @@ export function PhoneYou() {
     { title: "Devices", route: { name: "devices" } },
     { title: "Settings", route: { name: "settings" } },
   ];
-  // Copy settings from my computer: shown once the core can do it.
-  const copy = (backend as unknown as { pairCopySettings?: () => Promise<unknown> }).pairCopySettings;
 
   return (
     <div className="ph-page ph-you" data-testid="phone-you">
@@ -142,6 +146,8 @@ export function PhoneYou() {
       {wrappedOn && (
         <YearEntry className="ph-you__wrapped" year={year} title={`Your ${year} Wrapped`} shown="Wrapped" sub="Your year in records, songs and hours" onOpen={() => wrapped.open(year)} />
       )}
+
+      <SyncRow />
 
       <section aria-labelledby="ph-you-recent">
         <h2 id="ph-you-recent" className="ph-section-title">
@@ -200,27 +206,95 @@ export function PhoneYou() {
             </button>
           </li>
         ))}
-        {typeof copy === "function" && (
-          <li>
-            <button
-              type="button"
-              className="ph-set-link"
-              onClick={() =>
-                void copy.call(backend).then(
-                  () => toast.info("Settings copied from your computer"),
-                  (e: unknown) => toast.error(failText("Couldn't copy settings from your computer", e)),
-                )
-              }
-            >
-              <span className="ph-set-link__text">
-                <span className="ph-set-link__title">Copy settings from my computer</span>
-                <span className="ph-set-link__sub">Your look, playback and sound, the way Platter is set up there</span>
-              </span>
-              <ChevronRight size={18} aria-hidden="true" className="ph-set-link__chev" />
-            </button>
-          </li>
-        )}
+
       </ul>
+    </div>
+  );
+}
+
+/** The device to name on the row: the one in step most recently. */
+export function syncRowDevice(devices: DeviceSyncDevice[]): DeviceSyncDevice | null {
+  return [...devices].sort((a, b) => (b.lastSyncedAt ?? 0) - (a.lastSyncedAt ?? 0))[0] ?? null;
+}
+
+/** The row's two lines for a paired device. */
+export function syncRowWords(d: DeviceSyncDevice, others: number): { title: string; sub: string; warn: boolean } {
+  const inSync = d.words === "In sync";
+  const title = inSync ? `In sync with ${d.name}` : d.words;
+  const ago = d.lastSyncedAt ? timeAgo(d.lastSyncedAt / 1000) : null;
+  const when = ago ? (inSync ? ago : `Last in step ${ago.toLowerCase()}`) : "Not in step yet";
+  const more = others > 0 ? `, and ${others === 1 ? "1 more device" : `${others} more devices`}` : "";
+  return { title, sub: `${when}${more}`, warn: !inSync };
+}
+
+/**
+ * Keep my devices in sync on You: before a computer is paired, the way to
+ * copy from it; after, how the devices are doing, with Sync now.
+ */
+function SyncRow() {
+  const [ov, setOv, { failed, reload }] = useDeviceSync();
+  const [busy, setBusy] = useState(false);
+  const d = syncRowDevice(ov?.devices ?? []);
+  const toSettings = () => {
+    tap();
+    nav.go({ name: "settings", page: "sync" });
+  };
+  if (!ov && failed)
+    return (
+      <div className="ph-you__sync" data-testid="you-sync">
+        <span className="ph-you__sync-text">
+          <span className="ph-you__sync-title">Couldn't read sync status</span>
+          <span className="ph-you__sync-sub">Your paired devices are fine.</span>
+        </span>
+        <button type="button" className="ph-text-btn" onClick={() => void reload()}>
+          Retry
+        </button>
+      </div>
+    );
+  if (!ov) return <div className="ph-you__sync" data-testid="you-sync" aria-busy="true" />;
+  if (!d)
+    return (
+      <div className="ph-you__sync" data-testid="you-sync">
+        <button
+          type="button"
+          className="ph-you__sync-text"
+          onClick={() => {
+            tap();
+            openSyncStep(false);
+          }}
+        >
+          <span className="ph-you__sync-title">Copy settings from my computer</span>
+          <span className="ph-you__sync-sub">Your look, pins and follows, the way Platter is set up there</span>
+        </button>
+        <ChevronRight size={18} aria-hidden="true" className="ph-set-link__chev" />
+      </div>
+    );
+  const w = syncRowWords(d, ov.devices.length - 1);
+  const now = () => {
+    tap();
+    setBusy(true);
+    backend.deviceSyncNow().then(
+      (o) => {
+        setBusy(false);
+        setOv(o);
+        const first = syncRowDevice(o.devices);
+        if (first) toast.info(first.words === "In sync" ? `In sync with ${first.name}` : first.words);
+      },
+      (e: unknown) => {
+        setBusy(false);
+        toast.error(failText("Couldn't sync", e));
+      },
+    );
+  };
+  return (
+    <div className="ph-you__sync" data-testid="you-sync">
+      <button type="button" className="ph-you__sync-text" onClick={toSettings} aria-label={`${w.title}. ${w.sub}. Sync settings`}>
+        <span className="ph-you__sync-title">{w.title}</span>
+        <span className={`ph-you__sync-sub ${w.warn ? "is-warn" : ""}`}>{w.sub}</span>
+      </button>
+      <button type="button" className="ph-text-btn" onClick={now} disabled={busy || !ov.on}>
+        {busy ? "Syncing" : "Sync now"}
+      </button>
     </div>
   );
 }

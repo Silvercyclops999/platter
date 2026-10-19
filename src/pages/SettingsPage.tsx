@@ -1566,6 +1566,26 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
         ]
       : []) satisfies RowDef[]),
     {
+      key: "deviceSyncAway",
+      section: "App",
+      page: "sync",
+      group: "Keep my devices in sync",
+      title: "Sync when I'm away from home",
+      description: "Devices not on this network swap changes through the sealed relay. This device only.",
+      more: "When your devices aren't on the same network, changes go through the sealed relay: the relay sees only scrambled messages. Off: devices sync only when they're on the same network, and changes wait until then. This device only.",
+      control: (ids) => toggle(s, "deviceSyncAway", ids),
+    },
+    {
+      key: "deviceSyncWifiOnly",
+      section: "App",
+      page: "sync",
+      group: "Keep my devices in sync",
+      title: "Send big things only on Wi-Fi",
+      description: "A first copy and imported plays wait for Wi-Fi. This device only.",
+      more: "On mobile data, Copy from my computer and imported plays wait until you're on Wi-Fi. Small changes, like a pin or a setting, still go. This device only.",
+      control: (ids) => toggle(s, "deviceSyncWifiOnly", ids),
+    },
+    {
       key: "syncSettings",
       section: "App",
       page: "sync",

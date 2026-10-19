@@ -4,6 +4,7 @@ import { installPageVisibility } from "./design/pageVisibility";
 import { installOverlayScrollbars } from "./design/scrollbars";
 import { installTheme, motionPreference } from "./stores/theme";
 import { checkFormWithCore, usePhoneForm } from "./phone/form";
+import { followNetwork } from "./lib/deviceSyncWake";
 import { connectApp, useApp } from "./stores/app";
 import { connectFileTags } from "./stores/fileTags";
 import { connectLikes } from "./stores/likes";
@@ -82,6 +83,7 @@ function MainApp() {
   useEffect(() => connectMiniplayer(), []);
   useEffect(() => connectSwitching(), []);
   useEffect(() => void checkFormWithCore(), []);
+  useEffect(() => followNetwork(), []);
   const isPhone = usePhoneForm((s) => s.phone);
   const auth = useApp((s) => s.auth);
   // The window is shown once the page has drawn in the cached look, with
@@ -103,8 +105,10 @@ function MainApp() {
     if (auth?.state === "signedIn") useUi.getState().setSignInOpen(false);
     if (auth?.state === "signedIn" && sawSignIn.current) {
       sawSignIn.current = false;
-      // The computer's Get started guide is about windows and layouts; the phone starts ready.
+      // The computer's Get started guide is about windows and layouts; the
+      // phone offers to bring the computer's setup over instead.
       if (!usePhoneForm.getState().phone) offerFirstRun();
+      else void import("./phone/SyncSetup").then((m) => m.openSyncStep(true));
     }
   }, [auth?.state]);
 

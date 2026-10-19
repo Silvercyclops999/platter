@@ -164,6 +164,7 @@ import type {
   KeySendOutcome,
   DeviceSyncOverview,
   DevicePairState,
+  DeviceCopyResult,
   DevicePaired,
   SyncQuarantined,
   DownloadSuggestion,
@@ -1017,8 +1018,12 @@ export interface Backend {
   deviceDownloadSuggestions(): Promise<DownloadSuggestion[]>;
   /** Stop suggesting this one here. */
   deviceDownloadDismiss(kind: DownloadKind, id: string | null): Promise<void>;
-  /** Take the synced settings your computer has, here and everywhere. Resolves to its name. */
-  pairCopySettings(): Promise<string>;
+  /** Copy from my computer: everything kept in step here, one group at a time (progress on device-sync://copy). Its settings win here and everywhere. */
+  pairCopySettings(): Promise<DeviceCopyResult>;
+  /** Stop a copy from the computer; what came stays. */
+  pairCopyCancel(): Promise<void>;
+  /** The network changed (metered: on mobile data, when the window can tell): a round with every device now. */
+  deviceSyncNetwork(metered: boolean | null): Promise<void>;
   // Hide, bookmarks, smart playlists, scrobbling (docs/IPC.md)
   /** Hidden songs and artists, newest first. */
   hiddenList(): Promise<HiddenItem[]>;
@@ -1678,6 +1683,8 @@ export function createTauriBackend(): Backend {
     deviceDownloadSuggestions: () => call("device_download_suggestions"),
     deviceDownloadDismiss: (kind, id) => call("device_download_dismiss", { kind, id }),
     pairCopySettings: () => call("pair_copy_settings"),
+    pairCopyCancel: () => call("pair_copy_cancel"),
+    deviceSyncNetwork: (metered) => call("device_sync_network", { metered }),
     followSet: (artist, on) => call("follow_set", { id: artist.id, title: artist.title, thumb: artist.thumb ?? null, on }),
     whatsNew: () => call("whats_new"),
     whatsNewSeen: () => call("whats_new_seen"),
