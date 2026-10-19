@@ -691,6 +691,35 @@ async fn a_call_ending_doesnt_overrule_a_pause_by_hand() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_call_ending_after_the_headphones_left_stays_paused() {
+    let mut r = rig(&["a"], 3.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.interruption(true, false);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    r.player.headphones(false);
+    r.player.interruption(false, true);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Paused, "not out loud");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_call_ending_doesnt_play_what_the_headphones_left() {
+    let mut r = rig(&["a"], 3.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.headphones(false);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    r.player.interruption(true, false);
+    r.player.interruption(false, true);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Paused, "not out loud");
+    // The same headphones back still play on.
+    r.player.headphones(true);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Playing).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_media_services_reset_while_playing_keeps_playing() {
     let mut r = rig(&["a"], 3.0, true, PlayerConfig::default()).await;
     r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
