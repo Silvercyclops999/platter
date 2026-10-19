@@ -3,7 +3,7 @@
  * scaled down): the chosen style, a row to pick another (remembered, and
  * synced), and plain words when there is nothing to draw.
  */
-import { Suspense } from "react";
+import { lazy, Suspense } from "react";
 import type { VisualizerStyle } from "../lib/types";
 import { usePlayer } from "../stores/player";
 import { updateSettings, useSettings } from "../stores/settings";
@@ -40,6 +40,9 @@ export function visFps(setting: number | undefined, phone: boolean, reduced: boo
   return phone ? Math.min(PHONE_MAX_FPS, want) : want;
 }
 
+const Scope = lazy(() => import("./Scope").then((m) => ({ default: m.Scope })));
+const Glow = lazy(() => import("./Glow").then((m) => ({ default: m.Glow })));
+
 /** What stops the picture, in words, or null when it can draw. */
 export function useVisualizerBlock(): string | null {
   const remote = usePlayer((s) => s.remote !== null);
@@ -65,6 +68,8 @@ export function VisualizerView({ phone = false }: { phone?: boolean }) {
 
   let picture;
   if (style === "meters") picture = <Meters fps={fps} accent={accent} />;
+  else if (style === "scope") picture = <Scope fps={fps} accent={accent} />;
+  else if (style === "glow") picture = <Glow fps={fps} />;
   else picture = <Analyser fps={fps} smoothing={smoothing} peakHold={!reduced} accent={accent} />;
 
   return (

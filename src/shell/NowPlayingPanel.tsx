@@ -27,6 +27,7 @@ import {
   useNowPlayingDetails,
 } from "./nowPlaying";
 import { timedLines, useLyrics } from "./lyrics";
+import { PanelStrip } from "../visualizer/places";
 
 /** Requested art size for the panel's cover: the widest panel minus its padding. */
 const PANEL_ART = 388;
@@ -239,6 +240,7 @@ function PanelBody({ track, view, setView }: { track: Track; view: View; setView
       <button type="button" className={`np-art ${spinning ? "is-spinning" : ""}`} aria-label={`Go to album ${track.albumTitle}`} onClick={() => nav.go({ name: "album", id: track.albumId })}>
         <Art path={track.thumb} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} fluid requestSize={PANEL_ART} />
       </button>
+      <PanelStrip />
       <TrackTitle track={track} />
       {/* Show lyrics opens the lyrics view itself: synced, with its tools. */}
       {lyrics && <LyricsCard lines={lyrics.lines} tint={colors?.shade ?? null} onOpen={() => fullWindow.open("lyrics")} />}

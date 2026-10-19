@@ -158,9 +158,10 @@ export function lowEnd(bands: ArrayLike<number> | null): number {
 }
 
 /**
- * The goniometer's point for a stereo pair: mid up, side across, so a mono
- * signal draws a vertical line and a wide one spreads out.
+ * The goniometer's point for a stereo pair: mid up, side across (left
+ * channel alone on the upper-left diagonal), so a mono signal draws a
+ * vertical line and a wide one spreads out.
  */
 export function scopePoint(l: number, r: number): [x: number, y: number] {
-  return [(l - r) * Math.SQRT1_2, (l + r) * Math.SQRT1_2];
+  return [(r - l) * Math.SQRT1_2, (l + r) * Math.SQRT1_2];
 }
