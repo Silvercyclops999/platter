@@ -9,7 +9,7 @@ import { DEFAULT_SETTINGS, type MixSummary } from "../lib/types";
 import { HomePage } from "../pages/HomePage";
 import { MixArt } from "../pages/MixCard";
 import { MixPage } from "../pages/MixPage";
-import { leadArtists, mixSentence } from "../pages/MixStory";
+import { leadArtists, mixSentence, stripLabel } from "../pages/MixStory";
 import { PlayControls } from "../shell/PlayerBar";
 import { useApp } from "../stores/app";
 import { connectPlayer, usePlayer } from "../stores/player";
@@ -172,6 +172,7 @@ describe("a mix in a sentence", () => {
     expect(mixSentence(tracks, tracks.map(() => true))).toBe("6 songs you know well, led by Ada and Bo.");
     expect(mixSentence([t("Ada")], [false])).toBe("1 song you've hardly played, all by Ada.");
     expect(mixSentence([], [])).toBe("");
+    expect(stripLabel(1, 4)).toBe("In running order: 1 song you know and 4 you've hardly played.");
   });
 
   it("the mix page says it, with the running order when it holds both kinds", async () => {

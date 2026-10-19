@@ -28,6 +28,11 @@ export function mixSentence(tracks: Pick<Track, "artistTitle">[], familiar: bool
   return `${what}${who}.`;
 }
 
+/** What the strip says to a screen reader: "In running order: 1 song you know and 4 you've hardly played." */
+export function stripLabel(known: number, fresh: number): string {
+  return `In running order: ${known.toLocaleString()} ${known === 1 ? "song" : "songs"} you know and ${fresh.toLocaleString()} you've hardly played.`;
+}
+
 export function MixStory({ tracks, familiar, className = "" }: { tracks: Pick<Track, "id" | "artistTitle">[]; familiar: boolean[]; className?: string }) {
   if (!tracks.length) return null;
   const known = familiar.slice(0, tracks.length);
@@ -37,7 +42,7 @@ export function MixStory({ tracks, familiar, className = "" }: { tracks: Pick<Tr
     <div className={`mix-story ${className}`} data-testid="mix-story">
       <p className="lg-lead lg-lead--xs mix-story__sentence">{mixSentence(tracks, familiar)}</p>
       {mixed && (
-        <figure className="mix-strip" role="img" aria-label={`In running order: ${k} songs you know and ${tracks.length - k} you've hardly played.`}>
+        <figure className="mix-strip" role="img" aria-label={stripLabel(k, tracks.length - k)}>
           <span className="mix-strip__songs" aria-hidden="true">
             {tracks.map((t, i) => (
               <span key={`${t.id}-${i}`} className={`mix-strip__song ${known[i] ? "is-known" : ""}`} />
