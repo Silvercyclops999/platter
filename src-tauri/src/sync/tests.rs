@@ -1001,3 +1001,11 @@ mod keys {
         assert!(crypto::unhex("zz").is_err() && crypto::unhex("é1").is_err());
     }
 }
+
+#[test]
+fn theme_design_tokens_are_not_secrets() {
+    use super::store::looks_secret;
+    assert!(!looks_secret(&json!({"themeFile": {"name": "Mine", "tokens": {"accent": "#c90"}}})));
+    assert!(looks_secret(&json!({"themeFile": {"tokens": {"plexToken": "x"}}})));
+    assert!(looks_secret(&json!({"accessToken": "x"})));
+}

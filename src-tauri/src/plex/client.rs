@@ -1686,6 +1686,15 @@ impl PlexClient {
         if let Ok(v) = session.parse() {
             headers.insert("x-plex-session-identifier", v);
         }
+        // Plex picks a built-in profile from X-Plex-Platform; the iOS one
+        // only streams music over HLS and answers 400 to a plain MP3 over
+        // HTTP. Naming the target keeps every platform on the same answer.
+        headers.insert(
+            "x-plex-client-profile-extra",
+            reqwest::header::HeaderValue::from_static(
+                "add-transcode-target(type=musicProfile&context=streaming&protocol=http&container=mp3&audioCodec=mp3)",
+            ),
+        );
         Ok(StreamRequest { url, headers })
     }
 

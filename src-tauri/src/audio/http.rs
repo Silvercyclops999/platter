@@ -664,6 +664,12 @@ async fn transfer(
     };
     let status = resp.status();
     if let Some(f) = classify(status) {
+        let body = resp.bytes().await.unwrap_or_default();
+        tracing::warn!(
+            "stream refused: http {} ({})",
+            status.as_u16(),
+            String::from_utf8_lossy(&body[..body.len().min(200)])
+        );
         let mut st = shared.st.lock();
         st.fatal = Some(f);
         shared.cv.notify_all();
