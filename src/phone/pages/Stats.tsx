@@ -1,5 +1,5 @@
 /**
- * Stats on the phone: a range, the range in three readouts and a sentence,
+ * Stats on the phone: a range, the range told as the computer's Stats hero does,
  * then top artists, songs, records and genres, when you listened (each
  * chart led by its sentence), and Recaps and Compare as their own tabs.
  * The same counts as the computer's Stats page, from the same core calls.
@@ -9,12 +9,14 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Art } from "../../components/Art";
 import { backend } from "../../lib/backend";
 import { failText } from "../../lib/errorText";
-import { WEEKDAYS, barFractions, hourLabel, minutes, rangeLabel, shortDate, toRange, type RangeChoice } from "../../lib/stats";
+import { WEEKDAYS, barFractions, hourLabel, minutes, rangeLabel, toRange, type RangeChoice } from "../../lib/stats";
 import type { StatsOverview } from "../../lib/statsTypes";
 import { useLoad } from "../../lib/useLoad";
 import { CompareSection } from "../../pages/StatsCompare";
 import { MonthlySection, monthsIn } from "../../pages/StatsRecaps";
 import { WrappedSection } from "../../pages/StatsWrapped";
+import { StatsHero } from "../../pages/StatsHero";
+import "../../pages/stats.css";
 import { player } from "../../stores/player";
 import { nav, useRouter, type StatsTab } from "../../stores/router";
 import { useSettings } from "../../stores/settings";
@@ -89,13 +91,12 @@ function Section({ title, children, note }: { title: string; children: ReactNode
   );
 }
 
-function Overview({ o, title }: { o: StatsOverview; title: string }) {
+function Overview({ o, title, isAll }: { o: StatsOverview; title: string; isAll: boolean }) {
+  const moments = useLoad(() => backend.statsMoments({ from: isAll ? null : o.from, to: isAll ? null : o.to }), [o.from, o.to, isAll]);
   const [songsShown, setSongsShown] = useState(10);
   const [artistsShown, setArtistsShown] = useState(5);
   const songs = o.topSongs.filter((s) => s.track);
   const ids = songs.map((s) => s.track!.id);
-  const top = o.topArtists[0];
-  const share = top && o.totals.ms > 0 ? top.ms / o.totals.ms : 0;
   const save = async () => {
     try {
       const pl = await backend.playlistCreate(`Top songs: ${title}`, ids.slice(0, 50));
@@ -107,30 +108,7 @@ function Overview({ o, title }: { o: StatsOverview; title: string }) {
   const hourLabels = Array.from({ length: 24 }, (_, h) => (h % 6 === 0 ? hourLabel(h).replace(" ", "").toLowerCase() : ""));
   return (
     <>
-      <dl className="ph-readouts" data-testid="stats-numbers">
-        {(
-          [
-            ["Minutes", minutes(o.totals.ms).toLocaleString()],
-            ["Plays", o.totals.plays.toLocaleString()],
-            ["Days", o.totals.days.toLocaleString()],
-          ] as const
-        ).map(([k, v]) => (
-          <div key={k} className="ph-readout">
-            <dd className="ph-readout__value">{v}</dd>
-            <dt className="ph-readout__label">{k}</dt>
-          </div>
-        ))}
-      </dl>
-      <p className="ph-stats__line">
-        {o.totals.songs.toLocaleString()} songs by {o.totals.artists.toLocaleString()} artists from {o.totals.albums.toLocaleString()} records.
-        {top && share >= 0.1 && (
-          <>
-            {" "}
-            <strong>{top.name}</strong> took about {share >= 0.45 ? "half" : share >= 0.3 ? "a third" : share >= 0.2 ? "a fifth" : "a tenth"} of it.
-          </>
-        )}
-        {o.streak && o.streak.days > 1 && ` Your longest streak was ${o.streak.days} days in a row, ${shortDate(o.streak.from)} to ${shortDate(o.streak.to)}.`}
-      </p>
+      <StatsHero o={o} moments={moments.data} title={title} isAll={isAll} />
 
       {o.topArtists.length > 0 && (
         <Section title="Top artists">
@@ -258,8 +236,8 @@ export function PhoneStats({ tab: openTab, month, friend }: { tab?: StatsTab; mo
               <GhostRows />
             ) : (
               <>
-                <h2 className="ph-label ph-stats__range">{title}</h2>
-                <Overview key={`${range?.from}:${range?.to}`} o={o.data} title={title} />
+                <h2 className="sr-only ph-stats__range">{title}</h2>
+                <Overview key={`${range?.from}:${range?.to}`} o={o.data} title={title} isAll={!range?.from && !range?.to} />
               </>
             ))}
           {tab === "recaps" && (

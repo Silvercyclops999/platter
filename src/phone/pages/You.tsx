@@ -1,6 +1,6 @@
 /**
- * You, the phone's fourth tab: your picture and name, this month in three
- * readouts, your year's Wrapped, what you played lately, and the way into
+ * You, the phone's fourth tab: your picture and name, this month in words
+ * (the profile page's own sentence), your year's Wrapped, what you played lately, and the way into
  * Settings. Drawn from what the core already has, like the profile page on
  * a computer; nothing here is published.
  */
@@ -10,9 +10,9 @@ import { LikedCover } from "../../components/LikedCover";
 import { backend } from "../../lib/backend";
 import { metaLine, profilePlaylists, thisMonth } from "../../lib/profile";
 import { timeAgo } from "../../lib/relativeTime";
-import { minutes } from "../../lib/stats";
 import type { RecentsEntry } from "../../lib/types";
 import { useLoad } from "../../lib/useLoad";
+import { MonthStory } from "../../pages/MonthStory";
 import { AvatarFace } from "../../shell/TopBar";
 import { useApp } from "../../stores/app";
 import { player } from "../../stores/player";
@@ -83,12 +83,6 @@ export function PhoneYou() {
   const lists = playlists.data ? profilePlaylists(playlists.data) : null;
   const meta = metaLine(lists?.length ?? null, statsOn ? (o?.totals.plays ?? (span.data && !hasHistory ? 0 : null)) : null);
   const year = Number((today ?? new Date().toISOString().slice(0, 10)).slice(0, 4));
-  const numbers: [string, string | null][] = [
-    ["Minutes", o ? minutes(o.totals.ms).toLocaleString() : null],
-    ["Plays", o ? o.totals.plays.toLocaleString() : null],
-    ["Day streak", o ? (o.streak ? o.streak.days.toLocaleString() : "0") : null],
-  ];
-  const topArtist = o?.topArtists[0];
   const diaryOn = useSettings((s) => s.settings?.keepDiary !== false);
   const bookmarksOn = useSettings((s) => s.settings?.bookmarksInLibrary !== false);
   const links: { title: string; route: Route }[] = [
@@ -139,21 +133,7 @@ export function PhoneYou() {
           {span.data && !hasHistory ? (
             <p className="ph-rows__note">Nothing played yet. Play a record and this month's listening shows up here.</p>
           ) : (
-            <>
-              <dl className="ph-readouts" data-testid="you-numbers">
-                {numbers.map(([label, value]) => (
-                  <div key={label} className="ph-readout">
-                    <dd className="ph-readout__value">{value ?? <span className="ph-readout__wait" />}</dd>
-                    <dt className="ph-readout__label">{label}</dt>
-                  </div>
-                ))}
-              </dl>
-              {topArtist && (
-                <p className="ph-you__top">
-                  Most played: <strong>{topArtist.name}</strong>
-                </p>
-              )}
-            </>
+            <MonthStory o={o} testId="you-month" />
           )}
         </section>
       )}

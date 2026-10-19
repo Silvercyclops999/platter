@@ -12,7 +12,8 @@ import { ContextMenuHost } from "../components/ContextMenu";
 import { backend } from "../lib/backend";
 import { metaLine, PROFILE_AUDIENCE, profileFriends, profileSections, thisMonth } from "../lib/profile";
 import { importSettings, migrateSettingNames } from "../lib/settingsFile";
-import { formatPlays, minutes, monthName } from "../lib/stats";
+import { formatPlays, monthName } from "../lib/stats";
+import { monthStory } from "../lib/statsStory";
 import { DEFAULT_SETTINGS } from "../lib/types";
 import { ProfilePage } from "../pages/ProfilePage";
 import { StatsPage } from "../pages/StatsPage";
@@ -77,10 +78,13 @@ describe("Profile page", () => {
     );
     expect(await screen.findByRole("heading", { level: 1, name: "listener" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("profile-meta")).toHaveTextContent(metaLine(playlists.length, o.totals.plays)));
-    const numbers = await screen.findByTestId("profile-numbers");
-    await waitFor(() => expect(within(numbers).getByText("Minutes this month").closest("div")).toHaveTextContent(minutes(o.totals.ms).toLocaleString()));
-    expect(within(numbers).getByText("Plays").closest("div")).toHaveTextContent(o.totals.plays.toLocaleString());
-    expect(within(numbers).getByText("Longest streak")).toBeInTheDocument();
+    const story = monthStory(o);
+    await waitFor(() => expect(screen.getByTestId("profile-month")).toHaveTextContent(`You listened for ${story.time} this month`));
+    const told = screen.getByTestId("profile-month");
+    expect(told).toHaveTextContent(o.topArtists[0].name);
+    expect(told).toHaveTextContent(`That's ${story.plays} over ${story.days}`);
+    // A sentence, not a row of labelled boxes.
+    expect(within(told).queryByRole("term")).toBeNull();
     await user.click(screen.getByRole("button", { name: "More options for your profile" }));
     expect(await screen.findByRole("menuitem", { name: /See all your stats/ })).toBeInTheDocument();
     await user.keyboard("{Escape}");
@@ -131,7 +135,7 @@ describe("Profile page", () => {
     await settings({ showFriendActivity: false });
     render(<ProfilePage />);
     await screen.findByRole("region", { name: "Playlists" });
-    await screen.findByTestId("profile-numbers");
+    await screen.findByTestId("profile-month");
     expect(screen.queryByRole("region", { name: "Friends" })).toBeNull();
   });
 
@@ -153,7 +157,7 @@ describe("Profile page", () => {
     expect(await screen.findByText("Nothing played yet")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Import past plays" })).toBeInTheDocument();
     await screen.findByRole("region", { name: "Playlists" });
-    expect(screen.queryByTestId("profile-numbers")).toBeNull();
+    expect(screen.queryByTestId("profile-month")).toBeNull();
     expect(screen.queryByRole("region", { name: "Top artists this month" })).toBeNull();
     await waitFor(() => expect(screen.getByTestId("profile-meta")).toHaveTextContent("0 plays this month"));
     expect(overview).not.toHaveBeenCalled();
@@ -163,7 +167,7 @@ describe("Profile page", () => {
     await settings({ statsPage: false });
     render(<ProfilePage />);
     await screen.findByRole("region", { name: "Playlists" });
-    expect(screen.queryByTestId("profile-numbers")).toBeNull();
+    expect(screen.queryByTestId("profile-month")).toBeNull();
     expect(screen.queryByRole("button", { name: "See all your stats" })).toBeNull();
     expect(screen.getByRole("button", { name: /Wrapped$/ })).toBeInTheDocument();
   });

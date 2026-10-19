@@ -129,9 +129,8 @@ describe("the You tab", () => {
     fireEvent.click(within(screen.getByRole("navigation", { name: "Tabs" })).getByRole("button", { name: "You" }));
     const you = await screen.findByTestId("phone-you");
     expect(within(you).getByRole("heading", { level: 1 })).toHaveTextContent("listener");
-    const numbers = await within(you).findByTestId("you-numbers");
-    expect(within(numbers).getByText("Minutes")).toBeInTheDocument();
-    expect(within(numbers).getByText("Plays")).toBeInTheDocument();
+    // This month as the profile page says it: one sentence, how long and mostly to whom.
+    await waitFor(() => expect(within(you).getByTestId("you-month")).toHaveTextContent(/^You listened for .+ this month, (mostly|more) to /));
     fireEvent.click(within(you).getByRole("button", { name: /Wrapped/ }));
     expect(useWrapped.getState().year).not.toBeNull();
     act(() => useWrapped.getState().close());
