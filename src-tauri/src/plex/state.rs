@@ -306,7 +306,17 @@ impl PlexState {
             state: AuthState::SignedIn,
             username: s.username.clone(),
             avatar: s.avatar.clone(),
-            needs_server_pick: server.is_none() && !s.servers.is_empty(),
+            // A saved server that's still on the list (or the only server)
+            // is connected to without asking; while that runs (seconds over
+            // a remote connection) there's nothing to pick.
+            needs_server_pick: server.is_none()
+                && !s.servers.is_empty()
+                && s.servers.len() > 1
+                && !s
+                    .cache
+                    .selected
+                    .as_ref()
+                    .is_some_and(|id| s.servers.iter().any(|x| &x.machine_id == id)),
             server,
             reauth_required: false,
         }
