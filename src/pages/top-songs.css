@@ -120,32 +120,8 @@
 .ts-card__title { font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
 .ts-card__sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
 
-/* The profile's Wrapped and Top Songs. */
-.wrapped-section__years { list-style: none; margin: 0 0 var(--space-6); padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-4); }
+/* The Top Songs lists in search results. */
 .wrapped-section__lists { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: var(--space-4); }
-.wrapped-tile {
-  position: relative;
-  display: flex;
-  align-items: flex-end;
-  width: 100%;
-  aspect-ratio: 16 / 7;
-  overflow: hidden;
-  padding: var(--space-4);
-  border: none;
-  border-radius: var(--radius-card);
-  background: var(--year-deep);
-  color: var(--year-light);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.wrapped-tile .year-art { position: absolute; inset: 0; transition: transform var(--motion-slow) var(--motion-easing); }
-.wrapped-tile:hover .year-art { transform: scale(calc(1 + 0.03 * var(--motion-move))); }
-.wrapped-tile::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(14, 13, 12, 0.5), transparent 70%); }
-.wrapped-tile:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
-.wrapped-tile__text { position: relative; z-index: 1; display: flex; flex-direction: column; gap: var(--space-1); }
-.wrapped-tile__year { font-size: 64px; font-weight: var(--font-weight-display); letter-spacing: -0.055em; line-height: 0.82; font-variant-numeric: tabular-nums lining-nums; }
-.wrapped-tile__name { display: inline-flex; align-items: center; gap: 6px; font-size: var(--font-size-md); font-weight: var(--font-weight-bold); color: #F4EFE8; }
 .sr-top-songs { margin: var(--space-2) 0 var(--space-8); }
 .sr-top-songs .section-title { margin-bottom: var(--space-4); }
 
