@@ -16,6 +16,8 @@ import { EQ_FREQS, EQ_PRESETS, type AppError, type Settings } from "../lib/types
 import { loadOutput, useOutput } from "../stores/output";
 import { updateSettings, useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
+import { usePhoneForm } from "../phone/form";
+import { phoneText } from "./settingsMeta";
 import "./audio-settings.css";
 import { failText } from "../lib/errorText";
 
@@ -337,10 +339,13 @@ export function EqEditor() {
     return list;
   }, [s?.eqProfiles, s?.eqPreset]);
 
+  const phone = usePhoneForm((x) => x.phone);
   if (!s) return <Skeleton height={260} radius="card" />;
   const bands = local ?? s.eqBands;
   const profile = s.eqPreset.startsWith("profile:") ? s.eqPreset.slice("profile:".length) : null;
-  const device = out?.current ?? null;
+  const current = out?.current ?? null;
+  // A phone names its own output in its own words ("Default Device" is the computer's).
+  const device = current && phone ? { ...current, name: phoneText(current.name) } : current;
   const binding = device ? s.eqOutputs.find((o) => o.deviceId === device.id) : undefined;
   const label = (id: string) => options.find((o) => o.value === id)?.label ?? EQ_PRESETS.find((p) => p.id === id)?.name ?? id;
   const others = s.eqOutputs.filter((o) => o.deviceId !== device?.id);

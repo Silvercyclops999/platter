@@ -2,14 +2,17 @@
  * The "?" beside a Settings row's title: its longer text in a small popover,
  * so the row itself keeps a one-line description.
  */
-import { HelpCircle } from "lucide-react";
+import { HelpCircle, Info } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { usePhoneForm } from "../phone/form";
 
 /** Space kept between the popover and the window's edge. */
 const EDGE = 8;
 
 export function MoreText({ title, text }: { title: string; text: string }) {
   const [open, setOpen] = useState(false);
+  // On a phone the text opens as a small card at the foot of the screen, behind an info mark.
+  const phone = usePhoneForm((x) => x.phone);
   const [shift, setShift] = useState(0);
   const id = useId();
   const ref = useRef<HTMLSpanElement>(null);
@@ -63,7 +66,7 @@ export function MoreText({ title, text }: { title: string; text: string }) {
         aria-describedby={open ? id : undefined}
         onClick={() => setOpen((v) => !v)}
       >
-        <HelpCircle size={16} aria-hidden="true" />
+        {phone ? <Info size={16} aria-hidden="true" /> : <HelpCircle size={16} aria-hidden="true" />}
       </button>
       <span id={id} ref={pop} role="note" className="setting-more__pop" hidden={!open} style={shift ? { transform: `translateX(${shift}px)` } : undefined}>
         {text}

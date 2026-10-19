@@ -44,6 +44,10 @@ import { bookmarkPage, bookmarkTrack } from "../stores/curate";
 import { useApp } from "../stores/app";
 import { useCircle } from "../stores/circle";
 import { collaboratorPlaylists, editablePlaylists } from "../components/PlaylistPicker";
+import { versionLabel } from "../components/FileTagBadges";
+import { formatArchiveDate, SONG_STATUS_LABEL } from "../pages/era";
+import type { VersionItem } from "../lib/types";
+import { useSettings } from "../stores/settings";
 import { openSongCredits } from "../stores/songCredits";
 import { countLine } from "./pages/common";
 import { SORT_LABEL, useLibraryView, type LibSort } from "../stores/library";
@@ -130,6 +134,8 @@ function SheetFor({ sheet }: { sheet: Sheet }) {
       return <PlaylistSheet playlist={sheet.playlist} />;
     case "addTo":
       return <AddToSheet track={sheet.track} />;
+    case "versions":
+      return <VersionsSheet track={sheet.track} />;
     case "librarySort":
       return <SortSheet />;
     case "create":
@@ -478,7 +484,7 @@ export function TrackSheet({ track, inPlaylist }: { track: Track; inPlaylist?: i
     { label: "Go to album", icon: Disc3, run: act(() => phone.go({ name: "album", id: track.albumId }), true) },
     { label: "Go to artist", icon: UserRound, run: act(() => phone.go({ name: "artist", id: track.artistId }), true) },
     { label: "Song radio", icon: Radio, run: act(() => player.playRadio(`track:${track.id}`)) },
-    ...((track.otherVersions ?? 0) > 0 ? [{ label: "All versions", icon: GitBranch, run: act(() => phone.go({ name: "lineage", id: track.id }), true) }] : []),
+    ...((track.otherVersions ?? 0) > 0 ? [{ label: `Versions (${(track.otherVersions ?? 0) + 1})`, icon: GitBranch, run: act(() => phone.push({ kind: "versions", track }), true) }] : []),
     { label: "Bookmark this moment", icon: Bookmark, run: act(() => bookmarkTrack(track)) },
   ];
   return (
@@ -658,6 +664,76 @@ function AddToSheet({ track }: { track: Track }) {
           </li>
         )}
       </ul>
+    </SheetFrame>
+  );
+}
+
+/** "Live at the Mill · 2019 · Deluxe" under a version. */
+export function versionLine(v: VersionItem): string {
+  const when = v.date ? formatArchiveDate(v.date) : v.year ? String(v.year) : null;
+  const album = v.track.albumTitle;
+  const said = (x: string | null | undefined) => !!x && !album.toLowerCase().includes(x.toLowerCase());
+  const extra = [v.edition, versionLabel(v.version)].filter(said).filter((x, i, all) => all.indexOf(x) === i);
+  return [album, when, ...extra].filter(Boolean).join(" · ");
+}
+
+/**
+ * Every version of a song in the library (the same list as the computer's
+ * Other versions): each with its record and year, the one you came from
+ * marked, and each playable. The lineage page is a tap away.
+ */
+function VersionsSheet({ track }: { track: Track }) {
+  const { data, error, retry } = useLoad(() => backend.trackVersions(track.id), [track.id]);
+  const nowId = usePlayer((s) => s.state?.track?.id);
+  const lineageOn = useSettings((s) => s.settings?.showLineage !== false);
+  const play = (id: string) => {
+    tap();
+    if (id === nowId) return void player.toggle();
+    void player.playTracks((data ?? []).map((v) => v.track.id), id);
+  };
+  return (
+    <SheetFrame title="Versions" subtitle={track.title} onClose={phone.pop}>
+      <ul className="ph-rows" aria-label={`Versions of ${track.title}`}>
+        {data?.map((v) => (
+          <li key={v.track.id} className="ph-version">
+            <button type="button" className="ph-row" onClick={() => play(v.track.id)} aria-current={v.current || undefined}>
+              <Art path={v.track.thumb} size={48} sleeve={{ title: v.track.albumTitle, artist: v.track.artistTitle }} />
+              <span className="ph-row__text">
+                <span className={`ph-row__title ${v.track.id === nowId ? "is-playing" : ""}`}>
+                  {v.track.title}
+                  {v.current && <span className="ph-version__here"> · This one</span>}
+                </span>
+                <span className="ph-row__sub">{versionLine(v)}</span>
+                {v.status !== "released" && <span className="ph-row__sub ph-version__status">{SONG_STATUS_LABEL[v.status]}</span>}
+              </span>
+            </button>
+            <button
+              type="button"
+              className="ph-icon-btn"
+              aria-label={`Go to ${v.track.albumTitle}`}
+              onClick={() => {
+                tap();
+                phone.go({ name: "album", id: v.track.albumId });
+              }}
+            >
+              <Disc3 size={20} aria-hidden="true" />
+            </button>
+          </li>
+        ))}
+        {!data && !error && [0, 1, 2].map((i) => <li key={i} className="ph-lib-row--ghost" />)}
+        {error && !data && (
+          <li>
+            <button type="button" className="ph-row ph-row--text" onClick={retry}>
+              Couldn't load the versions. Try again
+            </button>
+          </li>
+        )}
+      </ul>
+      {lineageOn && data && data.length > 1 && (
+        <button type="button" className="ph-pill ph-pill--wide" onClick={() => phone.go({ name: "lineage", id: track.id })}>
+          <GitBranch size={16} aria-hidden="true" /> Every version on one timeline
+        </button>
+      )}
     </SheetFrame>
   );
 }

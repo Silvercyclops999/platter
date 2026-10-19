@@ -3,11 +3,12 @@
  * one, and results as you type (no submit), the top artist first. The
  * same folding and typo rules as on the desktop: the core does the search.
  */
-import { MoreHorizontal, Search as SearchIcon, X } from "lucide-react";
+import { GitBranch, MoreHorizontal, Search as SearchIcon, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Art } from "../../components/Art";
 import { backend } from "../../lib/backend";
-import type { SearchHit, SearchResults } from "../../lib/types";
+import type { SearchHit, SearchResults, Track } from "../../lib/types";
+import { useSettings } from "../../stores/settings";
 import { hitInfo, hitOf, mixedHits, openHit, rememberHit, subtitleWithType } from "../../shell/searchModel";
 import { useLoad } from "../../lib/useLoad";
 import { nav, useRouter } from "../../stores/router";
@@ -179,6 +180,7 @@ export function PhoneSearch() {
                   top={i === 0 && kind === "all"}
                   onOpen={() => open(h)}
                   onMore={h.track ? () => phone.push({ kind: "track", track: h.track! }) : h.album ? () => phone.push({ kind: "album", album: h.album! }) : undefined}
+                  versions={h.track ? versionsCount(h.track, res) : 0}
                 />
               ))}
             </ul>
@@ -191,11 +193,35 @@ export function PhoneSearch() {
   );
 }
 
-function HitRow({ hit, top, onOpen, onRemove, onMore }: { hit: SearchHit; top?: boolean; onOpen: () => void; onRemove?: () => void; onMore?: () => void }) {
+/**
+ * How many other versions a song has (deluxe, live, alternate, V1 and V2):
+ * the ones search folded under it, else the count the library keeps.
+ */
+export function versionsCount(t: Track, res: SearchResults | null, countsOn = useSettings.getState().settings?.showVersionCounts !== false): number {
+  const folded = res?.versions?.[t.id]?.length ?? 0;
+  if (folded) return folded;
+  return countsOn ? (t.otherVersions ?? 0) : 0;
+}
+
+function HitRow({
+  hit,
+  top,
+  onOpen,
+  onRemove,
+  onMore,
+  versions = 0,
+}: {
+  hit: SearchHit;
+  top?: boolean;
+  onOpen: () => void;
+  onRemove?: () => void;
+  onMore?: () => void;
+  versions?: number;
+}) {
   const i = hitInfo(hit);
   if (!i) return null;
   return (
-    <li className={`ph-hit ${top ? "is-top" : ""}`}>
+    <li className={`ph-hit ${top ? "is-top" : ""} ${versions > 0 ? "has-versions" : ""}`}>
       <button type="button" className="ph-row" onClick={onOpen}>
         <Art path={i.thumb} size={52} round={i.round} kind={i.kind === "track" ? "album" : i.kind} monogram={i.round ? i.title : undefined} />
         <span className="ph-row__text">
@@ -216,6 +242,14 @@ function HitRow({ hit, top, onOpen, onRemove, onMore }: { hit: SearchHit; top?: 
         ) : (
           !top && <span className="ph-icon-btn" aria-hidden="true" />
         ))}
+      {versions > 0 && hit.track && (
+        <div className="ph-hit__versions-line">
+          <button type="button" className="ph-hit__versions" onClick={() => phone.push({ kind: "versions", track: hit.track! })}>
+            <GitBranch size={14} aria-hidden="true" />
+            {versions + 1} versions
+          </button>
+        </div>
+      )}
     </li>
   );
 }

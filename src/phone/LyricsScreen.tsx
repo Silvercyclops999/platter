@@ -3,12 +3,17 @@
  * from it. Sung and current lines are bright, the ones to come are dim.
  * Tapping a timed line plays from there and keeps play or pause.
  */
-import { ChevronDown, Maximize2, Pause, Play } from "lucide-react";
-import { useRef, type CSSProperties } from "react";
+import { ChevronDown, Maximize2, Pause, PenLine, Play, RotateCw } from "lucide-react";
+import { useRef, useState, type CSSProperties } from "react";
+import { backend } from "../lib/backend";
 import { trackArtistLine } from "../lib/format";
 import type { Lyrics, LyricLine, Track } from "../lib/types";
 import { useArtColours } from "../lib/useTint";
-import { currentLineIndex, timedLines, useLyrics } from "../shell/lyrics";
+import { currentLineIndex, lyricsChanged, timedLines, useLyrics } from "../shell/lyrics";
+import { openLyricsEditor } from "../stores/lyricsEditor";
+import { useSettings } from "../stores/settings";
+import { toast } from "../stores/toasts";
+import "./pages/parity.css";
 import { player, usePlayer } from "../stores/player";
 import { tap } from "./bits";
 import { useLyricFollow } from "./lyricsFollow";
@@ -99,7 +104,7 @@ function LyricsFull({ track }: { track: Track }) {
             ))}
           </div>
         ) : (
-          <p className="ph-lyrics__none">No lyrics for this song.</p>
+          <NoLyrics track={track} />
         )}
         {lyrics?.credit && <p className="ph-lyrics__credit">{lyrics.credit}</p>}
       </div>
@@ -118,6 +123,49 @@ function LyricsFull({ track }: { track: Track }) {
         </button>
       </footer>
     </section>
+  );
+}
+
+/**
+ * A song with no lyrics: say so plainly, and offer to look again (the
+ * sources may have it now) or to write them (while that's on in Settings).
+ */
+export function NoLyrics({ track }: { track: Track }) {
+  const showAdd = useSettings((s) => s.settings?.lyricsShowAdd ?? true);
+  const [looking, setLooking] = useState(false);
+  const lookAgain = async () => {
+    setLooking(true);
+    try {
+      await backend.lyricsLookAgain(track.id);
+      lyricsChanged(track.id);
+    } catch {
+      toast.error("Couldn't look for lyrics again");
+    } finally {
+      setLooking(false);
+    }
+  };
+  return (
+    <div className="ph-lyrics__empty" role="status">
+      <p className="ph-lyrics__empty-title">No lyrics for this song</p>
+      <p className="ph-lyrics__empty-text">None of your lyrics sources have it yet.</p>
+      <div className="ph-lyrics__empty-actions">
+        {showAdd && (
+          <button
+            type="button"
+            className="ph-pill is-primary"
+            onClick={() => {
+              phone.closeLyrics();
+              openLyricsEditor(track);
+            }}
+          >
+            <PenLine size={16} aria-hidden="true" /> Add lyrics
+          </button>
+        )}
+        <button type="button" className="ph-pill" disabled={looking} onClick={() => void lookAgain()}>
+          <RotateCw size={16} aria-hidden="true" className={looking ? "ph-spin" : undefined} /> {looking ? "Looking…" : "Look again"}
+        </button>
+      </div>
+    </div>
   );
 }
 

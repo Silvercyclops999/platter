@@ -1,6 +1,7 @@
 import { Disc3, ListMusic, User } from "lucide-react";
 import { createContext, useContext, useLayoutEffect, useRef, useState } from "react";
 import { artUrl } from "../lib/backend";
+import { usePhoneForm } from "../phone/form";
 
 /**
  * Rendered width (CSS px) of fluid art inside a layout that knows it, such as
@@ -125,6 +126,10 @@ export function Art({ path, size = 48, fluid, requestSize, round, kind = "album"
     if (src && el?.complete && el.naturalWidth > 0) setLoadedSrc(src);
   }, [src]);
 
+  // On the phone a record's printed sleeve stands in while its cover loads
+  // (a page of blank squares reads as broken there); the cover fades in over it.
+  const phone = usePhoneForm((s) => s.phone);
+  const printWhileLoading = phone && !!sleeve && kind === "album" && !round && !!wanted && !failed && !loaded;
   const style = fluid ? undefined : { width: size, height: size };
   const Fallback = kind === "artist" ? User : kind === "playlist" ? ListMusic : Disc3;
   const box = Math.round(cssSize);
@@ -143,7 +148,8 @@ export function Art({ path, size = 48, fluid, requestSize, round, kind = "album"
             <Fallback size={fluid ? 40 : Math.max(16, Math.round(size * 0.38))} strokeWidth={1.5} />
           </span>
         ))}
-      {wanted && !failed && !loaded && <span className="art__skeleton skeleton" aria-hidden="true" />}
+      {printWhileLoading && <FallbackSleeve text={sleeve!} size={cssSize} fluid={!!fluid} />}
+      {wanted && !failed && !loaded && !printWhileLoading && <span className="art__skeleton skeleton" aria-hidden="true" />}
       {src && !failed && (
         <img
           ref={img}

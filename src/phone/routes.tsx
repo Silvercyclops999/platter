@@ -41,6 +41,7 @@ import { PhoneStats } from "./pages/Stats";
 import { PhoneTopSongs } from "./pages/TopSongs";
 import { PhoneWhatsNew } from "./pages/WhatsNew";
 import { PhoneYou } from "./pages/You";
+import "./pages/parity.css";
 
 const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 

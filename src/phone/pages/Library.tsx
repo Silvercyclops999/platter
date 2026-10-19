@@ -4,12 +4,15 @@
  * the top, and small glyphs for pinned and downloaded.
  */
 import { ArrowUpDown, LayoutGrid, List, Plus, X } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Art } from "../../components/Art";
 import { LikedCover } from "../../components/LikedCover";
-import { KIND_LABEL, SORT_LABEL, subtitle, useLibraryView, type LibEntry, type LibKind } from "../../stores/library";
+import { KIND_LABEL, SORT_LABEL, useLibraryView, type LibEntry, type LibKind } from "../../stores/library";
 import { openEntry, useLibraryLoader, useLibraryModel } from "../../shell/useLibrary";
+import { useApp } from "../../stores/app";
 import { RowGlyphs, tap } from "../bits";
+import { letterOf, phoneRows, phoneSubtitle } from "../libraryRows";
+import "./parity.css";
 import { phone, usePhoneUi } from "../phoneUi";
 import { CratesBody } from "./Crates";
 
@@ -86,8 +89,23 @@ export function PhoneLibrary() {
   );
 }
 
+/** A long A to Z list gets the letter index down the right edge. */
+const INDEX_FROM = 30;
+
 function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof useLibraryModel>; view: PhoneLibView; toggleView: () => void }) {
-  const rows = model.shown.filter((e) => !e.folder);
+  const playlists = useApp((s) => s.playlists);
+  const counts = useMemo(() => new Map((playlists ?? []).map((p) => [p.id, p.trackCount])), [playlists]);
+  const rows = useMemo(() => phoneRows(model.shown, model.sort, counts), [model.shown, model.sort, counts]);
+  const listRef = useRef<HTMLUListElement>(null);
+  const indexed = model.sort === "alpha" && rows.length >= INDEX_FROM;
+  const firsts = new Set<string>();
+  const letterFor = (e: LibEntry) => {
+    if (!indexed || e.liked) return undefined;
+    const l = letterOf(e.title);
+    if (firsts.has(l)) return undefined;
+    firsts.add(l);
+    return l;
+  };
   return (
     <>
       <div className="ph-library__bar">
@@ -106,21 +124,36 @@ function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof use
           ))}
         </ul>
       ) : view === "list" ? (
-        <ul className="ph-lib-list" aria-label="Your library">
-          {rows.map((e) => (
-            <LibRow key={`${e.kind}:${e.id}`} e={e} typed={model.filter !== "all"} />
-          ))}
-        </ul>
+        <div className={`ph-lib-index-wrap ${indexed ? "is-indexed" : ""}`}>
+          <ul ref={listRef} className="ph-lib-list" aria-label="Your library">
+            {rows.map((e) => (
+              <LibRow key={`${e.kind}:${e.id}`} e={e} typed={model.filter !== "all"} letter={letterFor(e)} />
+            ))}
+          </ul>
+          {indexed && <LetterIndex list={listRef} letters={[...firsts]} />}
+        </div>
       ) : (
         <ul className={`ph-lib-grid ${model.filter === "artist" ? "ph-lib-grid--round" : ""}`} aria-label="Your library">
           {rows.map((e) => (
             <li key={`${e.kind}:${e.id}`}>
               <button type="button" className={`ph-card-tile ph-card-tile--fluid ${e.kind === "artist" ? "is-round" : ""}`} onClick={() => openEntry(e)}>
-                <Art path={e.thumb} fluid requestSize={200} round={e.kind === "artist"} kind={e.kind} monogram={e.kind === "artist" ? e.title : undefined} />
+                {e.liked || e.bookmarks || e.stats ? (
+                  <LikedCover size={160} icon={e.liked ? "heart" : e.bookmarks ? "bookmark" : "stats"} />
+                ) : (
+                  <Art
+                    path={e.thumb}
+                    fluid
+                    requestSize={200}
+                    round={e.kind === "artist"}
+                    kind={e.kind}
+                    monogram={e.kind === "artist" ? e.title : undefined}
+                    sleeve={e.kind === "album" ? { title: e.title, artist: e.creator ?? "" } : undefined}
+                  />
+                )}
                 <span className="ph-card-tile__title">{e.title}</span>
                 <span className="ph-card-tile__sub">
                   <RowGlyphs pinned={e.pinned && !e.liked} downloaded={e.downloaded} />
-                  {subtitle(e, model.filter !== "all")}
+                  {phoneSubtitle(e, model.filter !== "all")}
                 </span>
               </button>
             </li>
@@ -137,10 +170,52 @@ function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof use
   );
 }
 
-function LibRow({ e, typed }: { e: LibEntry; typed: boolean }) {
+/**
+ * The A to Z index down the list's right edge: touch or drag along it and
+ * the list jumps to that letter's first row.
+ */
+function LetterIndex({ list, letters }: { list: React.RefObject<HTMLUListElement | null>; letters: string[] }) {
+  const last = useRef("");
+  const go = (clientY: number, el: HTMLElement) => {
+    const box = el.getBoundingClientRect();
+    const i = Math.min(letters.length - 1, Math.max(0, Math.floor(((clientY - box.top) / box.height) * letters.length)));
+    const l = letters[i];
+    if (!l || l === last.current) return;
+    last.current = l;
+    tap();
+    list.current?.querySelector<HTMLElement>(`[data-letter="${l}"]`)?.scrollIntoView({ block: "start" });
+  };
+  return (
+    <div
+      className="ph-lib-index"
+      role="navigation"
+      aria-label="Jump to a letter"
+      onPointerDown={(ev) => {
+        ev.currentTarget.setPointerCapture?.(ev.pointerId);
+        last.current = "";
+        go(ev.clientY, ev.currentTarget);
+      }}
+      onPointerMove={(ev) => ev.buttons && go(ev.clientY, ev.currentTarget)}
+    >
+      {letters.map((l) => (
+        <button
+          key={l}
+          type="button"
+          className="ph-lib-index__letter"
+          aria-label={`Jump to ${l}`}
+          onClick={() => list.current?.querySelector<HTMLElement>(`[data-letter="${l}"]`)?.scrollIntoView({ block: "start" })}
+        >
+          {l}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function LibRow({ e, typed, letter }: { e: LibEntry; typed: boolean; letter?: string }) {
   const round = e.kind === "artist";
   return (
-    <li>
+    <li data-letter={letter}>
       <button type="button" className="ph-lib-row" onClick={() => openEntry(e)} disabled={e.unavailable}>
         {e.liked || e.bookmarks || e.stats ? (
           <LikedCover size={56} icon={e.liked ? "heart" : e.bookmarks ? "bookmark" : "stats"} />
@@ -151,7 +226,7 @@ function LibRow({ e, typed }: { e: LibEntry; typed: boolean }) {
           <span className="ph-row__title">{e.title}</span>
           <span className="ph-row__sub">
             <RowGlyphs pinned={e.pinned && !e.liked} downloaded={e.downloaded} />
-            {subtitle(e, typed)}
+            {phoneSubtitle(e, typed)}
           </span>
         </span>
       </button>

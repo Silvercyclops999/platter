@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { formatBytes } from "../lib/format";
+import { usePhoneForm } from "../phone/form";
 import { chooseDownloadFolder, pauseText, removeAllDownloads, startDownloads, useDownloads } from "../stores/downloads";
 import "../components/downloads.css";
 
@@ -20,13 +21,14 @@ export function downloadsTitle(used: number | undefined): string {
 /** Used of the limit, with free space, and a meter. */
 export function StorageNote() {
   const st = useDownloadStatus();
+  const phone = usePhoneForm((x) => x.phone);
   if (!st) return null;
   const share = st.limitBytes > 0 ? Math.min(1, st.usedBytes / st.limitBytes) : 0;
   const full = st.paused === "full" || st.paused === "noSpace";
   return (
     <>
       {formatBytes(st.usedBytes)} of {formatBytes(st.limitBytes)} used
-      {st.freeBytes != null ? `, ${formatBytes(st.freeBytes)} free on this drive` : ""}.
+      {st.freeBytes != null ? `, ${formatBytes(st.freeBytes)} free on this ${phone ? "phone" : "drive"}` : ""}.
       <span
         className={`dl-meter ${full ? "dl-meter--full" : ""}`}
         role="meter"

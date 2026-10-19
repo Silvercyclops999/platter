@@ -32,6 +32,8 @@ export type Sheet =
   | { kind: "album"; album: Album }
   | { kind: "playlist"; playlist: Playlist }
   | { kind: "addTo"; track: Track }
+  /** Every version of a song in the library, each playable. */
+  | { kind: "versions"; track: Track }
   | { kind: "librarySort" }
   | { kind: "create" };
 

@@ -1,6 +1,6 @@
 import { useLibraryChips } from "../lib/libraryChips";
 import { ChevronLeft, ChevronRight, MoreHorizontal, RotateCcw, Server } from "lucide-react";
-import { Fragment, memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { SearchField } from "../components/SearchField";
@@ -468,6 +468,18 @@ function Row({ row }: { row: RowDef }) {
   );
 }
 
+/** Where each phone Settings list was scrolled to, by section or page, for this visit. */
+const PHONE_SCROLL = new Map<string, number>();
+
+/**
+ * A row's description cut to its first sentence, for the phone's one line
+ * ("This device only." and other tails go behind the info button).
+ */
+export function shortLine(text: string): string {
+  const m = /^(.+?[.!?])(\s|$)/.exec(text.trim());
+  return m ? m[1] : text.trim();
+}
+
 /** A row's words. They seldom change, so a change elsewhere on the page skips them. */
 const RowText = memo(function RowText({
   settingKey,
@@ -487,16 +499,20 @@ const RowText = memo(function RowText({
   footnote?: string;
 }) {
   const learn = helpFor(settingKey);
+  // On a phone each row keeps one short line; the whole explanation is behind its info button.
+  const phone = usePhoneForm((x) => x.phone);
+  const line = phone ? shortLine(description) : description;
+  const info = phone ? [line !== description ? description : null, more].filter(Boolean).join(" ") || undefined : more;
   return (
     <div className="setting-row__text">
       <div className="setting-row__head">
         <div id={ids.title} className="setting-row__title">
           {title}
         </div>
-        {more && <MoreText title={title} text={more} />}
+        {info && <MoreText title={title} text={info} />}
       </div>
       <p id={ids.desc} className="setting-row__desc">
-        {description}
+        {line}
         {note && (
           <>
             {" "}
@@ -1011,6 +1027,29 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
     return rows;
   };
   const isPhone = usePhoneForm((x) => x.phone);
+  // The phone keeps each Settings list where you left it: back from a page
+  // lands on the row you came from, not at the top.
+  const phoneRoot = useRef<HTMLDivElement>(null);
+  const phoneScrollKey = useRef("");
+  useLayoutEffect(() => {
+    if (!isPhone) return;
+    const scroller = phoneRoot.current?.closest<HTMLElement>(".ph-page");
+    if (!scroller) return;
+    const key = phoneScrollKey.current;
+    const saved = PHONE_SCROLL.get(key);
+    // Rows still arriving can make the list too short at first: try again next frame.
+    let frame = 0;
+    if (saved) {
+      scroller.scrollTop = saved;
+      if (scroller.scrollTop < saved) frame = requestAnimationFrame(() => (scroller.scrollTop = saved));
+    }
+    const save = () => PHONE_SCROLL.set(key, scroller.scrollTop);
+    scroller.addEventListener("scroll", save, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      scroller.removeEventListener("scroll", save);
+    };
+  }, [isPhone, pageProp, routePage, sectionProp, routeSection]);
   const rows: RowDef[] = [
     // Account
     {
@@ -3864,10 +3903,18 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       return next;
     });
 
-  /** Rows, with rarely needed ones folded under one Advanced row. */
+  /** Rows, with rarely needed ones folded under one Advanced row (on a phone, set out under "More options" instead). */
   const foldedRows = (scope: string, list: RowDef[], domId: string, between?: ReactNode) => {
     const everyday = list.filter((r) => !ADVANCED.has(r.key));
     const advanced = list.filter((r) => ADVANCED.has(r.key));
+    if (isPhone)
+      return (
+        <>
+          <RowList rows={everyday} />
+          {between}
+          {advanced.length > 0 && <RowList rows={advanced.map((r) => (r.group ? r : { ...r, group: "More options" }))} />}
+        </>
+      );
     // A search shows matching Advanced rows without a click, and so does a link to one.
     // A link to an Advanced row opens it until the effect below takes over; the toggle works after.
     const open = searching || allOpen !== openAdvanced.has(scope) || (advanced.some((r) => r.key === routeRow) && seededRow.current !== routeRow);
@@ -4092,6 +4139,8 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
 
   if (isPhone) {
     const g = page ? undefined : (sectionProp ?? routeSection);
+    // phoneScrollKey is read by the effect above, which keeps each list's place.
+    phoneScrollKey.current = page ? `page:${page.id}` : (g ?? "");
     const offline = usable.filter((r) => r.key === "goOffline");
     let body: ReactNode;
     if (page) body = pageView(page);
@@ -4184,7 +4233,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
         </>
       );
     return (
-      <div className="settings settings--phone">
+      <div className="settings settings--phone" ref={phoneRoot}>
         {body}
         {dialogs}
       </div>

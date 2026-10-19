@@ -489,7 +489,15 @@ export function phoneText(text: string): string {
   return text
     .replace(/\b(this|your|the) computer's\b/gi, (_, w: string) => `${w} phone's`)
     .replace(/\b(this|your|the) computer\b/gi, (_, w: string) => `${w} phone`)
-    .replace(/\bon your computers\b/gi, "on your devices");
+    .replace(/\bon your computers\b/gi, "on your devices")
+    .replace(/\byour computers\b/gi, "your devices")
+    .replace(/\bon this drive\b/gi, "on this phone")
+    .replace(/\bDefault Device\b/g, "this phone's speaker")
+    .replace(/,?\s*unless the queue is open there\b/gi, "")
+    .replace(/\s+on the right\b/gi, "")
+    .replace(/\bas a dot on the bell\b/gi, "with a dot on What's new")
+    .replace(/ {2,}/g, " ")
+    .replace(/ ([,.])/g, "$1");
 }
 
 /** The same row with its words said for a phone. */
@@ -502,9 +510,9 @@ export const GROUP_BLURB: Readonly<Record<GroupName, string>> = {
   "Account and servers": "Your sign-in, servers and libraries",
   Playback: "Shuffle, crossfade, Automix and the queue",
   Sound: "Quality, loudness and the equalizer",
-  Library: "Search, mixes, crates and what pages show",
+  Library: "Search, mixes and what pages show",
   "Downloads and devices": "Offline music, mobile data and other players",
-  Appearance: "Theme, colours and the record player",
+  Appearance: "Your look, colours and motion",
   Lyrics: "Where lyrics come from and how they show",
   Integrations: "Last.fm, Lidarr and other services",
   "Sharing and friends": "Share links, sessions and friends",
