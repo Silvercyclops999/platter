@@ -183,6 +183,11 @@ pub fn lan_addrs() -> Vec<Ipv4Addr> {
 
 /// The OS computer name ("Studio PC", "Adam's MacBook Air").
 pub fn os_computer_name() -> String {
+    // An iPhone app can't run commands, and iOS hands apps only the model
+    // name anyway.
+    if cfg!(target_os = "ios") {
+        return "iPhone".into();
+    }
     #[cfg(target_os = "macos")]
     {
         if let Ok(out) = std::process::Command::new("scutil").args(["--get", "ComputerName"]).output()
