@@ -27,12 +27,24 @@ pub struct Source {
 
 static STREAMING: streaming_export::StreamingExport = streaming_export::StreamingExport;
 static TABLE: table::Table = table::Table;
+static ACCOUNT: Connected = Connected;
+
+/// A source read from a connected account, not from files.
+pub struct Connected;
+
+impl Parser for Connected {
+    fn parse(&self, _: &[InputFile]) -> AppResult<Parsed> {
+        Err(crate::error::AppError::Invalid("This one reads your account. Connect it instead of picking a file.".into()))
+    }
+}
 
 /// Every source, in the order Settings lists them. Their names and help
 /// text are in the UI's strings table.
 pub const SOURCES: &[Source] = &[
     // A streaming service's account data and extended listening history.
     Source { id: "streaming", parser: &STREAMING },
+    // The same service's playlists, read from a connected account.
+    Source { id: super::account::SOURCE, parser: &ACCOUNT },
     // Files from a transfer tool (other services).
     Source { id: "transfer", parser: &TABLE },
     // Any CSV or M3U list.

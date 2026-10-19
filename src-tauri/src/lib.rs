@@ -803,6 +803,27 @@ pub fn run() {
                 scrobble::spawn(scrobbler.clone(), player.subscribe_tracking());
                 app.manage(scrobble::commands::ScrobbleState::new(scrobbler, lastfm, listenbrainz, db.clone()));
             }
+            // Library import from a connected streaming account (playlists).
+            {
+                let handle = app.handle().clone();
+                let cfg_db = db.clone();
+                let account = import::account::AccountImport::new(import::account::Deps {
+                    web: web_out.clone(),
+                    keys: keychain.clone(),
+                    db: db.clone(),
+                    events: Arc::new(plex::state::TauriSink(app.handle().clone())),
+                    open: Arc::new(move |url: &str| {
+                        use tauri_plugin_opener::OpenerExt;
+                        handle.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+                    }),
+                    config: Arc::new(move || import::account::Config::from_settings(&settings::load(&cfg_db))),
+                    clock: Arc::new(|| db::queries::now_s() * 1000),
+                    ends: import::account::api::Endpoints::default(),
+                    sign_in_wait: import::account::callback::WAIT,
+                });
+                account.spawn_recheck();
+                app.manage(account);
+            }
             // Play history from before Platter and other apps: the Plex
             // server's, Tautulli's and Last.fm's.
             {
@@ -1519,7 +1540,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            import::commands::import_overview, import::commands::import_choose, import::commands::import_run, import::commands::import_review_queue, import::commands::import_review, import::commands::import_list_page, import::commands::import_missing, import::commands::import_missing_albums, import::commands::import_missing_album_add, import::commands::import_missing_album_remove, import::commands::import_open_link, import::commands::import_forget, import::commands::import_list_remove, import::commands::import_played, import::commands::import_played_hide, import::commands::import_played_hidden,
+            import::commands::import_overview, import::commands::import_choose, import::commands::import_run, import::commands::import_review_queue, import::commands::import_review, import::commands::import_list_page, import::commands::import_missing, import::commands::import_missing_albums, import::commands::import_missing_album_add, import::commands::import_missing_album_remove, import::commands::import_open_link, import::commands::import_forget, import::commands::import_list_remove, import::commands::import_played, import::commands::import_played_hide, import::commands::import_played_hidden, import::account::commands::streaming_account_status, import::account::commands::streaming_account_sign_in, import::account::commands::streaming_account_read, import::account::commands::streaming_account_cancel, import::account::commands::streaming_account_sign_out,
             plex::commands::auth_status,
             plex::commands::auth_start,
             plex::commands::auth_cancel,

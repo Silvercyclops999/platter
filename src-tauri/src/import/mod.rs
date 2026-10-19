@@ -19,6 +19,7 @@
 //! history files are never read into anything that is kept. Plays marked
 //! private are dropped.
 
+pub mod account;
 pub mod commands;
 pub mod files;
 pub mod matching;
@@ -86,6 +87,9 @@ pub struct Skipped {
     pub incomplete_rows: u64,
     /// Files that couldn't be read as anything this source knows.
     pub unknown_files: u64,
+    /// Playlists other people own, which a connected account can't read
+    /// the songs of (the download has them).
+    pub others_playlists: u64,
 }
 
 /// Everything a parser found.
@@ -125,5 +129,6 @@ impl Parsed {
         s.short_plays += o.short_plays;
         s.incomplete_rows += o.incomplete_rows;
         s.unknown_files += o.unknown_files;
+        s.others_playlists += o.others_playlists;
     }
 }

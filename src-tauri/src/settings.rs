@@ -847,6 +847,12 @@ pub struct Settings {
     pub allow_stream_deck: bool,
     /// Library import sources turned on (ids from `import::sources`).
     pub import_sources: Vec<String>,
+    /// The Client ID of the user's own developer app for reading their
+    /// playlists from their streaming account. Empty: not set up.
+    pub streaming_client_id: String,
+    /// Read the connected account's playlists again once a day while the
+    /// app runs.
+    pub streaming_recheck: bool,
     /// The Missing page lists songs and albums from imported listening
     /// history that aren't in the library ("Played a lot").
     pub show_played_a_lot: bool,
@@ -1020,6 +1026,17 @@ pub fn staging_folder(f: &str) -> AppResult<String> {
 
 /// Lidarr's address as stored: an http(s) address with no query, sign-in or
 /// trailing slash; blank clears it.
+/// A developer app's Client ID: letters and digits (32 of them today).
+/// Empty clears it.
+pub fn streaming_client_id(id: &str) -> AppResult<String> {
+    let id = id.trim();
+    if id.is_empty() || (id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric())) {
+        Ok(id.to_string())
+    } else {
+        Err(AppError::Invalid("A Client ID is the letters and digits on your developer app's page.".into()))
+    }
+}
+
 pub fn lidarr_url(u: &str) -> AppResult<String> {
     let u = u.trim().trim_end_matches('/');
     if u.is_empty() {
@@ -1277,6 +1294,8 @@ impl Default for Settings {
             now_playing_feed_port: crate::feed::DEFAULT_PORT,
             allow_stream_deck: false,
             import_sources: Vec::new(),
+            streaming_client_id: String::new(),
+            streaming_recheck: true,
             show_played_a_lot: true,
             played_min_plays: crate::import::played::MIN_PLAYS_DEFAULT,
             played_period: "all".into(),
@@ -1476,6 +1495,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "powerKeys",
     "hintKey",
     "importSources",
+    "streamingClientId",
+    "streamingRecheck",
     "showPlayedALot",
     "playedMinPlays",
     "playedPeriod",
@@ -1853,6 +1874,8 @@ pub struct SettingsPatch {
     pub now_playing_feed_port: Option<u16>,
     pub allow_stream_deck: Option<bool>,
     pub import_sources: Option<Vec<String>>,
+    pub streaming_client_id: Option<String>,
+    pub streaming_recheck: Option<bool>,
     pub show_played_a_lot: Option<bool>,
     pub played_min_plays: Option<u32>,
     pub played_period: Option<String>,
@@ -2425,6 +2448,10 @@ impl Settings {
             self.import_sources =
                 crate::import::sources::SOURCES.iter().map(|s| s.id).filter(|id| ids.iter().any(|x| x == id)).map(String::from).collect();
         }
+        if let Some(id) = &p.streaming_client_id {
+            self.streaming_client_id = streaming_client_id(id)?;
+        }
+        set(&mut self.streaming_recheck, p.streaming_recheck);
         set(&mut self.show_played_a_lot, p.show_played_a_lot);
         set(&mut self.played_min_plays, p.played_min_plays);
         if let Some(period) = &p.played_period {
