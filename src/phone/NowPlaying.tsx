@@ -6,7 +6,7 @@
  * pull down closes, straight down to the tab underneath.
  */
 import { AudioLines, ChevronDown, ListMusic, MicVocal, MoreHorizontal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from "lucide-react";
-import { useDeferredValue, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { memo, useDeferredValue, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { preloadArt } from "../components/Art";
 import { nextInQueue } from "../shell/nowPlaying";
 import { holdLightStatusBar, mixIsDark } from "./statusBar";
@@ -78,24 +78,22 @@ export function NowPlaying() {
   return <Player track={track} closing={!open} />;
 }
 
+/**
+ * The screen itself: its tint, the cover's flight and the status bar. Closing
+ * changes only this; everything on it (PlayerBody) stays as it is drawn, so
+ * the first frame of the close is one class.
+ */
 function Player({ track, closing }: { track: Track; closing: boolean }) {
-  const ctx = usePlayer((s) => s.state?.queue.context ?? null);
-  const source = usePlayer((s) => s.state?.queue.current?.source);
-  const status = usePlayer((s) => s.state?.status ?? "idle");
   const colours = useArtColours(null, track.thumb);
-  const playing = status === "playing" || status === "loading" || status === "buffering";
   const screen = useRef<HTMLElement>(null);
-  // The cards under the player follow a new song a moment later, in pieces that give way to the screen.
-  const below = useDeferredValue(track);
   useCoverFlight(screen, closing);
-  // The visualizer in the cover's place, when its button is on.
-  const visButton = useSettings((s) => s.settings?.visualizerButton !== false);
-  const vis = usePhoneVis((s) => s.open) && visButton;
   // Over a dark cover colour the top of the screen is dark even on the light look: light status bar text then.
   const vivid = colours?.vivid ?? null;
   useEffect(() => {
     if (closing || document.documentElement.dataset.themeBase !== "light" || !mixIsDark(vivid, NP_TOP_TINT)) return;
-    return holdLightStatusBar();
+    const release = holdLightStatusBar();
+    // Closing, the status bar changes once the screen has gone, not under the slide.
+    return () => void (usePhoneUi.getState().nowPlaying ? release() : setTimeout(release, CLOSE_MS));
   }, [vivid, closing]);
   // The pull down writes its transform and is-dragging straight onto the screen (CoverDeck).
   const style = { "--ph-tint": colours?.vivid ?? "var(--color-bg-overlay)" } as CSSProperties;
@@ -108,97 +106,112 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
       aria-label="Now playing"
       style={style}
     >
-      <div className="ph-np__scroll">
-        <div className="ph-np__player">
-          <header className="ph-np__top">
-            <button type="button" className="ph-icon-btn" aria-label="Close now playing" onClick={phone.closePlayer}>
-              <ChevronDown size={28} aria-hidden="true" />
-            </button>
-            <div className="ph-np__from">
-              <span className="ph-np__from-label">Playing from</span>
-              <span className="ph-np__from-name">{playingFrom(ctx, source)}</span>
-            </div>
-            <button type="button" className="ph-icon-btn" aria-label="More for this song" onClick={() => phone.push({ kind: "track", track })}>
-              <MoreHorizontal size={24} aria-hidden="true" />
-            </button>
-          </header>
-          {vis ? (
-            <div className="ph-np__art ph-np__art--vis" data-testid="np-visualizer">
-              <VisualizerView phone />
-            </div>
-          ) : (
-            <CoverDeck screen={screen} onClose={phone.closePlayer} />
-          )}
-          <div className="ph-np__deck">
-          <div className="ph-np__meta">
-            <div className="ph-np__names">
-              <button type="button" className="ph-np__title" onClick={() => phone.go({ name: "album", id: track.albumId })}>
-                {track.title}
-              </button>
-              <span className="ph-np__artist-line">
-                <RowGlyphs trackId={track.id} />
-                <button type="button" className="ph-np__artist" aria-label={trackArtistLine(track)} onClick={() => phone.go({ name: "artist", id: track.artistId })}>
-                  <Marquee text={trackArtistLine(track)} moving={playing} />
-                </button>
-              </span>
-            </div>
-            <LikeControl track={track} />
-          </div>
-          <PhoneSeek />
-          <Transport playing={playing} />
-          <div className="ph-np__bottom">
-            <div className="ph-np__out">
-              <OutputButton />
-              <FormatPlate track={track} />
-            </div>
-            <div className="ph-np__right">
-            {visButton && (
-              <button
-                type="button"
-                className={`ph-icon-btn ${vis ? "is-on" : ""}`}
-                aria-label="Visualizer"
-                aria-pressed={vis}
-                onClick={() => {
-                  tap("selection");
-                  togglePhoneVis();
-                }}
-              >
-                <AudioLines size={22} aria-hidden="true" />
-              </button>
-            )}
-            <button
-              type="button"
-              className="ph-icon-btn"
-              aria-label="Lyrics"
-              onClick={() => {
-                tap();
-                phone.openLyrics();
-              }}
-            >
-              <MicVocal size={22} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="ph-icon-btn"
-              aria-label="Queue"
-              onClick={() => {
-                tap();
-                phone.push({ kind: "queue" });
-              }}
-            >
-              <ListMusic size={24} aria-hidden="true" />
-            </button>
-            </div>
-          </div>
-          </div>
-        </div>
-        <LyricsCard track={below} />
-        <SleeveCard track={below} />
-        <CreditsCard track={below} />
-      </div>
+      <PlayerBody track={track} screen={screen} />
     </section>
   );
 }
+
+const PlayerBody = memo(function PlayerBody({ track, screen }: { track: Track; screen: RefObject<HTMLElement | null> }) {
+  const ctx = usePlayer((s) => s.state?.queue.context ?? null);
+  const source = usePlayer((s) => s.state?.queue.current?.source);
+  const status = usePlayer((s) => s.state?.status ?? "idle");
+  const playing = status === "playing" || status === "loading" || status === "buffering";
+  // The cards under the player follow a new song a moment later, in pieces that give way to the screen.
+  const below = useDeferredValue(track);
+  // The visualizer in the cover's place, when its button is on.
+  const visButton = useSettings((s) => s.settings?.visualizerButton !== false);
+  const vis = usePhoneVis((s) => s.open) && visButton;
+  return (
+    <div className="ph-np__scroll">
+      <div className="ph-np__player">
+        <header className="ph-np__top">
+          <button type="button" className="ph-icon-btn" aria-label="Close now playing" onClick={phone.closePlayer}>
+            <ChevronDown size={28} aria-hidden="true" />
+          </button>
+          <div className="ph-np__from">
+            <span className="ph-np__from-label">Playing from</span>
+            <span className="ph-np__from-name">{playingFrom(ctx, source)}</span>
+          </div>
+          <button type="button" className="ph-icon-btn" aria-label="More for this song" onClick={() => phone.push({ kind: "track", track })}>
+            <MoreHorizontal size={24} aria-hidden="true" />
+          </button>
+        </header>
+        {vis ? (
+          <div className="ph-np__art ph-np__art--vis" data-testid="np-visualizer">
+            <VisualizerView phone />
+          </div>
+        ) : (
+          <CoverDeck screen={screen} onClose={phone.closePlayer} />
+        )}
+        <div className="ph-np__deck">
+        <div className="ph-np__meta">
+          <div className="ph-np__names">
+            <button type="button" className="ph-np__title" onClick={() => phone.go({ name: "album", id: track.albumId })}>
+              {track.title}
+            </button>
+            <span className="ph-np__artist-line">
+              <RowGlyphs trackId={track.id} />
+              <button type="button" className="ph-np__artist" aria-label={trackArtistLine(track)} onClick={() => phone.go({ name: "artist", id: track.artistId })}>
+                <Marquee text={trackArtistLine(track)} moving={playing} />
+              </button>
+            </span>
+          </div>
+          <LikeControl track={track} />
+        </div>
+        <PhoneSeek />
+        <Transport playing={playing} />
+        <div className="ph-np__bottom">
+          <div className="ph-np__out">
+            <OutputButton />
+            <FormatPlate track={track} />
+          </div>
+          <div className="ph-np__right">
+          {visButton && (
+            <button
+              type="button"
+              className={`ph-icon-btn ${vis ? "is-on" : ""}`}
+              aria-label="Visualizer"
+              aria-pressed={vis}
+              onClick={() => {
+                tap("selection");
+                togglePhoneVis();
+              }}
+            >
+              <AudioLines size={22} aria-hidden="true" />
+            </button>
+          )}
+          <button
+            type="button"
+            className="ph-icon-btn"
+            aria-label="Lyrics"
+            onClick={() => {
+              tap();
+              phone.openLyrics();
+            }}
+          >
+            <MicVocal size={22} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="ph-icon-btn"
+            aria-label="Queue"
+            onClick={() => {
+              tap();
+              phone.push({ kind: "queue" });
+            }}
+          >
+            <ListMusic size={24} aria-hidden="true" />
+          </button>
+          </div>
+        </div>
+        </div>
+      </div>
+      <LyricsCard track={below} />
+      <SleeveCard track={below} />
+      <CreditsCard track={below} />
+    </div>
+  );
+});
 
 /**
  * The small cover now playing grows from: the mini player's, or on Home

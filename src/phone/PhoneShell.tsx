@@ -5,7 +5,7 @@
  * desktop uses; nothing here talks to a server.
  */
 import { CircleUserRound, Home, Library, Search } from "lucide-react";
-import { Suspense, useEffect, useRef } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { backend } from "../lib/backend";
 import { afterFirstPaint } from "../lib/idle";
 import { SettingsPage } from "../shell/lazyPages";
@@ -14,12 +14,12 @@ import { startLyricsTrust } from "../shell/lyrics";
 import { useLibraryRecents } from "../shell/useLibrary";
 import { startDownloads } from "../stores/downloads";
 import { loadOwnLyricsIds } from "../stores/lyricsEditor";
-import { useCurrentEntry, type Route } from "../stores/router";
+import { useCurrentEntry, type HistoryEntry, type Route } from "../stores/router";
 import { usePlayer } from "../stores/player";
 import { tap } from "./bits";
 import { LyricsScreen } from "./LyricsScreen";
 import { MiniPlayer } from "./MiniPlayer";
-import { NowPlaying } from "./NowPlaying";
+import { CLOSE_MS, NowPlaying } from "./NowPlaying";
 import { PhoneAlbum } from "./pages/Album";
 import { PhoneArtist } from "./pages/Artist";
 import { BackBar, PageLoading } from "./pages/common";
@@ -50,6 +50,14 @@ export function PhoneShell() {
   const entry = useCurrentEntry();
   const tab = usePhoneUi((s) => s.tab);
   const playerOpen = usePhoneUi((s) => s.nowPlaying);
+  // The pages stay inert until now playing has slid off them: lifting it restyles every page, which mustn't land in the slide.
+  const [stillCovered, setStillCovered] = useState(playerOpen);
+  useEffect(() => {
+    if (playerOpen) return setStillCovered(true);
+    const t = setTimeout(() => setStillCovered(false), CLOSE_MS);
+    return () => clearTimeout(t);
+  }, [playerOpen]);
+  const inertUnder = playerOpen || stillCovered;
   const hasTrack = usePlayer((s) => !!s.state?.track);
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => (root.current ? installTapGuard(root.current) : undefined), []);
@@ -68,10 +76,10 @@ export function PhoneShell() {
   }, [entry.route]);
   return (
     <div ref={root} className={`phone ${hasTrack ? "has-mini" : ""} ${NOTCH ? "ph-notch" : ""}`} data-testid="phone-shell" data-tab={tab}>
-      <main className="ph-main" aria-hidden={playerOpen || undefined} inert={playerOpen || undefined}>
-        <PageStack render={(e) => <PhonePage route={e.route} />} />
+      <main className="ph-main" aria-hidden={playerOpen || undefined} inert={inertUnder || undefined}>
+        <PageStack render={renderPage} />
       </main>
-      <div ref={dock} className="ph-dock" aria-hidden={playerOpen || undefined} inert={playerOpen || undefined}>
+      <div ref={dock} className="ph-dock" aria-hidden={playerOpen || undefined} inert={inertUnder || undefined}>
         <MiniPlayer />
         <nav className="ph-tabs" aria-label="Tabs">
           {TABS.map((t) => {
@@ -102,6 +110,8 @@ export function PhoneShell() {
     </div>
   );
 }
+
+const renderPage = (e: HistoryEntry) => <PhonePage route={e.route} />;
 
 /** The page for a route. Pages that have no phone version yet say so plainly. */
 export function PhonePage({ route }: { route: Route }) {

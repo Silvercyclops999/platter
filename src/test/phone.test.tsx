@@ -5,6 +5,7 @@
  * seek on a tap, and the phone's settings.
  */
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { Profiler } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { backend } from "../lib/backend";
@@ -20,6 +21,7 @@ import { inLibraryLine, topByPlays } from "../phone/pages/Artist";
 import { topGenres } from "../phone/pages/Playlist";
 import { dockInset } from "../phone/dockInset";
 import { PhoneShell } from "../phone/PhoneShell";
+import { CLOSE_MS } from "../phone/NowPlaying";
 import { phone, usePhoneUi } from "../phone/phoneUi";
 import { dropIndex } from "../phone/Sheets";
 import { cancelSleep, due, sleepLabel, startSleep, useSleep } from "../phone/sleepTimer";
@@ -315,6 +317,51 @@ describe("artwork gestures", () => {
     const long = drag(art, [200, 200], [200, 450], 1000);
     long.up();
     expect(usePhoneUi.getState().nowPlaying).toBe(false);
+  });
+
+  it("a drag draws nothing new while the finger moves: only the transform changes", async () => {
+    const commits: string[] = [];
+    play(tracks()[0], { status: "playing" });
+    render(
+      <Profiler id="phone" onRender={(_id, phase) => commits.push(phase)}>
+        <PhoneShell />
+      </Profiler>,
+    );
+    act(() => phone.openPlayer());
+    const art = await screen.findByTestId("np-art");
+    Object.defineProperty(art, "clientWidth", { value: 400, configurable: true });
+    const np = screen.getByRole("dialog", { name: "Now playing" });
+    Object.defineProperty(np, "clientHeight", { value: 800, configurable: true });
+    await act(async () => {});
+    commits.length = 0;
+    const pull = drag(art, [200, 200], [200, 300], 1000);
+    expect(np.style.transform).toBe("translateY(100px)");
+    expect(np).toHaveClass("is-dragging");
+    const swipe = drag(art, [300, 400], [250, 400], 1000);
+    expect(commits).toEqual([]);
+    swipe.up();
+    pull.up();
+  });
+
+  it("closing leaves the pages inert until now playing has slid off them", async () => {
+    play(tracks()[0], { status: "playing" });
+    render(<PhoneShell />);
+    act(() => phone.openPlayer());
+    await screen.findByTestId("np-art");
+    const main = document.querySelector(".ph-main")!;
+    expect(main).toHaveAttribute("inert");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      act(() => phone.closePlayer());
+      // Back in reach for assistive tech at once, but restyling the pages waits for the slide.
+      expect(main).not.toHaveAttribute("aria-hidden");
+      expect(main).toHaveAttribute("inert");
+      expect(screen.getByRole("dialog", { name: "Now playing", hidden: true })).toHaveClass("is-closing");
+      act(() => void vi.advanceTimersByTime(CLOSE_MS));
+      expect(main).not.toHaveAttribute("inert");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
