@@ -126,7 +126,7 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 # iPhone: the audio session, so music plays with the ringer switch on silent
 # and keeps playing when the screen locks.
 [target.'cfg(target_os = "ios")'.dependencies]
-objc2-avf-audio = { version = "0.3.2", default-features = false, features = ["std", "AVAudioSession", "AVAudioSessionTypes"] }
+objc2-avf-audio = { version = "0.3.2", default-features = false, features = ["std", "AVAudioSession", "AVAudioSessionTypes", "AVAudioSessionRoute"] }
 # Lock screen and Control Centre: now-playing info and the remote commands.
 objc2 = "0.6"
 block2 = "0.6"
