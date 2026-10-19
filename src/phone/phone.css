@@ -47,6 +47,7 @@
 .phone.ph-notch::after { content: ""; position: absolute; left: 50%; z-index: 200; transform: translateX(-50%); pointer-events: none; border-radius: 999px; }
 .phone.ph-notch::before { top: 11px; width: 124px; height: 36px; background: #000; }
 .phone.ph-notch::after { bottom: 8px; width: 136px; height: 5px; background: color-mix(in srgb, var(--color-text-primary) 85%, transparent); }
+/* A stand-in until the shell measures the dock (phone/dockInset.ts sets --ph-dock-h on .phone). */
 .phone.has-mini { --ph-dock-h: calc(var(--ph-tabs-h) + var(--ph-mini-h) + 8px + var(--ph-safe-bottom)); }
 :where(.phone) button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: inherit; }
 :where(.phone) button:disabled { cursor: default; opacity: 0.45; }

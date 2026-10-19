@@ -30,6 +30,7 @@ import { PhoneLiked, PhonePlaylist } from "./pages/Playlist";
 import { PhoneSearch } from "./pages/Search";
 import { PhoneYou } from "./pages/You";
 import { notchFromUrl } from "./form";
+import { followDock } from "./dockInset";
 import { installTapGuard } from "./gestures";
 import { TABS, phone, tabOf, usePhoneUi, type PhoneTab } from "./phoneUi";
 import { PageStack } from "./PageStack";
@@ -50,6 +51,9 @@ export function PhoneShell() {
   const hasTrack = usePlayer((s) => !!s.state?.track);
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => (root.current ? installTapGuard(root.current) : undefined), []);
+  // Pages pad their foot by what the dock really covers (mini player or not).
+  const dock = useRef<HTMLDivElement>(null);
+  useEffect(() => (root.current && dock.current ? followDock(root.current, dock.current) : undefined), [hasTrack]);
   useLibraryRecents();
   useEffect(() => void loadOwnLyricsIds(), []);
   useEffect(() => void startDownloads(), []);
@@ -65,7 +69,7 @@ export function PhoneShell() {
       <main className="ph-main" aria-hidden={playerOpen || undefined} inert={playerOpen || undefined}>
         <PageStack render={(e) => <PhonePage route={e.route} />} />
       </main>
-      <div className="ph-dock" aria-hidden={playerOpen || undefined} inert={playerOpen || undefined}>
+      <div ref={dock} className="ph-dock" aria-hidden={playerOpen || undefined} inert={playerOpen || undefined}>
         <MiniPlayer />
         <nav className="ph-tabs" aria-label="Tabs">
           {TABS.map((t) => {

@@ -18,6 +18,7 @@ import { anchorTarget, PHONE_ANCHOR } from "../phone/lyricsFollow";
 import { cardWindow } from "../phone/LyricsScreen";
 import { inLibraryLine, topByPlays } from "../phone/pages/Artist";
 import { topGenres } from "../phone/pages/Playlist";
+import { dockInset } from "../phone/dockInset";
 import { PhoneShell } from "../phone/PhoneShell";
 import { phone, usePhoneUi } from "../phone/phoneUi";
 import { dropIndex } from "../phone/Sheets";
@@ -124,6 +125,26 @@ describe("mini player and now playing", () => {
     expect(within(np).getByText(remaining(30_000, t.durationMs))).toBeInTheDocument();
     fireEvent.click(within(np).getByRole("button", { name: "Close now playing" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Now playing" })).not.toBeInTheDocument());
+  });
+
+  it("pages pad their foot by what the dock covers, with the mini player and without", async () => {
+    // A dock 90 px high with only the tabs (and the home indicator), 72 more with the mini player.
+    const real = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (!this.classList.contains("ph-dock")) return real.call(this);
+      const h = 90 + (this.querySelector(".ph-mini") ? 72 : 0);
+      return { x: 0, y: 844 - h, left: 0, top: 844 - h, width: 390, height: h, right: 390, bottom: 844, toJSON: () => ({}) } as DOMRect;
+    });
+    act(() => usePlayer.setState({ state: null }));
+    render(<PhoneShell />);
+    const shell = screen.getByTestId("phone-shell");
+    expect(shell.style.getPropertyValue("--ph-dock-h")).toBe("90px");
+    play(tracks()[0]);
+    await waitFor(() => expect(shell.style.getPropertyValue("--ph-dock-h")).toBe("162px"));
+    act(() => usePlayer.setState({ state: null }));
+    await waitFor(() => expect(shell.style.getPropertyValue("--ph-dock-h")).toBe("90px"));
+    expect(dockInset(0)).toBeNull();
+    expect(dockInset(161.2)).toBe("162px");
   });
 
   it("now playing marks an explicit, downloaded song with the row glyphs before the artist, not words", async () => {
