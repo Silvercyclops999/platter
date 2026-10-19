@@ -17,7 +17,7 @@ function Group({ title, mixes }: { title: string; mixes: MixSummary[] }) {
       <h2 className="ph-section-title">{title}</h2>
       <TileGrid label={title}>
         {mixes.map((m) => (
-          <Tile key={m.id} title={m.kind === "daylist" ? "daylist" : m.title} sub={m.kind === "daylist" ? "Your day in a playlist" : m.description} art={<MixArt mix={m} size={320} />} onOpen={() => openMix(m)} />
+          <Tile key={m.id} title={m.kind === "daylist" ? "daylist" : m.title} sub={m.kind === "daylist" ? "Your day in a playlist" : m.description} art={<MixArt mix={m} size={320} named={false} />} onOpen={() => openMix(m)} />
         ))}
       </TileGrid>
     </section>

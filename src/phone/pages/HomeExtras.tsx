@@ -23,7 +23,8 @@ export function HomeMixes() {
       {list.slice(0, 12).map((m) => (
         <button key={m.id} type="button" className="ph-card-tile ph-mix-tile" onClick={() => openMix(m)}>
           <span className="ph-mix-tile__art">
-            <MixArt mix={m} size={272} />
+            {/* The name is printed once, under the cover. */}
+            <MixArt mix={m} size={272} named={false} />
           </span>
           <span className="ph-card-tile__title">{m.kind === "daylist" ? "daylist" : m.title}</span>
           <span className="ph-card-tile__sub">{m.kind === "daylist" ? "Your day in a playlist" : m.description}</span>

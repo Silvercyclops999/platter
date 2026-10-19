@@ -27,16 +27,17 @@ export function openMix(mix: Pick<MixSummary, "id" | "kind">) {
 /**
  * A mix's art: the leading artist's photo, toned, with a coloured strip
  * holding the mix's name (a cover collage when there's no photo). The
- * daylist is a soft gradient instead.
+ * daylist is a soft gradient instead. `named` false leaves the name off
+ * the art, for a tile that prints it under the cover.
  */
-export function MixArt({ mix, size = 200 }: { mix: MixSummary; size?: number }) {
+export function MixArt({ mix, size = 200, named = true }: { mix: MixSummary; size?: number; named?: boolean }) {
   // A photo that fails to load falls back to the cover collage.
   const [failedPhoto, setFailedPhoto] = useState<string | null>(null);
   if (mix.kind === "daylist") {
     const [a, b] = daylistGradient(new Date().getHours());
     return (
       <span className="mix-art mix-art--daylist" style={{ "--mix-a": a, "--mix-b": b } as CSSProperties} aria-hidden="true">
-        <span className="mix-art__daylist">daylist</span>
+        {named && <span className="mix-art__daylist">daylist</span>}
       </span>
     );
   }
@@ -59,9 +60,11 @@ export function MixArt({ mix, size = 200 }: { mix: MixSummary; size?: number }) 
           ))}
         </span>
       )}
-      <span className="mix-art__strip">
-        <span className="mix-art__name">{mix.kind === "topSongs" ? "Top Songs" : mix.title}</span>
-      </span>
+      {named && (
+        <span className="mix-art__strip">
+          <span className="mix-art__name">{mix.kind === "topSongs" ? "Top Songs" : mix.title}</span>
+        </span>
+      )}
     </span>
   );
 }
