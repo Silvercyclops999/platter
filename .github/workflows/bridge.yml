@@ -109,11 +109,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      # The Unraid template must name this release (scripts/pin-bridge-template.mjs).
+      # The Unraid template must point at this release and follow :latest
+      # (scripts/pin-bridge-template.mjs), so Unraid offers each new release.
       - name: Template pinned to this release
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          grep -q "platter-bridge:$VERSION<" docker/bridge/platter-bridge.xml
+          grep -q "platter-bridge:latest<" docker/bridge/platter-bridge.xml
           grep -q "/platter/v$VERSION/docker/bridge/platter-bridge.xml" docker/bridge/platter-bridge.xml
       - uses: actions/download-artifact@v4
         with:

@@ -120,6 +120,16 @@ The full file, pinned to the current release, is in
 The template runs the container as `99:100` (Unraid's usual owner for
 appdata and shares).
 
+## Updates
+
+The image follows `:latest`, and a new one comes out with every Platter release. On
+Unraid the Docker tab shows "update ready" for it, and the Auto Update Applications
+plugin from Community Applications can apply updates on a schedule like your other
+containers. With Docker Compose or `docker run`, Watchtower does the same, or run
+`docker pull` and recreate the container yourself. The Bridge never updates itself:
+that would mean giving it control of Docker on your server. Pairing, settings and
+progress live in the appdata folder, so an update keeps them.
+
 ## The music folder
 
 With a music folder mounted, the Bridge needs to know which of Plex's

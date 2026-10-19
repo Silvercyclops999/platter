@@ -23,7 +23,9 @@ let wrong = 0;
 for (const f of files) {
   const p = path.join(root, f);
   const was = readFileSync(p, "utf8");
-  const now = was.replace(image, `$1:${version}`).replace(templateUrl, `$1v${version}$2`);
+  // The image follows :latest so Unraid (and Watchtower) can see and apply new
+  // releases; only the template's own address is pinned to the release tag.
+  const now = was.replace(image, "$1:latest").replace(templateUrl, `$1v${version}$2`);
   if (!/ghcr\.io\/silvercyclops999\/platter-bridge:/.test(was)) {
     console.error(`${f}: no platter-bridge image to pin`);
     wrong++;

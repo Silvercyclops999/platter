@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>platter-bridge</Name>
-  <Repository>ghcr.io/silvercyclops999/platter-bridge:0.2.30</Repository>
+  <Repository>ghcr.io/silvercyclops999/platter-bridge:latest</Repository>
   <Registry>https://github.com/Silvercyclops999/platter/pkgs/container/platter-bridge</Registry>
   <Network>bridge</Network>
   <MyIP/>
