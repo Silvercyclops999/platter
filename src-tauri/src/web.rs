@@ -227,7 +227,10 @@ impl Web for ReqwestWeb {
             .headers()
             .get(reqwest::header::RETRY_AFTER)
             .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.trim().parse().ok());
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            // A day at most: a server can't park a caller for years, or
+            // overflow the time it computes from this.
+            .map(|s| s.min(24 * 3600));
         let body = body_capped(resp, WEB_MAX, |e| AppError::Network(e.without_url().to_string())).await?;
         Ok(HttpResponse { status, body, retry_after, ..Default::default() })
     }

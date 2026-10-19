@@ -319,7 +319,10 @@ impl AccountImport {
 
     fn set_phase(&self, p: Phase) {
         let p = match p {
-            Phase::Failed(Fail::RateLimited(secs)) => Phase::Limited(self.now() + secs as i64 * 1000),
+            Phase::Failed(Fail::RateLimited(secs)) => {
+                let wait = i64::try_from(secs.min(24 * 3600)).unwrap_or(0).saturating_mul(1000);
+                Phase::Limited(self.now().saturating_add(wait))
+            }
             p => p,
         };
         *self.0.phase.lock() = p;

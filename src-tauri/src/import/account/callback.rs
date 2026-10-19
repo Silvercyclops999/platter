@@ -150,10 +150,10 @@ pub async fn wait(listener: TcpListener, expected_state: &str, wait: Duration, c
                     "The sign-in page didn't sign you in. Try again.".into()
                 }));
             }
-            Answer::WrongState => {
-                reply(&mut s, "400 Bad Request", REFUSED_PAGE).await;
-                return Err(Fail::Refused("That sign-in answer wasn't for this sign-in, so it was refused. Try again.".into()));
-            }
+            // Not this sign-in's answer (another page or program poking the
+            // port): refuse it and keep waiting for the real one, so it
+            // can't cut a sign-in short.
+            Answer::WrongState => reply(&mut s, "400 Bad Request", REFUSED_PAGE).await,
         }
     }
 }

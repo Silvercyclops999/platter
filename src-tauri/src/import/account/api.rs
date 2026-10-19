@@ -122,9 +122,18 @@ impl Api {
         if r.ok() {
             let t: TokenAnswer = serde_json::from_slice(&r.body).map_err(|_| Fail::Other("The sign-in answer couldn't be read.".into()))?;
             let access = Token::new(t.access_token).map_err(|_| Fail::Other("The sign-in answer had no access token.".into()))?;
+            // Signed out or stopped while this was on its way: keep nothing.
+            if self.cancel.load(Ordering::SeqCst) {
+                return Err(Fail::Stopped);
+            }
             if let Some(rt) = t.refresh_token.filter(|s| !s.trim().is_empty()) {
                 let rt = Token::new(rt).map_err(|e| Fail::Other(e.to_string()))?;
-                self.keys.set(REFRESH_ACCOUNT, &rt).map_err(|e| Fail::Other(format!("Couldn't keep the sign-in in the keychain: {e}")))?;
+                if let Err(e) = self.keys.set(REFRESH_ACCOUNT, &rt) {
+                    // The old token was likely retired by the rotation: drop
+                    // it too, so the next read asks to sign in again cleanly.
+                    let _ = self.forget();
+                    return Err(Fail::Other(format!("Couldn't keep the sign-in in the keychain: {e}")));
+                }
             }
             let life = t.expires_in.unwrap_or(3600).max(60);
             let until = (self.clock)() + (life - 30) * 1000;

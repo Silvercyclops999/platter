@@ -84,7 +84,12 @@ async fn rig() -> Rig {
                 let target = match b {
                     Browser::Allow => format!("{redirect}?code=the-code&state={state}"),
                     Browser::Deny => format!("{redirect}?error=access_denied&state={state}"),
-                    Browser::WrongState => format!("{redirect}?code=the-code&state=someone-elses"),
+                    Browser::WrongState => {
+                        // Something else pokes the port first; the real answer follows.
+                        let poke = c.get(format!("{redirect}?code=not-yours&state=someone-elses")).send().await.unwrap();
+                        assert_eq!(poke.status(), 400);
+                        format!("{redirect}?code=the-code&state={state}")
+                    }
                     Browser::Nothing => return,
                 };
                 let page = c.get(target).send().await.unwrap();
@@ -288,13 +293,14 @@ async fn saying_no_on_the_sign_in_page_is_refused() {
 }
 
 #[tokio::test]
-async fn an_answer_with_another_state_is_refused() {
+async fn an_answer_with_another_state_is_refused_and_the_real_one_still_signs_in() {
     let r = rig().await;
+    r.token_answers("acc-1", Some("ref-1")).await;
     *r.browser.lock() = Browser::WrongState;
     let st = r.acct.sign_in().await;
-    assert_eq!(st.state, State::Refused);
-    assert!(st.message.unwrap().contains("wasn't for this sign-in"));
-    assert_eq!(r.requests_to("/api/token").await, 0, "the code is never traded");
+    assert_eq!(st.state, State::Connected, "{st:?}");
+    // Only the real code was traded, once.
+    assert_eq!(r.requests_to("/api/token").await, 1);
 }
 
 #[tokio::test]
