@@ -1989,6 +1989,7 @@ pub fn run() {
             homeside::commands::bridge_overview,
             homeside::commands::bridge_pair_start,
             homeside::commands::bridge_pair_cancel,
+            homeside::commands::bridge_join,
             homeside::commands::bridge_unpair,
             homeside::commands::bridge_queued_apply,
             homeside::commands::bridge_queued_dismiss,

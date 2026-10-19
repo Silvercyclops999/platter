@@ -1,6 +1,7 @@
 //! Platter Bridge: Platter's home side without a window, for a server or a
 //! container (docs/BRIDGE.md). `platter-bridge` runs it; `platter-bridge
-//! health` asks a running one whether it's well (Docker's healthcheck).
+//! health` asks a running one whether it's well (Docker's healthcheck);
+//! `platter-bridge status` prints what it's doing and its pair code.
 
 use std::sync::Arc;
 
@@ -19,6 +20,18 @@ fn main() {
     if args.get(1).map(String::as_str) == Some("health") {
         let ok = rt.block_on(health::check(env.health_port));
         std::process::exit(if ok { 0 } else { 1 });
+    }
+    if args.get(1).map(String::as_str) == Some("status") {
+        match rt.block_on(health::status(env.health_port)) {
+            Some(text) => {
+                print!("{text}");
+                std::process::exit(0);
+            }
+            None => {
+                eprintln!("The Bridge isn't running here (nothing answered on 127.0.0.1:{}).", env.health_port);
+                std::process::exit(1);
+            }
+        }
     }
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_env("BRIDGE_LOG").unwrap_or_else(|_| "info,platter_lib::db=warn".into()))
@@ -44,13 +57,10 @@ async fn start(env: run::Env) -> i32 {
         platter_lib::homeside::wire::MusicAccess::ReadOnly => "mounted read-only, so additions wait for a desktop",
         platter_lib::homeside::wire::MusicAccess::None => "not mounted, so additions wait for a desktop",
     });
-    let plex = parts.plex.clone();
-    let bridge = run::Bridge::new(parts);
-    if let Some(p) = plex
-        && let Err(e) = p.restore().await
-    {
-        tracing::info!("Plex: {e}");
+    if !parts.env.set_here().is_empty() {
+        tracing::info!("Using the Bridge's own settings for: {}. What a computer sends for these is ignored.", parts.env.set_here().join(", "));
     }
+    let bridge = run::Bridge::new(parts);
     let h = bridge.clone();
     tokio::spawn(async move {
         if let Err(e) = health::serve(h, port).await {

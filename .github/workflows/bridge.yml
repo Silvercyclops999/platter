@@ -59,13 +59,20 @@ jobs:
       - name: Start it once
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: |
-          docker run -d --name bridge platter-bridge:check
+          # Started from its own settings, with no computer and no code.
+          docker run -d --name bridge -e LIDARR_URL=http://10.20.30.40:8686 -e LIDARR_API_KEY=checkonly0000 platter-bridge:check
           for i in $(seq 1 30); do
             docker logs bridge 2>&1 | grep -q "Not paired yet" && break
             sleep 2
           done
           docker logs bridge
           docker logs bridge 2>&1 | grep -q "Not paired yet"
+          docker logs bridge 2>&1 | grep -q "Using the Bridge's own settings for: lidarrUrl, lidarrKey"
+          ! docker logs bridge 2>&1 | grep -q "checkonly0000"
+          # Its own pair code, in the log and on the status page.
+          docker logs bridge 2>&1 | grep -q "PBB-"
+          docker exec bridge platter-bridge status
+          docker exec bridge platter-bridge status | grep -q "Pair code"
           docker exec bridge platter-bridge health
           test "$(docker exec bridge id -u)" != "0"
           test -z "$(docker port bridge)"
@@ -101,6 +108,13 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v4
+      # The Unraid template must name this release (scripts/pin-bridge-template.mjs).
+      - name: Template pinned to this release
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          grep -q "platter-bridge:$VERSION<" docker/bridge/platter-bridge.xml
+          grep -q "/platter/v$VERSION/docker/bridge/platter-bridge.xml" docker/bridge/platter-bridge.xml
       - uses: actions/download-artifact@v4
         with:
           pattern: digest-*

@@ -5152,7 +5152,16 @@ export interface BridgeStatus {
   plex: boolean;
   lidarr: boolean;
   problem: string | null;
+  /** Settings set on the Bridge itself, which win over what this computer sends. */
+  fromEnv: BridgeEnvSetting[];
+  /** Waiting to be let into Plex: the code for plex.tv/link. */
+  plexLink: string | null;
+  /** What MUSIC_PLEX_PATH should be on the Bridge, when it isn't that. */
+  musicPlexPath: string | null;
 }
+
+/** A setting given to the Bridge in its own environment. */
+export type BridgeEnvSetting = "lidarrUrl" | "lidarrKey" | "plexUrl" | "plexToken" | "musicPlexPath";
 
 /** A paired Bridge. */
 export interface BridgeInfo {

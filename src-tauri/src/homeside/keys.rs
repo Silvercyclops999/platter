@@ -1,6 +1,7 @@
-//! The Bridge's secrets (the link secret, Lidarr's key, the Plex token) in
-//! one file on its data volume that only the Bridge's user can read. There
-//! is no keychain inside a container.
+//! The Bridge's secrets (the link secret, Lidarr's key, its Plex sign-in)
+//! in one file on its data volume that only the Bridge's user can read
+//! (0600, put right again if it was ever looser). There is no keychain
+//! inside a container. Nothing secret is kept anywhere else on the volume.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -22,16 +23,34 @@ impl FileKeys {
     }
 
     fn load(&self) -> BTreeMap<String, String> {
+        keep_private(&self.path);
         std::fs::read_to_string(&self.path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
     }
 
     fn save(&self, map: &BTreeMap<String, String>) -> AppResult<()> {
         let json = serde_json::to_string(map).map_err(|e| AppError::Internal(e.to_string()))?;
         let tmp = self.path.with_extension("tmp");
+        let _ = std::fs::remove_file(&tmp);
         write_private(&tmp, json.as_bytes())?;
-        std::fs::rename(&tmp, &self.path).map_err(|_| AppError::Internal("couldn't save the keys file".into()))
+        std::fs::rename(&tmp, &self.path).map_err(|_| AppError::Internal("couldn't save the keys file".into()))?;
+        keep_private(&self.path);
+        Ok(())
     }
 }
+
+/// Only the owner may read or write the file.
+#[cfg(unix)]
+pub fn keep_private(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Ok(m) = std::fs::metadata(path)
+        && m.permissions().mode() & 0o077 != 0
+    {
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+}
+
+#[cfg(not(unix))]
+pub fn keep_private(_path: &std::path::Path) {}
 
 #[cfg(unix)]
 fn write_private(path: &std::path::Path, bytes: &[u8]) -> AppResult<()> {
@@ -44,6 +63,7 @@ fn write_private(path: &std::path::Path, bytes: &[u8]) -> AppResult<()> {
         .mode(0o600)
         .open(path)
         .map_err(|_| AppError::Internal("couldn't write the keys file".into()))?;
+    keep_private(path);
     f.write_all(bytes).map_err(|_| AppError::Internal("couldn't write the keys file".into()))
 }
 

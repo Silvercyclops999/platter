@@ -285,7 +285,7 @@ async fn a_desktop_and_a_bridge_pair_and_talk_only_in_sealed_messages() {
     // The desktop hears the Bridge and sends how to reach Lidarr, sealed.
     until("the Bridge's settings", || crate::settings::load(&b.db).lidarr_url == LIDARR_URL).await;
     until("the Lidarr key on the Bridge", || b.lidarr.status().has_key).await;
-    assert_eq!(b.keys.get(ACCOUNT_TOKEN).unwrap().unwrap().expose(), PLEX_TOKEN);
+    assert!(b.keys.get(ACCOUNT_TOKEN).unwrap().is_none(), "the Plex account's sign-in never reaches the Bridge");
     assert_eq!(crate::settings::load(&b.db).lidarr_staging_folder, "/data/staging/music");
     until("the Bridge in Settings", || desk.overview().bridges.first().is_some_and(|x| x.name == "Shed Bridge" && x.online)).await;
     let ov = desk.overview();
@@ -344,7 +344,7 @@ async fn the_bridge_passes_on_only_lidarr_reads_and_platters_fixed_writes() {
     let get = |p: &str| Msg::Get { id: 1, path: p.into(), query: vec![] };
     let write = |m: &str, p: &str, b: &str| Msg::Write { id: 2, method: m.into(), path: p.into(), body: b.into() };
     assert!(matches!(ask(get("/artist")).await, Some(Msg::Answer { status: 200, .. })));
-    for p in ["/../config", "artist", "/artist?x=1", "//evil", "/config/host", "/system/backup", "/log/file"] {
+    for p in ["/../config", "artist", "/artist?x=1", "//evil", "/config/host", "/system/backup", "/log/file", "/indexer", "/downloadclient", "/indexer/1", "/downloadclient/2", "/filesystem"] {
         assert!(matches!(ask(get(p)).await, Some(Msg::Failed { .. })), "{p}");
     }
     // Keys never travel back.
@@ -359,6 +359,12 @@ async fn the_bridge_passes_on_only_lidarr_reads_and_platters_fixed_writes() {
     assert_eq!(web.bodies("/album/monitor"), [r#"{"albumIds":[1],"monitored":false}"#], "rebuilt from only what Platter sends");
     assert!(super::route::serve(None, "", &get("/artist")).await.is_some_and(|m| matches!(m, Msg::Failed { .. })));
     assert!(super::route::serve(Some(&home), "", &Msg::Unpair).await.is_none());
+    // Folder listings only inside Lidarr's folders, named once.
+    let fs = |q: Vec<(&str, &str)>| Msg::Get { id: 1, path: "/filesystem".into(), query: q.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() };
+    for q in [vec![("path", "/")], vec![("path", "/config")], vec![("path", "/data/staging/music/../../../config")], vec![("path", "/data/staging/music/A"), ("path", "/config")]] {
+        assert!(matches!(ask(fs(q.clone())).await, Some(Msg::Failed { .. })), "{q:?}");
+    }
+    assert!(matches!(ask(fs(vec![("path", "/data/staging/music/A")])).await, Some(Msg::Answer { .. })));
 }
 
 #[test]
@@ -463,4 +469,289 @@ async fn bring_in_my_listening_goes_to_the_bridge_sealed_and_comes_back() {
         }
     }
     let _ = stop_tx.send(true);
+}
+
+// ---------------------------------------------------------------- one-command install
+
+const ENV_LIDARR: &str = "http://10.20.30.41:8686";
+const ENV_KEY: &str = "envlidarrkey999";
+
+fn bridge_from(b: &End, env: Env, relays: Arc<dyn RelayFactory>) -> Arc<Bridge> {
+    Bridge::new(Parts {
+        env,
+        db: b.db.clone(),
+        keys: b.keys.clone(),
+        relays,
+        clock: Arc::new(super::peer::system_ms),
+        store: b.store.clone(),
+        lidarr: b.lidarr.clone(),
+        web: b.web.clone(),
+        plex: None,
+        music: MusicAccess::None,
+    })
+}
+
+fn desktop_for(d: &End, name: &'static str, relays: Arc<dyn RelayFactory>) -> Arc<Desktop> {
+    Desktop::new(DesktopDeps {
+        db: d.db.clone(),
+        keys: d.keys.clone(),
+        relays,
+        clock: Arc::new(super::peer::system_ms),
+        store: d.store.clone(),
+        lidarr: d.lidarr.clone(),
+        plex: None,
+        name: Arc::new(move || name.to_string()),
+    })
+}
+
+#[tokio::test]
+async fn the_bridge_starts_from_its_own_settings_with_no_computer_and_they_win() {
+    let tmp = tempfile::tempdir().unwrap();
+    let b = side(tmp.path(), "bridge");
+    let env = Env {
+        name: "Shed Bridge".into(),
+        lidarr_url: Some(ENV_LIDARR.into()),
+        lidarr_key: Some(ENV_KEY.into()),
+        plex_url: Some("http://10.20.30.42:32400".into()),
+        ..Default::default()
+    };
+    let bridge = bridge_from(&b, env, Arc::new(Ntfy::new().unwrap()));
+    // Lidarr is set up before any computer said anything.
+    assert_eq!(crate::settings::load(&b.db).lidarr_url, ENV_LIDARR);
+    let st = b.lidarr.status();
+    assert!(st.url_set && st.has_key);
+    assert_eq!(b.keys.get(crate::lidarr::KEY_ACCOUNT).unwrap().unwrap().expose(), ENV_KEY);
+    assert!(crate::keyhost::trusted(&b.db, crate::lidarr::KEY_ACCOUNT, ENV_LIDARR, &[ENV_LIDARR]), "the key goes only to its own address");
+    assert_eq!(bridge.status().from_env, ["lidarrUrl", "lidarrKey", "plexUrl"]);
+    // Not paired: it says how, and doesn't wait for a computer's Lidarr settings.
+    assert!(bridge.catch_up_once().await.is_none());
+    assert!(bridge.status().doing.contains("Add the Bridge"), "{}", bridge.status().doing);
+    // A computer's settings come later: the Bridge's own win, the rest is taken.
+    let cfg = super::wire::BridgeConfig {
+        desktop: "Desk".into(),
+        lidarr_url: LIDARR_URL.into(),
+        lidarr_key: Some(LIDARR_KEY.into()),
+        staging_folder: "/data/staging/music".into(),
+        ..Default::default()
+    };
+    bridge.apply_config(&cfg).await.unwrap();
+    let s = crate::settings::load(&b.db);
+    assert_eq!(s.lidarr_url, ENV_LIDARR);
+    assert_eq!(s.lidarr_staging_folder, "/data/staging/music");
+    assert_eq!(b.keys.get(crate::lidarr::KEY_ACCOUNT).unwrap().unwrap().expose(), ENV_KEY);
+}
+
+#[test]
+fn a_bridge_made_code_pairs_once_and_never_as_the_other_kind() {
+    let code = PairCode::new(Some("http://relay".into()), (NOW / 1000) as i64);
+    let text = code.bridge_text();
+    assert!(text.starts_with("PBB-"), "{text}");
+    assert_eq!(PairCode::parse_bridge_made(&text), Some(code.clone()));
+    assert!(PairCode::parse(&text).is_none(), "a Bridge's code isn't a BRIDGE_PAIR_CODE");
+    assert!(PairCode::parse_bridge_made(&code.text()).is_none());
+    // The Bridge shows it; a phone enters it.
+    let mut offer = Offer::from_bridge(code.clone(), "Shed Bridge");
+    let (j, (topic, join)) = Joining::start_to_bridge(code.clone(), "Adam's phone", "1.0", NOW).unwrap();
+    assert_eq!(topic, offer.listen_topic());
+    let ((wtopic, welcome), phone) = offer.answer(&join, NOW).unwrap();
+    assert_eq!(wtopic, j.listen_topic());
+    assert_eq!(phone.name, "Adam's phone");
+    let bridge = j.finish(&welcome, NOW).unwrap();
+    assert_eq!(bridge.name, "Shed Bridge");
+    assert_eq!(bridge.link.secret, phone.link.secret);
+    assert_eq!((phone.link.side, bridge.link.side), (Side::Bridge, Side::Desktop), "each end keeps its own role");
+    // Good once.
+    let (_, (_, again)) = Joining::start_to_bridge(code.clone(), "Someone else", "1.0", NOW).unwrap();
+    assert!(offer.answer(&again, NOW).is_none());
+    // A join of the other kind with the same code doesn't open here, and the other way round.
+    let mut offer2 = Offer::from_bridge(code.clone(), "Shed Bridge");
+    let (_, (_, desk_kind)) = Joining::start(code.clone(), "Shed", "1.0", NOW).unwrap();
+    assert!(offer2.answer(&desk_kind, NOW).is_none());
+    let mut desk_offer = Offer::new(code.clone(), "Desk");
+    let (_, (_, shown_kind)) = Joining::start_to_bridge(code, "Phone", "1.0", NOW).unwrap();
+    assert!(desk_offer.answer(&shown_kind, NOW).is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_phone_pairs_with_the_code_the_bridge_shows() {
+    let ntfy = FakeNtfy::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let relays: Arc<dyn RelayFactory> = Arc::new(Ntfy::new().unwrap());
+    // The Bridge, started from its own settings, with no code given.
+    let b = side(tmp.path(), "bridge");
+    let env = Env {
+        name: "Shed Bridge".into(),
+        relay: Some(ntfy.url.clone()),
+        lidarr_url: Some(ENV_LIDARR.into()),
+        lidarr_key: Some(ENV_KEY.into()),
+        ..Default::default()
+    };
+    let bridge = bridge_from(&b, env, relays.clone());
+    let (stop_tx, stop) = tokio::sync::watch::channel(false);
+    tokio::spawn(bridge.clone().run(stop));
+    until("the Bridge's own code", || bridge.shown_code().is_some()).await;
+    let code = bridge.shown_code().unwrap();
+    let page = super::health::status_text(&bridge);
+    assert!(page.contains(&code) && page.contains("Add the Bridge"), "{page}");
+
+    // The phone: no Lidarr of its own.
+    let p = side(tmp.path(), "phone");
+    let phone = desktop_for(&p, "Adam's phone", relays.clone());
+    tokio::spawn(phone.clone().run());
+    // The kind of code a computer makes is turned away at once, with words.
+    let wrong = PairCode::new(None, (NOW / 1000) as i64).text();
+    assert!(phone.join_bridge(&wrong).await.unwrap_err().to_string().contains("PBB-"));
+    let name = tokio::time::timeout(Duration::from_secs(30), phone.join_bridge(&code)).await.unwrap().unwrap();
+    assert_eq!(name, "Shed Bridge");
+    until("the Bridge to stop showing the code", || bridge.shown_code().is_none()).await;
+    assert_eq!(bridge.wire.links.all().len(), 1);
+    // The Bridge says hello, so the phone hears it and its music access.
+    until("the Bridge answering on the phone", || phone.overview().bridges.first().is_some_and(|x| x.online)).await;
+    let ov = phone.overview();
+    assert_eq!(ov.bridges[0].name, "Shed Bridge");
+    // Its status says which settings are its own.
+    until("the Bridge's status", || phone.overview().bridges[0].status.is_some()).await;
+    assert_eq!(phone.overview().bridges[0].status.as_ref().unwrap().from_env, ["lidarrUrl", "lidarrKey"]);
+    // Lidarr through the Bridge, which uses its own address and key.
+    b.web.route("/api/v1/system/status", None, 200, r#"{"appName": "Lidarr", "version": "2.8.2"}"#);
+    let route = phone.route().expect("a route through the Bridge");
+    let r = crate::lidarr::api::LidarrGet::get(route.as_ref(), "/system/status", &[]).await.unwrap();
+    assert_eq!(r.status, 200);
+    assert!(b.web.log.lock().iter().any(|r| r.url == format!("{ENV_LIDARR}/api/v1/system/status")));
+    // Nothing on the relay in the clear.
+    for m in ntfy.published() {
+        for secret in [ENV_KEY, ENV_LIDARR, "10.20.30.41", "Shed Bridge", "Adam's phone", &code[4..]] {
+            assert!(!m.body.contains(secret) && !m.topic.contains(secret), "{secret} travelled in the clear");
+        }
+    }
+    let _ = stop_tx.send(true);
+}
+
+#[tokio::test]
+async fn the_bridge_never_keeps_the_plex_account_sign_in() {
+    let tmp = tempfile::tempdir().unwrap();
+    // A computer sends no account sign-in, whatever it's signed in with.
+    let d = side(tmp.path(), "desk");
+    d.keys.set(ACCOUNT_TOKEN, &Token::new(PLEX_TOKEN).unwrap()).unwrap();
+    let desk = desktop_for(&d, "Desk", Arc::new(Ntfy::new().unwrap()));
+    let cfg = desk.config().await;
+    assert!(cfg.plex_token.is_none() && cfg.plex_server_token.is_none());
+    assert!(!serde_json::to_string(&cfg).unwrap().contains(PLEX_TOKEN));
+
+    // An older computer's account sign-in is never kept; a server's own token is, in the keys file.
+    let b = side(tmp.path(), "bridge");
+    let bridge = bridge_from(&b, Env { name: "Shed".into(), ..Default::default() }, Arc::new(Ntfy::new().unwrap()));
+    let old = super::wire::BridgeConfig { desktop: "Old desk".into(), plex_token: Some(PLEX_TOKEN.into()), plex_server: Some("m1".into()), ..Default::default() };
+    bridge.apply_config(&old).await.unwrap();
+    assert!(b.keys.get(ACCOUNT_TOKEN).unwrap().is_none());
+    let shared = super::wire::BridgeConfig {
+        plex_server: Some("m1".into()),
+        plex_server_token: Some("server-only-token".into()),
+        plex_connections: vec!["https://10-0-0-5.example.plex.direct:32400".into()],
+        ..Default::default()
+    };
+    bridge.apply_config(&shared).await.unwrap();
+    assert_eq!(b.keys.get(super::run::PLEX_SERVER_TOKEN).unwrap().unwrap().expose(), "server-only-token");
+    assert!(b.keys.get(ACCOUNT_TOKEN).unwrap().is_none());
+    let kv: Vec<String> = b.db.read(|c| {
+        let mut st = c.prepare("SELECT value FROM kv")?;
+        let rows = st.query_map([], |r| r.get::<_, String>(0))?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }).unwrap();
+    assert!(kv.iter().all(|v| !v.contains("server-only-token") && !v.contains(PLEX_TOKEN)), "no token in the database");
+
+    // Only a token Plex gives a server that isn't the account's own counts as narrower.
+    use crate::plex::discovery::{Connection, DiscoveredServer};
+    let account = Token::new(PLEX_TOKEN).unwrap();
+    let server = |id: &str, t: &str| DiscoveredServer {
+        machine_id: id.into(),
+        name: id.into(),
+        owned: false,
+        presence: true,
+        version: None,
+        connections: vec![Connection { uri: "https://10-0-0-5.example.plex.direct:32400".into(), kind: crate::plex::types::ConnectionKind::Local }],
+        access_token: Some(Token::new(t).unwrap()),
+    };
+    let owned = [server("m1", PLEX_TOKEN)];
+    assert!(super::run::server_only_token(&owned, &account, Some("m1")).is_none(), "an owned server's token is the account's");
+    let both = [server("m1", PLEX_TOKEN), server("m2", "shared-token")];
+    let (m, t, uris) = super::run::server_only_token(&both, &account, Some("m2")).unwrap();
+    assert_eq!((m.as_str(), t.expose(), uris.len()), ("m2", "shared-token", 1));
+    assert!(super::run::server_only_token(&both, &account, None).is_none(), "which server isn't a guess");
+}
+
+#[tokio::test]
+async fn an_existing_bridges_account_sign_in_is_given_up_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    let b = side(tmp.path(), "bridge");
+    // Left by an older desktop.
+    b.keys.set(ACCOUNT_TOKEN, &Token::new(PLEX_TOKEN).unwrap()).unwrap();
+    b.keys.set(crate::plex::keychain::SERVER_TOKEN, &Token::new(PLEX_TOKEN).unwrap()).unwrap();
+    let bridge = bridge_from(&b, Env { name: "Shed".into(), ..Default::default() }, Arc::new(Ntfy::new().unwrap()));
+    bridge.migrate_plex().await;
+    assert!(b.keys.get(ACCOUNT_TOKEN).unwrap().is_none());
+    assert!(b.keys.get(crate::plex::keychain::SERVER_TOKEN).unwrap().is_none());
+    // Once: the Bridge's own sign-in later (plex.tv/link) is kept.
+    b.keys.set(ACCOUNT_TOKEN, &Token::new("bridge-own-device-token").unwrap()).unwrap();
+    b.db.write(|c| crate::db::store::kv_set(c, super::run::PLEX_OWN_KEY, "1")).unwrap();
+    bridge.migrate_plex().await;
+    assert_eq!(b.keys.get(ACCOUNT_TOKEN).unwrap().unwrap().expose(), "bridge-own-device-token");
+}
+
+#[test]
+fn the_keys_file_is_only_for_the_bridge() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("keys.json");
+    let keys = super::keys::FileKeys::new(path.clone());
+    keys.set(ACCOUNT_TOKEN, &Token::new("t1").unwrap()).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let _ = keys.get(ACCOUNT_TOKEN).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600, "put right again");
+    }
+    assert_eq!(keys.get(ACCOUNT_TOKEN).unwrap().unwrap().expose(), "t1");
+    assert!(!path.with_extension("tmp").exists());
+}
+
+#[test]
+fn the_music_mount_is_matched_against_plexs_paths() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mount = tmp.path().join("music");
+    for f in ["Northlight/First/01.flac", "Northlight/First/02.flac", "Quiet Hours/Low/01.flac"] {
+        let p = mount.join(f);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, b"").unwrap();
+    }
+    let files: Vec<String> = ["/data/media/Music/Northlight/First/01.flac", "/data/media/Music/Northlight/First/02.flac", "/data/media/Music/Quiet Hours/Low/01.flac", "/data/media/Music/Gone/x.flac"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let got = super::run::suggest_plex_path(&files, &mount, |p| p.exists());
+    assert_eq!(got.as_deref(), Some("/data/media/Music"));
+    // Mounted one folder lower (just one artist): still the right start.
+    let low = super::run::suggest_plex_path(&files[..2], &mount.join("Northlight"), |p| p.exists());
+    assert_eq!(low.as_deref(), Some("/data/media/Music/Northlight"));
+    // Plex on Windows.
+    let win = vec![r"D:\Media\Music\Northlight\First\01.flac".to_string()];
+    assert_eq!(super::run::suggest_plex_path(&win, &mount, |p| p.exists()).as_deref(), Some(r"D:\Media\Music"));
+    // Nothing in common: no guess.
+    assert!(super::run::suggest_plex_path(&files, &tmp.path().join("empty"), |p| p.exists()).is_none());
+    assert!(super::run::suggest_plex_path(&[], &mount, |p| p.exists()).is_none());
+}
+
+#[test]
+fn the_status_page_is_plain_and_only_what_it_says() {
+    let tmp = tempfile::tempdir().unwrap();
+    let b = side(tmp.path(), "bridge");
+    let bridge = bridge_from(&b, Env { name: "<Shed>".into(), ..Default::default() }, Arc::new(Ntfy::new().unwrap()));
+    let (code, kind, page) = super::health::answer(&bridge, "GET / HTTP/1.1\r\n", 0);
+    assert_eq!((code, kind), ("200 OK", "text/html; charset=utf-8"));
+    assert!(page.contains("&lt;Shed&gt;") && !page.contains("<Shed>"), "{page}");
+    assert_eq!(super::health::answer(&bridge, "GET /status HTTP/1.1\r\n", 0).1, "text/plain; charset=utf-8");
+    assert_eq!(super::health::answer(&bridge, "GET /keys.json HTTP/1.1\r\n", 0).0, "404 Not Found");
+    assert_eq!(super::health::answer(&bridge, "POST /health HTTP/1.1\r\n", 0).0, "404 Not Found");
+    assert!(super::health::answer(&bridge, "GET /health HTTP/1.1\r\n", 0).0.starts_with("200"));
 }

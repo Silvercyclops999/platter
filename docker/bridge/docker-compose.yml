@@ -1,22 +1,30 @@
 # Platter Bridge (optional). See docs/BRIDGE.md.
 #
-# 1. In Platter on your computer: Settings > Bridge > Pair a Bridge.
-# 2. Put the code below, then `docker compose up -d`. Keep Platter open
-#    until Settings > Bridge shows the Bridge (a few seconds).
-# 3. After that the code can stay or go; it only ever works once.
+# 1. Set Lidarr's address and key below (or leave them out and open Platter
+#    on a computer at home once), then `docker compose up -d`.
+# 2. `docker logs platter-bridge` shows a pair code (PBB-...). In Platter on
+#    your computer or phone: Settings > Bridge > Add the Bridge, and enter it.
+# 3. If the log asks, open plex.tv/link and enter the code it shows, so the
+#    Bridge can read your Plex library.
 services:
   platter-bridge:
-    image: ghcr.io/silvercyclops999/platter-bridge:latest
+    image: ghcr.io/silvercyclops999/platter-bridge:0.2.29
     container_name: platter-bridge
     restart: unless-stopped
     # The user that owns ./appdata on your server (run `id` to see yours).
     user: "1000:1000"
     environment:
-      BRIDGE_PAIR_CODE: "PB1-paste-the-code-from-Platter-here"
       BRIDGE_NAME: "Platter Bridge"
       TZ: "Etc/UTC"
+      # Lidarr as the server reaches it. These win over what a computer sends.
+      # LIDARR_URL: "http://10.20.30.40:8686"
+      # LIDARR_API_KEY: "your-lidarr-api-key"
+      # Optional: Plex's address. Without PLEX_TOKEN the Bridge signs in on
+      # its own through plex.tv/link.
+      # PLEX_URL: "http://10.20.30.40:32400"
       # Optional: add new protected albums from the server.
-      # The path Plex uses for the music folder mounted at /music below:
+      # The path Plex uses for the music folder mounted at /music below (the
+      # log suggests it once the folder is mounted):
       # MUSIC_PLEX_PATH: "/data/media/Music"
       # Lidarr's staging folder, mounted at /staging below:
       # STAGING_DIR: "/staging"

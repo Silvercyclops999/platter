@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
-import { BridgeSettings, bridgeMatches } from "../pages/BridgeSettings";
+import { BridgeSettings, bridgeMatches, envList } from "../pages/BridgeSettings";
 import { LidarrWorkStatus } from "../pages/LidarrModes";
 
 const mock = backend as MockBackend;
@@ -41,6 +41,32 @@ describe("Settings > Bridge", () => {
     await user.click(within(row).getByRole("button", { name: "Unpair Platter Bridge" }));
     expect(await screen.findByRole("button", { name: "Pair a Bridge" })).toBeInTheDocument();
     expect(screen.queryByTestId("bridge-row")).toBeNull();
+  });
+
+  it("adds a Bridge from the code it shows, then says which settings are its own and what it still needs", async () => {
+    const user = userEvent.setup();
+    render(<BridgeSettings />);
+    const add = await screen.findByTestId("bridge-add");
+    expect(add).toHaveTextContent("starting with PBB-");
+    const field = within(add).getByRole("textbox", { name: "Add the Bridge" });
+    // A code of the other kind is turned away with words.
+    await user.type(field, "PB1-q3Vx8bN2kLm9TzR4wYc7HdE1fGj5sAo6pUi0eWn3vXb8yZaQk");
+    await user.click(within(add).getByRole("button", { name: "Add the Bridge" }));
+    expect(await within(add).findByRole("alert")).toHaveTextContent("starts with PBB-");
+    await user.clear(field);
+    await user.type(field, "PBB-q3Vx8bN2kLm9TzR4wYc7HdE1fGj5sAo6pUi0eWn3vXb8yZaQk{Enter}");
+    const row = await screen.findByTestId("bridge-row");
+    expect(row).toHaveTextContent("Shed Bridge");
+    expect(within(row).getByTestId("bridge-env")).toHaveTextContent("Set on the Bridge itself: Lidarr's address and Lidarr's key. It uses those, not what this computer sends.");
+    expect(within(row).getByTestId("bridge-plex-link")).toHaveTextContent("open plex.tv/link and enter K3QZ");
+    expect(within(row).getByTestId("bridge-music-path")).toHaveTextContent("MUSIC_PLEX_PATH to /data/media/Music");
+    expect(field).toHaveValue("");
+  });
+
+  it("names the Bridge's own settings plainly", () => {
+    expect(envList(["lidarrUrl"])).toBe("Lidarr's address");
+    expect(envList(["lidarrUrl", "lidarrKey", "plexToken"])).toBe("Lidarr's address, Lidarr's key and the Plex token");
+    expect(envList([])).toBe("");
   });
 
   it("shows Lidarr settings changes a Bridge queued, with exactly what it would send", async () => {

@@ -35,11 +35,23 @@ pub struct BridgeConfig {
     pub lidarr_url: String,
     #[serde(default)]
     pub lidarr_key: Option<String>,
+    /// Never sent by this build: older desktops sent the Plex account's
+    /// sign-in here. A Bridge that still holds one gives it up once
+    /// (`run::Bridge::migrate_plex`).
     #[serde(default)]
     pub plex_token: Option<String>,
     /// The Plex server (its machine id).
     #[serde(default)]
     pub plex_server: Option<String>,
+    /// That server's own access token, only when Plex gives it one that
+    /// isn't the account's sign-in (a server shared with the user). An
+    /// owned server's comes back as the account's, so it's never sent; the
+    /// Bridge signs in to Plex on its own instead.
+    #[serde(default)]
+    pub plex_server_token: Option<String>,
+    /// The server's addresses, best first, for the server token.
+    #[serde(default)]
+    pub plex_connections: Vec<String>,
     #[serde(default)]
     pub staging_folder: String,
     #[serde(default)]
@@ -100,6 +112,17 @@ pub struct BridgeStatus {
     /// Something the user should look at.
     #[serde(default)]
     pub problem: Option<String>,
+    /// Settings set on the Bridge itself (its environment), which win over
+    /// what a computer sends: `lidarrUrl`, `lidarrKey`, `plexUrl`, `plexToken`.
+    #[serde(default)]
+    pub from_env: Vec<String>,
+    /// Waiting to be let into Plex: the code to enter at plex.tv/link.
+    #[serde(default)]
+    pub plex_link: Option<String>,
+    /// What MUSIC_PLEX_PATH should be, when the music folder is mounted and
+    /// it isn't set to that.
+    #[serde(default)]
+    pub music_plex_path: Option<String>,
 }
 
 /// One message.

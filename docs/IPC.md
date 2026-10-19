@@ -2782,6 +2782,7 @@ Optional: the home side on a server (docs/BRIDGE.md). Settings > Bridge.
 | `bridge_overview` | – | `BridgeOverview` |
 | `bridge_pair_start` | – | `BridgePairStart` |
 | `bridge_pair_cancel` | – | – |
+| `bridge_join` | `{ code: string }` | the Bridge's name; `invalid` for a code that isn't one the Bridge showed (`PBB-`), `network` when the Bridge didn't answer within a minute |
 | `bridge_unpair` | `{ id: string }` | `BridgeOverview` |
 | `bridge_queued_apply` | `{ id: string }` | `BridgeOverview` |
 | `bridge_queued_dismiss` | `{ id: string }` | `BridgeOverview` |
@@ -2790,7 +2791,10 @@ Optional: the home side on a server (docs/BRIDGE.md). Settings > Bridge.
 `BridgeOverview` is `{ bridges, pairing, queued }`: each paired Bridge
 (`id`, `name`, `version`, `pairedAt`, `lastSeen`, `online`, `music`:
 `none | readOnly | readWrite`, and `status`, what it last said: `doing`,
-`lastCatchUp`, `problem`), the pair code waiting to be used (`code`,
+`lastCatchUp`, `problem`, `fromEnv`: which of `lidarrUrl`, `lidarrKey`,
+`plexUrl`, `plexToken`, `musicPlexPath` are set on the Bridge itself and win
+over what this computer sends, `plexLink`: the plex.tv/link code it waits
+on, `musicPlexPath`: what MUSIC_PLEX_PATH should be), the pair code waiting to be used (`code`,
 `expiresAt`), and Lidarr settings changes a Bridge queued instead of making
 (`what`, and the exact `method`, `path` and `body`). `bridge_queued_apply`
 makes one from this computer after the yes, through the same checks;

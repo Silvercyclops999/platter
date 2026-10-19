@@ -14,7 +14,7 @@ use tokio::sync::{Notify, mpsc, watch};
 use super::code::PairCode;
 use super::link::Link;
 use super::links::{Links, Outbox};
-use super::pair::Offer;
+use super::pair::{Joining, Offer};
 use super::peer::{self, Clock, Incoming, Wire};
 use super::route::{self, BridgeRoute, Pending};
 use super::wire::{BridgeConfig, BridgeStatus, MusicAccess, Msg};
@@ -26,7 +26,7 @@ use crate::lidarr::api::LidarrRoute;
 use crate::lidarr::homeside::QueuedWrite;
 use crate::lidarr::waves::Waves;
 use crate::plex::PlexState;
-use crate::plex::keychain::{ACCOUNT_TOKEN, TokenStore};
+use crate::plex::keychain::TokenStore;
 use crate::social::listen::relay::{RelayEvent, RelayFactory};
 use crate::sync::SyncStore;
 use crate::sync::store::LIDARR;
@@ -35,6 +35,8 @@ use crate::sync::store::LIDARR;
 /// it's alive every half hour).
 pub const ONLINE_S: i64 = 75 * 60;
 const SETTLE: Duration = Duration::from_secs(3);
+/// How long "Add the Bridge" waits for the Bridge's answer.
+pub const JOIN_WAIT: Duration = Duration::from_secs(60);
 
 fn seen_key(id: &str) -> String {
     format!("bridge.seen.{id}")
@@ -311,6 +313,54 @@ impl Desktop {
         }
     }
 
+    /// "Add the Bridge": enter the code a Bridge shows in its log. The
+    /// Bridge answers only the first device to enter it; the name it gives
+    /// is what Settings shows. Gives back that name.
+    pub async fn join_bridge(&self, raw: &str) -> AppResult<String> {
+        let code = PairCode::parse_bridge_made(raw).ok_or_else(|| {
+            AppError::Invalid(if PairCode::parse(raw).is_some() {
+                "That code is for starting a Bridge (BRIDGE_PAIR_CODE). Enter the code the Bridge shows in its log, which starts with PBB-.".into()
+            } else {
+                "That isn't a Bridge code. Copy it again from the Bridge's log: it starts with PBB-.".into()
+            })
+        })?;
+        let relay_url = code.relay.clone().unwrap_or_else(|| super::DEFAULT_RELAY.to_string());
+        let relay = self.d.relays.relay(&relay_url);
+        let (joining, (topic, body)) = Joining::start_to_bridge(code.clone(), &(self.d.name)(), super::VERSION, (self.d.clock)())?;
+        let mut rx = relay.subscribe(&[joining.listen_topic()], None).await.map_err(|e| AppError::Network(peer::relay_error(e)))?;
+        // Listening first, so the answer can't arrive before it.
+        loop {
+            match tokio::time::timeout(Duration::from_secs(10), rx.recv()).await {
+                Ok(Some(RelayEvent::Open)) => break,
+                Ok(Some(_)) => {}
+                _ => return Err(AppError::Network("The relay didn't answer.".into())),
+            }
+        }
+        relay.publish(&topic, &body).await.map_err(|e| AppError::Network(peer::relay_error(e)))?;
+        let gave_up = tokio::time::Instant::now() + JOIN_WAIT;
+        loop {
+            match tokio::time::timeout_at(gave_up, rx.recv()).await {
+                Ok(Some(RelayEvent::Message { body, .. })) if joining.is_welcome(&body, (self.d.clock)()) => {
+                    let b = joining.finish(&body, (self.d.clock)())?;
+                    self.wire.links.add(&b.link, &b.name, "", self.now_s())?;
+                    self.links_changed.notify_one();
+                    self.changed();
+                    tracing::info!("Paired with a Bridge from its own code.");
+                    return Ok(b.name);
+                }
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    rx = relay.subscribe(&[joining.listen_topic()], None).await.map_err(|e| AppError::Network(peer::relay_error(e)))?;
+                }
+                Err(_) => {
+                    return Err(AppError::Network(
+                        "The Bridge didn't answer. Check that it's running and that this is the newest code in its log (each one works once).".into(),
+                    ));
+                }
+            }
+        }
+    }
+
     /// Forget a Bridge (and tell it to forget this desktop).
     pub async fn unpair(&self, id: &str) -> AppResult<()> {
         if let Some(link) = self.wire.links.link(id) {
@@ -351,6 +401,12 @@ impl Desktop {
             Some(p) => p.machine_id().await,
             None => None,
         };
+        // Never the account's own sign-in: only a server's own token, when
+        // Plex gives it one (a server shared with this account).
+        let server_only = match &self.d.plex {
+            Some(p) => p.server_only_access().await.filter(|(m, _, _)| Some(m) == plex_server.as_ref()),
+            None => None,
+        };
         BridgeConfig {
             desktop: (self.d.name)(),
             lidarr_url: url.clone(),
@@ -359,8 +415,10 @@ impl Desktop {
             lidarr_key: crate::keyhost::trusted(&self.d.db, crate::lidarr::KEY_ACCOUNT, &url, &[&s.lidarr_url, &s.lidarr_away_url])
                 .then(|| self.d.keys.get(crate::lidarr::KEY_ACCOUNT).ok().flatten().map(|t| t.expose().to_string()))
                 .flatten(),
-            plex_token: self.d.keys.get(ACCOUNT_TOKEN).ok().flatten().map(|t| t.expose().to_string()),
+            plex_token: None,
             plex_server,
+            plex_server_token: server_only.as_ref().map(|(_, t, _)| t.expose().to_string()),
+            plex_connections: server_only.map(|(_, _, uris)| uris).unwrap_or_default(),
             staging_folder: s.lidarr_staging_folder,
             scan_after_import: s.lidarr_scan_after_import,
             free_staging: s.lidarr_free_staging,
@@ -491,6 +549,14 @@ impl Desktop {
                             }
                             self.changed();
                         } else {
+                            // Paired from the Bridge's own code and never heard from:
+                            // its hello went out before this end listened, so send
+                            // the settings and it says hello again.
+                            if self.seen(&id).last_seen.is_none()
+                                && let Some(link) = self.wire.links.link(&id)
+                            {
+                                self.send_config_to(&link, true).await;
+                            }
                             // Back in touch: the Bridge running the waves says how they went.
                             self.send_waves_plan(true).await;
                         }

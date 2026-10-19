@@ -1,15 +1,16 @@
 /**
  * Settings > Bridge: Platter Bridge, the optional home side for a server
- * (docs/BRIDGE.md). Pair one with a code, see what it's doing and when it
- * last caught up with Lidarr, unpair it, and say yes or no to Lidarr
- * settings changes it queued (it never makes those itself).
+ * (docs/BRIDGE.md). Pair one with a code made here, or add one by entering
+ * the code it shows in its log; see what it's doing and when it last caught
+ * up with Lidarr, which settings it has of its own, unpair it, and say yes
+ * or no to Lidarr settings changes it queued (it never makes those itself).
  */
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import { backend } from "../lib/backend";
 import { timeAgo } from "../lib/relativeTime";
-import type { BridgeInfo, BridgeMusicAccess, BridgeOverview } from "../lib/types";
+import type { BridgeEnvSetting, BridgeInfo, BridgeMusicAccess, BridgeOverview } from "../lib/types";
 import { toast } from "../stores/toasts";
 import "./feed-settings.css";
 import { failText } from "../lib/errorText";
@@ -17,7 +18,83 @@ import { failText } from "../lib/errorText";
 export const BRIDGE_DESCRIPTION =
   "Optional. A small Docker container for your server that does Platter's Lidarr work while no computer has Platter open: catching up after downloads, scanning just the new folders, and adding protected albums when it can reach your music folder. Platter works fully without it, and nothing is installed on your server unless you set it up. It talks to Platter only through the same sealed relay as Listen along, and opens no ports.";
 
-const SECTION_WORDS = "bridge server docker unraid container home side lidarr pair code unpair headless relay";
+const SECTION_WORDS = "bridge server docker unraid container home side lidarr pair code add unpair headless relay";
+
+const ENV_WORDS: Record<BridgeEnvSetting, string> = {
+  lidarrUrl: "Lidarr's address",
+  lidarrKey: "Lidarr's key",
+  plexUrl: "Plex's address",
+  plexToken: "the Plex token",
+  musicPlexPath: "the music folder's Plex path",
+};
+
+/** "Lidarr's address and Lidarr's key" */
+export function envList(keys: BridgeEnvSetting[]): string {
+  const words = keys.map((k) => ENV_WORDS[k]).filter(Boolean);
+  if (words.length < 2) return words.join("");
+  return `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
+}
+
+/** "Add the Bridge": enter the code a Bridge shows in its log. */
+export function AddBridge({ onAdded }: { onAdded?: () => void }) {
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const add = () => {
+    if (!code.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    backend.bridgeJoin(code.trim()).then(
+      (name) => {
+        setBusy(false);
+        setCode("");
+        toast.info(`Paired with ${name}`);
+        onAdded?.();
+      },
+      (e: unknown) => {
+        setBusy(false);
+        setError(failText("Couldn't add the Bridge", e, 300));
+      },
+    );
+  };
+  return (
+    <div className="setting-row" data-testid="bridge-add">
+      <div className="setting-row__text">
+        <div className="setting-row__title" id="bridge-add-title">
+          Add the Bridge
+        </div>
+        <p className="setting-row__desc" id="bridge-add-desc">
+          Started the Bridge without a code? While it isn't paired it shows one in its log, starting with PBB-. Enter it here, on a computer or your phone. It works once, for an hour.
+        </p>
+        <input
+          className="setting-text"
+          value={code}
+          placeholder="PBB-..."
+          spellCheck={false}
+          autoCapitalize="off"
+          autoComplete="off"
+          aria-labelledby="bridge-add-title"
+          aria-describedby="bridge-add-desc"
+          onChange={(e) => setCode(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
+          }}
+        />
+        {error && (
+          <p className="info-key__error" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+      <Button size="sm" variant="primary" disabled={busy || !code.trim()} onClick={add}>
+        {busy ? "Waiting for the Bridge" : "Add the Bridge"}
+      </Button>
+    </div>
+  );
+}
 
 export function bridgeMatches(query: string): boolean {
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -65,6 +142,21 @@ function BridgeRow({ b, onUnpair }: { b: BridgeInfo; onUnpair: () => void }) {
               : `Last catch-up ${timeAgo(last.at)}: ${last.handled} Lidarr ${last.handled === 1 ? "event" : "events"}, ${last.acted} acted on${last.announced.length ? `, new: ${last.announced.join(", ")}` : ""}.`
             : "No catch-up yet."}
         </p>
+        {st && st.fromEnv.length > 0 && (
+          <p className="setting-row__desc" data-testid="bridge-env">
+            Set on the Bridge itself: {envList(st.fromEnv)}. It uses those, not what this computer sends.
+          </p>
+        )}
+        {st?.plexLink && (
+          <p className="setting-row__desc" data-testid="bridge-plex-link">
+            To let it read your Plex library, open plex.tv/link and enter <code>{st.plexLink}</code>.
+          </p>
+        )}
+        {st?.musicPlexPath && (
+          <p className="setting-row__desc" data-testid="bridge-music-path">
+            Its music folder matches Plex's {st.musicPlexPath}. Set MUSIC_PLEX_PATH to <code>{st.musicPlexPath}</code> on the Bridge so it can add albums itself.
+          </p>
+        )}
         {st?.problem && (
           <p className="info-key__error" role="alert">
             {st.problem}
@@ -146,6 +238,7 @@ export function BridgeSettings() {
         )}
       </div>
       {ov?.bridges.map((b) => <BridgeRow key={b.id} b={b} onUnpair={() => void unpair(b)} />)}
+      {ov && !ov.pairing && <AddBridge onAdded={load} />}
       {ov?.queued.map((q) => (
         <div className="setting-row" key={q.id} data-testid="bridge-queued">
           <div className="setting-row__text">

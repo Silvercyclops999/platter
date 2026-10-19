@@ -24,6 +24,13 @@ pub async fn bridge_pair_start(bridge: State<'_, Arc<Desktop>>, db: State<'_, cr
     bridge.inner().pair_start(relay)
 }
 
+/// "Add the Bridge": the code a Bridge shows in its log (PBB-). Gives back
+/// the Bridge's name once it answered.
+#[tauri::command]
+pub async fn bridge_join(bridge: State<'_, Arc<Desktop>>, code: String) -> AppResult<String> {
+    bridge.join_bridge(&code).await
+}
+
 #[tauri::command]
 pub async fn bridge_pair_cancel(bridge: State<'_, Arc<Desktop>>) -> AppResult<()> {
     bridge.pair_cancel();

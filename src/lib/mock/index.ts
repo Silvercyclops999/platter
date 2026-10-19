@@ -4545,6 +4545,9 @@ export class MockBackend implements Backend {
                 plex: true,
                 lidarr: true,
                 problem: null,
+                fromEnv: [],
+                plexLink: null,
+                musicPlexPath: null,
               },
             },
           ],
@@ -4576,6 +4579,47 @@ export class MockBackend implements Backend {
   }
   bridgeSendSettings() {
     return this.delay(() => undefined);
+  }
+  /** "Add the Bridge": a code the Bridge showed (PBB-) pairs it after a moment. */
+  bridgeJoin(code: string) {
+    return this.delay(() => {
+      const c = code.replace(/\s+/g, "");
+      if (!c.startsWith("PBB-") || c.length < 20) {
+        throw { kind: "invalid", message: "That isn't a Bridge code. Copy it again from the Bridge's log: it starts with PBB-." };
+      }
+      const at = Math.floor(Date.now() / 1000);
+      this.bridgeState = {
+        ...this.bridgeState,
+        bridges: [
+          ...this.bridgeState.bridges,
+          {
+            id: `b${this.bridgeState.bridges.length + 1}`,
+            name: "Shed Bridge",
+            version: "0.2.20",
+            pairedAt: at,
+            lastSeen: at,
+            online: true,
+            music: "readOnly",
+            status: {
+              name: "Shed Bridge",
+              version: "0.2.20",
+              at,
+              doing: "Waiting for the next catch-up",
+              lastCatchUp: null,
+              music: "readOnly",
+              plex: false,
+              lidarr: true,
+              problem: null,
+              fromEnv: ["lidarrUrl", "lidarrKey"],
+              plexLink: "K3QZ",
+              musicPlexPath: "/data/media/Music",
+            },
+          },
+        ],
+      };
+      this.emit("bridge://changed", null);
+      return "Shed Bridge";
+    });
   }
 
   // ---------------------------------------------------------------- stream deck

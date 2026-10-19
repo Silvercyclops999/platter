@@ -154,6 +154,14 @@ impl PlexTv {
         })
     }
 
+    /// `POST /api/v2/pins`: a short PIN for plex.tv/link, for a device with
+    /// no browser of its own (Platter Bridge). Poll it with [`Self::poll_pin`].
+    pub async fn create_link_pin(&self) -> AppResult<Pin> {
+        let resp = self.http.post(self.url("/api/v2/pins")?).send().await.map_err(map_send_error)?;
+        let raw: RawPin = check_status(resp).await?.json().await.map_err(map_send_error)?;
+        Ok(Pin { id: raw.id, code: raw.code, expires_at: raw.expires_at })
+    }
+
     /// The browser URL the user approves the PIN at. Contains only the client
     /// id and the PIN code.
     pub fn auth_url(&self, pin: &Pin) -> String {
@@ -308,6 +316,22 @@ mod tests {
         assert!(url.contains("clientID=cid-1"));
         assert!(url.contains("code=abcd1234"));
         assert!(url.contains("context%5Bdevice%5D%5Bproduct%5D=Platter"));
+    }
+
+    #[tokio::test]
+    async fn a_link_pin_is_the_short_kind() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v2/pins"))
+            .and(header("x-plex-client-identifier", "cid-1"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({"id": 7, "code": "K3QZ", "expiresAt": "2026-10-13T12:30:00Z"})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let pin = tv(&server).create_link_pin().await.unwrap();
+        assert_eq!((pin.id.as_str(), pin.code.as_str()), ("7", "K3QZ"));
+        let asked = server.received_requests().await.unwrap();
+        assert!(asked[0].url.query().is_none_or(|q| !q.contains("strong")), "plex.tv/link takes the short code");
     }
 
     #[tokio::test]

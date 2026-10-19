@@ -781,6 +781,8 @@ export interface Backend {
   /** "Pair a Bridge": a new code, good for an hour. */
   bridgePairStart(): Promise<BridgePairStart>;
   bridgePairCancel(): Promise<void>;
+  /** "Add the Bridge": the code a Bridge shows in its log (PBB-). Resolves with its name once it answered. */
+  bridgeJoin(code: string): Promise<string>;
   /** Forget a Bridge (and tell it to forget this computer). */
   bridgeUnpair(id: string): Promise<BridgeOverview>;
   /** Say yes to a Lidarr settings change a Bridge queued. */
@@ -1604,6 +1606,7 @@ export function createTauriBackend(): Backend {
     lidarrHomeSides: () => call("lidarr_home_sides"),
     bridgePairStart: () => call("bridge_pair_start"),
     bridgePairCancel: () => call("bridge_pair_cancel"),
+    bridgeJoin: (code) => call("bridge_join", { code }),
     bridgeUnpair: (id) => call("bridge_unpair", { id }),
     bridgeQueuedApply: (id) => call("bridge_queued_apply", { id }),
     bridgeQueuedDismiss: (id) => call("bridge_queued_dismiss", { id }),

@@ -1,5 +1,7 @@
 //! The pair code: what Settings > Bridge > "Pair a Bridge" shows, and what
-//! the Bridge takes once from `BRIDGE_PAIR_CODE`.
+//! the Bridge takes once from `BRIDGE_PAIR_CODE`. The Bridge shows codes of
+//! its own too, the same inside with `PBB-` in front, for "Add the Bridge"
+//! in Settings > Bridge.
 //!
 //! `PB1-` then base64url of
 //!
@@ -19,6 +21,8 @@ use crate::remote::peer::auth::{hex, hmac_sha256};
 use crate::social::listen::invite::relay_url;
 
 pub const PREFIX: &str = "PB1-";
+/// A code the Bridge made and shows, entered on a computer or phone.
+pub const BRIDGE_PREFIX: &str = "PBB-";
 const FIXED: usize = 16 + 16 + 4;
 /// How long a code can be used.
 pub const VALID_S: u32 = 60 * 60;
@@ -68,6 +72,20 @@ impl PairCode {
             b.extend_from_slice(r.as_bytes());
         }
         format!("{PREFIX}{}", B64.encode(b))
+    }
+
+    /// The code as the Bridge shows it in its log (`PBB-`), for a computer
+    /// or phone to enter. The same code inside; the prefix keeps the two
+    /// kinds apart so neither is ever used for the other.
+    pub fn bridge_text(&self) -> String {
+        format!("{BRIDGE_PREFIX}{}", &self.text()[PREFIX.len()..])
+    }
+
+    /// Read a code the Bridge showed.
+    pub fn parse_bridge_made(raw: &str) -> Option<Self> {
+        let raw: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+        let body = raw.strip_prefix(BRIDGE_PREFIX)?;
+        Self::parse(&format!("{PREFIX}{body}"))
     }
 
     /// Read a code (spaces and line breaks from copying are ignored).

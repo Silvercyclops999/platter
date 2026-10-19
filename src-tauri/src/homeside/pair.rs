@@ -74,6 +74,12 @@ struct Labels {
     confirm: &'static str,
     secret: &'static str,
     id: &'static str,
+    /// Which end the link is for the side showing the code, and the one entering it.
+    offer_side: Side,
+    join_side: Side,
+    /// A name to show when the other end sent none.
+    offer_fallback: &'static str,
+    join_fallback: &'static str,
 }
 
 const BRIDGE: Labels = Labels {
@@ -82,6 +88,25 @@ const BRIDGE: Labels = Labels {
     confirm: CONFIRM_AAD,
     secret: "bridge link",
     id: "bridge link id",
+    offer_side: Side::Desktop,
+    join_side: Side::Bridge,
+    offer_fallback: "Platter Bridge",
+    join_fallback: "a desktop",
+};
+
+/// A code the Bridge shows (in its log), entered on a computer or phone:
+/// the same exchange the other way round, under labels of its own so a
+/// code of one kind never pairs as the other.
+const BRIDGE_SHOWN: Labels = Labels {
+    join: "bridge shown pair join",
+    welcome: "bridge shown pair welcome",
+    confirm: "platter-bridge shown welcome",
+    secret: "bridge link",
+    id: "bridge link id",
+    offer_side: Side::Bridge,
+    join_side: Side::Desktop,
+    offer_fallback: "Your computer",
+    join_fallback: "Platter Bridge",
 };
 
 const DEVICE: Labels = Labels {
@@ -90,6 +115,10 @@ const DEVICE: Labels = Labels {
     confirm: "platter-device welcome",
     secret: "device link",
     id: "device link id",
+    offer_side: Side::Device,
+    join_side: Side::Device,
+    offer_fallback: "Your other device",
+    join_fallback: "Your other device",
 };
 
 /// A device's own side of a device pairing.
@@ -157,6 +186,11 @@ impl Offer {
         Self { code, desktop_name: desktop_name.to_string(), used: false, labels: BRIDGE, me: None }
     }
 
+    /// The Bridge showing a code of its own, for a computer or phone to enter.
+    pub fn from_bridge(code: PairCode, bridge_name: &str) -> Self {
+        Self { code, desktop_name: bridge_name.to_string(), used: false, labels: BRIDGE_SHOWN, me: None }
+    }
+
     /// A device showing a code for another of the user's devices.
     pub fn for_device(code: PairCode, name: &str, me: DeviceMe) -> Self {
         Self { code, desktop_name: name.to_string(), used: false, labels: DEVICE, me: Some(me) }
@@ -199,11 +233,9 @@ impl Offer {
         let body = seal::seal_value(&ch, &Sealed { x: now_ms + TTL_MS, m: PairMsg::Welcome { n, b: seal::b64(&msg_b), c } }).ok()?;
         self.used = true;
         let relay = self.code.relay.clone().unwrap_or_else(|| super::DEFAULT_RELAY.to_string());
-        let side = if self.me.is_some() { Side::Device } else { Side::Desktop };
-        let link = Link { id: link_id(l, &secret), secret, relay, side, me: desktop, peer: bridge };
-        let fallback = if self.me.is_some() { "Your other device" } else { "Platter Bridge" };
+        let link = Link { id: link_id(l, &secret), secret, relay, side: l.offer_side, me: desktop, peer: bridge };
         let name = shown_name(&name);
-        let name = if name.is_empty() { fallback.to_string() } else { name };
+        let name = if name.is_empty() { l.offer_fallback.to_string() } else { name };
         let device = if self.me.is_some() { dev.chars().take(100).collect() } else { String::new() };
         Some(((ch.topic, body), PairedBridge { link, name, version: version.chars().take(20).collect(), device }))
     }
@@ -236,6 +268,14 @@ impl Joining {
             return Err(AppError::Invalid("This pair code has expired. Make a new one in Platter (Settings > Bridge > Pair a Bridge).".into()));
         }
         Self::begin(code, name, version, now_ms, BRIDGE, None)
+    }
+
+    /// A computer or phone entering the code a Bridge showed.
+    pub fn start_to_bridge(code: PairCode, name: &str, version: &str, now_ms: u64) -> AppResult<(Self, (String, String))> {
+        if code.expired((now_ms / 1000) as i64) {
+            return Err(AppError::Invalid("This Bridge code has expired. While it isn't paired, the Bridge shows a new one in its log every hour.".into()));
+        }
+        Self::begin(code, name, version, now_ms, BRIDGE_SHOWN, None)
     }
 
     /// A device joining another of the user's devices with its long code.
@@ -289,10 +329,9 @@ impl Joining {
         }
         let secret = link_secret(l, &key);
         let relay = self.code.relay.clone().unwrap_or_else(|| super::DEFAULT_RELAY.to_string());
-        let side = if self.me.is_some() { Side::Device } else { Side::Bridge };
-        let link = Link { id: link_id(l, &secret), secret, relay, side, me: confirm.bridge, peer: confirm.desktop };
-        let fallback = if self.me.is_some() { "Your other device" } else { "a desktop" };
-        let name = if confirm.desktop_name.trim().is_empty() { fallback.to_string() } else { confirm.desktop_name.chars().take(60).collect() };
+        let link = Link { id: link_id(l, &secret), secret, relay, side: l.join_side, me: confirm.bridge, peer: confirm.desktop };
+        let name = shown_name(&confirm.desktop_name);
+        let name = if name.is_empty() { l.join_fallback.to_string() } else { name };
         let device = if self.me.is_some() { confirm.dev.chars().take(100).collect() } else { String::new() };
         Ok(PairedDesktop { link, name, device })
     }

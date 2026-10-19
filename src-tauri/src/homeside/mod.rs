@@ -4,7 +4,8 @@
 //!
 //! The Bridge and desktops talk only through the sealed relay (the same
 //! ntfy relay and sealing as listen along), over outbound connections. They
-//! pair once with a code the desktop shows (`code`, `pair`); after that
+//! pair once with a code the desktop shows, or one the Bridge shows in its
+//! log for a computer or phone to enter (`code`, `pair`); after that
 //! every message is sealed for its link (`link`), split to fit the relay and
 //! put back together, with replays dropped (`peer`).
 //!

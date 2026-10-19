@@ -50,7 +50,9 @@ export function LidarrHomeSides() {
         </ul>
       ) : (
         !h.offering && (
-          <p className="lidarr-home-sides__line">None yet. A computer at home with Lidarr set up, or the Platter Bridge, lets this device use Lidarr away from home.</p>
+          <p className="lidarr-home-sides__line">
+            None yet. A computer at home with Lidarr set up, or the Platter Bridge, lets this device use Lidarr away from home. To add the Bridge, enter the code from its log under Bridge, Add the Bridge.
+          </p>
         )
       )}
       {h.problem && (

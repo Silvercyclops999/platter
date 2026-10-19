@@ -47,25 +47,35 @@ What it never does:
 The Bridge and your computers never both act on the same Lidarr event. Each
 one claims an event before acting, and only the earliest claim acts.
 
-## Unraid
+## Install it with one command
 
-1. In Platter on your computer: **Settings > Bridge > Pair a Bridge**. Keep
-   Platter open; the code works once, for an hour.
-2. In Unraid, **Docker > Add Container**, and choose the template
-   `platter-bridge` (or use the template URL:
-   `https://raw.githubusercontent.com/Silvercyclops999/platter/main/docker/bridge/platter-bridge.xml`).
-3. Paste the code into **Pair code**.
-4. Optional: set **Music folder** to your music share. Leave it read-only
-   if you only want scans and safety checks; set it to read-write if you
-   want the Bridge to add protected albums itself. Then set **Plex's path
-   for the music folder** to the same folder as Plex sees it (for example
-   `/data/media/Music`), and, for additions, **Lidarr staging folder**.
-5. Apply. Within a few seconds Settings > Bridge on your computer shows the
-   Bridge, and the Lidarr page says the Bridge does the work while your
-   computers are off.
+On the server, with your own Lidarr address and key:
 
-The template runs the container as `99:100` (Unraid's usual owner for
-appdata and shares).
+```sh
+docker run -d --name platter-bridge --restart unless-stopped \
+  --user 1000:1000 \
+  -e LIDARR_URL=http://10.20.30.40:8686 \
+  -e LIDARR_API_KEY=your-lidarr-api-key \
+  -v /path/to/appdata:/data \
+  ghcr.io/silvercyclops999/platter-bridge:latest
+```
+
+Set `--user` to the owner of the appdata folder (`id` shows yours). The
+image runs as a normal user, never root, and publishes no ports. Swap
+`:latest` for a version like `:0.2.29` to stay on one release.
+
+Then pair it and let it into Plex:
+
+1. `docker logs platter-bridge` shows a pair code that starts with `PBB-`.
+   `docker exec platter-bridge platter-bridge status` shows it too.
+2. In Platter on your computer or your phone: **Settings > Bridge > Add the
+   Bridge**, and enter the code. It works once, for an hour; while the
+   Bridge isn't paired it shows a new one every hour.
+3. The log then asks you to open plex.tv/link and enter a short code, so the
+   Bridge can read your Plex library. Settings > Bridge shows the same code.
+
+Leave out `LIDARR_URL` and `LIDARR_API_KEY` and the Bridge takes them from
+Platter on a computer at home instead, once one is open.
 
 ## Docker Compose
 
@@ -77,7 +87,8 @@ services:
     restart: unless-stopped
     user: "1000:1000"
     environment:
-      BRIDGE_PAIR_CODE: "PB1-paste-the-code-from-Platter-here"
+      LIDARR_URL: "http://10.20.30.40:8686"
+      LIDARR_API_KEY: "your-lidarr-api-key"
       TZ: "Etc/UTC"
       # MUSIC_PLEX_PATH: "/data/media/Music"
       # STAGING_DIR: "/staging"
@@ -88,31 +99,78 @@ services:
       # - /path/to/staging:/staging
 ```
 
-The full file is in `docker/bridge/docker-compose.yml`. Set `user` to the
-owner of the appdata folder (`id` shows yours). The image runs as a normal
-user, never root, and has no ports.
+The full file, pinned to the current release, is in
+`docker/bridge/docker-compose.yml`.
+
+## Unraid
+
+1. In Unraid, **Docker > Add Container**, and choose the template
+   `platter-bridge`, or use the template URL from
+   `docker/bridge/platter-bridge.xml` (it points at the release it came
+   with, never at main).
+2. Fill in **Lidarr address** and **Lidarr API key**, or leave them empty to
+   take them from Platter on a computer.
+3. Optional: set **Music folder** to your music share. Leave it read-only
+   if you only want scans and safety checks; set it to read-write if you
+   want the Bridge to add protected albums itself. Leave **Plex's path for
+   the music folder** empty at first (see below). For additions, also set
+   **Lidarr staging folder**.
+4. Apply, open the container's log, and pair it as above.
+
+The template runs the container as `99:100` (Unraid's usual owner for
+appdata and shares).
+
+## The music folder
+
+With a music folder mounted, the Bridge needs to know which of Plex's
+folders it is. Once it has read your Plex library it compares the files
+under `/music` with the paths Plex gives, and when `MUSIC_PLEX_PATH` isn't
+set to the folder they match, it says what to set, in its log and in
+Settings > Bridge on your computer, for example "Set MUSIC_PLEX_PATH to
+/data/media/Music". Set it and restart the container.
 
 ## Pairing
 
-Pairing happens once. Platter shows a code; the Bridge reads it from
-`BRIDGE_PAIR_CODE` the first time it starts. The two prove they both know
-the code without sending it anywhere, and agree on a key only they have.
-After that the code is used up: it can stay in your settings or be removed,
-and nobody else can pair with it.
+Pairing happens once, one of two ways. The Bridge shows a code in its log
+and you enter it in Platter (Settings > Bridge > Add the Bridge), on a
+computer or a phone. Or Platter shows a code (Settings > Bridge > Pair a
+Bridge) and the Bridge reads it from `BRIDGE_PAIR_CODE` the first time it
+starts. Either way the two prove they both know the code without sending it
+anywhere, and agree on a key only they have. Each code works once, for an
+hour, and only for the first device to use it; a code of one kind never
+pairs as the other. The Bridge's own code is only in its log and on its
+status page, which only the server itself can open.
 
-Once paired, Platter sends the Bridge how to reach Lidarr and Plex (Lidarr's
-home address and API key, your Plex sign-in). It does this every time the
-Bridge starts, so a changed key reaches it too.
+Once paired, Platter sends the Bridge how to reach Lidarr (Lidarr's home
+address and API key) and its Lidarr settings, every time the Bridge starts,
+so a changed key reaches it too. Whatever is set on the Bridge itself
+(`LIDARR_URL`, `LIDARR_API_KEY`, `PLEX_URL`, `PLEX_TOKEN`) wins, and
+Settings > Bridge says which of those the Bridge has of its own.
 
 To unpair, use **Unpair** in Settings > Bridge. The Bridge hears it and
 forgets your computer. Then remove the container if you like.
+
+## Plex
+
+Platter never gives the Bridge your Plex account's sign-in. The Bridge
+reaches Plex one of these ways, the first that applies:
+
+- `PLEX_URL` and `PLEX_TOKEN` set on the Bridge.
+- A server shared with you: Plex gives each such server a token of its own,
+  for that server only, and Platter sends the Bridge that.
+- Its own sign-in. The Bridge shows a short code; you open plex.tv/link and
+  enter it. It then shows in Plex's Authorized Devices as its own device,
+  where you can sign it out without touching any other.
+
+A Bridge set up with an older Platter kept the account's sign-in. When it
+updates, it gives that up once and asks for its own sign-in instead.
 
 ## Privacy
 
 - The Bridge only makes outgoing connections: to the relay, Lidarr, Plex,
   plex.tv and MusicBrainz (to check albums Bring in my listening asks for).
-  It opens no ports. Its health check listens on 127.0.0.1
-  inside the container, for Docker only.
+  It opens no ports. Its health check and status page listen on 127.0.0.1
+  inside the container, for Docker and `platter-bridge status` only.
 - Everything between the Bridge and your computers goes through the same
   relay as Listen along (ntfy.sh by default, or your own ntfy server: set it
   in Settings > Listen along, and `BRIDGE_RELAY` on the Bridge). The relay
@@ -120,8 +178,14 @@ forgets your computer. Then remove the container if you like.
   artist or album name ever goes through it in the clear.
 - Sealed messages count for 12 hours, can't be replayed, and can't be moved
   to another topic.
+- What a paired device asks the Bridge to read from Lidarr is limited to
+  the pages Platter reads, each query name given once, folders only inside
+  Lidarr's own; every change is rebuilt from only the fields Platter sends
+  and checked against Lidarr first. Keys and passwords are taken out of
+  every answer.
 - On the server, the Bridge keeps its secrets in `keys.json` in the data
-  folder, readable only by its own user, and its state in `bridge.db`.
+  folder, readable only by its own user (put right if that ever changes),
+  and its state in `bridge.db`, which holds no keys or tokens.
 
 ntfy.sh is free and limits how many messages one address sends a day. The
 Bridge stays well under that (a heartbeat every half hour, and messages
@@ -131,22 +195,35 @@ when something happens). If you run your own ntfy server, there's no limit.
 
 | Variable | What it's for |
 | --- | --- |
-| `BRIDGE_PAIR_CODE` | The code from Settings > Bridge. Used once. |
+| `LIDARR_URL`, `LIDARR_API_KEY` | Lidarr as the server reaches it. They win over what a computer sends. |
+| `PLEX_URL` | Plex's address as the server reaches it. Optional. |
+| `PLEX_TOKEN` | A token for that Plex server, with `PLEX_URL`. Optional. |
+| `BRIDGE_PAIR_CODE` | A code from Settings > Bridge > Pair a Bridge. Used once. Optional. |
 | `BRIDGE_NAME` | What Platter calls this Bridge. Default "Platter Bridge". |
 | `MUSIC_PLEX_PATH` | The path Plex uses for the folder mounted at `/music`. |
 | `MUSIC_DIR` | Where the music folder is mounted, if not `/music`. |
 | `STAGING_DIR` | Where Lidarr's staging folder is mounted (`/staging`). |
 | `BRIDGE_RELAY` | Your own ntfy server, if you use one. |
-| `LIDARR_URL`, `LIDARR_API_KEY` | Set these only to override what your computer sends. |
 | `BRIDGE_LOG` | Log detail, like `debug`. Default `info`. |
 | `BRIDGE_DATA` | The data folder. Default `/data`. |
 
 ## Logs and health
 
-`docker logs platter-bridge` says plainly what it's doing: waiting to pair,
-waiting for your computer's settings, catching up, what it added. Docker's
-health check runs `platter-bridge health`, which is healthy while the Bridge
-keeps working.
+`docker logs platter-bridge` says plainly what it's doing: its pair code
+while it isn't paired, the plex.tv/link code while it waits for Plex,
+catching up, what it added. `docker exec platter-bridge platter-bridge
+status` prints the same in short. Docker's health check runs
+`platter-bridge health`, which is healthy while the Bridge keeps working.
+
+## For the maintainer
+
+The image is pushed to GitHub Container Registry by the bridge workflow on
+each version tag, as `platter-bridge:<version>` and `:latest`. The package
+must be public in the package's settings on GitHub, or `docker pull` asks
+for a sign-in. With every version bump, run `node scripts/pin-bridge-template.mjs`
+before tagging, so the Unraid template and compose file name that release.
+CI fails while they don't match `package.json`, and the tag's publish job
+checks the template names the tag.
 
 ## Bring in my listening
 

@@ -15,8 +15,10 @@ use tokio::sync::{Notify, RwLock, broadcast, mpsc, watch};
 use super::auth::{self, Pin, PlexTv, PlexUser};
 use super::client::PlexClient;
 use super::discovery::{
-    self, DiscoveredServer, DiscoveryCache, Probe, RaceConfig, ServerList, load_servers,
+    self, Connection, DiscoveredServer, DiscoveryCache, Probe, RaceConfig, ServerList,
+    load_servers,
 };
+use super::types::ConnectionKind;
 use super::health::{HealthAction, HealthMachine, PING_INTERVAL, ProbeOutcome, ScanTracker};
 use super::identity::ClientIdentity;
 use super::keychain::{ACCOUNT_TOKEN, KeyringStore, SERVER_TOKEN, TokenStore};
@@ -506,6 +508,61 @@ impl PlexState {
     /// list). Never logged or shown.
     pub async fn account_token(&self) -> Option<Token> {
         self.inner.session.read().await.account.clone()
+    }
+
+    /// The connected server's own access token and addresses, only when it
+    /// isn't the account's sign-in (Plex gives an owned server's as the
+    /// account token itself). For handing the Bridge no more than the server.
+    pub async fn server_only_access(&self) -> Option<(String, Token, Vec<String>)> {
+        let s = self.inner.session.read().await;
+        let c = s.current.as_ref()?;
+        if s.account.as_ref().is_none_or(|a| a == &c.token) {
+            return None;
+        }
+        let uris = c.server.connections.iter().map(|x| x.uri.clone()).collect();
+        Some((c.server.machine_id.clone(), c.token.clone(), uris))
+    }
+
+    /// Connect to one server by its addresses and a token for it, with no
+    /// plex.tv sign-in (Platter Bridge given a server's own token). Gives
+    /// back the server's machine id. The account stays signed out; only
+    /// [`Self::client`] and the server's ids work.
+    pub async fn connect_direct(&self, machine_id: Option<&str>, uris: &[String], token: Token) -> AppResult<String> {
+        let connections: Vec<Connection> = uris
+            .iter()
+            .filter_map(|u| url::Url::parse(u.trim()).ok())
+            .filter(|u| matches!(u.scheme(), "http" | "https"))
+            .map(|u| Connection { uri: u.as_str().trim_end_matches('/').to_string(), kind: ConnectionKind::Local })
+            .collect();
+        if connections.is_empty() {
+            return Err(AppError::Invalid("No Plex address to try.".into()));
+        }
+        let out = discovery::race_detailed(&self.inner.probe_http, &connections, machine_id, self.inner.race_cfg).await;
+        let p = out.best.ok_or_else(|| AppError::Network("Your Plex server didn't answer at that address.".into()))?;
+        let probe = PlexClient::new(&p.uri, token.clone(), self.inner.identity.clone(), Some(p.kind))?;
+        let id = match machine_id {
+            Some(m) => m.to_string(),
+            None => probe.identity_info().await?.machine_identifier,
+        };
+        if id.trim().is_empty() {
+            return Err(AppError::Decode("Your Plex server didn't say who it is.".into()));
+        }
+        let client = probe.with_server(&id);
+        // A token that isn't for this server is turned away here, not later.
+        client.music_sections().await?;
+        let server = DiscoveredServer {
+            machine_id: id.clone(),
+            name: "Plex".into(),
+            owned: false,
+            presence: true,
+            version: p.version.clone(),
+            connections,
+            access_token: Some(token.clone()),
+        };
+        let mut s = self.inner.session.write().await;
+        s.servers = vec![server.clone()];
+        s.current = Some(Current { server, token, client: Some(client) });
+        Ok(id)
     }
 
     /// The plex.tv client (same identity headers as the server client).

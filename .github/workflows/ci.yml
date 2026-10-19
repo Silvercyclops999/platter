@@ -34,6 +34,8 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
+      # The Unraid template and compose file name this version's image.
+      - run: node scripts/pin-bridge-template.mjs --check
       - run: npm test
       - run: npm run build
       - name: cargo clippy
