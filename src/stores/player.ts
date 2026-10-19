@@ -26,7 +26,7 @@ import type {
 import { OFFLINE_SKIPPED } from "../lib/offline";
 import { useApp } from "./app";
 import { addToSession, controlSession, guestLive } from "./social";
-import { toast } from "./toasts";
+import { toast, useToasts } from "./toasts";
 
 interface PlayerStore {
   /** What the player bar shows: the local snapshot, or the remote device's over it. */
@@ -200,9 +200,22 @@ const play = (args: PlayContextArgs): Promise<unknown> =>
 
 const round = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 10_000) / 10_000;
 
-/** The toast after songs go to the end of the queue. */
+/** The queue toast showing now, and how many songs it counts. */
+let liveQueued: { id: number; n: number } | null = null;
+
+/**
+ * The toast after songs go to the end of the queue. While one is still
+ * showing, the next add replaces it and counts on ("Added 3 songs to
+ * queue"), so quick adds never stack.
+ */
 export function queuedToast(n: number, thumb?: string | null) {
-  toast.info(n === 1 ? "Added to queue" : `Added ${n} songs to queue`, thumb ? { path: thumb } : undefined);
+  const live = liveQueued && useToasts.getState().toasts.some((t) => t.id === liveQueued!.id) ? liveQueued : null;
+  const total = (live?.n ?? 0) + n;
+  const message = total === 1 ? "Added to queue" : `Added ${total} songs to queue`;
+  // One song's cover; a count of several shows none unless this add brought one.
+  const art = thumb && (total === 1 || n > 1) ? { art: { path: thumb } } : {};
+  const id = useToasts.getState().push({ kind: "info", message, ...art }, undefined, live?.id);
+  liveQueued = { id, n: total };
 }
 
 /** Player commands with error toasts. */

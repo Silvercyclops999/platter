@@ -17,7 +17,8 @@ export interface ToastArt {
 
 interface ToastState {
   toasts: Toast[];
-  push: (t: Omit<Toast, "id">, ttlMs?: number) => number;
+  /** `replace`: the id of a toast this one takes the place of, when it's still showing. */
+  push: (t: Omit<Toast, "id">, ttlMs?: number, replace?: number) => number;
   dismiss: (id: number) => void;
 }
 
@@ -33,9 +34,9 @@ const timers = new Map<number, ReturnType<typeof setTimeout>>();
 
 export const useToasts = create<ToastState>()((set, get) => ({
   toasts: [],
-  push: (t, ttlMs = 4000) => {
-    // The same text already showing is replaced in place, not stacked.
-    const same = get().toasts.find((x) => x.message === t.message);
+  push: (t, ttlMs = 4000, replace) => {
+    // The toast it replaces, or the same text already showing, is replaced in place, not stacked.
+    const same = (replace !== undefined && get().toasts.find((x) => x.id === replace)) || get().toasts.find((x) => x.message === t.message);
     const id = same ? same.id : seq++;
     const old = timers.get(id);
     if (old) clearTimeout(old);
