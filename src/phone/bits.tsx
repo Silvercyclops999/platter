@@ -34,13 +34,14 @@ export function resetHaptics() {
  * A tap of feedback from the phone's haptic engine, while Haptics on
  * controls is on: light for play, pause, skip and like, selection for tabs,
  * pills and sheet choices, success when a song lands in a playlist. A
- * second tap within HAPTIC_GAP_MS doesn't buzz again. Off the phone, or on a
+ * second tap within HAPTIC_GAP_MS doesn't buzz again, unless `always` (a
+ * result that must be felt even right after a tick). Off the phone, or on a
  * core without haptics, nothing happens.
  */
-export function tap(kind: HapticKind = "light") {
+export function tap(kind: HapticKind = "light", always = false) {
   if (useSettings.getState().settings?.phoneHaptics === false) return;
   const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-  if (now - lastHaptic < HAPTIC_GAP_MS) return;
+  if (!always && now - lastHaptic < HAPTIC_GAP_MS) return;
   lastHaptic = now;
   try {
     void backend.haptic(kind).catch(() => undefined);

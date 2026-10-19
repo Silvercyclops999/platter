@@ -49,8 +49,25 @@ export function useSwipeToQueue(onAdd: () => void, enabled = true) {
   const swiped = useRef(false);
   const [offset, setOffset] = useState(0);
   const [dragging, setDragging] = useState(false);
+  const [armed, setArmed] = useState(false);
+
+  /** Back to rest: no press, the row home, the mark out. */
+  const reset = () => {
+    press.current = null;
+    setDragging(false);
+    setOffset(0);
+    setArmed(false);
+  };
+  // The swipe's own click is swallowed; anything after it (a tap, Enter) gets through.
+  const forgetSwipe = () => {
+    setTimeout(() => {
+      swiped.current = false;
+    }, 0);
+  };
 
   const onPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
+    // One finger at a time: a second one while a press is live is ignored.
+    if (press.current) return;
     swiped.current = false;
     if (!enabled || (e.pointerType === "mouse" && e.button !== 0)) return;
     // The left edge belongs to the back swipe.
@@ -75,17 +92,22 @@ export function useSwipeToQueue(onAdd: () => void, enabled = true) {
       e.currentTarget.setPointerCapture?.(e.pointerId);
       setDragging(true);
     }
+    const wasArmed = swipeAdds(p.axis, p.dx);
     p.dx = dx;
+    const nowArmed = swipeAdds(p.axis, dx);
+    // A light tick as the mark lights: letting go now adds.
+    if (nowArmed && !wasArmed) tap("light");
+    if (nowArmed !== wasArmed) setArmed(nowArmed);
     if (!reduced()) setOffset(swipeFollow(dx));
   };
   const end = (e: ReactPointerEvent<HTMLElement>, cancelled: boolean) => {
     const p = press.current;
     if (!p || p.id !== e.pointerId) return;
-    press.current = null;
-    setDragging(false);
-    setOffset(0);
+    reset();
+    if (swiped.current) forgetSwipe();
     if (!cancelled && swipeAdds(p.axis, p.dx)) {
-      tap("success");
+      // Felt even right after the tick at the mark.
+      tap("success", true);
       onAdd();
     }
   };
@@ -103,11 +125,14 @@ export function useSwipeToQueue(onAdd: () => void, enabled = true) {
       onPointerMove,
       onPointerUp: (e: ReactPointerEvent<HTMLElement>) => end(e, false),
       onPointerCancel: (e: ReactPointerEvent<HTMLElement>) => end(e, true),
+      // Capture taken away (the system took the touch): the row never stays out.
+      onLostPointerCapture: (e: ReactPointerEvent<HTMLElement>) => end(e, true),
       onClickCapture,
-      style: { "--ph-swipe": `${offset}px`, "--ph-swipe-reach": reach } as CSSProperties,
+      style: { "--ph-swipe": `${offset}px`, "--ph-swipe-reach": armed ? 1 : reach } as CSSProperties,
     },
-    className: `ph-swipe ${dragging ? "is-swiping" : ""} ${offset >= QUEUE_SWIPE_PX ? "is-armed" : ""}`,
+    className: `ph-swipe ${dragging ? "is-swiping" : ""} ${armed ? "is-armed" : ""}`,
     offset,
+    armed,
   };
 }
 
