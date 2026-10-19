@@ -255,3 +255,4 @@
 .mix-strip__key span:nth-child(2) { text-align: center; }
 .ph-mix .mix-story { margin: 4px 0 20px; padding: 0; }
 .ph-mix .mix-strip__key span:nth-child(2) { display: none; }
+.mix-row { cursor: pointer; }

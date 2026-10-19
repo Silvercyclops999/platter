@@ -56,7 +56,14 @@ function MixRow({ mix }: { mix: MixSummary }) {
   const title = mix.kind === "daylist" ? "daylist" : mix.title;
   const about = mix.kind === "daylist" ? "Your day in a playlist." : mix.description;
   return (
-    <li className={`mix-row ${playing ? "is-playing" : ""}`} data-testid={`mix-card-${mix.id}`}>
+    // The whole row opens the mix (the title is its keyboard stop); Play keeps its own click.
+    <li
+      className={`mix-row ${playing ? "is-playing" : ""}`}
+      data-testid={`mix-card-${mix.id}`}
+      onClick={(e) => {
+        if (!(e.target as HTMLElement).closest("button")) openMix(mix);
+      }}
+    >
       <span className="mix-row__sleeve">
         <MixSleeve mix={mix} size={64} />
       </span>

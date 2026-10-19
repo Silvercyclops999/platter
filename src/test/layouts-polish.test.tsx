@@ -311,6 +311,9 @@ describe("Radio and mixes", () => {
     const made = screen.getByRole("list", { name: "Made for you" });
     expect(within(made).getByRole("button", { name: "Daily Mix 1" })).toBeInTheDocument();
     expect(within(made).getByRole("button", { name: "Play Daily Mix 1" })).toBeInTheDocument();
+    // Anywhere on the row opens the mix, not just its title.
+    await userEvent.setup().click(within(screen.getByTestId("mix-card-daily:1")).getByText(/ and more$/));
+    expect(useRouter.getState().entries[useRouter.getState().index].route).toEqual({ name: "mix", id: "daily:1" });
   });
 
   it("says what to do when mixes are off", async () => {
