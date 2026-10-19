@@ -7,7 +7,8 @@
  */
 import { ChevronDown, ListMusic, MicVocal, MoreHorizontal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { Art } from "../components/Art";
+import { Art, preloadArt } from "../components/Art";
+import { nextInQueue } from "../shell/nowPlaying";
 import { Slider } from "../components/Slider";
 import { formatDuration, trackArtistLine } from "../lib/format";
 import type { Track } from "../lib/types";
@@ -50,9 +51,16 @@ export function playingFrom(ctx: { kind: string; title?: string | null } | null 
   return ctx.kind === "liked" ? "Liked Songs" : `This ${CONTEXT_NOUN[ctx.kind] ?? "queue"}`;
 }
 
+/** Now playing's cover is asked for at this CSS size (the phone's ladder caps it at 1200 px). */
+export const NP_ART_CSS = 400;
+
 export function NowPlaying() {
+
   const open = usePhoneUi((s) => s.nowPlaying);
   const track = usePlayer((s) => s.state?.track ?? null);
+  // The next song's cover, at now playing's size, so it is ready when the song changes.
+  const nextThumb = usePlayer((s) => nextInQueue(s.state?.queue)?.track.thumb ?? null);
+  useEffect(() => preloadArt(nextThumb, NP_ART_CSS), [nextThumb]);
   // Kept on screen while it slides away.
   const [shown, setShown] = useState(open);
   useEffect(() => {
@@ -120,7 +128,7 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
             style={{ transform: offset.x ? `translateX(${offset.x}px)` : undefined }}
           >
             <div className={`ph-np__cover ${playing ? "is-playing" : ""}`}>
-              <Art path={track.thumb} fluid requestSize={400} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} />
+              <Art path={track.thumb} fluid requestSize={NP_ART_CSS} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} />
             </div>
           </div>
           <div className="ph-np__deck">

@@ -5,9 +5,11 @@
  * cover's tint shows until it loads and it fades in only after decoding,
  * and covers start loading about a screen before they scroll in.
  */
-import { act, fireEvent, render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Art, tintColour, watchNear } from "../components/Art";
+import { Art, PHONE_ART_FADE_MS, preloadArt, tintColour, watchNear } from "../components/Art";
+import { artLoadState, isArtReady, loadArt, markArtReady, MAX_ART_LOADS, resetArtLoader } from "../components/artLoader";
+import { NP_ART_CSS } from "../phone/NowPlaying";
 import { artPixelSize, PHONE_ART_MAX, PHONE_ART_SAMPLE, PHONE_ART_STEPS, phoneArtPixelSize } from "../lib/artSize";
 import { artSampleUrl, artUrl, backend } from "../lib/backend";
 import { usePhoneForm } from "../phone/form";
@@ -92,9 +94,45 @@ describe("the stylesheets this touches", () => {
   });
 });
 
+/** An Image that loads only when the test says so, and records what it was asked for. */
+const images: { src: string; decode: () => void; fail: () => void }[] = [];
+class FakeImage {
+  decoding = "";
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  private done!: () => void;
+  private bad!: (e: unknown) => void;
+  private p = new Promise<void>((res, rej) => {
+    this.done = res;
+    this.bad = rej;
+  });
+  set src(v: string) {
+    images.push({ src: v, decode: () => this.done(), fail: () => {
+        this.bad(new Error("x"));
+        this.onerror?.();
+      } });
+  }
+  decode() {
+    return this.p;
+  }
+}
+const sized = () => vi.spyOn(backend, "artUrl").mockImplementation((p, w, h) => `${p}?w=${w}&h=${h}`);
+
 describe("a cover loading on the phone", () => {
-  beforeEach(() => usePhoneForm.setState({ phone: true }));
-  afterEach(() => usePhoneForm.setState({ phone: false }));
+  beforeEach(() => {
+    images.length = 0;
+    resetArtLoader();
+    vi.stubGlobal("Image", FakeImage);
+    vi.stubGlobal("devicePixelRatio", 3);
+    sized();
+    usePhoneForm.setState({ phone: true });
+  });
+  afterEach(() => {
+    usePhoneForm.setState({ phone: false });
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    resetArtLoader();
+  });
 
   it("server tints become colours", () => {
     expect(tintColour("a1b2c3")).toBe("#a1b2c3");
@@ -103,25 +141,47 @@ describe("a cover loading on the phone", () => {
     expect(tintColour(null)).toBeNull();
   });
 
-  it("shows its tint until the image is decoded, then fades in", async () => {
-    let decoded!: () => void;
-    const decode = vi.fn(() => new Promise<void>((r) => (decoded = r)));
-    Object.defineProperty(HTMLImageElement.prototype, "decode", { value: decode, configurable: true });
-    try {
-      const { container } = render(<Art path="/t/1" size={48} tint="a1b2c3" sleeve={{ title: "Glass Season" }} />);
-      const tint = container.querySelector(".art__tint") as HTMLElement;
-      expect(tint.style.background).toBe("rgb(161, 178, 195)");
-      // The printed sleeve and the skeleton make way for the colour.
-      expect(container.querySelector(".art__skeleton, .art__sleeve--pending")).toBeNull();
-      fireEvent.load(container.querySelector("img")!);
-      expect(decode).toHaveBeenCalled();
-      expect(container.querySelector(".art")).not.toHaveClass("is-loaded");
-      await act(async () => decoded());
-      expect(container.querySelector(".art")).toHaveClass("is-loaded", "is-fading");
-      expect(container.querySelector(".art__tint")).toBeNull();
-    } finally {
-      delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
-    }
+  it("goes straight from its tint to the cover, decoded off screen first, with one fade", async () => {
+    const { container } = render(<Art path="/t/1" size={48} tint="a1b2c3" sleeve={{ title: "Glass Season" }} />);
+    const tint = container.querySelector(".art__tint") as HTMLElement;
+    expect(tint.style.background).toBe("rgb(161, 178, 195)");
+    expect(container.querySelector(".art__skeleton, .art__sleeve--pending, img")).toBeNull();
+    expect(images.map((i) => i.src)).toEqual(["/t/1?w=192&h=192"]);
+    await act(async () => images[0].decode());
+    const art = container.querySelector(".art")!;
+    expect(art).toHaveClass("is-loaded", "is-fading");
+    const img = container.querySelector("img")!;
+    expect(img.getAttribute("src")).toBe("/t/1?w=192&h=192");
+    expect(img.getAttribute("decoding")).toBe("async");
+    // The colour stays under it until the fade ends.
+    expect(container.querySelector(".art__tint")).not.toBeNull();
+    await act(() => new Promise((r) => setTimeout(r, PHONE_ART_FADE_MS + 80)));
+    expect(art).not.toHaveClass("is-fading");
+    expect(container.querySelector(".art__tint")).toBeNull();
+  });
+
+  it("a cover already decoded shows at once, with no fade and no new request", () => {
+    markArtReady("/t/1?w=192&h=192", "/t/1", 192);
+    const { container } = render(<Art path="/t/1" size={48} tint="a1b2c3" />);
+    expect(container.querySelector(".art")).toHaveClass("is-loaded");
+    expect(container.querySelector(".art")).not.toHaveClass("is-fading");
+    expect(images).toHaveLength(0);
+  });
+
+  it("shows a smaller size only when it is decoded already and the right one isn't", async () => {
+    markArtReady("/t/1?w=192&h=192", "/t/1", 192);
+    const { container } = render(<Art path="/t/1" size={136} tint="a1b2c3" />);
+    const under = container.querySelector("img.art__under")!;
+    expect(under.getAttribute("src")).toBe("/t/1?w=192&h=192");
+    expect(container.querySelector(".art__tint")).toBeNull();
+    expect(images.map((i) => i.src)).toEqual(["/t/1?w=600&h=600"]);
+    await act(async () => images[0].decode());
+    await act(() => new Promise((r) => setTimeout(r, PHONE_ART_FADE_MS + 80)));
+    expect(container.querySelector("img.art__under")).toBeNull();
+    // Nothing decoded for another picture: its colour, never a fetched small step.
+    const other = render(<Art path="/t/2" size={136} tint="a1b2c3" />);
+    expect(other.container.querySelector("img")).toBeNull();
+    expect(other.container.querySelector(".art__tint")).not.toBeNull();
   });
 
   it("without a tint, a record keeps its printed sleeve while it loads", () => {
@@ -130,11 +190,40 @@ describe("a cover loading on the phone", () => {
     expect(container.querySelector(".art__tint")).toBeNull();
   });
 
+  it("a cover that fails shows the record's printed sleeve", async () => {
+    const { container } = render(<Art path="/t/1" size={48} sleeve={{ title: "Glass Season" }} />);
+    await act(async () => images[0].fail());
+    expect(container.querySelector('[data-testid="fallback-sleeve"]')).not.toBeNull();
+  });
+
   it("on the computer the tint is not used", () => {
     act(() => usePhoneForm.setState({ phone: false }));
     const { container } = render(<Art path="/t/1" size={48} tint="a1b2c3" />);
     expect(container.querySelector(".art__tint")).toBeNull();
     expect(container.querySelector(".art__skeleton")).not.toBeNull();
+  });
+
+  it("loads at most six at once, covers on screen first", async () => {
+    const jobs = Array.from({ length: 10 }, (_, i) => loadArt(`/a/${i}`, { visible: false }));
+    expect(artLoadState()).toEqual({ running: MAX_ART_LOADS, queued: 4 });
+    const seen = loadArt("/a/seen", { visible: true });
+    // A queued one that scrolled on screen moves up too, and a cancelled one never starts.
+    jobs[8].promote();
+    jobs[6].cancel();
+    await act(async () => images[0].decode());
+    await act(async () => images[1].decode());
+    expect(images.slice(6).map((i) => i.src)).toEqual(["/a/8", "/a/seen"]);
+    await act(async () => images[2].decode());
+    expect(images.map((i) => i.src)).not.toContain("/a/6");
+    expect(images[8].src).toBe("/a/7");
+    void seen;
+  });
+
+  it("now playing's next cover is fetched ahead, at now playing's size", async () => {
+    preloadArt("/t/next", NP_ART_CSS);
+    expect(images.map((i) => i.src)).toEqual(["/t/next?w=1200&h=1200"]);
+    await act(async () => images[0].decode());
+    expect(isArtReady("/t/next?w=1200&h=1200")).toBe(true);
   });
 });
 
@@ -143,6 +232,8 @@ describe("loading the next screenful", () => {
   const made: { root: Element | null; margin: string; cb: (e: Entry[]) => void; seen: Element[] }[] = [];
   beforeEach(() => {
     made.length = 0;
+    images.length = 0;
+    resetArtLoader();
     class FakeIO {
       rec: (typeof made)[number];
       constructor(cb: (e: Entry[]) => void, opts: { root: Element | null; rootMargin: string }) {
@@ -158,14 +249,16 @@ describe("loading the next screenful", () => {
       disconnect() {}
     }
     vi.stubGlobal("IntersectionObserver", FakeIO);
+    vi.stubGlobal("Image", FakeImage);
     usePhoneForm.setState({ phone: true });
   });
   afterEach(() => {
     vi.unstubAllGlobals();
     usePhoneForm.setState({ phone: false });
+    resetArtLoader();
   });
 
-  it("covers in a list switch to eager about a screen before they show, with one observer per list", () => {
+  it("covers in a list are asked for about a screen before they show, with one observer per list", () => {
     const { container } = render(
       <div className="ph-page">
         <Art path="/t/1" size={48} />
@@ -173,14 +266,13 @@ describe("loading the next screenful", () => {
       </div>,
     );
     const page = container.querySelector(".ph-page")!;
-    const io = made.find((m) => m.root === page)!;
-    expect(made.filter((m) => m.root === page)).toHaveLength(1);
-    expect(io.margin).toBe("100%");
-    const imgs = [...container.querySelectorAll("img")];
-    expect(imgs.map((i) => i.getAttribute("loading"))).toEqual(["lazy", "lazy"]);
-    act(() => io.cb([{ target: imgs[0], isIntersecting: true }]));
-    expect(imgs.map((i) => i.getAttribute("loading"))).toEqual(["eager", "lazy"]);
-    expect(io.seen).toEqual([imgs[1]]);
+    const io = made.find((m) => m.root === page && m.margin === "100%")!;
+    expect(made.filter((m) => m.root === page && m.margin === "100%")).toHaveLength(1);
+    const arts = [...container.querySelectorAll(".art")];
+    expect(images).toHaveLength(0);
+    act(() => io.cb([{ target: arts[0], isIntersecting: true }]));
+    expect(images).toHaveLength(1);
+    expect(io.seen).toEqual([arts[1]]);
   });
 
   it("a shelf's covers wait until the shelf itself is near the page's view", () => {
@@ -193,15 +285,15 @@ describe("loading the next screenful", () => {
     );
     const page = container.querySelector(".ph-page")!;
     const shelf = container.querySelector(".ph-shelf__row")!;
-    const img = container.querySelector("img")!;
-    const pageIo = made.find((m) => m.root === page)!;
+    const art = container.querySelector(".art")!;
+    const pageIo = made.find((m) => m.root === page && m.margin === "100%")!;
     expect(pageIo.seen).toEqual([shelf]);
-    expect(made.find((m) => m.root === shelf)).toBeUndefined();
+    expect(made.find((m) => m.root === shelf && m.margin === "100%")).toBeUndefined();
     act(() => pageIo.cb([{ target: shelf, isIntersecting: true }]));
-    const shelfIo = made.find((m) => m.root === shelf)!;
-    expect(shelfIo.seen).toEqual([img]);
-    act(() => shelfIo.cb([{ target: img, isIntersecting: true }]));
-    expect(img.getAttribute("loading")).toBe("eager");
+    const shelfIo = made.find((m) => m.root === shelf && m.margin === "100%")!;
+    expect(shelfIo.seen).toEqual([art]);
+    act(() => shelfIo.cb([{ target: art, isIntersecting: true }]));
+    expect(images).toHaveLength(1);
   });
 
   it("a cover that fired and then unmounts doesn't stop another cover watching the same place", () => {

@@ -182,8 +182,8 @@
 
 /* A cover on the phone: its own colour while it loads, then a 150 ms fade once decoded (none from the cache, none under reduced motion). */
 .phone .art__tint { position: absolute; inset: 0; }
-.phone .art.is-loaded.is-fading img { animation: fade-in 150ms var(--ph-ease); }
-:root[data-reduced-motion="true"] .phone .art.is-loaded.is-fading img { animation: none; }
+.phone .art img.art__under { opacity: 1; }
+.phone .art.is-loaded.is-fading img:not(.art__under) { animation: fade-in 150ms var(--ph-ease); }
 
 /* ---------------------------------------------------------------- rows */
 .ph-rows { list-style: none; margin: 0; padding: 0; }
