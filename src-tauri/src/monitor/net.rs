@@ -9,8 +9,15 @@
 //!   costs nothing: "connecting" a UDP socket only picks a route, no packet
 //!   is sent. A different address means the network changed (Wi-Fi switch,
 //!   cable pulled with Wi-Fi still up); no address means no network at all.
+//!
+//! Both families are looked at, each on its own: the IPv4 address, and the
+//! IPv6 /64 (a phone's IPv6 address rotates within its /64 every so often,
+//! and a cellular IPv4 route can come and go between looks while the network
+//! stays the same). A change in both at once is a new network at once; a
+//! change in only one counts once it's held for a second look, so flapping
+//! doesn't reconnect every 15 s.
 
-use std::net::{IpAddr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, UdpSocket};
 use std::time::{Duration, SystemTime};
 
 use crate::plex::PlexState;
@@ -21,20 +28,55 @@ pub const TICK: Duration = Duration::from_secs(15);
 /// Extra wall-clock time beyond the tick that counts as a sleep.
 const WAKE_SLACK: Duration = Duration::from_secs(20);
 
+/// The local address the default route would use for one family.
+fn route_for(bind: &str, target: &str) -> Option<IpAddr> {
+    let sock = UdpSocket::bind(bind).ok()?;
+    sock.connect(target).ok()?;
+    let ip = sock.local_addr().ok()?.ip();
+    (!ip.is_unspecified() && !ip.is_loopback()).then_some(ip)
+}
+
 /// The local address of the default route, if there is one.
 pub fn route_ip() -> Option<IpAddr> {
-    // Public anycast resolvers, used only as a routing target.
-    for (bind, target) in [("0.0.0.0:0", "1.1.1.1:53"), ("[::]:0", "[2606:4700:4700::1111]:53")] {
-        if let Ok(sock) = UdpSocket::bind(bind)
-            && sock.connect(target).is_ok()
-            && let Ok(addr) = sock.local_addr()
-            && !addr.ip().is_unspecified()
-            && !addr.ip().is_loopback()
-        {
-            return Some(addr.ip());
+    route_for("0.0.0.0:0", "1.1.1.1:53").or_else(|| route_for("[::]:0", "[2606:4700:4700::1111]:53"))
+}
+
+/// Which network this is, per family. Public anycast resolvers are used
+/// only as routing targets; nothing is sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Route {
+    pub v4: Option<Ipv4Addr>,
+    /// The /64 only: the address within it rotates on the same network.
+    pub v6: Option<[u16; 4]>,
+}
+
+impl Route {
+    pub fn of(v4: Option<Ipv4Addr>, v6: Option<Ipv6Addr>) -> Self {
+        Self {
+            v4,
+            v6: v6.map(|a| {
+                let s = a.segments();
+                [s[0], s[1], s[2], s[3]]
+            }),
         }
     }
-    None
+
+    pub fn is_none(&self) -> bool {
+        self.v4.is_none() && self.v6.is_none()
+    }
+}
+
+/// Both families' routes now.
+pub fn route() -> Route {
+    let v4 = match route_for("0.0.0.0:0", "1.1.1.1:53") {
+        Some(IpAddr::V4(a)) => Some(a),
+        _ => None,
+    };
+    let v6 = match route_for("[::]:0", "[2606:4700:4700::1111]:53") {
+        Some(IpAddr::V6(a)) => Some(a),
+        _ => None,
+    };
+    Route::of(v4, v6)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,7 +91,9 @@ pub enum NetSignal {
 
 #[derive(Debug)]
 pub struct NetWatch {
-    route: Option<IpAddr>,
+    route: Route,
+    /// A change in one family only, waiting for a second look.
+    pending: Option<Route>,
     last_wall: SystemTime,
     started: bool,
 }
@@ -57,15 +101,21 @@ pub struct NetWatch {
 impl NetWatch {
     pub fn new(now: SystemTime) -> Self {
         Self {
-            route: None,
+            route: Route::default(),
+            pending: None,
             last_wall: now,
             started: false,
         }
     }
 
+    /// The route last taken as this network.
+    pub fn current(&self) -> Route {
+        self.route
+    }
+
     /// One look. `route` is [`route_ip`]'s answer, `now` the wall clock,
     /// `tick` the interval the caller slept for.
-    pub fn tick(&mut self, route: Option<IpAddr>, now: SystemTime, tick: Duration) -> Vec<NetSignal> {
+    pub fn tick(&mut self, route: Route, now: SystemTime, tick: Duration) -> Vec<NetSignal> {
         let mut out = Vec::new();
         let elapsed = now.duration_since(self.last_wall).unwrap_or_default();
         self.last_wall = now;
@@ -80,33 +130,42 @@ impl NetWatch {
         if elapsed > tick + WAKE_SLACK {
             out.push(NetSignal::Woke);
         }
-        if route != self.route {
-            out.push(if route.is_some() {
-                NetSignal::Changed
-            } else {
-                NetSignal::Lost
-            });
+        if route == self.route {
+            self.pending = None;
+            return out;
+        }
+        // Every family either side has moved: a new network.
+        let moved = |was: bool, is: bool, same: bool| !(was || is) || !same;
+        let all_moved = moved(self.route.v4.is_some(), route.v4.is_some(), self.route.v4 == route.v4)
+            && moved(self.route.v6.is_some(), route.v6.is_some(), self.route.v6 == route.v6);
+        let at_once = route.is_none() || self.route.is_none() || all_moved || self.pending == Some(route);
+        if at_once {
+            self.pending = None;
+            out.push(if route.is_none() { NetSignal::Lost } else { NetSignal::Changed });
             self.route = route;
+        } else {
+            self.pending = Some(route);
         }
         out
     }
 }
 
-/// What kind of change a route change was, without the addresses: the
-/// families and, within one family, whether it's another network or the
-/// same network with a new address (an IPv6 privacy address rotating, a
-/// carrier handing out another IPv4 address).
-pub fn describe_change(old: Option<IpAddr>, new: Option<IpAddr>) -> &'static str {
-    match (old, new) {
-        (None, Some(_)) => "network back",
-        (Some(IpAddr::V4(_)), Some(IpAddr::V6(_))) => "IPv4 to IPv6",
-        (Some(IpAddr::V6(_)), Some(IpAddr::V4(_))) => "IPv6 to IPv4",
-        (Some(IpAddr::V6(a)), Some(IpAddr::V6(b))) if a.segments()[..4] == b.segments()[..4] => "same IPv6 /64, new address",
-        (Some(IpAddr::V6(_)), Some(IpAddr::V6(_))) => "another IPv6 /64",
-        (Some(IpAddr::V4(a)), Some(IpAddr::V4(b))) if a.octets()[..3] == b.octets()[..3] => "same IPv4 /24, new address",
-        (Some(IpAddr::V4(_)), Some(IpAddr::V4(_))) => "another IPv4 network",
-        _ => "no change",
-    }
+/// What kind of change a route change was, without the addresses.
+pub fn describe_change(old: Route, new: Route) -> String {
+    let family = |name: &str, was: bool, is: bool, same: bool| match (was, is) {
+        (false, true) => Some(format!("{name} came")),
+        (true, false) => Some(format!("{name} went")),
+        (true, true) if !same => Some(format!("another {name} network")),
+        _ => None,
+    };
+    let parts: Vec<String> = [
+        family("IPv4", old.v4.is_some(), new.v4.is_some(), old.v4 == new.v4),
+        family("IPv6", old.v6.is_some(), new.v6.is_some(), old.v6 == new.v6),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if parts.is_empty() { "no change".into() } else { parts.join(", ") }
 }
 
 /// Background loop: wake or network change → reconnect now; no network →
@@ -115,8 +174,8 @@ pub fn spawn(plex: PlexState) {
     tauri::async_runtime::spawn(async move {
         let mut watch = NetWatch::new(SystemTime::now());
         loop {
-            let route = tokio::task::spawn_blocking(route_ip).await.ok().flatten();
-            let before = watch.route;
+            let Ok(route) = tokio::task::spawn_blocking(route).await else { continue };
+            let before = watch.current();
             for s in watch.tick(route, SystemTime::now(), TICK) {
                 match s {
                     NetSignal::Changed => tracing::info!("network: Changed ({})", describe_change(before, route)),
@@ -138,10 +197,20 @@ pub fn spawn(plex: PlexState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::Ipv4Addr;
 
-    const HOME: Option<IpAddr> = Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20)));
-    const CAFE: Option<IpAddr> = Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 7)));
+    fn v4(a: u8, b: u8) -> Option<Ipv4Addr> {
+        Some(Ipv4Addr::new(192, 168, a, b))
+    }
+    fn v6(net: u16, host: u16) -> Option<Ipv6Addr> {
+        Some(Ipv6Addr::new(0x2600, net, 0, 0, 0, 0, 0, host))
+    }
+    const NONE: Route = Route { v4: None, v6: None };
+    fn home() -> Route {
+        Route::of(v4(1, 20), None)
+    }
+    fn cafe() -> Route {
+        Route::of(Some(Ipv4Addr::new(10, 0, 0, 7)), None)
+    }
 
     fn at(s: u64) -> SystemTime {
         SystemTime::UNIX_EPOCH + Duration::from_secs(1_760_000_000 + s)
@@ -150,57 +219,90 @@ mod tests {
     #[test]
     fn steady_network_is_quiet() {
         let mut w = NetWatch::new(at(0));
-        assert!(w.tick(HOME, at(0), TICK).is_empty());
-        assert!(w.tick(HOME, at(5), TICK).is_empty());
-        assert!(w.tick(HOME, at(11), TICK).is_empty());
+        assert!(w.tick(home(), at(0), TICK).is_empty());
+        assert!(w.tick(home(), at(5), TICK).is_empty());
+        assert!(w.tick(home(), at(11), TICK).is_empty());
     }
 
     #[test]
     fn wake_from_sleep_is_seen_from_the_clock_jump() {
         let mut w = NetWatch::new(at(0));
-        w.tick(HOME, at(0), TICK);
+        w.tick(home(), at(0), TICK);
         // laptop lid closed for an hour
-        assert_eq!(w.tick(HOME, at(3600), TICK), vec![NetSignal::Woke]);
-        assert!(w.tick(HOME, at(3605), TICK).is_empty());
+        assert_eq!(w.tick(home(), at(3600), TICK), vec![NetSignal::Woke]);
+        assert!(w.tick(home(), at(3605), TICK).is_empty());
     }
 
     #[test]
     fn wifi_switch_and_cable_pull() {
         let mut w = NetWatch::new(at(0));
-        w.tick(HOME, at(0), TICK);
-        assert_eq!(w.tick(CAFE, at(5), TICK), vec![NetSignal::Changed]);
-        assert_eq!(w.tick(None, at(10), TICK), vec![NetSignal::Lost]);
-        assert!(w.tick(None, at(15), TICK).is_empty());
-        assert_eq!(w.tick(HOME, at(20), TICK), vec![NetSignal::Changed]);
+        w.tick(home(), at(0), TICK);
+        assert_eq!(w.tick(cafe(), at(5), TICK), vec![NetSignal::Changed]);
+        assert_eq!(w.tick(NONE, at(10), TICK), vec![NetSignal::Lost]);
+        assert!(w.tick(NONE, at(15), TICK).is_empty());
+        assert_eq!(w.tick(home(), at(20), TICK), vec![NetSignal::Changed]);
     }
 
     #[test]
     fn starting_without_network_reports_lost() {
         let mut w = NetWatch::new(at(0));
-        assert_eq!(w.tick(None, at(0), TICK), vec![NetSignal::Lost]);
+        assert_eq!(w.tick(NONE, at(0), TICK), vec![NetSignal::Lost]);
     }
 
     #[test]
     fn wake_on_another_network() {
         let mut w = NetWatch::new(at(0));
-        w.tick(HOME, at(0), TICK);
-        assert_eq!(
-            w.tick(CAFE, at(900), TICK),
-            vec![NetSignal::Woke, NetSignal::Changed]
-        );
+        w.tick(home(), at(0), TICK);
+        assert_eq!(w.tick(cafe(), at(900), TICK), vec![NetSignal::Woke, NetSignal::Changed]);
+    }
+
+    #[test]
+    fn ipv6_address_rotating_in_its_64_is_the_same_network() {
+        let mut w = NetWatch::new(at(0));
+        w.tick(Route::of(None, v6(1, 1)), at(0), TICK);
+        assert!(w.tick(Route::of(None, v6(1, 2)), at(15), TICK).is_empty());
+        assert!(w.tick(Route::of(None, v6(1, 3)), at(30), TICK).is_empty());
+    }
+
+    #[test]
+    fn a_cellular_ipv4_route_coming_and_going_doesnt_reconnect() {
+        // The 5G case: IPv6 steady, IPv4 there on one look and not the next.
+        let mut w = NetWatch::new(at(0));
+        let both = Route::of(Some(Ipv4Addr::new(100, 64, 0, 9)), v6(1, 1));
+        let v6_only = Route::of(None, v6(1, 1));
+        w.tick(both, at(0), TICK);
+        for i in 1..10 {
+            let r = if i % 2 == 0 { both } else { v6_only };
+            assert!(w.tick(r, at(i * 15), TICK).is_empty(), "flap {i} reconnected");
+        }
+    }
+
+    #[test]
+    fn a_change_in_one_family_counts_once_it_holds() {
+        let mut w = NetWatch::new(at(0));
+        let both = Route::of(Some(Ipv4Addr::new(100, 64, 0, 9)), v6(1, 1));
+        let v6_only = Route::of(None, v6(1, 1));
+        w.tick(both, at(0), TICK);
+        assert!(w.tick(v6_only, at(15), TICK).is_empty());
+        assert_eq!(w.tick(v6_only, at(30), TICK), vec![NetSignal::Changed]);
+    }
+
+    #[test]
+    fn wifi_to_cellular_on_both_families_is_at_once() {
+        let mut w = NetWatch::new(at(0));
+        w.tick(Route::of(v4(1, 20), v6(1, 1)), at(0), TICK);
+        let cell = Route::of(Some(Ipv4Addr::new(100, 64, 0, 9)), v6(7, 1));
+        assert_eq!(w.tick(cell, at(15), TICK), vec![NetSignal::Changed]);
     }
 
     #[test]
     fn changes_are_described_without_addresses() {
-        use std::net::Ipv6Addr;
-        let v6 = |last: u16| Some(IpAddr::V6(Ipv6Addr::new(0x2600, 1, 2, 3, 0, 0, 0, last)));
-        let other64 = Some(IpAddr::V6(Ipv6Addr::new(0x2600, 9, 2, 3, 0, 0, 0, 1)));
-        assert_eq!(describe_change(HOME, v6(1)), "IPv4 to IPv6");
-        assert_eq!(describe_change(v6(1), HOME), "IPv6 to IPv4");
-        assert_eq!(describe_change(v6(1), v6(2)), "same IPv6 /64, new address");
-        assert_eq!(describe_change(v6(1), other64), "another IPv6 /64");
-        assert_eq!(describe_change(HOME, CAFE), "another IPv4 network");
-        assert_eq!(describe_change(None, HOME), "network back");
+        let both = Route::of(v4(1, 20), v6(1, 1));
+        assert_eq!(describe_change(both, Route::of(None, v6(1, 1))), "IPv4 went");
+        assert_eq!(describe_change(Route::of(None, v6(1, 1)), both), "IPv4 came");
+        assert_eq!(describe_change(both, Route::of(v4(1, 20), v6(2, 1))), "another IPv6 network");
+        assert_eq!(describe_change(home(), cafe()), "another IPv4 network");
+        assert_eq!(describe_change(NONE, home()), "IPv4 came");
     }
 
     #[test]
