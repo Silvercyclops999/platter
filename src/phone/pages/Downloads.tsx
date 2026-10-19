@@ -7,6 +7,7 @@
 import { Heart, ListMusic, Disc3, Radio } from "lucide-react";
 import { useState } from "react";
 import { Dialog } from "../../components/Dialog";
+import { suggestionLine, useDownloadSuggestions } from "../../components/DownloadSuggestions";
 import { Switch } from "../../components/Switch";
 import { formatBytes } from "../../lib/format";
 import type { DownloadItem } from "../../lib/types";
@@ -40,6 +41,7 @@ export function PhoneDownloads() {
   const status = useDownloads((s) => s.status);
   const offline = useSettings((s) => !!s.settings?.goOffline);
   const [asking, setAsking] = useState(false);
+  const suggested = useDownloadSuggestions();
   const items = status?.items ?? [];
   const share = status && status.limitBytes > 0 ? Math.min(1, status.usedBytes / status.limitBytes) : 0;
   const waiting = status?.queued ? pauseText(status.paused) : null;
@@ -98,6 +100,41 @@ export function PhoneDownloads() {
             );
           })}
         </ul>
+      )}
+      {suggested.list.length > 0 && (
+        <section aria-labelledby="ph-dl-other">
+          <h2 id="ph-dl-other" className="ph-label">
+            On your other devices
+          </h2>
+          <ul className="ph-rows" aria-label="On your other devices">
+            {suggested.list.map((x) => {
+              const Icon = KIND_ICON[x.kind];
+              return (
+                <Row
+                  key={`${x.kind}:${x.id}`}
+                  label={x.title}
+                  art={
+                    <span className="ph-row__glyph" aria-hidden="true">
+                      <Icon size={22} />
+                    </span>
+                  }
+                  title={x.title}
+                  sub={suggestionLine(x)}
+                  end={
+                    <span className="ph-x__pill-row">
+                      <button type="button" className="ph-pill" onClick={() => suggested.dismiss(x)}>
+                        Not now
+                      </button>
+                      <button type="button" className="ph-pill is-primary" onClick={() => void suggested.download(x)}>
+                        Download here
+                      </button>
+                    </span>
+                  }
+                />
+              );
+            })}
+          </ul>
+        </section>
       )}
       <div className="ph-x__pill-row">
         {items.length > 0 && (

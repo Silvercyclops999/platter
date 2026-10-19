@@ -2003,6 +2003,71 @@ export interface KeySendOutcome {
   sent: KeyKind[];
 }
 
+/** One paired device, for Settings > Keep my devices in sync (docs/IPC.md "Keep my devices in sync"). */
+export interface DeviceSyncDevice {
+  id: string;
+  name: string;
+  /** When the two were last in step (ms, this device's clock). */
+  lastSyncedAt: number | null;
+  /** One plain line: "In sync", "Waiting for Studio PC", ... */
+  words: string;
+  /** A newer Platter on the other device. */
+  updateOther: string | null;
+  /** The clocks are far apart. */
+  clock: string | null;
+  /** Changes held back from a clock far ahead. */
+  held: number;
+}
+
+export type DevicePairPhase = "idle" | "waiting" | "paired" | "expired" | "locked";
+
+/** The Add a device dialog on the device being added. */
+export interface DevicePairState {
+  phase: DevicePairPhase;
+  /** 6 digits, for a device on the same network. */
+  code: string | null;
+  /** PB1-..., for a device somewhere else. */
+  longCode: string | null;
+  /** The long code as a QR code: rows of "0" and "1" (dark). */
+  qr: { size: number; rows: string[] } | null;
+  expiresAt: number | null;
+  /** The device it paired with. */
+  with: string | null;
+}
+
+export interface DevicePaired {
+  id: string;
+  name: string;
+}
+
+export interface DeviceSyncOverview {
+  /** Keep my devices in sync is on. */
+  on: boolean;
+  devices: DeviceSyncDevice[];
+  /** Changes held back from a device whose clock is far ahead. */
+  quarantined: number;
+  pairing: DevicePairState;
+}
+
+/** A change held back because its device's clock is far ahead. */
+export interface SyncQuarantined {
+  ns: string;
+  key: string;
+  entry: { value?: unknown; ts: number; device: string };
+  /** The device it came from. */
+  from: string;
+}
+
+/** Something another device downloaded that this one hasn't: one tap downloads it here too. */
+export interface DownloadSuggestion {
+  kind: DownloadKind;
+  id: string;
+  title: string;
+  /** The devices that have it. */
+  devices: string[];
+  addedAt: number;
+}
+
 /** What changed in the sync store (namespaces: settings, pins, folders, folderItems, follows, hidden, bookmarks, lyrics). */
 export interface SyncStoreChanged {
   namespaces: string[];
@@ -4348,6 +4413,10 @@ export interface EventMap {
   "syncstore://changed": SyncStoreChanged;
   /** The Copy keys dialog's state (a code, keys arriving, expiry). */
   "keys://receive": KeyReceiveState;
+  /** A paired device's sync status changed. */
+  "device-sync://status": DeviceSyncDevice[];
+  /** The Add a device dialog's state (codes, paired, expiry). */
+  "device-sync://pair": DevicePairState;
   /** The hidden songs and artists changed. */
   "hidden://changed": HiddenItem[];
   /** Bookmarks changed (newest first). */

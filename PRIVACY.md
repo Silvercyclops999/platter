@@ -318,6 +318,27 @@ turns into a one-time key, and the keys you tick are sent sealed with it and
 go straight into the receiving computer's keychain. The code and the keys are
 never logged.
 
+## Keep my devices in sync
+
+Devices you pair (Settings, Sync, Keep my devices in sync) swap the same
+things the sync file holds, plus your saved looks, what each device has
+downloaded (only shown on the others as a suggestion; nothing downloads by
+itself) and plays you brought in from elsewhere. Your layout and Home's
+shortcuts stay on each device. There's no server: at home the two talk
+directly on your local network, every request signed with your Plex
+account's key; away, through the same relay as listening sessions, sealed
+end to end, so the relay sees random topic names and ciphertext. Only
+devices signed in to the same Plex account (and Home user) pair or sync.
+
+You pair once: the device you're adding shows a 6-digit code for a device
+on the same network, and a long code with a QR code for one somewhere else.
+Each turns into a key only the two devices know; the code itself is never
+sent anywhere. A 6-digit code never goes near the relay. Your Plex token,
+API keys and other secrets never travel this way either: the app refuses to
+send or take anything shaped like one, and a test checks every message.
+Turn Keep my devices in sync off and nothing is sent or taken; Unpair and
+both devices forget the link.
+
 ## What stays on your machine
 
 Your Plex token is kept in the OS keychain (Windows Credential Manager or

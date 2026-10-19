@@ -171,6 +171,7 @@ import {
 } from "./fixtures";
 import { mockBio } from "./bio";
 import { MOCK_CLOUD_FOLDERS, MockSync } from "./sync";
+import { MockDeviceSync } from "./deviceSync";
 import { MockImport, importLinkAllowed } from "./importData";
 import type { AccountStatus, ImportDecision, ImportSourceId, PlayedHidden, PlayedQuery } from "../importTypes";
 import { MockAccount } from "./accountData";
@@ -439,6 +440,7 @@ export class MockBackend implements Backend {
   /** Sharing your music through Plex (test hooks: plexPass, owner, failNext, inviteArrives). */
   readonly sharing: MockSharing;
   readonly syncFile: MockSync;
+  readonly deviceSync: MockDeviceSync;
   /** Library import (test hook: failNext). */
   readonly importMock: MockImport;
   readonly account: MockAccount;
@@ -732,6 +734,15 @@ export class MockBackend implements Backend {
       emitStatus: (s) => this.emit("sync-file://status", s),
       emitChanged: (c) => this.emit("syncstore://changed", c),
       emitKeys: (s) => this.emit("keys://receive", s),
+    });
+    this.deviceSync = new MockDeviceSync({
+      settings: () => this.settings,
+      setSettings: (patch) => {
+        this.settings = { ...this.settings, ...patch };
+        this.emit("settings://changed", { ...this.settings, volume: this.volume });
+      },
+      emitStatus: (s) => this.emit("device-sync://status", s),
+      emitPair: (s) => this.emit("device-sync://pair", s),
     });
     this.social = new MockSocial(this.fx, {
       settings: () => this.settings,
@@ -3853,6 +3864,42 @@ export class MockBackend implements Backend {
   }
   keysSend(code: string, kinds: KeyKind[]) {
     return this.delay(() => this.syncFile.send(code, kinds));
+  }
+  deviceSyncStatus() {
+    return this.delay(() => this.deviceSync.overview());
+  }
+  deviceSyncNow() {
+    return this.delay(() => this.deviceSync.syncNow());
+  }
+  deviceSyncForget(id: string) {
+    return this.delay(() => this.deviceSync.forget(id));
+  }
+  deviceSyncQuarantined() {
+    return this.delay(() => [...this.deviceSync.held]);
+  }
+  deviceSyncTakeQuarantined() {
+    return this.delay(() => this.deviceSync.takeHeld());
+  }
+  devicePairStart() {
+    return this.delay(() => this.deviceSync.pairStart());
+  }
+  devicePairCancel() {
+    return this.delay(() => this.deviceSync.pairCancel());
+  }
+  devicePairState() {
+    return this.delay(() => this.deviceSync.pairState());
+  }
+  devicePairJoin(code: string) {
+    return this.delay(() => this.deviceSync.join(code));
+  }
+  deviceDownloadSuggestions() {
+    return this.delay(() => [...this.deviceSync.suggestions]);
+  }
+  deviceDownloadDismiss(kind: DownloadKind, id: string | null) {
+    return this.delay(() => this.deviceSync.dismiss(kind, id));
+  }
+  pairCopySettings() {
+    return this.delay(() => this.deviceSync.copySettings());
   }
 
   // ---------------------------------------------------------------- hide, bookmarks, smart playlists, scrobbling
