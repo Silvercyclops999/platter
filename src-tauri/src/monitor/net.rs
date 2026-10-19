@@ -25,6 +25,9 @@ use crate::plex::PlexState;
 /// One look costs a socket bind, so a slower tick saves wakeups while idle;
 /// the health ping still runs every 30 s.
 pub const TICK: Duration = Duration::from_secs(15);
+/// A change waiting for its second look gets it this soon, not a whole
+/// tick later.
+pub const RELOOK: Duration = Duration::from_secs(3);
 /// Extra wall-clock time beyond the tick that counts as a sleep.
 const WAKE_SLACK: Duration = Duration::from_secs(20);
 
@@ -34,11 +37,6 @@ fn route_for(bind: &str, target: &str) -> Option<IpAddr> {
     sock.connect(target).ok()?;
     let ip = sock.local_addr().ok()?.ip();
     (!ip.is_unspecified() && !ip.is_loopback()).then_some(ip)
-}
-
-/// The local address of the default route, if there is one.
-pub fn route_ip() -> Option<IpAddr> {
-    route_for("0.0.0.0:0", "1.1.1.1:53").or_else(|| route_for("[::]:0", "[2606:4700:4700::1111]:53"))
 }
 
 /// Which network this is, per family. Public anycast resolvers are used
@@ -113,7 +111,12 @@ impl NetWatch {
         self.route
     }
 
-    /// One look. `route` is [`route_ip`]'s answer, `now` the wall clock,
+    /// A change in one family is waiting for its second look.
+    pub fn waiting(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// One look. `route` is [`route`]'s answer, `now` the wall clock,
     /// `tick` the interval the caller slept for.
     pub fn tick(&mut self, route: Route, now: SystemTime, tick: Duration) -> Vec<NetSignal> {
         let mut out = Vec::new();
@@ -174,7 +177,10 @@ pub fn spawn(plex: PlexState) {
     tauri::async_runtime::spawn(async move {
         let mut watch = NetWatch::new(SystemTime::now());
         loop {
-            let Ok(route) = tokio::task::spawn_blocking(route).await else { continue };
+            let Ok(route) = tokio::task::spawn_blocking(route).await else {
+                tokio::time::sleep(TICK).await;
+                continue;
+            };
             let before = watch.current();
             for s in watch.tick(route, SystemTime::now(), TICK) {
                 match s {
@@ -189,7 +195,7 @@ pub fn spawn(plex: PlexState) {
                     }
                 }
             }
-            tokio::time::sleep(TICK).await;
+            tokio::time::sleep(if watch.waiting() { RELOOK } else { TICK }).await;
         }
     });
 }
@@ -295,6 +301,79 @@ mod tests {
         assert_eq!(w.tick(cell, at(15), TICK), vec![NetSignal::Changed]);
     }
 
+    fn dual() -> Route {
+        Route::of(Some(Ipv4Addr::new(100, 64, 0, 9)), v6(1, 1))
+    }
+    fn v6_only() -> Route {
+        Route::of(None, v6(1, 1))
+    }
+
+    #[test]
+    fn a_pending_change_is_dropped_when_the_route_returns() {
+        let mut w = NetWatch::new(at(0));
+        w.tick(dual(), at(0), TICK);
+        assert!(w.tick(v6_only(), at(3), TICK).is_empty());
+        assert!(w.waiting());
+        assert!(w.tick(dual(), at(6), TICK).is_empty());
+        assert!(!w.waiting());
+        // Back to v6 only later starts over: one look isn't enough.
+        assert!(w.tick(v6_only(), at(21), TICK).is_empty());
+    }
+
+    #[test]
+    fn a_pending_change_replaced_by_a_third_route_needs_its_own_second_look() {
+        let mut w = NetWatch::new(at(0));
+        w.tick(dual(), at(0), TICK);
+        assert!(w.tick(v6_only(), at(3), TICK).is_empty());
+        let other_v4 = Route::of(Some(Ipv4Addr::new(100, 64, 0, 10)), v6(1, 1));
+        assert!(w.tick(other_v4, at(6), TICK).is_empty());
+        assert_eq!(w.tick(other_v4, at(9), TICK), vec![NetSignal::Changed]);
+        assert_eq!(w.current(), other_v4);
+    }
+
+    #[test]
+    fn losing_the_network_while_a_change_waits_is_at_once() {
+        let mut w = NetWatch::new(at(0));
+        w.tick(dual(), at(0), TICK);
+        assert!(w.tick(v6_only(), at(3), TICK).is_empty());
+        assert_eq!(w.tick(NONE, at(6), TICK), vec![NetSignal::Lost]);
+        assert!(!w.waiting());
+    }
+
+    #[test]
+    fn an_ipv6_only_switch_between_64s_is_at_once() {
+        let mut w = NetWatch::new(at(0));
+        w.tick(Route::of(None, v6(1, 1)), at(0), TICK);
+        assert_eq!(w.tick(Route::of(None, v6(2, 1)), at(15), TICK), vec![NetSignal::Changed]);
+    }
+
+    #[test]
+    fn dual_stack_to_ipv6_only_holds_for_a_second_look() {
+        let mut w = NetWatch::new(at(0));
+        w.tick(dual(), at(0), TICK);
+        assert!(w.tick(v6_only(), at(15), TICK).is_empty());
+        assert_eq!(w.tick(v6_only(), at(18), TICK), vec![NetSignal::Changed]);
+    }
+
+    #[test]
+    fn the_64_ends_at_the_fourth_segment() {
+        let a = Ipv6Addr::new(0x2600, 1, 2, 3, 0, 0, 0, 1);
+        // The fourth segment is part of the /64: another network.
+        let b = Ipv6Addr::new(0x2600, 1, 2, 4, 0, 0, 0, 1);
+        // The fifth and on are the host part: the same network.
+        let c = Ipv6Addr::new(0x2600, 1, 2, 3, 9, 9, 9, 9);
+        assert_ne!(Route::of(None, Some(a)), Route::of(None, Some(b)));
+        assert_eq!(Route::of(None, Some(a)), Route::of(None, Some(c)));
+    }
+
+    #[test]
+    fn waking_with_a_change_waiting_says_both() {
+        let mut w = NetWatch::new(at(0));
+        w.tick(dual(), at(0), TICK);
+        assert!(w.tick(v6_only(), at(15), TICK).is_empty());
+        assert_eq!(w.tick(v6_only(), at(900), TICK), vec![NetSignal::Woke, NetSignal::Changed]);
+    }
+
     #[test]
     fn changes_are_described_without_addresses() {
         let both = Route::of(v4(1, 20), v6(1, 1));
@@ -308,8 +387,7 @@ mod tests {
     #[test]
     fn route_lookup_does_not_panic() {
         // Depends on the machine; only checks it returns a sane value.
-        if let Some(ip) = route_ip() {
-            assert!(!ip.is_loopback());
-        }
+        let r = route();
+        assert!(r.v4.is_none_or(|a| !a.is_loopback()));
     }
 }
