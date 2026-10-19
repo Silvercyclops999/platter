@@ -136,7 +136,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 objc2-media-player = { version = "0.3.2", default-features = false, features = ["std", "block2", "MPNowPlayingInfoCenter", "MPRemoteCommandCenter", "MPRemoteCommand", "MPRemoteCommandEvent", "MPMediaItem", "MPNowPlayingInfoLanguageOption"] }
 objc2-ui-kit = { version = "0.3.2", default-features = false, features = ["std", "UIImage", "UIScene", "UISceneDefinitions", "UISceneOptions", "UISceneSession", "UIResponder", "UIApplication"] }
 # CarPlay: the car's screen, built from Apple's templates.
-objc2-car-play = { version = "0.3.2", default-features = false, features = ["std", "block2", "dispatch2", "objc2-ui-kit", "CPTemplateApplicationScene", "CPInterfaceController", "CPTemplate", "CPTabBarTemplate", "CPListTemplate", "CPListSection", "CPListItem", "CPListItemTypes", "CPNowPlayingTemplate", "CPAlertTemplate", "CPAlertAction"] }
+objc2-car-play = { version = "0.3.2", default-features = false, features = ["std", "block2", "dispatch2", "objc2-ui-kit", "CPTemplateApplicationScene", "CPInterfaceController", "CPTemplate", "CPTabBarTemplate", "CPListTemplate", "CPListSection", "CPListItem", "CPListItemTypes", "CPNowPlayingTemplate", "CPNowPlayingButton", "CPAlertTemplate", "CPAlertAction"] }
 
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
 souvlaki = { version = "0.8.3", default-features = false }
