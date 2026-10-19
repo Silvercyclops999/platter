@@ -217,15 +217,6 @@ fn shown_name(name: &str) -> String {
     kept.trim().to_string()
 }
 
-#[cfg(test)]
-mod shown_name_tests {
-    #[test]
-    fn names_lose_control_and_direction_characters() {
-        assert_eq!(super::shown_name("Adam\u{202e}s PC\n"), "Adams PC");
-        assert_eq!(super::shown_name(" \u{200f} "), "");
-        assert_eq!(super::shown_name(&"x".repeat(80)).len(), 60);
-    }
-}
 
 // ---------------------------------------------------------------- bridge
 
@@ -304,5 +295,15 @@ impl Joining {
         let name = if confirm.desktop_name.trim().is_empty() { fallback.to_string() } else { confirm.desktop_name.chars().take(60).collect() };
         let device = if self.me.is_some() { confirm.dev.chars().take(100).collect() } else { String::new() };
         Ok(PairedDesktop { link, name, device })
+    }
+}
+
+#[cfg(test)]
+mod shown_name_tests {
+    #[test]
+    fn names_lose_control_and_direction_characters() {
+        assert_eq!(super::shown_name("Adam\u{202e}s PC\n"), "Adams PC");
+        assert_eq!(super::shown_name(" \u{200f} "), "");
+        assert_eq!(super::shown_name(&"x".repeat(80)).len(), 60);
     }
 }
