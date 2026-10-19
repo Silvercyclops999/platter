@@ -1705,7 +1705,7 @@ export const DEFAULT_SETTINGS: Settings = {
   libraries: [],
   serverView: "all",
   lyricsMode: "autoShow",
-  lyricsLrclib: false,
+  lyricsLrclib: true,
   lyricsPreferOwn: false,
   lyricsShowAdd: true,
   lyricsLiveTiming: false,

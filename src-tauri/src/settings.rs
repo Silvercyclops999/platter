@@ -1159,7 +1159,7 @@ impl Default for Settings {
             libraries: Vec::new(),
             server_view: "all".into(),
             lyrics_mode: LyricsMode::AutoShow,
-            lyrics_lrclib: false,
+            lyrics_lrclib: true,
             lyrics_prefer_own: false,
             lyrics_show_add: true,
             lyrics_live_timing: false,
@@ -1192,7 +1192,8 @@ impl Default for Settings {
             lyrics_fix_timing: true,
             lyrics_released_for_versions: false,
             lyrics_official_first: true,
-            show_to_my_devices: false,
+            // A phone is useless to hand off to if nothing can see it.
+            show_to_my_devices: cfg!(mobile),
             computer_name: String::new(),
             show_airplay_locked: false,
             download_quality: DownloadQuality::Original,
@@ -2645,6 +2646,30 @@ impl Settings {
 /// couldn't be read.
 pub const UNREADABLE_KEY: &str = "app.settings.unreadable";
 
+/// Set once a phone has had the switches that now start on there.
+const PHONE_DEFAULTS_KEY: &str = "app.settings.phoneDefaults1";
+
+/// A phone saved before showing itself and LRCLIB lyrics started on gets
+/// them once (its stored false came from saving every field, not a
+/// choice). Later changes by the user stick.
+fn phone_defaults_once(db: &DbHandle, s: &mut Settings, had_saved: bool) {
+    match db.read(|c| kv_get(c, PHONE_DEFAULTS_KEY)) {
+        Ok(None) => {}
+        Ok(Some(_)) => return,
+        Err(e) => return tracing::warn!("phone defaults not checked: {e}"),
+    }
+    if had_saved {
+        s.show_to_my_devices = true;
+        s.lyrics_lrclib = true;
+        if let Err(e) = save(db, s) {
+            return tracing::warn!("phone defaults not saved: {e}");
+        }
+    }
+    if let Err(e) = db.write(|c| kv_set(c, PHONE_DEFAULTS_KEY, "1")) {
+        tracing::warn!("phone defaults not marked: {e}");
+    }
+}
+
 /// Read settings for showing and following. When the database can't be
 /// read this gives the defaults; anything that saves uses [`try_load`],
 /// which says so instead, so defaults never overwrite real settings.
@@ -2663,6 +2688,7 @@ pub fn load(db: &DbHandle) -> Settings {
 /// the database itself can't be read.
 pub fn try_load(db: &DbHandle) -> AppResult<Settings> {
     let raw = db.read(|c| kv_get(c, KEY))?;
+    let had_saved = raw.is_some();
     let mut s = match raw.as_deref().map(parse_stored) {
         None => Settings::default(),
         Some((s, None)) => s,
@@ -2682,6 +2708,9 @@ pub fn try_load(db: &DbHandle) -> AppResult<Settings> {
             s
         }
     };
+    if cfg!(mobile) {
+        phone_defaults_once(db, &mut s, had_saved);
+    }
     s.clamp();
     // Ids saved before they carried their server (crate::sid).
     for ids in [&mut s.mix_exclude_artists, &mut s.mix_exclude_albums] {
@@ -3547,7 +3576,6 @@ mod tests {
             "nowPlayingFeed",
             "allowStreamDeck",
             "allowAutomation",
-            "showToMyDevices",
             "actAsPlexPlayer",
             // Write to the server.
             "saveQueueOnServer",
@@ -3569,7 +3597,6 @@ mod tests {
             "infoListenbrainz",
             "infoMusicbrainz",
             "infoListenbrainzStats",
-            "lyricsLrclib",
             "identifyBySound",
             "scrobbleLastfm",
             "scrobbleListenbrainz",
@@ -4676,7 +4703,8 @@ mod tests {
     #[test]
     fn platter_device_settings_default_and_reach_the_switches() {
         let s = Settings::default();
-        assert!(!s.show_to_my_devices && s.computer_name.is_empty() && !s.show_airplay_locked, "it opens a port, so it starts off");
+        assert_eq!(s.show_to_my_devices, cfg!(mobile), "a computer opens no port until asked; a phone shows itself");
+        assert!(s.computer_name.is_empty() && !s.show_airplay_locked);
         let mut s = s;
         s.show_to_my_devices = true;
         let (db, _d) = db();
@@ -4723,10 +4751,34 @@ mod tests {
     }
 
     #[test]
+    fn a_saved_phone_gets_the_new_defaults_once() {
+        let (db, _d) = db();
+        let mut s = Settings { show_to_my_devices: false, lyrics_lrclib: false, ..Default::default() };
+        save(&db, &s).unwrap();
+        phone_defaults_once(&db, &mut s, true);
+        assert!(s.show_to_my_devices && s.lyrics_lrclib);
+        assert!(load(&db).show_to_my_devices, "saved");
+        // Turned off again by the user: it stays off.
+        s.show_to_my_devices = false;
+        save(&db, &s).unwrap();
+        phone_defaults_once(&db, &mut s, true);
+        assert!(!s.show_to_my_devices && !load(&db).show_to_my_devices);
+    }
+
+    #[test]
+    fn a_new_phone_is_only_marked() {
+        let (db, _d) = db();
+        let mut s = Settings { lyrics_lrclib: false, ..Default::default() };
+        phone_defaults_once(&db, &mut s, false);
+        assert!(!s.lyrics_lrclib);
+        assert!(db.read(|c| kv_get(c, PHONE_DEFAULTS_KEY)).unwrap().is_some());
+    }
+
+    #[test]
     fn lyrics_settings_default_and_reach_the_switch() {
         let s = Settings::default();
         assert_eq!(s.lyrics_mode, LyricsMode::AutoShow);
-        assert!(!s.lyrics_lrclib, "LRCLIB is off until the user turns it on");
+        assert!(s.lyrics_lrclib, "an empty lyrics view reads as broken");
         assert!(s.full_window_hide_controls);
         let v = serde_json::to_value(&s).unwrap();
         assert_eq!(v["lyricsMode"], "autoShow");

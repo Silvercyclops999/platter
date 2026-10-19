@@ -435,13 +435,13 @@ describe("lyrics settings", () => {
     const mode = screen.getByRole("combobox", { name: "Show synced lyrics automatically" });
     expect(mode).toHaveValue("autoShow");
     const lrclib = screen.getByRole("switch", { name: "Lyrics from LRCLIB when your server has none" });
-    expect(lrclib).not.toBeChecked();
+    expect(lrclib).toBeChecked();
     const fade = screen.getByRole("switch", { name: "Expanded view hides controls" });
     expect(fade).toBeChecked();
     await user.selectOptions(mode, "off");
     expect(set).toHaveBeenCalledWith({ lyricsMode: "off" });
     await user.click(lrclib);
-    expect(set).toHaveBeenCalledWith({ lyricsLrclib: true });
+    expect(set).toHaveBeenCalledWith({ lyricsLrclib: false });
     await user.click(fade);
     expect(set).toHaveBeenCalledWith({ fullWindowHideControls: false });
     expect(SOURCE_NOTICES.some((n) => n.name.startsWith("LRCLIB"))).toBe(true);
@@ -519,6 +519,7 @@ describe("expanded view mode", () => {
   });
 
   it("turning LRCLIB on asks for lyrics again", async () => {
+    act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS, lyricsLrclib: false } }));
     const spy = vi.spyOn(backend, "lyrics");
     await loadLyrics(none.id);
     await loadLyrics(none.id);

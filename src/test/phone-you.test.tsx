@@ -191,6 +191,7 @@ describe("phone settings screens", () => {
   it("the computer keeps every row", () => {
     expect(onPhone({ key: "closeToTray" })).toBe(false);
     expect(onPhone({ key: "crossfade" })).toBe(true);
+    expect(onPhone({ key: "showToMyDevices" })).toBe(true);
     expect(onPhone({ key: "discordStatus", page: "discord" })).toBe(false);
     expect(DESKTOP_ONLY.has("layout")).toBe(true);
   });

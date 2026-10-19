@@ -2381,8 +2381,8 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       key: "showToMyDevices",
       section: "Downloads and devices",
       title: "Show this computer to my other devices",
-      description: "Your other computers running Platter can play on this one. This device only.",
-      more: "Your other computers running Platter on this network, signed in to the same Plex account, can see this one and play on it. Opens a network port, so your computer may ask to allow it. This device only.",
+      description: "Your other devices running Platter can see this computer and play on it. This device only.",
+      more: "Your other devices running Platter on this network, signed in to the same Plex account, can see this computer and play on it. Opens a network port, so your computer may ask to allow it. This device only.",
       control: (ids) => toggle(s, "showToMyDevices", ids),
     },
     {

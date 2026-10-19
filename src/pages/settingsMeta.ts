@@ -462,10 +462,9 @@ export const DESKTOP_ONLY: ReadonlySet<string> = new Set([
   "spineWidthByTracks",
   // Sound: the phone picks its output through the system.
   "outputDevice",
-  // Downloads and devices: folders and this computer as a player.
+  // Downloads and devices: folders and this computer as a Plex player.
   "downloadFolder",
   "computerName",
-  "showToMyDevices",
   "actAsPlexPlayer",
   // Lyrics: transcription runs on a computer.
   "transcribeLyrics",
