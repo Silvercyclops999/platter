@@ -14,9 +14,12 @@
 //! - [`run`]: listeners, rounds and sending local changes through the relay.
 //! - [`lan`]: the local network path (tried first), and answering it.
 //! - [`clock`]: how far apart two devices' clocks are, in words.
+//! - [`pair`]: pairing two devices, with the 6-digit code at home or the
+//!   long code anywhere.
 
 pub mod clock;
 pub mod lan;
+pub mod pair;
 pub mod protocol;
 pub mod run;
 

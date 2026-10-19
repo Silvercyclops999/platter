@@ -10,6 +10,12 @@
 //! 4. The Bridge finishes the exchange and opens the confirmation
 //!    ([`Joining::finish`]). Both now hold the link secret, which neither
 //!    the relay nor anyone who later sees the code can work out.
+//!
+//! Two of the user's own devices pair the same way when they aren't on one
+//! network ([`Offer::for_device`], [`Joining::start_device`]), under labels
+//! of their own so a device code never pairs a Bridge, and the other way
+//! round. Each says which Plex account it's signed in to inside the sealed
+//! exchange, and a device of another account is turned away.
 
 use serde::{Deserialize, Serialize};
 
@@ -27,7 +33,17 @@ const CONFIRM_AAD: &str = "platter-bridge welcome";
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "t", rename_all = "camelCase")]
 enum PairMsg {
-    Join { n: String, a: String, name: String, version: String },
+    Join {
+        n: String,
+        a: String,
+        name: String,
+        version: String,
+        /// A device's id and account tag (device pairing only).
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        dev: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        acct: String,
+    },
     Welcome { n: String, b: String, c: String },
 }
 
@@ -43,22 +59,62 @@ struct Confirm {
     desktop: String,
     desktop_name: String,
     bridge: String,
+    /// The answering device's id and account tag (device pairing only).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    dev: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    acct: String,
 }
 
-fn join_channel(code: &PairCode) -> Channel {
-    Channel::new(&code.seed(), "bridge pair join")
+/// What a pairing's channels, confirmation and link are derived under.
+#[derive(Clone, Copy)]
+struct Labels {
+    join: &'static str,
+    welcome: &'static str,
+    confirm: &'static str,
+    secret: &'static str,
+    id: &'static str,
 }
 
-fn welcome_channel(code: &PairCode) -> Channel {
-    Channel::new(&code.seed(), "bridge pair welcome")
+const BRIDGE: Labels = Labels {
+    join: "bridge pair join",
+    welcome: "bridge pair welcome",
+    confirm: CONFIRM_AAD,
+    secret: "bridge link",
+    id: "bridge link id",
+};
+
+const DEVICE: Labels = Labels {
+    join: "device pair join",
+    welcome: "device pair welcome",
+    confirm: "platter-device welcome",
+    secret: "device link",
+    id: "device link id",
+};
+
+/// A device's own side of a device pairing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceMe {
+    /// Its Plex client id.
+    pub device: String,
+    /// Its account tag; the other device must have the same.
+    pub acct: String,
 }
 
-fn link_secret(key: &[u8; 32]) -> [u8; 32] {
-    seal::derive(key, "bridge link")
+fn join_channel(l: Labels, code: &PairCode) -> Channel {
+    Channel::new(&code.seed(), l.join)
 }
 
-fn link_id(secret: &[u8; 32]) -> String {
-    hex(&seal::derive(secret, "bridge link id")[..8])
+fn welcome_channel(l: Labels, code: &PairCode) -> Channel {
+    Channel::new(&code.seed(), l.welcome)
+}
+
+fn link_secret(l: Labels, key: &[u8; 32]) -> [u8; 32] {
+    seal::derive(key, l.secret)
+}
+
+fn link_id(l: Labels, secret: &[u8; 32]) -> String {
+    hex(&seal::derive(secret, l.id)[..8])
 }
 
 fn open(ch: &Channel, body: &str, now_ms: u64) -> Option<PairMsg> {
@@ -72,6 +128,8 @@ pub struct PairedBridge {
     pub link: Link,
     pub name: String,
     pub version: String,
+    /// The joining device's id (device pairing; empty for a Bridge).
+    pub device: String,
 }
 
 /// A paired desktop, as the Bridge learns it.
@@ -79,6 +137,8 @@ pub struct PairedBridge {
 pub struct PairedDesktop {
     pub link: Link,
     pub name: String,
+    /// The answering device's id (device pairing; empty for a desktop).
+    pub device: String,
 }
 
 // ---------------------------------------------------------------- desktop
@@ -88,16 +148,23 @@ pub struct Offer {
     pub code: PairCode,
     pub desktop_name: String,
     used: bool,
+    labels: Labels,
+    me: Option<DeviceMe>,
 }
 
 impl Offer {
     pub fn new(code: PairCode, desktop_name: &str) -> Self {
-        Self { code, desktop_name: desktop_name.to_string(), used: false }
+        Self { code, desktop_name: desktop_name.to_string(), used: false, labels: BRIDGE, me: None }
+    }
+
+    /// A device showing a code for another of the user's devices.
+    pub fn for_device(code: PairCode, name: &str, me: DeviceMe) -> Self {
+        Self { code, desktop_name: name.to_string(), used: false, labels: DEVICE, me: Some(me) }
     }
 
     /// Where the Bridge's join arrives.
     pub fn listen_topic(&self) -> String {
-        join_channel(&self.code).topic
+        join_channel(self.labels, &self.code).topic
     }
 
     /// The first good join: the welcome to publish (topic, body) and the
@@ -107,21 +174,37 @@ impl Offer {
         if self.used || self.code.expired((now_ms / 1000) as i64) {
             return None;
         }
-        let PairMsg::Join { n, a, name, version } = open(&join_channel(&self.code), body, now_ms)? else { return None };
+        let l = self.labels;
+        let PairMsg::Join { n, a, name, version, dev, acct } = open(&join_channel(l, &self.code), body, now_ms)? else { return None };
+        if let Some(me) = &self.me
+            && (acct.is_empty() || acct != me.acct || dev.is_empty() || dev == me.device)
+        {
+            tracing::info!("device pairing: turned away a device of another account");
+            return None;
+        }
         let msg_a = seal::unb64(&a)?;
         let (msg_b, key) = seal::pake_host(&self.code.secret, &msg_a).ok()?;
-        let secret = link_secret(&key);
+        let secret = link_secret(l, &key);
         let desktop = hex(&seal::random16()[..8]);
         let bridge = hex(&seal::random16()[..8]);
-        let confirm = Confirm { desktop: desktop.clone(), desktop_name: self.desktop_name.clone(), bridge: bridge.clone() };
-        let c = seal::seal_with(&key, CONFIRM_AAD, &serde_json::to_vec(&confirm).ok()?).ok()?;
-        let ch = welcome_channel(&self.code);
+        let confirm = Confirm {
+            desktop: desktop.clone(),
+            desktop_name: self.desktop_name.clone(),
+            bridge: bridge.clone(),
+            dev: self.me.as_ref().map(|m| m.device.clone()).unwrap_or_default(),
+            acct: self.me.as_ref().map(|m| m.acct.clone()).unwrap_or_default(),
+        };
+        let c = seal::seal_with(&key, l.confirm, &serde_json::to_vec(&confirm).ok()?).ok()?;
+        let ch = welcome_channel(l, &self.code);
         let body = seal::seal_value(&ch, &Sealed { x: now_ms + TTL_MS, m: PairMsg::Welcome { n, b: seal::b64(&msg_b), c } }).ok()?;
         self.used = true;
         let relay = self.code.relay.clone().unwrap_or_else(|| super::DEFAULT_RELAY.to_string());
-        let link = Link { id: link_id(&secret), secret, relay, side: Side::Desktop, me: desktop, peer: bridge };
-        let name = if name.trim().is_empty() { "Platter Bridge".to_string() } else { name.chars().take(60).collect() };
-        Some(((ch.topic, body), PairedBridge { link, name, version: version.chars().take(20).collect() }))
+        let side = if self.me.is_some() { Side::Device } else { Side::Desktop };
+        let link = Link { id: link_id(l, &secret), secret, relay, side, me: desktop, peer: bridge };
+        let fallback = if self.me.is_some() { "Your other device" } else { "Platter Bridge" };
+        let name = if name.trim().is_empty() { fallback.to_string() } else { name.chars().take(60).collect() };
+        let device = if self.me.is_some() { dev.chars().take(100).collect() } else { String::new() };
+        Some(((ch.topic, body), PairedBridge { link, name, version: version.chars().take(20).collect(), device }))
     }
 }
 
@@ -132,6 +215,8 @@ pub struct Joining {
     code: PairCode,
     pake: PakeGuest,
     nonce: String,
+    labels: Labels,
+    me: Option<DeviceMe>,
 }
 
 impl Joining {
@@ -140,37 +225,65 @@ impl Joining {
         if code.expired((now_ms / 1000) as i64) {
             return Err(AppError::Invalid("This pair code has expired. Make a new one in Platter (Settings > Bridge > Pair a Bridge).".into()));
         }
+        Self::begin(code, name, version, now_ms, BRIDGE, None)
+    }
+
+    /// A device joining another of the user's devices with its long code.
+    pub fn start_device(code: PairCode, name: &str, version: &str, me: DeviceMe, now_ms: u64) -> AppResult<(Self, (String, String))> {
+        if code.expired((now_ms / 1000) as i64) {
+            return Err(AppError::Invalid("This code has expired. Show a new one on your other device.".into()));
+        }
+        Self::begin(code, name, version, now_ms, DEVICE, Some(me))
+    }
+
+    fn begin(code: PairCode, name: &str, version: &str, now_ms: u64, labels: Labels, me: Option<DeviceMe>) -> AppResult<(Self, (String, String))> {
         let (pake, msg_a) = seal::pake_guest_start(&code.secret);
         let nonce = hex(&seal::random16()[..8]);
-        let ch = join_channel(&code);
-        let m = PairMsg::Join { n: nonce.clone(), a: seal::b64(&msg_a), name: name.to_string(), version: version.to_string() };
+        let ch = join_channel(labels, &code);
+        let m = PairMsg::Join {
+            n: nonce.clone(),
+            a: seal::b64(&msg_a),
+            name: name.to_string(),
+            version: version.to_string(),
+            dev: me.as_ref().map(|m| m.device.clone()).unwrap_or_default(),
+            acct: me.as_ref().map(|m| m.acct.clone()).unwrap_or_default(),
+        };
         let body = seal::seal_value(&ch, &Sealed { x: now_ms + TTL_MS, m })?;
-        Ok((Self { code, pake, nonce }, (ch.topic, body)))
+        Ok((Self { code, pake, nonce, labels, me }, (ch.topic, body)))
     }
 
     /// Where the desktop's welcome arrives.
     pub fn listen_topic(&self) -> String {
-        welcome_channel(&self.code).topic
+        welcome_channel(self.labels, &self.code).topic
     }
 
     /// Whether `body` is the welcome to this join (without using it up).
     pub fn is_welcome(&self, body: &str, now_ms: u64) -> bool {
-        matches!(open(&welcome_channel(&self.code), body, now_ms), Some(PairMsg::Welcome { n, .. }) if n == self.nonce)
+        matches!(open(&welcome_channel(self.labels, &self.code), body, now_ms), Some(PairMsg::Welcome { n, .. }) if n == self.nonce)
     }
 
     /// Finish with the desktop's welcome.
     pub fn finish(self, body: &str, now_ms: u64) -> AppResult<PairedDesktop> {
         let bad = || AppError::Invalid("The answer from Platter couldn't be opened. Make a new pair code and try again.".into());
-        let Some(PairMsg::Welcome { n, b, c }) = open(&welcome_channel(&self.code), body, now_ms) else { return Err(bad()) };
+        let l = self.labels;
+        let Some(PairMsg::Welcome { n, b, c }) = open(&welcome_channel(l, &self.code), body, now_ms) else { return Err(bad()) };
         if n != self.nonce {
             return Err(bad());
         }
         let key = seal::pake_guest_finish(self.pake, &seal::unb64(&b).ok_or_else(bad)?)?;
-        let confirm: Confirm = serde_json::from_slice(&seal::open_with(&key, CONFIRM_AAD, &c).map_err(|_| bad())?).map_err(|_| bad())?;
-        let secret = link_secret(&key);
+        let confirm: Confirm = serde_json::from_slice(&seal::open_with(&key, l.confirm, &c).map_err(|_| bad())?).map_err(|_| bad())?;
+        if let Some(me) = &self.me
+            && (confirm.acct.is_empty() || confirm.acct != me.acct)
+        {
+            return Err(AppError::Auth("That device is signed in to a different Plex account or Home user.".into()));
+        }
+        let secret = link_secret(l, &key);
         let relay = self.code.relay.clone().unwrap_or_else(|| super::DEFAULT_RELAY.to_string());
-        let link = Link { id: link_id(&secret), secret, relay, side: Side::Bridge, me: confirm.bridge, peer: confirm.desktop };
-        let name = if confirm.desktop_name.trim().is_empty() { "a desktop".to_string() } else { confirm.desktop_name.chars().take(60).collect() };
-        Ok(PairedDesktop { link, name })
+        let side = if self.me.is_some() { Side::Device } else { Side::Bridge };
+        let link = Link { id: link_id(l, &secret), secret, relay, side, me: confirm.bridge, peer: confirm.desktop };
+        let fallback = if self.me.is_some() { "Your other device" } else { "a desktop" };
+        let name = if confirm.desktop_name.trim().is_empty() { fallback.to_string() } else { confirm.desktop_name.chars().take(60).collect() };
+        let device = if self.me.is_some() { confirm.dev.chars().take(100).collect() } else { String::new() };
+        Ok(PairedDesktop { link, name, device })
     }
 }

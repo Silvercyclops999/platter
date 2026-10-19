@@ -11,6 +11,7 @@ use url::Url;
 
 use super::auth::{AUTH_HEADER, PeerKey, nonce, now_ms, sign};
 use super::keys::{KeysDeliver, KeysHello, KeysHelloReply, KeysWaiting, PATH_KEYS_DELIVER, PATH_KEYS_HELLO, PATH_KEYS_WAITING};
+use super::pair::{PATH_PAIR_FINISH, PATH_PAIR_HELLO, PATH_PAIR_WAITING, PairFinish, PairHello, PairHelloReply, PairWaiting};
 use super::sync::{LanBody, PATH_SYNC_ENTRIES, PATH_SYNC_HELLO};
 use super::{Hello, PATH_COMMAND, PATH_HELLO, PATH_PLAY, PATH_STATE, PATH_STOP, PeerTimeline, PlayRequest};
 use crate::error::{AppError, AppResult};
@@ -214,6 +215,19 @@ impl PeerClient {
 
     pub async fn keys_deliver(&self, base: &Url, to: &str, req: &KeysDeliver, timeout: Duration) -> Result<(), PeerError> {
         self.call::<serde_json::Value>(base, to, PATH_KEYS_DELIVER, Some(Self::json(req)), timeout).await.map(|_| ())
+    }
+
+    /// Is `to` showing a code to pair with?
+    pub async fn pair_waiting(&self, base: &Url, to: &str, timeout: Duration) -> Result<bool, PeerError> {
+        self.call::<PairWaiting>(base, to, PATH_PAIR_WAITING, None, timeout).await.map(|w| w.waiting)
+    }
+
+    pub async fn pair_hello(&self, base: &Url, to: &str, req: &PairHello, timeout: Duration) -> Result<PairHelloReply, PeerError> {
+        self.call(base, to, PATH_PAIR_HELLO, Some(Self::json(req)), timeout).await
+    }
+
+    pub async fn pair_finish(&self, base: &Url, to: &str, req: &PairFinish, timeout: Duration) -> Result<(), PeerError> {
+        self.call::<serde_json::Value>(base, to, PATH_PAIR_FINISH, Some(Self::json(req)), timeout).await.map(|_| ())
     }
 
     /// Sealed device sync messages to `to`, and its sealed answers.
