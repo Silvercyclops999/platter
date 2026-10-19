@@ -57,7 +57,11 @@ export function BackBar({ title, after = 160, right }: { title?: string; after?:
   );
 }
 
-/** A song: optional number or art, title, artist line with the downloaded mark, and its sheet. */
+/**
+ * A song: optional number or art, title, artist line with the downloaded
+ * mark, and its sheet. The playing song wears the level bars: in place of
+ * its number, or before its title on a row without one.
+ */
 export function SongRow({
   track,
   index,
@@ -89,7 +93,10 @@ export function SongRow({
         )}
         {art && <Art path={track.thumb} size={48} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} />}
         <span className="ph-row__text">
-          <span className={`ph-row__title ${playing ? "is-playing" : ""}`}>{track.title}</span>
+          <span className={`ph-row__title ${playing ? "is-playing" : ""}`}>
+            {playing && index === undefined && <PlayingBars />}
+            {track.title}
+          </span>
           <span className="ph-row__sub">
             <RowGlyphs trackId={track.id} />
             {sub ?? trackArtistLine(track)}

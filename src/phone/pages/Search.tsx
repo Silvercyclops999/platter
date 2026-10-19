@@ -15,7 +15,8 @@ import { nav, useRouter } from "../../stores/router";
 import { phone } from "../phoneUi";
 import { RowGlyphs, tap } from "../bits";
 import { SwipeUnder, useSwipeToQueue } from "../rowSwipe";
-import { player } from "../../stores/player";
+import { player, usePlayer } from "../../stores/player";
+import { PlayingBars } from "./common";
 
 /** Typing settles for this long before the search runs. */
 export const SEARCH_SETTLE_MS = 150;
@@ -231,6 +232,8 @@ function HitRow({
   const i = hitInfo(hit);
   // A song swipes right into the queue.
   const swipe = useSwipeToQueue(() => hit.track && void player.addToQueue([hit.track]), !!hit.track);
+  // The playing song wears the level bars.
+  const playing = usePlayer((s) => !!hit.track && s.state?.track?.id === hit.track.id);
   if (!i) return null;
   return (
     <li className={`ph-hit ${hit.track ? swipe.className : ""} ${top ? "is-top" : ""} ${versions > 0 ? "has-versions" : ""}`} {...(hit.track ? swipe.props : {})}>
@@ -238,7 +241,10 @@ function HitRow({
       <button type="button" className="ph-row" onClick={onOpen}>
         <Art path={i.thumb} size={52} round={i.round} kind={i.kind === "track" ? "album" : i.kind} monogram={i.round ? i.title : undefined} />
         <span className="ph-row__text">
-          <span className="ph-row__title">{i.title}</span>
+          <span className={`ph-row__title ${playing ? "is-playing" : ""}`}>
+            {playing && <PlayingBars />}
+            {i.title}
+          </span>
           <span className="ph-row__sub">
             <RowGlyphs trackId={i.kind === "track" ? i.id : undefined} albumId={i.kind === "album" ? i.id : undefined} />
             {hitLine(i, typed)}

@@ -52,7 +52,7 @@ import { retryDownload, toggleDownload, useDownloadItem, type DownloadTarget } f
 import { countText, phoneDownloadState } from "./PhoneDownload";
 import { useSettings } from "../stores/settings";
 import { openSongCredits } from "../stores/songCredits";
-import { countLine } from "./pages/common";
+import { countLine, PlayingBars } from "./pages/common";
 import { SORT_LABEL, useLibraryView, type LibSort } from "../stores/library";
 import { isLiked, setLiked } from "../stores/likes";
 import { player, usePlayer } from "../stores/player";
@@ -327,7 +327,10 @@ export function QueueSheet() {
         <div className="ph-queue__now">
           <Art path={current.track.thumb} size={48} sleeve={{ title: current.track.albumTitle, artist: current.track.artistTitle }} />
           <span className="ph-row__text">
-            <span className="ph-row__title is-playing">{current.track.title}</span>
+            <span className="ph-row__title is-playing">
+              <PlayingBars />
+              {current.track.title}
+            </span>
             <span className="ph-row__sub">{trackArtistLine(current.track)}</span>
           </span>
           <button type="button" className="ph-play ph-play--row" aria-label={playing ? "Pause" : "Play"} onClick={() => void player.toggle()}>

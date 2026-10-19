@@ -13,7 +13,7 @@ import { usePlayer } from "../../stores/player";
 import { tap } from "../bits";
 import { nav } from "../../stores/router";
 import { phone } from "../phoneUi";
-import { Carousel, PageFailed, PageLoading, PlayingBars, ShelfCard, itemInfo } from "./common";
+import { Carousel, PageFailed, PageLoading, ShelfCard, itemInfo } from "./common";
 import { HomeExplore, HomeMixes } from "./HomeExtras";
 
 export function PhoneHome() {
@@ -44,13 +44,13 @@ export function PhoneHome() {
           {grid.map((i) => {
             const info = itemInfo(i);
             const id = info.route.name === "album" || info.route.name === "artist" || info.route.name === "playlist" ? info.route.id : "";
+            // What's playing is marked on its song's row; the tile only takes the accent.
             const live = playingCtx?.id === id && playingCtx?.kind === info.kind;
             return (
               <li key={info.key}>
                 <button type="button" className={`ph-shortcut ${live ? "is-playing" : ""}`} onClick={() => nav.go(info.route)}>
                   <Art path={info.thumb} size={56} round={info.round} kind={info.kind} tint={info.tint} sleeve={info.kind === "album" ? { title: info.title, artist: info.sub } : undefined} />
                   <span className="ph-shortcut__title">{info.title}</span>
-                  {live && <PlayingBars />}
                 </button>
               </li>
             );

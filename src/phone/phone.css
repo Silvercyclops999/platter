@@ -222,6 +222,8 @@
 .ph-row__text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 .ph-row__title { font-size: 16px; font-weight: 600; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ph-row__title.is-playing { color: var(--color-accent); }
+/* The level bars before a playing song's title, on rows without a number. */
+.ph-row__title > .ph-eq { margin-right: 7px; vertical-align: 1px; }
 .ph-row__sub { display: block; font-size: 13px; line-height: 1.3; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ph-row .art, .ph-song .art, .ph-lib-row .art, .ph-queue .art { border-radius: 4px; flex: none; }
 
