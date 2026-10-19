@@ -44,6 +44,10 @@ pub enum OsCommand {
     SeekTo(u64),
     /// Seek forward (positive) or back by ms.
     SeekBy(i64),
+    /// Shuffle on or off (the phone's lock screen and the car).
+    Shuffle(bool),
+    /// Repeat off, the whole queue, or one song.
+    Repeat(crate::audio::queue::Repeat),
     /// Bring the window to the front.
     Show,
     Quit,

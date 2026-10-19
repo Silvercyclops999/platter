@@ -65,7 +65,7 @@ impl IosSession {
             }
             // Dragging the lock screen's progress bar.
             let seek: Retained<MPRemoteCommand> = Retained::into_super(center.changePlaybackPositionCommand());
-            let cb = cb.clone();
+            let cb1 = cb.clone();
             let block = RcBlock::new(move |e: NonNull<MPRemoteCommandEvent>| {
                 let event = e.as_ref();
                 if !event.isKindOfClass(MPChangePlaybackPositionCommandEvent::class()) {
@@ -73,12 +73,39 @@ impl IosSession {
                 }
                 let event = &*(event as *const MPRemoteCommandEvent as *const MPChangePlaybackPositionCommandEvent);
                 let secs = event.positionTime().max(0.0);
-                cb(OsCommand::SeekTo((secs * 1000.0) as u64));
+                cb1(OsCommand::SeekTo((secs * 1000.0) as u64));
                 MPRemoteCommandHandlerStatus::Success
             });
             seek.setEnabled(true);
             let target = seek.addTargetWithHandler(&block);
             targets.push((seek, target));
+            // Shuffle and repeat (the car's Now Playing buttons and some lock
+            // screens). MPShuffleType: 0 off; MPRepeatType: 0 off, 1 one, 2 all.
+            let shuffle: Retained<MPRemoteCommand> = Retained::into_super(center.changeShuffleModeCommand());
+            let cb2 = cb.clone();
+            let block = RcBlock::new(move |e: NonNull<MPRemoteCommandEvent>| {
+                let kind: isize = msg_send![e.as_ref(), shuffleType];
+                cb2(OsCommand::Shuffle(kind != 0));
+                MPRemoteCommandHandlerStatus::Success
+            });
+            shuffle.setEnabled(true);
+            let target = shuffle.addTargetWithHandler(&block);
+            targets.push((shuffle, target));
+            let repeat: Retained<MPRemoteCommand> = Retained::into_super(center.changeRepeatModeCommand());
+            let cb3 = cb.clone();
+            let block = RcBlock::new(move |e: NonNull<MPRemoteCommandEvent>| {
+                let kind: isize = msg_send![e.as_ref(), repeatType];
+                let r = match kind {
+                    1 => crate::audio::queue::Repeat::One,
+                    2 => crate::audio::queue::Repeat::All,
+                    _ => crate::audio::queue::Repeat::Off,
+                };
+                cb3(OsCommand::Repeat(r));
+                MPRemoteCommandHandlerStatus::Success
+            });
+            repeat.setEnabled(true);
+            let target = repeat.addTargetWithHandler(&block);
+            targets.push((repeat, target));
         }
         Ok(Self {
             targets,
