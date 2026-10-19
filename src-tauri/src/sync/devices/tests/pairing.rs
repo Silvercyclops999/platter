@@ -306,7 +306,7 @@ async fn the_long_code_pairs_two_devices_through_the_relay_sealed() {
     let host_side = DevicePairing::new(deps(&phone, &ntfy.url));
     let joiner = DevicePairing::new(deps(&pc, &ntfy.url));
     let long = host_side.start().await.unwrap().long_code.unwrap();
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    until("the code's listener on the relay", || ntfy.requests().iter().any(|r| r.starts_with("GET") && r.contains("/json"))).await;
     // Scanned from the QR code: the link form works too.
     let join = {
         let joiner = joiner.clone();
@@ -347,7 +347,7 @@ async fn saying_no_to_a_device_that_joined_with_the_long_code_pairs_nothing() {
     let host_side = DevicePairing::new(deps(&phone, &ntfy.url));
     let joiner = DevicePairing::new(deps(&pc, &ntfy.url));
     let long = host_side.start().await.unwrap().long_code.unwrap();
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    until("the code's listener on the relay", || ntfy.requests().iter().any(|r| r.starts_with("GET") && r.contains("/json"))).await;
     let join = tokio::spawn(async move { joiner.join(&long, None).await });
     until("the phone to ask", || host_side.state().phase == PairPhase::Confirm).await;
     assert!(host_side.state().code.is_none(), "the codes stop while it asks");
@@ -381,7 +381,7 @@ async fn a_device_of_another_account_cant_pair_with_the_long_code() {
     let other = real_clock("other", "someone-else");
     let host_side = DevicePairing::new(deps(&phone, &ntfy.url));
     let long = host_side.start().await.unwrap().long_code.unwrap();
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    until("the code's listener on the relay", || ntfy.requests().iter().any(|r| r.starts_with("GET") && r.contains("/json"))).await;
     let e = DevicePairing::new(deps(&other, &ntfy.url)).join(&long, None).await.unwrap_err();
     assert!(matches!(e, AppError::Network(_)), "no answer for another account: {e}");
     assert!(phone.links.all().is_empty() && other.links.all().is_empty());

@@ -381,6 +381,8 @@ struct Inner {
     clock: Clock,
     changed: broadcast::Sender<Changed>,
     edited: Notify,
+    /// One change to the held list at a time.
+    quarantine: parking_lot::Mutex<()>,
 }
 
 /// The store. Cheap to clone.
@@ -487,7 +489,7 @@ impl SyncStore {
     pub fn with_clock(db: DbHandle, device: impl Into<String>, clock: Clock) -> Self {
         let (changed, _) = broadcast::channel(64);
         Self {
-            inner: Arc::new(Inner { db, device: device.into(), clock, changed, edited: Notify::new() }),
+            inner: Arc::new(Inner { db, device: device.into(), clock, changed, edited: Notify::new(), quarantine: Default::default() }),
         }
     }
 
@@ -732,6 +734,7 @@ impl SyncStore {
         let limit = self.now().saturating_add(FUTURE_MS);
         let out = self.merge_inner(other, namespaces, Some(limit))?;
         if !out.held.is_empty() {
+            let _one = self.inner.quarantine.lock();
             let mut list = self.quarantined()?;
             for (ns, key, entry) in &out.held {
                 match list.iter_mut().find(|q| &q.ns == ns && &q.key == key) {
@@ -829,16 +832,18 @@ impl SyncStore {
         self.inner.db.write(|c| kv_set(c, QUARANTINE_KEY, &json))
     }
 
-    /// "Take anyway": merge every held entry as it is. Returns the
+    /// "Take anyway": merge every held entry in these namespaces (the ones
+    /// this device keeps in step) as it is; the rest stay held. Returns the
     /// namespaces that changed.
-    pub fn take_quarantined(&self) -> AppResult<Vec<String>> {
-        let list = self.quarantined()?;
+    pub fn take_quarantined(&self, namespaces: &[&str]) -> AppResult<Vec<String>> {
+        let _one = self.inner.quarantine.lock();
+        let (take, keep): (Vec<Quarantined>, Vec<Quarantined>) = self.quarantined()?.into_iter().partition(|q| namespaces.contains(&q.ns.as_str()));
         let mut m = EntryMap::new();
-        for q in list {
+        for q in take {
             m.entry(q.ns).or_default().insert(q.key, q.entry);
         }
-        let changed = self.merge_inner(&m, &NAMESPACES, None)?.changed;
-        self.save_quarantine(&[])?;
+        let changed = self.merge_inner(&m, namespaces, None)?.changed;
+        self.save_quarantine(&keep)?;
         Ok(changed)
     }
 

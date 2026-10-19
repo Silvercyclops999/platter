@@ -77,6 +77,42 @@ async fn copy_settings_needs_a_paired_device_that_answers() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn copy_settings_says_so_at_once_when_there_are_none_or_they_dont_sync() {
+    let (pc, phone) = paired().await;
+    // The computer has no synced settings at all: an answer, not a wait.
+    let started = std::time::Instant::now();
+    let e = phone.sync.copy_settings(Duration::from_secs(20)).await.unwrap_err();
+    assert!(started.elapsed() < Duration::from_secs(5), "answered, not timed out");
+    assert!(e.to_string().contains("has no synced settings to copy"), "{e}");
+    // Settings switched off here: refused before anything goes.
+    phone.dev.groups.lock().settings = false;
+    let e = phone.sync.copy_settings(Duration::from_secs(20)).await.unwrap_err();
+    assert!(e.to_string().contains("Settings aren't kept in sync on this device"), "{e}");
+    phone.dev.groups.lock().settings = true;
+    // Switched off on the computer: it says so once it knows.
+    pc.dev.groups.lock().settings = false;
+    pc.dev.store.put(&SETTINGS, "accent", &json!("#c90")).unwrap();
+    phone.sync.sync_now().await;
+    let e = phone.sync.copy_settings(Duration::from_secs(20)).await.unwrap_err();
+    assert!(e.to_string().contains("doesn't keep its settings in sync"), "{e}");
+}
+
+#[tokio::test]
+async fn a_normal_push_with_settings_isnt_taken_as_the_copy() {
+    let a = dev("a");
+    let b = dev("b");
+    let (la, lb) = pair(&a, &b, "http://relay");
+    round(&a, &la, &b, &lb).await;
+    let _want = a.peer.copy_settings(&la);
+    // A change from b that happens to carry settings arrives first.
+    b.store.put(&SETTINGS, "accent", &json!("#123")).unwrap();
+    for m in b.peer.push(&lb).await {
+        a.peer.handle(&la, m).await;
+    }
+    assert_eq!(a.peer.copying(&la.id), Some(crate::sync::devices::protocol::Copying::Waiting), "still waiting for the copy itself");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn with_keep_my_devices_in_sync_off_nothing_goes_or_comes() {
     let (pc, phone) = paired().await;
     let on = Arc::new(std::sync::atomic::AtomicBool::new(false));

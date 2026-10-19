@@ -84,14 +84,27 @@ pub struct PeerSeen {
     pub skip: Vec<String>,
     /// Entries from it held back for a clock far ahead.
     pub held: usize,
+    /// Its last changes couldn't be saved here: not in step until they are.
+    pub save_failed: bool,
+    /// Which entries `held` counts.
+    #[serde(skip)]
+    pub held_keys: std::collections::BTreeSet<String>,
+}
+
+/// A settings copy asked for on a link.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Copying {
+    Waiting,
+    Done,
+    Failed(String),
 }
 
 pub struct SyncPeer {
     d: SyncDeps,
     seen: Mutex<HashMap<String, PeerSeen>>,
     /// Links whose synced settings are being copied here ("Copy settings
-    /// from my computer"): their next settings entries win as new edits.
-    adopting: Mutex<std::collections::HashSet<String>>,
+    /// from my computer"): their answer to the copy wins as new edits.
+    adopting: Mutex<HashMap<String, Copying>>,
     /// Messages that came before the hello they follow, by link.
     waiting: Mutex<HashMap<String, Vec<Msg>>>,
 }
@@ -211,17 +224,21 @@ impl SyncPeer {
 
     /// One message from the other end of `link`: the messages to answer
     /// with.
-    pub async fn handle(&self, link: &Link, msg: Msg) -> Vec<Msg> {
+    pub async fn handle(self: &Arc<Self>, link: &Link, msg: Msg) -> Vec<Msg> {
         tracing::debug!(kind = msg.kind(), "device sync: in");
         match msg {
             Msg::SyncHello(h) => self.on_hello(link, *h).await,
             Msg::SyncBye => {
                 tracing::info!("A device unpaired itself.");
-                let _ = self.d.links.remove(&link.id);
-                self.seen.lock().remove(&link.id);
+                if let Err(e) = self.d.links.remove(&link.id) {
+                    tracing::warn!("device sync: couldn't forget the device: {e}");
+                }
+                self.forget_seen(&link.id);
                 Vec::new()
             }
-            m @ (Msg::SyncDiff { .. } | Msg::SyncWant { .. } | Msg::SyncEntries { .. }) if !self.verified(&link.id) => {
+            m @ (Msg::SyncDiff { .. } | Msg::SyncWant { .. } | Msg::SyncEntries { .. } | Msg::SyncCopyWant { .. } | Msg::SyncCopy { .. })
+                if !self.verified(&link.id) =>
+            {
                 // Arrived ahead of the hello it follows: kept (a few) until
                 // the hello is checked, never used before.
                 if self.seen(&link.id).is_some_and(|s| s.paused == Some(Paused::OtherAccount)) {
@@ -236,7 +253,23 @@ impl SyncPeer {
                 }
                 Vec::new()
             }
-            m => self.on_checked(link, m),
+            m => {
+                let link = link.clone();
+                self.blocking(move |p| p.on_checked(&link, m)).await
+            }
+        }
+    }
+
+    /// Store work off the async threads.
+    pub(crate) async fn blocking<T: Default + Send + 'static>(self: &Arc<Self>, f: impl FnOnce(&SyncPeer) -> T + Send + 'static) -> T {
+        let me = self.clone();
+        match tokio::task::spawn_blocking(move || f(&me)).await {
+            Ok(v) => v,
+            Err(e) if e.is_panic() => std::panic::resume_unwind(e.into_panic()),
+            Err(e) => {
+                tracing::warn!("device sync: store work stopped: {e}");
+                T::default()
+            }
         }
     }
 
@@ -246,12 +279,14 @@ impl SyncPeer {
             Msg::SyncDiff { ns, keys } => self.on_diff(link, &ns, &keys),
             Msg::SyncWant { ns, keys } => self.on_want(link, &ns, &keys),
             Msg::SyncEntries { entries } => self.on_entries(link, &entries),
+            Msg::SyncCopyWant { ns, keys } => self.on_copy_want(link, &ns, &keys),
+            Msg::SyncCopy { entries } => self.on_copy(link, entries),
             // Bridge messages and kinds from a newer build.
             _ => Vec::new(),
         }
     }
 
-    async fn on_hello(&self, link: &Link, h: SyncHello) -> Vec<Msg> {
+    async fn on_hello(self: &Arc<Self>, link: &Link, h: SyncHello) -> Vec<Msg> {
         let Some(mine) = self.d.account.tag().await else {
             self.set_seen(&link.id, |s| {
                 s.paused = Some(Paused::SignedOut);
@@ -280,11 +315,13 @@ impl SyncPeer {
             s.skip = h.skip.clone();
         });
         let device: String = h.device.chars().take(100).collect();
-        let _ = self.d.links.update(&link.id, |p| {
+        if let Err(e) = self.d.links.update(&link.id, |p| {
             p.name = name;
             p.version = h.version.chars().take(20).collect();
             p.device = Some(device);
-        });
+        }) {
+            tracing::warn!("device sync: couldn't save what a device said about itself: {e}");
+        }
         // This end's namespaces, and ones the other keeps that this build
         // doesn't know (kept and passed on).
         let mut ns = self.namespaces();
@@ -293,22 +330,36 @@ impl SyncPeer {
                 ns.push(k.clone());
             }
         }
-        let mut diffs = Vec::new();
-        for n in ns {
-            if h.skip.contains(&n) {
-                continue;
-            }
-            let Ok(stamps) = self.d.store.stamps(&n) else { continue };
-            let ours = crate::sync::store::digest_of(&stamps);
-            match h.digests.get(&n) {
-                Some(theirs) if *theirs == ours => {}
-                None if ours.n == 0 => {}
-                _ => diffs.push(Msg::SyncDiff { ns: n, keys: stamps }),
-            }
-        }
-        if diffs.is_empty() {
-            self.mark_synced(&link.id);
-        }
+        let (skip, digests, id) = (h.skip, h.digests, link.id.clone());
+        let mut diffs = self
+            .blocking(move |p| {
+                let mut diffs = Vec::new();
+                let mut ok = true;
+                for n in ns {
+                    if skip.contains(&n) {
+                        continue;
+                    }
+                    let stamps = match p.d.store.stamps(&n) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            tracing::warn!(ns = n, "device sync: couldn't read this device's entries: {e}");
+                            ok = false;
+                            continue;
+                        }
+                    };
+                    let ours = crate::sync::store::digest_of(&stamps);
+                    match digests.get(&n) {
+                        Some(theirs) if *theirs == ours => {}
+                        None if ours.n == 0 => {}
+                        _ => diffs.push(Msg::SyncDiff { ns: n, keys: stamps }),
+                    }
+                }
+                if diffs.is_empty() && ok {
+                    p.mark_synced(&id);
+                }
+                diffs
+            })
+            .await;
         let mut out: Vec<Msg> = Vec::new();
         if !h.answer {
             out.extend(self.hello(true).await);
@@ -316,8 +367,9 @@ impl SyncPeer {
         }
         // Anything that came ahead of this hello.
         let early = self.waiting.lock().remove(&link.id).unwrap_or_default();
-        for m in early {
-            out.extend(self.on_checked(link, m));
+        if !early.is_empty() {
+            let link = link.clone();
+            out.extend(self.blocking(move |p| early.into_iter().flat_map(|m| p.on_checked(&link, m)).collect::<Vec<_>>()).await);
         }
         out
     }
@@ -326,18 +378,32 @@ impl SyncPeer {
         if !self.moves(&link.id, ns) {
             return Vec::new();
         }
-        let Ok(mine) = self.d.store.stamps(ns) else { return Vec::new() };
+        let mine = match self.d.store.stamps(ns) {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!(ns, "device sync: couldn't read this device's entries: {e}");
+                return Vec::new();
+            }
+        };
         // What it has, so it isn't sent again.
-        let _ = Outbox::new(&self.d.db, &link.id).mark_stamps(ns, theirs);
+        if let Err(e) = Outbox::new(&self.d.db, &link.id).mark_stamps(ns, theirs) {
+            tracing::warn!("device sync: couldn't note what the other device has: {e}");
+        }
         let d = diff_keys(&mine, theirs);
+        let mut ok = true;
         let mut out = match self.d.store.entries_for(ns, &d.send) {
             Ok(m) => entries_msgs(m),
-            Err(_) => Vec::new(),
+            Err(e) => {
+                // Not in step: the next round tries again.
+                tracing::warn!(ns, "device sync: couldn't read entries to send: {e}");
+                ok = false;
+                Vec::new()
+            }
         };
         for chunk in d.want.chunks(WANT_CHUNK) {
             out.push(Msg::SyncWant { ns: ns.to_string(), keys: chunk.to_vec() });
         }
-        if out.is_empty() {
+        if out.is_empty() && ok {
             self.mark_synced(&link.id);
         }
         out
@@ -349,42 +415,87 @@ impl SyncPeer {
         }
         match self.d.store.entries_for(ns, keys) {
             Ok(m) => entries_msgs(m),
-            Err(_) => Vec::new(),
+            Err(e) => {
+                tracing::warn!(ns, "device sync: couldn't read entries it asked for: {e}");
+                Vec::new()
+            }
         }
     }
 
     /// Ask the other end of `link` for its synced settings, to take them
     /// as they are there.
     pub fn copy_settings(&self, link: &Link) -> Msg {
-        self.adopting.lock().insert(link.id.clone());
-        Msg::SyncWant { ns: SETTINGS.name().to_string(), keys: crate::sync::settings::store_keys() }
+        self.adopting.lock().insert(link.id.clone(), Copying::Waiting);
+        Msg::SyncCopyWant { ns: SETTINGS.name().to_string(), keys: crate::sync::settings::store_keys() }
     }
 
-    /// Whether a settings copy from `link` is still waiting for its answer.
-    pub fn copying(&self, link_id: &str) -> bool {
-        self.adopting.lock().contains(link_id)
+    /// Where a settings copy from `link` stands (None: none asked for).
+    pub fn copying(&self, link_id: &str) -> Option<Copying> {
+        self.adopting.lock().get(link_id).cloned()
     }
 
-    /// Give up waiting for a settings copy (a late answer merges as usual).
+    /// Done waiting for a settings copy (a late answer is dropped).
     pub fn stop_copying(&self, link_id: &str) {
         self.adopting.lock().remove(link_id);
     }
 
-    fn on_entries(&self, link: &Link, entries: &EntryMap) -> Vec<Msg> {
-        let mut entries = std::borrow::Cow::Borrowed(entries);
-        if entries.contains_key(SETTINGS.name()) && self.adopting.lock().remove(&link.id) {
-            // Copying settings: what the other device has wins here, and
-            // from here everywhere, as if just chosen.
-            // Later than anything here, even an edit made this millisecond.
-            let now = self.d.store.now();
-            let here: HashMap<String, u64> = self.d.store.stamps(SETTINGS.name()).unwrap_or_default().into_iter().map(|(k, ts, _)| (k, ts)).collect();
-            if let Some(s) = entries.to_mut().get_mut(SETTINGS.name()) {
-                for (k, e) in s.iter_mut().filter(|(_, e)| e.value.is_some()) {
-                    e.ts = e.ts.max(now).max(here.get(k).map_or(0, |t| t + 1));
-                }
+    /// The other device asked for this one's settings as they are. Always
+    /// answered, empty when there's nothing to give, so it isn't left
+    /// waiting.
+    fn on_copy_want(&self, link: &Link, ns: &str, keys: &[String]) -> Vec<Msg> {
+        if ns != SETTINGS.name() || !self.moves(&link.id, ns) {
+            return vec![Msg::SyncCopy { entries: EntryMap::new() }];
+        }
+        let keys: Vec<String> = keys.iter().take(WANT_CHUNK).cloned().collect();
+        match self.d.store.entries_for(ns, &keys) {
+            Ok(m) => vec![Msg::SyncCopy { entries: clean(m) }],
+            Err(e) => {
+                tracing::warn!("device sync: couldn't read settings to copy: {e}");
+                vec![Msg::SyncCopy { entries: EntryMap::new() }]
             }
         }
-        let entries = entries.as_ref();
+    }
+
+    /// The answer to "Copy settings from my computer": what the other
+    /// device has wins here, and from here everywhere, as if just chosen.
+    fn on_copy(&self, link: &Link, mut entries: EntryMap) -> Vec<Msg> {
+        if self.copying(&link.id) != Some(Copying::Waiting) {
+            // Not asked for (or given up on): never taken as a copy.
+            return Vec::new();
+        }
+        let name = self.seen(&link.id).map(|s| s.name).filter(|n| !n.is_empty()).unwrap_or_else(|| "The other device".into());
+        let done = |r: Copying| {
+            self.adopting.lock().insert(link.id.clone(), r);
+        };
+        entries.retain(|n, _| n == SETTINGS.name());
+        let Some(s) = entries.get_mut(SETTINGS.name()).filter(|s| s.values().any(|e| e.value.is_some())) else {
+            done(Copying::Failed(format!("{name} has no synced settings to copy.")));
+            return Vec::new();
+        };
+        // Later than anything here, even an edit made this millisecond.
+        let now = self.d.store.now();
+        let here: HashMap<String, u64> = match self.d.store.stamps(SETTINGS.name()) {
+            Ok(st) => st.into_iter().map(|(k, ts, _)| (k, ts)).collect(),
+            Err(e) => {
+                tracing::warn!("device sync: couldn't read settings here: {e}");
+                done(Copying::Failed("Couldn't read the settings on this device.".into()));
+                return Vec::new();
+            }
+        };
+        for (k, e) in s.iter_mut().filter(|(_, e)| e.value.is_some()) {
+            e.ts = e.ts.max(now).max(here.get(k).map_or(0, |t| t + 1));
+        }
+        match self.d.store.merge_from_device(&entries, &[SETTINGS.name()], &name) {
+            Ok(_) => done(Copying::Done),
+            Err(e) => {
+                tracing::warn!("device sync: couldn't save copied settings: {e}");
+                done(Copying::Failed(format!("Couldn't save the settings from {name}.")));
+            }
+        }
+        Vec::new()
+    }
+
+    fn on_entries(&self, link: &Link, entries: &EntryMap) -> Vec<Msg> {
         let ns: Vec<String> = entries.keys().filter(|n| self.moves(&link.id, n)).cloned().collect();
         let refs: Vec<&str> = ns.iter().map(String::as_str).collect();
         let from = self.seen(&link.id).map(|s| s.name).unwrap_or_default();
@@ -392,50 +503,120 @@ impl SyncPeer {
             Ok(out) => {
                 if !out.held.is_empty() {
                     tracing::info!(held = out.held.len(), "device sync: held entries from a clock far ahead");
-                    self.set_seen(&link.id, |s| s.held += out.held.len());
                 }
+                self.set_seen(&link.id, |s| {
+                    // Counted once per entry, however often it comes again.
+                    s.held_keys.extend(out.held.iter().map(|(ns, key, _)| format!("{ns}/{key}")));
+                    s.held = s.held_keys.len();
+                    s.save_failed = false;
+                });
             }
-            Err(e) => tracing::warn!("device sync: couldn't take entries: {e}"),
+            Err(e) => {
+                // Not saved: not marked as had, and not in step, so the
+                // next round sends them again.
+                tracing::warn!("device sync: couldn't take entries: {e}");
+                self.set_seen(&link.id, |s| s.save_failed = true);
+                return Vec::new();
+            }
         }
         // It has these now, whether or not they won here.
-        let _ = Outbox::new(&self.d.db, &link.id).mark(entries);
+        if let Err(e) = Outbox::new(&self.d.db, &link.id).mark(entries) {
+            tracing::warn!("device sync: couldn't note what the other device has: {e}");
+        }
         self.mark_synced(&link.id);
         Vec::new()
     }
 
+    /// The two are in step now (not while changes from it couldn't be saved).
     pub(crate) fn mark_synced(&self, link_id: &str) {
+        if self.seen(link_id).is_some_and(|s| s.save_failed) {
+            return;
+        }
         let now = self.d.store.now();
-        let _ = self.d.links.update(link_id, |p| p.last_synced_at = Some(now));
+        if let Err(e) = self.d.links.update(link_id, |p| p.last_synced_at = Some(now)) {
+            tracing::warn!("device sync: couldn't note the time in step: {e}");
+        }
     }
 
     /// Local changes the other end doesn't have yet. Nothing until its
     /// account is checked: then a hello goes instead.
-    pub async fn push(&self, link: &Link) -> Vec<Msg> {
+    pub async fn push(self: &Arc<Self>, link: &Link) -> Vec<Msg> {
         if !self.verified(&link.id) {
             return self.hello(false).await.into_iter().collect();
         }
-        let ns: Vec<String> = self.namespaces().into_iter().filter(|n| self.moves(&link.id, n)).collect();
-        let refs: Vec<&str> = ns.iter().map(String::as_str).collect();
-        match Outbox::new(&self.d.db, &link.id).pending(&self.d.store, &refs) {
-            Ok(b) => b.into_iter().map(|entries| Msg::SyncEntries { entries }).collect(),
-            Err(e) => {
-                tracing::debug!("device sync: {e}");
-                Vec::new()
+        let id = link.id.clone();
+        self.blocking(move |p| {
+            let ns: Vec<String> = p.namespaces().into_iter().filter(|n| p.moves(&id, n)).collect();
+            let refs: Vec<&str> = ns.iter().map(String::as_str).collect();
+            match Outbox::new(&p.d.db, &id).pending(&p.d.store, &refs) {
+                Ok(b) => b.into_iter().map(|entries| Msg::SyncEntries { entries }).collect(),
+                Err(e) => {
+                    tracing::warn!("device sync: couldn't read changes to send: {e}");
+                    Vec::new()
+                }
             }
+        })
+        .await
+    }
+
+    /// This device isn't signed in: nothing goes to the link until it is.
+    pub fn signed_out(&self, link_id: &str) {
+        self.set_seen(link_id, |s| {
+            if s.paused != Some(Paused::OtherAccount) {
+                s.paused = Some(Paused::SignedOut);
+                s.verified = false;
+            }
+        });
+    }
+
+    /// Several messages reached the other end: noted in one write.
+    pub fn sent_all(&self, link: &Link, msgs: &[Msg]) {
+        let mut all = EntryMap::new();
+        for m in msgs {
+            tracing::debug!(kind = m.kind(), "device sync: out");
+            if let Msg::SyncEntries { entries } = m {
+                for (ns, e) in entries {
+                    all.entry(ns.clone()).or_default().extend(e.iter().map(|(k, v)| (k.clone(), v.clone())));
+                }
+            }
+        }
+        if !all.is_empty()
+            && let Err(e) = Outbox::new(&self.d.db, &link.id).mark(&all)
+        {
+            tracing::warn!("device sync: couldn't note what was sent: {e}");
         }
     }
 
     /// A message reached the other end.
     pub fn sent(&self, link: &Link, msg: &Msg) {
         tracing::debug!(kind = msg.kind(), "device sync: out");
-        if let Msg::SyncEntries { entries } = msg {
-            let _ = Outbox::new(&self.d.db, &link.id).mark(entries);
+        if let Msg::SyncEntries { entries } = msg
+            && let Err(e) = Outbox::new(&self.d.db, &link.id).mark(entries)
+        {
+            tracing::warn!("device sync: couldn't note what was sent: {e}");
         }
     }
 
     /// Unpair: the bye to send first, then forget the link here.
     pub fn forget(&self, link_id: &str) -> crate::error::AppResult<()> {
-        self.seen.lock().remove(link_id);
+        self.forget_seen(link_id);
         self.d.links.remove(link_id)
+    }
+
+    /// Everything this run kept about a link.
+    fn forget_seen(&self, link_id: &str) {
+        self.seen.lock().remove(link_id);
+        self.waiting.lock().remove(link_id);
+        self.adopting.lock().remove(link_id);
+    }
+
+    /// Whether the other end keeps this namespace in step (from its hello).
+    pub fn peer_skips(&self, link_id: &str, ns: &str) -> bool {
+        self.seen(link_id).is_some_and(|s| s.skip.iter().any(|x| x == ns))
+    }
+
+    /// Whether this device keeps this group in step.
+    pub fn keeps_settings(&self) -> bool {
+        (self.d.groups)().settings
     }
 }

@@ -78,7 +78,7 @@ impl ExtraRoutes for SyncRoutes {
         };
         match serde_json::from_slice::<LanBody>(body) {
             Ok(req) => match self.handler.exchange(&from, req).await {
-                Ok(reply) => (200, serde_json::to_string(&reply).unwrap_or_default()),
+                Ok(reply) => super::pair::ok_json(&reply),
                 Err(e) => app_err(e),
             },
             Err(_) => (400, json_err("invalid", "Bad request")),

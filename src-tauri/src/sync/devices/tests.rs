@@ -409,8 +409,92 @@ async fn a_device_whose_clock_is_days_ahead_has_its_entries_held() {
     let st = DeviceSync::new(a.peer.clone(), wire, Timing::default()).status();
     assert_eq!(st[0].clock.as_deref(), Some("Device b's clock is about 3 days fast"));
     assert_eq!(st[0].held, 1);
-    a.store.take_quarantined().unwrap();
+    // Sent again with every round: still one held, not one more each time.
+    round(&b, &lb, &a, &la).await;
+    round(&b, &lb, &a, &la).await;
+    assert_eq!(a.store.quarantined().unwrap().len(), 1);
+    assert_eq!(a.peer.seen(&la.id).unwrap().held, 1);
+    // Taken only into what this device keeps in step.
+    a.store.take_quarantined(&[HIDDEN.name()]).unwrap();
+    assert!(a.store.get(&SETTINGS, "accent").unwrap().is_none(), "settings aren't kept here");
+    assert_eq!(a.store.quarantined().unwrap().len(), 1, "still held");
+    a.store.take_quarantined(&store::NAMESPACES).unwrap();
     assert_eq!(a.store.get(&SETTINGS, "accent").unwrap(), Some(json!("#f00")));
+}
+
+#[tokio::test]
+async fn changes_that_couldnt_be_saved_dont_count_as_in_sync() {
+    let a = dev("a");
+    let b = dev("b");
+    let (la, lb) = pair(&a, &b, "http://relay");
+    b.store.put(&HIDDEN, "track:1", &hidden("One")).unwrap();
+    // The store here refuses writes (a full disk, say).
+    a.db
+        .write(|c| {
+            c.execute_batch("CREATE TRIGGER no_room BEFORE INSERT ON sync_entries BEGIN SELECT RAISE(ABORT, 'disk full'); END;")?;
+            Ok(())
+        })
+        .unwrap();
+    round(&b, &lb, &a, &la).await;
+    assert!(!a.store.has_entry(&HIDDEN, "track:1").unwrap());
+    assert_eq!(a.links.get(&la.id).unwrap().last_synced_at, None, "not in step");
+    let wire = Arc::new(Wire::new(a.links.clone(), Arc::new(Ntfy::new().unwrap()), Arc::new(|| 1)));
+    let sync = DeviceSync::new(a.peer.clone(), wire, Timing::default());
+    assert_eq!(sync.status()[0].words, "Couldn't save changes from Device b");
+    // Room again: the next round sends them again and all is well.
+    a.db
+        .write(|c| {
+            c.execute_batch("DROP TRIGGER no_room;")?;
+            Ok(())
+        })
+        .unwrap();
+    round(&b, &lb, &a, &la).await;
+    assert!(a.store.has_entry(&HIDDEN, "track:1").unwrap());
+    assert!(a.links.get(&la.id).unwrap().last_synced_at.is_some());
+    assert_eq!(sync.status()[0].words, "In sync");
+}
+
+#[tokio::test]
+async fn in_sync_goes_stale_and_signed_out_says_so() {
+    let a = dev("a");
+    let b = dev("b");
+    let (la, lb) = pair(&a, &b, "http://relay");
+    round(&a, &la, &b, &lb).await;
+    let wire = Arc::new(Wire::new(a.links.clone(), Arc::new(Ntfy::new().unwrap()), Arc::new(|| 1)));
+    let timing = Timing { every: Duration::from_secs(60), ..Timing::default() };
+    let sync = DeviceSync::new(a.peer.clone(), wire, timing);
+    assert_eq!(sync.status()[0].words, "In sync");
+    // Three rounds' time with no word from it.
+    a.clock.fetch_add(3 * 60_000, Ordering::SeqCst);
+    assert_eq!(sync.status()[0].words, "Not in touch with Device b lately");
+    // Signed out here: a round sends nothing and the device says why.
+    *a.acct.0.lock() = None;
+    sync.round(&la).await;
+    assert_eq!(sync.status()[0].words, "Sign in to Plex to keep your devices in sync");
+}
+
+#[tokio::test]
+async fn a_task_that_stops_on_a_fault_starts_again() {
+    use std::sync::atomic::AtomicUsize;
+    let runs = Arc::new(AtomicUsize::new(0));
+    let downs = Arc::new(Mutex::new(Vec::new()));
+    let (r, d) = (runs.clone(), downs.clone());
+    tokio::time::pause();
+    crate::sync::devices::run::supervise(
+        "test",
+        move |down| d.lock().push(down),
+        move || {
+            let r = r.clone();
+            async move {
+                if r.fetch_add(1, Ordering::SeqCst) < 2 {
+                    panic!("a fault");
+                }
+            }
+        },
+    )
+    .await;
+    assert_eq!(runs.load(Ordering::SeqCst), 3, "ran again until it ended normally");
+    assert_eq!(*downs.lock(), [true, false, true, false]);
 }
 
 #[tokio::test]
@@ -516,7 +600,7 @@ struct Running {
 
 fn running(d: Dev) -> Running {
     let wire = Arc::new(Wire::new(d.links.clone(), Arc::new(Ntfy::new().unwrap()) as Arc<dyn RelayFactory>, Arc::new(crate::sync::store::system_ms)));
-    let sync = Arc::new(DeviceSync::new(d.peer.clone(), wire, Timing { debounce: Duration::from_millis(200), every: Duration::from_secs(1) }));
+    let sync = Arc::new(DeviceSync::new(d.peer.clone(), wire, Timing { debounce: Duration::from_millis(200), every: Duration::from_secs(1), ..Timing::default() }));
     let (stop, rx) = tokio::sync::watch::channel(false);
     tokio::spawn(sync.clone().run(rx));
     Running { dev: d, sync, stop }
@@ -588,8 +672,9 @@ async fn a_device_of_another_account_gets_nothing_through_the_relay() {
     a.store.put(&HIDDEN, "track:1", &hidden("mine")).unwrap();
     let a = running(a);
     let b = running(b);
-    until("the refusal", || a.dev.peer.seen(&a.dev.links.all()[0].id).is_some_and(|s| s.paused == Some(Paused::OtherAccount))).await;
-    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let refused = |d: &Running| d.dev.peer.seen(&d.dev.links.all()[0].id).is_some_and(|s| s.paused == Some(Paused::OtherAccount));
+    // Both ends have heard the other's hello and turned it away.
+    until("the refusal at both ends", || refused(&a) && refused(&b)).await;
     assert!(!b.dev.store.has_entry(&HIDDEN, "track:1").unwrap());
     let _ = a.stop.send(true);
     let _ = b.stop.send(true);
@@ -714,7 +799,7 @@ mod lan {
     /// with `token`. `dead`: announced, but nothing answers on its port.
     async fn on_lan(d: Dev, token: &str, announced_acct: &str, net: &Arc<MemoryLan>, relay_running: bool, dead: bool) -> OnLan {
         let wire = Arc::new(Wire::new(d.links.clone(), Arc::new(Ntfy::new().unwrap()) as Arc<dyn RelayFactory>, Arc::new(crate::sync::store::system_ms)));
-        let sync = Arc::new(DeviceSync::new(d.peer.clone(), wire, Timing { debounce: Duration::from_millis(200), every: Duration::from_secs(1) }));
+        let sync = Arc::new(DeviceSync::new(d.peer.clone(), wire, Timing { debounce: Duration::from_millis(200), every: Duration::from_secs(1), ..Timing::default() }));
         let slot = ExtraSlot::default();
         let routes = SyncRoutes::new(d.id.clone(), Arc::new(Fixed(key(token))), sync.clone());
         *slot.write() = Some(Arc::new(RouteList(vec![Arc::new(routes)])));
@@ -827,6 +912,32 @@ mod lan {
         let d = on_lan(dev_with("d", Some(ACCT), None), "acct-token", ACCT, &net2, false, false).await;
         assert_eq!(d.lan.post("c", PATH_SYNC_ENTRIES, &body).await.unwrap_err(), PeerError::Unreachable);
         let _ = (a.stop.send(true), b.stop.send(true), c.stop.send(true), d.stop.send(true));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_device_not_reached_here_isnt_tried_again_for_a_while() {
+        let net = MemoryLan::new();
+        let a = real_clock("a", ACCT);
+        let b = real_clock("b", ACCT);
+        let (la, _) = pair_known(&a, &b, "http://127.0.0.1:9");
+        let _a = on_lan(a, "acct-token", ACCT, &net, false, false).await;
+        // b is announced on a port that takes the connection and never answers.
+        let hang = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let port = hang.local_addr().unwrap().port();
+        let dir = Arc::new(MemoryDirectory::new(net.clone()));
+        dir.announce(&Announce { id: "b".into(), txt: txt("b", "Device b", "Windows", "0.3.0", ACCT), ips: vec![Ipv4Addr::LOCALHOST], port });
+        let client = PeerClient::new(reqwest::Client::new(), "a".into(), key("acct-token"));
+        let mut lan = PeerLan::new(Arc::new(move || Some(client.clone())), Arc::new(MemoryDirectory::new(net.clone())), _a.dev.acct.clone(), "a".into());
+        lan.timeout = Duration::from_millis(300);
+        let body = LanBody { link: la.id.clone(), msgs: vec![] };
+        let t = std::time::Instant::now();
+        assert_eq!(lan.post("b", PATH_SYNC_ENTRIES, &body).await.unwrap_err(), PeerError::Unreachable);
+        assert!(t.elapsed() >= Duration::from_millis(250), "it was tried");
+        let t = std::time::Instant::now();
+        assert_eq!(lan.post("b", PATH_SYNC_ENTRIES, &body).await.unwrap_err(), PeerError::Unreachable);
+        assert!(t.elapsed() < Duration::from_millis(100), "not tried again so soon: the relay goes at once");
+        drop(hang);
+        let _ = _a.stop.send(true);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

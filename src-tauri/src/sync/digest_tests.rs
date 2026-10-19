@@ -243,7 +243,7 @@ fn entries_from_a_clock_days_ahead_are_held_until_taken_anyway() {
     let out = me.store.merge_from_device(&near.store.entries(&[HIDDEN.name()]).unwrap(), &[HIDDEN.name()], "Near").unwrap();
     assert_eq!(out.changed, [HIDDEN.name()]);
     // Take anyway.
-    let changed = me.store.take_quarantined().unwrap();
+    let changed = me.store.take_quarantined(&store::NAMESPACES).unwrap();
     assert_eq!(changed.len(), 2);
     assert_eq!(me.store.get(&SETTINGS, "accent").unwrap(), Some(json!("#f00")));
     assert!(me.store.get(&PINS, "album:1").unwrap().is_some());

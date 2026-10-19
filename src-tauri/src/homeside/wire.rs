@@ -147,6 +147,11 @@ pub enum Msg {
     SyncWant { ns: String, keys: Vec<String> },
     /// Entries, in batches (`links::batches`).
     SyncEntries { entries: EntryMap },
+    /// "Copy settings from my computer": these entries as they are there.
+    SyncCopyWant { ns: String, keys: Vec<String> },
+    /// The answer to a [`Msg::SyncCopyWant`], in one message (empty when
+    /// the other device has none of them).
+    SyncCopy { entries: EntryMap },
     /// The device unpaired.
     SyncBye,
     /// A message from a newer build this one doesn't know. Ignored.
@@ -207,6 +212,8 @@ impl Msg {
             Msg::SyncDiff { .. } => "syncDiff",
             Msg::SyncWant { .. } => "syncWant",
             Msg::SyncEntries { .. } => "syncEntries",
+            Msg::SyncCopyWant { .. } => "syncCopyWant",
+            Msg::SyncCopy { .. } => "syncCopy",
             Msg::SyncBye => "syncBye",
             Msg::Unknown => "unknown",
         }

@@ -28,6 +28,12 @@ const REQUEST_MAX: usize = 400 * 1024;
 const EXCHANGES_MAX: usize = 32;
 /// Messages taken from one request.
 const MSGS_MAX: usize = 64;
+/// How long one exchange may take on the local network.
+const LAN_TIMEOUT: Duration = Duration::from_secs(6);
+/// After a device isn't reached on the local network, it isn't tried
+/// there again for this long (doubling each time, up to `DOWN_MAX`).
+const DOWN_FIRST: Duration = Duration::from_secs(30);
+const DOWN_MAX: Duration = Duration::from_secs(5 * 60);
 
 /// Sending to a linked device on the local network.
 #[async_trait]
@@ -65,6 +71,8 @@ pub struct PeerLan {
     pub own_id: String,
     pub timeout: Duration,
     known: Mutex<HashMap<String, Vec<Url>>>,
+    /// Devices not reached here lately: until when, and the next wait.
+    down: Mutex<HashMap<String, (std::time::Instant, Duration)>>,
 }
 
 impl PeerLan {
@@ -74,7 +82,22 @@ impl PeerLan {
         account: Arc<dyn AccountTag>,
         own_id: String,
     ) -> Self {
-        Self { client, directory, account, own_id, timeout: Duration::from_secs(20), known: Mutex::default() }
+        Self { client, directory, account, own_id, timeout: LAN_TIMEOUT, known: Mutex::default(), down: Mutex::default() }
+    }
+
+    /// Not reached lately: the relay is used without waiting on this path.
+    fn is_down(&self, device: &str) -> bool {
+        self.down.lock().get(device).is_some_and(|(until, _)| std::time::Instant::now() < *until)
+    }
+
+    fn mark(&self, device: &str, reached: bool) {
+        let mut d = self.down.lock();
+        if reached {
+            d.remove(device);
+        } else {
+            let wait = d.get(device).map_or(DOWN_FIRST, |(_, w)| (*w * 2).min(DOWN_MAX));
+            d.insert(device.to_string(), (std::time::Instant::now() + wait, wait));
+        }
     }
 
     async fn find(&self, device: &str) -> Vec<Url> {
@@ -99,6 +122,17 @@ impl PeerLan {
 impl LanSend for PeerLan {
     async fn post(&self, device: &str, path: &str, body: &LanBody) -> Result<LanBody, PeerError> {
         let client = self.client.client().await.ok_or_else(|| PeerError::Refused(SIGNED_OUT.into()))?;
+        if self.is_down(device) {
+            return Err(PeerError::Unreachable);
+        }
+        let r = self.post_now(&client, device, path, body).await;
+        self.mark(device, !matches!(r, Err(PeerError::Unreachable)));
+        r
+    }
+}
+
+impl PeerLan {
+    async fn post_now(&self, client: &PeerClient, device: &str, path: &str, body: &LanBody) -> Result<LanBody, PeerError> {
         let cached = self.known.lock().get(device).cloned();
         let tries = match cached {
             Some(c) => vec![c, Vec::new()],
@@ -169,9 +203,8 @@ impl DeviceSync {
             match lan.post(&device, path, &body).await {
                 Ok(reply) => {
                     let sent: Vec<Msg> = msgs.drain(..n).collect();
-                    for m in &sent {
-                        self.peer.sent(link, m);
-                    }
+                    let link2 = link.clone();
+                    self.peer.blocking(move |p| p.sent_all(&link2, &sent)).await;
                     self.lan_ok(&link.id);
                     for frames in reply.msgs.iter().take(MSGS_MAX) {
                         if let Some(m) = self.wire.open_lan(link, frames, true) {
@@ -216,15 +249,18 @@ impl PeerSync for DeviceSync {
             replies.extend(self.peer.handle(&link, m).await);
         }
         let mut out = LanBody { link: link.id.clone(), msgs: Vec::new() };
+        let mut sent = Vec::new();
         for r in replies {
             match self.wire.seal_lan(&link, &r, true) {
                 Ok(frames) => {
-                    self.peer.sent(&link, &r);
+                    sent.push(r);
                     out.msgs.push(frames);
                 }
-                Err(e) => tracing::debug!("device sync: {e}"),
+                Err(e) => tracing::warn!("device sync: couldn't seal an answer: {e}"),
             }
         }
+        let link2 = link.clone();
+        self.peer.blocking(move |p| p.sent_all(&link2, &sent)).await;
         self.lan_ok(&link.id);
         Ok(out)
     }

@@ -170,8 +170,15 @@ pub fn start(s: Setup) -> DeviceService {
         }));
     }
     let (keep, stop) = watch::channel(false);
-    tauri::async_runtime::spawn(sync.clone().run(stop.clone()));
-    tauri::async_runtime::spawn(feeds.clone().run(stop));
+    // Both started again if they stop on a fault; the devices say so meanwhile.
+    {
+        let (ds, s1) = (sync.clone(), stop.clone());
+        let shown = sync.clone();
+        tauri::async_runtime::spawn(super::run::supervise("Device sync", move |down| shown.set_stopped(down), move || ds.clone().run(s1.clone())));
+        let (f, s2) = (feeds.clone(), stop);
+        let shown = sync.clone();
+        tauri::async_runtime::spawn(super::run::supervise("Device sync feeds", move |down| shown.set_stopped(down), move || f.clone().run(s2.clone())));
+    }
     DeviceService { sync, pairing, feeds, store: s.store, on: s.on, _stop: Arc::new(keep) }
 }
 
@@ -219,7 +226,8 @@ pub async fn device_sync_quarantined(d: State<'_, DeviceService>) -> AppResult<V
 /// "Take them anyway".
 #[tauri::command]
 pub async fn device_sync_take_quarantined(d: State<'_, DeviceService>) -> AppResult<DeviceSyncOverview> {
-    d.store.run(|s| s.take_quarantined()).await?;
+    let ns: Vec<String> = d.sync.peer.namespaces();
+    d.store.run(move |s| s.take_quarantined(&ns.iter().map(String::as_str).collect::<Vec<_>>())).await?;
     Ok(d.overview())
 }
 
