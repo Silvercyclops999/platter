@@ -1,7 +1,10 @@
-/* Song lineage: a vertical timeline of versions, and the Compare panel. */
+/* Song lineage: the versions in a sentence, a vertical timeline of them on a
+   hairline (ink dots, the version you're on in the accent, unreleased ones
+   hollow), and the Compare panel. */
 
 .lineage-page .action-row { flex-wrap: wrap; }
 .lineage-page__hint { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.lineage-page__lead { margin: var(--space-2) var(--space-4) var(--space-8); max-width: 32em; }
 .lineage-off { display: grid; gap: var(--space-3); justify-items: start; max-width: 520px; color: var(--color-text-secondary); }
 .lineage-off__title { margin: 0; font-size: var(--font-size-xl); color: var(--color-text-primary); }
 
@@ -13,12 +16,11 @@
   top: 28px;
   bottom: 40px;
   left: calc(var(--space-4) + var(--lineage-date) + 11px);
-  width: 2px;
-  border-radius: 1px;
-  background: var(--color-border);
+  width: 1px;
+  background: var(--ledger-line);
 }
 .lineage__node {
-  --stage: var(--color-text-muted);
+  --stage: var(--ledger-stem-hover);
   position: relative;
   display: grid;
   grid-template-columns: var(--lineage-date) 24px minmax(0, 1fr);
@@ -26,40 +28,34 @@
   gap: var(--space-3);
   padding: var(--space-1) 0;
 }
-.lineage__node--demo { --stage: var(--color-warning); }
-.lineage__node--session { --stage: var(--color-info); }
-.lineage__node--leak { --stage: var(--color-error); }
-.lineage__node--alternate,
-.lineage__node--unreleased { --stage: var(--color-version); }
-.lineage__node--release { --stage: var(--color-accent); }
-.lineage__node--remaster { --stage: var(--color-success); }
-.lineage__node--live { --stage: var(--color-text-secondary); }
+.lineage__node.is-current { --stage: var(--color-accent); }
 .lineage__node--undated { margin-top: var(--space-6); }
 .lineage__node--undated::before {
   content: "No date";
   position: absolute;
   top: calc(-1 * var(--space-6) + 4px);
   left: 0;
-  font-size: var(--font-size-xs);
+  font-family: var(--font-readout, var(--font-family));
+  font-size: 11px;
   font-weight: var(--font-weight-semibold);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--color-text-muted);
 }
 
-.lineage__date { font-size: var(--font-size-sm); color: var(--color-text-secondary); text-align: right; font-variant-numeric: tabular-nums; }
+.lineage__date { font-family: var(--font-readout, var(--font-family)); font-size: var(--font-size-xs); color: var(--color-text-secondary); text-align: right; font-variant-numeric: tabular-nums; }
 .lineage__date.is-unknown { color: var(--color-text-muted); }
 .lineage__dot {
   position: relative;
   justify-self: center;
-  width: 14px;
-  height: 14px;
-  border: 3px solid var(--color-bg-base);
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   background: var(--stage);
-  box-shadow: 0 0 0 1px var(--stage);
 }
-.lineage__node.is-current .lineage__dot { width: 18px; height: 18px; }
+/* Unreleased stages are hollow: the song was never put out like this. */
+:is(.lineage__node--demo, .lineage__node--session, .lineage__node--leak, .lineage__node--alternate, .lineage__node--unreleased) .lineage__dot { background: var(--color-bg-base); box-shadow: inset 0 0 0 1.5px var(--stage); }
+.lineage__node.is-current .lineage__dot { width: 13px; height: 13px; background: var(--color-accent); box-shadow: none; }
 
 .lineage__card {
   display: grid;
@@ -68,16 +64,16 @@
   gap: var(--space-3);
   min-height: 72px;
   padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-row);
+  border-radius: 2px;
+  border-top: 1px solid var(--ledger-faint);
 }
 .lineage__node:hover .lineage__card { background: var(--color-state-hover); }
-.lineage__node.is-current .lineage__card { background: var(--color-state-selected); }
-.lineage__node.is-picked .lineage__card { box-shadow: inset 0 0 0 1px var(--color-accent); }
-.lineage__card .art { border-radius: var(--radius-row); }
+.lineage__node.is-picked .lineage__card { box-shadow: inset 2px 0 0 var(--color-accent); }
+.lineage__card .art { border-radius: 2px; }
 .lineage__text { min-width: 0; }
 .lineage__name { display: flex; align-items: center; gap: var(--space-2); min-width: 0; font-size: var(--font-size-md); color: var(--color-text-primary); }
 .lineage__name .is-playing { color: var(--color-playing); }
-.lineage__here { flex: none; font-size: var(--font-size-xs); color: var(--color-text-muted); }
+.lineage__here { flex: none; font-family: var(--font-readout, var(--font-family)); font-size: 10px; font-weight: var(--font-weight-semibold); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-accent); }
 .lineage__meta { display: flex; align-items: center; gap: var(--space-1); min-width: 0; margin-top: 2px; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
 .lineage__meta .link { color: inherit; text-align: left; }
 .lineage__meta .link:hover { color: var(--color-text-primary); }
@@ -88,14 +84,15 @@
   align-items: center;
   gap: 6px;
   height: 18px;
-  padding: 0 6px;
-  border-radius: var(--radius-row);
-  font-size: var(--font-size-xs);
+  padding: 0;
+  font-family: var(--font-readout, var(--font-family));
+  font-size: 10px;
   font-weight: var(--font-weight-semibold);
-  color: var(--color-text-primary);
-  background: color-mix(in srgb, var(--stage) 18%, transparent);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
 }
-.lineage__duration { font-size: var(--font-size-sm); color: var(--color-text-secondary); text-align: right; }
+.lineage__duration { font-family: var(--font-readout, var(--font-family)); font-size: var(--font-size-xs); color: var(--color-text-secondary); text-align: right; }
 
 .lineage__pick {
   display: inline-flex;
@@ -214,3 +211,15 @@
 @media (prefers-reduced-motion: reduce) {
   .compare__bar progress::-webkit-progress-value { transition: none; }
 }
+
+/* The phone: the same sentence over the list. */
+.ph-lineage .ph-lineage__lead { margin: 16px 0 20px; }
+.ph-lineage .ph-lineage__list { padding-left: 14px; border-left: 1px solid var(--ledger-line); }
+.ph-lineage .ph-lineage__node { border-top: 1px solid var(--ledger-faint); }
+.ph-lineage .ph-lineage__node::before { left: -19px; width: 9px; height: 9px; background: var(--ledger-stem-hover); box-shadow: none; }
+.ph-lineage .ph-lineage__node.is-current::before { left: -21px; width: 13px; height: 13px; background: var(--color-accent); }
+.ph-lineage .ph-lineage__card .ph-row__title { font-weight: var(--font-weight-semibold); }
+.ph-lineage .ph-lineage__tags .ph-x__tag:not(.ph-lineage__era) { padding: 0; border-radius: 0; background: none; font-family: var(--font-readout, var(--font-family)); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; }
+.ph-lineage .ph-lineage__tags { gap: 4px 10px; align-items: baseline; }
+.ph-lineage .ph-lineage__era { padding: 0; border-radius: 0; background: none; color: var(--color-text-primary); font-size: 12px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.ph-lineage .ph-row__title .ph-x__tag.is-accent { padding: 0; margin-left: 4px; border-radius: 0; background: none; font-family: var(--font-readout, var(--font-family)); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; }

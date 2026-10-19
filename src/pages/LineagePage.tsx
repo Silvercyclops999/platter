@@ -1,6 +1,6 @@
 /**
- * A song's lineage: every version on one timeline, oldest first (versions
- * with no date follow), each with its stage, status, quality and era, and
+ * A song's lineage: the versions in a sentence, then every version on one
+ * timeline, oldest first (versions with no date follow), each with its stage, status, quality and era, and
  * each playable. Pick two to Compare them: both files come onto this
  * computer first ("Preparing compare…"), then X switches between them at
  * the same moment, with an optional loop region.
@@ -25,6 +25,7 @@ import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { usePageBar, useTitleStep } from "./detail";
 import { formatArchiveDate, SONG_STATUS_LABEL } from "./era";
+import "./ledger.css";
 import "./lineage.css";
 import { LoadError } from "../components/LoadError";
 
@@ -55,6 +56,48 @@ export function lineageSpan(l: Lineage): string | null {
   const lo = Math.min(...years);
   const hi = Math.max(...years);
   return lo === hi ? String(lo) : `${lo} to ${hi}`;
+}
+
+const STAGE_ONE: Record<LineageStage, string> = {
+  demo: "a demo",
+  session: "a session take",
+  leak: "a leak",
+  alternate: "an alternate",
+  unreleased: "an unreleased version",
+  release: "the release",
+  remaster: "a remaster",
+  live: "a live take",
+};
+const STAGE_MANY: Record<LineageStage, string> = {
+  demo: "demos",
+  session: "session takes",
+  leak: "leaks",
+  alternate: "alternates",
+  unreleased: "unreleased versions",
+  release: "releases",
+  remaster: "remasters",
+  live: "live takes",
+};
+
+/**
+ * The lineage in a sentence: how many versions over which years, and what
+ * they are in the order they first came. "Glasshouse has 3 versions from
+ * 2017 to 2019: a demo, a session take and the release."
+ */
+export function lineageSentence(l: Lineage): string {
+  const n = l.nodes.length;
+  if (n === 0) return `${l.title} has no versions here yet.`;
+  const span = lineageSpan(l);
+  if (n === 1) {
+    const only = l.nodes[0];
+    return `${l.title} has one version here, ${STAGE_ONE[only.stage]}${only.when !== null ? ` from ${nodeDate(only)}` : ""}.`;
+  }
+  const counts = new Map<LineageStage, number>();
+  for (const x of l.nodes) counts.set(x.stage, (counts.get(x.stage) ?? 0) + 1);
+  const parts = [...counts].map(([s, k]) => (k === 1 ? STAGE_ONE[s] : `${k} ${STAGE_MANY[s]}`));
+  const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+  const years = !span ? "" : span.includes(" to ") ? ` from ${span}` : `, all from ${span}`;
+  return `${l.title} has ${n} versions${years}: ${list}.`;
 }
 
 /** The song menu for a node; unreleased versions never get a share link. */
@@ -137,6 +180,12 @@ export function LineagePage({ id }: { id: string }) {
           />
           <p className="lineage-page__hint">Pick two versions to compare them.</p>
         </div>
+
+        {data && (
+          <p className="lead lead--sm lineage-page__lead" data-testid="lineage-lead">
+            {lineageSentence(data)}
+          </p>
+        )}
 
         <ol className="lineage" aria-label={data ? `Versions of ${data.title}, oldest first` : "Versions"} aria-busy={!data || undefined}>
           {data

@@ -12,7 +12,7 @@ import { formatDuration, plural } from "../../lib/format";
 import type { LineageNode } from "../../lib/types";
 import { useLoad } from "../../lib/useLoad";
 import { SONG_STATUS_LABEL } from "../../pages/era";
-import { ComparePanel, STAGE_LABEL, lineageSpan, nodeDate } from "../../pages/LineagePage";
+import { ComparePanel, STAGE_LABEL, lineageSentence, lineageSpan, nodeDate } from "../../pages/LineagePage";
 import { player, usePlayer } from "../../stores/player";
 import { nav } from "../../stores/router";
 import { useSettings } from "../../stores/settings";
@@ -102,6 +102,7 @@ export function PhoneLineage({ id }: { id: string }) {
         onPlay={() => (playingHere ? void player.toggle() : void player.playTracks(ids))}
         left={<span className="ph-x__meta">Pick two to compare them.</span>}
       />
+      <p className="lead lead--sm ph-lineage__lead">{lineageSentence(data)}</p>
       <ol className="ph-lineage__list" aria-label={`Versions of ${data.title}, oldest first`}>
         {data.nodes.map((n) => (
           <Node
