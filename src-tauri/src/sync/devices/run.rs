@@ -6,11 +6,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use serde::Serialize;
 use tokio::sync::{mpsc, watch};
 
 use super::clock;
+use super::lan::LanSend;
 use super::protocol::{Paused, SyncPeer};
 use crate::homeside::link::{self, Link};
 use crate::homeside::peer::{self as relay_peer, Incoming, Wire};
@@ -74,11 +75,40 @@ pub struct DeviceSync {
     timing: Timing,
     paths: Mutex<HashMap<String, PathState>>,
     listeners: Mutex<HashMap<String, watch::Sender<bool>>>,
+    lan: RwLock<Option<Arc<dyn LanSend>>>,
+    /// One answer to a request from the local network at a time, per link.
+    replies: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl DeviceSync {
     pub fn new(peer: Arc<SyncPeer>, wire: Arc<Wire>, timing: Timing) -> Self {
-        Self { peer, wire, timing, paths: Mutex::default(), listeners: Mutex::default() }
+        Self {
+            peer,
+            wire,
+            timing,
+            paths: Mutex::default(),
+            listeners: Mutex::default(),
+            lan: RwLock::default(),
+            replies: Mutex::default(),
+        }
+    }
+
+    /// Use the local network when the other device answers there.
+    pub fn set_lan(&self, lan: Arc<dyn LanSend>) {
+        *self.lan.write() = Some(lan);
+    }
+
+    pub(crate) fn lan(&self) -> Option<Arc<dyn LanSend>> {
+        self.lan.read().clone()
+    }
+
+    pub(crate) fn reply_lock(&self, link_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+        self.replies.lock().entry(link_id.to_string()).or_default().clone()
+    }
+
+    /// The other device answered on the local network.
+    pub(crate) fn lan_ok(&self, link_id: &str) {
+        self.set_path(link_id, PathState::Ok);
     }
 
     fn set_path(&self, id: &str, s: PathState) {
@@ -125,7 +155,7 @@ impl DeviceSync {
     /// A round with one linked device.
     pub async fn round(&self, link: &Link) {
         if let Some(h) = self.peer.hello(false).await {
-            self.deliver(link, vec![h]).await;
+            self.send(link, vec![h]).await;
         }
     }
 
@@ -140,14 +170,14 @@ impl DeviceSync {
     pub async fn push_all(&self) {
         for link in self.wire.links.links() {
             let msgs = self.peer.push(&link).await;
-            self.deliver(&link, msgs).await;
+            self.send(&link, msgs).await;
         }
     }
 
     /// One message in from a link: answered on the same link.
     pub async fn incoming(&self, link: &Link, msg: Msg) {
         let replies = self.peer.handle(link, msg).await;
-        self.deliver(link, replies).await;
+        self.send(link, replies).await;
     }
 
     /// Unpair: tell the other device, then forget it here (also when it

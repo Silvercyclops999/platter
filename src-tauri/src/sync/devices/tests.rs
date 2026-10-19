@@ -423,9 +423,7 @@ async fn nothing_secret_leaves_in_a_full_sync() {
     a.keys.set("lidarr-api-key", &Token::new(LIDARR_KEY).unwrap()).unwrap();
     a.keys.set("lastfm-api-key", &Token::new(LASTFM_KEY).unwrap()).unwrap();
     // Every synced setting, with addresses of the user's own servers.
-    let mut s = crate::settings::Settings::default();
-    s.lidarr_url = "http://10.20.30.40:8686".into();
-    s.tautulli_url = "http://10.20.30.40:8181".into();
+    let s = crate::settings::Settings { lidarr_url: "http://10.20.30.40:8686".into(), tautulli_url: "http://10.20.30.40:8181".into(), ..Default::default() };
     crate::sync::settings::push(&a.store, &s).unwrap();
     a.store.put(&HIDDEN, "track:1", &hidden("x")).unwrap();
     a.store.put(&store::LIDARR, "artist:1", &json!({"mode": "protected"})).unwrap();
@@ -626,4 +624,210 @@ fn device_links_are_kept_apart_from_bridge_links() {
     let bridge = Links::new(a.db.clone(), a.keys.clone());
     assert!(bridge.all().is_empty(), "a Bridge never sees a device link");
     assert_eq!(a.links.links().len(), 1);
+}
+
+// ---------------------------------------------------------------- the local network
+
+mod lan {
+    use std::net::Ipv4Addr;
+
+    use super::*;
+    use crate::error::AppResult;
+    use crate::remote::peer::auth::PeerKey;
+    use crate::remote::peer::client::{NOT_SAME_ACCOUNT, PeerClient, PeerError};
+    use crate::remote::peer::directory::{Announce, MemoryDirectory, MemoryLan, PeerDirectory};
+    use crate::remote::peer::keys::RouteList;
+    use crate::remote::peer::server::{self, ExtraSlot, KeySource, PeerHandler, PeerServer};
+    use crate::remote::peer::sync::{LanBody, PATH_SYNC_ENTRIES, SyncRoutes};
+    use crate::remote::peer::{Hello, PeerTimeline, PlayRequest, txt};
+    use crate::remote::types::RemoteCommand;
+    use crate::sync::devices::lan::{LanSend, PeerLan};
+
+    struct NoPlayer;
+    #[async_trait]
+    impl PeerHandler for NoPlayer {
+        async fn hello(&self) -> Hello {
+            Hello { id: "x".into(), name: "X".into(), platform: "Windows".into(), version: "0".into(), playing: None }
+        }
+        async fn timeline(&self) -> PeerTimeline {
+            PeerTimeline { state: "stopped".into(), time_ms: 0, duration_ms: 0, track_id: None, volume: 0.0, shuffle: false, repeat: Default::default() }
+        }
+        async fn play(&self, _: PlayRequest) -> AppResult<()> {
+            Ok(())
+        }
+        async fn command(&self, _: RemoteCommand) -> AppResult<()> {
+            Ok(())
+        }
+        async fn stop(&self) -> AppResult<()> {
+            Ok(())
+        }
+    }
+
+    struct Fixed(PeerKey);
+    #[async_trait]
+    impl KeySource for Fixed {
+        async fn key(&self) -> Option<PeerKey> {
+            Some(self.0.clone())
+        }
+    }
+
+    fn key(t: &str) -> PeerKey {
+        PeerKey::from_token(&Token::new(t).unwrap())
+    }
+
+    struct OnLan {
+        dev: Dev,
+        sync: Arc<DeviceSync>,
+        lan: Arc<PeerLan>,
+        stop: tokio::sync::watch::Sender<bool>,
+    }
+
+    /// A device on the pretend network: the control port on loopback with
+    /// the sync routes, announced on `net` under `announced_acct`, signing
+    /// with `token`. `dead`: announced, but nothing answers on its port.
+    async fn on_lan(d: Dev, token: &str, announced_acct: &str, net: &Arc<MemoryLan>, relay_running: bool, dead: bool) -> OnLan {
+        let wire = Arc::new(Wire::new(d.links.clone(), Arc::new(Ntfy::new().unwrap()) as Arc<dyn RelayFactory>, Arc::new(crate::sync::store::system_ms)));
+        let sync = Arc::new(DeviceSync::new(d.peer.clone(), wire, Timing { debounce: Duration::from_millis(200), every: Duration::from_secs(1) }));
+        let slot = ExtraSlot::default();
+        let routes = SyncRoutes::new(d.id.clone(), Arc::new(Fixed(key(token))), sync.clone());
+        *slot.write() = Some(Arc::new(RouteList(vec![Arc::new(routes)])));
+        let srv = Arc::new(PeerServer::new(d.id.clone(), Arc::new(NoPlayer), Arc::new(Fixed(key(token)))).with_extra(slot));
+        let (listeners, port) = server::bind(&[Ipv4Addr::LOCALHOST], 0, 1).await.unwrap();
+        let (stop, rx) = tokio::sync::watch::channel(false);
+        if dead {
+            // Announced, but nothing answers there.
+            drop(listeners);
+        } else {
+            tokio::spawn(server::serve(listeners, srv, rx.clone()));
+        }
+        let dir = Arc::new(MemoryDirectory::new(net.clone()));
+        dir.announce(&Announce { id: d.id.clone(), txt: txt(&d.id, &format!("Device {}", d.id), "Windows", "0.3.0", announced_acct), ips: vec![Ipv4Addr::LOCALHOST], port });
+        let client = PeerClient::new(reqwest::Client::new(), d.id.clone(), key(token));
+        let lan = Arc::new(PeerLan::new(Arc::new(move || Some(client.clone())), dir, d.acct.clone(), d.id.clone()));
+        sync.set_lan(lan.clone());
+        if relay_running {
+            tokio::spawn(sync.clone().run(rx));
+        }
+        OnLan { dev: d, sync, lan, stop }
+    }
+
+    /// As pairing leaves it: each end knows the other device's id.
+    fn pair_known(a: &Dev, b: &Dev, relay: &str) -> (Link, Link) {
+        let (la, lb) = pair(a, b, relay);
+        a.links.update(&la.id, |p| p.device = Some(b.id.clone())).unwrap();
+        b.links.update(&lb.id, |p| p.device = Some(a.id.clone())).unwrap();
+        (la, lb)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn two_devices_on_one_network_sync_over_it_and_carry_big_things_there() {
+        let ntfy = FakeNtfy::start().await;
+        let net = MemoryLan::new();
+        let a = real_clock("a", ACCT);
+        let b = real_clock("b", ACCT);
+        let (la, _) = pair_known(&a, &b, &ntfy.url);
+        a.store.put(&HIDDEN, "track:1", &hidden("Quiet Hours")).unwrap();
+        // More than the relay takes at once.
+        for i in 0..8 {
+            let text: String = (0..70_000u32).map(|_| char::from(b'a' + rand::random::<u8>() % 26)).collect();
+            a.store.put(&store::LYRICS, &format!("t{i}"), &store::UserLyricsEntry { text, prefer: false }).unwrap();
+        }
+        b.store.put(&SETTINGS, "accent", &json!("#0a7c5f")).unwrap();
+        let a = on_lan(a, "acct-token", ACCT, &net, false, false).await;
+        let b = on_lan(b, "acct-token", ACCT, &net, false, false).await;
+        a.sync.sync_now().await;
+        assert!(same(&a.dev, &b.dev), "one round over the network");
+        assert_eq!(b.dev.store.list(&store::LYRICS).unwrap().len(), 8);
+        assert_eq!(a.dev.store.get(&SETTINGS, "accent").unwrap(), Some(json!("#0a7c5f")));
+        // A change goes the same way.
+        tick(&b.dev, 10);
+        b.dev.store.put(&HIDDEN, "track:2", &hidden("Second")).unwrap();
+        b.sync.push_all().await;
+        assert!(a.dev.store.has_entry(&HIDDEN, "track:2").unwrap());
+        assert!(ntfy.published().is_empty(), "nothing went through the relay");
+        assert_eq!(a.sync.status()[0].words, "In sync");
+        assert!(a.dev.links.get(&la.id).unwrap().last_synced_at.is_some());
+        let _ = a.stop.send(true);
+        let _ = b.stop.send(true);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn when_the_other_device_doesnt_answer_here_the_relay_carries_it() {
+        let ntfy = FakeNtfy::start().await;
+        let net = MemoryLan::new();
+        let a = real_clock("a", ACCT);
+        let b = real_clock("b", ACCT);
+        pair_known(&a, &b, &ntfy.url);
+        a.store.put(&HIDDEN, "track:1", &hidden("mine")).unwrap();
+        // Both announced, but their ports refuse connections (a firewall).
+        let a = on_lan(a, "acct-token", ACCT, &net, true, true).await;
+        let b = on_lan(b, "acct-token", ACCT, &net, true, true).await;
+        until("the entry through the relay", || b.dev.store.has_entry(&HIDDEN, "track:1").unwrap()).await;
+        assert!(!ntfy.published().is_empty());
+        tick(&a.dev, 10);
+        a.dev.store.put(&HIDDEN, "track:2", &hidden("later")).unwrap();
+        until("a change through the relay", || b.dev.store.has_entry(&HIDDEN, "track:2").unwrap()).await;
+        let _ = a.stop.send(true);
+        let _ = b.stop.send(true);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_device_of_another_account_is_refused_on_the_network() {
+        let ntfy = FakeNtfy::start().await;
+        let net = MemoryLan::new();
+        let a = real_clock("a", ACCT);
+        let b = real_clock("b", "someone-else");
+        let (la, _) = pair_known(&a, &b, &ntfy.url);
+        a.store.put(&HIDDEN, "track:1", &hidden("mine")).unwrap();
+        b.store.put(&HIDDEN, "track:9", &hidden("theirs")).unwrap();
+        let a = on_lan(a, "acct-token", ACCT, &net, false, false).await;
+        // It even announces itself under this account's tag.
+        let b = on_lan(b, "other-token", ACCT, &net, false, false).await;
+        let body = LanBody { link: la.id.clone(), msgs: vec![] };
+        match a.lan.post("b", PATH_SYNC_ENTRIES, &body).await {
+            Err(PeerError::Refused(why)) => assert_eq!(why, NOT_SAME_ACCOUNT),
+            other => panic!("not refused: {other:?}"),
+        }
+        // From its side, this account's devices aren't its own: none found.
+        assert_eq!(b.lan.post("a", PATH_SYNC_ENTRIES, &body).await.unwrap_err(), PeerError::Unreachable);
+        a.sync.sync_now().await;
+        b.sync.sync_now().await;
+        assert!(!b.dev.store.has_entry(&HIDDEN, "track:1").unwrap());
+        assert!(!a.dev.store.has_entry(&HIDDEN, "track:9").unwrap());
+        // Announced under another account: not even found.
+        let net2 = MemoryLan::new();
+        let c = on_lan(dev_with("c", Some(ACCT), None), "acct-token", "another-tag", &net2, false, false).await;
+        let d = on_lan(dev_with("d", Some(ACCT), None), "acct-token", ACCT, &net2, false, false).await;
+        assert_eq!(d.lan.post("c", PATH_SYNC_ENTRIES, &body).await.unwrap_err(), PeerError::Unreachable);
+        let _ = (a.stop.send(true), b.stop.send(true), c.stop.send(true), d.stop.send(true));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_network_path_takes_only_frames_for_its_link_once() {
+        let net = MemoryLan::new();
+        let a = real_clock("a", ACCT);
+        let b = real_clock("b", ACCT);
+        let (la, lb) = pair_known(&a, &b, "http://127.0.0.1:9");
+        let a = on_lan(a, "acct-token", ACCT, &net, false, false).await;
+        let b = on_lan(b, "acct-token", ACCT, &net, false, false).await;
+        let hello = a.dev.peer.hello(false).await.unwrap();
+        let frames = a.sync.wire.seal_lan(&la, &hello, false).unwrap();
+        // Opens once, on the other end, as a request only.
+        assert!(b.sync.wire.open_lan(&lb, &frames, true).is_none(), "not as an answer");
+        assert!(b.sync.wire.open_lan(&lb, &frames, false).is_some());
+        assert!(b.sync.wire.open_lan(&lb, &frames, false).is_none(), "replayed");
+        // A relay frame isn't a network frame, and the other way round.
+        let relay = link::seal_msg(&la.outbox(), &la.me, &mut Counter::default(), &hello, crate::sync::store::system_ms()).unwrap();
+        assert!(b.sync.wire.open_lan(&lb, &relay, false).is_none());
+        let frames = a.sync.wire.seal_lan(&la, &hello, false).unwrap();
+        assert!(b.sync.wire.receive(&lb, &frames[0]).is_none());
+        // A link that isn't there is refused; frames for another link open to nothing.
+        let body = LanBody { link: "nope".into(), msgs: vec![frames.clone()] };
+        assert!(matches!(a.lan.post("b", PATH_SYNC_ENTRIES, &body).await, Err(PeerError::Failed(_))));
+        let other = Link { secret: [9u8; 32], ..la.clone() };
+        let wrong = a.sync.wire.seal_lan(&other, &hello, false).unwrap();
+        let reply = a.lan.post("b", PATH_SYNC_ENTRIES, &LanBody { link: la.id.clone(), msgs: vec![wrong] }).await.unwrap();
+        assert!(reply.msgs.is_empty());
+        let _ = (a.stop.send(true), b.stop.send(true));
+    }
 }

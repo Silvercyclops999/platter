@@ -11,10 +11,12 @@
 //! and every merge checks again.
 //!
 //! - [`protocol`]: the messages and what each end does with them.
-//! - [`run`]: listeners, rounds and sending local changes.
+//! - [`run`]: listeners, rounds and sending local changes through the relay.
+//! - [`lan`]: the local network path (tried first), and answering it.
 //! - [`clock`]: how far apart two devices' clocks are, in words.
 
 pub mod clock;
+pub mod lan;
 pub mod protocol;
 pub mod run;
 

@@ -77,7 +77,7 @@ impl Link {
     }
 
     /// A device's own channel on a device link, derived from its frame id.
-    fn from_device(&self, id: &str) -> Channel {
+    fn device_channel(&self, id: &str) -> Channel {
         Channel::new(&self.secret, &format!("device from-{id}"))
     }
 
@@ -86,7 +86,7 @@ impl Link {
         match self.side {
             Side::Desktop => self.to_desktop(),
             Side::Bridge => self.to_bridge(),
-            Side::Device => self.from_device(&self.peer),
+            Side::Device => self.device_channel(&self.peer),
         }
     }
 
@@ -95,7 +95,7 @@ impl Link {
         match self.side {
             Side::Desktop => self.to_bridge(),
             Side::Bridge => self.to_desktop(),
-            Side::Device => self.from_device(&self.me),
+            Side::Device => self.device_channel(&self.me),
         }
     }
 
