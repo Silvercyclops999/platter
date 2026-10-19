@@ -631,10 +631,34 @@ fn cpal_list_isolated() -> Vec<OutputDevice> {
     })
 }
 
+#[derive(Clone)]
 struct StreamCtx {
     on_event: OutputCallback,
     selected: Arc<Mutex<Option<String>>>,
     opened: Arc<Mutex<Option<OutputDevice>>>,
+}
+
+/// A stream on `device` in `supported`'s format.
+fn open_stream(
+    device: &cpal::Device,
+    supported: &cpal::SupportedStreamConfig,
+    renderer: Arc<dyn Renderer>,
+    ctx: StreamCtx,
+) -> Result<cpal::Stream, String> {
+    use cpal::SampleFormat as F;
+    let config = supported.config();
+    let built = match supported.sample_format() {
+        F::F32 => build_stream::<f32>(device, config, renderer, ctx),
+        F::I16 => build_stream::<i16>(device, config, renderer, ctx),
+        F::U16 => build_stream::<u16>(device, config, renderer, ctx),
+        F::I32 => build_stream::<i32>(device, config, renderer, ctx),
+        F::U32 => build_stream::<u32>(device, config, renderer, ctx),
+        F::I8 => build_stream::<i8>(device, config, renderer, ctx),
+        F::U8 => build_stream::<u8>(device, config, renderer, ctx),
+        F::F64 => build_stream::<f64>(device, config, renderer, ctx),
+        other => return Err(format!("unsupported device sample format {other:?}")),
+    };
+    built.map_err(|e| e.to_string())
 }
 
 fn build_stream<T>(
@@ -700,6 +724,14 @@ where
     )
 }
 
+/// After a rate change: the device as it is now (when found again), at `rate`.
+fn refind_config(device: &mut cpal::Device, found: Option<cpal::Device>, rate: u32) -> Option<cpal::SupportedStreamConfig> {
+    if let Some(d) = found {
+        *device = d;
+    }
+    config_at(device, rate)
+}
+
 /// A stereo config at `rate`, f32 if the device has it.
 fn config_at(device: &cpal::Device, rate: u32) -> Option<cpal::SupportedStreamConfig> {
     use cpal::traits::DeviceTrait;
@@ -743,7 +775,15 @@ impl AudioOutput for CpalOutput {
                     .as_deref()
                     .and_then(|id| id.parse::<cpal::DeviceId>().ok())
                     .and_then(|id| host.device_by_id(&id));
-                let Some(device) = chosen.or_else(|| host.default_output_device()) else {
+                // Looked up again after a bit-perfect rate change: some devices
+                // come back as a new object, and the old handle no longer works.
+                let find = || {
+                    want.as_deref()
+                        .and_then(|id| id.parse::<cpal::DeviceId>().ok())
+                        .and_then(|id| host.device_by_id(&id))
+                        .or_else(|| host.default_output_device())
+                };
+                let Some(mut device) = chosen.or_else(|| host.default_output_device()) else {
                     let _ = ready_tx.send(Err(AppError::Io("no audio output device".into())));
                     return;
                 };
@@ -775,7 +815,7 @@ impl AudioOutput for CpalOutput {
                             stream.run(renderer, stop_rx, lost);
                             return;
                         }
-                        Ok(super::exclusive::Opened::Device { guard, rate, bits }) => match config_at(&device, rate) {
+                        Ok(super::exclusive::Opened::Device { guard, rate, bits }) => match refind_config(&mut device, find(), rate) {
                             Some(c) => {
                                 supported = c;
                                 _hog = Some(guard);
@@ -793,6 +833,38 @@ impl AudioOutput for CpalOutput {
                         }
                     }
                 }
+                let ctx = StreamCtx {
+                    on_event,
+                    selected,
+                    opened: opened.clone(),
+                };
+                let mut stream = open_stream(&device, &supported, renderer.clone(), ctx.clone());
+                // The device on its own wouldn't open a stream: give it back
+                // and play shared, saying why, instead of not playing at all.
+                if let (Err(e), Some(_)) = (&stream, &_hog) {
+                    tracing::info!("bit-perfect stream failed, playing shared: {e}");
+                    _hog = None;
+                    *exclusive.lock() = Exclusive::Fallback {
+                        reason: "The device wouldn't play on its own, so it plays shared.".into(),
+                    };
+                    if let Some(d) = find() {
+                        device = d;
+                    }
+                    match device.default_output_config() {
+                        Ok(c) => {
+                            supported = c;
+                            stream = open_stream(&device, &supported, renderer.clone(), ctx.clone());
+                        }
+                        Err(e) => stream = Err(format!("audio device: {e}")),
+                    }
+                }
+                let stream = match stream {
+                    Ok(s) => s,
+                    Err(e) => {
+                        let _ = ready_tx.send(Err(AppError::Io(format!("open audio stream: {e}"))));
+                        return;
+                    }
+                };
                 let config = supported.config();
                 let fmt = OutputFormat {
                     sample_rate: config.sample_rate,
@@ -801,35 +873,6 @@ impl AudioOutput for CpalOutput {
                 let name = info.as_ref().map_or_else(|| "unknown device".into(), |d| d.name.clone());
                 *last.lock() = Some((name, format!("{:?}", supported.sample_format())));
                 *opened.lock() = info;
-                let ctx = StreamCtx {
-                    on_event,
-                    selected,
-                    opened: opened.clone(),
-                };
-                use cpal::SampleFormat as F;
-                let stream = match supported.sample_format() {
-                    F::F32 => build_stream::<f32>(&device, config, renderer, ctx),
-                    F::I16 => build_stream::<i16>(&device, config, renderer, ctx),
-                    F::U16 => build_stream::<u16>(&device, config, renderer, ctx),
-                    F::I32 => build_stream::<i32>(&device, config, renderer, ctx),
-                    F::U32 => build_stream::<u32>(&device, config, renderer, ctx),
-                    F::I8 => build_stream::<i8>(&device, config, renderer, ctx),
-                    F::U8 => build_stream::<u8>(&device, config, renderer, ctx),
-                    F::F64 => build_stream::<f64>(&device, config, renderer, ctx),
-                    other => {
-                        let _ = ready_tx.send(Err(AppError::Io(format!(
-                            "unsupported device sample format {other:?}"
-                        ))));
-                        return;
-                    }
-                };
-                let stream = match stream {
-                    Ok(s) => s,
-                    Err(e) => {
-                        let _ = ready_tx.send(Err(AppError::Io(format!("open audio stream: {e}"))));
-                        return;
-                    }
-                };
                 if let Err(e) = stream.play() {
                     let _ = ready_tx.send(Err(AppError::Io(format!("start audio stream: {e}"))));
                     return;
