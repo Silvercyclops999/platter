@@ -4264,6 +4264,12 @@ export class MockBackend implements Backend {
   artistAliasSet(a: { key: string; name?: string; sameAs?: string; sameAsName?: string }, on: boolean) {
     return this.delay(() => this.stats.aliasSet(a, on));
   }
+  artistAliasApart(p: { key: string; name?: string; other: string; otherName?: string }, on: boolean) {
+    return this.delay(() => this.stats.aliasApart(p, on));
+  }
+  artistAliasAutoPairs() {
+    return this.delay(() => (this.settings.artistAliasesAuto === false ? [] : [...this.stats.autoPairs]));
+  }
   statsPlayedArtists(query: string, limit?: number) {
     return this.delay(() => this.stats.playedArtists(query, limit));
   }

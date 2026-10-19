@@ -210,3 +210,114 @@ fn sync_keeps_each_artists_musicbrainz_id() {
     let got: Option<String> = c.query_row("SELECT mbid FROM artists WHERE id = '7'", [], |r| r.get(0)).unwrap();
     assert_eq!(got.as_deref(), Some("aaaa0000-0000-4000-8000-000000000001"), "kept lower-case so ids compare");
 }
+
+#[test]
+fn a_read_without_guids_keeps_the_musicbrainz_id() {
+    let mut c = db();
+    let full: crate::plex::client::PlexMetadata = serde_json::from_value(serde_json::json!({
+        "ratingKey": "7", "title": "Northwind", "type": "artist",
+        "Guid": [{"id": "mbid://aaaa0000-0000-4000-8000-000000000001"}]
+    }))
+    .unwrap();
+    // A live or quick update: the same artist, no guids.
+    let quick: crate::plex::client::PlexMetadata =
+        serde_json::from_value(serde_json::json!({"ratingKey": "7", "title": "Northwind", "type": "artist"})).unwrap();
+    for m in [full, quick] {
+        let tx = c.transaction().unwrap();
+        crate::db::store::upsert_artists(&tx, &[m.to_artist()], 1).unwrap();
+        tx.commit().unwrap();
+    }
+    let got: Option<String> = c.query_row("SELECT mbid FROM artists WHERE id = '7'", [], |r| r.get(0)).unwrap();
+    assert_eq!(got.as_deref(), Some("aaaa0000-0000-4000-8000-000000000001"));
+}
+
+#[test]
+fn the_cache_reads_every_artist_again_once_for_their_ids() {
+    let mut c = rusqlite::Connection::open_in_memory().unwrap();
+    crate::db::schema::migrate_to(&mut c, 46).unwrap();
+    c.execute("INSERT INTO sync_state (id, section_id, section_uuid, last_sync_at, last_full_sync_at) VALUES (1, '1', 'u', 100, 100)", []).unwrap();
+    crate::db::schema::migrate(&mut c).unwrap();
+    let full: Option<i64> = c.query_row("SELECT last_full_sync_at FROM sync_state", [], |r| r.get(0)).unwrap();
+    assert_eq!(full, None, "the next library sync is a full one");
+}
+
+/// The renamed pair, in a database the Settings switch and the store can reach.
+fn renamed_handle() -> (tempfile::TempDir, crate::db::DbHandle, Aliases) {
+    let dir = tempfile::tempdir().unwrap();
+    let h = crate::db::DbHandle::open(dir.path().join("a.db")).unwrap();
+    h.write(|c| {
+        renamed(c);
+        Ok(())
+    })
+    .unwrap();
+    let a = Aliases::with_clock(SyncStore::new(h.clone(), "dev1"), Arc::new(|| 1_700_000_000));
+    (dir, h, a)
+}
+
+#[test]
+fn joining_by_musicbrainz_id_can_be_switched_off() {
+    let (_d, h, _a) = renamed_handle();
+    let top = |h: &crate::db::DbHandle| h.read(|c| top_artists(c, year(2025), 10)).unwrap();
+    assert_eq!(names(&top(&h)), vec![("The Northwinds", 8), ("Copper Hollow", 6)]);
+    assert_eq!(h.read(aliases::auto_pairs).unwrap().len(), 1);
+    let mut s = crate::settings::load(&h);
+    assert!(s.artist_aliases_auto, "on by default");
+    assert!(crate::settings::SYNCED_SETTINGS.contains(&"artistAliasesAuto"));
+    s.artist_aliases_auto = false;
+    crate::settings::save(&h, &s).unwrap();
+    assert_eq!(names(&top(&h)), vec![("Copper Hollow", 6), ("The Northwinds", 5), ("Northwind", 3)]);
+    assert!(h.read(aliases::auto_pairs).unwrap().is_empty());
+    assert_eq!(h.read(|c| crate::db::queries::top_artists(c, 10)).unwrap().len(), 0, "no view counts here; just no error");
+}
+
+#[test]
+fn not_the_same_artist_keeps_a_matched_pair_apart_and_undoes() {
+    let (_d, h, a) = renamed_handle();
+    let top = |h: &crate::db::DbHandle| h.read(|c| top_artists(c, year(2025), 10)).unwrap();
+    let pairs = h.read(aliases::auto_pairs).unwrap();
+    assert_eq!((pairs[0].name.as_str(), pairs[0].same_as_name.as_str()), ("Northwind", "The Northwinds"));
+    let list = a.apart("northwind", "Northwind", "the northwinds", "The Northwinds", true).unwrap();
+    assert!(list[0].apart && list[0].key == "northwind");
+    assert_eq!(names(&top(&h)), vec![("Copper Hollow", 6), ("The Northwinds", 5), ("Northwind", 3)]);
+    assert!(h.read(aliases::auto_pairs).unwrap().is_empty());
+    // Kept in the sync store, so other devices keep them apart too.
+    let id = aliases::apart_key("the northwinds", "northwind");
+    assert!(a.list().unwrap().iter().any(|r| r.apart) && id.starts_with("apart:") && id.len() < 40);
+    a.apart("the northwinds", "", "northwind", "", false).unwrap();
+    assert_eq!(names(&top(&h)), vec![("The Northwinds", 8), ("Copper Hollow", 6)]);
+}
+
+#[test]
+fn undo_takes_back_a_merge_made_from_either_side() {
+    let (_d, h, a) = renamed_handle();
+    a.set("copper hollow", "Copper Hollow", "brass ring", "Brass Ring", true).unwrap();
+    // The same pair the other way round (from another device, say).
+    a.set("brass ring", "Brass Ring", "copper hollow", "Copper Hollow", true).unwrap();
+    assert!(a.set("copper hollow", "", "", "", false).unwrap().is_empty(), "both directions gone");
+    let _ = h;
+}
+
+#[test]
+fn a_name_two_artists_with_different_ids_share_joins_nothing() {
+    let mut c = db();
+    act(&c, "1", "Echo", Some("eeee0000-0000-4000-8000-000000000005"));
+    act(&c, "2", "Echo Lake", Some("eeee0000-0000-4000-8000-000000000005"));
+    // Another library artist called Echo with another id.
+    artist(&c, "9", "Echo", Some("ffff0000-0000-4000-8000-000000000006"));
+    plays(&c, "t1", "2025-02-02 09:00:00", 2);
+    plays(&c, "t2", "2025-02-02 09:00:00", 1);
+    refresh(&mut c).unwrap();
+    // Echo's plays came from another app: by name only.
+    c.execute("UPDATE stats_artist SET artist_id = NULL WHERE artist_key = 'echo'", []).unwrap();
+    // Two library artists are called Echo, with different ids: no guess.
+    assert!(aliases::groups(&c).unwrap().is_empty());
+}
+
+#[test]
+fn the_joined_top_list_keeps_its_limit_in_range() {
+    let mut c = db();
+    renamed(&mut c);
+    assert_eq!(top_artists(&c, year(2025), 0).unwrap().len(), 1, "at least one row");
+    assert_eq!(top_artists(&c, year(2025), u32::MAX).unwrap().len(), 2);
+}
+

@@ -1243,6 +1243,8 @@ export interface Settings {
   showDescribePlaylist: boolean;
   /** The sound map page and its entries (shown once songs are analysed). */
   showSoundMap: boolean;
+  /** Names Plex matched to one MusicBrainz artist count as one in stats. */
+  artistAliasesAuto: boolean;
   /** Compare plays both versions at matched loudness when the server has it. */
   compareLevelMatch: boolean;
   /** Scrobble to Last.fm (once signed in). */
@@ -1825,6 +1827,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showLineage: true,
   showDescribePlaylist: true,
   showSoundMap: true,
+  artistAliasesAuto: true,
   compareLevelMatch: true,
   scrobbleLastfm: false,
   scrobbleListenbrainz: false,

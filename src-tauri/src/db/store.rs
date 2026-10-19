@@ -146,11 +146,12 @@ pub fn upsert_artists_in(tx: &Transaction<'_>, items: &[Artist], gen_: i64, src:
          ON CONFLICT (id) DO UPDATE SET title = excluded.title, sort_title = excluded.sort_title,
            thumb = excluded.thumb, art = excluded.art, view_count = excluded.view_count,
            summary = excluded.summary, seen_gen = excluded.seen_gen, src = excluded.src,
-           mbid = excluded.mbid",
+           mbid = coalesce(excluded.mbid, artists.mbid)",
     )?;
     // `similar` isn't on list items; the artist page fills it (db::similar).
+    // A read without guids (live and quick updates) keeps the id already known.
     for a in items {
-        let mbid = a.mbid.as_deref().map(str::to_ascii_lowercase);
+        let mbid = a.mbid.as_deref().map(str::trim).filter(|m| !m.is_empty()).map(str::to_ascii_lowercase);
         st.execute(params![a.id, a.title, a.sort_title, a.thumb, a.art, a.view_count, a.summary, gen_, src, mbid])?;
     }
     Ok(())

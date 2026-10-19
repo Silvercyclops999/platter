@@ -5,6 +5,10 @@
 //! user said so with "Same artist as..." (kept in the sync store's
 //! `artistAliases` namespace, keyed by the artist's stats key, the lower-case
 //! name). Their plays add up, and the list shows the name played most.
+//!
+//! Joining by MusicBrainz id can be switched off (`artistAliasesAuto`), and
+//! one pair it joined can be kept apart ("Not the same artist", an entry in
+//! the same namespace marked `apart`).
 
 use std::collections::{HashMap, HashSet};
 
@@ -30,9 +34,16 @@ pub struct ArtistAlias {
     /// Unix seconds.
     #[serde(default)]
     pub added_at: i64,
+    /// "Not the same artist": `artist` and `same_as` are kept apart even
+    /// though their MusicBrainz ids match.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub apart: bool,
+    /// The first artist of a kept-apart pair (its entry's key is the pair's).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub artist: String,
 }
 
-/// One manual merge, as Settings lists it.
+/// One manual merge (or a pair kept apart), as Settings lists it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AliasRow {
@@ -41,6 +52,18 @@ pub struct AliasRow {
     pub same_as: String,
     pub same_as_name: String,
     pub added_at: i64,
+    /// Kept apart rather than joined.
+    pub apart: bool,
+}
+
+/// Two names joined because their library artists share a MusicBrainz id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoPair {
+    pub key: String,
+    pub name: String,
+    pub same_as: String,
+    pub same_as_name: String,
 }
 
 /// A played artist the picker offers.
@@ -85,6 +108,25 @@ fn union(parent: &mut HashMap<String, String>, a: &str, b: &str) {
     }
 }
 
+/// The store key of a kept-apart pair (the two keys in order, hashed so the
+/// key stays short).
+pub fn apart_key(a: &str, b: &str) -> String {
+    let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+    let h = crate::remote::peer::auth::hmac_sha256(b"platter artist apart", format!("{lo}\n{hi}").as_bytes());
+    format!("apart:{}", crate::remote::peer::auth::hex(&h[..12]))
+}
+
+/// Whether names matched to one MusicBrainz artist are joined on their own
+/// (Settings: on unless switched off).
+pub fn auto_on(c: &Connection) -> bool {
+    crate::db::store::kv_get(c, "app.settings")
+        .ok()
+        .flatten()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("artistAliasesAuto").and_then(serde_json::Value::as_bool))
+        .unwrap_or(true)
+}
+
 /// The manual merges, straight from the store's table (stats queries run
 /// on a plain connection).
 fn manual(c: &Connection) -> AppResult<Vec<(String, ArtistAlias)>> {
@@ -100,35 +142,99 @@ fn manual(c: &Connection) -> AppResult<Vec<(String, ArtistAlias)>> {
     Ok(out)
 }
 
-/// Which played artists count as one.
-pub fn groups(c: &Connection) -> AppResult<Groups> {
-    let mut parent: HashMap<String, String> = HashMap::new();
+/// Played artists joined by a shared MusicBrainz id, each id's names most
+/// played first. Pairs kept apart are left out (a name kept apart from
+/// another of its id isn't joined to any of them).
+fn by_mbid(c: &Connection, apart: &HashSet<(String, String)>) -> AppResult<Vec<Vec<String>>> {
     // Library artists' MusicBrainz ids, by id and by lower-case name (plays
-    // from other apps carry no id).
-    let mut by_name: HashMap<String, String> = HashMap::new();
+    // from other apps carry no id). A name two artists with different ids
+    // share says nothing, so it's left out.
+    let mut by_name: HashMap<String, Option<String>> = HashMap::new();
     let mut st = c.prepare_cached("SELECT lower(title), mbid FROM artists WHERE mbid IS NOT NULL AND mbid <> ''")?;
     for row in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
         let (name, mbid) = row?;
-        by_name.entry(name).or_insert(mbid);
-    }
-    if !by_name.is_empty() {
-        let mut st = c.prepare_cached(
-            "SELECT s.artist_key, a.mbid FROM stats_artist s LEFT JOIN artists a ON a.id = s.artist_id AND a.mbid <> ''",
-        )?;
-        let mut first: HashMap<String, String> = HashMap::new();
-        for row in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))? {
-            let (key, mbid) = row?;
-            let Some(mbid) = mbid.or_else(|| by_name.get(&key).cloned()) else { continue };
-            match first.get(&mbid) {
-                Some(other) => union(&mut parent, other, &key),
-                None => {
-                    first.insert(mbid, key);
+        by_name
+            .entry(name)
+            .and_modify(|m| {
+                if m.as_ref().is_some_and(|x| *x != mbid) {
+                    *m = None;
                 }
+            })
+            .or_insert(Some(mbid));
+    }
+    if by_name.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut st = c.prepare_cached(
+        "SELECT s.artist_key, a.mbid FROM stats_artist s LEFT JOIN artists a ON a.id = s.artist_id AND a.mbid <> ''
+         ORDER BY s.plays DESC, s.artist_key",
+    )?;
+    let mut ids: Vec<String> = Vec::new();
+    let mut members: HashMap<String, Vec<String>> = HashMap::new();
+    for row in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))? {
+        let (key, mbid) = row?;
+        let Some(mbid) = mbid.or_else(|| by_name.get(&key).cloned().flatten()) else { continue };
+        if !members.contains_key(&mbid) {
+            ids.push(mbid.clone());
+        }
+        members.entry(mbid).or_default().push(key);
+    }
+    let kept_apart = |a: &str, b: &str| {
+        let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+        apart.contains(&(lo.to_string(), hi.to_string()))
+    };
+    Ok(ids
+        .into_iter()
+        .filter_map(|id| {
+            let m = members.remove(&id)?;
+            let joined: Vec<String> = m.iter().filter(|k| !m.iter().any(|o| o != *k && kept_apart(k, o))).cloned().collect();
+            (joined.len() > 1).then_some(joined)
+        })
+        .collect())
+}
+
+/// The pairs kept apart, each in key order.
+fn apart_pairs(manual: &[(String, ArtistAlias)]) -> HashSet<(String, String)> {
+    manual
+        .iter()
+        .filter(|(_, a)| a.apart && !a.artist.is_empty() && !a.same_as.is_empty())
+        .map(|(_, a)| if a.artist <= a.same_as { (a.artist.clone(), a.same_as.clone()) } else { (a.same_as.clone(), a.artist.clone()) })
+        .collect()
+}
+
+/// Names joined because they share a MusicBrainz id, as Settings lists
+/// them (each with the name played most). Empty while that's switched off.
+pub fn auto_pairs(c: &Connection) -> AppResult<Vec<AutoPair>> {
+    if !auto_on(c) {
+        return Ok(Vec::new());
+    }
+    let m = manual(c)?;
+    let name = |k: &str| -> String {
+        c.query_row("SELECT name FROM stats_artist WHERE artist_key = ?1", [k], |r| r.get::<_, String>(0)).unwrap_or_else(|_| k.to_string())
+    };
+    let mut out = Vec::new();
+    for g in by_mbid(c, &apart_pairs(&m))? {
+        let top = &g[0];
+        for k in &g[1..] {
+            out.push(AutoPair { key: k.clone(), name: name(k), same_as: top.clone(), same_as_name: name(top) });
+        }
+    }
+    Ok(out)
+}
+
+/// Which played artists count as one.
+pub fn groups(c: &Connection) -> AppResult<Groups> {
+    let mut parent: HashMap<String, String> = HashMap::new();
+    let m = manual(c)?;
+    if auto_on(c) {
+        for g in by_mbid(c, &apart_pairs(&m))? {
+            for k in &g[1..] {
+                union(&mut parent, &g[0], k);
             }
         }
     }
-    for (key, a) in manual(c)? {
-        if !a.same_as.is_empty() && a.same_as != key {
+    for (key, a) in m {
+        if !a.apart && !a.same_as.is_empty() && a.same_as != key {
             union(&mut parent, &key, &a.same_as);
         }
     }
@@ -284,7 +390,14 @@ impl Aliases {
             .store
             .list(&ARTIST_ALIASES)?
             .into_iter()
-            .map(|(key, a)| AliasRow { key, name: a.name, same_as: a.same_as, same_as_name: a.same_as_name, added_at: a.added_at })
+            .map(|(key, a)| AliasRow {
+                key: if a.apart { a.artist.clone() } else { key },
+                name: a.name,
+                same_as: a.same_as,
+                same_as_name: a.same_as_name,
+                added_at: a.added_at,
+                apart: a.apart,
+            })
             .collect();
         out.sort_by(|a, b| b.added_at.cmp(&a.added_at).then_with(|| a.key.cmp(&b.key)));
         Ok(out)
@@ -298,7 +411,16 @@ impl Aliases {
             return Err(AppError::Invalid("Pick an artist.".into()));
         }
         if !on {
-            self.store.write_many(vec![Op::remove(&ARTIST_ALIASES, key)])?;
+            // Both ways: a merge made from either side (here or on another
+            // device) stops counting.
+            let mut ops = vec![Op::remove(&ARTIST_ALIASES, key.clone())];
+            let was = self.store.get(&ARTIST_ALIASES, &key)?.filter(|a| !a.apart).map(|a| a.same_as);
+            if let Some(other) = was
+                && self.store.get(&ARTIST_ALIASES, &other)?.is_some_and(|a| !a.apart && a.same_as == key)
+            {
+                ops.push(Op::remove(&ARTIST_ALIASES, other));
+            }
+            self.store.write_many(ops)?;
             return self.list();
         }
         let same_as = same_as.trim().to_lowercase();
@@ -313,8 +435,42 @@ impl Aliases {
             return Err(AppError::Invalid("You've merged as many artists as Platter can keep.".into()));
         }
         let pick = |s: &str, k: &str| if s.trim().is_empty() { k.to_string() } else { s.trim().to_string() };
-        let v = ArtistAlias { same_as: same_as.clone(), name: pick(name, &key), same_as_name: pick(same_as_name, &same_as), added_at: (self.clock)() };
+        let v = ArtistAlias {
+            same_as: same_as.clone(),
+            name: pick(name, &key),
+            same_as_name: pick(same_as_name, &same_as),
+            added_at: (self.clock)(),
+            ..Default::default()
+        };
         self.store.write_many(vec![Op::put(&ARTIST_ALIASES, key, &v)?])?;
+        self.list()
+    }
+
+    /// "Not the same artist": keep two names apart though their MusicBrainz
+    /// ids match (`on`), or join them again (`on` false).
+    pub fn apart(&self, key: &str, name: &str, other: &str, other_name: &str, on: bool) -> AppResult<Vec<AliasRow>> {
+        let (key, other) = (key.trim().to_lowercase(), other.trim().to_lowercase());
+        if key.is_empty() || other.is_empty() || key.len() > 190 || other.len() > 190 || key == other {
+            return Err(AppError::Invalid("Pick two different artists.".into()));
+        }
+        let id = apart_key(&key, &other);
+        if !on {
+            self.store.write_many(vec![Op::remove(&ARTIST_ALIASES, id)])?;
+            return self.list();
+        }
+        if self.list()?.len() >= MAX_ALIASES {
+            return Err(AppError::Invalid("You've merged as many artists as Platter can keep.".into()));
+        }
+        let pick = |s: &str, k: &str| if s.trim().is_empty() { k.to_string() } else { s.trim().to_string() };
+        let v = ArtistAlias {
+            same_as: other.clone(),
+            name: pick(name, &key),
+            same_as_name: pick(other_name, &other),
+            added_at: (self.clock)(),
+            apart: true,
+            artist: key,
+        };
+        self.store.write_many(vec![Op::put(&ARTIST_ALIASES, id, &v)?])?;
         self.list()
     }
 }
@@ -342,6 +498,28 @@ pub async fn artist_alias_set(
     })
     .await
     .map_err(|e| AppError::Internal(e.to_string()))?
+}
+
+#[tauri::command]
+pub async fn artist_alias_apart(
+    aliases: tauri::State<'_, Aliases>,
+    key: String,
+    name: Option<String>,
+    other: String,
+    other_name: Option<String>,
+    on: bool,
+) -> AppResult<Vec<AliasRow>> {
+    let a = aliases.inner().clone();
+    tokio::task::spawn_blocking(move || a.apart(&key, name.as_deref().unwrap_or(""), &other, other_name.as_deref().unwrap_or(""), on))
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?
+}
+
+/// Names joined because they share a MusicBrainz id.
+#[tauri::command]
+pub async fn artist_alias_auto_pairs(db: tauri::State<'_, crate::db::DbHandle>) -> AppResult<Vec<AutoPair>> {
+    super::commands::fresh(&db).await?;
+    db.read_async(auto_pairs).await
 }
 
 #[tauri::command]

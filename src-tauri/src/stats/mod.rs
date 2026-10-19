@@ -661,7 +661,7 @@ pub fn top_artists(c: &Connection, d: Days, limit: u32) -> AppResult<Vec<TopArti
         return artists_for(c, &top_keys(c, "stats_artist_day", "artist_key", "stats_artist", d, limit)?);
     }
     let mut rows = aliases::fold(&aliases::artist_counts(c, d)?, &g);
-    rows.truncate(limit as usize);
+    rows.truncate(limit.clamp(1, TOP_MAX) as usize);
     artists_for(c, &rows)
 }
 
@@ -803,7 +803,7 @@ pub fn play_ids(c: &Connection, d: Days, kind: TopKind, limit: u32) -> AppResult
         let mut top = aliases::fold(&aliases::artist_counts(c, d)?, &g);
         top.truncate(10);
         let keys: Vec<String> = top.into_iter().map(|(k, _, _)| k).collect();
-        let all = serde_json::to_string(&aliases::members(&keys, &g)).unwrap_or_default();
+        let all = serde_json::to_string(&aliases::members(&keys, &g)).map_err(|e| crate::error::AppError::Internal(e.to_string()))?;
         st.query_map(params![d.lo, d.hi, limit, all], |r| r.get(0))?.collect::<Result<Vec<_>, _>>()?
     } else {
         st.query_map(params![d.lo, d.hi, limit], |r| r.get(0))?.collect::<Result<Vec<_>, _>>()?

@@ -62,6 +62,16 @@ export interface ArtistAlias {
   sameAsName: string;
   /** Unix seconds. */
   addedAt: number;
+  /** "Not the same artist": the two are kept apart though Plex matched them. */
+  apart?: boolean;
+}
+
+/** Two names joined because Plex matched them to one MusicBrainz artist. */
+export interface ArtistAutoPair {
+  key: string;
+  name: string;
+  sameAs: string;
+  sameAsName: string;
 }
 
 /** A played artist, for the "Same artist as..." picker. */

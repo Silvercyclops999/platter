@@ -41,6 +41,12 @@ const CALLS: [string, (b: ReturnType<typeof createTauriBackend>) => Promise<unkn
     (b) => b.artistAliasSet({ key: "northwind", name: "Northwind", sameAs: "the northwinds", sameAsName: "The Northwinds" }, true),
     { key: "northwind", name: "Northwind", sameAs: "the northwinds", sameAsName: "The Northwinds", on: true },
   ],
+  [
+    "artist_alias_apart",
+    (b) => b.artistAliasApart({ key: "northwind", name: "Northwind", other: "the northwinds", otherName: "The Northwinds" }, true),
+    { key: "northwind", name: "Northwind", other: "the northwinds", otherName: "The Northwinds", on: true },
+  ],
+  ["artist_alias_auto_pairs", (b) => b.artistAliasAutoPairs(), undefined],
   ["stats_played_artists", (b) => b.statsPlayedArtists("north", 8), { query: "north", limit: 8 }],
   ["artists", (b) => b.artists({ sort: "name", offset: 0, limit: 50 }), { sort: "name", offset: 0, limit: 50 }],
   ["artist_names", (b) => b.artistNames(), undefined],

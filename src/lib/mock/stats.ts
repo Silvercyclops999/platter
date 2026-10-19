@@ -35,6 +35,7 @@ import type {
   TopSongsRow,
   Wrapped,
   ArtistAlias,
+  ArtistAutoPair,
   PlayedArtist,
 } from "../statsTypes";
 import { addDays, localDay, monthBounds, parseDay } from "../stats";
@@ -162,6 +163,8 @@ export class MockStats {
   private byId: Map<string, Track> | null = null;
   /** "Same artist as..." merges, by artist key (the core keeps them in the sync store). */
   private aliases = new Map<string, ArtistAlias>();
+  /** Test hook: names Plex matched to one MusicBrainz artist. */
+  autoPairs: ArtistAutoPair[] = [];
 
   private artistKey(id: string): string {
     return (this.fx.artists.find((a) => a.id === id)?.title ?? id).toLowerCase();
@@ -175,6 +178,7 @@ export class MockStats {
       links.get(a)!.add(b);
     };
     for (const [k, a] of this.aliases) {
+      if (a.apart) continue;
       link(k, a.sameAs);
       link(a.sameAs, k);
     }
@@ -202,6 +206,20 @@ export class MockStats {
       }
     }
     return out.sort((a, z) => z[1].plays - a[1].plays || z[1].ms - a[1].ms);
+  }
+
+  aliasApart(p: { key: string; name?: string; other: string; otherName?: string }, on: boolean): ArtistAlias[] {
+    const [key, other] = [p.key.trim().toLowerCase(), p.other.trim().toLowerCase()];
+    const id = `apart:${[key, other].sort().join("|")}`;
+    if (on) {
+      this.aliases.set(id, { key, name: p.name?.trim() || key, sameAs: other, sameAsName: p.otherName?.trim() || other, addedAt: Math.floor(Date.now() / 1000), apart: true });
+      this.autoPairs = this.autoPairs.filter((x) => !(x.key === key && x.sameAs === other) && !(x.key === other && x.sameAs === key));
+    } else {
+      const was = this.aliases.get(id);
+      this.aliases.delete(id);
+      if (was) this.autoPairs.push({ key: was.key, name: was.name, sameAs: was.sameAs, sameAsName: was.sameAsName });
+    }
+    return this.aliasList();
   }
 
   aliasList(): ArtistAlias[] {

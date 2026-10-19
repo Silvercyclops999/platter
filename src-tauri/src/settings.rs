@@ -795,6 +795,8 @@ pub struct Settings {
     pub show_describe_playlist: bool,
     /// The sound map page and its entries (shown once songs are analysed).
     pub show_sound_map: bool,
+    /// Names Plex matched to one MusicBrainz artist count as one in stats.
+    pub artist_aliases_auto: bool,
     /// Compare plays both versions at matched loudness when the server has it.
     pub compare_level_match: bool,
     /// Scrobble to Last.fm (once signed in).
@@ -1271,6 +1273,7 @@ impl Default for Settings {
             show_lineage: true,
             show_describe_playlist: true,
             show_sound_map: true,
+            artist_aliases_auto: true,
             compare_level_match: true,
             scrobble_lastfm: false,
             scrobble_listenbrainz: false,
@@ -1480,6 +1483,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "showLineage",
     "showDescribePlaylist",
     "showSoundMap",
+    "artistAliasesAuto",
     "compareLevelMatch",
     "scrobbleUnreleased",
     "aiModel",
@@ -1865,6 +1869,7 @@ pub struct SettingsPatch {
     pub show_lineage: Option<bool>,
     pub show_describe_playlist: Option<bool>,
     pub show_sound_map: Option<bool>,
+    pub artist_aliases_auto: Option<bool>,
     pub compare_level_match: Option<bool>,
     pub scrobble_lastfm: Option<bool>,
     pub scrobble_listenbrainz: Option<bool>,
@@ -2412,6 +2417,7 @@ impl Settings {
         set(&mut self.show_lineage, p.show_lineage);
         set(&mut self.show_describe_playlist, p.show_describe_playlist);
         set(&mut self.show_sound_map, p.show_sound_map);
+        set(&mut self.artist_aliases_auto, p.artist_aliases_auto);
         set(&mut self.compare_level_match, p.compare_level_match);
         set(&mut self.scrobble_lastfm, p.scrobble_lastfm);
         set(&mut self.scrobble_listenbrainz, p.scrobble_listenbrainz);

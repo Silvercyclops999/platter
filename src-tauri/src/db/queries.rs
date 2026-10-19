@@ -144,6 +144,15 @@ pub fn recently_played(c: &Connection, limit: usize) -> AppResult<Vec<HomeItem>>
 /// MusicBrainz id (one artist under two names) are one row: their plays
 /// added up, under the one played most.
 pub fn top_artists(c: &Connection, limit: usize) -> AppResult<Vec<Artist>> {
+    if !crate::stats::aliases::auto_on(c) {
+        // Joining by MusicBrainz id is off: each artist on its own.
+        let mut st = c.prepare_cached(
+            "SELECT ar.id, ar.title, ar.sort_title, ar.thumb, ar.art, ar.view_count AS plays
+             FROM artists ar WHERE ar.view_count > 0
+             ORDER BY plays DESC, ar.sort_title COLLATE NOCASE LIMIT ?1",
+        )?;
+        return Ok(st.query_map([limit as i64], row_artist)?.collect::<Result<Vec<_>, _>>()?);
+    }
     let mut st = c.prepare_cached(
         "SELECT ar.id, ar.title, ar.sort_title, ar.thumb, ar.art,
                 CASE WHEN ar.mbid IS NULL THEN ar.view_count

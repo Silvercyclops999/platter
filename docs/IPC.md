@@ -2498,15 +2498,18 @@ State is kept in the library cache's `kv` table (`circle.state`).
 | `top_songs_index` | – | `{ years, allTime, promoted, wrappedYears, currentYear }`, or `invalid` while Wrapped and Top Songs are off |
 | `top_songs_list` | `{ year? }` (no year: All-Time) | `TopSongsList`; `notFound` for a year without a list |
 | `stats_wrapped` | `{ year }` | `Wrapped` |
-| `artist_aliases` | – | `ArtistAlias[]`, newest first: `{ key, name, sameAs, sameAsName, addedAt }` |
+| `artist_aliases` | – | `ArtistAlias[]`, newest first: `{ key, name, sameAs, sameAsName, addedAt, apart }`; `apart` marks a pair kept apart with `artist_alias_apart` |
 | `artist_alias_set` | `{ key, name?, sameAs?, sameAsName?, on }` | `ArtistAlias[]`. "Same artist as...": counts artist `key` as `sameAs` (both stats keys, lower-case names), or stops with `on: false`. Kept in the sync store's `artistAliases` namespace |
+| `artist_alias_apart` | `{ key, name?, other, otherName?, on }` | `ArtistAlias[]`. "Not the same artist": keeps two names apart though their MusicBrainz ids match, or joins them again with `on: false`. Kept in the same namespace |
+| `artist_alias_auto_pairs` | – | `{ key, name, sameAs, sameAsName }[]`: names joined because they share a MusicBrainz id (empty while `artistAliasesAuto` is off) |
 | `stats_played_artists` | `{ query, limit? }` | `{ key, name, plays }[]`, played artists whose name has `query` in it, most played first |
 
 One artist under two names counts as one in top artists, artist counts,
 new artists, Wrapped, recaps, Play these and Home's Top artists: when their
 library artists share a MusicBrainz artist id (Plex's `mbid://` guid, kept
-in `artists.mbid` at sync), or when joined with `artist_alias_set`. Their
-plays add up under the name played most.
+in `artists.mbid` at sync; a read without guids keeps the id known), unless
+the setting `artistAliasesAuto` is off or the pair was kept apart, or when
+joined with `artist_alias_set`. Their plays add up under the name played most.
 | `home_on_this_day` | – | `{ shown, date, years: OnThisDayYear[] }`; `shown` is false (and the rest empty) while `homeOnThisDay` is off |
 | `home_time_travel` | – | `{ shown, yourYear: HistoryMix \| null, decades: HistoryMix[] }`; `shown` is false while `homeTimeTravel` is off |
 

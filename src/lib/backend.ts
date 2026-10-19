@@ -297,6 +297,7 @@ import type {
   StatsSpan,
   StatsTopKind,
   ArtistAlias,
+  ArtistAutoPair,
   PlayedArtist,
   TopSongsIndex,
   TopSongsList,
@@ -1263,6 +1264,10 @@ export interface Backend {
   artistAliases(): Promise<ArtistAlias[]>;
   /** Count `key` as `sameAs` (on), or stop (off); resolves to the whole list. */
   artistAliasSet(alias: { key: string; name?: string; sameAs?: string; sameAsName?: string }, on: boolean): Promise<ArtistAlias[]>;
+  /** Keep two names Plex matched apart ("Not the same artist", on), or join them again (off). */
+  artistAliasApart(pair: { key: string; name?: string; other: string; otherName?: string }, on: boolean): Promise<ArtistAlias[]>;
+  /** Names joined because Plex matched them to one MusicBrainz artist. */
+  artistAliasAutoPairs(): Promise<ArtistAutoPair[]>;
   /** Played artists whose name has `query` in it, most played first. */
   statsPlayedArtists(query: string, limit?: number): Promise<PlayedArtist[]>;
   /** Your summary to share with a friend (Compare must be on in Settings). */
@@ -1800,6 +1805,8 @@ export function createTauriBackend(): Backend {
     statsWrapped: (year) => call("stats_wrapped", { year }),
     artistAliases: () => call("artist_aliases"),
     artistAliasSet: (a, on) => call("artist_alias_set", { key: a.key, name: a.name ?? null, sameAs: a.sameAs ?? null, sameAsName: a.sameAsName ?? null, on }),
+    artistAliasApart: (p, on) => call("artist_alias_apart", { key: p.key, name: p.name ?? null, other: p.other, otherName: p.otherName ?? null, on }),
+    artistAliasAutoPairs: () => call("artist_alias_auto_pairs"),
     statsPlayedArtists: (query, limit) => call("stats_played_artists", { query, limit: limit ?? null }),
     statsCompareSummary: (unreleasedOk, theirUnreleasedOk) => call("stats_compare_summary", { unreleasedOk, theirUnreleasedOk }),
     statsCompare: (theirs, unreleasedOk) => call("stats_compare", { theirs, unreleasedOk }),

@@ -1360,6 +1360,12 @@ CREATE TABLE IF NOT EXISTS sync_entries_unknown (
 ALTER TABLE artists ADD COLUMN mbid TEXT;
 CREATE INDEX IF NOT EXISTS artists_mbid ON artists (mbid) WHERE mbid IS NOT NULL;
 "#,
+    // v47: artists read before v46 have no MusicBrainz id yet, and only a
+    // full read carries the guids: the next library sync is a full one, so
+    // names of one artist join without waiting for it.
+    r#"
+UPDATE sync_state SET last_full_sync_at = NULL;
+"#,
 ];
 
 #[cfg(test)]
