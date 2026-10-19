@@ -15,6 +15,7 @@ import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
 import { usePageBar, useTitleStep } from "./detail";
 import { eraRange, formatArchiveDate } from "./era";
+import { EraStory } from "./EraStory";
 import { LoadError } from "../components/LoadError";
 
 /** A copy in random order (Fisher-Yates). */
@@ -29,8 +30,9 @@ function shuffled<T>(list: T[]): T[] {
 
 /**
  * One era of an artist (`/artist/:id/era/:name`): the era's dates, Play and
- * Shuffle, then every song of it by album or build, newest build first,
- * released and unreleased alike.
+ * Shuffle, the era in a sentence with its releases on a timeline, then
+ * every song of it by album or build, newest build first, released and
+ * unreleased alike.
  */
 export function EraPage({ artistId, name }: { artistId: string; name: string }) {
   const { data: loaded, error, retry } = useLoad(() => backend.eraPage(artistId, name), [artistId, name]);
@@ -104,6 +106,8 @@ export function EraPage({ artistId, name }: { artistId: string; name: string }) 
             Show on the artist page
           </button>
         </div>
+
+        {data && <EraStory data={data} />}
 
         {data
           ? data.groups.map((g) => (

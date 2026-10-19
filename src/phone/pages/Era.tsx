@@ -1,6 +1,7 @@
 /**
  * One era of an artist on the phone: its cover and dates, play and
- * shuffle, then every song of it by record or build, newest build first.
+ * shuffle, the era in a sentence with its releases on a timeline as on the
+ * computer, then every song of it by record or build, newest build first.
  */
 import { useEffect } from "react";
 import { Art } from "../../components/Art";
@@ -8,6 +9,7 @@ import { backend } from "../../lib/backend";
 import { plural, releaseTypeLabel } from "../../lib/format";
 import { useLoad, useReload } from "../../lib/useLoad";
 import { eraRange, formatArchiveDate } from "../../pages/era";
+import { EraStory } from "../../pages/EraStory";
 import { player, usePlayer } from "../../stores/player";
 import { nav } from "../../stores/router";
 import { PageFailed, PageLoading, SongRow } from "./common";
@@ -55,6 +57,7 @@ export function PhoneEra({ artistId, name }: { artistId: string; name: string })
           </button>
         }
       />
+      <EraStory data={data} className="ph-era__story" gap={0.6} />
       {data.groups.map((g) => (
         <section key={g.album.id} className="ph-x__section" aria-label={g.album.title}>
           <button type="button" className="ph-row ph-era__group" onClick={() => nav.go({ name: "album", id: g.album.id })}>
