@@ -234,6 +234,8 @@
 .phone .ph-lyrics__artist { color: var(--color-text-secondary); }
 .phone .ph-lyric { color: color-mix(in srgb, var(--color-text-primary) 34%, transparent) !important; }
 .phone .ph-lyric.is-sung { color: var(--color-text-primary) !important; }
+.phone .ph-lyric.is-worded .lyrics__word { color: color-mix(in srgb, var(--color-text-primary) 34%, transparent); }
+.phone .ph-lyric.is-worded .lyrics__word.is-sung { color: var(--color-text-primary); }
 .phone .ph-lyrics__credit, .phone .ph-lyrics__none { color: var(--color-text-secondary); }
 .phone .ph-lyrics .ph-scrub .slider__track { background: color-mix(in srgb, var(--color-text-primary) 22%, transparent); }
 .phone .ph-lyrics .ph-scrub .slider__fill, .phone .ph-lyrics .ph-scrub .slider__thumb { background: var(--color-text-primary); }

@@ -3,7 +3,7 @@
  * start times, and writing them out again. One time per line (the editor
  * doesn't do word timing); `[mm:ss.xx]` tags, header tags skipped.
  */
-import type { Lyrics } from "./types";
+import type { LyricWord, Lyrics } from "./types";
 
 /** One line in the editor. `startMs` null: not synced yet. "" text: a break between verses. */
 export interface EditLine {
@@ -103,13 +103,54 @@ export function toLrc(lines: EditLine[]): string {
     .trim();
 }
 
-/** Saved text as lyrics for the views (the mock backend's own-lyrics source). */
+/**
+ * Word times in enhanced LRC (`[00:01.00]<00:01.00>Hello <00:01.40>there`),
+ * by the line's start: each word keeps its trailing space, so joined they
+ * make the line. Lines without word tags aren't in the map.
+ */
+export function wordTimes(text: string): Map<number, LyricWord[]> {
+  const out = new Map<number, LyricWord[]>();
+  for (const raw of text.replace(/\r\n?/g, "\n").split("\n")) {
+    let line = raw.trim();
+    let startMs: number | null = null;
+    let m: RegExpMatchArray | null;
+    while ((m = line.match(TIME))) {
+      startMs ??= tagMs(m);
+      line = line.slice(m[0].length).trimStart();
+    }
+    if (startMs === null || out.has(startMs)) continue;
+    const tag = /<(\d{1,4}):(\d{1,2})(?:[.:](\d{1,3}))?>/g;
+    const marks = [...line.matchAll(tag)];
+    if (!marks.length) continue;
+    const words: LyricWord[] = [];
+    marks.forEach((mk, k) => {
+      const from = mk.index! + mk[0].length;
+      const to = k + 1 < marks.length ? marks[k + 1].index! : line.length;
+      const piece = line.slice(from, to).replace(/\s+/g, " ");
+      if (piece.trim()) words.push({ startMs: tagMs(mk), text: piece });
+    });
+    if (!words.length) continue;
+    words[0].text = words[0].text.trimStart();
+    words[words.length - 1].text = words[words.length - 1].text.trimEnd();
+    out.set(startMs, words);
+  }
+  return out;
+}
+
+/** Saved text as lyrics for the views (the mock backend's own-lyrics source), word times kept. */
 export function lyricsFromText(text: string): Lyrics | null {
   const lines = parseLrc(text);
   if (!lines.some(stampable)) return null;
   const synced = isSynced(lines);
+  const words = synced ? wordTimes(text) : new Map<number, LyricWord[]>();
   const timed = synced
-    ? lines.filter((l) => l.startMs !== null).map((l) => ({ startMs: l.startMs!, text: l.text })).sort((a, b) => a.startMs - b.startMs)
+    ? lines
+        .filter((l) => l.startMs !== null)
+        .map((l) => {
+          const w = words.get(l.startMs!);
+          return { startMs: l.startMs!, text: l.text, ...(w && w.map((x) => x.text).join("") === l.text ? { words: w } : {}) };
+        })
+        .sort((a, b) => a.startMs - b.startMs)
     : undefined;
   return { synced, lines: lines.map((l) => l.text), timed, source: "user" };
 }

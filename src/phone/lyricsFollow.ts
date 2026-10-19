@@ -3,10 +3,11 @@
  * then the list eases up by the finished line in a short scroll that keeps
  * the current line about 45% down the view. Nothing scrolls until the song
  * gets to that spot. A seek, playing or paused, puts both right at once.
+ * Lines with word timing also say which word is playing, for the fill.
  */
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { LyricLine } from "../lib/types";
-import { currentLineIndex, currentPositionMs, onSeek, setPlayhead } from "../shell/lyrics";
+import { currentLineIndex, currentPositionMs, currentWordIndex, onSeek, setPlayhead } from "../shell/lyrics";
 import { player, usePlayer } from "../stores/player";
 
 /** Where the current line sits, as a share of the view's height. */
@@ -31,6 +32,7 @@ export const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) 
  */
 export function useLyricFollow(lines: LyricLine[] | null, view: RefObject<HTMLElement | null>) {
   const [current, setCurrent] = useState(() => (lines ? currentLineIndex(lines, currentPositionMs()) : -1));
+  const [word, setWord] = useState(-1);
   const status = usePlayer((s) => s.state?.status);
   const playing = status === "playing" || status === "buffering";
   const shown = useRef(current);
@@ -62,6 +64,8 @@ export function useLyricFollow(lines: LyricLine[] | null, view: RefObject<HTMLEl
   const update = (eased: boolean, ms = currentPositionMs()) => {
     if (!lines) return;
     const i = currentLineIndex(lines, ms);
+    // The word fill (lines with word timing only); React drops a repeat of the same value.
+    setWord(i >= 0 ? currentWordIndex(lines[i].words, ms) : -1);
     if (i !== shown.current || !eased) {
       shown.current = i;
       setCurrent(i);
@@ -106,5 +110,5 @@ export function useLyricFollow(lines: LyricLine[] | null, view: RefObject<HTMLEl
     void player.seek(ms);
     update(false, ms);
   };
-  return { current, seekTo };
+  return { current, word, seekTo };
 }

@@ -404,6 +404,9 @@
 .ph-lyrics-card__lines { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .ph-lyrics-card__line { font-family: var(--ph-title-font); font-size: 21px; line-height: 1.3; font-weight: 600; color: rgba(18, 16, 14, 0.62); }
 .ph-lyrics-card__line.is-sung { color: #fffaf0; }
+/* Word by word, as on the computer: the current line's sung words lit, the rest still waiting. */
+.ph-lyrics-card__line.is-worded .lyrics__word { color: rgba(18, 16, 14, 0.62); transition: color 80ms linear; }
+.ph-lyrics-card__line.is-worded .lyrics__word.is-sung { color: #fffaf0; }
 /* Sleeve notes and credits: the computer's printed sleeve (pages/sleeve.css),
    the same paper, rules, type and credit columns, set for the phone's width.
    Source tags show on hover there; a phone has none, so screen readers
@@ -486,6 +489,8 @@
   color: rgba(18, 16, 14, 0.58) !important;
 }
 .ph-lyric.is-sung { color: #fffaf0 !important; }
+.ph-lyric.is-worded .lyrics__word { color: rgba(18, 16, 14, 0.58); transition: color 80ms linear; }
+.ph-lyric.is-worded .lyrics__word.is-sung { color: #fffaf0; }
 .ph-lyric--gap { min-height: 1.28em; letter-spacing: 0.2em; }
 .ph-lyrics__none, .ph-lyrics__credit { margin: 24px 0 0; font-size: 13px; color: rgba(255, 250, 240, 0.7); }
 .ph-lyrics__bottom { display: flex; align-items: center; gap: 16px; padding: 8px 20px calc(16px + var(--ph-safe-bottom)); }

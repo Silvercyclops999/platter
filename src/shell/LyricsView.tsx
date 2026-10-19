@@ -3,7 +3,6 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Keyboar
 import { Button } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import { prefersReducedMotion } from "../design/motion";
-import { usePageVisible } from "../design/pageVisibility";
 import { NEUTRAL_HEADER } from "../lib/color";
 import type { LyricLine, Lyrics, Track } from "../lib/types";
 import { openLyricsEditor, useLyricsEditor } from "../stores/lyricsEditor";
@@ -14,19 +13,16 @@ import { trackArtistLine } from "../lib/format";
 import { useSettings } from "../stores/settings";
 import { LyricExtras, TranslateButton, useLyricExtras, type Extras } from "./lyricExtras";
 import {
-  currentLineIndex,
-  currentPositionMs,
-  currentWordIndex,
   followTarget,
   lineState,
   lyricsSourceLabel,
   onSeek,
-  setPlayhead,
   timedLines,
   useLyrics,
 } from "./lyrics";
 import { useCoverColors } from "./nowPlaying";
 import { TranscribeOffer } from "./TranscribeOffer";
+import { LyricWords, usePlayhead } from "./lyricWords";
 import { LyricsNotice, LyricsTools, tapLine } from "./LyricsTrust";
 import "./lyrics.css";
 import "./lyrics-editor.css";
@@ -74,47 +70,6 @@ function nearestStop(i: number, stop: (i: number) => boolean, n: number): number
     if (i - d >= 0 && stop(i - d)) return i - d;
   }
   return i;
-}
-
-/** Which line and word are playing, updated every frame but only re-rendering on a change. */
-function usePlayhead(lines: LyricLine[]): { line: number; word: number; jump: (ms: number) => void } {
-  const [pos, setPos] = useState({ line: -1, word: -1 });
-  const measure = useCallback(() => {
-    const ms = currentPositionMs();
-    const line = currentLineIndex(lines, ms);
-    const word = line >= 0 ? currentWordIndex(lines[line].words, ms) : -1;
-    setPos((p) => (p.line === line && p.word === word ? p : { line, word }));
-  }, [lines]);
-  // The frame loop runs only while the song plays and the page is visible:
-  // paused or hidden, the position ticks alone keep the line right.
-  const playing = usePlayer((s) => s.state?.status === "playing");
-  const visible = usePageVisible();
-  useEffect(() => {
-    // The shared playhead (lyrics.ts) has already taken the change in.
-    const unsub = usePlayer.subscribe((s, p) => {
-      if (s.positionMs !== p.positionMs || s.state?.status !== p.state?.status) measure();
-    });
-    measure();
-    return unsub;
-  }, [measure]);
-  useEffect(() => {
-    if (!playing || !visible) return;
-    let raf = 0;
-    const tick = () => {
-      measure();
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [measure, playing, visible]);
-  const jump = useCallback(
-    (ms: number) => {
-      setPlayhead(ms);
-      measure();
-    },
-    [measure],
-  );
-  return { ...pos, jump };
 }
 
 function SyncedLyrics({
@@ -275,11 +230,7 @@ function SyncedLyrics({
                 >
                   {l.text ? (
                     words ? (
-                      words.map((w, j) => (
-                        <span key={j} className={`lyrics__word ${j <= word ? "is-sung" : ""}`}>
-                          {w.text}
-                        </span>
-                      ))
+                      <LyricWords words={words} word={word} />
                     ) : (
                       l.text
                     )

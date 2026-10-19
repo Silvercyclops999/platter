@@ -1,15 +1,18 @@
 /**
  * Lyrics on the phone: a tinted card under the player, and the whole screen
  * from it. Sung and current lines are bright, the ones to come are dim.
- * Tapping a timed line plays from there and keeps play or pause.
+ * Tapping a timed line plays from there and keeps play or pause. Where the
+ * lyrics time each word, the current line lights word by word, as on the
+ * computer; otherwise the whole line lights.
  */
 import { ChevronDown, Maximize2, Pause, PenLine, Play, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { backend } from "../lib/backend";
 import { trackArtistLine } from "../lib/format";
-import type { Lyrics, LyricLine, Track } from "../lib/types";
+import type { Lyrics, LyricLine, LyricWord, Track } from "../lib/types";
 import { useArtColours } from "../lib/useTint";
 import { currentLineIndex, lyricsChanged, timedLines, useLyrics } from "../shell/lyrics";
+import { LyricWords, usePlayhead } from "../shell/lyricWords";
 import { openLyricsEditor } from "../stores/lyricsEditor";
 import { useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
@@ -25,22 +28,39 @@ import { holdLightStatusBar } from "./statusBar";
 /** Lines the card shows around the current one. */
 export const CARD_LINES = 4;
 
+/** A card line: its text, whether it is lit, and its words when they are timed (the current line only). */
+export interface CardLine {
+  text: string;
+  sung: boolean;
+  words?: LyricWord[];
+}
+
 /** The card's lines: from the current line on (or the first ones untimed). */
-export function cardWindow(l: Lyrics, ms: number): { text: string; sung: boolean }[] {
+export function cardWindow(l: Lyrics, ms: number): CardLine[] {
+  const timed = timedLines(l);
+  return cardWindowAt(l, timed ? currentLineIndex(timed, ms) : -1);
+}
+
+/** The card's lines from line `line` (-1 before the first). */
+export function cardWindowAt(l: Lyrics, line: number): CardLine[] {
   const timed = timedLines(l);
   if (!timed) return l.lines.filter((x) => x.trim()).slice(0, CARD_LINES).map((text) => ({ text, sung: true }));
-  const i = Math.max(0, currentLineIndex(timed, ms));
-  return timed
-    .slice(i, i + CARD_LINES)
-    .map((line, k) => ({ text: line.text.trim() || "♪", sung: k === 0 && currentLineIndex(timed, ms) >= 0 }));
+  const i = Math.max(0, line);
+  return timed.slice(i, i + CARD_LINES).map((x, k) => {
+    const now = k === 0 && line >= 0;
+    return { text: x.text.trim() || "♪", sung: now, ...(now && x.text.trim() && x.words?.length ? { words: x.words } : {}) };
+  });
 }
+
+const NO_LINES: LyricLine[] = [];
 
 export function LyricsCard({ track }: { track: Track }) {
   const { lyrics, loading } = useLyrics(track.id);
-  const positionMs = usePlayer((s) => s.positionMs);
+  // The same playhead as the computer's lyrics: line and word, each frame while playing.
+  const head = usePlayhead(timedLines(lyrics) ?? NO_LINES);
   const colours = useArtColours(null, track.thumb);
   if (loading || !lyrics) return null;
-  const lines = cardWindow(lyrics, positionMs);
+  const lines = cardWindowAt(lyrics, head.line);
   return (
     <section className="ph-card ph-lyrics-card" style={{ "--ph-tint": colours?.vivid ?? "var(--color-bg-overlay)" } as CSSProperties} aria-label="Lyrics">
       <div className="ph-card__head">
@@ -51,8 +71,8 @@ export function LyricsCard({ track }: { track: Track }) {
       </div>
       <button type="button" className="ph-lyrics-card__lines" onClick={phone.openLyrics} aria-label="Open lyrics">
         {lines.map((l, i) => (
-          <span key={i} className={`ph-lyrics-card__line ${l.sung ? "is-sung" : ""}`}>
-            {l.text}
+          <span key={i} className={`ph-lyrics-card__line ${l.sung ? "is-sung" : ""} ${l.words ? "is-worded" : ""}`}>
+            {l.words ? <LyricWords words={l.words} word={head.word} /> : l.text}
           </span>
         ))}
       </button>
@@ -77,7 +97,7 @@ function LyricsFull({ track }: { track: Track }) {
   const playing = status === "playing" || status === "loading" || status === "buffering";
   const timed = timedLines(lyrics);
   const view = useRef<HTMLDivElement>(null);
-  const { current, seekTo } = useLyricFollow(timed, view);
+  const { current, word, seekTo } = useLyricFollow(timed, view);
   return (
     <section
       className="ph-lyrics"
@@ -98,7 +118,7 @@ function LyricsFull({ track }: { track: Track }) {
       </header>
       <div className="ph-lyrics__view" ref={view} data-testid="lyrics-view">
         {timed ? (
-          <TimedLines lines={timed} current={current} onSeek={seekTo} />
+          <TimedLines lines={timed} current={current} word={word} onSeek={seekTo} />
         ) : lyrics ? (
           <div className="ph-lyrics__lines">
             {lyrics.lines.map((l, i) => (
@@ -173,22 +193,24 @@ export function NoLyrics({ track }: { track: Track }) {
   );
 }
 
-function TimedLines({ lines, current, onSeek }: { lines: LyricLine[]; current: number; onSeek: (ms: number) => void }) {
+function TimedLines({ lines, current, word, onSeek }: { lines: LyricLine[]; current: number; word: number; onSeek: (ms: number) => void }) {
   return (
     <div className="ph-lyrics__lines">
       {lines.map((l, i) => {
         const gap = !l.text.trim();
         const sung = i <= current;
+        // The current line lights word by word when its words are timed.
+        const words = i === current && !gap && l.words?.length ? l.words : null;
         return (
           <button
             key={i}
             type="button"
             data-line={i}
-            className={`ph-lyric ${sung ? "is-sung" : ""} ${i === current ? "is-current" : ""} ${gap ? "ph-lyric--gap" : ""}`}
+            className={`ph-lyric ${sung ? "is-sung" : ""} ${i === current ? "is-current" : ""} ${words ? "is-worded" : ""} ${gap ? "ph-lyric--gap" : ""}`}
             aria-current={i === current ? "true" : undefined}
             onClick={() => onSeek(l.startMs)}
           >
-            {gap ? <span aria-label="Instrumental">♪</span> : l.text}
+            {gap ? <span aria-label="Instrumental">♪</span> : words ? <LyricWords words={words} word={word} /> : l.text}
           </button>
         );
       })}
