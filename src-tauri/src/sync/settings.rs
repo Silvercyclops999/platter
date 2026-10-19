@@ -104,4 +104,35 @@ mod tests {
         store.put(&SETTINGS, "monthlyStatsOnProfile", &Value::Bool(true)).unwrap();
         assert_eq!(patch_from_store(&store, &no_recaps).unwrap().unwrap().monthly_stats, Some(true));
     }
+
+    #[test]
+    fn the_layout_and_home_shortcuts_never_sync_but_the_look_does() {
+        use crate::settings::{FORM_FACTOR_ONLY, ThemeMode};
+        let dir = tempfile::tempdir().unwrap();
+        let store = SyncStore::new(DbHandle::open(dir.path().join("lib.db")).unwrap(), "pc");
+        let mut s = Settings::default();
+        s.layout.sidebar_side = "right".into();
+        s.home_shortcuts = false;
+        s.theme = ThemeMode::Light;
+        s.accent = "#0a7c5f".into();
+        s.readout_face = false;
+        push(&store, &s).unwrap();
+        seed(&store, &s).unwrap();
+        for n in FORM_FACTOR_ONLY {
+            assert_eq!(store.get(&SETTINGS, store_key(n)).unwrap(), None, "{n} stays on this device");
+        }
+        assert!(store.get(&SETTINGS, "theme").unwrap().is_some());
+        assert_eq!(store.get(&SETTINGS, "accent").unwrap(), Some(Value::from("#0a7c5f")));
+        assert_eq!(store.get(&SETTINGS, "readoutFace").unwrap(), Some(Value::Bool(false)));
+        // An older build on another device still shares its layout: it's
+        // left alone here, while its look is taken.
+        let phone = SyncStore::new(DbHandle::open(dir.path().join("phone.db")).unwrap(), "phone");
+        phone.put(&SETTINGS, "layout", &serde_json::json!({"sidebarSide": "left", "frame": "deck"})).unwrap();
+        phone.put(&SETTINGS, "homeShortcuts", &Value::Bool(true)).unwrap();
+        phone.put(&SETTINGS, "accent", &Value::from("#c90")).unwrap();
+        let p = patch_from_store(&phone, &s).unwrap().unwrap();
+        assert_eq!(p.layout, None);
+        assert_eq!(p.home_shortcuts, None);
+        assert_eq!(p.accent.as_deref(), Some("#c90"));
+    }
 }

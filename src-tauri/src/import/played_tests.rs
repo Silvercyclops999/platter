@@ -182,7 +182,7 @@ fn hidden_rows_and_artists_leave_the_list() {
 fn hidden_rows_sync_through_the_store() {
     use crate::sync::store::{NAMESPACES, PLAYED_HIDDEN};
     assert!(NAMESPACES.contains(&PLAYED_HIDDEN.name()));
-    let g = crate::sync::engine::Groups { follows: true, settings: false, library: false, lyrics: false, diary: false };
+    let g = crate::sync::engine::Groups { follows: true, settings: false, library: false, lyrics: false, diary: false, looks: false, downloads: false, plays: false };
     assert!(g.namespaces().contains(&PLAYED_HIDDEN.name()));
     let dir = tempfile::tempdir().unwrap();
     let db = DbHandle::open(dir.path().join("s.db")).unwrap();

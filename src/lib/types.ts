@@ -1195,6 +1195,14 @@ export interface Settings {
   syncFollows: boolean;
   /** What to sync: lyrics you wrote. This device only. */
   syncLyrics: boolean;
+  /** What to sync: saved looks and themes. This device only. */
+  syncLooks: boolean;
+  /** What to sync: what each device downloaded, offered to the others with one tap. Nothing downloads by itself. This device only. */
+  syncDownloads: boolean;
+  /** What to sync: plays brought in from elsewhere, between paired devices. This device only. */
+  syncPlays: boolean;
+  /** Keep my devices in sync: paired devices swap changes directly, at home or away. This device only. */
+  deviceSync: boolean;
   /** Bookmarks has a row in the library. */
   bookmarksInLibrary: boolean;
   showDlnaDevices: boolean;
@@ -1790,6 +1798,10 @@ export const DEFAULT_SETTINGS: Settings = {
   syncLibrary: true,
   syncFollows: true,
   syncLyrics: true,
+  syncLooks: true,
+  syncDownloads: true,
+  syncPlays: true,
+  deviceSync: true,
   bookmarksInLibrary: true,
   showDlnaDevices: true,
   allowAutomation: false,

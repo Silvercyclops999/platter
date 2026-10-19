@@ -39,11 +39,25 @@ pub struct Groups {
     /// The listening diary (its own setting, off until turned on).
     #[serde(default)]
     pub diary: bool,
+    /// Saved looks and themes.
+    #[serde(default = "yes")]
+    pub looks: bool,
+    /// What each device downloaded, offered to the others (never
+    /// downloaded by itself).
+    #[serde(default = "yes")]
+    pub downloads: bool,
+    /// Plays brought in from elsewhere (between paired devices only).
+    #[serde(default = "yes")]
+    pub plays: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 impl Default for Groups {
     fn default() -> Self {
-        Self { settings: true, library: true, follows: true, lyrics: true, diary: false }
+        Self { settings: true, library: true, follows: true, lyrics: true, diary: false, looks: true, downloads: true, plays: true }
     }
 }
 
@@ -83,6 +97,24 @@ impl Groups {
         if self.diary {
             out.push(store::DIARY.name());
         }
+        if self.looks {
+            out.push(store::LOOKS.name());
+        }
+        if self.downloads {
+            out.push(store::DOWNLOAD_INTENT.name());
+        }
+        if self.plays {
+            out.push(store::IMPORTED_PLAYS.name());
+        }
+        out
+    }
+
+    /// The namespaces that go in the sync file: all but imported plays,
+    /// which can run to years of history and move between paired devices
+    /// only.
+    pub fn file_namespaces(&self) -> Vec<&'static str> {
+        let mut out = self.namespaces();
+        out.retain(|n| *n != store::IMPORTED_PLAYS.name());
         out
     }
 }
@@ -243,7 +275,7 @@ pub fn pass(store: &SyncStore, folder: &Path, tag: &str, groups: Groups, device_
             copies.push(c);
         }
     }
-    let namespaces = groups.namespaces();
+    let namespaces = groups.file_namespaces();
     let changed = store.merge(&combined, &namespaces).map_err(|e| PassError::Io(e.to_string()))?;
     let local = store.entries(&namespaces).map_err(|e| PassError::Io(e.to_string()))?;
     let mut out = combined;

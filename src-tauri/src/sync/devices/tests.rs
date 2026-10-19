@@ -427,6 +427,28 @@ async fn nothing_secret_leaves_in_a_full_sync() {
     crate::sync::settings::push(&a.store, &s).unwrap();
     a.store.put(&HIDDEN, "track:1", &hidden("x")).unwrap();
     a.store.put(&store::LIDARR, "artist:1", &json!({"mode": "protected"})).unwrap();
+    // The newer paths: a saved look, a download, plays brought in.
+    let themes = a._dir.path().join("themes");
+    crate::themes::import_text(&themes, r##"{"version":1,"name":"Dusk","base":"dark","tokens":{"color-accent":"#c08a3e"}}"##).unwrap();
+    crate::sync::looks::publish(&a.store, &themes).unwrap();
+    let row = crate::downloads::store::ItemRow {
+        key: crate::downloads::store::ItemKey::new(crate::downloads::store::ItemKind::Album, "a1"),
+        title: "Blue".into(),
+        added_at: 5,
+    };
+    crate::sync::download_intent::publish(&a.store, "Device a", &[row]).unwrap();
+    let play = crate::db::listens::ImportedPlay {
+        source: crate::db::listens::ImportSource::Lastfm,
+        source_id: "lf1".into(),
+        played_at: 1_700_000_000_000,
+        ms_played: None,
+        title: "Lullaby".into(),
+        artist: None,
+        album: None,
+        rating_key: None,
+    };
+    a.db.write(|c| crate::db::listens::insert_imported(c, &[play], 1)).unwrap();
+    crate::sync::imported_plays::publish(&a.store).unwrap();
     let mut tap = round(&a, &la, &b, &lb).await;
     tap.extend(round(&b, &lb, &a, &la).await);
     tick(&a, 9);
@@ -435,6 +457,10 @@ async fn nothing_secret_leaves_in_a_full_sync() {
     talk(&a, &la, &b, &lb, out, Net::default(), &mut tap).await;
     assert!(same(&a, &b));
     assert!(tap.iter().any(|m| m.contains("10.20.30.40")), "server addresses do sync");
+    for ns in [store::LOOKS.name(), store::DOWNLOAD_INTENT.name(), store::IMPORTED_PLAYS.name()] {
+        let refs = [ns];
+        assert_eq!(b.store.digest(&refs).unwrap()[ns].n, 1, "{ns} arrived");
+    }
     let vault = [PLEX_TOKEN, LIDARR_KEY, LASTFM_KEY];
     for m in &tap {
         for v in vault {
@@ -445,6 +471,7 @@ async fn nothing_secret_leaves_in_a_full_sync() {
             for (ns, es) in &entries {
                 for (k, e) in es {
                     assert!(!e.value.as_ref().is_some_and(looks_secret), "{ns}/{k} looks secret");
+                    assert!(!(ns == "settings" && crate::settings::FORM_FACTOR_ONLY.contains(&k.as_str())), "{k} stays on its device");
                     let lower = k.to_ascii_lowercase();
                     for w in ["token", "password", "secret", "apikey", "api_key", "clientid"] {
                         assert!(!lower.contains(w), "{ns}/{k}");

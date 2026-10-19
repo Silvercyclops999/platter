@@ -763,6 +763,18 @@ pub struct Settings {
     pub sync_follows: bool,
     /// What to sync: lyrics you wrote (this device only).
     pub sync_lyrics: bool,
+    /// What to sync: saved looks and themes (this device only).
+    pub sync_looks: bool,
+    /// What to sync: what each device downloaded, offered to the others
+    /// with one tap (this device only). Nothing downloads by itself.
+    pub sync_downloads: bool,
+    /// What to sync: plays brought in from elsewhere, between paired
+    /// devices (this device only).
+    pub sync_plays: bool,
+    /// Keep my devices in sync: paired devices swap changes directly, at
+    /// home or away (this device only). On by default; does nothing until
+    /// a device is paired.
+    pub device_sync: bool,
     /// Bookmarks has a row in the library.
     pub bookmarks_in_library: bool,
     /// The Stats page (profile menu and library row).
@@ -1245,6 +1257,10 @@ impl Default for Settings {
             sync_library: true,
             sync_follows: true,
             sync_lyrics: true,
+            sync_looks: true,
+            sync_downloads: true,
+            sync_plays: true,
+            device_sync: true,
             bookmarks_in_library: true,
             stats_page: true,
             stats_strip: true,
@@ -1348,9 +1364,10 @@ impl Default for Settings {
     }
 }
 
-/// Settings that travel in the sync file (camelCase names, as on the wire).
-/// Everything else is this device only. Every setting is in exactly one of
-/// the two lists (a test checks).
+/// Settings that travel in the sync file and between paired devices
+/// (camelCase names, as on the wire). Everything else is this device only.
+/// Every setting is in exactly one of this list, [`DEVICE_SETTINGS`] and
+/// [`FORM_FACTOR_ONLY`] (a test checks).
 pub const SYNCED_SETTINGS: &[&str] = &[
     "reportPlays",
     "shuffleStyle",
@@ -1372,9 +1389,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "readoutFace",
     "coverLight",
     "themeFile",
-    "layout",
     "showLookBuilder",
-    "homeShortcuts",
     "homeColourWash",
     "searchSuggestions",
     "searchTypos",
@@ -1532,6 +1547,12 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "showHelpButtons",
 ];
 
+/// How the window is laid out (the layout, the sidebar, Home's shortcuts):
+/// right for one screen and wrong for another, so it never syncs, neither
+/// in the sync file nor between paired devices. The look (theme, accent,
+/// fonts, cover light, readout face) does, for the same feel everywhere.
+pub const FORM_FACTOR_ONLY: &[&str] = &["layout", "homeShortcuts"];
+
 /// Settings kept on this device only.
 pub const DEVICE_SETTINGS: &[&str] = &[
     "discographyChip",
@@ -1622,6 +1643,10 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "syncLibrary",
     "syncFollows",
     "syncLyrics",
+    "syncLooks",
+    "syncDownloads",
+    "syncPlays",
+    "deviceSync",
     // Signed in, and keys kept, per device.
     "scrobbleLastfm",
     "scrobbleListenbrainz",
@@ -1823,6 +1848,10 @@ pub struct SettingsPatch {
     pub sync_library: Option<bool>,
     pub sync_follows: Option<bool>,
     pub sync_lyrics: Option<bool>,
+    pub sync_looks: Option<bool>,
+    pub sync_downloads: Option<bool>,
+    pub sync_plays: Option<bool>,
+    pub device_sync: Option<bool>,
     pub bookmarks_in_library: Option<bool>,
     pub stats_page: Option<bool>,
     pub stats_strip: Option<bool>,
@@ -2166,6 +2195,10 @@ impl Settings {
         set(&mut self.sync_library, p.sync_library);
         set(&mut self.sync_follows, p.sync_follows);
         set(&mut self.sync_lyrics, p.sync_lyrics);
+        set(&mut self.sync_looks, p.sync_looks);
+        set(&mut self.sync_downloads, p.sync_downloads);
+        set(&mut self.sync_plays, p.sync_plays);
+        set(&mut self.device_sync, p.device_sync);
         if let Some(h) = p.daylist_hours {
             if !DAYLIST_HOURS.contains(&h) {
                 return Err(AppError::Invalid("The daylist refreshes every 1, 3 or 6 hours.".into()));
@@ -2619,6 +2652,9 @@ impl Settings {
                 follows: self.sync_follows,
                 lyrics: self.sync_lyrics,
                 diary: self.keep_diary && self.sync_diary,
+                looks: self.sync_looks,
+                downloads: self.sync_downloads,
+                plays: self.sync_plays,
             },
         }
     }
@@ -3749,11 +3785,11 @@ mod tests {
         let v = serde_json::to_value(Settings::default()).unwrap();
         let names: Vec<&String> = v.as_object().unwrap().keys().collect();
         for n in &names {
-            let synced = SYNCED_SETTINGS.contains(&n.as_str());
-            let device = DEVICE_SETTINGS.contains(&n.as_str());
-            assert!(synced ^ device, "{n} must be in exactly one scope list");
+            let n = n.as_str();
+            let lists = [SYNCED_SETTINGS.contains(&n), DEVICE_SETTINGS.contains(&n), FORM_FACTOR_ONLY.contains(&n)];
+            assert_eq!(lists.iter().filter(|x| **x).count(), 1, "{n} must be in exactly one scope list");
         }
-        for n in SYNCED_SETTINGS.iter().chain(DEVICE_SETTINGS) {
+        for n in SYNCED_SETTINGS.iter().chain(DEVICE_SETTINGS).chain(FORM_FACTOR_ONLY) {
             assert!(names.iter().any(|x| x == n), "{n} isn't a setting");
         }
         // Every synced setting can be applied as a patch (that's how it arrives).
@@ -4999,7 +5035,11 @@ mod tests {
         let mut s = Settings::default();
         assert_eq!(s.layout, crate::themes::Layout::index());
         assert!(s.show_look_builder && !s.look_step_done);
-        assert!(SYNCED_SETTINGS.contains(&"layout") && SYNCED_SETTINGS.contains(&"showLookBuilder"));
+        // The look travels; the layout stays with the screen it was made for.
+        assert!(FORM_FACTOR_ONLY.contains(&"layout") && SYNCED_SETTINGS.contains(&"showLookBuilder"));
+        for look in ["theme", "accent", "themeFile", "coverLight", "readoutFace"] {
+            assert!(SYNCED_SETTINGS.contains(&look), "{look} syncs");
+        }
         assert!(DEVICE_SETTINGS.contains(&"lookStepDone"));
         let p: SettingsPatch = serde_json::from_str(r#"{"layout":{"sidebarSide":"right","quickAccess":6},"showLookBuilder":false,"lookStepDone":true}"#).unwrap();
         s.apply(&p).unwrap();

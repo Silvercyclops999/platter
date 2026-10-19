@@ -97,7 +97,16 @@ pub struct SyncPeer {
 const WAITING_MAX: usize = 32;
 
 fn group_names(g: &Groups) -> Vec<String> {
-    [("settings", g.settings), ("library", g.library), ("follows", g.follows), ("lyrics", g.lyrics), ("diary", g.diary)]
+    [
+        ("settings", g.settings),
+        ("library", g.library),
+        ("follows", g.follows),
+        ("lyrics", g.lyrics),
+        ("diary", g.diary),
+        ("looks", g.looks),
+        ("downloads", g.downloads),
+        ("plays", g.plays),
+    ]
         .into_iter()
         .filter(|(_, on)| *on)
         .map(|(n, _)| n.to_string())
