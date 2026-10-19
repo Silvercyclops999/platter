@@ -1644,6 +1644,10 @@ impl PlexClient {
             ("minSize", "1".to_string()),
             ("upscale", "1".to_string()),
         ]);
+        // A phone asks for JPEG: Plex otherwise keeps the source's format,
+        // and a PNG cover is several times the bytes over mobile data.
+        #[cfg(any(target_os = "ios", target_os = "android"))]
+        let rb = rb.query(&[("format", "jpeg"), ("quality", "85")]);
         let resp = self.send(rb.header("accept", "image/*")).await?;
         crate::web::body_capped(resp, PLEX_MAX, map_send_error).await
     }
