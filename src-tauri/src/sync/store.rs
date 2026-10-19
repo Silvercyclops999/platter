@@ -219,8 +219,10 @@ pub fn looks_secret(v: &Value) -> bool {
     match v {
         Value::Object(m) => m.iter().any(|(k, v)| {
             let k = k.to_ascii_lowercase().replace('-', "");
-            // A theme file's design "tokens" (colours, sizes) aren't a token.
-            (k != "tokens" && SECRET_WORDS.iter().any(|w| k.contains(w))) || looks_secret(v)
+            // A theme file's design "tokens" (a map of colours and sizes)
+            // aren't a token; a plain value under that name still is.
+            let design_tokens = k == "tokens" && v.is_object();
+            (!design_tokens && SECRET_WORDS.iter().any(|w| k.contains(w))) || looks_secret(v)
         }),
         Value::Array(a) => a.iter().any(looks_secret),
         _ => false,

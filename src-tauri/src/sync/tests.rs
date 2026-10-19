@@ -1008,4 +1008,6 @@ fn theme_design_tokens_are_not_secrets() {
     assert!(!looks_secret(&json!({"themeFile": {"name": "Mine", "tokens": {"accent": "#c90"}}})));
     assert!(looks_secret(&json!({"themeFile": {"tokens": {"plexToken": "x"}}})));
     assert!(looks_secret(&json!({"accessToken": "x"})));
+    // A plain value named tokens is still treated as a secret.
+    assert!(looks_secret(&json!({"tokens": "abc123"})));
 }
