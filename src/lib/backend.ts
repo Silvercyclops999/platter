@@ -299,6 +299,9 @@ import type {
 
 export type Unlisten = () => void;
 
+/** What the phone's haptic engine plays: a light tap, a firmer one, a selection tick, or success. */
+export type HapticKind = "light" | "medium" | "selection" | "success" | "error";
+
 export interface Backend {
   readonly kind: "tauri" | "mock";
 
@@ -618,9 +621,9 @@ export interface Backend {
   appInfo(): Promise<AppInfo>;
   /** The phone's own AirPlay and Bluetooth picker (fails off the phone). */
   showRoutePicker(): Promise<void>;
-  /** A tap the phone can feel ("Haptics on controls"); nothing off the phone. */
-  haptic(kind: "light" | "medium" | "selection" | "success" | "error"): Promise<void>;
-  /** The phone's status bar text: dark on a light look (nothing off the phone). */
+  /** A tap of the phone's haptic engine (fails off the phone, or on an older core). */
+  haptic(kind: HapticKind): Promise<void>;
+  /** The phone's status bar text: dark (for a light look) or light (fails off the phone, or on an older core). */
   setStatusBarStyle(dark: boolean): Promise<void>;
   /** Opens the project page in the default browser. */
   openProjectPage(): Promise<void>;

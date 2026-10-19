@@ -34,7 +34,7 @@
  *   ?listen=invited a guest who can't hear the host's song, with the host's
  *                   server invite waiting
  */
-import type { Backend, Unlisten } from "../backend";
+import type { Backend, HapticKind, Unlisten } from "../backend";
 import { compareApproximate, compareMap, compareMapLoop } from "../compare";
 import type {
   IsrcRelease,
@@ -3098,10 +3098,10 @@ export class MockBackend implements Backend {
   showRoutePicker() {
     return this.delay(() => undefined);
   }
-  haptic() {
+  haptic(_kind: HapticKind) {
     return Promise.resolve();
   }
-  setStatusBarStyle() {
+  setStatusBarStyle(_dark: boolean) {
     return Promise.resolve();
   }
   updateCheck() {
