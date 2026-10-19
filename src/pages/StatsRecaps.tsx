@@ -10,7 +10,7 @@ import { Art } from "../components/Art";
 import { Button } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import { backend } from "../lib/backend";
-import { barFractions, change, minutes, monthName } from "../lib/stats";
+import { barFractions, minutes, monthName } from "../lib/stats";
 import type { MonthRecap, StatsRange, StatsSpan } from "../lib/statsTypes";
 import { useLoad } from "../lib/useLoad";
 import "./ledger.css";
@@ -24,23 +24,37 @@ export function recapCovers(r: MonthRecap): (string | null)[] {
   return [0, 1, 2, 3].map((i) => own[i % own.length]);
 }
 
+/** The month against the one before, in words: "12% more than the month before". */
+export function recapChange(now: number, before: number): string | null {
+  if (before <= 0) return null;
+  const pct = Math.round(((now - before) / before) * 100);
+  if (pct === 0) return "about the same as the month before";
+  return `${Math.abs(pct)}% ${pct > 0 ? "more" : "less"} than the month before`;
+}
+
+/** Whether the top artist really carried the month (at least two fifths of its minutes), so "Mostly" is true. */
+export const MOSTLY = 0.4;
+
 function RecapLine({ r }: { r: MonthRecap }) {
   const song = r.topSongs[0];
   const artist = r.topArtists[0];
-  const pct = change(r.totals.ms, r.prevMs);
+  const vs = recapChange(r.totals.ms, r.prevMs);
+  const mostly = !!artist && r.totals.ms > 0 && artist.ms / r.totals.ms >= MOSTLY;
   return (
     <p className="recap__line">
-      <span className="lg-num">{minutes(r.totals.ms).toLocaleString()}</span> minutes
-      {pct && (
-        <>
-          , <span className="lg-num">{pct}</span> on the month before
-        </>
-      )}
-      .
+      <span className="lg-num">{minutes(r.totals.ms).toLocaleString()}</span> minutes{vs && `, ${vs}`}.
       {artist && (
         <>
           {" "}
-          Mostly <strong>{artist.name}</strong>
+          {mostly ? (
+            <>
+              Mostly <strong>{artist.name}</strong>
+            </>
+          ) : (
+            <>
+              More <strong>{artist.name}</strong> than anyone else
+            </>
+          )}
           {song ? (
             <>
               , and <strong>{song.title}</strong>

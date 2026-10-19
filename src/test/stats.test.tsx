@@ -23,6 +23,7 @@ import { DEFAULT_SETTINGS } from "../lib/types";
 import { BarChart, DayCharts, ListeningCalendar } from "../pages/StatsCharts";
 import { momentCards, momentDate } from "../pages/StatsMoments";
 import { StatsPage } from "../pages/StatsPage";
+import { recapChange } from "../pages/StatsRecaps";
 import { AppMenu } from "../shell/TopBar";
 import { useLibraryLoader, useLibraryModel } from "../shell/useLibrary";
 import { useApp } from "../stores/app";
@@ -222,6 +223,8 @@ describe("Stats page", () => {
     const cards = await screen.findAllByTestId("recap-card");
     expect(cards.length).toBeGreaterThan(3);
     const share = await within(cards[1]).findByRole("button", { name: /^Share / });
+    // Each month in words: its minutes, the change in plain words, and who led it.
+    expect(cards[1]).toHaveTextContent(/\d minutes(, \d+% (more|less) than the month before|, about the same as the month before)?\. (Mostly |More .+ than anyone else)/);
     await user.click(share);
     expect(await screen.findByTestId("recap-share")).toBeInTheDocument();
     expect(screen.getByText("Unreleased songs are left off the card. Nothing is uploaded.")).toBeInTheDocument();
@@ -471,6 +474,13 @@ describe("stats stories", () => {
   /** Daily points from `from` for `n` days, with minutes where `on` says. */
   const run = (from: string, n: number, on: (i: number) => number) => Array.from({ length: n }, (_, i) => pt(addDays(from, i), on(i)));
   const hoursWith = (m: Record<number, number>) => Array.from({ length: 24 }, (_, h) => (m[h] ?? 0) * 60_000);
+
+  it("a recap says the change on the month before in words", () => {
+    expect(recapChange(112, 100)).toBe("12% more than the month before");
+    expect(recapChange(95, 100)).toBe("5% less than the month before");
+    expect(recapChange(100, 100)).toBe("about the same as the month before");
+    expect(recapChange(100, 0)).toBeNull();
+  });
 
   it("words time in real units", () => {
     expect([0, 45, 60, 130, 600, 2280].map((m) => duration(m * 60_000))).toEqual(["0 min", "45 min", "1 hr", "2 hrs 10 min", "10 hrs", "38 hrs"]);
