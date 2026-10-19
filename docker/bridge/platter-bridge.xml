@@ -12,7 +12,7 @@
   <Overview>Optional home side for Platter, the desktop music player for Plex. While no computer has Platter open, the Bridge catches up with Lidarr: it scans just the folders of new downloads, keeps protected albums out of Lidarr's way and, with the music folder mounted read-write, adds new protected albums the way Platter would. Platter works fully without it. It opens no ports and talks to Platter only through a sealed relay. Pair it once: start it, then enter the code from its log in Platter (Settings &gt; Bridge &gt; Add the Bridge), on a computer or your phone.</Overview>
   <Category>MediaApp:Music Tools:</Category>
   <WebUI/>
-  <TemplateURL>https://raw.githubusercontent.com/Silvercyclops999/platter/v0.2.30/docker/bridge/platter-bridge.xml</TemplateURL>
+  <TemplateURL>https://raw.githubusercontent.com/Silvercyclops999/platter/main/docker/bridge/platter-bridge.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/Silvercyclops999/platter/main/src-tauri/icons/128x128.png</Icon>
   <ExtraParams>--user 99:100</ExtraParams>
   <PostArgs/>

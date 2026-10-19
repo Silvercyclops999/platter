@@ -23,20 +23,21 @@ let wrong = 0;
 for (const f of files) {
   const p = path.join(root, f);
   const was = readFileSync(p, "utf8");
-  // The image follows :latest so Unraid (and Watchtower) can see and apply new
-  // releases; only the template's own address is pinned to the release tag.
-  const now = was.replace(image, "$1:latest").replace(templateUrl, `$1v${version}$2`);
+  // The image follows :latest and the template's own address follows main, so
+  // Unraid (and Watchtower) see each new release and a template refresh never
+  // pins an old one.
+  const now = was.replace(image, "$1:latest").replace(templateUrl, "$1main$2");
   if (!/ghcr\.io\/silvercyclops999\/platter-bridge:/.test(was)) {
     console.error(`${f}: no platter-bridge image to pin`);
     wrong++;
   }
   if (now !== was) {
     if (check) {
-      console.error(`${f} isn't pinned to ${version}. Run: node scripts/pin-bridge-template.mjs`);
+      console.error(`${f} should follow main and :latest. Run: node scripts/pin-bridge-template.mjs`);
       wrong++;
     } else {
       writeFileSync(p, now);
-      console.log(`${f}: pinned to ${version}`);
+      console.log(`${f}: follows main and :latest`);
     }
   }
 }
