@@ -41,8 +41,8 @@ export function setOsFullscreenImpl(impl: OsFullscreen) {
 }
 
 /** What fills the expanded view. */
-export type FullWindowMode = "artwork" | "artist" | "lyrics";
-const MODES: readonly FullWindowMode[] = ["artwork", "artist", "lyrics"];
+export type FullWindowMode = "artwork" | "artist" | "lyrics" | "visualizer";
+const MODES: readonly FullWindowMode[] = ["artwork", "artist", "lyrics", "visualizer"];
 
 /** "Remember the expanded view's mode" and the mode it remembers. App-only and per device (localStorage). */
 export interface FullWindowPrefs {
@@ -134,6 +134,12 @@ export const fullWindow = {
     const st = useFullWindow.getState();
     if (st.open && st.mode === "lyrics") void fullWindow.close();
     else fullWindow.open("lyrics");
+  },
+  /** The visualizer button and V: show the visualizer, or go back to the artwork when it already shows. */
+  toggleVisualizer: () => {
+    const st = useFullWindow.getState();
+    if (st.open && st.mode === "visualizer") fullWindow.setMode("artwork");
+    else fullWindow.open("visualizer");
   },
   /** The expand button: open in the last mode used, or close. */
   toggle: () => {

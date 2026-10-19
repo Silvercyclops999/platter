@@ -1,0 +1,114 @@
+/* ---------------------------------------------------------------- Visualizer
+   Instruments, not a light show: hairline scales in the surface's own text
+   colours, one line in the cover's colour, nothing else lit. */
+
+.vis {
+  width: min(1040px, 100%);
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* The instrument's window: a flat panel with a hairline edge. */
+.vis__panel {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: var(--space-6) var(--space-6) var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--color-ink) 12%, transparent);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--color-bg-base) 78%, transparent);
+}
+.vis__panel > * { flex: 1; min-width: 0; min-height: 0; }
+
+.vis__block {
+  align-self: center;
+  margin: 0;
+  text-align: center;
+  font-size: var(--font-size-lg);
+  color: var(--color-text-secondary);
+}
+
+/* Style picker: plain words in a row, the chosen one underlined. */
+.vis__styles { display: flex; justify-content: center; gap: var(--space-1); }
+.vis__style {
+  padding: var(--space-1) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-row);
+  background: none;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline 1px transparent;
+  text-underline-offset: 6px;
+}
+.vis__style:hover { color: var(--color-text-primary); }
+.vis__style.is-on { color: var(--color-text-primary); text-decoration-color: currentColor; }
+.vis__style[aria-disabled="true"] { opacity: 0.4; cursor: default; }
+.vis__style:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+
+/* ---- shared: the drawing surface over its scale */
+.vis-canvas { position: absolute; inset: 0; display: block; pointer-events: none; }
+.vis-scale { position: absolute; inset: 0; overflow: visible; }
+.vis-scale__line { stroke: color-mix(in srgb, var(--color-ink) 10%, transparent); stroke-width: 1; shape-rendering: crispEdges; }
+.vis-scale__line--ref { stroke: color-mix(in srgb, var(--color-ink) 22%, transparent); }
+.vis-scale__label,
+.vis-scale__unit {
+  fill: var(--color-text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.vis-scale__unit { letter-spacing: 0.04em; }
+
+/* ---- Analyser */
+.vis-analyser { position: relative; width: 100%; height: 100%; min-height: 120px; }
+.vis-analyser--slim { min-height: 0; }
+
+/* ---- Meters: two faces side by side, the note under them. */
+.vis-meters { width: 100%; height: 100%; display: flex; flex-direction: column; gap: var(--space-2); }
+.vis-meters__dials { position: relative; flex: 1; min-height: 0; max-height: 320px; width: min(760px, 100%); margin: auto; }
+.vis-meter {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 12%, transparent);
+  border-radius: var(--radius-row);
+  overflow: hidden;
+}
+.vis-meter__face { display: block; }
+.vis-meter__arc { fill: none; stroke: var(--color-text-secondary); stroke-width: 1; }
+.vis-meter__arc--over { stroke: var(--color-text-primary); stroke-width: 2.5; }
+.vis-meter__tick { stroke: var(--color-text-secondary); stroke-width: 1; }
+.vis-meter__mark { fill: var(--color-text-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.vis-meter__side,
+.vis-meter__unit { fill: var(--color-text-muted); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; }
+.vis-meters__note { margin: 0; text-align: center; font-size: var(--font-size-xs); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.vis-meters--compact { gap: 0; }
+.vis-meters--compact .vis-meters__dials { max-height: none; width: 100%; }
+.vis-meters--compact .vis-meter__mark { font-size: 9px; }
+.vis-meters--compact .vis-meter__side { font-size: 9px; }
+
+/* ---- the expanded view: the cover in the corner, the instrument in the stage */
+.fw--visualizer .fw__bg { display: none; }
+.fw--visualizer .fw__shade { background: color-mix(in srgb, var(--fw-tint, #2a2520) 14%, #0d0c0b); }
+.fw__vis-mode {
+  width: min(1040px, 100%);
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  animation: fw-in var(--motion-slow) ease;
+}
+.fw__vis-mode .vis { width: 100%; flex: 1; }
+
+@media (max-width: 800px) {
+  .vis__panel { padding: var(--space-4) var(--space-3) var(--space-3); }
+}

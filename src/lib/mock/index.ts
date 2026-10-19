@@ -182,6 +182,7 @@ import { OFFLINE_NOTHING_PLAYS, offlineLeftOutMessage } from "../offline";
 import * as eq from "./eq";
 import * as hifi from "./hifi";
 import { mockSignalPath } from "./signal";
+import { MockVisualizer } from "./visualizer";
 import { MockHome, type ContextPlay } from "./home";
 import { mockRecordHome } from "./records";
 import { MockHomeUsers } from "./homeUsers";
@@ -561,6 +562,11 @@ export class MockBackend implements Backend {
   private resumePoints = new Map<string, ResumePoint>();
   private itemSeq = 1;
   private tick: ReturnType<typeof setInterval> | null = null;
+  /** Visualizer frames while watched and playing. */
+  readonly visualizer = new MockVisualizer(
+    (f) => this.emit("player://spectrum", f),
+    () => this.status === "playing",
+  );
   private rng = mulberry32(42);
 
   constructor(opts: Partial<MockOptions> = {}) {
@@ -955,6 +961,7 @@ export class MockBackend implements Backend {
     this.timers.forEach(clearTimeout);
     this.timers.clear();
     this.stopTick();
+    this.visualizer.stop();
     this.remote.dispose();
     this.listeners.clear();
   }
@@ -2456,6 +2463,10 @@ export class MockBackend implements Backend {
   }
   signalPath() {
     return this.delay(() => this.signalSnapshot());
+  }
+  visualizerWatch(on: boolean, fps: number, scope: boolean, pauseOnBattery: boolean) {
+    void pauseOnBattery; // the browser has no battery to rest on
+    return Promise.resolve(this.visualizer.watch(on, fps, scope));
   }
 
   private act(fn: () => void) {
