@@ -34,6 +34,10 @@
 //! - [`settings`]: settings marked Synced through the store.
 //! - [`pins`], [`folders`], [`lyrics`], [`transcripts`], [`follows`]: features on top of the store
 //!   (followed artists through the social module's `FollowStore`).
+//! - [`looks`], [`download_intent`], [`imported_plays`]: saved looks, what
+//!   each device downloaded (offered, never downloaded by itself), and
+//!   plays brought in from elsewhere.
+//! - [`devices`]: keeping paired devices in step with no file and no server.
 //! - [`detect`]: finding cloud folders to suggest.
 //! - [`keycopy`]: copying keys between devices (never through the file).
 //! - [`commands`]: the Tauri commands (docs/IPC.md "Sync, folders and keys").
@@ -41,11 +45,14 @@
 pub mod commands;
 pub mod detect;
 pub mod devices;
+pub mod download_intent;
 pub mod engine;
 pub mod file;
 pub mod folders;
 pub mod follows;
+pub mod imported_plays;
 pub mod keycopy;
+pub mod looks;
 pub mod lyrics;
 pub mod mixed;
 pub mod pins;

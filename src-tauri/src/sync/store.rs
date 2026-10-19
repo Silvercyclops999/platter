@@ -116,9 +116,24 @@ pub const ALBUM_SIDES: Ns<crate::sleeve::sides::ManualSides> = Ns::new("albumSid
 /// Private: synced only with the diary group, which is off by default.
 pub const DIARY: Ns<crate::diary::DiaryEntry> = Ns::new("diary");
 
+/// Look and theme files in the themes folder, keyed by file name. The look
+/// in use travels with the settings; these are the ones to pick from.
+pub const LOOKS: Ns<crate::themes::ThemeFile> = Ns::new("looks");
+/// What each device has downloaded, keyed `<device>|<kind>:<id>`. Only an
+/// intent: another device shows it as a suggestion and downloads nothing
+/// by itself (sync::download_intent).
+pub const DOWNLOAD_INTENT: Ns<super::download_intent::DownloadIntent> = Ns::new("downloadIntent");
+/// Plays brought in from elsewhere (Plex history, Tautulli, Last.fm, a
+/// file), a day at a time, keyed `<source>:<day>:<part>` (sync::imported_plays).
+/// Between paired devices only: too big for the sync file.
+pub const IMPORTED_PLAYS: Ns<super::imported_plays::PlayDay> = Ns::new("importedPlays");
+
 /// Every namespace the store takes. Anything else is refused, so nothing
 /// lands in the sync file by accident.
-pub const NAMESPACES: [&str; 21] = [
+pub const NAMESPACES: [&str; 24] = [
+    LOOKS.name(),
+    DOWNLOAD_INTENT.name(),
+    IMPORTED_PLAYS.name(),
     MIXED.name(),
     DIARY.name(),
     ALBUM_SIDES.name(),
@@ -442,6 +457,11 @@ impl SyncStore {
         Self {
             inner: Arc::new(Inner { db, device: device.into(), clock, changed, edited: Notify::new() }),
         }
+    }
+
+    /// The database the store lives in.
+    pub(crate) fn db(&self) -> &DbHandle {
+        &self.inner.db
     }
 
     /// This device's id (the Plex client id).

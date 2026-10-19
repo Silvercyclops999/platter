@@ -262,7 +262,7 @@ pub struct ThemeFile {
 }
 
 impl ThemeFile {
-    fn is_look(&self) -> bool {
+    pub fn is_look(&self) -> bool {
         self.file.to_ascii_lowercase().ends_with(LOOK_EXT)
             || self.author.is_some()
             || self.style.is_some()
