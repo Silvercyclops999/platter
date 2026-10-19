@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Skeleton } from "../components/Skeleton";
+import { usePhoneForm } from "../phone/form";
 import { updateSettings, useSettings } from "../stores/settings";
 
 /** The longest name, same as the core. */
@@ -11,6 +12,7 @@ export const COMPUTER_NAME_MAX = 60;
  */
 export function ComputerNameSetting({ ids }: { ids: { title: string; desc: string } }) {
   const saved = useSettings((s) => s.settings?.computerName);
+  const phone = usePhoneForm((s) => s.phone);
   const [value, setValue] = useState(saved ?? "");
   useEffect(() => {
     if (saved !== undefined) setValue(saved);
@@ -26,7 +28,7 @@ export function ComputerNameSetting({ ids }: { ids: { title: string; desc: strin
       className="setting-text"
       value={value}
       maxLength={COMPUTER_NAME_MAX}
-      placeholder="This computer's name"
+      placeholder={phone ? "This phone's name" : "This computer's name"}
       spellCheck={false}
       aria-labelledby={ids.title}
       aria-describedby={ids.desc}

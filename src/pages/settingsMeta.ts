@@ -402,7 +402,6 @@ export const NOT_RESET: ReadonlySet<string> = new Set([
   "lidarrStagingFolder",
   "tautulliUrl",
   "translationService",
-  "computerName",
   "volume",
 ]);
 
@@ -462,10 +461,9 @@ export const DESKTOP_ONLY: ReadonlySet<string> = new Set([
   "spineWidthByTracks",
   // Sound: the phone picks its output through the system.
   "outputDevice",
-  // Downloads and devices: folders and this computer as a Plex player.
+  // Downloads and devices: folders on disk. (Being a Plex player and this
+  // device's name work on a phone too; the Devices page is USB drives.)
   "downloadFolder",
-  "computerName",
-  "actAsPlexPlayer",
   // Lyrics: transcription runs on a computer.
   "transcribeLyrics",
   // Discord lives on the computer.

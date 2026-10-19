@@ -11,6 +11,7 @@ import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS, type PlayerState, type QueueItem, type Track } from "../lib/types";
 import { SettingsPage } from "../pages/SettingsPage";
 import { DESKTOP_ONLY, onPhone, phoneText } from "../pages/settingsMeta";
+import { ASSUMED_CAPS, useCaps } from "../stores/caps";
 import { usePhoneForm } from "../phone/form";
 import { PhoneShell } from "../phone/PhoneShell";
 import { PhoneServerPick, PhoneSignIn } from "../phone/PhoneSignIn";
@@ -188,10 +189,37 @@ describe("phone settings screens", () => {
     expect(within(more).getByText("Lidarr")).toBeInTheDocument();
   });
 
+  it("Listen on works from the phone: its name, being a Plex player, and what it lists", async () => {
+    act(() => useCaps.setState({ all: ASSUMED_CAPS }));
+    render(<SettingsPage section="Downloads and devices" />);
+    await screen.findByRole("heading", { name: "Downloads and devices", level: 1 });
+    for (const key of ["showDevices", "moveStopsOldDevice", "actAsPlexPlayer", "showToMyDevices", "computerName"]) expect(document.querySelector(`[data-setting="${key}"]`)).not.toBeNull();
+    expect(screen.getByText("This phone's name")).toBeInTheDocument();
+    expect(screen.getByText("Let other Plex apps play on this phone")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("This phone's name")).toBeInTheDocument();
+    // Copying to USB drives and folders on disk stay on the computer.
+    for (const key of ["devices", "deviceFormat", "downloadFolder"]) expect(document.querySelector(`[data-setting="${key}"]`)).toBeNull();
+  });
+
+  it("a server that can't take Plex players leaves that row out", async () => {
+    act(() => useCaps.setState({ all: { ...ASSUMED_CAPS, caps: { ...ASSUMED_CAPS.caps, remotePlayers: false } } }));
+    try {
+      render(<SettingsPage section="Downloads and devices" />);
+      await screen.findByRole("heading", { name: "Downloads and devices", level: 1 });
+      expect(document.querySelector('[data-setting="actAsPlexPlayer"]')).toBeNull();
+      expect(document.querySelector('[data-setting="computerName"]')).not.toBeNull();
+    } finally {
+      act(() => useCaps.setState({ all: ASSUMED_CAPS }));
+    }
+  });
+
   it("the computer keeps every row", () => {
     expect(onPhone({ key: "closeToTray" })).toBe(false);
     expect(onPhone({ key: "crossfade" })).toBe(true);
     expect(onPhone({ key: "showToMyDevices" })).toBe(true);
+    expect(onPhone({ key: "computerName" })).toBe(true);
+    expect(onPhone({ key: "actAsPlexPlayer" })).toBe(true);
+    expect(onPhone({ key: "devices", page: "devices" })).toBe(false);
     expect(onPhone({ key: "discordStatus", page: "discord" })).toBe(false);
     expect(DESKTOP_ONLY.has("layout")).toBe(true);
   });
