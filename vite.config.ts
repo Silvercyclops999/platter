@@ -40,7 +40,9 @@ export default defineConfig(() => ({
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
-    testTimeout: 15000,
+    // CI machines run the suite several times slower than a desktop, and
+    // role queries on big pages grow with the app's CSS: more room there.
+    testTimeout: process.env.CI ? 30000 : 15000,
     // Every core by default; a few workers keep a desktop cool. CI uses them all.
     maxWorkers: process.env.CI ? undefined : 4,
     include: ["src/**/*.test.{ts,tsx}"],
