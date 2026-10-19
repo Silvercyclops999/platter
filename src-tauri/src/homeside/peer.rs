@@ -77,6 +77,49 @@ impl Wire {
         Ok(())
     }
 
+    /// The publish lock for one link: hold it to keep a run of messages in
+    /// order on that link.
+    pub fn sending(&self, link: &Link) -> Arc<tokio::sync::Mutex<()>> {
+        self.sending.lock().entry(link.id.clone()).or_default().clone()
+    }
+
+    /// Seal a message for the local network on a device link (the same
+    /// frames as the relay, under the link's network keys). `reply`: an
+    /// answer to the other end's request, counted apart from requests so
+    /// the two never trip each other's replay guard.
+    pub fn seal_lan(&self, link: &Link, msg: &Msg, reply: bool) -> AppResult<Vec<String>> {
+        let (_, out) = link.lan_channels();
+        let mut counters = self.counters.lock();
+        let c = counters.entry(link.id.clone()).or_insert_with(|| self.links.counter(&link.id));
+        let bodies = link::seal_msg(&out, &lan_sender(&link.me, reply), c, msg, self.now_ms())?;
+        let last = c.last();
+        drop(counters);
+        let _ = self.links.update(&link.id, |p| p.counter = p.counter.max(last));
+        Ok(bodies)
+    }
+
+    /// Open one message that came over the local network on a device link.
+    /// Anything sealed wrong, from the wrong end, expired or replayed is
+    /// None.
+    pub fn open_lan(&self, link: &Link, bodies: &[String], reply: bool) -> Option<Msg> {
+        let (inbox, _) = link.lan_channels();
+        let now = self.now_ms();
+        let want = lan_sender(&link.peer, reply);
+        let mut parts = Reassembler::default();
+        let mut out = None;
+        for b in bodies {
+            let frame = link::open_frame(&inbox, b, now).ok()?;
+            if frame.f != want {
+                return None;
+            }
+            let mut guard = self.links.get(&link.id)?.guard;
+            guard.accept(&frame).ok()?;
+            let _ = self.links.update(&link.id, |p| p.guard = guard);
+            out = parts.add(frame, now);
+        }
+        out
+    }
+
     /// One relay message from a link's inbox: the whole message once every
     /// piece is in. Anything sealed wrong, expired or replayed is dropped.
     pub fn receive(&self, link: &Link, body: &str) -> Option<Msg> {
@@ -96,6 +139,11 @@ impl Wire {
         let _ = self.links.update(&link.id, |p| p.guard = guard);
         self.parts.lock().entry(link.id.clone()).or_default().add(frame, now)
     }
+}
+
+/// A device's frame id on the local network: requests and answers apart.
+fn lan_sender(id: &str, reply: bool) -> String {
+    format!("{id}.{}", if reply { "lanr" } else { "lan" })
 }
 
 pub fn relay_error(e: RelayError) -> String {

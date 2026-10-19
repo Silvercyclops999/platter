@@ -113,13 +113,13 @@ impl Offer {
         let secret = link_secret(&key);
         let desktop = hex(&seal::random16()[..8]);
         let bridge = hex(&seal::random16()[..8]);
-        let confirm = Confirm { desktop: desktop.clone(), desktop_name: self.desktop_name.clone(), bridge };
+        let confirm = Confirm { desktop: desktop.clone(), desktop_name: self.desktop_name.clone(), bridge: bridge.clone() };
         let c = seal::seal_with(&key, CONFIRM_AAD, &serde_json::to_vec(&confirm).ok()?).ok()?;
         let ch = welcome_channel(&self.code);
         let body = seal::seal_value(&ch, &Sealed { x: now_ms + TTL_MS, m: PairMsg::Welcome { n, b: seal::b64(&msg_b), c } }).ok()?;
         self.used = true;
         let relay = self.code.relay.clone().unwrap_or_else(|| super::DEFAULT_RELAY.to_string());
-        let link = Link { id: link_id(&secret), secret, relay, side: Side::Desktop, me: desktop };
+        let link = Link { id: link_id(&secret), secret, relay, side: Side::Desktop, me: desktop, peer: bridge };
         let name = if name.trim().is_empty() { "Platter Bridge".to_string() } else { name.chars().take(60).collect() };
         Some(((ch.topic, body), PairedBridge { link, name, version: version.chars().take(20).collect() }))
     }
@@ -169,7 +169,7 @@ impl Joining {
         let confirm: Confirm = serde_json::from_slice(&seal::open_with(&key, CONFIRM_AAD, &c).map_err(|_| bad())?).map_err(|_| bad())?;
         let secret = link_secret(&key);
         let relay = self.code.relay.clone().unwrap_or_else(|| super::DEFAULT_RELAY.to_string());
-        let link = Link { id: link_id(&secret), secret, relay, side: Side::Bridge, me: confirm.bridge };
+        let link = Link { id: link_id(&secret), secret, relay, side: Side::Bridge, me: confirm.bridge, peer: confirm.desktop };
         let name = if confirm.desktop_name.trim().is_empty() { "a desktop".to_string() } else { confirm.desktop_name.chars().take(60).collect() };
         Ok(PairedDesktop { link, name })
     }

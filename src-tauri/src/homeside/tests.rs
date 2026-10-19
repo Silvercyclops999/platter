@@ -56,8 +56,8 @@ fn a_pair_code_round_trips_and_says_nothing() {
 
 fn pair_links() -> (Link, Link) {
     let secret = [7u8; 32];
-    let d = Link { id: "l1".into(), secret, relay: "http://relay".into(), side: Side::Desktop, me: "desk".into() };
-    let b = Link { id: "l1".into(), secret, relay: "http://relay".into(), side: Side::Bridge, me: "brdg".into() };
+    let d = Link { id: "l1".into(), secret, relay: "http://relay".into(), side: Side::Desktop, me: "desk".into(), peer: "brdg".into() };
+    let b = Link { id: "l1".into(), secret, relay: "http://relay".into(), side: Side::Bridge, me: "brdg".into(), peer: "desk".into() };
     (d, b)
 }
 

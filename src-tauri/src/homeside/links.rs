@@ -20,10 +20,10 @@ use crate::sync::store::{EntryMap, LIDARR};
 use crate::sync::SyncStore;
 
 const LINKS_KEY: &str = "bridge.links";
-
-fn secret_account(id: &str) -> String {
-    format!("bridge-link-{id}")
-}
+/// Links between the user's own devices, kept apart from Bridge links so
+/// nothing meant for a Bridge (its settings, keys and token) can ever go to
+/// a device link.
+const DEVICE_LINKS_KEY: &str = "devices.links";
 
 /// A pairing as kept (no secret).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -46,26 +46,49 @@ pub struct Paired {
     pub guard: Guard,
     #[serde(default)]
     pub counter: u64,
+    /// The other end's id inside frames (device links).
+    #[serde(default)]
+    pub peer: String,
+    /// The other device's id (its Plex client id), from its hello.
+    #[serde(default)]
+    pub device: Option<String>,
+    /// When the two were last in step, by this device's clock (ms).
+    #[serde(default)]
+    pub last_synced_at: Option<u64>,
 }
 
 #[derive(Clone)]
 pub struct Links {
     db: DbHandle,
     keys: Arc<dyn TokenStore>,
+    list_key: &'static str,
+    secret_prefix: &'static str,
+    /// One change to the kept list at a time.
+    lock: Arc<parking_lot::Mutex<()>>,
 }
 
 impl Links {
+    /// A Bridge's or a desktop's Bridge links.
     pub fn new(db: DbHandle, keys: Arc<dyn TokenStore>) -> Self {
-        Self { db, keys }
+        Self { db, keys, list_key: LINKS_KEY, secret_prefix: "bridge-link-", lock: Arc::default() }
+    }
+
+    /// Links to the user's other devices.
+    pub fn devices(db: DbHandle, keys: Arc<dyn TokenStore>) -> Self {
+        Self { db, keys, list_key: DEVICE_LINKS_KEY, secret_prefix: "device-link-", lock: Arc::default() }
+    }
+
+    fn secret_account(&self, id: &str) -> String {
+        format!("{}{id}", self.secret_prefix)
     }
 
     pub fn all(&self) -> Vec<Paired> {
-        self.db.read(|c| kv_get(c, LINKS_KEY)).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+        self.db.read(|c| kv_get(c, self.list_key)).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
     }
 
     fn save(&self, list: &[Paired]) -> AppResult<()> {
         let json = serde_json::to_string(list).map_err(|e| AppError::Internal(e.to_string()))?;
-        self.db.write(|c| kv_set(c, LINKS_KEY, &json))
+        self.db.write(|c| kv_set(c, self.list_key, &json))
     }
 
     pub fn get(&self, id: &str) -> Option<Paired> {
@@ -75,8 +98,8 @@ impl Links {
     /// The link with its secret, when both are there.
     pub fn link(&self, id: &str) -> Option<Link> {
         let p = self.get(id)?;
-        let secret = self.keys.get(&secret_account(id)).ok().flatten().and_then(|t| seal::key32(t.expose()))?;
-        Some(Link { id: p.id, secret, relay: p.relay, side: p.side, me: p.me })
+        let secret = self.keys.get(&self.secret_account(id)).ok().flatten().and_then(|t| seal::key32(t.expose()))?;
+        Some(Link { id: p.id, secret, relay: p.relay, side: p.side, me: p.me, peer: p.peer })
     }
 
     pub fn links(&self) -> Vec<Link> {
@@ -84,7 +107,8 @@ impl Links {
     }
 
     pub fn add(&self, link: &Link, name: &str, version: &str, now_s: i64) -> AppResult<()> {
-        self.keys.set(&secret_account(&link.id), &Token::new(seal::b64(&link.secret))?)?;
+        self.keys.set(&self.secret_account(&link.id), &Token::new(seal::b64(&link.secret))?)?;
+        let _one = self.lock.lock();
         let mut list = self.all();
         list.retain(|p| p.id != link.id);
         list.push(Paired {
@@ -98,12 +122,16 @@ impl Links {
             since: None,
             guard: Guard::default(),
             counter: 0,
+            peer: link.peer.clone(),
+            device: None,
+            last_synced_at: None,
         });
         self.save(&list)
     }
 
     pub fn remove(&self, id: &str) -> AppResult<()> {
-        let _ = self.keys.delete(&secret_account(id));
+        let _ = self.keys.delete(&self.secret_account(id));
+        let _one = self.lock.lock();
         let mut list = self.all();
         list.retain(|p| p.id != id);
         self.save(&list)?;
@@ -115,6 +143,7 @@ impl Links {
 
     /// Change one pairing's kept state.
     pub fn update(&self, id: &str, f: impl FnOnce(&mut Paired)) -> AppResult<()> {
+        let _one = self.lock.lock();
         let mut list = self.all();
         if let Some(p) = list.iter_mut().find(|p| p.id == id) {
             f(p);
