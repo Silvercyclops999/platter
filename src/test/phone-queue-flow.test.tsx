@@ -16,7 +16,7 @@ import { SongRow } from "../phone/pages/common";
 import { PhoneShell } from "../phone/PhoneShell";
 import { phone, usePhoneUi } from "../phone/phoneUi";
 import { QUEUE_SWIPE_PX, SWIPE_MAX_PX, swipeAdds, swipeFollow } from "../phone/rowSwipe";
-import { player, usePlayer } from "../stores/player";
+import { player, queuedToast, usePlayer } from "../stores/player";
 import { useRouter } from "../stores/router";
 import { loadSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
@@ -196,9 +196,9 @@ describe("the song sheet and the queue sheet", () => {
     const now = queue.querySelector(".ph-queue__now")!;
     expect(within(now as HTMLElement).getByText(t.title)).toHaveClass("is-playing");
     expect(within(now as HTMLElement).getByRole("button", { name: "Pause" })).toBeInTheDocument();
-    const added = within(queue).getByRole("list", { name: "Next in queue" });
+    const added = within(queue).getByRole("region", { name: "Next in queue" });
     expect(within(added).getAllByRole("button", { name: /^Move / }).map((h) => h.getAttribute("aria-label"))).toEqual([`Move ${c.title}`, `Move ${d.title}`]);
-    const next = within(queue).getByRole("list", { name: `Next from: ${t.albumTitle}` });
+    const next = within(queue).getByRole("region", { name: `Next from: ${t.albumTitle}` });
     expect(within(next).getAllByRole("button", { name: /^Move / }).map((h) => h.getAttribute("aria-label"))).toEqual([`Move ${a.title}`, `Move ${b.title}`]);
     expect(within(queue).getByRole("heading", { name: `Next from: ${t.albumTitle}` })).toBeInTheDocument();
     // The added songs reorder by their handles.
@@ -215,7 +215,87 @@ describe("the song sheet and the queue sheet", () => {
     render(<PhoneShell />);
     act(() => phone.push({ kind: "queue" }));
     const queue = await screen.findByRole("dialog", { name: "Queue" });
-    expect(within(queue).queryByRole("list", { name: "Next in queue" })).toBeNull();
-    expect(within(queue).getByRole("list", { name: "Next up" })).toBeInTheDocument();
+    expect(within(queue).queryByRole("region", { name: "Next in queue" })).toBeNull();
+    expect(within(queue).getByRole("region", { name: "Next up" })).toBeInTheDocument();
+  });
+});
+
+describe("toasts, fingers and taps after a swipe", () => {
+  it("queue toasts don't stack: a live one is replaced and counts on (the computer shares this)", () => {
+    queuedToast(1, "/a.jpg");
+    queuedToast(1, "/b.jpg");
+    queuedToast(2);
+    const shown = useToasts.getState().toasts;
+    expect(shown.map((t) => t.message)).toEqual(["Added 4 songs to queue"]);
+    // Gone: the next add starts a fresh count.
+    act(() => useToasts.getState().dismiss(shown[0].id));
+    queuedToast(1, "/c.jpg");
+    expect(useToasts.getState().toasts.map((t) => t.message)).toEqual(["Added to queue"]);
+    expect(useToasts.getState().toasts[0].art?.path).toBe("/c.jpg");
+  });
+
+  it("a second finger while one is swiping is ignored, and the swipe still adds once", () => {
+    const add = vi.spyOn(player, "addToQueue").mockResolvedValue(undefined);
+    const li = row(tracks()[2]);
+    fireEvent.pointerDown(li, { pointerId: 7, clientX: 100, clientY: 300, button: 0, pointerType: "touch" });
+    fireEvent.pointerMove(li, { pointerId: 7, clientX: 140, clientY: 300, pointerType: "touch" });
+    fireEvent.pointerDown(li, { pointerId: 9, clientX: 300, clientY: 300, button: 0, pointerType: "touch" });
+    fireEvent.pointerMove(li, { pointerId: 9, clientX: 310, clientY: 300, pointerType: "touch" });
+    fireEvent.pointerUp(li, { pointerId: 9, clientX: 310, clientY: 300, pointerType: "touch" });
+    expect(li.style.getPropertyValue("--ph-swipe")).toBe("40px");
+    fireEvent.pointerMove(li, { pointerId: 7, clientX: 200, clientY: 300, pointerType: "touch" });
+    fireEvent.pointerUp(li, { pointerId: 7, clientX: 200, clientY: 300, pointerType: "touch" });
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(li.style.getPropertyValue("--ph-swipe")).toBe("0px");
+  });
+
+  it("losing the pointer capture puts the row back and adds nothing", () => {
+    const add = vi.spyOn(player, "addToQueue").mockResolvedValue(undefined);
+    const li = row(tracks()[2]);
+    fireEvent.pointerDown(li, { pointerId: 7, clientX: 100, clientY: 300, button: 0, pointerType: "touch" });
+    fireEvent.pointerMove(li, { pointerId: 7, clientX: 200, clientY: 300, pointerType: "touch" });
+    expect(li).toHaveClass("is-armed");
+    fireEvent.lostPointerCapture(li, { pointerId: 7 });
+    expect(li.style.getPropertyValue("--ph-swipe")).toBe("0px");
+    expect(li).not.toHaveClass("is-swiping");
+    expect(li).not.toHaveClass("is-armed");
+    expect(add).not.toHaveBeenCalled();
+  });
+
+  it("crossing the mark ticks lightly, and letting go still buzzes success", () => {
+    vi.spyOn(player, "addToQueue").mockResolvedValue(undefined);
+    const buzz = vi.spyOn(backend, "haptic");
+    const li = row(tracks()[2]);
+    fireEvent.pointerDown(li, { pointerId: 7, clientX: 100, clientY: 300, button: 0, pointerType: "touch" });
+    fireEvent.pointerMove(li, { pointerId: 7, clientX: 150, clientY: 300, pointerType: "touch" });
+    expect(buzz).not.toHaveBeenCalled();
+    fireEvent.pointerMove(li, { pointerId: 7, clientX: 100 + QUEUE_SWIPE_PX + 4, clientY: 300, pointerType: "touch" });
+    expect(buzz).toHaveBeenLastCalledWith("light");
+    // Moving on past the mark doesn't tick again.
+    fireEvent.pointerMove(li, { pointerId: 7, clientX: 220, clientY: 300, pointerType: "touch" });
+    expect(buzz).toHaveBeenCalledTimes(1);
+    fireEvent.pointerUp(li, { pointerId: 7, clientX: 220, clientY: 300, pointerType: "touch" });
+    expect(buzz).toHaveBeenLastCalledWith("success");
+  });
+
+  it("after a swipe, cancelled or let go, a later Enter or tap on the row still plays it", async () => {
+    const onPlay = vi.fn();
+    vi.spyOn(player, "addToQueue").mockResolvedValue(undefined);
+    const { container } = render(
+      <ul>
+        <SongRow track={tracks()[1]} onPlay={onPlay} />
+      </ul>,
+    );
+    const li = container.querySelector<HTMLLIElement>("li.ph-song")!;
+    const main = li.querySelector<HTMLButtonElement>(".ph-song__main")!;
+    swipe(li, [100, 300], [[200, 300]], { cancel: true });
+    await act(() => new Promise((r) => setTimeout(r, 0)));
+    // A keyboard Enter is a click with no press before it.
+    fireEvent.click(main, { detail: 0 });
+    expect(onPlay).toHaveBeenCalledTimes(1);
+    swipe(li, [100, 300], [[130, 300]]);
+    await act(() => new Promise((r) => setTimeout(r, 0)));
+    fireEvent.click(main, { detail: 0 });
+    expect(onPlay).toHaveBeenCalledTimes(2);
   });
 });

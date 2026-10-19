@@ -343,7 +343,7 @@ export function QueueSheet() {
           <h3 id="ph-q-user" className="ph-queue__next">
             Next in queue
           </h3>
-          <ul className="ph-queue__list" aria-label="Next in queue">
+          <ul className="ph-queue__list">
             {q.userQueue.map((item, k) => row(item, k))}
           </ul>
         </section>
@@ -359,7 +359,7 @@ export function QueueSheet() {
               "Next up"
             )}
           </h3>
-          <ul className="ph-queue__list" aria-label={ctxTitle ? `Next from: ${ctxTitle}` : "Next up"}>
+          <ul className="ph-queue__list">
             {q.nextUp.map((item, k) => row(item, q.userQueue.length + k))}
           </ul>
         </section>
