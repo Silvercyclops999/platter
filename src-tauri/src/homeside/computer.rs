@@ -138,8 +138,11 @@ impl HomeServe for ComputerServes {
 /// it) gets the same answer and a write is never made twice.
 #[derive(Default)]
 pub struct Served {
-    list: Mutex<VecDeque<((String, u64), watch::Receiver<Option<Msg>>)>>,
+    list: Mutex<VecDeque<(ServedKey, watch::Receiver<Option<Msg>>)>>,
 }
+
+/// A link's id and a request's id.
+type ServedKey = (String, u64);
 
 /// Requests remembered at most.
 const SERVED_MAX: usize = 128;
