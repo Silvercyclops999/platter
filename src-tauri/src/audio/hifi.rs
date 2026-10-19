@@ -94,6 +94,49 @@ async fn current_device(player: &PlayerHandle) -> AppResult<OutputDevice> {
         .ok_or_else(|| AppError::NotFound("No output device on this computer is in use.".into()))
 }
 
+/// What the output is called, cut down to the headphones' own name: an
+/// owner in front ("Adam's AirPods Pro") and the type of connection
+/// ("Bluetooth", "Stereo") don't name a model.
+pub fn headphone_query(output_name: &str) -> String {
+    let name = output_name.replace('\u{2019}', "'");
+    let name = match name.find("'s ") {
+        Some(i) if !name[..i].contains(' ') => &name[i + 3..],
+        _ => &name[..],
+    };
+    const NOISE: [&str; 6] = ["bluetooth", "stereo", "hands-free", "headphones", "(2)", "(3)"];
+    name.split_whitespace()
+        .filter(|w| !NOISE.contains(&w.to_ascii_lowercase().as_str()))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The output playing now and the headphones it most likely is.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeadphoneGuess {
+    /// The output's own name ("Adam's AirPods Pro").
+    pub output_name: String,
+    /// Best matches first; empty for a speaker or an unknown model.
+    pub matches: Vec<Entry>,
+}
+
+/// Finds the headphones in use: on a phone from the system's audio route
+/// (only headphones and Bluetooth count, not the speaker), on a computer
+/// from the output device's name.
+#[tauri::command]
+pub async fn headphone_detect(player: State<'_, PlayerHandle>) -> AppResult<HeadphoneGuess> {
+    #[cfg(target_os = "ios")]
+    let name = {
+        let _ = &player;
+        crate::platform::audio_session::headphones_name().unwrap_or_default()
+    };
+    #[cfg(not(target_os = "ios"))]
+    let name = current_device(&player).await.map(|d| d.name).unwrap_or_default();
+    let query = headphone_query(&name);
+    let matches = if query.is_empty() { Vec::new() } else { autoeq::search(&query, 5) };
+    Ok(HeadphoneGuess { output_name: name, matches })
+}
+
 /// Headphones in the bundled index whose name matches `query`.
 #[tauri::command]
 pub async fn headphone_search(query: String) -> AppResult<Vec<Entry>> {
@@ -191,6 +234,17 @@ mod tests {
         assert!(set_correction(&mut s, &dev("hp"), None));
         assert!(!set_correction(&mut s, &dev("hp"), None));
         assert_eq!(correction_for(&s, Some("hp")), None);
+    }
+
+    #[test]
+    fn output_names_come_down_to_the_model() {
+        assert_eq!(headphone_query("Adam\u{2019}s AirPods Pro"), "AirPods Pro");
+        assert_eq!(headphone_query("Adam's AirPods Max"), "AirPods Max");
+        assert_eq!(headphone_query("WH-1000XM5 Stereo"), "WH-1000XM5");
+        assert_eq!(headphone_query("Sennheiser HD 650"), "Sennheiser HD 650");
+        assert_eq!(headphone_query("Living Room's Speaker Set"), "Living Room's Speaker Set");
+        assert_eq!(headphone_query(""), "");
+        assert!(super::autoeq::search(&headphone_query("Adam's AirPods Pro"), 5).iter().any(|e| e.name.contains("AirPods Pro")));
     }
 
     #[test]
