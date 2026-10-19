@@ -450,31 +450,39 @@ pub fn stream_cap_kbps(
     }
 }
 
-/// Transcodes the server is running for us, oldest first. Plex keeps each
-/// one going until it times out and refuses new ones once enough are open,
-/// so skipping through songs on a remote connection ended in "Bad Request"
-/// for every song after a few.
-static OPEN_TRANSCODES: Mutex<std::collections::VecDeque<(crate::plex::client::PlexClient, String)>> =
-    Mutex::new(std::collections::VecDeque::new());
+/// How many transcodes this device keeps on the server: the song playing
+/// and the one loaded after it.
+const TRANSCODE_SLOTS: usize = 2;
 
-/// How many may stay open: the song playing and the one loaded after it.
-const TRANSCODES_KEPT: usize = 2;
+static NEXT_SLOT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static SLOTS_CLEARED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Notes a new transcode and stops the oldest beyond [`TRANSCODES_KEPT`].
-fn keep_transcode(client: crate::plex::client::PlexClient, session: String) {
-    let stale: Vec<_> = {
-        let mut open = OPEN_TRANSCODES.lock();
-        open.push_back((client, session));
-        let extra = open.len().saturating_sub(TRANSCODES_KEPT);
-        open.drain(..extra).collect()
+/// The session name for a new transcode. Plex keeps every transcode going
+/// until it times out and refuses new ones once a few are open, so random
+/// names left sessions running after every skip, and after every restart of
+/// the app (a phone's app is ended often). Each device instead takes turns
+/// with [`TRANSCODE_SLOTS`] fixed names: the slot's old transcode (two songs
+/// back, or from before a restart) is stopped first, and the first one this
+/// run stops them all.
+async fn transcode_session(client: &crate::plex::client::PlexClient) -> String {
+    let id = &client.identity().client_id;
+    let name = |slot: usize| format!("platter-{id}-{slot}");
+    let stale: Vec<String> = if SLOTS_CLEARED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        let slot = NEXT_SLOT.load(std::sync::atomic::Ordering::SeqCst) % TRANSCODE_SLOTS;
+        vec![name(slot)]
+    } else {
+        (0..TRANSCODE_SLOTS).map(name).collect()
     };
-    for (client, session) in stale {
-        tokio::spawn(async move {
-            if let Err(e) = client.transcode_stop(&session).await {
-                tracing::debug!("transcode not stopped: {e}");
-            }
-        });
+    let slot = NEXT_SLOT.fetch_add(1, std::sync::atomic::Ordering::SeqCst) % TRANSCODE_SLOTS;
+    for session in stale {
+        // Short: a server that doesn't answer shouldn't hold up playback.
+        match tokio::time::timeout(std::time::Duration::from_secs(2), client.transcode_stop(&session)).await {
+            Ok(Err(e)) => tracing::debug!("transcode {session} not stopped: {e}"),
+            Err(_) => tracing::debug!("transcode {session}: stop timed out"),
+            Ok(Ok(())) => {}
+        }
     }
+    name(slot)
 }
 
 /// Turns a track into an HTTP source on the connected server. The token
@@ -501,9 +509,8 @@ impl TrackResolver for PlexStreams {
         let client = self.0.client_for_when_ready(&track.id, STARTUP_WAIT).await?;
         let prefs = &self.1;
         if let Some(kbps) = stream_cap_kbps(client.connection(), track.bitrate, prefs.home(), prefs.away()) {
-            let session = uuid::Uuid::new_v4().to_string();
+            let session = transcode_session(&client).await;
             let req = client.transcode_request(&track.id, kbps, &session)?;
-            keep_transcode(client.clone(), session);
             return Ok(source_of(req, Some("mp3".into())));
         }
         let req = client.stream_request(&track.part_key)?;
@@ -511,10 +518,9 @@ impl TrackResolver for PlexStreams {
     }
 
     async fn transcode(&self, track: &Track) -> AppResult<StreamSource> {
-        let session = uuid::Uuid::new_v4().to_string();
         let client = self.0.client_for(&track.id).await?;
+        let session = transcode_session(&client).await;
         let req = client.transcode_request(&track.id, 320, &session)?;
-        keep_transcode(client, session);
         Ok(source_of(req, Some("mp3".into())))
     }
 
@@ -1123,37 +1129,37 @@ mod transcode_tests {
     use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    use super::{OPEN_TRANSCODES, TRANSCODES_KEPT, keep_transcode};
+    use super::transcode_session;
     use crate::plex::client::PlexClient;
     use crate::plex::identity::ClientIdentity;
     use crate::plex::token::Token;
     use crate::plex::types::ConnectionKind;
 
     #[tokio::test]
-    async fn only_the_playing_and_next_transcodes_stay_open() {
+    async fn transcodes_take_turns_with_two_fixed_names_and_clear_leftovers_first() {
         let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/music/:/transcode/universal/stop"))
-            .and(query_param("session", "s1"))
-            .respond_with(ResponseTemplate::new(200))
-            .expect(1)
-            .mount(&server)
-            .await;
+        let stop = |s: &'static str, times: u64| {
+            Mock::given(method("GET"))
+                .and(path("/music/:/transcode/universal/stop"))
+                .and(query_param("session", s))
+                .respond_with(ResponseTemplate::new(200))
+                .expect(times)
+        };
+        // First call stops both (leftovers from an earlier run), then each
+        // new song stops only the slot it reuses.
+        stop("platter-dev-0", 2).mount(&server).await;
+        stop("platter-dev-1", 2).mount(&server).await;
         let c = PlexClient::new(
             &server.uri(),
             Token::new("tok-123456789").unwrap(),
-            Arc::new(ClientIdentity::with_id("cid")),
+            Arc::new(ClientIdentity::with_id("dev")),
             Some(ConnectionKind::Remote),
         )
         .unwrap();
-        OPEN_TRANSCODES.lock().clear();
-        for s in ["s1", "s2", "s3"] {
-            keep_transcode(c.clone(), s.into());
+        let mut names = Vec::new();
+        for _ in 0..3 {
+            names.push(transcode_session(&c).await);
         }
-        let open: Vec<String> = OPEN_TRANSCODES.lock().iter().map(|(_, s)| s.clone()).collect();
-        assert_eq!(open, ["s2", "s3"]);
-        assert_eq!(open.len(), TRANSCODES_KEPT);
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        // `expect(1)` is checked when the server drops: s1 was stopped once.
+        assert_eq!(names, ["platter-dev-0", "platter-dev-1", "platter-dev-0"]);
     }
 }
