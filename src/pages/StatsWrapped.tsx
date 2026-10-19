@@ -14,20 +14,27 @@ import { wrapped } from "../stores/wrapped";
 import { toneStyle, YearBanner } from "./TopSongsTile";
 import "./ledger.css";
 
-function Entry({ year, title, shown, sub, onOpen }: { year: number | null; title: string; shown: string; sub: string; onOpen: () => void }) {
+/** One year's row: its record sleeve, the year, what opening it shows. The You tab has this year's Wrapped as one. */
+export function YearEntry({ year, title, shown, sub, onOpen, className = "" }: { year: number | null; title: string; shown: string; sub: string; onOpen: () => void; className?: string }) {
+  return (
+    <button type="button" className={`year-entry ${className}`} aria-label={title} onClick={onOpen}>
+      <span className="year-entry__sleeve" style={toneStyle(year)} aria-hidden="true">
+        <YearBanner year={year} w={96} h={96} />
+      </span>
+      <span className="year-entry__year num">{year ?? ""}</span>
+      <span className="year-entry__text">
+        <span className="year-entry__title">{shown}</span>
+        <span className="year-entry__sub">{sub}</span>
+      </span>
+      <ChevronRight className="year-entry__go" size={18} aria-hidden="true" />
+    </button>
+  );
+}
+
+function Entry(p: { year: number | null; title: string; shown: string; sub: string; onOpen: () => void }) {
   return (
     <li>
-      <button type="button" className="year-entry" aria-label={title} onClick={onOpen}>
-        <span className="year-entry__sleeve" style={toneStyle(year)} aria-hidden="true">
-          <YearBanner year={year} w={96} h={96} />
-        </span>
-        <span className="year-entry__year num">{year ?? ""}</span>
-        <span className="year-entry__text">
-          <span className="year-entry__title">{shown}</span>
-          <span className="year-entry__sub">{sub}</span>
-        </span>
-        <ChevronRight className="year-entry__go" size={18} aria-hidden="true" />
-      </button>
+      <YearEntry {...p} />
     </li>
   );
 }

@@ -352,36 +352,6 @@ button.moment__btn:focus-visible { outline: 2px solid var(--color-focus-ring); o
 .recap__days { display: flex; align-items: flex-end; justify-content: space-between; height: 32px; border-bottom: 1px solid var(--ledger-line); }
 .recap__days span { width: 2px; background: var(--ledger-stem); }
 
-/* ---------------------------------------------------------------- Wrapped and Top Songs */
-.year-entries { list-style: none; margin: 0 0 var(--space-6); padding: 0; }
-.year-entries:last-child { margin-bottom: 0; }
-.year-entry {
-  display: grid;
-  grid-template-columns: 48px 64px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-4);
-  width: 100%;
-  min-height: 64px;
-  padding: var(--space-2) var(--space-2) var(--space-2) 0;
-  border: 0;
-  border-top: 1px solid var(--ledger-faint);
-  background: none;
-  color: var(--color-text-primary);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.year-entries li:last-child .year-entry { border-bottom: 1px solid var(--ledger-faint); }
-.year-entry:hover { background: var(--color-state-hover); }
-.year-entry:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; }
-.year-entry__sleeve { position: relative; display: block; width: 48px; height: 48px; overflow: hidden; border-radius: 2px; background: var(--year-deep); }
-.year-entry__sleeve .year-art { position: absolute; inset: 0; width: 100%; height: 100%; }
-.year-entry__year { font-size: var(--font-size-xl); color: var(--color-text-primary); }
-.year-entry__text { display: flex; flex-direction: column; min-width: 0; }
-.year-entry__title { font-family: var(--font-headings, var(--font-family)); font-size: var(--font-size-lg); font-weight: 600; }
-.year-entry__sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
-.year-entry__go { color: var(--color-text-muted); }
-
 /* ---------------------------------------------------------------- off, empty, failed */
 .stats-state { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); padding: var(--space-8) 0; border-top: 1px solid var(--ledger-line); }
 .stats-state__art .liked-cover { border-radius: 2px; }

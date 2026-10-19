@@ -914,26 +914,10 @@
 .phone .month-story__more { margin-top: 8px; font-size: 13px; }
 .phone .stats-hero { margin-top: 16px; }
 .phone .stats-hero__sentence { font-size: 24px; line-height: 1.22; }
-.phone .stats-hero__facts { grid-template-columns: minmax(0, 1fr); margin-top: 20px; }
-.phone .stats-fact { padding: 12px 0 0; border-left: 0; }
-.ph-wrapped {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  width: 100%;
-  min-height: 72px;
-  margin: 8px 0 4px;
-  padding: 0 16px 0 0 !important;
-  border-radius: 14px;
-  overflow: hidden;
-  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-bg-raised)) !important;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 30%, transparent);
-}
-.ph-wrapped__year { display: grid; place-items: center; align-self: stretch; width: 76px; flex: none; background: var(--color-accent); color: var(--color-text-on-accent); font-family: var(--font-family); font-weight: 700; font-size: 18px; font-weight: 500; }
-.ph-wrapped__text { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
-.ph-wrapped__title { font-size: 16px; font-weight: 700; }
-.ph-wrapped__sub { font-size: 13px; color: var(--color-text-secondary); }
-.ph-wrapped__icon { color: var(--color-accent); flex: none; }
+.phone .stats-hero__facts { margin-top: 20px; }
+/* This year's Wrapped: a ruled row with the year's record, as on the Stats page. */
+.phone .ph-you__wrapped { grid-template-columns: 44px 56px minmax(0, 1fr) auto; gap: 12px; margin: 8px 0 4px; padding: 10px 0; border-bottom: 1px solid var(--ph-line, var(--ledger-faint)); border-top-color: var(--ph-line, var(--ledger-faint)); }
+.phone .ph-you__wrapped .year-entry__sleeve { width: 44px; height: 44px; }
 .ph-you__links { margin-top: 24px; }
 
 /* ---------------------------------------------------------------- settings, phone-sized */
@@ -1233,5 +1217,3 @@
 /* Status is said in words, not lit dots. */
 .ph-server__lamp, .ph-signin__pulse { display: none; }
 .ph-server__state.is-on { color: var(--color-accent); }
-.ph-wrapped__year { background: none; color: var(--color-accent); width: auto; padding: 0 4px 0 16px; font-size: 22px; }
-.ph-wrapped { background: color-mix(in srgb, var(--color-ink) 5%, var(--color-bg-raised)) !important; box-shadow: none; }

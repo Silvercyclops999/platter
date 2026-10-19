@@ -1,10 +1,10 @@
 /**
  * You, the phone's fourth tab: your picture and name, this month in words
- * (the profile page's own sentence), your year's Wrapped, what you played lately, and the way into
- * Settings. Drawn from what the core already has, like the profile page on
+ * (the profile page's own sentence), your year's Wrapped as a ruled row
+ * with its record, what you played lately, and the way into Settings. Drawn from what the core already has, like the profile page on
  * a computer; nothing here is published.
  */
-import { ChevronRight, Settings as Cog, Sparkles, UsersRound } from "lucide-react";
+import { ChevronRight, Settings as Cog, UsersRound } from "lucide-react";
 import { Art } from "../../components/Art";
 import { LikedCover } from "../../components/LikedCover";
 import { backend } from "../../lib/backend";
@@ -13,6 +13,7 @@ import { timeAgo } from "../../lib/relativeTime";
 import type { RecentsEntry } from "../../lib/types";
 import { useLoad } from "../../lib/useLoad";
 import { MonthStory } from "../../pages/MonthStory";
+import { YearEntry } from "../../pages/StatsWrapped";
 import { AvatarFace } from "../../shell/TopBar";
 import { useApp } from "../../stores/app";
 import { player } from "../../stores/player";
@@ -139,16 +140,7 @@ export function PhoneYou() {
       )}
 
       {wrappedOn && (
-        <button type="button" className="ph-wrapped" onClick={() => wrapped.open(year)}>
-          <span className="ph-wrapped__year tabular" aria-hidden="true">
-            {year}
-          </span>
-          <span className="ph-wrapped__text">
-            <span className="ph-wrapped__title">Your {year} Wrapped</span>
-            <span className="ph-wrapped__sub">Your year in records, songs and hours</span>
-          </span>
-          <Sparkles size={20} aria-hidden="true" className="ph-wrapped__icon" />
-        </button>
+        <YearEntry className="ph-you__wrapped" year={year} title={`Your ${year} Wrapped`} shown="Wrapped" sub="Your year in records, songs and hours" onOpen={() => wrapped.open(year)} />
       )}
 
       <section aria-labelledby="ph-you-recent">
