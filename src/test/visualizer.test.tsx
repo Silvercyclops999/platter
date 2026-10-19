@@ -365,7 +365,7 @@ describe("each style", () => {
     expect(within(view).getByRole("img", { name: "Level meters, left and right" })).toBeInTheDocument();
     expect(within(view).getAllByText("VU")).toHaveLength(2);
     expect(within(view).getAllByText("+3")).toHaveLength(2);
-    expect(within(view).getByText(/0 VU = −14 dBFS/)).toBeInTheDocument();
+    expect(within(view).getByText(/0 VU = −10 dBFS/)).toBeInTheDocument();
     frame();
     run(3);
     // Two needles and two lamps a frame.
