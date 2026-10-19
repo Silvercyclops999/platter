@@ -9,6 +9,8 @@
  * track columns can be dragged into a new order right in the picture.
  */
 import { Clock3, Heart, ListMusic, Maximize2, Mic2, MonitorSpeaker, PictureInPicture2, Play, Repeat, Search, Shuffle, SkipBack, SkipForward, Volume2 } from "lucide-react";
+import { RecordDisc } from "../../components/Record";
+import { RecordPlayerStill } from "../../shell/Turntable";
 import { memo, useEffect, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
 import { useNearView } from "../../lib/artistPhotos";
 import { lookProps, type LookParts } from "../../design/looks/apply";
@@ -419,7 +421,7 @@ function PlatterColumn({ now }: { now: boolean }) {
   return (
     <div className="lp-fplatter">
       <span className="lp-fplatter__disc">
-        <Cover hue={a.hue} round className="lp-fplatter__label" />
+        <RecordDisc label={{ hue: a.hue }} seed={a.title} />
       </span>
       {now && (
         <span className="lp-fplatter__meta">
@@ -563,10 +565,7 @@ function TurntableBody({ parts, page, drag }: { parts: LookParts; page: "home" |
     <div className="lp-fbody">
       <div className="lp-fleft lp-tt">
         <span className="lp-tt__plinth">
-          <span className="lp-tt__disc">
-            <Cover hue={a.hue} round className="lp-tt__label" />
-          </span>
-          <span className="lp-tt__arm" />
+          <RecordPlayerStill label={{ hue: a.hue }} seed={a.title} />
         </span>
         <span className="lp-tt__plates">
           <span className="lp-plate">

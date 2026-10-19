@@ -57,9 +57,10 @@
 /* The record is the way into now playing. */
 .tt-plinth__open {
   position: absolute;
-  left: 2%;
-  top: 7%;
-  width: 86%;
+  /* Over the record: centre 160, 190 and radius 151 of the drawing's 412 x 346 mm. */
+  left: 2.2%;
+  top: 11.3%;
+  width: 73.3%;
   aspect-ratio: 1;
   border-radius: 50%;
   background: transparent;

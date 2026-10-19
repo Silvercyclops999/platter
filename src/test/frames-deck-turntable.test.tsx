@@ -289,16 +289,16 @@ describe("the Turntable frame", () => {
     expect((document.querySelector(".app") as HTMLElement).style.getPropertyValue("--frame-left")).toBe(`${TURNTABLE_COLUMN.large}px`);
   });
 
-  it("reduced motion holds the record still and fades the arm", async () => {
+  it("reduced motion holds the record still and puts the arm in place", async () => {
     setReducedMotion(true);
-    expect(turntableCss).toMatch(/\[data-reduced-motion="true"\] \.turntable__arm \{ animation: tt-fade/);
+    expect(turntableCss).toMatch(/\[data-reduced-motion="true"\] :is\(\.turntable__arm, \.turntable__arm-shadow\) \{ transition: none; \}/);
     expect(turntableFrameCss).toMatch(/\[data-reduced-motion="true"\] \.tt-tab::after/);
     await settings({ layout: frame("turntable") });
     render(<AppShell />);
     const column = await screen.findByTestId("turntable-column");
     const record = column.querySelector<HTMLElement>(".turntable__record")!;
     await new Promise((r) => setTimeout(r, 60));
-    expect(record.style.transform === "" || record.style.transform === "rotate(0.00deg)").toBe(true);
+    expect(record.style.transform === "" || /rotate\(0\.00deg\)$/.test(record.style.transform)).toBe(true);
   });
 });
 

@@ -234,7 +234,7 @@ function FullWindowView() {
     stage = (
       <div className={`fw__now ${turntable ? "fw__now--turntable" : ""}`} key={track.id}>
         {turntable ? (
-          <Turntable thumb={track.thumb} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} playing={playing && !flip} requestSize={COVER_ART}>
+          <Turntable thumb={track.thumb} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} track={track} playing={playing && !flip} requestSize={COVER_ART}>
             {flip && (
               <>
                 <p className="turntable__ended" role="status">

@@ -1,0 +1,7 @@
+/* A record drawn to scale (Record.tsx). The vinyl is near black and matte in every look. */
+.record__vinyl { fill: #121212; }
+.record__label-title,
+.record__label-artist { font-family: var(--font-headings, var(--font-family)); font-weight: 600; letter-spacing: 0.02em; }
+.record-disc { display: block; width: 100%; height: 100%; }
+/* Off the platter, what's behind shows through the spindle hole. */
+.record-disc__hole { fill: var(--record-hole, var(--color-bg-raised)); }

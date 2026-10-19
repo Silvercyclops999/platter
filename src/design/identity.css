@@ -93,8 +93,8 @@
 :root[data-identity] .track-list__head { box-shadow: 0 1px 0 var(--engrave-light); }
 
 /* ---------------------------------------------------------------- Album header: the sleeve */
-/* No colour band: a quiet tint from the cover on the panel, the cover as the
-   sleeve, and the record half out of it in the cover's colour. */
+/* No colour band: a quiet tint from the cover on the panel and the cover
+   itself, large, with a real shadow. */
 :root[data-identity] .detail-header {
   background: linear-gradient(180deg, color-mix(in srgb, var(--tint-shade) 55%, var(--color-bg-raised)) 0%, color-mix(in srgb, var(--tint-shade) 28%, var(--color-bg-raised)) 100%);
   box-shadow: inset 0 -1px 0 var(--engrave-dark), 0 1px 0 var(--engrave-light);
@@ -103,35 +103,16 @@
   background: linear-gradient(180deg, color-mix(in srgb, var(--tint) 16%, var(--color-bg-raised)) 0%, color-mix(in srgb, var(--tint) 7%, var(--color-bg-raised)) 100%);
 }
 :root[data-identity] .detail-header ~ .detail-body { background: none; }
-:root[data-identity] .detail-header__art .art { box-shadow: 0 10px 28px rgba(0, 0, 0, 0.42); border-radius: 2px; }
-:root[data-identity="sleeve"] .detail-header__art .art { box-shadow: 0 8px 22px rgba(43, 33, 23, 0.28); }
-
-.sleeve-disc { display: none; }
-:root[data-identity] .detail-header__art:has(.sleeve-disc) {
-  position: relative;
-  isolation: isolate;
-  /* Room for the half of the record that is out of the sleeve. */
-  margin-right: 104px;
+:root[data-identity] .detail-header__art .art {
+  border-radius: 2px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 14px rgba(0, 0, 0, 0.24), 0 22px 44px rgba(0, 0, 0, 0.32);
+  /* A thin edge, as a printed sleeve has against a dark room. */
+  outline: 1px solid rgba(255, 255, 255, 0.07);
+  outline-offset: -1px;
 }
-:root[data-identity] .detail-header--compact .detail-header__art:has(.sleeve-disc) { margin-right: 58px; }
-:root[data-identity] .sleeve-disc {
-  display: block;
-  position: absolute;
-  z-index: -1;
-  top: 4%;
-  left: 46%;
-  width: 92%;
-  aspect-ratio: 1;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle, var(--color-bg-raised) 0 2.2%, color-mix(in srgb, var(--tint) 85%, #000) 2.6% 31%, #0b0b0b 31.4% 32.4%, transparent 32.8%),
-    repeating-radial-gradient(circle, #131313 0 1.1px, #1d1d1d 1.1px 2.2px),
-    #151515;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-  animation: sleeve-slide var(--motion-long) var(--motion-easing) both;
-}
-@keyframes sleeve-slide {
-  from { translate: calc(-40% * var(--motion-move)) 0; opacity: 0; }
+:root[data-identity="sleeve"] .detail-header__art .art {
+  box-shadow: 0 1px 2px rgba(43, 33, 23, 0.22), 0 6px 14px rgba(43, 33, 23, 0.14), 0 20px 38px rgba(43, 33, 23, 0.18);
+  outline-color: rgba(43, 33, 23, 0.12);
 }
 
 /* ---------------------------------------------------------------- Artist banner */
@@ -264,5 +245,4 @@
 @keyframes identity-fade {
   from { opacity: 0; }
 }
-:root[data-reduced-motion="true"][data-identity] .empty-state::after,
-:root[data-reduced-motion="true"][data-identity] .sleeve-disc { animation: identity-fade var(--motion-medium) ease both; }
+:root[data-reduced-motion="true"][data-identity] .empty-state::after { animation: identity-fade var(--motion-medium) ease both; }

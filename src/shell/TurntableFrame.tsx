@@ -79,10 +79,19 @@ function Platter({ compact }: { compact: boolean }) {
   const playing = usePlayer((s) => s.state?.status === "playing");
   const expanded = useFullWindow((s) => s.open);
   const nowPlayingOpen = useUi((s) => s.nowPlayingOpen) && !expanded;
+  // The record player setting off: the record holds still (the arm still follows the music).
+  const spin = useSettings((s) => (s.settings?.recordMotion ?? "off") !== "off");
   return (
     <div className="tt-plinth">
       <div className="tt-plinth__deck">
-        <Turntable thumb={track?.thumb} sleeve={track ? { title: track.albumTitle, artist: track.artistTitle } : null} playing={!!track && playing} requestSize={compact ? 240 : 480} />
+        <Turntable
+          thumb={track?.thumb}
+          sleeve={track ? { title: track.albumTitle, artist: track.artistTitle } : null}
+          track={track}
+          playing={!!track && playing}
+          spin={spin}
+          requestSize={compact ? 240 : 480}
+        />
         {track && (
           <button
             type="button"

@@ -129,8 +129,6 @@ function LibraryAlbumView({ id, tab }: { id: string; tab?: "sleeve" }) {
     <div className="detail">
       <header ref={header} className={`detail-header ${compact ? "detail-header--compact" : ""}`}>
         <div className="detail-header__art">
-          {/* The record half out of its sleeve (drawn only in Platter's own looks). */}
-          {album && <span className="sleeve-disc" aria-hidden="true" />}
           {album ? (
             <button
               ref={coverBtn}

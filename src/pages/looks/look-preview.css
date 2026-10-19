@@ -253,8 +253,7 @@
 .lp-key.is-on { color: var(--color-text-primary); background: var(--color-state-selected); }
 
 .lp-fplatter { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 16px 12px; border-radius: var(--radius-card); background: var(--color-bg-raised); }
-.lp-fplatter__disc { display: grid; place-items: center; width: 150px; height: 150px; border-radius: 50%; background: radial-gradient(circle, #222 0 30%, #111 31% 100%); }
-.lp-fplatter__label { width: 56px; }
+.lp-fplatter__disc { display: block; width: 150px; height: 150px; border-radius: 50%; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35); }
 .lp-fplatter__meta { display: flex; flex-direction: column; align-items: center; text-align: center; }
 .lp-fplatter .lp-tonearm { flex: none; width: 100%; }
 .lp-fleft .lp-np { flex: 1; width: auto; }
@@ -292,10 +291,7 @@
 /* ---------------------------------------------------------------- Turntable */
 .lp-tt { gap: 8px; padding: 12px; border-radius: var(--radius-card); background: var(--color-bg-raised); width: 200px; }
 .lp-tt__plinth { position: relative; display: block; padding: 8px; border-radius: 8px; background: var(--color-bg-base); box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.3); }
-.lp-tt__disc { display: grid; place-items: center; width: 150px; aspect-ratio: 1; border-radius: 50%; background: repeating-radial-gradient(circle, #121212 0 1px, #1b1b1b 1px 2px), #141414; box-shadow: 0 0 0 3px #3b3833; }
-.lp-tt__label { width: 54px; }
-.lp-tt__arm { position: absolute; right: 10px; top: 10px; width: 4px; height: 110px; border-radius: 2px; background: var(--color-text-secondary); transform: rotate(14deg); transform-origin: top center; }
-.lp-tt__arm::after { content: ""; position: absolute; bottom: -4px; left: -3px; width: 10px; height: 14px; border-radius: 2px; background: var(--color-accent); }
+.lp-tt__plinth .turntable__svg { display: block; width: 100%; height: auto; }
 .lp-tt__plates { display: flex; gap: 6px; }
 .lp-tt__plates .lp-plate { display: inline-flex; align-items: center; gap: 4px; }
 .lp-tt__lamp { width: 4px; height: 4px; border-radius: 50%; background: var(--color-accent); }

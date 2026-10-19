@@ -7,9 +7,6 @@
 .home__records { container-type: inline-size; }
 
 .record-hero {
-  --record-disc: #121110;
-  --record-groove-a: #141312;
-  --record-groove-b: #1e1c1a;
   position: relative;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -28,12 +25,11 @@
   background-image: var(--paper-grain);
 }
 
-/* The sleeve and the record half out of it. */
+/* The sleeve: the cover itself, with a real shadow and a thin edge. */
 .record-hero__sleeve {
   position: relative;
   isolation: isolate;
   width: clamp(128px, 26cqi, 248px);
-  margin-right: clamp(52px, 10cqi, 104px);
 }
 .record-hero__cover {
   display: block;
@@ -44,41 +40,21 @@
 }
 .record-hero__cover .art {
   border-radius: 2px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 14px rgba(0, 0, 0, 0.24), 0 20px 40px rgba(0, 0, 0, 0.3);
+  outline: 1px solid rgba(255, 255, 255, 0.07);
+  outline-offset: -1px;
 }
-:root[data-identity="sleeve"] .record-hero__cover .art { box-shadow: 0 10px 24px rgba(43, 33, 23, 0.28), 0 0 0 1px rgba(43, 33, 23, 0.08); }
-.record-hero__disc,
+:root[data-identity="sleeve"] .record-hero__cover .art {
+  box-shadow: 0 1px 2px rgba(43, 33, 23, 0.22), 0 6px 14px rgba(43, 33, 23, 0.14), 0 18px 34px rgba(43, 33, 23, 0.18);
+  outline-color: rgba(43, 33, 23, 0.12);
+}
 .sleeve-card__disc {
   position: absolute;
   z-index: -1;
   aspect-ratio: 1;
   border-radius: 50%;
-  background:
-    radial-gradient(circle, var(--color-bg-raised) 0 2.2%, color-mix(in srgb, var(--record-label) 85%, #000) 2.6% 31%, #0b0b0b 31.4% 32.4%, transparent 32.8%),
-    repeating-radial-gradient(circle, var(--record-groove-a, #141312) 0 1.1px, var(--record-groove-b, #1e1c1a) 1.1px 2.2px),
-    var(--record-disc, #121110);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.42), inset 0 0 0 1px rgba(255, 255, 255, 0.09);
-}
-.record-hero__disc {
-  top: 4%;
-  left: 40%;
-  width: 92%;
-  animation: record-slide var(--motion-long) var(--motion-easing) both;
-}
-/* A sheen on the vinyl that turns while the record plays. */
-.record-hero__disc::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: conic-gradient(from 20deg, transparent 0 12%, rgba(255, 255, 255, 0.1) 16%, transparent 22% 62%, rgba(255, 255, 255, 0.05) 66%, transparent 72%);
-}
-.record-hero.is-spinning .record-hero__disc::after { animation: record-spin 1.8s linear infinite; }
-@keyframes record-slide {
-  from { translate: calc(-36% * var(--motion-move)) 0; opacity: 0; }
-}
-@keyframes record-spin {
-  to { rotate: 360deg; }
+  /* The record itself is drawn to scale (components/Record.tsx). */
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.42);
 }
 
 .record-hero__body { min-width: 0; max-width: 560px; }
@@ -148,7 +124,6 @@
 @container (max-width: 440px) {
   .record-hero { grid-template-columns: minmax(0, 1fr); padding: var(--space-6); }
   .record-hero__sleeve { width: 150px; margin-right: 0; }
-  .record-hero__disc { left: 34%; width: 88%; }
 }
 
 /* ---------------------------------------------------------------- Record shelves */
@@ -193,7 +168,6 @@
 
 /* ---------------------------------------------------------------- Sleeve card */
 .sleeve-card {
-  --record-disc: #121110;
   position: relative;
   min-width: 0;
   padding-top: 2px;
@@ -302,7 +276,5 @@
   color: var(--color-text-primary);
 }
 
-/* Reduced motion: no sliding or turning; the record still shows. */
-:root[data-reduced-motion="true"] .record-hero__disc { animation: identity-fade var(--motion-medium) ease both; }
-:root[data-reduced-motion="true"] .record-hero.is-spinning .record-hero__disc::after { animation: none; }
+/* Reduced motion: no sliding; the record still shows. */
 :root[data-reduced-motion="true"] :is(.sleeve-card__disc, .sleeve-card__play) { transition-duration: 0s; }

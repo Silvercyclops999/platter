@@ -10,6 +10,7 @@ import { Pause, Play } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import { Art } from "../components/Art";
 import { Button } from "../components/Button";
+import { RecordDisc } from "../components/Record";
 import { identityOf } from "../design/themes";
 import { backend } from "../lib/backend";
 import { headerColorsFromServer } from "../lib/color";
@@ -105,7 +106,6 @@ export function RecordHero({ progress: p }: { progress: RecordProgress }) {
       onContextMenu={a.onContextMenu}
     >
       <div className="record-hero__sleeve">
-        <span className="record-hero__disc" aria-hidden="true" />
         <button type="button" className="record-hero__cover" onClick={open} aria-label={`Open ${p.album.title}`} tabIndex={-1}>
           <Art path={p.album.thumb} fluid requestSize={320} kind="album" sleeve={{ title: p.album.title, artist: p.album.artistTitle }} />
         </button>
@@ -177,7 +177,9 @@ export function SleeveCard({ album, meta, progress, extra }: SleeveCardProps) {
       onContextMenu={a.onContextMenu}
     >
       <div className="sleeve-card__art">
-        <span className="sleeve-card__disc" aria-hidden="true" />
+        <span className="sleeve-card__disc" aria-hidden="true">
+          <RecordDisc label={{ color: "color-mix(in srgb, var(--record-label) 85%, #000)" }} seed={album.id} />
+        </span>
         <span className="sleeve-card__sleeve">
           <Art path={album.thumb} fluid requestSize={220} kind="album" sleeve={{ title: album.title, artist: album.artistTitle }} />
         </span>
