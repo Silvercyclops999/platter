@@ -3,7 +3,7 @@
  * frame, row glyphs, a like control and a light tap of feedback.
  */
 import { Heart, Pin } from "lucide-react";
-import { createContext, useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Plate } from "../components/Plate";
 import { backend, type HapticKind } from "../lib/backend";
 import { prefersReducedMotion } from "../design/motion";
@@ -20,6 +20,7 @@ import type { Track } from "../lib/types";
 import { setLiked, useIsLiked } from "../stores/likes";
 import { useSettings } from "../stores/settings";
 import { phone } from "./phoneUi";
+import { afterFrame, FADE_MS, reduced, run } from "./motion";
 
 /** Taps closer together than this buzz once. */
 export const HAPTIC_GAP_MS = 120;
@@ -162,13 +163,17 @@ export const SheetLeaving = createContext(false);
 
 /** How far down a sheet is dragged by its top before letting go closes it. */
 export const SHEET_CLOSE_PX = 90;
+/** A sheet slides away in this long (its dim fades a little quicker). */
+export const SHEET_OUT_MS = 260;
 
 /**
  * A bottom sheet: a handle, a heading, and its body over the dimmed screen.
  * Escape goes back to the sheet under it; tapping the dim area closes every
  * sheet (or only this one with `dimBack`, for a sheet stacked on another).
  * Dragging the top of the sheet down closes it. The frame draws on the tap;
- * its body follows a frame later so the slide starts at once.
+ * its body follows a frame later so the slide starts at once. Closing is the
+ * same in reverse: the sheet starts sliding away on the tap itself, and the
+ * close (with whatever it sets off) follows once that first frame is drawn.
  */
 export function SheetFrame({
   title,
@@ -199,6 +204,35 @@ export function SheetFrame({
   const id = useId();
   const leaving = useContext(SheetLeaving);
   const box = useRef<HTMLDivElement>(null);
+  const layer = useRef<HTMLDivElement>(null);
+  const dimEl = useRef<HTMLDivElement>(null);
+  const out = useRef(false);
+  // Starts the slide away on screen now. True when it runs (the close itself can then wait a frame).
+  const slideOut = (): boolean => {
+    if (out.current) return true;
+    const el = box.current;
+    if (!el || typeof el.animate !== "function") return false;
+    out.current = true;
+    layer.current?.setAttribute("data-sliding-out", "");
+    const quiet = reduced();
+    if (quiet) run(el, [{ opacity: 1 }, { opacity: 0 }], FADE_MS, { easing: "ease-out" });
+    else run(el, [{ transform: el.style.transform || "none" }, { transform: "translateY(100%)" }], SHEET_OUT_MS);
+    const d = dimEl.current;
+    if (d) run(d, [{ opacity: getComputedStyle(d).opacity || "1" }, { opacity: 0 }], quiet ? FADE_MS : 240);
+    return true;
+  };
+  // However it closes (a choice, the player closing), it slides away before it is drawn closed.
+  useLayoutEffect(() => {
+    if (leaving) slideOut();
+  }, [leaving]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Asked once: a second tap while the first close waits for its frame does nothing.
+  const asked = useRef(false);
+  const closeAfterFirstFrame = (close: () => void) => {
+    if (asked.current) return;
+    if (!slideOut()) return close();
+    asked.current = true;
+    afterFrame(close);
+  };
   const [ready, setReady] = useState(typeof requestAnimationFrame === "undefined" || import.meta.env?.MODE === "test");
   useEffect(() => {
     if (ready) return;
@@ -222,8 +256,8 @@ export function SheetFrame({
       if (drag.current?.id !== e.pointerId) return;
       const far = e.clientY - drag.current.y;
       drag.current = null;
+      if (far > SHEET_CLOSE_PX) closeAfterFirstFrame(onClose);
       setDy(0);
-      if (far > SHEET_CLOSE_PX) onClose();
     },
     onPointerCancel: () => {
       drag.current = null;
@@ -240,15 +274,15 @@ export function SheetFrame({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        closeAfterFirstFrame(onClose);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, leaving]);
   return (
-    <div className={`ph-sheet-layer ${leaving ? "is-closing" : ""}`} aria-hidden={leaving || undefined} inert={leaving || undefined}>
-      <div className="ph-sheet-dim" data-testid="sheet-dim" onClick={dimBack ? onClose : phone.closeSheets} aria-hidden="true" />
+    <div ref={layer} className={`ph-sheet-layer ${leaving ? "is-closing" : ""}`} aria-hidden={leaving || undefined} inert={leaving || undefined}>
+      <div ref={dimEl} className="ph-sheet-dim" data-testid="sheet-dim" onClick={() => closeAfterFirstFrame(dimBack ? onClose : phone.closeSheets)} aria-hidden="true" />
       <div
         ref={box}
         className={`ph-sheet ${tall ? "ph-sheet--tall" : ""} ${dy ? "is-dragging" : ""} ${className}`}

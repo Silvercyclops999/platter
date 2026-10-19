@@ -156,3 +156,13 @@ export function whenIdle(fn: () => void, fallbackMs = 250, timeoutMs = 1000): ()
   const t = setTimeout(fn, fallbackMs);
   return () => clearTimeout(t);
 }
+
+/**
+ * Runs `fn` once the next frame is on screen: a move started now is already
+ * running on the compositor before the work in `fn` begins. Without frames
+ * (tests) it runs at once.
+ */
+export function afterFrame(fn: () => void) {
+  if (typeof requestAnimationFrame !== "function") return fn();
+  requestAnimationFrame(() => setTimeout(fn, 0));
+}

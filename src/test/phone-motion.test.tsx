@@ -433,6 +433,38 @@ describe("sheets", () => {
     act(() => void vi.advanceTimersByTime(300));
     expect(document.querySelector(".ph-sheet-layer")).toBeNull();
   });
+
+  it("a tap on the dim starts the slide on the tap itself; the close follows once that frame is drawn", async () => {
+    const anims = fakeAnimations();
+    setSheetLeaveMs(260);
+    render(<PhoneShell />);
+    act(() => phone.show({ kind: "queue" }));
+    act(() => phone.push({ kind: "sleep" }));
+    fireEvent.click(screen.getAllByTestId("sheet-dim")[1]);
+    const slide = anims.made.find((m) => m.el.classList.contains("ph-sheet"));
+    expect(slide?.frames[slide.frames.length - 1]).toEqual({ transform: "translateY(100%)" });
+    expect(anims.made.some((m) => m.el.classList.contains("ph-sheet-dim"))).toBe(true);
+    // Nothing else has happened yet: both sheets are still open, and a second tap asks nothing more.
+    expect(usePhoneUi.getState().sheets).toHaveLength(2);
+    fireEvent.click(screen.getAllByTestId("sheet-dim")[1]);
+    // Then the stacked sheet goes back to the one under it, once.
+    await waitFor(() => expect(usePhoneUi.getState().sheets).toEqual([{ kind: "queue" }]));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(usePhoneUi.getState().sheets).toEqual([{ kind: "queue" }]);
+    expect(anims.made.filter((m) => m.el.classList.contains("ph-sheet"))).toHaveLength(1);
+  });
+
+  it("under reduced motion a closing sheet fades instead", async () => {
+    setReducedMotion(true);
+    const anims = fakeAnimations();
+    setSheetLeaveMs(260);
+    render(<PhoneShell />);
+    act(() => phone.show({ kind: "librarySort" }));
+    fireEvent.click(screen.getByTestId("sheet-dim"));
+    const slide = anims.made.find((m) => m.el.classList.contains("ph-sheet"));
+    expect(slide?.frames).toEqual([{ opacity: 1 }, { opacity: 0 }]);
+    await waitFor(() => expect(usePhoneUi.getState().sheets).toHaveLength(0));
+  });
 });
 
 describe("feedback without toasts", () => {

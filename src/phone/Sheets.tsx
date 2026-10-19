@@ -34,7 +34,7 @@ import {
   UsersRound,
   type LucideIcon,
 } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Art } from "../components/Art";
 import { trackArtistLine } from "../lib/format";
 import { backend } from "../lib/backend";
@@ -121,7 +121,8 @@ export function SheetHost() {
   );
 }
 
-function SheetFor({ sheet }: { sheet: Sheet }) {
+/** One sheet. Memoised: a sheet that starts closing redraws only its frame, never its rows. */
+const SheetFor = memo(function SheetFor({ sheet }: { sheet: Sheet }) {
   switch (sheet.kind) {
     case "queue":
       return <QueueSheet />;
@@ -144,7 +145,7 @@ function SheetFor({ sheet }: { sheet: Sheet }) {
     case "create":
       return <CreateSheet />;
   }
-}
+});
 
 // ---------------------------------------------------------------- queue
 

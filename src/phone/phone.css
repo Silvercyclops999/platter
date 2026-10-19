@@ -520,8 +520,9 @@
 /* Sheets are fixed over the whole screen; nothing under them scrolls or moves when one opens. */
 .ph-sheet-layer { position: fixed; inset: 0; z-index: 80; }
 .ph-sheet-layer.is-closing { pointer-events: none; }
-.ph-sheet-layer.is-closing .ph-sheet-dim { opacity: 0; }
-.ph-sheet-layer.is-closing .ph-sheet { transform: translateY(100%) !important; transition: transform 260ms var(--ph-ease); }
+/* SheetFrame slides a closing sheet away itself (data-sliding-out); these are for when it can't. */
+.ph-sheet-layer.is-closing:not([data-sliding-out]) .ph-sheet-dim { opacity: 0; }
+.ph-sheet-layer.is-closing:not([data-sliding-out]) .ph-sheet { transform: translateY(100%) !important; transition: transform 260ms var(--ph-ease); }
 .ph-sheet-layer + .ph-sheet-layer .ph-sheet-dim { background: rgba(0, 0, 0, 0.22); }
 .ph-sheet-dim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.5); animation: ph-fade 140ms ease-out; transition: opacity 240ms var(--ph-ease); }
 @keyframes ph-fade { from { opacity: 0; } }
@@ -1179,7 +1180,7 @@
 .ph-np__top { background: linear-gradient(180deg, color-mix(in srgb, var(--ph-tint) 46%, var(--color-bg-base)) 78%, transparent); }
 /* Inputs take a caret and a selection even though the rest of the phone doesn't. */
 .phone :is(input, textarea, [contenteditable="true"]) { -webkit-user-select: text; user-select: text; }
-:root[data-reduced-motion="true"] .ph-sheet-layer.is-closing .ph-sheet { opacity: 0; transition: opacity 120ms ease-out; }
+:root[data-reduced-motion="true"] .ph-sheet-layer.is-closing:not([data-sliding-out]) .ph-sheet { opacity: 0; transition: opacity 120ms ease-out; }
 
 /* ---------------------------------------------------------------- like */
 /* The heart fills and gives one short pop; that is the whole confirmation. */
