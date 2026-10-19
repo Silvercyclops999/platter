@@ -622,6 +622,55 @@ async fn device_loss_pauses_and_resume_reopens() {
     }
 }
 
+async fn audio_flows(r: &Rig) {
+    let frames = r.cap.len_frames(2);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while r.cap.len_frames(2) <= frames {
+        assert!(Instant::now() < deadline, "no audio");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_call_pauses_and_its_end_plays_on() {
+    let mut r = rig(&["a"], 3.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.interruption(true, false);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    r.player.interruption(false, true);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Playing).await;
+    audio_flows(&r).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn after_another_app_takes_the_sound_play_works() {
+    let mut r = rig(&["a"], 3.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    // A video elsewhere: no word to play on, and the end may never come.
+    r.player.interruption(true, false);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    r.player.interruption(false, false);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Paused, "stays paused without the word");
+    r.player.resume().await.unwrap();
+    wait_state(&r.player, |s| s.status == PlayerStatus::Playing).await;
+    audio_flows(&r).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_paused_song_stays_paused_after_an_interruption() {
+    let mut r = rig(&["a"], 3.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.pause().await.unwrap();
+    r.player.interruption(true, false);
+    r.player.interruption(false, true);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Paused);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn paused_output_goes_idle_and_play_wakes_it() {
     let cfg = PlayerConfig {
