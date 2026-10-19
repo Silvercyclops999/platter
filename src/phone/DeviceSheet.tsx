@@ -80,8 +80,6 @@ export function DeviceSheet() {
   const busy = useRemote((s) => s.busy);
   const [help, setHelp] = useState(false);
   useEffect(() => watchPlayers(), []);
-  const downloaded = useIsDownloaded(track?.id ?? "");
-  const quality = track ? plateText(track, downloaded) : null;
   const others = sortPlaces((players ?? []).filter((p) => p.id !== remote?.playerId && p.online));
   const CardIcon = remote ? KIND_ICON[remote.kind] : Smartphone;
   return (
