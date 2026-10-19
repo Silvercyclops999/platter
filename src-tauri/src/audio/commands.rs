@@ -347,10 +347,21 @@ impl BatteryCache {
         let stale = now_s.saturating_sub(self.at.load(Ordering::Relaxed)) >= BATTERY_FRESH_S;
         if stale && !self.refreshing.swap(true, Ordering::SeqCst) {
             spawn(Box::pin(async move {
-                if let Ok(Ok(v)) = tokio::time::timeout(BATTERY_TIMEOUT, tokio::task::spawn_blocking(probe)).await {
-                    self.on.store(v, Ordering::Relaxed);
-                    self.at.store(now_s, Ordering::Relaxed);
+                let mut task = tokio::task::spawn_blocking(probe);
+                match tokio::time::timeout(BATTERY_TIMEOUT, &mut task).await {
+                    Ok(Ok(v)) => self.on.store(v, Ordering::Relaxed),
+                    Ok(Err(_)) => {}
+                    // A probe that hangs keeps the last answer for another
+                    // stretch, and no second probe starts until it returns,
+                    // so a stuck one can't pile up blocking threads.
+                    Err(_) => {
+                        self.at.store(now_s, Ordering::Relaxed);
+                        let _ = task.await;
+                        self.refreshing.store(false, Ordering::SeqCst);
+                        return;
+                    }
                 }
+                self.at.store(now_s, Ordering::Relaxed);
                 self.refreshing.store(false, Ordering::SeqCst);
             }));
         }

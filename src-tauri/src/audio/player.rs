@@ -1033,7 +1033,8 @@ impl Actor {
         let mut tick = tokio::time::interval(self.config.position_interval);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         // Visualizer frames are made here, off the audio thread, one at a
-        // time at the watched rate; unwatched, the tick isn't polled.
+        // time at the watched rate; unwatched, paused or stopped, the tick
+        // isn't polled (the view lets its lines fall when frames stop).
         let vis = self.engine.visualizer();
         let mut vis_fps = 0;
         let mut vis_tick = tokio::time::interval(Duration::from_secs(1));
@@ -1068,7 +1069,7 @@ impl Actor {
                 }
                 // Paused or stopped, the tick isn't polled, so the actor sleeps.
                 _ = tick.tick(), if ticks_in(self.status) => self.on_tick(),
-                _ = vis_tick.tick(), if watched => {
+                _ = vis_tick.tick(), if watched && ticks_in(self.status) => {
                     if let Some(sp) = vis.frame() {
                         self.sink.spectrum(&sp);
                     }
