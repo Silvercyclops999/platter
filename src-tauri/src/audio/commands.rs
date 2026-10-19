@@ -313,3 +313,66 @@ pub async fn follow_output<R: tauri::Runtime>(app: tauri::AppHandle<R>, player: 
         }
     }
 }
+
+/// Battery state, asked at most every 30 s (on a Mac asking runs a tool).
+fn on_battery_cached() -> bool {
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+    static AT: AtomicU64 = AtomicU64::new(0);
+    static ON: AtomicBool = AtomicBool::new(false);
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    if now.saturating_sub(AT.load(Ordering::Relaxed)) >= 30 {
+        ON.store(crate::platform::power::on_battery(), Ordering::Relaxed);
+        AT.store(now, Ordering::Relaxed);
+    }
+    ON.load(Ordering::Relaxed)
+}
+
+/// Whether a visualizer watch may run: the asking window is on screen, and
+/// on battery only when the setting allows it.
+pub fn visualizer_allowed(on: bool, window_seen: bool, pause_on_battery: bool, on_battery: impl FnOnce() -> bool) -> bool {
+    on && window_seen && !(pause_on_battery && on_battery())
+}
+
+/// Starts or renews a visualizer watch: `player://spectrum` frames come at
+/// `fps` (1 to 60) until it is turned off or not renewed within 3 s.
+/// `scope` adds the stereo pairs. Returns whether it runs: not while the
+/// window is minimised or hidden, nor on battery with `pauseOnBattery`.
+#[tauri::command]
+pub async fn visualizer_watch(
+    player: State<'_, PlayerHandle>,
+    window: tauri::WebviewWindow,
+    on: bool,
+    fps: u32,
+    scope: Option<bool>,
+    pause_on_battery: Option<bool>,
+) -> AppResult<bool> {
+    #[cfg(desktop)]
+    let seen = window.is_visible().unwrap_or(true) && !window.is_minimized().unwrap_or(false);
+    #[cfg(mobile)]
+    let seen = {
+        let _ = &window;
+        true
+    };
+    let rest_on_battery = pause_on_battery.unwrap_or(true);
+    let run = on
+        && tokio::task::spawn_blocking(move || visualizer_allowed(true, seen, rest_on_battery, on_battery_cached))
+            .await
+            .unwrap_or(false);
+    player.visualizer_watch(run, fps, scope.unwrap_or(false));
+    Ok(run)
+}
+
+#[cfg(test)]
+mod visualizer_tests {
+    use super::visualizer_allowed;
+
+    #[test]
+    fn the_visualizer_runs_only_when_seen_and_not_resting_on_battery() {
+        assert!(visualizer_allowed(true, true, true, || false));
+        assert!(!visualizer_allowed(true, false, true, || false), "minimised or hidden");
+        assert!(!visualizer_allowed(true, true, true, || true), "on battery, resting");
+        assert!(visualizer_allowed(true, true, false, || true), "on battery, allowed");
+        assert!(!visualizer_allowed(false, true, false, || false));
+    }
+}
