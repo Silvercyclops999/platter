@@ -4,12 +4,13 @@
  * same folding and typo rules as on the desktop: the core does the search.
  */
 import { MoreHorizontal, Search as SearchIcon, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Art } from "../../components/Art";
 import { backend } from "../../lib/backend";
 import type { SearchHit, SearchResults } from "../../lib/types";
 import { hitInfo, hitOf, mixedHits, openHit, rememberHit, subtitleWithType } from "../../shell/searchModel";
-import { useRouter } from "../../stores/router";
+import { useLoad } from "../../lib/useLoad";
+import { nav, useRouter } from "../../stores/router";
 import { phone } from "../phoneUi";
 
 /** Typing settles for this long before the search runs. */
@@ -23,12 +24,30 @@ export function phoneResults(res: SearchResults): SearchHit[] {
   return top ? [top, ...rest] : rest;
 }
 
+/** The type pills over the results. */
+export const SEARCH_KINDS = [
+  { id: "all", label: "All" },
+  { id: "track", label: "Songs" },
+  { id: "album", label: "Records" },
+  { id: "artist", label: "Artists" },
+  { id: "playlist", label: "Playlists" },
+] as const;
+export type SearchKind = (typeof SEARCH_KINDS)[number]["id"];
+
+/** The results of one type (all of them for "all"). */
+export function ofKind(hits: SearchHit[], kind: SearchKind): SearchHit[] {
+  return kind === "all" ? hits : hits.filter((h) => hitInfo(h)?.kind === kind);
+}
+
 export function PhoneSearch() {
   const route = useRouter((s) => s.entries[s.index].route);
   const initial = route.name === "search" ? (route.query ?? "") : "";
   const [query, setQuery] = useState(initial);
   const [res, setRes] = useState<SearchResults | null>(null);
   const [recents, setRecents] = useState<SearchHit[] | null>(null);
+  const [kind, setKind] = useState<SearchKind>("all");
+  const [focused, setFocused] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
   const q = query.trim();
 
   useEffect(() => {
@@ -65,10 +84,13 @@ export function PhoneSearch() {
     setRecents((r) => (r ?? []).filter((x) => hitInfo(x)?.key !== i.key));
     backend.searchRecentRemove(i.kind, i.id).catch(() => {});
   };
-  const hits = res ? phoneResults(res) : [];
+  const all = res ? phoneResults(res) : [];
+  const hits = ofKind(all, kind);
+  const kinds = SEARCH_KINDS.filter((k) => k.id === "all" || all.some((h) => hitInfo(h)?.kind === k.id));
   return (
     <div className="ph-page ph-search">
       <h1 className="ph-title">Search</h1>
+      <div className="ph-search__bar">
       <div className="ph-field">
         <SearchIcon size={20} aria-hidden="true" />
         <input
@@ -76,7 +98,11 @@ export function PhoneSearch() {
           className="ph-field__input"
           placeholder="Artists, records, songs"
           aria-label="Search your library"
+          ref={input}
           value={query}
+          enterKeyHint="search"
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           onChange={(e) => setQuery(e.target.value)}
           autoCapitalize="none"
           autoCorrect="off"
@@ -88,6 +114,29 @@ export function PhoneSearch() {
           </button>
         )}
       </div>
+      {(focused || query) && (
+        <button
+          type="button"
+          className="ph-search__cancel"
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={() => {
+            setQuery("");
+            input.current?.blur();
+          }}
+        >
+          Cancel
+        </button>
+      )}
+      </div>
+      {q && kinds.length > 2 && (
+        <div className="ph-pills ph-pills--scroll" role="group" aria-label="Show">
+          {kinds.map((k) => (
+            <button key={k.id} type="button" className={`ph-chip ${kind === k.id ? "is-on" : ""}`} aria-pressed={kind === k.id} onClick={() => setKind(k.id)}>
+              {k.label}
+            </button>
+          ))}
+        </div>
+      )}
       {!q && (
         <section aria-label="Recent searches">
           {recents && recents.length > 0 ? (
@@ -99,9 +148,8 @@ export function PhoneSearch() {
                 ))}
               </ul>
             </>
-          ) : (
-            recents && <p className="ph-rows__note">Search your library. What you open shows here next time.</p>
-          )}
+          ) : null}
+          <Browse />
         </section>
       )}
       {q && res && (
@@ -109,7 +157,13 @@ export function PhoneSearch() {
           {hits.length ? (
             <ul className="ph-rows">
               {hits.map((h, i) => (
-                <HitRow key={hitInfo(h)?.key} hit={h} top={i === 0} onOpen={() => open(h)} onMore={h.track ? () => phone.push({ kind: "track", track: h.track! }) : undefined} />
+                <HitRow
+                  key={hitInfo(h)?.key}
+                  hit={h}
+                  top={i === 0 && kind === "all"}
+                  onOpen={() => open(h)}
+                  onMore={h.track ? () => phone.push({ kind: "track", track: h.track! }) : h.album ? () => phone.push({ kind: "album", album: h.album! }) : undefined}
+                />
               ))}
             </ul>
           ) : (
@@ -127,7 +181,7 @@ function HitRow({ hit, top, onOpen, onRemove, onMore }: { hit: SearchHit; top?: 
   return (
     <li className={`ph-hit ${top ? "is-top" : ""}`}>
       <button type="button" className="ph-row" onClick={onOpen}>
-        <Art path={i.thumb} size={top ? 64 : 52} round={i.round} kind={i.kind === "track" ? "album" : i.kind} monogram={i.round ? i.title : undefined} />
+        <Art path={i.thumb} size={52} round={i.round} kind={i.kind === "track" ? "album" : i.kind} monogram={i.round ? i.title : undefined} />
         <span className="ph-row__text">
           <span className="ph-row__title">{i.title}</span>
           <span className="ph-row__sub">{subtitleWithType(i)}</span>
@@ -138,11 +192,43 @@ function HitRow({ hit, top, onOpen, onRemove, onMore }: { hit: SearchHit; top?: 
           <X size={18} aria-hidden="true" />
         </button>
       )}
-      {onMore && !onRemove && (
-        <button type="button" className="ph-icon-btn ph-hit__more" aria-label={`More for ${i.title}`} onClick={onMore}>
-          <MoreHorizontal size={20} aria-hidden="true" />
-        </button>
-      )}
+      {!onRemove &&
+        (onMore ? (
+          <button type="button" className="ph-icon-btn ph-hit__more" aria-label={`More for ${i.title}`} onClick={onMore}>
+            <MoreHorizontal size={20} aria-hidden="true" />
+          </button>
+        ) : (
+          !top && <span className="ph-icon-btn" aria-hidden="true" />
+        ))}
     </li>
+  );
+}
+
+/** With nothing typed: the library's genres to browse, as crates. */
+function Browse() {
+  const { data } = useLoad(() => backend.crates("genre"), []);
+  const genres = (data?.crates ?? []).slice(0, 8);
+  if (!genres.length) return null;
+  return (
+    <section aria-labelledby="ph-browse">
+      <h2 id="ph-browse" className="ph-section-title">
+        Browse your genres
+      </h2>
+      <ul className="ph-browse">
+        {genres.map((g) => (
+          <li key={g.key}>
+            <button type="button" className="ph-browse__tile" onClick={() => nav.go({ name: "crate", kind: g.kind, key: g.key })}>
+              <span className="ph-browse__name">{g.name}</span>
+              <span className="ph-browse__count tabular">{g.count.toLocaleString()}</span>
+              {g.albums[0] && (
+                <span className="ph-browse__art" aria-hidden="true">
+                  <Art path={g.albums[0].thumb} size={64} sleeve={{ title: g.albums[0].title, artist: g.albums[0].artistTitle }} />
+                </span>
+              )}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

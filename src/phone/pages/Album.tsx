@@ -10,14 +10,15 @@ import { Plate } from "../../components/Plate";
 import { discGroups } from "../../pages/album";
 import { DownloadButton } from "../../components/DownloadButton";
 import { backend } from "../../lib/backend";
-import { formatLongDuration, qualityLabel, releaseTypeLabel } from "../../lib/format";
+import { formatLongDuration, releaseTypeLabel } from "../../lib/format";
 import { useLoad } from "../../lib/useLoad";
 import { useArtColours } from "../../lib/useTint";
 import { player, usePlayer } from "../../stores/player";
 import { nav } from "../../stores/router";
 import { phone } from "../phoneUi";
+import { albumPlate } from "../bits";
 import { SleeveCard } from "../NowPlaying";
-import { BackBar, PageFailed, PageLoading, SongRow, countLine } from "./common";
+import { BackBar, Carousel, PageFailed, PageLoading, ShelfCard, SongRow, countLine } from "./common";
 
 export function PhoneAlbum({ id }: { id: string }) {
   const { data, error, retry } = useLoad(() => backend.albumPage(id), [id]);
@@ -29,11 +30,11 @@ export function PhoneAlbum({ id }: { id: string }) {
   const { album, tracks } = data;
   const here = ctx?.kind === "album" && ctx.id === album.id;
   const playing = here && (status === "playing" || status === "loading" || status === "buffering");
-  const plate = tracks[0] ? qualityLabel(tracks[0]) : null;
+  const plate = albumPlate(tracks);
   const facts = [releaseTypeLabel(album), album.year ? String(album.year) : null].filter(Boolean).join(" · ");
   return (
     <div className="ph-page ph-album" style={{ "--ph-tint": colours?.vivid ?? "var(--color-bg-overlay)" } as CSSProperties}>
-      <BackBar />
+      <BackBar title={album.title} after={320} />
       <header className="ph-album__head">
         <div className="ph-album__cover">
           <Art path={album.thumb} fluid requestSize={480} sleeve={{ title: album.title, artist: album.artistTitle }} />
@@ -87,6 +88,13 @@ export function PhoneAlbum({ id }: { id: string }) {
         {countLine(tracks.length, "song")}, {formatLongDuration(data.totalDurationMs)}
       </p>
       <SleeveCard track={{ albumId: album.id, albumTitle: album.title, artistTitle: album.artistTitle, thumb: album.thumb }} link={false} />
+      {data.moreByArtist.length > 0 && (
+        <Carousel title={`More by ${album.artistTitle}`}>
+          {data.moreByArtist.slice(0, 12).map((a) => (
+            <ShelfCard key={a.id} title={a.title} sub={a.year ? String(a.year) : undefined} artist={a.artistTitle} thumb={a.thumb} kind="album" onOpen={() => nav.go({ name: "album", id: a.id })} />
+          ))}
+        </Carousel>
+      )}
     </div>
   );
 }

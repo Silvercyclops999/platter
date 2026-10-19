@@ -5,7 +5,7 @@
  * desktop uses; nothing here talks to a server.
  */
 import { CircleUserRound, Home, Library, Search } from "lucide-react";
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { afterFirstPaint } from "../lib/idle";
 import { ShellHosts } from "../shell/AppShell";
 import { startLyricsTrust } from "../shell/lyrics";
@@ -28,10 +28,12 @@ import { PhoneLiked, PhonePlaylist } from "./pages/Playlist";
 import { PhoneSearch } from "./pages/Search";
 import { PhoneYou } from "./pages/You";
 import { notchFromUrl } from "./form";
+import { installTapGuard } from "./gestures";
 import { TABS, phone, tabOf, usePhoneUi, type PhoneTab } from "./phoneUi";
 import { SheetHost } from "./Sheets";
 import "./phone.css";
 
+const DesktopPage = lazy(() => import("../shell/MainView").then((m) => ({ default: m.Page })));
 const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 
 const TAB_ICON: Record<PhoneTab, typeof Home> = { home: Home, search: Search, library: Library, you: CircleUserRound };
@@ -46,6 +48,8 @@ export function PhoneShell() {
   const hasTrack = usePlayer((s) => !!s.state?.track);
   // On Home, the big now-playing card stands in for the mini player.
   const cardShown = usePhoneUi((s) => s.homeCard) && entry.route.name === "home";
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => (root.current ? installTapGuard(root.current) : undefined), []);
   useLibraryRecents();
   useEffect(() => void loadOwnLyricsIds(), []);
   useEffect(() => void startDownloads(), []);
@@ -56,7 +60,7 @@ export function PhoneShell() {
     if (t !== usePhoneUi.getState().tab) usePhoneUi.setState({ tab: t });
   }, [entry.route]);
   return (
-    <div className={`phone ${hasTrack ? "has-mini" : ""} ${NOTCH ? "ph-notch" : ""}`} data-testid="phone-shell" data-tab={tab}>
+    <div ref={root} className={`phone ${hasTrack ? "has-mini" : ""} ${NOTCH ? "ph-notch" : ""}`} data-testid="phone-shell" data-tab={tab}>
       <main className="ph-main" aria-hidden={playerOpen || undefined} inert={playerOpen || undefined}>
         <PhonePage key={entry.key} route={entry.route} />
       </main>
@@ -125,14 +129,27 @@ export function PhonePage({ route }: { route: Route }) {
         </div>
       );
     default:
-      return (
-        <div className="ph-page">
-          <BackBar />
-          <div className="ph-empty">
-            <p className="ph-empty__title">Not on the phone yet</p>
-            <p className="ph-empty__text">This page opens in Platter on your computer for now.</p>
+      if (COMPUTER_ONLY.has(route.name))
+        return (
+          <div className="ph-page">
+            <BackBar />
+            <div className="ph-empty">
+              <p className="ph-empty__title">On your computer</p>
+              <p className="ph-empty__text">This works with files and drives, so it opens in Platter on your computer.</p>
+            </div>
           </div>
+        );
+      // Pages with no phone version yet: the computer's page, in one narrow column.
+      return (
+        <div className="ph-page ph-desk" data-route={route.name}>
+          <BackBar />
+          <Suspense fallback={<PageLoading />}>
+            <DesktopPage route={route} />
+          </Suspense>
         </div>
       );
   }
 }
+
+/** Pages that work on files, drives or the computer's processor. */
+export const COMPUTER_ONLY: ReadonlySet<Route["name"]> = new Set<Route["name"]>(["devices", "import", "doctor", "soundMap"]);

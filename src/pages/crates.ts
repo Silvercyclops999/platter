@@ -44,7 +44,7 @@ export const CRATE_SOURCE: Record<CrateKind, string> = {
 };
 
 export const records = (n: number) => (n === 1 ? "1 record" : `${n.toLocaleString()} records`);
-const artists = (n: number) => (n === 1 ? "one artist" : `${n.toLocaleString()} artists`);
+const artists = (n: number) => (n === 1 ? "1 artist" : `${n.toLocaleString()} artists`);
 
 /** "1991 to 2004", "1994", or "" when no album has a year. */
 export function yearSpan(from: number | null, to: number | null): string {

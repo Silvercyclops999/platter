@@ -3,7 +3,7 @@
  * sort as a label (it opens a sheet), a list or grid toggle, pinned items at
  * the top, and small glyphs for pinned and downloaded.
  */
-import { ArrowUpDown, LayoutGrid, List, Plus } from "lucide-react";
+import { ArrowUpDown, LayoutGrid, List, Plus, X } from "lucide-react";
 import { useState } from "react";
 import { Art } from "../../components/Art";
 import { LikedCover } from "../../components/LikedCover";
@@ -57,6 +57,7 @@ export function PhoneLibrary() {
         {model.kinds.map((k) => (
           <button key={k} type="button" className={`ph-chip ${model.filter === k && !crates ? "is-on" : ""}`} aria-pressed={model.filter === k && !crates} onClick={() => pick(k)}>
             {KIND_LABEL[k]}
+            {model.filter === k && !crates && <X size={14} aria-hidden="true" className="ph-chip__x" />}
           </button>
         ))}
         {cratesOn && (
@@ -106,11 +107,11 @@ function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof use
       ) : view === "list" ? (
         <ul className="ph-lib-list" aria-label="Your library">
           {rows.map((e) => (
-            <LibRow key={`${e.kind}:${e.id}`} e={e} />
+            <LibRow key={`${e.kind}:${e.id}`} e={e} typed={model.filter !== "all"} />
           ))}
         </ul>
       ) : (
-        <ul className="ph-lib-grid" aria-label="Your library">
+        <ul className={`ph-lib-grid ${model.filter === "artist" ? "ph-lib-grid--round" : ""}`} aria-label="Your library">
           {rows.map((e) => (
             <li key={`${e.kind}:${e.id}`}>
               <button type="button" className={`ph-card-tile ph-card-tile--fluid ${e.kind === "artist" ? "is-round" : ""}`} onClick={() => openEntry(e)}>
@@ -135,7 +136,7 @@ function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof use
   );
 }
 
-function LibRow({ e }: { e: LibEntry }) {
+function LibRow({ e, typed }: { e: LibEntry; typed: boolean }) {
   const round = e.kind === "artist";
   return (
     <li>
@@ -149,7 +150,7 @@ function LibRow({ e }: { e: LibEntry }) {
           <span className="ph-row__title">{e.title}</span>
           <span className="ph-row__sub">
             <RowGlyphs pinned={e.pinned && !e.liked} downloaded={e.downloaded} />
-            {subtitle(e, false)}
+            {subtitle(e, typed)}
           </span>
         </span>
       </button>

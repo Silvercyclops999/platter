@@ -114,3 +114,50 @@ export function useArtGestures(opts: {
     },
   };
 }
+
+/** A press that moves farther than this is a swipe or a scroll, never a tap. */
+export const TAP_SLOP_PX = 8;
+
+/**
+ * Keeps swipes from acting as taps anywhere under `root`: a press that
+ * moved more than TAP_SLOP_PX, or during which anything scrolled, doesn't
+ * click what it started on. Returns a function that removes it.
+ */
+export function installTapGuard(root: HTMLElement): () => void {
+  let start: { x: number; y: number; id: number } | null = null;
+  let moved = false;
+  const down = (e: PointerEvent) => {
+    start = { x: e.clientX, y: e.clientY, id: e.pointerId };
+    moved = false;
+  };
+  const move = (e: PointerEvent) => {
+    if (!start || e.pointerId !== start.id || moved) return;
+    if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > TAP_SLOP_PX) moved = true;
+  };
+  const scrolled = () => {
+    if (start) moved = true;
+  };
+  const click = (e: MouseEvent) => {
+    if (!moved) return;
+    moved = false;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  const up = () => {
+    start = null;
+  };
+  root.addEventListener("pointerdown", down, true);
+  root.addEventListener("pointermove", move, true);
+  root.addEventListener("pointerup", up, true);
+  root.addEventListener("pointercancel", up, true);
+  root.addEventListener("scroll", scrolled, true);
+  root.addEventListener("click", click, true);
+  return () => {
+    root.removeEventListener("pointerdown", down, true);
+    root.removeEventListener("pointermove", move, true);
+    root.removeEventListener("pointerup", up, true);
+    root.removeEventListener("pointercancel", up, true);
+    root.removeEventListener("scroll", scrolled, true);
+    root.removeEventListener("click", click, true);
+  };
+}

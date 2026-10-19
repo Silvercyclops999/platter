@@ -66,7 +66,8 @@ function MainApp() {
   useEffect(() => installTheme(), []);
   const reduceMotion = useSettings(motionPreference);
   useEffect(() => setMotionPreference(reduceMotion), [reduceMotion]);
-  useEffect(() => installOverlayScrollbars(), []);
+  // A phone scrolls with its own thin bars; the computer's overlay bars stay off.
+  useEffect(() => (usePhoneForm.getState().phone ? undefined : installOverlayScrollbars()), []);
   useEffect(() => connectApp(), []);
   useEffect(() => connectPlayer(), []);
   useEffect(() => connectLikes(), []);
@@ -96,7 +97,8 @@ function MainApp() {
     if (auth?.state === "signedIn") useUi.getState().setSignInOpen(false);
     if (auth?.state === "signedIn" && sawSignIn.current) {
       sawSignIn.current = false;
-      offerFirstRun();
+      // The computer's Get started guide is about windows and layouts; the phone starts ready.
+      if (!usePhoneForm.getState().phone) offerFirstRun();
     }
   }, [auth?.state]);
 

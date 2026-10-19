@@ -10,6 +10,7 @@ import { usePlayer } from "../stores/player";
 import { DownloadedGlyph } from "../components/DownloadButton";
 import { PlusGlyph, TickGlyph } from "../components/SaveButton";
 import { qualityLabel } from "../lib/format";
+import { isLosslessCodec } from "../lib/libraryChips";
 import type { Track } from "../lib/types";
 import { useIsDownloaded } from "../stores/downloads";
 import { setLiked, useIsLiked } from "../stores/likes";
@@ -26,9 +27,21 @@ export function tap() {
   }
 }
 
-/** What the plate says: "Downloaded", "FLAC 24/96", a bitrate, or nothing known. */
+/**
+ * What the plate says: "Downloaded", or the format of a lossless file
+ * ("FLAC 24/96"). A lossy file's bitrate is left off the phone: it is the
+ * usual case, and a number there reads like a debug label.
+ */
 export function plateText(track: Pick<Track, "codec" | "bitDepth" | "sampleRate" | "bitrate">, downloaded: boolean): string | null {
-  return downloaded ? "Downloaded" : qualityLabel(track);
+  if (downloaded) return "Downloaded";
+  return isLosslessCodec(track.codec) ? qualityLabel(track) : null;
+}
+
+/** An album's plate: its format when every song shares one lossless format. */
+export function albumPlate(tracks: Pick<Track, "codec" | "bitDepth" | "sampleRate" | "bitrate">[]): string | null {
+  const labels = new Set(tracks.map((t) => plateText(t, false)));
+  if (labels.size !== 1) return null;
+  return [...labels][0];
 }
 
 /** The engraved format plate beside an artist line. */
@@ -80,9 +93,15 @@ export function LikeControl({ track, size = 24 }: { track: Track; size?: number 
   );
 }
 
+/** How far down a sheet is dragged by its top before letting go closes it. */
+export const SHEET_CLOSE_PX = 90;
+
 /**
  * A bottom sheet: a handle, a heading, and its body over the dimmed screen.
- * Tapping the dim area or Escape closes it (back to the sheet under it).
+ * Escape goes back to the sheet under it; tapping the dim area closes every
+ * sheet (or only this one with `dimBack`, for a sheet stacked on another).
+ * Dragging the top of the sheet down closes it. The frame draws on the tap;
+ * its body follows a frame later so the slide starts at once.
  */
 export function SheetFrame({
   title,
@@ -94,6 +113,7 @@ export function SheetFrame({
   head,
   action,
   className = "",
+  dimBack = false,
 }: {
   title: string;
   subtitle?: ReactNode;
@@ -106,9 +126,42 @@ export function SheetFrame({
   /** A control at the right of the heading (the queue's Edit). */
   action?: ReactNode;
   className?: string;
+  /** Tapping the dim area goes back to the sheet under this one. */
+  dimBack?: boolean;
 }) {
   const id = useId();
   const box = useRef<HTMLDivElement>(null);
+  const [ready, setReady] = useState(typeof requestAnimationFrame === "undefined" || import.meta.env?.MODE === "test");
+  useEffect(() => {
+    if (ready) return;
+    const f = requestAnimationFrame(() => setReady(true));
+    return () => cancelAnimationFrame(f);
+  }, [ready]);
+  // Dragging the top of the sheet down.
+  const drag = useRef<{ y: number; id: number } | null>(null);
+  const [dy, setDy] = useState(0);
+  const grab = {
+    onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
+      if ((e.target as HTMLElement).closest("button, a, input")) return;
+      drag.current = { y: e.clientY, id: e.pointerId };
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+    },
+    onPointerMove: (e: React.PointerEvent<HTMLElement>) => {
+      if (drag.current?.id !== e.pointerId) return;
+      setDy(Math.max(0, e.clientY - drag.current.y));
+    },
+    onPointerUp: (e: React.PointerEvent<HTMLElement>) => {
+      if (drag.current?.id !== e.pointerId) return;
+      const far = e.clientY - drag.current.y;
+      drag.current = null;
+      setDy(0);
+      if (far > SHEET_CLOSE_PX) onClose();
+    },
+    onPointerCancel: () => {
+      drag.current = null;
+      setDy(0);
+    },
+  };
   useEffect(() => {
     box.current?.focus();
     const onKey = (e: KeyboardEvent) => {
@@ -122,34 +175,37 @@ export function SheetFrame({
   }, [onClose]);
   return (
     <div className="ph-sheet-layer">
-      <div className="ph-sheet-dim" data-testid="sheet-dim" onClick={onClose} aria-hidden="true" />
+      <div className="ph-sheet-dim" data-testid="sheet-dim" onClick={dimBack ? onClose : phone.closeSheets} aria-hidden="true" />
       <div
         ref={box}
-        className={`ph-sheet ${tall ? "ph-sheet--tall" : ""} ${className}`}
+        className={`ph-sheet ${tall ? "ph-sheet--tall" : ""} ${dy ? "is-dragging" : ""} ${className}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={id}
         tabIndex={-1}
+        style={dy ? { transform: `translateY(${dy}px)` } : undefined}
       >
-        <div className="ph-sheet__handle" aria-hidden="true" />
-        {head ?? (
-          <div className="ph-sheet__head">
-            <div className="ph-sheet__heading">
-              <h2 id={id} className="ph-sheet__title">
-                {title}
-              </h2>
-              {subtitle && <p className="ph-sheet__sub">{subtitle}</p>}
+        <div className="ph-sheet__grab" {...grab}>
+          <div className="ph-sheet__handle" aria-hidden="true" />
+          {head ?? (
+            <div className="ph-sheet__head">
+              <div className="ph-sheet__heading">
+                <h2 id={id} className="ph-sheet__title">
+                  {title}
+                </h2>
+                {subtitle && <p className="ph-sheet__sub">{subtitle}</p>}
+              </div>
+              {action}
             </div>
-            {action}
-          </div>
-        )}
+          )}
+        </div>
         {head && (
           <h2 id={id} className="sr-only">
             {title}
           </h2>
         )}
-        <div className="ph-sheet__body">{children}</div>
-        {footer && <div className="ph-sheet__foot">{footer}</div>}
+        <div className="ph-sheet__body">{ready ? children : null}</div>
+        {footer && <div className="ph-sheet__foot">{ready ? footer : null}</div>}
       </div>
     </div>
   );

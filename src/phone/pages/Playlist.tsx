@@ -3,12 +3,15 @@
  * starts sooner, genre pills from the songs' own genres that narrow the
  * list in place, and the songs, each with the shared song sheet.
  */
-import { Pause, Play, Shuffle } from "lucide-react";
+import { MoreHorizontal, Pause, Play, Shuffle } from "lucide-react";
+import { Art } from "../../components/Art";
+import { LikedCover } from "../../components/LikedCover";
+import { phone } from "../phoneUi";
 import { useMemo, useState, type ReactNode } from "react";
 import { DownloadButton } from "../../components/DownloadButton";
 import { backend } from "../../lib/backend";
 import { formatLongDuration } from "../../lib/format";
-import type { Track } from "../../lib/types";
+import type { Playlist, Track } from "../../lib/types";
 import { useLoad } from "../../lib/useLoad";
 import { player, usePlayer } from "../../stores/player";
 import { BackBar, PageFailed, PageLoading, SongRow, countLine } from "./common";
@@ -34,6 +37,7 @@ export function PhonePlaylist({ id }: { id: string }) {
   return (
     <SongList
       title={data.playlist.title}
+      playlist={data.playlist}
       tracks={data.tracks}
       contextKind="playlist"
       contextId={data.playlist.id}
@@ -62,6 +66,7 @@ export function PhoneLiked() {
 
 function SongList({
   title,
+  playlist,
   tracks,
   contextKind,
   contextId,
@@ -70,6 +75,7 @@ function SongList({
   inPlaylist,
 }: {
   title: string;
+  playlist?: Playlist;
   tracks: Track[];
   contextKind: "playlist" | "liked";
   contextId: string;
@@ -88,15 +94,26 @@ function SongList({
   const ids = genre ? rows.map((r) => r.t.id) : undefined;
   return (
     <div className="ph-page ph-playlist">
-      <BackBar />
+      <BackBar title={title} after={200} />
       <header className="ph-playlist__head">
+        <div className="ph-playlist__cover">
+          {playlist ? <Art path={playlist.thumb} fluid requestSize={400} kind="playlist" /> : <LikedCover size={176} />}
+        </div>
         <h1 className="ph-playlist__title">{title}</h1>
         <p className="ph-playlist__count tabular">
+          {playlist?.smart ? "Smart playlist, " : ""}
           {countLine(tracks.length, "song")}, {formatLongDuration(total)}
         </p>
       </header>
       <div className="ph-actions">
-        <div className="ph-actions__left">{download}</div>
+        <div className="ph-actions__left">
+          {download}
+          {playlist && (
+            <button type="button" className="ph-icon-btn" aria-label={`More for ${title}`} onClick={() => phone.push({ kind: "playlist", playlist })}>
+              <MoreHorizontal size={24} aria-hidden="true" />
+            </button>
+          )}
+        </div>
         <div className="ph-actions__right">
           <button type="button" className="ph-icon-btn" aria-label={`Shuffle ${title}`} onClick={() => play(undefined, true, ids)}>
             <Shuffle size={24} aria-hidden="true" />

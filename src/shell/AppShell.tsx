@@ -248,7 +248,7 @@ export function ShellHosts({ phone = false }: { phone?: boolean } = {}) {
   const desk = !phone;
   return (
     <>
-      <NewLookOffer />
+      {desk && <NewLookOffer />}
       {desk && <LayoutOffer />}
       {desk && <CommandPalette />}
       <LazyGuideHost />

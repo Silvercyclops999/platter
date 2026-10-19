@@ -3,6 +3,7 @@
  * eras and genres. They live in Library under the Crates pill; a crate opens
  * its own page of records.
  */
+import { Play, Shuffle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Art } from "../../components/Art";
 import { backend } from "../../lib/backend";
@@ -30,6 +31,16 @@ function markNoteSeen() {
   } catch {
     // Shown again next time; no harm.
   }
+}
+
+/** The crate's songs in a fresh random order. */
+function shuffled(ids: string[]): string[] {
+  const a = [...ids];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
 }
 
 export const CRATES_NOTE = "Crates are hand-picked piles of records, like a crate at a record shop.";
@@ -129,15 +140,22 @@ export function PhoneCrate({ kind, crateKey }: { kind: CrateKind; crateKey: stri
       <p className="ph-eyebrow">{CRATE_PLATE[kind]}</p>
       <h1 className="ph-title ph-title--page">{data.name}</h1>
       <div className="ph-actions">
-        <p className="ph-section-sub tabular">{records(data.albums.length)}</p>
-        <button type="button" className="ph-pill is-primary" onClick={() => void player.playTracks(data.trackIds)}>
-          Play the crate
-        </button>
+        <div className="ph-actions__left">
+          <p className="ph-section-sub tabular">{records(data.albums.length)}</p>
+        </div>
+        <div className="ph-actions__right">
+          <button type="button" className="ph-icon-btn" aria-label={`Shuffle ${data.name}`} onClick={() => void player.playTracks(shuffled(data.trackIds))}>
+            <Shuffle size={24} aria-hidden="true" />
+          </button>
+          <button type="button" className="ph-play ph-play--page" aria-label={`Play ${data.name}`} onClick={() => void player.playTracks(data.trackIds)}>
+            <Play size={28} fill="currentColor" aria-hidden="true" />
+          </button>
+        </div>
       </div>
       <ul className="ph-lib-grid">
         {data.albums.map(({ album }) => (
           <li key={album.id}>
-            <ShelfCard title={album.title} sub={album.artistTitle} thumb={album.thumb} kind="album" onOpen={() => nav.go({ name: "album", id: album.id })} />
+            <ShelfCard title={album.title} sub={album.year ? `${album.artistTitle}, ${album.year}` : album.artistTitle} artist={album.artistTitle} thumb={album.thumb} kind="album" onOpen={() => nav.go({ name: "album", id: album.id })} />
           </li>
         ))}
       </ul>

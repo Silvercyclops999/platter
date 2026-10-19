@@ -48,7 +48,7 @@ describe("words", () => {
     expect(yearSpan(null, null)).toBe("");
     expect(crateLine({ kind: "label", count: 14, artists: 9, fromYear: 1991, toYear: 2004 })).toBe("14 records by 9 artists, 1991 to 2004");
     expect(crateLine({ kind: "label", count: 3, artists: 3, fromYear: null, toYear: null })).toBe("3 records, each by a different artist");
-    expect(crateLine({ kind: "producer", count: 2, artists: 1, fromYear: 2001, toYear: 2001 })).toBe("2 records by one artist, 2001");
+    expect(crateLine({ kind: "producer", count: 2, artists: 1, fromYear: 2001, toYear: 2001 })).toBe("2 records by 1 artist, 2001");
     const c = { count: 6, artists: 4, fromYear: 1990, toYear: 1999 };
     expect(crateSentence({ ...c, kind: "label", name: "Low Tide" })).toBe("6 of your records came out on Low Tide, by 4 artists, from 1990 to 1999.");
     expect(crateSentence({ ...c, kind: "producer", name: "Max Volume" })).toBe("Max Volume produced 6 of your records, for 4 artists, from 1990 to 1999.");

@@ -3,7 +3,7 @@
  * sideways shelves.
  */
 import { ChevronLeft, MoreHorizontal } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Art } from "../../components/Art";
 import { DownloadedMark } from "../../components/DownloadButton";
 import { trackArtistLine } from "../../lib/format";
@@ -12,11 +12,34 @@ import { useCanGoBack, useRouter, type Route } from "../../stores/router";
 import { usePlayer } from "../../stores/player";
 import { phone, type InPlaylist } from "../phoneUi";
 
-/** The bar over a page that was opened from another: Back and a title that appears once scrolled. */
-export function BackBar({ title, shown = false, right }: { title?: string; shown?: boolean; right?: ReactNode }) {
+/**
+ * The bar over a page that was opened from another: Back, and once the page
+ * has scrolled past its header (`after` px) a solid bar with the page's
+ * title, so nothing scrolls under a floating button.
+ */
+export function BackBar({ title, after = 160, right }: { title?: string; after?: number; right?: ReactNode }) {
   const canBack = useCanGoBack();
+  const bar = useRef<HTMLDivElement>(null);
+  const [titled, setTitled] = useState(false);
+  useEffect(() => {
+    const page = bar.current?.closest(".ph-page");
+    if (!page) return;
+    let frame = 0;
+    const check = () => {
+      frame = 0;
+      setTitled(page.scrollTop > after);
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(check);
+    };
+    page.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      page.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(frame);
+    };
+  }, [after]);
   return (
-    <div className={`ph-backbar ${shown ? "is-titled" : ""}`}>
+    <div ref={bar} className={`ph-backbar ${titled ? "is-titled" : ""}`}>
       {canBack ? (
         <button type="button" className="ph-icon-btn ph-backbar__back" aria-label="Back" onClick={() => useRouter.getState().back()}>
           <ChevronLeft size={26} aria-hidden="true" />
@@ -50,7 +73,9 @@ export function SongRow({
   return (
     <li className="ph-song">
       <button type="button" className="ph-song__main" onClick={onPlay} aria-current={playing ? "true" : undefined}>
-        {index !== undefined && <span className={`ph-song__num tabular ${playing ? "is-playing" : ""}`}>{index}</span>}
+        {index !== undefined && (
+          <span className={`ph-song__num tabular ${playing ? "is-playing" : ""}`}>{playing ? <PlayingBars /> : index}</span>
+        )}
         {art && <Art path={track.thumb} size={48} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} />}
         <span className="ph-row__text">
           <span className={`ph-row__title ${playing ? "is-playing" : ""}`}>{track.title}</span>
@@ -67,16 +92,28 @@ export function SongRow({
   );
 }
 
+/** Small moving bars for the playing song (still while paused). */
+export function PlayingBars() {
+  const paused = usePlayer((s) => s.state?.status !== "playing");
+  return (
+    <span className={`ph-eq ${paused ? "is-paused" : ""}`} role="img" aria-label="Playing">
+      <span />
+      <span />
+      <span />
+    </span>
+  );
+}
+
 /** What a Home item shows and where it goes. */
 export function itemInfo(i: HomeItem): { key: string; title: string; sub: string; thumb: string | null; round: boolean; route: Route; kind: "album" | "artist" | "playlist" } {
   if (i.kind === "album")
     return { key: `album:${i.album.id}`, title: i.album.title, sub: i.album.artistTitle, thumb: i.album.thumb, round: false, route: { name: "album", id: i.album.id }, kind: "album" };
   if (i.kind === "artist")
-    return { key: `artist:${i.artist.id}`, title: i.artist.title, sub: "Artist", thumb: i.artist.thumb, round: true, route: { name: "artist", id: i.artist.id }, kind: "artist" };
+    return { key: `artist:${i.artist.id}`, title: i.artist.title, sub: "", thumb: i.artist.thumb, round: true, route: { name: "artist", id: i.artist.id }, kind: "artist" };
   return {
     key: `playlist:${i.playlist.id}`,
     title: i.playlist.title,
-    sub: `${i.playlist.trackCount} songs`,
+    sub: countLine(i.playlist.trackCount, "song"),
     thumb: i.playlist.thumb,
     round: false,
     route: { name: "playlist", id: i.playlist.id },
@@ -115,7 +152,7 @@ export function ShelfCard({
 }) {
   return (
     <button type="button" className={`ph-card-tile ${round ? "is-round" : ""}`} onClick={onOpen}>
-      <Art path={thumb} size={136} round={round} kind={kind} sleeve={kind === "album" ? { title, artist: artist ?? sub } : undefined} monogram={kind === "artist" ? title : undefined} />
+      <Art path={thumb} size={round ? 112 : 136} round={round} kind={kind} sleeve={kind === "album" ? { title, artist: artist ?? sub } : undefined} monogram={kind === "artist" ? title : undefined} />
       <span className="ph-card-tile__title">{title}</span>
       {sub && <span className="ph-card-tile__sub">{sub}</span>}
     </button>

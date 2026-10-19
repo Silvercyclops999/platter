@@ -16,7 +16,7 @@ import { useLoad } from "../../lib/useLoad";
 import { AvatarFace } from "../../shell/TopBar";
 import { useApp } from "../../stores/app";
 import { player } from "../../stores/player";
-import { nav } from "../../stores/router";
+import { nav, type Route } from "../../stores/router";
 import { useSettings } from "../../stores/settings";
 import { wrapped } from "../../stores/wrapped";
 import { tap } from "../bits";
@@ -87,6 +87,14 @@ export function PhoneYou() {
     ["Day streak", o ? (o.streak ? o.streak.days.toLocaleString() : "0") : null],
   ];
   const topArtist = o?.topArtists[0];
+  const diaryOn = useSettings((s) => s.settings?.keepDiary !== false);
+  const links: { title: string; route: Route }[] = [
+    ...(statsOn ? [{ title: "All your stats", route: { name: "stats" } as Route }] : []),
+    { title: "Everything you played", route: { name: "recents" } },
+    { title: "Mixes made for you", route: { name: "mixes" } },
+    ...(diaryOn ? [{ title: "Listening diary", route: { name: "diary" } as Route }] : []),
+    { title: "Settings", route: { name: "settings" } },
+  ];
 
   return (
     <div className="ph-page ph-you" data-testid="phone-you">
@@ -183,14 +191,16 @@ export function PhoneYou() {
       </section>
 
       <ul className="ph-set-list ph-you__links" aria-label="More">
-        <li>
-          <button type="button" className="ph-set-link" onClick={() => nav.go({ name: "settings" })}>
-            <span className="ph-set-link__text">
-              <span className="ph-set-link__title">Settings</span>
-            </span>
-            <ChevronRight size={18} aria-hidden="true" className="ph-set-link__chev" />
-          </button>
-        </li>
+        {links.map((l) => (
+          <li key={l.title}>
+            <button type="button" className="ph-set-link" onClick={() => nav.go(l.route)}>
+              <span className="ph-set-link__text">
+                <span className="ph-set-link__title">{l.title}</span>
+              </span>
+              <ChevronRight size={18} aria-hidden="true" className="ph-set-link__chev" />
+            </button>
+          </li>
+        ))}
       </ul>
     </div>
   );

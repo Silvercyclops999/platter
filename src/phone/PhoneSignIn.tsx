@@ -5,7 +5,7 @@
  * Jellyfin or Subsonic server); only the arrangement is the phone's.
  */
 import { Check, ChevronLeft, Copy, Server } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { backend } from "../lib/backend";
 import type { AppError, PinInfo, ServerInfo } from "../lib/types";
 import { AddServerFlow, type AddressKind } from "../pages/AddServer";
@@ -13,14 +13,17 @@ import { useApp } from "../stores/app";
 import { useUi } from "../stores/ui";
 import { tap } from "./bits";
 import { notchFromUrl } from "./form";
+import { installTapGuard } from "./gestures";
 import "./phone.css";
 
 const NOTCH = typeof window !== "undefined" && notchFromUrl(window.location.search);
 
 /** The phone frame these screens draw in, with the safe areas. */
 function Frame({ children, step }: { children: ReactNode; step: string }) {
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => (root.current ? installTapGuard(root.current) : undefined), []);
   return (
-    <div className={`phone ph-signin ${NOTCH ? "ph-notch" : ""}`} data-testid="phone-signin" data-step={step}>
+    <div ref={root} className={`phone ph-signin ${NOTCH ? "ph-notch" : ""}`} data-testid="phone-signin" data-step={step}>
       <main className="ph-signin__scroll">{children}</main>
     </div>
   );

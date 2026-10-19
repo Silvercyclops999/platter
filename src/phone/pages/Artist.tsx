@@ -4,7 +4,7 @@
  * tracks ranked by your own plays; then the discography as shelves.
  */
 import { Pause, Play, Shuffle } from "lucide-react";
-import { useState, type UIEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Art } from "../../components/Art";
 import { backend } from "../../lib/backend";
 import { SECTION_LABELS, plural } from "../../lib/format";
@@ -29,14 +29,41 @@ export function topByPlays(tracks: Track[], n = TOP_TRACKS): Track[] {
 
 /** "In your library: 4 albums, 52 songs". */
 export function inLibraryLine(albums: number, tracks: number): string {
-  return `In your library: ${plural(albums, "album")}, ${plural(tracks, "song")}`;
+  // A count the server didn't give stays out rather than saying "0 songs".
+  return tracks > 0 ? `In your library: ${plural(albums, "album")}, ${plural(tracks, "song")}` : `In your library: ${plural(albums, "album")}`;
 }
 
 export function PhoneArtist({ id }: { id: string }) {
   const { data, error, retry } = useLoad(() => backend.artistPage(id), [id]);
   const ctx = usePlayer((s) => s.state?.queue.context ?? null);
   const status = usePlayer((s) => s.state?.status ?? "idle");
-  const [scrolled, setScrolled] = useState(0);
+  const hero = useRef<HTMLDivElement>(null);
+  // The shelves come a frame after the header, so the page opens at once.
+  const [rest, setRest] = useState(false);
+  useEffect(() => {
+    if (!data || rest) return;
+    const f = requestAnimationFrame(() => setRest(true));
+    return () => cancelAnimationFrame(f);
+  }, [data, rest]);
+  // The photo fades as the page slides over it: set straight on the element, never a re-render.
+  useEffect(() => {
+    const el = hero.current;
+    const page = el?.closest(".ph-page");
+    if (!el || !page) return;
+    let frame = 0;
+    const onScroll = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        el.style.opacity = String(Math.max(0, 1 - page.scrollTop / 260));
+      });
+    };
+    page.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      page.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(frame);
+    };
+  }, [data]);
   if (error && !data) return <PageFailed what="this artist" retry={retry} />;
   if (!data) return <PageLoading />;
   const { artist, sections } = data;
@@ -45,15 +72,12 @@ export function PhoneArtist({ id }: { id: string }) {
   const top = topByPlays(data.popular);
   const here = ctx?.kind === "artist" && ctx.id === artist.id;
   const playing = here && (status === "playing" || status === "loading" || status === "buffering");
-  const onScroll = (e: UIEvent<HTMLDivElement>) => setScrolled(e.currentTarget.scrollTop);
-  // The photo fades and holds still while the page slides over it.
-  const fade = Math.max(0, 1 - scrolled / 260);
   return (
-    <div className="ph-page ph-artist" onScroll={onScroll} data-testid="artist-page">
-      <div className="ph-artist__hero" style={{ opacity: fade }}>
+    <div className="ph-page ph-artist" data-testid="artist-page">
+      <div ref={hero} className="ph-artist__hero">
         <Art path={photoPath(artist)} fluid requestSize={600} kind="artist" monogram={artist.title} />
       </div>
-      <BackBar title={artist.title} shown={scrolled > 220} />
+      <BackBar title={artist.title} after={220} />
       <h1 className="ph-artist__name">{artist.title}</h1>
       <div className="ph-artist__body">
         <div className="ph-actions">
@@ -91,7 +115,7 @@ export function PhoneArtist({ id }: { id: string }) {
             </ul>
           </section>
         )}
-        {sections.map((s) => (
+        {rest && sections.map((s) => (
           <Carousel key={`${s.section}:${s.custom ?? ""}`} title={s.custom ?? SECTION_LABELS[s.section]}>
             {s.albums.map((a) => (
               <ShelfCard key={a.id} title={a.title} sub={a.year ? String(a.year) : undefined} artist={a.artistTitle} thumb={a.thumb} kind="album" onOpen={() => nav.go({ name: "album", id: a.id })} />

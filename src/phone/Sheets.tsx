@@ -4,15 +4,45 @@
  * library's sort and the create sheet. They stack; closing one shows the
  * one under it.
  */
-import { Check, GripVertical, ListPlus, Moon, Pause, Play, Repeat, Repeat1, Shuffle, Sparkles } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  Check,
+  Disc3,
+  GripVertical,
+  Heart,
+  HeartOff,
+  ListEnd,
+  ListMusic,
+  ListPlus,
+  ListStart,
+  MicVocal,
+  Moon,
+  Pause,
+  Play,
+  Radio,
+  Repeat,
+  Repeat1,
+  Share,
+  Shuffle,
+  Pencil,
+  Sparkles,
+  Trash2,
+  UserRound,
+  UsersRound,
+  type LucideIcon,
+} from "lucide-react";
+import { Fragment, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Art } from "../components/Art";
 import { trackArtistLine } from "../lib/format";
-import type { Album, QueueItem, Track } from "../lib/types";
+import { backend } from "../lib/backend";
+import type { Album, Playlist, QueueItem, Track } from "../lib/types";
+import { useLoad } from "../lib/useLoad";
+import { openShareCard } from "../stores/shareCard";
+import { openSongCredits } from "../stores/songCredits";
+import { countLine } from "./pages/common";
 import { SORT_LABEL, useLibraryView, type LibSort } from "../stores/library";
 import { isLiked, setLiked } from "../stores/likes";
 import { player, usePlayer } from "../stores/player";
-import { addNow, createPlaylist, removeRows } from "../stores/playlists";
+import { addNow, askDelete, createPlaylist, editDetails, removeRows } from "../stores/playlists";
 import { newSmartPlaylist } from "../stores/curate";
 import { SheetFrame, tap } from "./bits";
 import { DeviceSheet } from "./DeviceSheet";
@@ -43,6 +73,8 @@ function SheetFor({ sheet }: { sheet: Sheet }) {
       return <TrackSheet track={sheet.track} inPlaylist={sheet.inPlaylist} />;
     case "album":
       return <AlbumSheet album={sheet.album} />;
+    case "playlist":
+      return <PlaylistSheet playlist={sheet.playlist} />;
     case "addTo":
       return <AddToSheet track={sheet.track} />;
     case "librarySort":
@@ -126,7 +158,7 @@ export function QueueSheet() {
   return (
     <SheetFrame
       title={editing ? "Edit queue" : "Queue"}
-      subtitle={editing ? `${picked.size} selected` : `Playing from ${playingFrom(q?.context)}`}
+      subtitle={editing ? `${picked.size} selected` : `Playing from ${playingFrom(q?.context, current?.source)}`}
       onClose={phone.pop}
       tall
       className="ph-queue"
@@ -158,7 +190,7 @@ export function QueueSheet() {
               <Shuffle size={20} aria-hidden="true" />
               Shuffle
             </button>
-            <button type="button" className={`ph-pill ph-pill--big ${repeat !== "off" ? "is-on" : ""}`} aria-pressed={repeat !== "off"} onClick={() => void player.cycleRepeatNow()}>
+            <button type="button" className={`ph-pill ph-pill--big ${repeat !== "off" ? "is-on" : ""}`} aria-pressed={repeat !== "off"} onClick={() => cycleRepeat()}>
               <RepeatIcon size={20} aria-hidden="true" />
               {repeat === "one" ? "This song" : "Repeat"}
             </button>
@@ -187,7 +219,14 @@ export function QueueSheet() {
         {upcoming.map((item, i) => {
           const on = picked.has(item.itemId);
           const dragging = drag?.id === item.itemId;
+          const autoplayStarts = item.source === "autoplay" && upcoming[i - 1]?.source !== "autoplay";
           return (
+            <Fragment key={item.itemId}>
+            {autoplayStarts && (
+              <li className="ph-queue__next" role="presentation">
+                Autoplay: chosen to follow
+              </li>
+            )}
             <li
               key={item.itemId}
               className={`ph-queue__row ${dragging ? "is-dragging" : ""}`}
@@ -233,6 +272,7 @@ export function QueueSheet() {
                 <GripVertical size={20} aria-hidden="true" />
               </span>
             </li>
+            </Fragment>
           );
         })}
       </ul>
@@ -255,15 +295,26 @@ export function SleepSheet() {
     phone.pop();
   };
   return (
-    <SheetFrame title="Sleep timer" subtitle={timer ? `Stops: ${sleepLabel(timer)}` : "Music fades out and stops."} onClose={phone.pop}>
+    <SheetFrame title="Sleep timer" subtitle={<SleepLine />} onClose={phone.pop} dimBack>
       <ul className="ph-rows" aria-label="Stop after">
-        {SLEEP_CHOICES.map((c) => (
-          <li key={c.label}>
-            <button type="button" className="ph-row ph-row--text" onClick={() => pick(() => startSleep(c.choice))}>
-              {c.label}
+        {timer && (
+          <li>
+            <button type="button" className="ph-row ph-row--text ph-row--danger" onClick={() => pick(cancelSleep)}>
+              Turn off the timer
             </button>
           </li>
-        ))}
+        )}
+        {SLEEP_CHOICES.map((c) => {
+          const on = sameChoice(timer, c.choice);
+          return (
+            <li key={c.label}>
+              <button type="button" className={`ph-row ph-row--text ${on ? "is-on" : ""}`} aria-current={on || undefined} onClick={() => pick(() => startSleep(c.choice))}>
+                {c.label}
+                {on && <Check size={20} aria-hidden="true" className="ph-row__tick" />}
+              </button>
+            </li>
+          );
+        })}
         <li>
           {custom ? (
             <form
@@ -287,17 +338,50 @@ export function SleepSheet() {
             </button>
           )}
         </li>
-        {timer && (
-          <li>
-            <button type="button" className="ph-row ph-row--text ph-row--quiet" onClick={() => pick(cancelSleep)}>
-              Turn off the timer
-            </button>
-          </li>
-        )}
       </ul>
     </SheetFrame>
   );
 }
+
+/** Whether the running timer is this choice. */
+function sameChoice(t: ReturnType<typeof useSleep.getState>["timer"], c: (typeof SLEEP_CHOICES)[number]["choice"]): boolean {
+  if (!t || t.kind !== c.kind) return false;
+  return t.kind !== "minutes" || (c.kind === "minutes" && t.minutes === c.minutes);
+}
+
+const clockFmt = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+
+/** "Stops at 9:02, in 14 min", kept up to date while the sheet is open. */
+function SleepLine() {
+  const timer = useSleep((s) => s.timer);
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (timer?.kind !== "minutes") return;
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [timer]);
+  if (!timer) return <>Music fades out and stops.</>;
+  if (timer.kind === "track") return <>Stops at the end of this song.</>;
+  if (timer.kind === "album") return <>Stops at the end of this album.</>;
+  const left = Math.max(0, timer.endsAt - Date.now());
+  const mins = Math.ceil(left / 60_000);
+  return (
+    <span className="tabular">
+      Stops at {clockFmt.format(new Date(timer.endsAt))}, in {mins} min
+    </span>
+  );
+}
+
+/** Repeat steps once per press, however fast the presses come. */
+let lastRepeat = 0;
+function cycleRepeat() {
+  const now = Date.now();
+  if (now - lastRepeat < 350) return;
+  lastRepeat = now;
+  tap();
+  void player.cycleRepeatNow();
+}
+export { cycleRepeat };
 
 // ---------------------------------------------------------------- a song
 
@@ -322,31 +406,53 @@ export function TrackSheet({ track, inPlaylist }: { track: Track; inPlaylist?: i
       </span>
     </div>
   );
-  const items: { label: string; run: () => void }[] = [
-    { label: liked ? "Remove from Liked Songs" : "Add to Liked Songs", run: act(() => setLiked([track], !liked)) },
-    { label: "Add to playlist", run: act(() => phone.push({ kind: "addTo", track }), true) },
-    { label: "Play next", run: act(() => player.queueAdd([track.id], "next")) },
-    { label: "Add to queue", run: act(() => player.addToQueue([track])) },
+  const items: Action[] = [
+    { label: liked ? "Remove from Liked Songs" : "Add to Liked Songs", icon: liked ? HeartOff : Heart, run: act(() => setLiked([track], !liked)) },
+    { label: "Add to playlist", icon: ListPlus, run: act(() => phone.push({ kind: "addTo", track }), true) },
+    { label: "Play next", icon: ListStart, run: act(() => player.queueAdd([track.id], "next")) },
+    { label: "Add to queue", icon: ListEnd, run: act(() => player.addToQueue([track])) },
     ...(fromPlaylist
-      ? [{ label: "Remove from this playlist", run: act(() => removeRows(fromPlaylist.playlist, [fromPlaylist.itemId], fromPlaylist.order)) }]
+      ? [{ label: "Remove from this playlist", icon: Trash2, danger: true, run: act(() => removeRows(fromPlaylist.playlist, [fromPlaylist.itemId], fromPlaylist.order)) }]
       : []),
-    ...(isCurrent ? [{ label: "Go to queue", run: act(() => phone.show({ kind: "queue" }), true) }] : []),
-    { label: "Go to album", run: act(() => phone.go({ name: "album", id: track.albumId }), true) },
-    { label: "Go to artist", run: act(() => phone.go({ name: "artist", id: track.artistId }), true) },
-    { label: "Song radio", run: act(() => player.playRadio(`track:${track.id}`)) },
+    ...(isCurrent
+      ? [
+          { label: "Lyrics", icon: MicVocal, run: act(() => (phone.closeSheets(), phone.openPlayer(), phone.openLyrics()), true) },
+          { label: "Go to queue", icon: ListMusic, run: act(() => phone.show({ kind: "queue" }), true) },
+        ]
+      : []),
+    { label: "Credits", icon: UsersRound, run: act(() => openSongCredits(track)) },
+    { label: "Share", icon: Share, run: act(() => openShareCard({ kind: "track", id: track.id, title: track.title, subtitle: trackArtistLine(track), thumb: track.thumb })) },
+    { label: "Go to album", icon: Disc3, run: act(() => phone.go({ name: "album", id: track.albumId }), true) },
+    { label: "Go to artist", icon: UserRound, run: act(() => phone.go({ name: "artist", id: track.artistId }), true) },
+    { label: "Song radio", icon: Radio, run: act(() => player.playRadio(`track:${track.id}`)) },
   ];
   return (
     <SheetFrame title={track.title} onClose={phone.pop} head={head}>
-      <ul className="ph-rows" aria-label="Actions">
-        {items.map((i) => (
-          <li key={i.label}>
-            <button type="button" className="ph-row ph-row--text" onClick={i.run}>
-              {i.label}
-            </button>
-          </li>
-        ))}
-      </ul>
+      <ActionList items={items} />
     </SheetFrame>
+  );
+}
+
+interface Action {
+  label: string;
+  icon: LucideIcon;
+  run: () => void;
+  danger?: boolean;
+}
+
+/** A sheet's actions: an icon and a word each. */
+function ActionList({ items }: { items: Action[] }) {
+  return (
+    <ul className="ph-rows ph-actions-list" aria-label="Actions">
+      {items.map((i) => (
+        <li key={i.label}>
+          <button type="button" className={`ph-row ph-row--action ${i.danger ? "ph-row--danger" : ""}`} onClick={i.run}>
+            <i.icon size={22} aria-hidden="true" className="ph-row__icon" />
+            {i.label}
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -365,32 +471,51 @@ function AlbumSheet({ album }: { album: Album }) {
       </span>
     </div>
   );
-  const items = [
-    { label: "Add to queue", run: act(() => player.queueAlbum(album.id)) },
-    { label: "Sleeve notes", run: act(() => phone.go({ name: "album", id: album.id, tab: "sleeve" })) },
-    { label: "Go to artist", run: act(() => phone.go({ name: "artist", id: album.artistId })) },
+  const items: Action[] = [
+    { label: "Add to queue", icon: ListEnd, run: act(() => player.queueAlbum(album.id)) },
+    { label: "Artist radio", icon: Radio, run: act(() => player.playRadio(`artist:${album.artistId}`)) },
+    { label: "Share", icon: Share, run: act(() => openShareCard({ kind: "album", id: album.id, title: album.title, subtitle: album.artistTitle, thumb: album.thumb })) },
+    { label: "Go to artist", icon: UserRound, run: act(() => phone.go({ name: "artist", id: album.artistId })) },
   ];
   return (
     <SheetFrame title={album.title} onClose={phone.pop} head={head}>
-      <ul className="ph-rows" aria-label="Actions">
-        {items.map((i) => (
-          <li key={i.label}>
-            <button type="button" className="ph-row ph-row--text" onClick={i.run}>
-              {i.label}
-            </button>
-          </li>
-        ))}
-      </ul>
+      <ActionList items={items} />
+    </SheetFrame>
+  );
+}
+
+function PlaylistSheet({ playlist }: { playlist: Playlist }) {
+  const act = (f: () => unknown) => () => {
+    tap();
+    phone.closeSheets();
+    void f();
+  };
+  const head = (
+    <div className="ph-track-head">
+      <Art path={playlist.thumb} size={56} kind="playlist" />
+      <span className="ph-row__text">
+        <span className="ph-row__title">{playlist.title}</span>
+        <span className="ph-row__sub">{countLine(playlist.trackCount, "song")}</span>
+      </span>
+    </div>
+  );
+  const own = !/^(blend|shared):/.test(playlist.id);
+  const items: Action[] = [
+    ...(own && !playlist.smart ? [{ label: "Edit name and description", icon: Pencil, run: act(() => editDetails(playlist)) }] : []),
+    { label: "Share", icon: Share, run: act(() => openShareCard({ kind: "playlist", id: playlist.id, title: playlist.title, thumb: playlist.thumb })) },
+    ...(own ? [{ label: "Delete playlist", icon: Trash2, danger: true, run: act(() => askDelete(playlist)) }] : []),
+  ];
+  return (
+    <SheetFrame title={playlist.title} onClose={phone.pop} head={head}>
+      <ActionList items={items} />
     </SheetFrame>
   );
 }
 
 function AddToSheet({ track }: { track: Track }) {
-  const items = useLibraryView((s) => s.items);
-  useEffect(() => {
-    if (items === null) void useLibraryView.getState().loadItems();
-  }, [items]);
-  const lists = (items ?? []).filter((i) => i.kind === "playlist" && !i.smart && !i.blend && !i.shared);
+  const { data, error, retry } = useLoad(() => backend.playlists(), []);
+  // Only lists you can add to: not smart playlists, Blends or ones shared with you.
+  const lists = (data ?? []).filter((p) => !p.smart && !/^(smart|blend|shared):/.test(p.id));
   return (
     <SheetFrame title="Add to playlist" subtitle={track.title} onClose={phone.pop} tall>
       <ul className="ph-rows">
@@ -424,11 +549,19 @@ function AddToSheet({ track }: { track: Track }) {
               <Art path={p.thumb} size={48} kind="playlist" />
               <span className="ph-row__text">
                 <span className="ph-row__title">{p.title}</span>
-                {p.trackCount != null && <span className="ph-row__sub tabular">{p.trackCount} songs</span>}
+                <span className="ph-row__sub tabular">{countLine(p.trackCount, "song")}</span>
               </span>
             </button>
           </li>
         ))}
+        {!data && !error && [0, 1, 2].map((i) => <li key={i} className="ph-lib-row--ghost" />)}
+        {error && !data && (
+          <li>
+            <button type="button" className="ph-row ph-row--text" onClick={retry}>
+              Couldn't load your playlists. Try again
+            </button>
+          </li>
+        )}
       </ul>
     </SheetFrame>
   );
@@ -440,10 +573,13 @@ const PHONE_SORTS: LibSort[] = ["recents", "added", "alpha", "creator"];
 
 function SortSheet() {
   const sort = useLibraryView((s) => s.sort);
+  const filter = useLibraryView((s) => s.filter);
+  // Artists have no creator to sort by.
+  const sorts = PHONE_SORTS.filter((x) => !(filter === "artist" && x === "creator"));
   return (
     <SheetFrame title="Sort by" onClose={phone.pop}>
       <ul className="ph-rows" role="radiogroup" aria-label="Sort by">
-        {PHONE_SORTS.map((s) => (
+        {sorts.map((s) => (
           <li key={s}>
             <button
               type="button"

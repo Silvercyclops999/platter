@@ -29,6 +29,7 @@ export type Sheet =
   | { kind: "device" }
   | { kind: "track"; track: Track; inPlaylist?: InPlaylist }
   | { kind: "album"; album: Album }
+  | { kind: "playlist"; playlist: Playlist }
   | { kind: "addTo"; track: Track }
   | { kind: "librarySort" }
   | { kind: "create" };

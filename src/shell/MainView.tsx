@@ -163,7 +163,8 @@ function syncLabel(s: SyncStatus | null): string | null {
     : "Syncing library…";
 }
 
-function Page({ route }: { route: Route }) {
+/** The page for a route, as a computer draws it (the phone borrows the ones it has no version of). */
+export function Page({ route }: { route: Route }) {
   switch (route.name) {
     case "home":
       return <HomePage />;

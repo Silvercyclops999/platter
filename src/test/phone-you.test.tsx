@@ -17,6 +17,11 @@ import { PhoneShell } from "../phone/PhoneShell";
 import { PhoneServerPick, PhoneSignIn } from "../phone/PhoneSignIn";
 import { phoneLookOf, phoneLookPatch } from "../phone/phoneSettings";
 import { phone, usePhoneUi } from "../phone/phoneUi";
+import { installTapGuard } from "../phone/gestures";
+import { albumPlate, plateText } from "../phone/bits";
+import { playingFrom, shownDate } from "../phone/NowPlaying";
+import { inLibraryLine } from "../phone/pages/Artist";
+import { ofKind } from "../phone/pages/Search";
 import { latestOnce } from "../phone/pages/You";
 import phoneCss from "../phone/phone.css?raw";
 import indexHtml from "../../index.html?raw";
@@ -277,5 +282,111 @@ describe("safe areas", () => {
     expect(phoneCss).toMatch(/env\(safe-area-inset-bottom/);
     // Tabs and the mini player sit above the home indicator.
     expect(phoneCss).toMatch(/\.ph-tabs \{[^}]*padding-bottom: var\(--ph-safe-bottom\)/);
+  });
+});
+
+describe("touch and sheets", () => {
+  it("a press that moved is a swipe, not a tap", () => {
+    const root = document.createElement("div");
+    const button = document.createElement("button");
+    root.appendChild(button);
+    document.body.appendChild(root);
+    const clicked = vi.fn();
+    button.addEventListener("click", clicked);
+    const off = installTapGuard(root);
+    const press = (dx: number) => {
+      button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: 10, clientY: 10, pointerId: 1 }));
+      button.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: 10 + dx, clientY: 10, pointerId: 1 }));
+      button.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: 10 + dx, clientY: 10, pointerId: 1 }));
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    };
+    press(40);
+    expect(clicked).not.toHaveBeenCalled();
+    press(3);
+    expect(clicked).toHaveBeenCalledTimes(1);
+    off();
+    root.remove();
+  });
+
+  it("tapping the dim area closes every sheet; the sleep timer's goes back to the queue", async () => {
+    render(<PhoneShell />);
+    act(() => phone.push({ kind: "queue" }));
+    act(() => phone.push({ kind: "librarySort" }));
+    fireEvent.click(screen.getAllByTestId("sheet-dim").slice(-1)[0]);
+    expect(usePhoneUi.getState().sheets).toEqual([]);
+    act(() => phone.push({ kind: "queue" }));
+    act(() => phone.push({ kind: "sleep" }));
+    fireEvent.click(screen.getAllByTestId("sheet-dim").slice(-1)[0]);
+    expect(usePhoneUi.getState().sheets.map((s) => s.kind)).toEqual(["queue"]);
+  });
+
+  it("Add to playlist lists your own playlists", async () => {
+    const t = mock.fx.tracks[0];
+    render(<PhoneShell />);
+    act(() => phone.push({ kind: "addTo", track: t }));
+    const sheet = await screen.findByRole("dialog", { name: "Add to playlist" });
+    const own = (await backend.playlists()).filter((p) => !p.smart);
+    expect(await within(sheet).findByText(own[0].title)).toBeInTheDocument();
+  });
+
+  it("the song sheet has an icon for each action, and lyrics for the playing song", async () => {
+    const t = mock.fx.tracks[0];
+    play(t);
+    render(<PhoneShell />);
+    act(() => phone.push({ kind: "track", track: t }));
+    const sheet = await screen.findByRole("dialog", { name: t.title });
+    expect(within(sheet).getByRole("button", { name: "Lyrics" })).toBeInTheDocument();
+    expect(within(sheet).getByRole("button", { name: "Credits" })).toBeInTheDocument();
+    expect(within(sheet).getByRole("button", { name: "Share" })).toBeInTheDocument();
+    expect(sheet.querySelectorAll(".ph-row__icon").length).toBeGreaterThan(6);
+  });
+});
+
+describe("what the phone says", () => {
+  it("format plates only for lossless files or downloads", () => {
+    expect(plateText({ codec: "mp3", bitDepth: null, sampleRate: 44100, bitrate: 320 }, false)).toBeNull();
+    expect(plateText({ codec: "mp3", bitDepth: null, sampleRate: 44100, bitrate: 320 }, true)).toBe("Downloaded");
+    const flac = { codec: "flac", bitDepth: 16, sampleRate: 44100, bitrate: 900 };
+    expect(albumPlate([flac, flac])).toBe(plateText(flac, false));
+    expect(albumPlate([flac, { ...flac, codec: "mp3" }])).toBeNull();
+  });
+
+  it("a 1 January date shows as its year", () => {
+    expect(shownDate("2007-01-01")).toBe("2007");
+    expect(shownDate("2007-03-03")).toMatch(/2007/);
+    expect(shownDate("2007-03-03")).not.toBe("2007-03-03");
+  });
+
+  it("Playing from follows the queue past the end of the record", () => {
+    const ctx = { kind: "album", title: "Night Ferry" };
+    expect(playingFrom(ctx)).toBe("Night Ferry");
+    expect(playingFrom(ctx, "autoplay")).toBe("Autoplay after Night Ferry");
+    expect(playingFrom(ctx, "user")).toBe("Your queue");
+  });
+
+  it("an artist's song count the server didn't give stays out", () => {
+    expect(inLibraryLine(41, 0)).toBe("In your library: 41 albums");
+    expect(inLibraryLine(1, 1)).toBe("In your library: 1 album, 1 song");
+  });
+
+  it("search narrows to one type of result", () => {
+    const hits = [{ kind: "artist" as const, artist: mock.fx.artists[0] }, { kind: "album" as const, album: mock.fx.albums[0] }];
+    expect(ofKind(hits, "all")).toHaveLength(2);
+    expect(ofKind(hits, "album")).toEqual([hits[1]]);
+  });
+
+  it("the phone's settings rows never send you to the computer", () => {
+    expect(onPhone({ key: "updates" })).toBe(false);
+    expect(onPhone({ key: "outputDevice" })).toBe(false);
+  });
+});
+
+describe("pages the phone borrows", () => {
+  it("a page with no phone version opens in one column; file and drive tools say they're on the computer", async () => {
+    render(<PhoneShell />);
+    act(() => useRouter.getState().navigate({ name: "recents" }));
+    await waitFor(() => expect(document.querySelector('.ph-desk[data-route="recents"]')).not.toBeNull());
+    act(() => useRouter.getState().navigate({ name: "devices" }));
+    expect(await screen.findByText("On your computer")).toBeInTheDocument();
   });
 });

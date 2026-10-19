@@ -5,7 +5,7 @@
  * card, sleeve notes and credits. A sideways swipe on the cover skips; a
  * pull down closes, straight down to the tab underneath.
  */
-import { ChevronDown, ListMusic, MoreHorizontal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from "lucide-react";
+import { ChevronDown, ListMusic, MicVocal, MoreHorizontal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Art } from "../components/Art";
 import { Slider } from "../components/Slider";
@@ -37,7 +37,10 @@ const CONTEXT_NOUN: Record<string, string> = {
 };
 
 /** "Playing from" and its source. */
-export function playingFrom(ctx: { kind: string; title?: string | null } | null | undefined): string {
+export function playingFrom(ctx: { kind: string; title?: string | null } | null | undefined, source?: string): string {
+  // Past the end of the record or list: what plays is chosen to follow it, or queued by hand.
+  if (source === "autoplay") return ctx?.title ? `Autoplay after ${ctx.title}` : "Autoplay";
+  if (source === "user") return "Your queue";
   if (!ctx) return "Your queue";
   if (ctx.title) return ctx.title;
   return ctx.kind === "liked" ? "Liked Songs" : `This ${CONTEXT_NOUN[ctx.kind] ?? "queue"}`;
@@ -59,6 +62,7 @@ export function NowPlaying() {
 
 function Player({ track, closing }: { track: Track; closing: boolean }) {
   const ctx = usePlayer((s) => s.state?.queue.context ?? null);
+  const source = usePlayer((s) => s.state?.queue.current?.source);
   const status = usePlayer((s) => s.state?.status ?? "idle");
   const colours = useArtColours(null, track.thumb);
   const playing = status === "playing" || status === "loading" || status === "buffering";
@@ -97,7 +101,7 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
             </button>
             <div className="ph-np__from">
               <span className="ph-np__from-label">Playing from</span>
-              <span className="ph-np__from-name">{playingFrom(ctx)}</span>
+              <span className="ph-np__from-name">{playingFrom(ctx, source)}</span>
             </div>
             <button type="button" className="ph-icon-btn" aria-label="More for this song" onClick={() => phone.push({ kind: "track", track })}>
               <MoreHorizontal size={24} aria-hidden="true" />
@@ -133,6 +137,18 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
               <OutputButton />
               <FormatPlate track={track} />
             </div>
+            <div className="ph-np__right">
+            <button
+              type="button"
+              className="ph-icon-btn"
+              aria-label="Lyrics"
+              onClick={() => {
+                tap();
+                phone.openLyrics();
+              }}
+            >
+              <MicVocal size={22} aria-hidden="true" />
+            </button>
             <button
               type="button"
               className="ph-icon-btn"
@@ -144,6 +160,7 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
             >
               <ListMusic size={24} aria-hidden="true" />
             </button>
+            </div>
           </div>
           </div>
         </div>
@@ -166,7 +183,7 @@ export function PhoneSeek() {
     <div className="ph-seek">
       <Slider
         label="Seek"
-        className="slider--tonearm"
+        className="ph-scrub"
         value={Math.min(shown, durationMs)}
         max={Math.max(durationMs, 1)}
         step={SEEK_KEY_STEP}
@@ -223,13 +240,27 @@ function Transport({ playing }: { playing: boolean }) {
   );
 }
 
+const dayFmt = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+
+/**
+ * A date from the sleeve notes as people write it: "3 March 2007". A 1 January
+ * date is how a year alone often arrives, so it shows as the year.
+ */
+export function shownDate(v: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v);
+  if (!m) return v;
+  if (m[2] === "01" && m[3] === "01") return m[1];
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return Number.isNaN(d.getTime()) ? v : dayFmt.format(d);
+}
+
 /** An album's sleeve notes as a card: the facts, then the release's own notes. */
 export function SleeveCard({ track, link = true }: { track: Pick<Track, "albumId" | "albumTitle" | "artistTitle" | "thumb">; link?: boolean }) {
   const { data } = useSleeveNotes(track.albumId);
   if (!data) return null;
   const facts = [
-    ["Released", data.released?.value],
-    ["Recorded", data.recorded?.value],
+    ["Released", data.released?.value ? shownDate(data.released.value) : undefined],
+    ["Recorded", data.recorded?.value ? shownDate(data.recorded.value) : undefined],
     ["Label", data.label?.value],
     ["Studio", data.studios[0]?.name],
   ].filter((f): f is [string, string] => !!f[1]);
@@ -244,10 +275,6 @@ export function SleeveCard({ track, link = true }: { track: Pick<Track, "albumId
             Open the album
           </button>
         )}
-      </div>
-      <div className="ph-sleeve-card__record">
-        <Art path={track.thumb} size={56} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} />
-        <span className="ph-sleeve-card__album">{track.albumTitle}</span>
       </div>
       {facts.length > 0 && (
         <dl className="ph-facts">
