@@ -68,6 +68,66 @@ describe("Keep my devices in sync", () => {
     expect(row("Keep my devices in sync").getByText("In sync with Studio PC.")).toBeInTheDocument();
   });
 
+  it("a device that used the long code is paired only after a yes here", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+    await user.click(row("Add a device").getByRole("button", { name: "Show codes" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add a device" });
+    await within(dialog).findByLabelText(/^Code /);
+    act(() => mock.deviceSync.pairAsks("Kitchen iPad"));
+    await within(dialog).findByText(/Pair with Kitchen iPad\? It used the long code/);
+    expect(mock.deviceSync.devices).toHaveLength(0);
+    await user.click(within(dialog).getByRole("button", { name: "Pair" }));
+    await within(dialog).findByText(/Paired with Kitchen iPad/);
+    expect(mock.deviceSync.devices.map((d) => d.name)).toEqual(["Kitchen iPad"]);
+  });
+
+  it("saying no to a device that used the long code pairs nothing", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+    await user.click(row("Add a device").getByRole("button", { name: "Show codes" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add a device" });
+    await within(dialog).findByLabelText(/^Code /);
+    act(() => mock.deviceSync.pairAsks("Someone's Laptop"));
+    await user.click(await within(dialog).findByRole("button", { name: "Don't pair" }));
+    await within(dialog).findByText(/Not paired. Get new codes to try again/);
+    expect(mock.deviceSync.devices).toHaveLength(0);
+    expect(within(dialog).getByRole("button", { name: "New codes" })).toBeInTheDocument();
+  });
+
+  it("with the relay down the long code is hidden and the 6-digit code still shows", async () => {
+    const user = userEvent.setup();
+    mock.deviceSync.relayDown = true;
+    render(<SettingsPage />);
+    await user.click(row("Add a device").getByRole("button", { name: "Show codes" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add a device" });
+    await within(dialog).findByLabelText(/^Code \d/);
+    expect(within(dialog).getByText("The relay can't be reached. The 6-digit code still works on this network.")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Copy the long code" })).toBeNull();
+    expect(within(dialog).queryByRole("img", { name: "QR code for the long code" })).toBeNull();
+  });
+
+  it("closing the dialog stops the codes, even while they're being made", async () => {
+    const user = userEvent.setup();
+    const cancel = vi.spyOn(backend, "devicePairCancel");
+    const { unmount } = render(<SettingsPage />);
+    await user.click(row("Add a device").getByRole("button", { name: "Show codes" }));
+    await screen.findByRole("dialog", { name: "Add a device" });
+    unmount();
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it("says when the sync status can't be read, and Retry reads it again", async () => {
+    const user = userEvent.setup();
+    mock.deviceSync.statusFails = true;
+    render(<SettingsPage />);
+    await waitFor(() => expect(row("Keep my devices in sync").getByText("Couldn't read sync status.")).toBeInTheDocument());
+    mock.deviceSync.statusFails = false;
+    await user.click(row("Couldn't read sync status").getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(row("Keep my devices in sync").getByText("No other device paired yet. Add one below.")).toBeInTheDocument());
+    expect(screen.queryByText("Couldn't read sync status", { selector: ".setting-row__title" })).toBeNull();
+  });
+
   it("codes that ran out offer new ones; cancelling stops showing them", async () => {
     const user = userEvent.setup();
     const cancel = vi.spyOn(backend, "devicePairCancel");
@@ -180,6 +240,8 @@ describe("Keep my devices in sync", () => {
     await user.click(await waitFor(() => row("Sync now").getByRole("button", { name: "Sync now" })));
     expect(now).toHaveBeenCalled();
     await waitFor(() => expect(row("Studio PC").getByText(/^In sync/)).toBeInTheDocument());
+    // It says how it went.
+    await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.message)).toContain("In sync with Studio PC"));
     await user.click(screen.getByRole("switch", { name: "Keep my devices in sync" }));
     await waitFor(async () => expect((await backend.settingsGet()).deviceSync).toBe(false));
     await waitFor(() => expect(row("Keep my devices in sync").getByText("Off. Your paired devices stay paired.")).toBeInTheDocument());
@@ -283,6 +345,23 @@ describe("downloads on your other devices", () => {
     await user.click(row(album.title).getByRole("button", { name: "Download here" }));
     expect(set).toHaveBeenCalledWith("album", album.id, true, expect.objectContaining({ title: album.title }));
     expect((await screen.findAllByText(`Downloading ${album.title}`))[0]).toBeInTheDocument();
+  });
+
+  it("a suggestion that couldn't be hidden comes back, and a failed read keeps the list", async () => {
+    const user = userEvent.setup();
+    mock.deviceSync.suggest("playlist", "p-none", "Road Trip");
+    render(
+      <>
+        <SettingsPage />
+        <Toaster />
+      </>,
+    );
+    await waitFor(() => expect(row("Road Trip").getByText("Downloaded on Studio PC")).toBeInTheDocument());
+    vi.spyOn(backend, "deviceDownloadDismiss").mockRejectedValueOnce({ kind: "internal", message: "disk full" });
+    vi.spyOn(backend, "deviceDownloadSuggestions").mockRejectedValue({ kind: "internal", message: "locked" });
+    await user.click(row("Road Trip").getByRole("button", { name: "Not now" }));
+    expect((await screen.findAllByText(/Couldn't hide that suggestion/))[0]).toBeInTheDocument();
+    await waitFor(() => expect(row("Road Trip").getByText("Downloaded on Studio PC")).toBeInTheDocument());
   });
 
   it("aren't offered while What each device downloaded is off", async () => {

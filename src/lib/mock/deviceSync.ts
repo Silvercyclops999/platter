@@ -6,8 +6,10 @@
  * `otherLong` (its long code), `away` (no device on this network),
  * `otherAccount` (the other device is signed in to another account),
  * `relayDown` (the relay can't be reached), `copyFails` (the computer
- * doesn't answer a settings copy), `pairArrives(name)` (a device joins
- * the codes this one shows), `expirePair()`, `hold(n)` (changes held from
+ * doesn't answer a settings copy), `statusFails` (the status can't be
+ * read), `pairArrives(name)` (a device joins the codes this one shows),
+ * `pairAsks(name)` (a device used the long code and waits for a yes),
+ * `expirePair()`, `hold(n)` (changes held from
  * a clock far ahead), `suggest(...)`.
  */
 import type {
@@ -40,6 +42,7 @@ export class MockDeviceSync {
   otherAccount = false;
   relayDown = false;
   copyFails = false;
+  statusFails = false;
   devices: DeviceSyncDevice[] = [];
   held: SyncQuarantined[] = [];
   suggestions: DownloadSuggestion[] = [];
@@ -55,6 +58,7 @@ export class MockDeviceSync {
     this.otherAccount = false;
     this.relayDown = false;
     this.copyFails = false;
+    this.statusFails = false;
     this.devices = [];
     this.held = [];
     this.suggestions = [];
@@ -70,6 +74,7 @@ export class MockDeviceSync {
   }
 
   overview(): DeviceSyncOverview {
+    if (this.statusFails) throw { kind: "internal", message: "database is locked" };
     return { on: this.on(), devices: this.devices.map((d) => this.words(d)), quarantined: this.held.length, pairing: this.pairState() };
   }
 
@@ -131,7 +136,17 @@ export class MockDeviceSync {
 
   pairStart(): DevicePairState {
     const code = String(100000 + Math.floor(Math.random() * 900000));
-    this.pair = { phase: "waiting", code, longCode: LONG, qr: mockQr(LONG), expiresAt: Date.now() + TTL_MS, with: null };
+    this.pair = this.relayDown
+      ? {
+          phase: "waiting",
+          code,
+          longCode: null,
+          qr: null,
+          expiresAt: Date.now() + TTL_MS,
+          with: null,
+          note: "The relay can't be reached. The 6-digit code still works on this network.",
+        }
+      : { phase: "waiting", code, longCode: LONG, qr: mockQr(LONG), expiresAt: Date.now() + TTL_MS, with: null };
     this.hooks.emitPair(this.pair);
     return this.pair;
   }
@@ -147,6 +162,22 @@ export class MockDeviceSync {
     this.add(name);
     this.pair = { ...IDLE, phase: "paired", with: name };
     this.hooks.emitPair(this.pair);
+  }
+
+  /** Test/demo hook: a device used the long code and waits for a yes here. */
+  pairAsks(name = "Studio PC") {
+    if (this.pairState().phase !== "waiting") return;
+    this.pair = { ...this.pair, phase: "confirm", code: null, longCode: null, qr: null, with: name };
+    this.hooks.emitPair(this.pair);
+  }
+
+  pairConfirm(yes: boolean): DevicePairState {
+    if (this.pair.phase !== "confirm") throw { kind: "notFound", message: "No device is asking to pair." };
+    const name = this.pair.with ?? "Studio PC";
+    if (yes) this.add(name);
+    this.pair = yes ? { ...IDLE, phase: "paired", with: name } : { ...IDLE, phase: "declined" };
+    this.hooks.emitPair(this.pair);
+    return this.pair;
   }
 
   /** Test hook: the codes ran out. */

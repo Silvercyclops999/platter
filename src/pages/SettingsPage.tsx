@@ -919,9 +919,9 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
   const downloads = useDownloadStatus();
   const [syncFile, setSyncFile] = useSyncFile();
   const syncOn = !!s?.syncEnabled && !!s?.syncFolder;
-  const [devSync, setDevSync] = useDeviceSync();
+  const [devSync, setDevSync, { failed: devSyncFailed, reload: reloadDevSyncNow }] = useDeviceSync();
   const suggested = useDownloadSuggestions();
-  const reloadDevSync = () => void backend.deviceSyncStatus().then(setDevSync, () => {});
+  const reloadDevSync = () => void reloadDevSyncNow();
   const devSyncOn = s?.deviceSync !== false;
   const limitGb = s?.downloadLimitGb;
   const limitOptions: SelectOption<string>[] = [...new Set([...DOWNLOAD_LIMITS_GB, ...(limitGb ? [limitGb] : [])])]
@@ -1487,9 +1487,26 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       title: "Keep my devices in sync",
       description: "Paired devices swap changes directly, at home and away. This device only.",
       more: "Paired devices of the same Plex account swap changes directly: over your network at home, and through the sealed relay when one is away. There's no server, and your sign-in and keys never travel. Your look syncs; each device keeps its own layout, and downloads stay on the device that made them. This device only.",
-      note: deviceSyncNote(s, devSync),
+      note: devSyncFailed ? "Couldn't read sync status." : deviceSyncNote(s, devSync),
       control: (ids) => toggle(s, "deviceSync", ids),
     },
+    ...((devSyncFailed
+      ? [
+          {
+            key: "deviceSyncRetry",
+            section: "App",
+            page: "sync",
+            group: "Keep my devices in sync",
+            title: "Couldn't read sync status",
+            description: "Your paired devices are fine. Try reading it again.",
+            control: () => (
+              <Button size="sm" onClick={reloadDevSync}>
+                Retry
+              </Button>
+            ),
+          },
+        ]
+      : []) satisfies RowDef[]),
     ...((devSync?.devices ?? []).map((d) => ({
       key: `deviceSync-${d.id}`,
       section: "App",

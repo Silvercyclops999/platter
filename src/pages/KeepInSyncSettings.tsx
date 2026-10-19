@@ -3,7 +3,7 @@
  * each is doing, adding a device (the codes to show), pairing with a code
  * another device shows, and changes held back from a clock far ahead.
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { QrCode } from "../components/QrCode";
@@ -17,26 +17,56 @@ import "./sync-settings.css";
 const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "");
 const spaced = (code: string) => `${code.slice(0, 3)} ${code.slice(3)}`;
 
-/** Paired devices and pairing, kept current while Settings is open. */
+/** Paired devices and pairing, kept current while Settings is open.
+ * `failed`: the status couldn't be read (with `reload` to try again). */
 export function useDeviceSync() {
   const [ov, setOv] = useState<DeviceSyncOverview | null>(null);
+  const [failed, setFailed] = useState(false);
+  const alive = useRef(true);
+  // Events that come before the first status is read are kept, not lost.
+  const early = useRef<Partial<DeviceSyncOverview>>({});
+  const seq = useRef(0);
+  const reload = useCallback(() => {
+    const n = ++seq.current;
+    return backend.deviceSyncStatus().then(
+      (o) => {
+        if (!alive.current || n !== seq.current) return;
+        setFailed(false);
+        setOv({ ...o, ...early.current });
+        early.current = {};
+      },
+      (e) => {
+        if (!alive.current || n !== seq.current) return;
+        console.warn("device sync status", e);
+        setFailed(true);
+      },
+    );
+  }, []);
   useEffect(() => {
-    let alive = true;
-    const load = () => backend.deviceSyncStatus().then((o) => alive && setOv(o), () => {});
-    void load();
-    const offStatus = backend.listen("device-sync://status", (devices) => alive && setOv((o) => (o ? { ...o, devices } : o)));
-    const offPair = backend.listen("device-sync://pair", (pairing) => {
-      if (!alive) return;
-      setOv((o) => (o ? { ...o, pairing } : o));
-      if (pairing.phase === "paired") void load();
+    alive.current = true;
+    const offStatus = backend.listen("device-sync://status", (devices) => {
+      if (!alive.current) return;
+      setOv((o) => {
+        if (!o) early.current.devices = devices;
+        return o ? { ...o, devices } : o;
+      });
     });
+    const offPair = backend.listen("device-sync://pair", (pairing) => {
+      if (!alive.current) return;
+      setOv((o) => {
+        if (!o) early.current.pairing = pairing;
+        return o ? { ...o, pairing } : o;
+      });
+      if (pairing.phase === "paired") void reload();
+    });
+    void reload();
     return () => {
-      alive = false;
+      alive.current = false;
       void offStatus.then((u) => u());
       void offPair.then((u) => u());
     };
-  }, []);
-  return [ov, setOv] as const;
+  }, [reload]);
+  return [ov, setOv, { failed, reload }] as const;
 }
 
 /** One line under the switch. */
@@ -110,6 +140,10 @@ export function DeviceSyncNowButton({ ov, on, onOv }: { ov: DeviceSyncOverview |
       (o) => {
         setBusy(false);
         onOv(o);
+        // Say how it went: the first device not in step, or all in step.
+        const behind = o.devices.find((d) => d.words !== "In sync");
+        if (behind) toast.info(`${behind.words}.`);
+        else toast.info(o.devices.length === 1 ? `In sync with ${o.devices[0].name}` : `In sync with all ${o.devices.length} devices`);
       },
       (e) => {
         setBusy(false);
@@ -166,22 +200,59 @@ function useCountdown(until: number | null) {
 export function AddDeviceDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [st, setSt] = useState<DevicePairState | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const left = useCountdown(st?.phase === "waiting" ? st.expiresAt : null);
+  const [answering, setAnswering] = useState(false);
+  const alive = useRef(false);
+  const showing = st?.phase === "waiting" || st?.phase === "confirm";
+  const left = useCountdown(showing ? st.expiresAt : null);
   const start = () => {
     setErr(null);
-    backend.devicePairStart().then(setSt, (e) => setErr(errText(e) || "Couldn't show a code."));
+    backend.devicePairStart().then(
+      (s) => alive.current && setSt(s),
+      (e) => alive.current && setErr(errText(e) || "Couldn't show a code."),
+    );
   };
+  const cancel = () =>
+    backend.devicePairCancel().catch((e) => {
+      console.warn("pairing not cancelled", e);
+    });
   useEffect(() => {
     if (!open) return;
-    start();
-    const off = backend.listen("device-sync://pair", setSt);
-    return () => void off.then((u) => u());
+    alive.current = true;
+    // Listening first, so nothing that happens right after the codes show is missed.
+    const off = backend.listen("device-sync://pair", (s) => alive.current && setSt(s));
+    void off.then(() => alive.current && start());
+    return () => {
+      alive.current = false;
+      void off.then((u) => u());
+      void cancel();
+    };
   }, [open]);
   useEffect(() => {
-    if (left === "0:00") backend.devicePairState().then(setSt, () => {});
+    if (left !== "0:00") return;
+    // The time is up: the codes stop here even before the other side says so.
+    setSt((s) => (s && (s.phase === "waiting" || s.phase === "confirm") ? { ...s, phase: "expired", code: null, longCode: null, qr: null, expiresAt: null } : s));
+    backend.devicePairState().then(
+      (s) => alive.current && s.phase !== "waiting" && setSt(s),
+      () => {},
+    );
   }, [left]);
+  const answer = (yes: boolean) => {
+    setAnswering(true);
+    backend.devicePairConfirm(yes).then(
+      (s) => {
+        if (!alive.current) return;
+        setAnswering(false);
+        setSt(s);
+      },
+      (e) => {
+        if (!alive.current) return;
+        setAnswering(false);
+        setErr(errText(e) || "Couldn't answer.");
+      },
+    );
+  };
   const close = () => {
-    if (st?.phase === "waiting") void backend.devicePairCancel();
+    if (showing) void cancel();
     setSt(null);
     onClose();
   };
@@ -203,9 +274,28 @@ export function AddDeviceDialog({ open, onClose }: { open: boolean; onClose: () 
         <p className="confirm__body" role="status">
           Paired with {st.with ?? "your other device"}. The two keep in sync from now on, at home and away.
         </p>
-      ) : st?.phase === "expired" || st?.phase === "locked" ? (
+      ) : st?.phase === "confirm" ? (
+        <>
+          <p className="confirm__body" role="status">
+            Pair with {st.with ?? "your other device"}? It used the long code. Say yes only if it's yours.
+          </p>
+          <div className="confirm__actions">
+            <Button variant="ghost" disabled={answering} onClick={() => answer(false)}>
+              Don't pair
+            </Button>
+            <Button variant="primary" disabled={answering} onClick={() => answer(true)}>
+              Pair
+            </Button>
+          </div>
+        </>
+      ) : st?.phase === "expired" || st?.phase === "locked" || st?.phase === "declined" ? (
         <p className="confirm__body" role="status">
-          {st.phase === "expired" ? "Those codes ran out." : "Too many wrong codes were tried, so these codes stopped working."} Get new codes to try again.
+          {st.phase === "expired"
+            ? "Those codes ran out."
+            : st.phase === "declined"
+              ? "Not paired."
+              : "Too many wrong codes were tried, so these codes stopped working."}{" "}
+          Get new codes to try again.
         </p>
       ) : (
         <>
@@ -226,7 +316,9 @@ export function AddDeviceDialog({ open, onClose }: { open: boolean; onClose: () 
           <div className="keys-code">
             {st?.qr && <QrCode qr={st.qr} label="QR code for the long code" className="keys-qr" />}
             <div className="device-pair__long">
-              <p className="device-pair__text">Scan this QR code, or paste the long code. It goes through the sealed relay.</p>
+              <p className="device-pair__text" role={st?.note ? "status" : undefined}>
+                {st?.note ?? "Scan this QR code, or paste the long code. It goes through the sealed relay."}
+              </p>
               {st?.longCode && (
                 <Button size="sm" variant="secondary" onClick={copyLong}>
                   Copy the long code
@@ -237,7 +329,7 @@ export function AddDeviceDialog({ open, onClose }: { open: boolean; onClose: () 
         </>
       )}
       <div className="confirm__actions">
-        {(st?.phase === "expired" || st?.phase === "locked") && (
+        {(st?.phase === "expired" || st?.phase === "locked" || st?.phase === "declined") && (
           <Button variant="secondary" onClick={start}>
             New codes
           </Button>
@@ -263,22 +355,36 @@ export function JoinDeviceDialog({ open, onClose, onPaired }: { open: boolean; o
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const field = useRef<HTMLInputElement>(null);
+  // Bumped on open, close and unmount: an answer to an earlier try is dropped.
+  const attempt = useRef(0);
   useEffect(() => {
+    attempt.current++;
     if (!open) return;
     setCode("");
     setErr(null);
     setDone(null);
+    setBusy(false);
   }, [open]);
+  useEffect(
+    () => () => {
+      attempt.current++;
+    },
+    [],
+  );
   const join = () => {
+    const n = ++attempt.current;
     setBusy(true);
     setErr(null);
     backend.devicePairJoin(code.trim()).then(
       (p) => {
+        // Paired even if the dialog closed meanwhile: the list still updates.
+        onPaired();
+        if (n !== attempt.current) return;
         setBusy(false);
         setDone(`Paired with ${p.name}. The two keep in sync from now on.`);
-        onPaired();
       },
       (e) => {
+        if (n !== attempt.current) return;
         setBusy(false);
         setErr(errText(e) || "Couldn't pair.");
       },

@@ -3886,6 +3886,9 @@ export class MockBackend implements Backend {
   devicePairCancel() {
     return this.delay(() => this.deviceSync.pairCancel());
   }
+  devicePairConfirm(yes: boolean) {
+    return this.delay(() => this.deviceSync.pairConfirm(yes));
+  }
   devicePairState() {
     return this.delay(() => this.deviceSync.pairState());
   }

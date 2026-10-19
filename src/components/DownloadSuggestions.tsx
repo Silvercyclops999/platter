@@ -3,7 +3,7 @@
  * downloads it here too, or Not now stops suggesting it on this device.
  * Downloads stay per device; nothing here downloads by itself.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { backend } from "../lib/backend";
 import type { DownloadSuggestion } from "../lib/types";
 import { setDownload } from "../stores/downloads";
@@ -22,12 +22,19 @@ export function suggestionLine(s: DownloadSuggestion): string {
 export function useDownloadSuggestions() {
   const on = useSettings((s) => s.settings?.syncDownloads !== false && s.settings?.deviceSync !== false);
   const [list, setList] = useState<DownloadSuggestion[]>([]);
+  // Only the latest read lands; an older answer arriving late is dropped.
+  const seq = useRef(0);
   const load = useCallback(() => {
+    const n = ++seq.current;
     if (!on) {
       setList([]);
       return;
     }
-    backend.deviceDownloadSuggestions().then(setList, () => setList([]));
+    backend.deviceDownloadSuggestions().then(
+      (l) => n === seq.current && setList(l),
+      // Keep what's shown; the next change reads again.
+      (e) => console.warn("download suggestions", e),
+    );
   }, [on]);
   useEffect(() => {
     load();
@@ -38,6 +45,7 @@ export function useDownloadSuggestions() {
     return () => {
       void offStore.then((u) => u());
       void offFiles.then((u) => u());
+      seq.current++;
     };
   }, [load]);
   const download = async (s: DownloadSuggestion) => {
@@ -47,8 +55,13 @@ export function useDownloadSuggestions() {
     }
   };
   const dismiss = (s: DownloadSuggestion) => {
-    setList((l) => l.filter((x) => !(x.kind === s.kind && x.id === s.id)));
-    backend.deviceDownloadDismiss(s.kind, s.kind === "liked" ? null : s.id).catch((e) => toast.error(failText("Couldn't hide that suggestion", e)));
+    const same = (x: DownloadSuggestion) => x.kind === s.kind && x.id === s.id;
+    setList((l) => l.filter((x) => !same(x)));
+    backend.deviceDownloadDismiss(s.kind, s.kind === "liked" ? null : s.id).catch((e) => {
+      // Not hidden after all: it comes back.
+      setList((l) => (l.some(same) ? l : [...l, s].sort((a, b) => b.addedAt - a.addedAt)));
+      toast.error(failText("Couldn't hide that suggestion", e));
+    });
   };
   return { list, download, dismiss };
 }
