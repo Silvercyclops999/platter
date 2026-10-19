@@ -183,6 +183,77 @@ fn batches_stay_small() {
     assert_eq!(b.iter().map(|m| m["lyrics"].len()).sum::<usize>(), 5);
 }
 
+// ---------------------------------------------------------------- clocks
+
+const DAY: u64 = 86_400_000;
+
+#[test]
+fn a_device_with_a_slow_clock_still_edits_after_what_it_has_seen() {
+    let desk = dev("desk");
+    let phone = dev("phone");
+    desk.clock.store(1_000 * DAY, Ordering::SeqCst);
+    phone.clock.store(999 * DAY, Ordering::SeqCst); // a day behind
+    desk.store.put(&SETTINGS, "accent", &json!("#c90")).unwrap();
+    desk.store.put(&SETTINGS, "theme", &json!("dark")).unwrap();
+    // The phone hears about the accent only.
+    let only_accent = desk.store.entries_for(SETTINGS.name(), &["accent".to_string()]).unwrap();
+    phone.store.merge(&only_accent, &[SETTINGS.name()]).unwrap();
+    // Then edits both: the key it saw, and one it didn't hear about.
+    phone.clock.fetch_add(60_000, Ordering::SeqCst);
+    phone.store.put(&SETTINGS, "accent", &json!("#09c")).unwrap();
+    phone.store.put(&SETTINGS, "theme", &json!("light")).unwrap();
+    let ns = [SETTINGS.name()];
+    desk.store.merge(&phone.store.entries(&ns).unwrap(), &ns).unwrap();
+    phone.store.merge(&desk.store.entries(&ns).unwrap(), &ns).unwrap();
+    for s in [&desk.store, &phone.store] {
+        assert_eq!(s.get(&SETTINGS, "accent").unwrap(), Some(json!("#09c")), "the later edit wins");
+        assert_eq!(s.get(&SETTINGS, "theme").unwrap(), Some(json!("light")), "after what it has seen, even unseen keys");
+    }
+    // Its own entries coming back don't push its clock on.
+    let before = phone.store.stamps(SETTINGS.name()).unwrap();
+    phone.store.merge(&phone.store.entries(&ns).unwrap(), &ns).unwrap();
+    assert_eq!(phone.store.stamps(SETTINGS.name()).unwrap(), before);
+}
+
+#[test]
+fn entries_from_a_clock_days_ahead_are_held_until_taken_anyway() {
+    let fast = dev("fast");
+    let me = dev("me");
+    me.clock.store(1_000 * DAY, Ordering::SeqCst);
+    fast.clock.store(1_003 * DAY, Ordering::SeqCst); // three days ahead
+    me.store.put(&SETTINGS, "accent", &json!("#c90")).unwrap();
+    fast.store.put(&SETTINGS, "accent", &json!("#f00")).unwrap();
+    fast.store.put(&PINS, "album:1", &pin("1")).unwrap();
+    let ns = [SETTINGS.name(), PINS.name()];
+    let out = me.store.merge_from_device(&fast.store.entries(&ns).unwrap(), &ns, "Fast Phone").unwrap();
+    assert!(out.changed.is_empty(), "nothing merged");
+    assert_eq!(out.held.len(), 2);
+    assert_eq!(me.store.get(&SETTINGS, "accent").unwrap(), Some(json!("#c90")));
+    assert!(me.store.get(&PINS, "album:1").unwrap().is_none());
+    let q = me.store.quarantined().unwrap();
+    assert_eq!(q.len(), 2);
+    assert!(q.iter().all(|q| q.from == "Fast Phone"));
+    // Held again: still one each.
+    me.store.merge_from_device(&fast.store.entries(&ns).unwrap(), &ns, "Fast Phone").unwrap();
+    assert_eq!(me.store.quarantined().unwrap().len(), 2);
+    // Within a day ahead is fine.
+    let near = dev("near");
+    near.clock.store(1_000 * DAY + DAY / 2, Ordering::SeqCst);
+    near.store.put(&HIDDEN, "track:1", &Hidden { kind: "track".into(), ..Default::default() }).unwrap();
+    let out = me.store.merge_from_device(&near.store.entries(&[HIDDEN.name()]).unwrap(), &[HIDDEN.name()], "Near").unwrap();
+    assert_eq!(out.changed, [HIDDEN.name()]);
+    // Take anyway.
+    let changed = me.store.take_quarantined().unwrap();
+    assert_eq!(changed.len(), 2);
+    assert_eq!(me.store.get(&SETTINGS, "accent").unwrap(), Some(json!("#f00")));
+    assert!(me.store.get(&PINS, "album:1").unwrap().is_some());
+    assert!(me.store.quarantined().unwrap().is_empty());
+    // The file path (not a device link) merges as before.
+    let other = dev("other");
+    other.store.merge(&fast.store.entries(&ns).unwrap(), &ns).unwrap();
+    assert_eq!(other.store.get(&SETTINGS, "accent").unwrap(), Some(json!("#f00")));
+}
+
 // ---------------------------------------------------------------- a newer app
 
 fn future_entries() -> EntryMap {
