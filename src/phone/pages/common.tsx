@@ -10,10 +10,11 @@ import { RowGlyphs } from "../bits";
 import { trackArtistLine } from "../../lib/format";
 import type { HomeItem, Track } from "../../lib/types";
 import { useCanGoBack, useRouter, type Route } from "../../stores/router";
-import { usePlayer } from "../../stores/player";
+import { player, usePlayer } from "../../stores/player";
 import { useApp } from "../../stores/app";
 import { useIsDownloaded } from "../../stores/downloads";
 import { phone, type InPlaylist } from "../phoneUi";
+import { SwipeUnder, useSwipeToQueue } from "../rowSwipe";
 
 /**
  * The bar over a page that was opened from another: Back, and once the page
@@ -77,8 +78,11 @@ export function SongRow({
   const offline = useApp((s) => !!s.health?.cachedOnly);
   const here = useIsDownloaded(track.id);
   const unplayable = offline && !here;
+  // Swipe right: into the queue.
+  const swipe = useSwipeToQueue(() => void player.addToQueue([track]), !unplayable);
   return (
-    <li className={`ph-song ${unplayable ? "is-unplayable" : ""}`} aria-disabled={unplayable || undefined}>
+    <li className={`ph-song ${swipe.className} ${unplayable ? "is-unplayable" : ""}`} aria-disabled={unplayable || undefined} {...swipe.props}>
+      <SwipeUnder />
       <button type="button" className="ph-song__main" onClick={onPlay} aria-current={playing ? "true" : undefined}>
         {index !== undefined && (
           <span className={`ph-song__num tabular ${playing ? "is-playing" : ""}`}>{playing ? <PlayingBars /> : index}</span>

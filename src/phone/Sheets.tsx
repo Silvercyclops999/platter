@@ -17,7 +17,6 @@ import {
   ListEnd,
   ListMusic,
   ListPlus,
-  ListStart,
   MicVocal,
   Moon,
   Pause,
@@ -217,6 +216,65 @@ export function QueueSheet() {
     }
   };
 
+  // What the context is called: "Next from: <album>" (desktop's words).
+  const ctxTitle = q?.context?.title || (q?.context?.kind === "liked" ? "Liked Songs" : null);
+  /** One upcoming row; `i` is its place in play order (what a drag counts in). */
+  const row = (item: QueueItem, i: number) => {
+    const on = picked.has(item.itemId);
+    const dragging = drag?.id === item.itemId;
+    const autoplayStarts = item.source === "autoplay" && upcoming[i - 1]?.source !== "autoplay";
+    return (
+      <Fragment key={item.itemId}>
+        {autoplayStarts && (
+          <li className="ph-queue__next" role="presentation">
+            Autoplay: chosen to follow
+          </li>
+        )}
+        <li className={`ph-queue__row ${dragging ? "is-dragging" : ""}`} style={dragging ? { transform: `translateY(${drag!.dy}px)` } : undefined}>
+          {editing && (
+            <button
+              type="button"
+              className={`ph-select ${on ? "is-on" : ""}`}
+              role="checkbox"
+              aria-checked={on}
+              aria-label={`Select ${item.track.title}`}
+              onClick={() => toggle(item.itemId)}
+            >
+              {on && <Check size={14} aria-hidden="true" />}
+            </button>
+          )}
+          <button type="button" className="ph-queue__song" onClick={() => (editing ? toggle(item.itemId) : void player.queueJump(item.itemId))}>
+            <Art path={item.track.thumb} size={44} sleeve={{ title: item.track.albumTitle, artist: item.track.artistTitle }} />
+            <span className="ph-row__text">
+              <span className="ph-row__title">{item.track.title}</span>
+              <span className="ph-row__sub">{trackArtistLine(item.track)}</span>
+            </span>
+          </button>
+          <span
+            className="ph-handle"
+            role="button"
+            tabIndex={0}
+            aria-label={`Move ${item.track.title}`}
+            data-testid={`handle-${item.itemId}`}
+            onPointerDown={(e) => onHandleDown(e, item, i)}
+            onPointerMove={onHandleMove}
+            onPointerUp={onHandleUp}
+            onPointerCancel={() => {
+              start.current = null;
+              setDrag(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowUp" && i > 0) void player.queueMove(item.itemId, i - 1);
+              if (e.key === "ArrowDown" && i < upcoming.length - 1) void player.queueMove(item.itemId, i + 1);
+            }}
+          >
+            <GripVertical size={20} aria-hidden="true" />
+          </span>
+        </li>
+      </Fragment>
+    );
+  };
+
   const RepeatIcon = repeat === "one" ? Repeat1 : Repeat;
   return (
     <SheetFrame
@@ -277,68 +335,32 @@ export function QueueSheet() {
           </button>
         </div>
       )}
-      {upcoming.length > 0 && <h3 className="ph-queue__next">Next up</h3>}
-      <ul className="ph-queue__list" aria-label="Next up">
-        {upcoming.map((item, i) => {
-          const on = picked.has(item.itemId);
-          const dragging = drag?.id === item.itemId;
-          const autoplayStarts = item.source === "autoplay" && upcoming[i - 1]?.source !== "autoplay";
-          return (
-            <Fragment key={item.itemId}>
-            {autoplayStarts && (
-              <li className="ph-queue__next" role="presentation">
-                Autoplay: chosen to follow
-              </li>
+      {q && q.userQueue.length > 0 && (
+        <section aria-labelledby="ph-q-user">
+          <h3 id="ph-q-user" className="ph-queue__next">
+            Next in queue
+          </h3>
+          <ul className="ph-queue__list" aria-label="Next in queue">
+            {q.userQueue.map((item, k) => row(item, k))}
+          </ul>
+        </section>
+      )}
+      {q && q.nextUp.length > 0 && (
+        <section aria-labelledby="ph-q-next">
+          <h3 id="ph-q-next" className="ph-queue__next">
+            {ctxTitle ? (
+              <>
+                Next from: <span className="ph-queue__ctx">{ctxTitle}</span>
+              </>
+            ) : (
+              "Next up"
             )}
-            <li
-              key={item.itemId}
-              className={`ph-queue__row ${dragging ? "is-dragging" : ""}`}
-              style={dragging ? { transform: `translateY(${drag!.dy}px)` } : undefined}
-            >
-              {editing && (
-                <button
-                  type="button"
-                  className={`ph-select ${on ? "is-on" : ""}`}
-                  role="checkbox"
-                  aria-checked={on}
-                  aria-label={`Select ${item.track.title}`}
-                  onClick={() => toggle(item.itemId)}
-                >
-                  {on && <Check size={14} aria-hidden="true" />}
-                </button>
-              )}
-              <button type="button" className="ph-queue__song" onClick={() => (editing ? toggle(item.itemId) : void player.queueJump(item.itemId))}>
-                <Art path={item.track.thumb} size={44} sleeve={{ title: item.track.albumTitle, artist: item.track.artistTitle }} />
-                <span className="ph-row__text">
-                  <span className="ph-row__title">{item.track.title}</span>
-                  <span className="ph-row__sub">{trackArtistLine(item.track)}</span>
-                </span>
-              </button>
-              <span
-                className="ph-handle"
-                role="button"
-                tabIndex={0}
-                aria-label={`Move ${item.track.title}`}
-                data-testid={`handle-${item.itemId}`}
-                onPointerDown={(e) => onHandleDown(e, item, i)}
-                onPointerMove={onHandleMove}
-                onPointerUp={onHandleUp}
-                onPointerCancel={() => {
-                  start.current = null;
-                  setDrag(null);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "ArrowUp" && i > 0) void player.queueMove(item.itemId, i - 1);
-                  if (e.key === "ArrowDown" && i < upcoming.length - 1) void player.queueMove(item.itemId, i + 1);
-                }}
-              >
-                <GripVertical size={20} aria-hidden="true" />
-              </span>
-            </li>
-            </Fragment>
-          );
-        })}
-      </ul>
+          </h3>
+          <ul className="ph-queue__list" aria-label={ctxTitle ? `Next from: ${ctxTitle}` : "Next up"}>
+            {q.nextUp.map((item, k) => row(item, q.userQueue.length + k))}
+          </ul>
+        </section>
+      )}
       {!current && !upcoming.length && <p className="ph-rows__note">Nothing is queued. Play something and it shows here.</p>}
     </SheetFrame>
   );
@@ -472,7 +494,6 @@ export function TrackSheet({ track, inPlaylist }: { track: Track; inPlaylist?: i
   const items: Action[] = [
     { label: liked ? "Remove from Liked Songs" : "Add to Liked Songs", icon: liked ? HeartOff : Heart, run: act(() => setLiked([track], !liked, { toast: !liked ? false : undefined })) },
     { label: "Add to playlist", icon: ListPlus, run: act(() => phone.push({ kind: "addTo", track }), true) },
-    { label: "Play next", icon: ListStart, run: act(() => player.queueAdd([track.id], "next")) },
     { label: "Add to queue", icon: ListEnd, run: act(() => player.addToQueue([track])) },
     ...(fromPlaylist
       ? [{ label: "Remove from this playlist", icon: Trash2, danger: true, run: act(() => removeRows(fromPlaylist.playlist, [fromPlaylist.itemId], fromPlaylist.order)) }]

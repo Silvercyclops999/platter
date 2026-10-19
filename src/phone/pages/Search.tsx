@@ -14,6 +14,8 @@ import { useLoad } from "../../lib/useLoad";
 import { nav, useRouter } from "../../stores/router";
 import { phone } from "../phoneUi";
 import { RowGlyphs, tap } from "../bits";
+import { SwipeUnder, useSwipeToQueue } from "../rowSwipe";
+import { player } from "../../stores/player";
 
 /** Typing settles for this long before the search runs. */
 export const SEARCH_SETTLE_MS = 150;
@@ -227,9 +229,12 @@ function HitRow({
   versions?: number;
 }) {
   const i = hitInfo(hit);
+  // A song swipes right into the queue.
+  const swipe = useSwipeToQueue(() => hit.track && void player.addToQueue([hit.track]), !!hit.track);
   if (!i) return null;
   return (
-    <li className={`ph-hit ${top ? "is-top" : ""} ${versions > 0 ? "has-versions" : ""}`}>
+    <li className={`ph-hit ${hit.track ? swipe.className : ""} ${top ? "is-top" : ""} ${versions > 0 ? "has-versions" : ""}`} {...(hit.track ? swipe.props : {})}>
+      {hit.track && <SwipeUnder />}
       <button type="button" className="ph-row" onClick={onOpen}>
         <Art path={i.thumb} size={52} round={i.round} kind={i.kind === "track" ? "album" : i.kind} monogram={i.round ? i.title : undefined} />
         <span className="ph-row__text">
