@@ -40,6 +40,7 @@ const NOT_A_ROW: Record<string, string> = {
   artCacheMb: "artCache",
   crossfadeSeconds: "crossfade",
   eqBands: "eqEnabled",
+  artistAliasesAuto: "artistAliases",
   eqPreset: "eqEnabled",
   eqProfiles: "eqEnabled",
   eqOutputs: "eqEnabled",

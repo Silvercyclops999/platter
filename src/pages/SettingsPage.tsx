@@ -2304,7 +2304,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       key: "artistAliases",
       section: "Library",
       title: "Same artist under two names",
-      description: "Count names your server matched to one artist as one in Stats, Wrapped and top lists, and join others here.",
+      description: "Names matched to one artist count as one in Stats. Join others here.",
       more: "An artist who changed their name can show up twice. With this on, names your server matched to the same MusicBrainz artist are counted as one on their own, and Not the same artist keeps a pair apart. Join any others by hand below. Their plays add up under the name you played most. The switch syncs with your look and settings; the names you join or keep apart are kept in the sync file when Followed artists and hidden items is synced.",
       control: (ids) => toggle(s, "artistAliasesAuto", ids),
       block: (ids) => <ArtistAliases ids={ids} />,
