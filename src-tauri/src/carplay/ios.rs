@@ -1002,12 +1002,16 @@ fn picked(action: &CarAction) {
             });
             show_now_playing();
         }
-        CarAction::Play(ctx) | CarAction::Shuffle(ctx) => {
+        CarAction::Play(ctx) | CarAction::Shuffle(ctx) | CarAction::PlayFrom(ctx, _) => {
             let player = app.state::<PlayerHandle>().inner().clone();
             let ctx = ctx.clone();
             let shuffle = matches!(action, CarAction::Shuffle(_)).then_some(true);
+            let start = match action {
+                CarAction::PlayFrom(_, track) => Some(track.clone()),
+                _ => None,
+            };
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = player.play_context_from(ctx, None, None, shuffle).await {
+                if let Err(e) = player.play_context_from(ctx, start, None, shuffle).await {
                     tracing::warn!("CarPlay play failed: {e}");
                 }
             });
@@ -1023,7 +1027,8 @@ fn open_list(app: &AppHandle<Wry>, which: &CarList) {
     let offline = REACH.with(Cell::get) == Some(Reach::Unreachable);
     tauri::async_runtime::spawn_blocking(move || {
         let db = app.state::<DbHandle>();
-        let mut items = db.read(|c| super::list(c, &which)).unwrap_or_else(|e| {
+        let liked_min = crate::settings::load(&db).liked_min_rating();
+        let mut items = db.read(|c| super::list(c, &which, liked_min)).unwrap_or_else(|e| {
             tracing::warn!("CarPlay list not read: {e}");
             Vec::new()
         });

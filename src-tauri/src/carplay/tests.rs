@@ -16,17 +16,17 @@ async fn synced(artists: usize, albums_per: usize) -> (DbHandle, tempfile::TempD
 #[tokio::test]
 async fn library_lists_play_what_they_show_and_stay_short() {
     let (db, _dir) = synced(30, 5).await;
-    let albums = db.read(|c| list(c, &CarList::Albums)).unwrap();
+    let albums = db.read(|c| list(c, &CarList::Albums, 10.0)).unwrap();
     assert_eq!(albums.len(), LIST_MAX, "150 albums are cut to the car's limit");
     for a in &albums {
         assert!(!a.title.is_empty());
         assert!(a.subtitle.as_deref().is_some_and(|s| !s.is_empty()), "albums say who made them");
-        assert!(matches!(&a.action, CarAction::Play(p) if p.kind == ContextKind::Album && p.id.is_some()));
+        assert!(matches!(&a.action, CarAction::Open(CarList::Songs { kind: ContextKind::Album, .. })), "an album opens to its songs");
     }
-    let artists = db.read(|c| list(c, &CarList::Artists)).unwrap();
+    let artists = db.read(|c| list(c, &CarList::Artists, 10.0)).unwrap();
     assert_eq!(artists.len(), 30);
     assert!(artists.iter().all(|a| matches!(&a.action, CarAction::Open(CarList::Artist { id, name }) if !id.is_empty() && *name == a.title)));
-    let added = db.read(|c| list(c, &CarList::RecentlyAdded)).unwrap();
+    let added = db.read(|c| list(c, &CarList::RecentlyAdded, 10.0)).unwrap();
     assert_eq!(added.len(), LIST_MAX);
 }
 
@@ -35,7 +35,7 @@ async fn an_empty_library_gives_empty_lists_not_errors() {
     let dir = tempfile::tempdir().unwrap();
     let db = DbHandle::open(dir.path().join("library.db")).unwrap();
     for which in [CarList::RecentlyPlayed, CarList::RecentlyAdded, CarList::Playlists, CarList::Albums, CarList::Artists] {
-        assert!(db.read(|c| list(c, &which)).unwrap().is_empty(), "{which:?}");
+        assert!(db.read(|c| list(c, &which, 10.0)).unwrap().is_empty(), "{which:?}");
     }
     // With no songs there's nothing to shuffle; likes and the shelves stay.
     let home = db.read(home).unwrap();
@@ -62,7 +62,7 @@ async fn home_opens_on_shuffle_and_likes_then_what_you_played_then_mixes() {
     let CarRow::Covers { title, items } = &sections[1].rows[0] else { panic!("covers second: {:?}", sections[1]) };
     assert_eq!(title, "Jump back in");
     assert!(!items.is_empty() && items.len() <= COVERS_MAX);
-    assert!(items.iter().all(|i| matches!(&i.action, CarAction::Play(_))), "a cover plays in one tap");
+    assert!(items.iter().all(|i| matches!(&i.action, CarAction::Open(CarList::Songs { .. }))), "a cover opens its songs");
     assert_eq!(sections.last().unwrap().header.as_deref(), Some("More"));
 }
 
@@ -77,7 +77,7 @@ async fn shuffle_my_library_starts_with_at_most_the_cap() {
 fn library_tab_starts_with_liked_songs_then_the_shelves() {
     let tab = library();
     assert_eq!(tab[0].title, "Liked songs");
-    assert!(matches!(&tab[0].action, CarAction::Play(p) if p.kind == ContextKind::Liked));
+    assert!(opens(&tab[0].action, ContextKind::Liked, "liked"));
     let opens: Vec<_> = tab[1..].iter().map(|i| i.title.as_str()).collect();
     assert_eq!(opens, ["Playlists", "Albums", "Artists"]);
 }
@@ -104,31 +104,31 @@ async fn downloaded_is_empty_with_nothing_kept() {
 #[tokio::test]
 async fn an_artist_opens_popular_then_their_albums() {
     let (db, _dir) = synced(3, 4).await;
-    let artists = db.read(|c| list(c, &CarList::Artists)).unwrap();
+    let artists = db.read(|c| list(c, &CarList::Artists, 10.0)).unwrap();
     let CarAction::Open(which) = &artists[0].action else { panic!("artists open a list") };
     let CarList::Artist { id, .. } = which else { panic!("an artist's list") };
     assert_eq!(which.title(), artists[0].title, "the list is titled with the artist's name");
-    let rows = db.read(|c| list(c, which)).unwrap();
+    let rows = db.read(|c| list(c, which, 10.0)).unwrap();
     assert_eq!(rows.len(), 5, "Popular and four albums");
     assert_eq!(rows[0].title, "Popular");
     assert!(matches!(&rows[0].action, CarAction::Play(p) if p.kind == ContextKind::Artist && p.id.as_ref() == Some(id)));
     let own = db.read(|c| queries::artist_albums(c, id, LIST_MAX)).unwrap();
     for (row, album) in rows[1..].iter().zip(&own) {
         assert_eq!(row.title, album.title);
-        assert!(matches!(&row.action, CarAction::Play(p) if p.kind == ContextKind::Album && p.id.as_ref() == Some(&album.id)));
+        assert!(opens(&row.action, ContextKind::Album, &album.id));
     }
 }
 
 #[tokio::test]
 async fn an_artist_list_stays_short_and_an_unknown_artist_is_just_popular() {
     let (db, _dir) = synced(1, 150).await;
-    let id = db.read(|c| list(c, &CarList::Artists)).unwrap().into_iter().find_map(|a| match a.action {
+    let id = db.read(|c| list(c, &CarList::Artists, 10.0)).unwrap().into_iter().find_map(|a| match a.action {
         CarAction::Open(CarList::Artist { id, .. }) => Some(id),
         _ => None,
     });
-    let rows = db.read(|c| list(c, &CarList::Artist { id: id.unwrap(), name: "A".into() })).unwrap();
+    let rows = db.read(|c| list(c, &CarList::Artist { id: id.unwrap(), name: "A".into() }, 10.0)).unwrap();
     assert_eq!(rows.len(), LIST_MAX, "Popular plus albums up to the car's limit");
-    let none = db.read(|c| list(c, &CarList::Artist { id: "nobody".into(), name: "Nobody".into() })).unwrap();
+    let none = db.read(|c| list(c, &CarList::Artist { id: "nobody".into(), name: "Nobody".into() }, 10.0)).unwrap();
     assert_eq!(none.len(), 1);
 }
 
@@ -258,7 +258,7 @@ async fn home_lists_the_mixes_and_leaves_artists_out_of_the_covers() {
     let made = sections.iter().find(|s| s.header.as_deref() == Some("Made for you")).expect("a mixes section");
     let CarRow::Item(m) = &made.rows[0] else { panic!("a mix row") };
     assert_eq!(m.title, "Daily Mix 1");
-    assert!(matches!(&m.action, CarAction::Play(p) if p.kind == ContextKind::Mix && p.id.as_deref() == Some("daily-1")));
+    assert!(opens(&m.action, ContextKind::Mix, "daily-1"));
     let CarRow::Covers { items, .. } = &sections[1].rows[0] else { panic!("covers") };
     assert!(items.iter().all(|i| !matches!(i.action, CarAction::Open(CarList::Artist { .. }))), "no artists among the covers");
 }
@@ -531,12 +531,12 @@ async fn downloaded_lists_what_is_kept_newest_first_and_plays_each() {
     assert_eq!(&titles[..3], ["Daily Mix 1", "Road trip", "Liked songs"], "newest first");
     assert!(matches!(&rows[0].action, CarAction::Play(p) if p.kind == ContextKind::Tracks && p.track_ids.as_deref() == Some(&tracks[2..4])), "a mix plays the songs it was kept with");
     assert_eq!(rows[1].subtitle.as_deref(), Some("Playlist"));
-    assert!(matches!(&rows[1].action, CarAction::Play(p) if p.kind == ContextKind::Playlist && p.id.as_deref() == Some("p1")));
-    assert!(matches!(&rows[2].action, CarAction::Play(p) if p.kind == ContextKind::Liked));
+    assert!(opens(&rows[1].action, ContextKind::Playlist, "p1"));
+    assert!(opens(&rows[2].action, ContextKind::Liked, "liked"));
     // An album shows as the library has it, with who made it.
     assert_ne!(rows[3].title, "Ignored for albums");
     assert!(rows[3].subtitle.as_deref().is_some_and(|s| !s.is_empty()));
-    assert!(matches!(&rows[3].action, CarAction::Play(p) if p.kind == ContextKind::Album && p.id.as_deref() == Some(album.as_str())));
+    assert!(opens(&rows[3].action, ContextKind::Album, &album));
 }
 
 #[tokio::test]
@@ -546,7 +546,7 @@ async fn downloaded_keeps_an_album_the_library_lost() {
     db.write(|c| store::set_item(c, &ItemKey::new(ItemKind::Album, "gone"), "Old album", &[], 1)).unwrap();
     let rows = db.read(downloaded).unwrap();
     assert_eq!(rows[0].title, "Old album", "its kept title, not a blank row");
-    assert!(matches!(&rows[0].action, CarAction::Play(p) if p.id.as_deref() == Some("gone")));
+    assert!(opens(&rows[0].action, ContextKind::Album, "gone"));
 }
 
 #[tokio::test]
@@ -596,3 +596,46 @@ async fn radio_offers_an_album_not_played_in_a_while() {
     assert!(old.subtitle.as_deref().is_some_and(|s| s.contains(" by ")));
     assert!(matches!(&old.action, CarAction::Play(p) if p.kind == ContextKind::Album));
 }
+
+fn opens(a: &CarAction, kind: ContextKind, id: &str) -> bool {
+    matches!(a, CarAction::Open(CarList::Songs { kind: k, id: i, .. }) if *k == kind && i == id)
+}
+
+#[tokio::test]
+async fn an_album_opens_to_play_shuffle_then_its_songs() {
+    let (db, _dir) = synced(1, 1).await;
+    let albums = db.read(|c| list(c, &CarList::Albums, 10.0)).unwrap();
+    let CarAction::Open(which) = &albums[0].action else { panic!("opens") };
+    assert_eq!(which.title(), albums[0].title, "titled with the album");
+    let rows = db.read(|c| list(c, which, 10.0)).unwrap();
+    assert_eq!(rows[0].title, "Play");
+    assert!(matches!(&rows[0].action, CarAction::Play(p) if p.kind == ContextKind::Album));
+    assert_eq!(rows[1].title, "Shuffle");
+    assert!(matches!(&rows[1].action, CarAction::Shuffle(p) if p.kind == ContextKind::Album));
+    assert_eq!(rows.len(), 2 + 3, "then its three songs");
+    for r in &rows[2..] {
+        assert!(matches!(&r.action, CarAction::PlayFrom(p, t) if p.kind == ContextKind::Album && !t.is_empty()), "a song plays the album from there");
+        assert!(r.thumb.is_none(), "an album's songs share its cover");
+    }
+}
+
+#[test]
+fn an_opened_album_is_marked_while_it_plays() {
+    let row = CarItem { title: "A".into(), subtitle: None, thumb: None, action: songs(ContextKind::Album, "al1", "A") };
+    assert!(is_playing(&row, &NowKey { context: Some((ContextKind::Album, "al1".into())), album_id: None }));
+    assert!(is_playing(&row, &NowKey { context: None, album_id: Some("al1".into()) }));
+    assert!(!is_playing(&row, &NowKey::default()));
+}
+
+#[test]
+fn offline_a_kept_album_opens_and_its_kept_songs_play() {
+    let mut kept = Kept::default();
+    kept.items.insert((crate::downloads::store::ItemKind::Album, "al1".into()));
+    kept.tracks.insert("t1".into());
+    assert!(kept.plays(&songs(ContextKind::Album, "al1", "A")));
+    assert!(!kept.plays(&songs(ContextKind::Album, "al2", "B")));
+    let ctx = PlayContext { kind: ContextKind::Album, id: Some("al1".into()), track_ids: None };
+    assert!(kept.plays(&CarAction::PlayFrom(ctx.clone(), "t1".into())));
+    assert!(!kept.plays(&CarAction::PlayFrom(ctx, "t2".into())));
+}
+
