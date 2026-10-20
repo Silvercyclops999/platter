@@ -34,15 +34,22 @@ pub trait FileProbe: Send + Sync {
     async fn readable(&self, track_id: &str) -> Option<bool>;
 }
 
-/// Combine per-track answers. Files are unavailable only when every track
-/// that gave an answer is unreadable: one missing file is a "Skipped" toast,
-/// not a dead array. `None` when nothing answered (keep the last verdict).
+/// Least unreadable answers that can mean the files are gone. One track's
+/// missing file (deleted, or replaced by a new copy the server hasn't caught
+/// up with) is a "Skipped" toast, not a stopped disk array.
+pub const MIN_UNREADABLE: usize = 2;
+
+/// Combine per-track answers. Files are unavailable only when at least
+/// [`MIN_UNREADABLE`] tracks answered and every one is unreadable. `None`
+/// when that can't be told (keep the last verdict).
 pub fn verdict(answers: &[Option<bool>]) -> Option<bool> {
     let known: Vec<bool> = answers.iter().flatten().copied().collect();
-    if known.is_empty() {
-        None
+    if known.iter().any(|ok| *ok) {
+        Some(true)
+    } else if known.len() >= MIN_UNREADABLE {
+        Some(false)
     } else {
-        Some(known.iter().any(|ok| *ok))
+        None
     }
 }
 
@@ -53,6 +60,31 @@ pub async fn check(probe: &dyn FileProbe, ids: &[String]) -> Option<bool> {
         answers.push(probe.readable(id).await);
     }
     verdict(&answers)
+}
+
+/// [`check`], with a second, different sample having to agree before files
+/// that were available count as unavailable: greying out the whole library
+/// is a big step. `available` is the current verdict; `resample` draws
+/// another sample.
+pub async fn confirmed<F, Fut>(probe: &dyn FileProbe, ids: &[String], available: bool, resample: F) -> Option<bool>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = AppResult<Vec<String>>>,
+{
+    let first = check(probe, ids).await;
+    if first != Some(false) || !available {
+        return first;
+    }
+    let again = match resample().await {
+        Ok(ids) if !ids.is_empty() => check(probe, &ids).await,
+        _ => None,
+    };
+    if again == Some(false) {
+        Some(false)
+    } else {
+        tracing::info!("music files check: one sample couldn't be read but another could (or didn't say); files still count as available");
+        None
+    }
 }
 
 /// Counts playback failures that point at the files (not found, server
@@ -107,7 +139,7 @@ async fn run_check(plex: &PlexState, db: &DbHandle, probe: &dyn FileProbe) {
         Ok(ids) if !ids.is_empty() => ids,
         _ => return,
     };
-    if let Some(ok) = check(probe, &ids).await {
+    if let Some(ok) = confirmed(probe, &ids, plex.files_available(), || sample_ids(db)).await {
         if ok != plex.files_available() {
             tracing::info!("music files available: {ok}");
         }
@@ -212,7 +244,30 @@ mod tests {
     async fn no_answers_keep_the_last_verdict() {
         let f = Fake(HashMap::new());
         assert_eq!(check(&f, &ids(3)).await, None);
-        assert_eq!(verdict(&[None, Some(false)]), Some(false));
+        // One unreadable answer can be one missing file: not enough to tell.
+        assert_eq!(verdict(&[None, Some(false), None]), None);
+        assert_eq!(verdict(&[Some(false), None, Some(false)]), Some(false));
+        assert_eq!(verdict(&[None, Some(true), None]), Some(true));
+    }
+
+    #[tokio::test]
+    async fn files_go_unavailable_only_when_a_second_sample_agrees() {
+        let mut m: HashMap<String, Option<bool>> = (0..3).map(|i| (i.to_string(), Some(false))).collect();
+        m.extend((10..13).map(|i| (i.to_string(), Some(true))));
+        let f = Fake(m);
+        let bad = ids(3);
+        let good: Vec<String> = (10..13).map(|i| i.to_string()).collect();
+        // A sample of tracks whose files went (replaced copies, say), then a
+        // sample that plays: still available.
+        let g = good.clone();
+        assert_eq!(confirmed(&f, &bad, true, || async move { Ok(g) }).await, None);
+        // Both samples unreadable: unavailable.
+        let b = bad.clone();
+        assert_eq!(confirmed(&f, &bad, true, || async move { Ok(b) }).await, Some(false));
+        // Already unavailable: one readable sample brings it back, no second look needed.
+        assert_eq!(confirmed(&f, &good, false, || async { Ok(Vec::new()) }).await, Some(true));
+        // The second sample couldn't be drawn: don't grey anything out.
+        assert_eq!(confirmed(&f, &bad, true, || async { Err(crate::error::AppError::Internal("db".into())) }).await, None);
     }
 
     #[test]
