@@ -850,17 +850,11 @@ export type MobileQuality = "auto" | StreamQuality;
 export const PHONE_KEEP_RECENT_CHOICES = [0, 25, 50, 100, 250, 500] as const;
 export type PopularSource = "global" | "myPlays";
 /**
- * The visualizer's picture. Art: the cover and its colours filling now
- * playing, moving with the music (Sleeve, Ink, Grooves, Light). Instruments:
- * a spectrum analyser line, needle meters, a stereo phase scope.
+ * The visualizer's picture: Grooves (the record in the cover's colours),
+ * Blur (the cover's colours as soft shapes) or Bars (spectrum bars over the
+ * cover).
  */
-export type VisualizerStyle = "sleeve" | "ink" | "grooves" | "light" | "analyser" | "meters" | "scope";
-/** How much the art styles move with the music. */
-export type VisualizerIntensity = "calm" | "lively";
-/** How slowly the visualizer's lines settle. */
-export type VisualizerSmoothing = "low" | "medium" | "high";
-/** Frame rates the visualizer offers. */
-export const VISUALIZER_FPS = [15, 30, 60] as const;
+export type VisualizerStyle = "grooves" | "blur" | "bars";
 export type ReduceMotion = "system" | "on" | "off";
 
 /** The Theme setting: a built-in theme, or follow the computer's light or dark mode. */
@@ -1133,20 +1127,10 @@ export interface Settings {
   carplayResume: boolean;
   /** CarPlay: with no signal, lists show only what's downloaded. This device only. */
   carplayOfflineDownloads: boolean;
-  /** Now playing has a Visualizer button. Synced. */
-  visualizerButton: boolean;
-  /** The visualizer's picture. Synced. */
+  /** A tap or click on the cover in now playing opens the visualizer. Synced. */
+  visualizerCoverTap: boolean;
+  /** The visualizer's last style, remembered. Synced. */
   visualizerStyle: VisualizerStyle;
-  /** Visualizer frames a second (15, 30 or 60): 60 on a computer, 30 on a phone until picked. This device only. */
-  visualizerFps: number;
-  /** How slowly the visualizer's lines settle. Synced. */
-  visualizerSmoothing: VisualizerSmoothing;
-  /** How much the art styles move with the music. Synced. */
-  visualizerIntensity: VisualizerIntensity;
-  /** A slim analyser under the cover in the now playing panel. This device only. */
-  visualizerPanelStrip: boolean;
-  /** The visualizer rests on battery power. This device only. */
-  visualizerBatteryPause: boolean;
   /** Sync to a device: what songs become on a device without its own format. Synced. */
   deviceFormat: DeviceFormat;
   /** Sync to a device: remove Platter's own files for songs no longer chosen. Synced. */
@@ -1805,13 +1789,8 @@ export const DEFAULT_SETTINGS: Settings = {
   phoneHaptics: true,
   carplayResume: true,
   carplayOfflineDownloads: true,
-  visualizerButton: true,
-  visualizerStyle: "sleeve",
-  visualizerFps: 60,
-  visualizerSmoothing: "medium",
-  visualizerIntensity: "calm",
-  visualizerPanelStrip: false,
-  visualizerBatteryPause: true,
+  visualizerCoverTap: true,
+  visualizerStyle: "grooves",
   deviceFormat: "original",
   deviceDeleteRemoved: false,
   homeMixes: true,

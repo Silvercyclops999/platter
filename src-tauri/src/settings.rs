@@ -73,50 +73,18 @@ impl StreamQuality {
     }
 }
 
-/// The visualizer's picture. The art styles fill now playing with the
-/// cover and its colours moving with the music (Sleeve, Ink, Grooves,
-/// Light); the instruments are a spectrum analyser line, a pair of needle
-/// meters and a stereo phase scope. Glow, from before, is part of Sleeve.
+/// The visualizer's picture, remembered (not a setting row): Grooves, the
+/// record in the cover's colours; Blur, the cover's colours as soft shapes;
+/// Bars, a row of spectrum bars over the cover. Styles from before the
+/// rework read as Grooves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum VisualizerStyle {
     #[default]
-    #[serde(alias = "glow")]
-    Sleeve,
-    Ink,
+    #[serde(alias = "sleeve", alias = "glow", alias = "ink", alias = "light", alias = "analyser", alias = "meters", alias = "scope")]
     Grooves,
-    Light,
-    Analyser,
-    Meters,
-    Scope,
-}
-
-/// How much the art styles move with the music.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum VisualizerIntensity {
-    #[default]
-    Calm,
-    Lively,
-}
-
-/// How slowly the visualizer's lines settle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum VisualizerSmoothing {
-    Low,
-    #[default]
-    Medium,
-    High,
-}
-
-/// Frame rates the visualizer offers.
-pub const VISUALIZER_FPS: [u32; 3] = [15, 30, 60];
-
-/// The visualizer's frame rate before one is picked: 30 on a phone, 60 on
-/// a computer.
-pub fn default_visualizer_fps() -> u32 {
-    if cfg!(any(target_os = "ios", target_os = "android")) { 30 } else { 60 }
+    Blur,
+    Bars,
 }
 
 /// Phone stream quality over mobile data. Auto keeps the original file
@@ -721,20 +689,10 @@ pub struct Settings {
     pub carplay_resume: bool,
     /// CarPlay: with no signal, lists show only what's downloaded (this device only).
     pub carplay_offline_downloads: bool,
-    /// Now playing has a Visualizer button (synced).
-    pub visualizer_button: bool,
-    /// The visualizer's picture (synced).
+    /// A tap or click on the cover in now playing opens the visualizer (synced).
+    pub visualizer_cover_tap: bool,
+    /// The visualizer's last style, remembered (synced).
     pub visualizer_style: VisualizerStyle,
-    /// Visualizer frames per second, one of VISUALIZER_FPS (this device only).
-    pub visualizer_fps: u32,
-    /// How slowly the visualizer's lines settle (synced).
-    pub visualizer_smoothing: VisualizerSmoothing,
-    /// How much the art styles move with the music (synced).
-    pub visualizer_intensity: VisualizerIntensity,
-    /// A slim analyser under the cover in the now playing panel (this device only).
-    pub visualizer_panel_strip: bool,
-    /// The visualizer rests while on battery power (this device only).
-    pub visualizer_battery_pause: bool,
     /// Sync to a device: what songs become on a device that doesn't pick
     /// its own format (synced).
     pub device_format: crate::devices::DeviceFormat,
@@ -1308,13 +1266,8 @@ impl Default for Settings {
             phone_haptics: true,
             carplay_resume: true,
             carplay_offline_downloads: true,
-            visualizer_button: true,
-            visualizer_style: VisualizerStyle::Sleeve,
-            visualizer_fps: default_visualizer_fps(),
-            visualizer_smoothing: VisualizerSmoothing::Medium,
-            visualizer_intensity: VisualizerIntensity::Calm,
-            visualizer_panel_strip: false,
-            visualizer_battery_pause: true,
+            visualizer_cover_tap: true,
+            visualizer_style: VisualizerStyle::Grooves,
             device_format: crate::devices::DeviceFormat::Original,
             device_delete_removed: false,
             home_mixes: true,
@@ -1483,10 +1436,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "qualityAway",
     "showFormatBadge",
     "signalPathBadge",
-    "visualizerButton",
+    "visualizerCoverTap",
     "visualizerStyle",
-    "visualizerSmoothing",
-    "visualizerIntensity",
     "resumeContexts",
     "popularSource",
     "deviceFormat",
@@ -1748,9 +1699,6 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "phoneHaptics",
     "carplayResume",
     "carplayOfflineDownloads",
-    "visualizerFps",
-    "visualizerPanelStrip",
-    "visualizerBatteryPause",
     "notifyNewReleases",
     "autoRequest",
     "autoRequestCap",
@@ -1933,14 +1881,8 @@ pub struct SettingsPatch {
     pub phone_haptics: Option<bool>,
     pub carplay_resume: Option<bool>,
     pub carplay_offline_downloads: Option<bool>,
-    pub visualizer_button: Option<bool>,
+    pub visualizer_cover_tap: Option<bool>,
     pub visualizer_style: Option<VisualizerStyle>,
-    /// One of VISUALIZER_FPS.
-    pub visualizer_fps: Option<u32>,
-    pub visualizer_smoothing: Option<VisualizerSmoothing>,
-    pub visualizer_intensity: Option<VisualizerIntensity>,
-    pub visualizer_panel_strip: Option<bool>,
-    pub visualizer_battery_pause: Option<bool>,
     pub device_format: Option<crate::devices::DeviceFormat>,
     pub device_delete_removed: Option<bool>,
     pub home_mixes: Option<bool>,
@@ -2316,18 +2258,8 @@ impl Settings {
         set(&mut self.phone_haptics, p.phone_haptics);
         set(&mut self.carplay_resume, p.carplay_resume);
         set(&mut self.carplay_offline_downloads, p.carplay_offline_downloads);
-        set(&mut self.visualizer_button, p.visualizer_button);
+        set(&mut self.visualizer_cover_tap, p.visualizer_cover_tap);
         set(&mut self.visualizer_style, p.visualizer_style);
-        set(&mut self.visualizer_smoothing, p.visualizer_smoothing);
-        set(&mut self.visualizer_intensity, p.visualizer_intensity);
-        set(&mut self.visualizer_panel_strip, p.visualizer_panel_strip);
-        set(&mut self.visualizer_battery_pause, p.visualizer_battery_pause);
-        if let Some(n) = p.visualizer_fps {
-            if !VISUALIZER_FPS.contains(&n) {
-                return Err(AppError::Invalid("The visualizer runs at 15, 30 or 60 frames a second.".into()));
-            }
-            self.visualizer_fps = n;
-        }
         if let Some(n) = p.phone_keep_recent {
             if !PHONE_KEEP_RECENT_CHOICES.contains(&n) {
                 return Err(AppError::Invalid("Keep 0, 25, 50, 100, 250 or 500 recent songs.".into()));
@@ -5098,66 +5030,48 @@ mod tests {
     #[test]
     fn the_visualizer_settings_have_their_defaults_and_scopes() {
         let d = Settings::default();
-        assert!(d.visualizer_button);
-        assert_eq!(d.visualizer_style, VisualizerStyle::Sleeve);
-        assert_eq!(d.visualizer_intensity, VisualizerIntensity::Calm);
-        assert_eq!(d.visualizer_fps, 60, "a computer runs at 60");
-        assert_eq!(d.visualizer_smoothing, VisualizerSmoothing::Medium);
-        assert!(!d.visualizer_panel_strip);
-        assert!(d.visualizer_battery_pause);
+        assert!(d.visualizer_cover_tap);
+        assert_eq!(d.visualizer_style, VisualizerStyle::Grooves);
         // Settings saved before they existed get the defaults.
         let old: Settings = serde_json::from_str(r#"{"volume":0.5}"#).unwrap();
-        assert!(old.visualizer_button && old.visualizer_battery_pause && !old.visualizer_panel_strip);
-        assert_eq!(old.visualizer_fps, default_visualizer_fps());
-        for k in ["visualizerButton", "visualizerStyle", "visualizerSmoothing", "visualizerIntensity"] {
+        assert!(old.visualizer_cover_tap);
+        for k in ["visualizerCoverTap", "visualizerStyle"] {
             assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
         }
-        for k in ["visualizerFps", "visualizerPanelStrip", "visualizerBatteryPause"] {
-            assert!(DEVICE_SETTINGS.contains(&k), "{k} is this device only");
-        }
-        let p: SettingsPatch = serde_json::from_str(
-            r#"{"visualizerButton":false,"visualizerStyle":"scope","visualizerFps":30,"visualizerSmoothing":"high","visualizerPanelStrip":true,"visualizerBatteryPause":false}"#,
-        )
-        .unwrap();
+        let p: SettingsPatch = serde_json::from_str(r#"{"visualizerCoverTap":false,"visualizerStyle":"bars"}"#).unwrap();
         let mut s = Settings::default();
         s.apply(&p).unwrap();
-        assert!(!s.visualizer_button && s.visualizer_panel_strip && !s.visualizer_battery_pause);
-        assert_eq!(s.visualizer_style, VisualizerStyle::Scope);
-        assert_eq!(s.visualizer_fps, 30);
-        assert_eq!(s.visualizer_smoothing, VisualizerSmoothing::High);
+        assert!(!s.visualizer_cover_tap);
+        assert_eq!(s.visualizer_style, VisualizerStyle::Bars);
         let v = serde_json::to_value(&s).unwrap();
-        assert_eq!(v["visualizerStyle"], "scope");
-        assert_eq!(v["visualizerSmoothing"], "high");
-        // Only the offered rates.
-        let bad: SettingsPatch = serde_json::from_str(r#"{"visualizerFps":45}"#).unwrap();
-        assert!(s.apply(&bad).is_err());
-        assert_eq!(s.visualizer_fps, 30);
-        // The art styles and the intensity.
-        let art: SettingsPatch = serde_json::from_str(r#"{"visualizerStyle":"grooves","visualizerIntensity":"lively"}"#).unwrap();
-        s.apply(&art).unwrap();
-        assert_eq!(s.visualizer_style, VisualizerStyle::Grooves);
-        assert_eq!(s.visualizer_intensity, VisualizerIntensity::Lively);
-        assert_eq!(serde_json::to_value(&s).unwrap()["visualizerIntensity"], "lively");
+        assert_eq!(v["visualizerStyle"], "bars");
+        assert_eq!(v["visualizerCoverTap"], false);
+        assert_eq!(serde_json::to_value(VisualizerStyle::Blur).unwrap(), "blur");
     }
 
     #[test]
-    fn an_unknown_saved_style_falls_back_to_sleeve_and_keeps_the_rest() {
-        let (s, bad) = parse_stored(r#"{"visualizerStyle":"confetti","privateSession":true,"visualizerIntensity":"lively"}"#);
-        assert_eq!(s.visualizer_style, VisualizerStyle::Sleeve);
-        assert_eq!(s.visualizer_intensity, VisualizerIntensity::Lively);
+    fn styles_from_before_the_rework_read_as_grooves_and_old_fields_are_dropped() {
+        for old in ["sleeve", "glow", "ink", "light", "analyser", "meters", "scope"] {
+            let raw = format!(r#"{{"visualizerStyle":"{old}","visualizerFps":30,"visualizerIntensity":"lively","visualizerButton":false}}"#);
+            let (s, bad) = parse_stored(&raw);
+            assert_eq!(s.visualizer_style, VisualizerStyle::Grooves, "{old}");
+            assert!(bad.is_none(), "{old}: {bad:?}");
+            assert!(s.visualizer_cover_tap);
+        }
+        let (s, bad) = parse_stored(r#"{"visualizerStyle":"confetti","privateSession":true}"#);
+        assert_eq!(s.visualizer_style, VisualizerStyle::Grooves);
         assert!(s.private_session);
         assert!(bad.is_some_and(|b| b.contains("visualizerStyle")));
     }
 
     #[test]
-    fn a_saved_glow_style_becomes_sleeve() {
+    fn an_old_style_sent_by_an_older_device_becomes_grooves() {
         let old: Settings = serde_json::from_str(r#"{"visualizerStyle":"glow"}"#).unwrap();
-        assert_eq!(old.visualizer_style, VisualizerStyle::Sleeve);
-        assert_eq!(serde_json::to_value(old).unwrap()["visualizerStyle"], "sleeve");
-        let p: SettingsPatch = serde_json::from_str(r#"{"visualizerStyle":"glow"}"#).unwrap();
-        let mut s = Settings { visualizer_style: VisualizerStyle::Meters, ..Settings::default() };
+        assert_eq!(serde_json::to_value(old).unwrap()["visualizerStyle"], "grooves");
+        let p: SettingsPatch = serde_json::from_str(r#"{"visualizerStyle":"meters"}"#).unwrap();
+        let mut s = Settings { visualizer_style: VisualizerStyle::Bars, ..Settings::default() };
         s.apply(&p).unwrap();
-        assert_eq!(s.visualizer_style, VisualizerStyle::Sleeve);
+        assert_eq!(s.visualizer_style, VisualizerStyle::Grooves);
     }
 
     #[test]
