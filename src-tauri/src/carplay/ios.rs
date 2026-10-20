@@ -71,8 +71,12 @@ struct Shown {
 
 static SHOWN: parking_lot::Mutex<Option<Shown>> = parking_lot::const_mutex(None);
 
-/// When the car last left during this run, to tell a blink from a new drive.
-static LAST_LEFT: parking_lot::Mutex<Option<std::time::Instant>> = parking_lot::const_mutex(None);
+/// When the car last left during this run, on both clocks, to tell a blink
+/// from a new drive ([`super::since_left`]).
+static LAST_LEFT: parking_lot::Mutex<Option<(std::time::Instant, std::time::SystemTime)>> = parking_lot::const_mutex(None);
+/// Resume was looked at for this connection: didConnect and attach can both
+/// ask, and only the first counts.
+static RESUMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 define_class!(
     #[unsafe(super(NSObject))]
@@ -105,7 +109,8 @@ define_class!(
         ) {
             tracing::info!("CarPlay disconnected");
             CAR.with(|c| *c.borrow_mut() = None);
-            *LAST_LEFT.lock() = Some(std::time::Instant::now());
+            *LAST_LEFT.lock() = Some((std::time::Instant::now(), std::time::SystemTime::now()));
+            RESUMED.store(false, std::sync::atomic::Ordering::SeqCst);
         }
     }
 );
@@ -403,13 +408,19 @@ fn offline_only(app: &AppHandle<Wry>) -> bool {
 }
 
 /// Plays on where you left off as the car connects, if the setting says
-/// so ([`super::on_connect`] decides). Main thread: reads how things stand,
-/// then asks the player off it.
+/// so ([`super::on_connect`] decides), once per connection. Main thread;
+/// the player is asked off it.
 fn resume_on_connect() {
     let Some(app) = APP.get().cloned() else { return };
-    let since_disconnect_s = LAST_LEFT.lock().map(|t| t.elapsed().as_secs());
-    let reach = reach(&app);
+    if RESUMED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let since_disconnect_s = LAST_LEFT
+        .lock()
+        .map(|(mono, wall)| super::since_left(mono.elapsed().as_secs(), wall.elapsed().ok().map(|d| d.as_secs())));
     tauri::async_runtime::spawn(async move {
+        // How things stand when the player is asked, not when the car came.
+        let reach = reach(&app);
         let Some(settings) = app.try_state::<SettingsState>() else { return };
         let resume_on = settings.get().await.map(|s| s.carplay_resume).unwrap_or(true);
         let player = app.state::<PlayerHandle>().inner().clone();

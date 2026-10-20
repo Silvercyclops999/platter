@@ -516,8 +516,18 @@ pub struct Connect {
     pub status: PlayerStatus,
     /// The song the player would play on: (id, kept on the phone).
     pub track: Option<(String, bool)>,
-    /// Seconds since the car last left, if it left during this run.
+    /// Seconds since the car last left, if it left during this run (see
+    /// [`since_left`]).
     pub since_disconnect_s: Option<u64>,
+}
+
+/// Seconds since the car left, from the monotonic clock and the wall clock.
+/// Apple's monotonic clock stops while the phone sleeps, so a short drive
+/// and a night asleep can read as seconds; the wall clock counts the sleep.
+/// The longer of the two wins, and a wall clock that went backwards counts
+/// as long ago: a missed resume is worse than a resume after a blink.
+pub fn since_left(mono_s: u64, wall_s: Option<u64>) -> u64 {
+    wall_s.map_or(u64::MAX, |w| w.max(mono_s))
 }
 
 /// What to do when a car connects.

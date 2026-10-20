@@ -324,6 +324,36 @@ fn a_car_that_only_blinked_changes_nothing() {
 }
 
 #[test]
+fn the_blink_line_is_thirty_seconds() {
+    use crate::audio::events::PlayerStatus;
+    assert_eq!(RECONNECT_GRACE_S, 30);
+    let at = |s| on_connect(&Connect { since_disconnect_s: Some(s), ..connect(PlayerStatus::Paused) });
+    assert_eq!(at(29), OnConnect::Nothing);
+    assert_eq!(at(30), OnConnect::Resume);
+    assert_eq!(at(0), OnConnect::Nothing);
+}
+
+#[test]
+fn time_since_the_car_left_counts_the_phones_sleep() {
+    assert_eq!(since_left(5, Some(5)), 5, "a blink on both clocks");
+    assert_eq!(since_left(5, Some(8 * 3600)), 8 * 3600, "a short drive, then a night asleep");
+    assert_eq!(since_left(40, Some(3)), 40, "the wall clock set back a little");
+    assert_eq!(since_left(5, None), u64::MAX, "a wall clock that went backwards resumes");
+    use crate::audio::events::PlayerStatus;
+    let slept = Connect { since_disconnect_s: Some(since_left(5, Some(8 * 3600))), ..connect(PlayerStatus::Paused) };
+    assert_eq!(on_connect(&slept), OnConnect::Resume);
+}
+
+#[test]
+fn signed_out_never_resumes_even_a_kept_song() {
+    use crate::audio::events::PlayerStatus;
+    let c = Connect { reach: Reach::SignedOut, track: Some(("t1".into(), true)), ..connect(PlayerStatus::Paused) };
+    assert_eq!(on_connect(&c), OnConnect::Nothing);
+    let idle = Connect { status: PlayerStatus::Idle, ..c };
+    assert_eq!(on_connect(&idle), OnConnect::Nothing);
+}
+
+#[test]
 fn out_of_reach_only_a_kept_song_resumes() {
     use crate::audio::events::PlayerStatus;
     let streamed = Connect { reach: Reach::Unreachable, ..connect(PlayerStatus::Paused) };
@@ -463,6 +493,18 @@ async fn kept_reads_finished_downloads_and_shuffle_draws_from_them() {
     assert!(k.plays(&CarAction::Play(PlayContext { kind: ContextKind::Album, id: Some(album), track_ids: None })));
     assert_eq!(k.tracks, [tracks[0].clone()].into());
     assert_eq!(db.read(shuffle_downloads_context).unwrap().track_ids, Some(vec![tracks[0].clone()]));
+    // Shuffle draws exactly the songs Kept counts: finished with a file.
+    db.write(|c| {
+        for t in &tracks[1..] {
+            store::mark_done(c, t, "/p", "original", &format!("{t}.flac"), 10, 3)?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    let k = db.read(Kept::read).unwrap();
+    let drawn: std::collections::HashSet<String> =
+        db.read(shuffle_downloads_context).unwrap().track_ids.unwrap().into_iter().collect();
+    assert_eq!(drawn, k.tracks);
 }
 
 #[tokio::test]
