@@ -348,8 +348,9 @@ fn the_helper_ends_after_a_while_without_work() {
     std::thread::sleep(Duration::from_millis(20));
     assert_eq!(f.rec.unloads.load(Ordering::SeqCst), 1, "the model is freed at once");
     assert!(f.helper.running(), "the helper itself stays a moment");
-    for _ in 0..100 {
-        if !f.helper.running() {
+    // The fake's exit count can land a moment after running() turns false on a busy machine.
+    for _ in 0..200 {
+        if !f.helper.running() && f.n.ended.load(Ordering::SeqCst) == 1 {
             break;
         }
         std::thread::sleep(Duration::from_millis(10));
