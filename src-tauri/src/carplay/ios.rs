@@ -24,7 +24,7 @@ use objc2_car_play::{
     CPTemplateApplicationScene, CPTemplateApplicationSceneDelegate, CPTemplateApplicationSceneSessionRoleApplication,
 };
 use objc2_foundation::{NSArray, NSData, NSObject, NSObjectProtocol, NSString};
-use objc2_ui_kit::UISceneDelegate;
+use objc2_ui_kit::{UIScene, UISceneConnectionOptions, UISceneDelegate, UISceneSession};
 use tauri::{AppHandle, Listener, Manager, Wry};
 
 use super::{CarAction, CarItem, CarList, CarRow, CarSection, Connect, Kept, NowKey, OnConnect, Reach, Tab};
@@ -85,7 +85,23 @@ define_class!(
     pub struct CarDelegate;
 
     unsafe impl NSObjectProtocol for CarDelegate {}
-    unsafe impl UISceneDelegate for CarDelegate {}
+    #[allow(non_snake_case)]
+    unsafe impl UISceneDelegate for CarDelegate {
+        // A car can launch Platter with no phone screen at all. tao starts
+        // the app (Tauri's setup, so the library and the player) only when
+        // the first scene connects, and it counts the scene through its own
+        // delegate; this scene is ours, so it's handed on, or the car would
+        // sit on "Loading…" until something brought the phone's window up.
+        #[unsafe(method(scene:willConnectToSession:options:))]
+        fn scene_willConnectToSession_options(
+            &self,
+            scene: &UIScene,
+            session: &UISceneSession,
+            options: &UISceneConnectionOptions,
+        ) {
+            start_app_from_car(scene, session, options);
+        }
+    }
 
     #[allow(non_snake_case)]
     unsafe impl CPTemplateApplicationSceneDelegate for CarDelegate {
@@ -131,6 +147,22 @@ define_class!(
         }
     }
 );
+
+/// Lets tao see the car's scene connect, so the app starts up (tao starts
+/// it on the first scene of any kind and attaches windows only to window
+/// scenes). Once started, it does nothing.
+fn start_app_from_car(scene: &UIScene, session: &UISceneSession, options: &UISceneConnectionOptions) {
+    let Some(tao) = AnyClass::get(c"TaoSceneDelegate") else {
+        tracing::warn!("CarPlay: no TaoSceneDelegate to start the app with");
+        return;
+    };
+    // SAFETY: tao's scene delegate holds no state; its willConnect takes
+    // any UIScene and only does window work for window scenes. Main thread.
+    unsafe {
+        let delegate: Retained<AnyObject> = msg_send![tao, new];
+        let _: () = msg_send![&*delegate, scene: scene, willConnectToSession: session, options: options];
+    }
+}
 
 /// The original `-[UISceneConfiguration setDelegateClass:]`.
 static SET_DELEGATE_CLASS: OnceLock<Imp> = OnceLock::new();
