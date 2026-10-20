@@ -18,7 +18,9 @@ for c in $commits; do
   if [ "$ce" != "$author" ] && [ "$ce" != "noreply@github.com" ]; then
     echo "$short has another committer: $ce ($subject)"; bad=1
   fi
-  trailers=$(git log -1 --format='%(trailers:only,unfold)' "$c" | sed '/^$/d')
+  # Real trailers, plus the usual ones anywhere in the message.
+  trailers=$( { git log -1 --format='%(trailers:only,unfold)' "$c"
+    git log -1 --format=%B "$c" | grep -iE '^(co-authored-by|claude-session|signed-off-by):'; } | sed '/^$/d' | sort -u)
   if [ -n "$trailers" ]; then
     echo "$short has trailers ($subject):"; echo "$trailers" | sed 's/^/    /'; bad=1
   fi

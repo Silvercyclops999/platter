@@ -38,9 +38,11 @@ jobs:
     steps:
       - name: Check the version and commit
         id: check
+        shell: bash
         run: |
           set -eu
-          echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "version must look like 1.2.3"; exit 1; }
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "version must look like 1.2.3"; exit 1; }
+          [[ -z "$SHA_IN" || "$SHA_IN" =~ ^[0-9a-f]{7,40}$ ]] || { echo "sha must be a commit hash"; exit 1; }
           tag="v$VERSION"
           if [ -n "$SHA_IN" ]; then
             sha=$(gh api "repos/$REPO/commits/$SHA_IN" --jq .sha)
@@ -48,8 +50,10 @@ jobs:
             sha=$(gh api "repos/$REPO/commits/main" --jq .sha)
           fi
           echo "Commit: $sha"
-          if gh api "repos/$REPO/git/ref/tags/$tag" >/dev/null 2>&1; then
+          if out=$(gh api "repos/$REPO/git/ref/tags/$tag" 2>&1); then
             echo "$tag already exists"; exit 1
+          elif ! echo "$out" | grep -q 'HTTP 404'; then
+            echo "couldn't check for $tag: $out"; exit 1
           fi
           status=$(gh api "repos/$REPO/compare/$sha...main" --jq .status)
           case "$status" in
@@ -65,7 +69,7 @@ jobs:
           SHA: ${{ steps.check.outputs.sha }}
         run: |
           set -eu
-          for i in $(seq 1 140); do
+          for i in $(seq 1 130); do
             runs=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&per_page=20")
             ok=$(echo "$runs" | jq '[.workflow_runs[] | select(.conclusion == "success")] | length')
             busy=$(echo "$runs" | jq '[.workflow_runs[] | select(.status != "completed")] | length')
@@ -86,5 +90,6 @@ jobs:
           set -eu
           gh api "repos/$REPO/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$SHA" >/dev/null
           echo "Tagged $SHA as $TAG"
-          gh api "repos/$REPO/actions/workflows/release.yml/dispatches" -f "ref=$TAG"
+          gh api "repos/$REPO/actions/workflows/release.yml/dispatches" -f "ref=$TAG" || {
+            echo "$TAG exists but the release didn't start: run release.yml on $TAG by hand"; exit 1; }
           echo "Started release.yml on $TAG"
