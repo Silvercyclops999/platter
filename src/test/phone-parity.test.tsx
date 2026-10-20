@@ -33,7 +33,7 @@ import { refreshRequests, resetRequests } from "../stores/requests";
 import { useRouter, type Route } from "../stores/router";
 import { loadSettings, useSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
-import type { LibEntry } from "../stores/library";
+import type { LibEntry, LibSort } from "../stores/library";
 
 const mock = backend as MockBackend;
 const SLOW = { timeout: 6000 };
@@ -354,6 +354,11 @@ describe("the Library tour fixes", () => {
     expect(phoneSubtitle(rows[1], true)).toBe("12 songs");
     expect(phoneSubtitle(rows[1], false)).toBe("Playlist · 12 songs");
     expect(isLikedCopy({ kind: "playlist", title: "Tracks" })).toBe(false);
+  });
+
+  it("Liked Songs stays at the top in every sort", () => {
+    const list = [e({ id: "p1", title: "Road" }), e({ kind: "album", id: "a1", title: "Blue" }), e({ title: "Liked Songs", liked: true })];
+    for (const sort of ["recents", "added", "alpha", "creator"] as LibSort[]) expect(phoneRows(list, sort)[0].title).toBe("Liked Songs");
   });
 
   it("A to Z goes by the name as written, ignoring a leading The", () => {

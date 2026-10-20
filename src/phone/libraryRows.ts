@@ -34,10 +34,11 @@ export function phoneRows(rows: LibEntry[], sort: LibSort, counts?: ReadonlyMap<
   const kept = rows
     .filter((e) => !e.folder && !e.bookmarks && !e.stats && !isLikedCopy(e))
     .map((e) => (e.kind === "playlist" && !e.trackCount && counts?.has(e.id) ? { ...e, trackCount: counts.get(e.id)! } : e));
-  if (sort !== "alpha") return kept;
-  // Pinned rows (Liked Songs) keep their place at the top; the rest go A to Z.
+  // Liked Songs stays at the top in every sort; with A to Z the rest go in order.
   const top = kept.filter((e) => e.liked);
-  const rest = kept.filter((e) => !e.liked).sort((a, b) => collator.compare(alphaKey(a.title), alphaKey(b.title)) || collator.compare(a.title, b.title));
+  const others = kept.filter((e) => !e.liked);
+  if (sort !== "alpha") return [...top, ...others];
+  const rest = others.sort((a, b) => collator.compare(alphaKey(a.title), alphaKey(b.title)) || collator.compare(a.title, b.title));
   return [...top, ...rest];
 }
 
