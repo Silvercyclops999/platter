@@ -1,14 +1,15 @@
 /**
  * The visualizer's rows on the Settings page (Playback, under its own small
- * heading). Style and smoothing are synced; the frame rate, the panel strip
- * and resting on battery are this device only.
+ * heading). Style, intensity and smoothing are synced; the frame rate, the
+ * panel strip and resting on battery are this device only.
  */
 import { Select, type SelectOption } from "../components/Select";
 import { Skeleton } from "../components/Skeleton";
 import { Switch } from "../components/Switch";
-import type { Settings, VisualizerSmoothing, VisualizerStyle } from "../lib/types";
+import type { Settings, VisualizerIntensity, VisualizerSmoothing, VisualizerStyle } from "../lib/types";
 import type { RowDef } from "../pages/SettingsPage";
 import { updateSettings } from "../stores/settings";
+import { INTENSITY_CHOICES, STYLE_GROUPS, normalizeStyle } from "./styles";
 
 type Ids = { title: string; desc: string };
 type SwitchKey = "visualizerButton" | "visualizerPanelStrip" | "visualizerBatteryPause";
@@ -16,12 +17,10 @@ type SwitchKey = "visualizerButton" | "visualizerPanelStrip" | "visualizerBatter
 const GROUP = "Visualizer";
 const wait = <Skeleton width={40} height={24} radius="pill" />;
 
-export const VIS_STYLE_CHOICES: SelectOption<VisualizerStyle>[] = [
-  { value: "analyser", label: "Analyser" },
-  { value: "meters", label: "Meters" },
-  { value: "scope", label: "Scope" },
-  { value: "glow", label: "Glow" },
-];
+/** The styles in their groups: Art first (Sleeve is the default), then Instruments. */
+export const VIS_STYLE_CHOICES: SelectOption<VisualizerStyle>[] = STYLE_GROUPS.flatMap((g) => g.styles.map((st) => ({ value: st.id, label: st.label, group: g.name })));
+
+export const VIS_INTENSITY_CHOICES: SelectOption<VisualizerIntensity>[] = INTENSITY_CHOICES.map((c) => ({ ...c }));
 
 export const VIS_FPS_CHOICES: SelectOption<string>[] = [
   { value: "60", label: "60 frames a second" },
@@ -54,7 +53,7 @@ export function visualizerRows(s: Settings | null, phone: boolean): RowDef[] {
       group: GROUP,
       title: "Show the Visualizer button",
       description: "A button in now playing that shows what the music is doing. V opens it too.",
-      more: "A button in the expanded now playing view (and on the phone's now playing) that swaps the cover for a picture of the music: a spectrum analyser, level meters, a stereo scope or the cover's colours breathing with the bass. It only runs while you can see it.",
+      more: "A button in the expanded now playing view (and on the phone's now playing) that fills it with the cover and its colours moving with the music, or shows an instrument: a spectrum analyser, level meters or a stereo scope. It only runs while you can see it.",
       control: (ids) => sw(s, "visualizerButton", ids),
     },
     {
@@ -62,10 +61,20 @@ export function visualizerRows(s: Settings | null, phone: boolean): RowDef[] {
       section: "Playback",
       group: GROUP,
       title: "Visualizer style",
-      description: "Analyser, Meters, Scope or Glow. You can also pick one in now playing.",
-      more: "Analyser draws the spectrum on a real frequency and level scale. Meters are a pair of needle meters with peak lamps. Scope shows the stereo image: a mono song is an upright line, a wide mix spreads out. Glow lets the cover's colours breathe with the bass. With Reduce motion on, only Analyser and Meters run.",
+      description: "Art over the cover (Sleeve, Ink, Grooves, Light) or an instrument. You can pick in now playing too.",
+      more: "Art fills now playing with the cover and its colours, moving with the music. Sleeve: the cover's colours drift and swell with the bass. Ink: they flow like smoke, faster with the bass. Grooves: a record in the cover's colours, rippling on the beat. Light: soft light leaks and film grain that flare on hits. The instruments are an Analyser on a real frequency and level scale, a pair of needle Meters, and a stereo Scope. With Reduce motion on, Sleeve stays still and only Sleeve, Analyser and Meters run.",
       note: off,
-      control: (ids) => sel(s, s?.visualizerStyle, VIS_STYLE_CHOICES, ids, (v) => void updateSettings({ visualizerStyle: v })),
+      control: (ids) => sel(s, s ? normalizeStyle(s.visualizerStyle) : undefined, VIS_STYLE_CHOICES, ids, (v) => void updateSettings({ visualizerStyle: v })),
+    },
+    {
+      key: "visualizerIntensity",
+      section: "Playback",
+      group: GROUP,
+      title: "Visualizer intensity",
+      description: "How much the art moves with the music: Calm or Lively.",
+      more: "Calm moves slowly and swells gently with the beat, the kind of thing you leave on. Lively reacts more and quicker. It changes the art styles, not the instruments.",
+      note: off,
+      control: (ids) => sel(s, s?.visualizerIntensity, VIS_INTENSITY_CHOICES, ids, (v) => void updateSettings({ visualizerIntensity: v })),
     },
     {
       key: "visualizerFps",

@@ -28,8 +28,11 @@ import { NP_OPEN_MS, flyCover } from "./motion";
 import { phone, usePhoneUi } from "./phoneUi";
 import type { HapticKind } from "../lib/backend";
 import { useSettings } from "../stores/settings";
-import { VisualizerView } from "../visualizer/VisualizerView";
+import { StylePicker, VisualizerView, useShownStyle } from "../visualizer/VisualizerView";
 import { togglePhoneVis, usePhoneVis } from "../visualizer/phoneVis";
+import { ArtStage } from "../visualizer/ArtStage";
+import { useReducedMotion } from "../visualizer/draw";
+import { isArtStyle, visFps, type ArtStyle } from "../visualizer/styles";
 
 /** The close slides straight down in this long. */
 export const CLOSE_MS = 300;
@@ -83,35 +86,71 @@ export function NowPlaying() {
  * changes only this; everything on it (PlayerBody) stays as it is drawn, so
  * the first frame of the close is one class.
  */
+/** The art style now playing shows full screen, or null (the visualizer is off, or an instrument shows). */
+export function usePhoneArt(): ArtStyle | null {
+  const visButton = useSettings((s) => s.settings?.visualizerButton !== false);
+  const open = usePhoneVis((s) => s.open);
+  const style = useShownStyle();
+  return open && visButton && isArtStyle(style) ? style : null;
+}
+
+/** The sharp cover the art gathers round: the deck's current one. */
+const currentCover = (screen: RefObject<HTMLElement | null>) => () => screen.current?.querySelector<HTMLElement>(".ph-np__slide--cur .ph-np__cover") ?? null;
+
 function Player({ track, closing }: { track: Track; closing: boolean }) {
   const colours = useArtColours(null, track.thumb);
   const screen = useRef<HTMLElement>(null);
   useCoverFlight(screen, closing);
-  // Over a dark cover colour the top of the screen is dark even on the light look: light status bar text then.
+  const art = usePhoneArt();
+  // A tap on the art hides the controls, another brings them back; leaving the art brings them back too.
+  const [bare, setBare] = useState(false);
+  if (bare && !art) setBare(false);
+  // Over a dark cover colour (or the art) the top of the screen is dark even on the light look: light status bar text then.
   const vivid = colours?.vivid ?? null;
+  const darkTop = !!art || mixIsDark(vivid, NP_TOP_TINT);
   useEffect(() => {
-    if (closing || document.documentElement.dataset.themeBase !== "light" || !mixIsDark(vivid, NP_TOP_TINT)) return;
+    if (closing || document.documentElement.dataset.themeBase !== "light" || !darkTop) return;
     const release = holdLightStatusBar();
     // Closing, the status bar changes once the screen has gone, not under the slide.
     return () => void (usePhoneUi.getState().nowPlaying ? release() : setTimeout(release, CLOSE_MS));
-  }, [vivid, closing]);
+  }, [darkTop, closing]);
   // The pull down writes its transform and is-dragging straight onto the screen (CoverDeck).
   const style = { "--ph-tint": colours?.vivid ?? "var(--color-bg-overlay)" } as CSSProperties;
   return (
     <section
       ref={screen}
-      className={`ph-np ${closing ? "is-closing" : ""}`}
+      className={`ph-np ${closing ? "is-closing" : ""} ${art ? `is-art is-art--${art}` : ""} ${bare ? "is-bare" : ""}`}
       role="dialog"
       aria-modal="true"
       aria-label="Now playing"
       style={style}
     >
-      <PlayerBody track={track} screen={screen} />
+      {art && <PhoneArtStage art={art} screen={screen} />}
+      <PlayerBody track={track} screen={screen} art={art} bare={bare} onBare={setBare} />
     </section>
   );
 }
 
-const PlayerBody = memo(function PlayerBody({ track, screen }: { track: Track; screen: RefObject<HTMLElement | null> }) {
+function PhoneArtStage({ art, screen }: { art: ArtStyle; screen: RefObject<HTMLElement | null> }) {
+  const reduced = useReducedMotion();
+  const fps = visFps(useSettings((s) => s.settings?.visualizerFps), true, reduced);
+  const intensity = useSettings((s) => s.settings?.visualizerIntensity ?? "calm");
+  const [cover] = useState(() => currentCover(screen));
+  return <ArtStage style={art} fps={fps} reduced={reduced} intensity={intensity} phone cover={cover} />;
+}
+
+/** Presses that are the controls' own, not a tap on the art. */
+const ON_A_CONTROL = "button, a, input, select, textarea, [role=slider], [role=button], [role=switch], .ph-seek";
+
+interface BodyProps {
+  track: Track;
+  screen: RefObject<HTMLElement | null>;
+  art?: ArtStyle | null;
+  bare?: boolean;
+  onBare?: (bare: boolean) => void;
+}
+
+const PlayerBody = memo(function PlayerBody({ track, screen, art = null, bare = false, onBare }: BodyProps) {
   const ctx = usePlayer((s) => s.state?.queue.context ?? null);
   const source = usePlayer((s) => s.state?.queue.current?.source);
   const status = usePlayer((s) => s.state?.status ?? "idle");
@@ -123,8 +162,16 @@ const PlayerBody = memo(function PlayerBody({ track, screen }: { track: Track; s
   const vis = usePhoneVis((s) => s.open) && visButton;
   return (
     <div className="ph-np__scroll">
-      <div className="ph-np__player">
-        <header className="ph-np__top">
+      <div
+        className="ph-np__player"
+        data-testid="np-player"
+        onClick={(e) => {
+          if (!art || !onBare) return;
+          if (e.target instanceof Element && e.target.closest(ON_A_CONTROL)) return;
+          onBare(!bare);
+        }}
+      >
+        <header className="ph-np__top" inert={bare || undefined}>
           <button type="button" className="ph-icon-btn" aria-label="Close now playing" onClick={phone.closePlayer}>
             <ChevronDown size={28} aria-hidden="true" />
           </button>
@@ -136,14 +183,19 @@ const PlayerBody = memo(function PlayerBody({ track, screen }: { track: Track; s
             <MoreHorizontal size={24} aria-hidden="true" />
           </button>
         </header>
-        {vis ? (
+        {vis && !art ? (
           <div className="ph-np__art ph-np__art--vis" data-testid="np-visualizer">
             <VisualizerView phone />
           </div>
         ) : (
-          <CoverDeck screen={screen} onClose={phone.closePlayer} />
+          <CoverDeck screen={screen} onClose={phone.closePlayer} art={art} />
         )}
-        <div className="ph-np__deck">
+        {art && (
+          <div className="ph-np__styles" inert={bare || undefined} data-testid="np-art-styles">
+            <StylePicker />
+          </div>
+        )}
+        <div className="ph-np__deck" inert={bare || undefined}>
         <div className="ph-np__meta">
           <div className="ph-np__names">
             <button type="button" className="ph-np__title" onClick={() => phone.go({ name: "album", id: track.albumId })}>

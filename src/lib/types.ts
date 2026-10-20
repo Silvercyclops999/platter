@@ -849,8 +849,14 @@ export type MobileQuality = "auto" | StreamQuality;
 /** How many recently played songs a phone may keep for offline play (0 is off). */
 export const PHONE_KEEP_RECENT_CHOICES = [0, 25, 50, 100, 250, 500] as const;
 export type PopularSource = "global" | "myPlays";
-/** The visualizer's picture: a spectrum analyser line, needle meters, a stereo phase scope, or the cover's colours breathing. */
-export type VisualizerStyle = "analyser" | "meters" | "scope" | "glow";
+/**
+ * The visualizer's picture. Art: the cover and its colours filling now
+ * playing, moving with the music (Sleeve, Ink, Grooves, Light). Instruments:
+ * a spectrum analyser line, needle meters, a stereo phase scope.
+ */
+export type VisualizerStyle = "sleeve" | "ink" | "grooves" | "light" | "analyser" | "meters" | "scope";
+/** How much the art styles move with the music. */
+export type VisualizerIntensity = "calm" | "lively";
 /** How slowly the visualizer's lines settle. */
 export type VisualizerSmoothing = "low" | "medium" | "high";
 /** Frame rates the visualizer offers. */
@@ -1131,6 +1137,8 @@ export interface Settings {
   visualizerFps: number;
   /** How slowly the visualizer's lines settle. Synced. */
   visualizerSmoothing: VisualizerSmoothing;
+  /** How much the art styles move with the music. Synced. */
+  visualizerIntensity: VisualizerIntensity;
   /** A slim analyser under the cover in the now playing panel. This device only. */
   visualizerPanelStrip: boolean;
   /** The visualizer rests on battery power. This device only. */
@@ -1786,9 +1794,10 @@ export const DEFAULT_SETTINGS: Settings = {
   phoneMobileQuality: "auto",
   phoneHaptics: true,
   visualizerButton: true,
-  visualizerStyle: "analyser",
+  visualizerStyle: "sleeve",
   visualizerFps: 60,
   visualizerSmoothing: "medium",
+  visualizerIntensity: "calm",
   visualizerPanelStrip: false,
   visualizerBatteryPause: true,
   deviceFormat: "original",

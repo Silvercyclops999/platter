@@ -145,7 +145,7 @@ export function current<T>(frame: T | null, arrivedAt: number, now: number): T |
   return frame && now - arrivedAt <= GAP_MS ? frame : null;
 }
 
-/** The low end's level (bands under 150 Hz), 0..1, for Glow. */
+/** The low end's level (bands under 150 Hz), 0..1. */
 export function lowEnd(bands: ArrayLike<number> | null): number {
   if (!bands) return 0;
   let sum = 0;

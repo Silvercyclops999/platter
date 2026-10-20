@@ -34,8 +34,19 @@
   color: var(--color-text-secondary);
 }
 
-/* Style picker: plain words in a row, the chosen one underlined. */
-.vis__styles { display: flex; justify-content: center; gap: var(--space-1); }
+/* Style picker: plain words in a row, the chosen one underlined, in two
+   groups (Art, Instruments) each led by its name in small capitals. */
+.vis__picker { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); }
+.vis__styles { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: var(--space-1) var(--space-6); }
+.vis__group { display: flex; align-items: center; gap: var(--space-1); }
+.vis__group-name {
+  margin-right: var(--space-1);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
 .vis__note { margin: 0; text-align: center; font-size: var(--font-size-xs); color: var(--color-text-muted); }
 .vis__style {
   min-height: 32px;
@@ -124,30 +135,6 @@
 .vis-scope__track::after { content: ""; position: absolute; left: 50%; top: -3px; width: 1px; height: 7px; background: color-mix(in srgb, var(--color-ink) 30%, transparent); }
 .vis-scope__dot { position: absolute; top: -3px; width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: var(--color-text-secondary); }
 .vis-scope__label { grid-area: label; text-align: center; color: var(--color-text-secondary); }
-
-/* ---- Glow: the cover in front, its own colours softened behind it */
-.vis-glow { position: relative; display: grid; place-items: center; width: 100%; height: 100%; min-height: 160px; }
-.vis-glow__light {
-  position: absolute;
-  width: min(70%, 70vh);
-  aspect-ratio: 1;
-  filter: blur(56px) saturate(1.15);
-  opacity: 0.22;
-  will-change: opacity, transform;
-  pointer-events: none;
-}
-.vis-glow__light .art { width: 100%; height: 100%; border-radius: 50%; }
-.vis-glow__cover {
-  position: relative;
-  width: min(44%, 44vh, 360px);
-  aspect-ratio: 1;
-  border-radius: var(--radius-card);
-  overflow: hidden;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
-}
-.vis-glow__cover .art { width: 100%; height: 100%; border-radius: var(--radius-card); }
-/* Glow draws on the stage itself, without the instrument panel. */
-.vis--glow .vis__panel { border-color: transparent; background: none; padding: 0; }
 
 /* ---- the now playing panel's slim strip under the cover */
 .np-vis-strip { height: 40px; margin-top: calc(var(--space-2) * -1); }

@@ -19,6 +19,7 @@ import { player, usePlayer } from "../stores/player";
 import { tap } from "./bits";
 import { useArtGestures, type Axis, type Outcome } from "./gestures";
 import { EASE, reduced, release as dropAnimations, run } from "./motion";
+import type { ArtStyle } from "../visualizer/styles";
 
 /** Now playing's cover is asked for at this CSS size (the phone's ladder caps it at 1200 px). */
 export const NP_ART_CSS = 400;
@@ -57,7 +58,7 @@ export function settleMs(left: number, speed: number): number {
   return Math.round(Math.min(SKIP_SETTLE_MAX_MS, Math.max(160, Math.abs(left) / Math.max(Math.abs(speed), 0.9))));
 }
 
-export const CoverDeck = memo(function CoverDeck({ screen, onClose }: { screen: RefObject<HTMLElement | null>; onClose: () => void }) {
+export const CoverDeck = memo(function CoverDeck({ screen, onClose, art: artStyle = null }: { screen: RefObject<HTMLElement | null>; onClose: () => void; art?: ArtStyle | null }) {
   const cur = usePlayer((s) => s.state?.track ?? null);
   const next = usePlayer((s) => nextInQueue(s.state?.queue)?.track ?? null);
   const prev = usePlayer((s) => previousCover(s.state, s.positionMs));
@@ -177,19 +178,19 @@ export const CoverDeck = memo(function CoverDeck({ screen, onClose }: { screen: 
   return (
     <div ref={art} className="ph-np__art" data-testid="np-art" {...handlers}>
       <div ref={strip} className="ph-np__deck-row" data-testid="np-deck">
-        <Slide cover={deck.prev} side="prev" shrunk={shrunk} />
-        <Slide cover={deck.cur} side="cur" shrunk={shrunk} />
-        <Slide cover={deck.next} side="next" shrunk={shrunk} />
+        <Slide cover={deck.prev} side="prev" shrunk={shrunk} art={artStyle} />
+        <Slide cover={deck.cur} side="cur" shrunk={shrunk} art={artStyle} />
+        <Slide cover={deck.next} side="next" shrunk={shrunk} art={artStyle} />
       </div>
     </div>
   );
 });
 
-function Slide({ cover, side, shrunk }: { cover: Cover; side: "prev" | "cur" | "next"; shrunk: boolean }) {
+function Slide({ cover, side, shrunk, art }: { cover: Cover; side: "prev" | "cur" | "next"; shrunk: boolean; art: ArtStyle | null }) {
   return (
     <div className={`ph-np__slide ph-np__slide--${side}`} aria-hidden={side !== "cur" || undefined}>
       {cover && (
-        <div className={`ph-np__cover ${shrunk ? "" : "is-playing"}`}>
+        <div className={`ph-np__cover ${shrunk ? "" : "is-playing"} ${art ? `art-cover art-cover--${art}` : ""}`}>
           <Art path={cover.thumb} fluid requestSize={NP_ART_CSS} sleeve={{ title: cover.albumTitle, artist: cover.artistTitle }} />
         </div>
       )}

@@ -35,7 +35,7 @@ side for the stuff that never got an official release.
 - Smart shuffle mixes similar songs from your library into a playlist or album, marked so you can tell them apart.
 - Downloads of albums, playlists, Liked Songs and mixes, in original quality or as smaller MP3s, that keep playing with no server.
 - A miniplayer with its own queue you can reorder, laid out side by side when the window is wide.
-- A visualizer in now playing: a spectrum analyser, a pair of VU meters, a stereo scope or a soft glow from the cover. It only runs while it's on screen.
+- A visualizer in now playing that fills the screen with the cover and its colours moving with the music (Sleeve, Ink, Grooves, Light), or shows an instrument: a spectrum analyser, a pair of VU meters or a stereo scope. It only runs while it's on screen.
 - Go Offline stops all network use, and a dropped server dims what isn't on this computer instead of breaking.
 - Works with media keys and the Windows media flyout, and has a Mac menu bar, close to tray and start at sign-in.
 

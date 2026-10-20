@@ -1,7 +1,9 @@
 /**
  * The visualizer: its scales and needles, the feed that asks the core to
- * watch only while a view is on screen, each style drawing from mock frames,
- * reduced motion, the expanded view's button and V key, and its Settings rows.
+ * watch only while a view is on screen, the art styles (their signals, beat
+ * pulse, renderer and fallback) and the instruments drawing from mock
+ * frames, reduced motion, the phone's full screen art, the expanded view's
+ * button and V key, and its Settings rows.
  */
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -32,9 +34,14 @@ import {
   scopePoint,
   vuPosition,
 } from "../visualizer/scale";
-import { CALM_FPS, VisualizerView, shownStyle, visFps } from "../visualizer/VisualizerView";
+import { CALM_FPS, CALM_NOTE, StylePicker, VisualizerView, shownStyle, visFps } from "../visualizer/VisualizerView";
 import { correlation } from "../visualizer/Scope";
-import { glowAt } from "../visualizer/Glow";
+import { ArtStage, MAX_RENDER_PIXELS, PHONE_RENDER_CAP, renderScale } from "../visualizer/ArtStage";
+import { LOW_BANDS, MusicSignals } from "../visualizer/signals";
+import { normalizeStyle } from "../visualizer/styles";
+import { paletteFromPixels } from "../visualizer/palette";
+import { rgbToHsl } from "../lib/color";
+import { player } from "../stores/player";
 import { PanelStrip } from "../visualizer/places";
 import { DeckFaceplate } from "../shell/DeckFrame";
 import { NowPlaying as PhoneNowPlaying } from "../phone/NowPlaying";
@@ -103,6 +110,30 @@ function frames() {
       act(() => run.forEach((cb) => cb(now)));
     }
   };
+}
+
+/** A WebGL2 context that builds everything and records its draws. */
+function fakeGl(drawArrays = vi.fn()) {
+  const noop = () => {};
+  return new Proxy(
+    {
+      COMPILE_STATUS: 1,
+      LINK_STATUS: 2,
+      TRIANGLE_STRIP: 5,
+      isContextLost: () => false,
+      getShaderParameter: () => true,
+      getProgramParameter: () => true,
+      createShader: () => ({}),
+      createProgram: () => ({}),
+      createBuffer: () => ({}),
+      createTexture: () => ({}),
+      createVertexArray: () => ({}),
+      getUniformLocation: () => ({}),
+      getAttribLocation: () => 0,
+      drawArrays,
+    } as Record<string, unknown>,
+    { get: (t, k: string) => (k in t ? t[k] : noop) },
+  );
 }
 
 /** The last watch the mock was asked for. */
@@ -227,7 +258,7 @@ describe("scales", () => {
     expect(current(f, 1000, 1001 + GAP_MS)).toBeNull();
   });
 
-  it("draws a mono pair upright on the scope and reads the low end for Glow", () => {
+  it("draws a mono pair upright on the scope and reads the low end", () => {
     const [x, y] = scopePoint(0.5, 0.5);
     expect(x).toBe(0);
     expect(y).toBeGreaterThan(0);
@@ -238,15 +269,29 @@ describe("scales", () => {
     expect(lowEnd(new Array(BANDS).fill(-6))).toBeGreaterThan(0.5);
   });
 
-  it("keeps only Analyser and Meters, at 15 frames, under reduced motion; a phone runs at most 30", () => {
-    expect(shownStyle("scope", true)).toBe("analyser");
-    expect(shownStyle("glow", true)).toBe("analyser");
+  it("keeps a still Sleeve, Analyser and Meters, at 15 frames, under reduced motion; a phone runs at most 30", () => {
+    for (const s of ["scope", "ink", "grooves", "light"]) expect(shownStyle(s, true)).toBe("sleeve");
     expect(shownStyle("meters", true)).toBe("meters");
-    expect(shownStyle("glow", false)).toBe("glow");
+    expect(shownStyle("analyser", true)).toBe("analyser");
+    expect(shownStyle("sleeve", true)).toBe("sleeve");
+    expect(shownStyle("ink", false)).toBe("ink");
     expect(visFps(60, false, true)).toBe(CALM_FPS);
     expect(visFps(60, true, false)).toBe(30);
     expect(visFps(15, true, false)).toBe(15);
     expect(visFps(60, false, false)).toBe(60);
+  });
+});
+
+describe("styles and defaults", () => {
+  it("makes a saved Glow into Sleeve, and Sleeve (Calm) the default", () => {
+    expect(normalizeStyle("glow")).toBe("sleeve");
+    expect(shownStyle("glow", false)).toBe("sleeve");
+    expect(normalizeStyle(undefined)).toBe("sleeve");
+    expect(normalizeStyle("something new")).toBe("sleeve");
+    expect(normalizeStyle("grooves")).toBe("grooves");
+    expect(normalizeStyle("scope")).toBe("scope");
+    expect(DEFAULT_SETTINGS.visualizerStyle).toBe("sleeve");
+    expect(DEFAULT_SETTINGS.visualizerIntensity).toBe("calm");
   });
 });
 
@@ -351,6 +396,7 @@ describe("the feed", () => {
 
 describe("each style", () => {
   it("Analyser draws its line over a log frequency axis and a dB scale", async () => {
+    await act(async () => void useSettings.setState({ settings: { ...DEFAULT_SETTINGS, visualizerStyle: "analyser" } }));
     const run = frames();
     render(<VisualizerView />);
     const view = screen.getByTestId("visualizer");
@@ -366,6 +412,7 @@ describe("each style", () => {
   });
 
   it("Analyser uses WebGL2 when it's there, and Canvas 2D after the GPU context is lost", async () => {
+    await act(async () => void useSettings.setState({ settings: { ...DEFAULT_SETTINGS, visualizerStyle: "analyser" } }));
     const run = frames();
     const noop = () => {};
     gl = new Proxy(
@@ -418,25 +465,40 @@ describe("each style", () => {
     expect((await mock.settingsGet()).visualizerStyle).toBe("meters");
   });
 
-  it("under reduced motion offers only Analyser and Meters, without the peak line, at 15 frames", async () => {
+  it("under reduced motion offers only Sleeve, Analyser and Meters, and says why", async () => {
     setReducedMotion(true);
     await act(async () => void useSettings.setState({ settings: { ...DEFAULT_SETTINGS, visualizerStyle: "scope" } }));
+    render(<StylePicker />);
+    for (const name of ["Ink", "Grooves", "Light", "Scope"]) {
+      expect(screen.getByRole("button", { name })).toHaveAttribute("aria-disabled", "true");
+      // The reason is on screen and read with the buttons it applies to.
+      expect(screen.getByRole("button", { name })).toHaveAccessibleDescription(CALM_NOTE);
+    }
+    for (const name of ["Sleeve", "Analyser", "Meters"]) expect(screen.getByRole("button", { name })).not.toHaveAttribute("aria-disabled");
+    // A saved Scope shows as a still Sleeve.
+    expect(screen.getByRole("button", { name: "Sleeve" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(CALM_NOTE)).toBeVisible();
+    // Pressing one that's off changes nothing.
+    fireEvent.click(screen.getByRole("button", { name: "Ink" }));
+    expect(useSettings.getState().settings?.visualizerStyle).toBe("scope");
+  });
+
+  it("draws Analyser without the peak line at 15 frames under reduced motion", async () => {
+    setReducedMotion(true);
+    await act(async () => void useSettings.setState({ settings: { ...DEFAULT_SETTINGS, visualizerStyle: "analyser" } }));
     render(<VisualizerView />);
-    expect(screen.getByRole("button", { name: "Scope" })).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByRole("button", { name: "Glow" })).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByRole("button", { name: "Analyser" })).toHaveAttribute("aria-pressed", "true");
-    // The reason is on screen and read with the buttons it applies to.
-    expect(screen.getByText("Scope and Glow are off while Reduce motion is on.")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Scope" })).toHaveAccessibleDescription("Scope and Glow are off while Reduce motion is on.");
     await waitFor(() => expect(lastCall()).toEqual({ on: true, fps: 15, scope: false }));
   });
 
-  it("picks styles with plain pressed buttons, each a tab stop", () => {
-    render(<VisualizerView />);
+  it("picks styles in two groups, Art then Instruments, with plain pressed buttons, each a tab stop", () => {
+    render(<StylePicker />);
     const group = screen.getByRole("group", { name: "Visualizer style" });
-    const buttons = within(group).getAllByRole("button");
-    expect(buttons.map((b) => b.textContent)).toEqual(["Analyser", "Meters", "Scope", "Glow"]);
-    expect(buttons.map((b) => b.getAttribute("aria-pressed"))).toEqual(["true", "false", "false", "false"]);
+    const art = within(group).getByRole("group", { name: "Art" });
+    const instruments = within(group).getByRole("group", { name: "Instruments" });
+    expect(within(art).getAllByRole("button").map((b) => b.textContent)).toEqual(["Sleeve", "Ink", "Grooves", "Light"]);
+    expect(within(instruments).getAllByRole("button").map((b) => b.textContent)).toEqual(["Analyser", "Meters", "Scope"]);
+    // Sleeve is the default.
+    expect(within(group).getAllByRole("button").map((b) => b.getAttribute("aria-pressed"))).toEqual(["true", "false", "false", "false", "false", "false", "false"]);
     expect(screen.queryByRole("radio")).toBeNull();
   });
 
@@ -456,7 +518,7 @@ describe("each style", () => {
   });
 });
 
-describe("Scope and Glow", () => {
+describe("Scope", () => {
   it("Scope draws the stereo trace on its L, R, M and S frame and reads the correlation", async () => {
     await act(async () => void useSettings.setState({ settings: { ...DEFAULT_SETTINGS, visualizerStyle: "scope" } }));
     const run = frames();
@@ -477,23 +539,197 @@ describe("Scope and Glow", () => {
     expect(correlation([0, 0, 0, 0])).toBeNull();
   });
 
-  it("Glow breathes the cover's light with the bass, softly", async () => {
-    await act(async () => void useSettings.setState({ settings: { ...DEFAULT_SETTINGS, visualizerStyle: "glow" } }));
+});
+
+// ------------------------------------------------------------ the art styles
+
+/** Low bands at `low` dB, everything else at `rest`, as a fresh frame. */
+function bandsWith(low: number, rest = -50): number[] {
+  const out = new Array(BANDS).fill(rest);
+  for (let k = LOW_BANDS[0]; k < LOW_BANDS[1]; k++) out[k] = low;
+  return out;
+}
+
+describe("the art signals", () => {
+  it("finds the beats in a kick every half second, and none in a steady tone", () => {
+    const sig = new MusicSignals();
+    let pulseAfterKick = 0;
+    let pulseLater = 1;
+    for (let t = 0; t < 8_000; t += 33) {
+      const since = t % 500;
+      sig.step(bandsWith(-44 + 34 * Math.exp(-since / 70)), {}, 33, t);
+      if (t > 2_000 && since < 33) pulseAfterKick = Math.max(pulseAfterKick, sig.pulse);
+      if (t > 2_000 && since >= 330 && since < 363) pulseLater = Math.min(pulseLater, sig.pulse);
+    }
+    // Sixteen kicks; the very first frame has nothing to compare with.
+    expect(sig.beatCount).toBeGreaterThanOrEqual(15);
+    expect(sig.beatCount).toBeLessThanOrEqual(16);
+    expect(pulseAfterKick).toBeGreaterThan(0.3);
+    expect(pulseLater).toBeLessThan(pulseAfterKick / 2);
+
+    const steady = new MusicSignals();
+    for (let t = 0; t < 4_000; t += 33) steady.step(bandsWith(-20), {}, 33, t);
+    expect(steady.beatCount).toBe(0);
+    expect(steady.pulse).toBe(0);
+  });
+
+  it("hears the kicks in the mock's song, and a lively intensity pulses harder than a calm one", () => {
+    const calm = new MusicSignals();
+    const lively = new MusicSignals();
+    let calmMax = 0;
+    let livelyMax = 0;
+    for (let t = 0; t < 8_000; t += 33) {
+      const f = mockFrame(t, false);
+      calm.step(f.bands, f, 33, t, "calm");
+      lively.step(f.bands, f, 33, t, "lively");
+      calmMax = Math.max(calmMax, calm.pulse);
+      livelyMax = Math.max(livelyMax, lively.pulse);
+    }
+    // 16 kicks and a few pickups in 8 seconds.
+    expect(calm.beatCount).toBeGreaterThanOrEqual(14);
+    expect(calm.beatCount).toBeLessThanOrEqual(24);
+    expect(livelyMax).toBeGreaterThan(calmMax);
+    expect(calm.low).toBeGreaterThan(0);
+    expect(calm.high).toBeGreaterThan(0);
+  });
+
+  it("moves with the music and settles back when the frames stop", () => {
+    const sig = new MusicSignals();
+    let lowPeak = 0;
+    for (let t = 0; t < 3_000; t += 33) {
+      const f = mockFrame(t, false);
+      sig.step(f.bands, f, 33, t);
+      lowPeak = Math.max(lowPeak, sig.low);
+    }
+    expect(lowPeak).toBeGreaterThan(0.25);
+    const flowBefore = sig.flow;
+    for (let t = 3_000; t < 6_000; t += 33) sig.step(null, null, 33, t);
+    expect(sig.low).toBeLessThan(0.02);
+    expect(sig.mid).toBeLessThan(0.02);
+    expect(sig.high).toBeLessThan(0.02);
+    expect(sig.pulse).toBeLessThan(0.01);
+    // The art still drifts, slowly, in a quiet moment.
+    expect(sig.flow).toBeGreaterThan(flowBefore);
+  });
+
+  it("reads four colours and a deep base from a cover, and quiet ones from a grey cover", () => {
+    const px: number[] = [];
+    for (let i = 0; i < 256; i++) {
+      const c = i < 120 ? [200, 40, 30] : i < 200 ? [30, 60, 190] : i < 230 ? [20, 18, 16] : [230, 220, 200];
+      px.push(c[0], c[1], c[2], 255);
+    }
+    const p = paletteFromPixels(px);
+    expect(p.colours).toHaveLength(4);
+    const hues = p.colours.slice(0, 2).map((c) => rgbToHsl([c[0] * 255, c[1] * 255, c[2] * 255])[0]);
+    // The lead is the cover's red, then its blue.
+    expect(Math.min(hues[0], 360 - hues[0])).toBeLessThan(25);
+    expect(hues[1]).toBeGreaterThan(200);
+    expect(hues[1]).toBeLessThan(250);
+    expect(p.base[0] + p.base[1] + p.base[2]).toBeLessThan(0.35);
+    const grey = paletteFromPixels(new Array(256).fill(0).flatMap((_, i) => [i % 200, i % 200, i % 200, 255]));
+    for (const c of grey.colours) expect(rgbToHsl([c[0] * 255, c[1] * 255, c[2] * 255])[1]).toBeLessThanOrEqual(0.17);
+  });
+
+  it("caps the render scale on a phone, and the pixels on any screen", () => {
+    expect(renderScale("grooves", 3, true, 430, 932)).toBeLessThanOrEqual(3 * PHONE_RENDER_CAP);
+    expect(renderScale("sleeve", 3, true, 430, 932)).toBeLessThanOrEqual(1.5);
+    expect(renderScale("grooves", 2, false, 800, 600)).toBe(2);
+    expect(renderScale("sleeve", 2, false, 800, 600)).toBe(1);
+    const big = renderScale("grooves", 2, false, 3840, 2160);
+    expect(3840 * 2160 * big * big).toBeLessThanOrEqual(MAX_RENDER_PIXELS + 1);
+  });
+});
+
+describe("the art stage", () => {
+  const coverEl = () => document.querySelector<HTMLElement>(".test-cover");
+  function stage(props: Partial<Parameters<typeof ArtStage>[0]> = {}) {
+    return render(
+      <>
+        <div className="test-cover" />
+        <ArtStage style="sleeve" fps={30} reduced={false} intensity="calm" cover={coverEl} {...props} />
+      </>,
+    );
+  }
+  const kick = (ms: number) => act(() => mock.emit("player://spectrum", { t: ms, bands: bandsWith(-44 + 34 * Math.exp(-(ms % 500) / 70)), rms: [-20, -20], peak: [-6, -6] }));
+
+  it("draws each art style with WebGL2 on one quad, and Sleeve in layers after the GPU context is lost", async () => {
     const run = frames();
-    render(<VisualizerView />);
-    const glow = await screen.findByRole("img", { name: "The cover's colours, moving with the bass" });
-    const light = glow.querySelector<HTMLElement>(".vis-glow__light")!;
+    const drawArrays = vi.fn();
+    gl = fakeGl(drawArrays);
+    stage({ style: "grooves" });
+    const s = screen.getByTestId("art-stage");
+    await waitFor(() => expect(s).toHaveAttribute("data-renderer", "webgl2"));
+    expect(s).toHaveAttribute("data-style", "grooves");
+    frame();
+    run(2);
+    expect(drawArrays).toHaveBeenCalledWith(5, 0, 4);
+    act(() => void s.querySelector("canvas")!.dispatchEvent(new Event("webglcontextlost", { cancelable: true })));
+    await waitFor(() => expect(s).toHaveAttribute("data-renderer", "css"));
+    expect(s).toHaveAttribute("data-style", "sleeve");
+    expect(s.querySelectorAll(".art-css__field")).toHaveLength(4);
+  });
+
+  it("falls back to Sleeve drawn with layers when there is no WebGL2, and still moves with the music", async () => {
+    const run = frames();
+    stage({ style: "ink" });
+    const s = screen.getByTestId("art-stage");
+    await waitFor(() => expect(s).toHaveAttribute("data-renderer", "css"));
+    expect(s).toHaveAttribute("data-style", "sleeve");
     run(1);
-    const quiet = Number(light.style.opacity);
+    const field = s.querySelector<HTMLElement>(".art-css__field--0")!;
+    const before = field.style.transform;
     for (let i = 0; i < 30; i++) {
-      frame(0, false);
+      kick(i * 20);
       run(1);
     }
-    const loud = Number(light.style.opacity);
-    expect(loud).toBeGreaterThan(quiet);
-    // Never more than a soft light, and only a few percent of size.
-    expect(glowAt(1).opacity).toBeLessThanOrEqual(0.75);
-    expect(glowAt(1).scale).toBeLessThanOrEqual(1.06);
+    expect(field.style.transform).not.toBe(before);
+    // The core is asked for frames at the stage's rate.
+    await waitFor(() => expect(lastCall()).toEqual({ on: true, fps: 30, scope: false }));
+  });
+
+  it("breathes the sharp cover with the beat", async () => {
+    const run = frames();
+    stage();
+    run(1);
+    const cover = coverEl()!;
+    let most = 1;
+    for (let i = 0; i < 60; i++) {
+      kick(10_000 + i * 20);
+      run(1);
+      most = Math.max(most, Number(cover.style.getPropertyValue("--art-breath")));
+    }
+    expect(most).toBeGreaterThan(1.005);
+    // Only a few percent.
+    expect(most).toBeLessThan(1.06);
+  });
+
+  it("stays still under reduced motion: no pulse, no drift, nothing asked of the core", async () => {
+    const run = frames();
+    stage({ reduced: true, fps: CALM_FPS });
+    const s = screen.getByTestId("art-stage");
+    expect(s).toHaveAttribute("data-reduced", "true");
+    await waitFor(() => expect(s).toHaveAttribute("data-renderer", "css"));
+    run(1);
+    const field = s.querySelector<HTMLElement>(".art-css__field--1")!;
+    const before = field.style.transform;
+    for (let i = 0; i < 40; i++) {
+      kick(i * 20);
+      run(1);
+    }
+    expect(coverEl()!.style.getPropertyValue("--art-breath")).toBe("1.0000");
+    expect(field.style.transform).toBe(before);
+    expect(mock.visualizer.calls).toEqual([]);
+  });
+
+  it("gives the cover back as it was when it goes", async () => {
+    const run = frames();
+    const { unmount } = stage({ style: "light" });
+    run(3);
+    expect(coverEl()!.style.getPropertyValue("--art-breath")).not.toBe("");
+    const cover = coverEl()!;
+    unmount();
+    expect(cover.style.getPropertyValue("--art-breath")).toBe("");
+    expect(cover.style.getPropertyValue("--art-leak-a")).toBe("");
   });
 });
 
@@ -539,22 +775,86 @@ describe("the phone", () => {
     act(() => usePhoneUi.setState({ nowPlaying: false }));
   });
 
-  it("has the same button, swapping the cover for the same styles at no more than 30 frames", async () => {
+  it("fills now playing with the art behind the song and the controls, at no more than 30 frames", async () => {
     act(() => usePhoneUi.setState({ nowPlaying: true }));
     render(<PhoneNowPlaying />);
-    expect(screen.getByTestId("np-art")).toBeInTheDocument();
+    const np = screen.getByRole("dialog", { name: "Now playing" });
+    expect(np).not.toHaveClass("is-art");
     const button = screen.getByRole("button", { name: "Visualizer" });
     expect(button).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(button);
     expect(screen.getByRole("button", { name: "Visualizer" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.queryByTestId("np-art")).toBeNull();
-    const vis = within(screen.getByTestId("np-visualizer")).getByTestId("visualizer");
-    expect(vis).toHaveClass("vis--phone");
-    for (const s of ["Analyser", "Meters", "Scope", "Glow"]) expect(within(vis).getByRole("button", { name: s })).toBeInTheDocument();
+    // Sleeve, the default, over the whole screen, with a dark scrim at the top and the bottom.
+    expect(np).toHaveClass("is-art", "is-art--sleeve");
+    const art = within(np).getByTestId("art-stage");
+    expect(art.querySelector(".art-stage__scrim--top")).not.toBeNull();
+    expect(art.querySelector(".art-stage__scrim--bottom")).not.toBeNull();
+    // The cover deck stays, its cover the sharp one over the art; the song and controls stay too.
+    expect(screen.getByTestId("np-art")).toBeInTheDocument();
+    expect(np.querySelector(".ph-np__slide--cur .ph-np__cover")).toHaveClass("art-cover", "art-cover--sleeve");
+    expect(within(np).getByRole("button", { name: "Pause" })).toBeInTheDocument();
+    // The picker, in its groups.
+    const picker = screen.getByTestId("np-art-styles");
+    expect(within(picker).getByRole("group", { name: "Art" })).toBeInTheDocument();
+    expect(within(picker).getByRole("group", { name: "Instruments" })).toBeInTheDocument();
     // The desktop's 60 is capped at 30 on the phone.
     await waitFor(() => expect(lastCall()).toEqual({ on: true, fps: 30, scope: false }));
     // Remembered on this device.
     expect(usePhoneVis.getState().open).toBe(true);
+  });
+
+  it("hides the controls with a tap on the art and brings them back with another", () => {
+    setPhoneVis(true);
+    act(() => usePhoneUi.setState({ nowPlaying: true }));
+    render(<PhoneNowPlaying />);
+    const np = screen.getByRole("dialog", { name: "Now playing" });
+    fireEvent.click(screen.getByTestId("np-art"));
+    expect(np).toHaveClass("is-bare");
+    expect(np.querySelector(".ph-np__deck")).toHaveAttribute("inert");
+    expect(np.querySelector(".ph-np__top")).toHaveAttribute("inert");
+    expect(screen.getByTestId("np-art-styles")).toHaveAttribute("inert");
+    // The cover stays.
+    expect(np.querySelector(".ph-np__slide--cur .ph-np__cover")).not.toBeNull();
+    fireEvent.click(screen.getByTestId("np-player"));
+    expect(np).not.toHaveClass("is-bare");
+    expect(np.querySelector(".ph-np__deck")).not.toHaveAttribute("inert");
+    // A press on a control is the control's own.
+    fireEvent.click(within(np).getByRole("button", { name: "Pause" }));
+    expect(np).not.toHaveClass("is-bare");
+  });
+
+  it("still skips on a sideways swipe over the art", async () => {
+    const next = vi.spyOn(player, "next").mockImplementation(() => Promise.resolve());
+    setPhoneVis(true);
+    act(() => usePhoneUi.setState({ nowPlaying: true }));
+    render(<PhoneNowPlaying />);
+    const np = screen.getByRole("dialog", { name: "Now playing" });
+    expect(np).toHaveClass("is-art");
+    const art = screen.getByTestId("np-art");
+    Object.defineProperty(art, "clientWidth", { value: 400, configurable: true });
+    Object.defineProperty(np, "clientHeight", { value: 800, configurable: true });
+    let now = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    fireEvent.pointerDown(art, { pointerId: 1, button: 0, clientX: 300, clientY: 400 });
+    for (let i = 1; i <= 5; i++) {
+      now += 160;
+      fireEvent.pointerMove(art, { pointerId: 1, clientX: 300 - 32 * i, clientY: 400 });
+    }
+    expect(screen.getByTestId("np-deck").style.transform).toBe("translateX(-160px)");
+    await act(async () => void fireEvent.pointerUp(art, { pointerId: 1, clientX: 140, clientY: 400 }));
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows an instrument in the cover's place, as before", async () => {
+    await act(async () => void useSettings.setState({ settings: { ...DEFAULT_SETTINGS, visualizerStyle: "meters" } }));
+    setPhoneVis(true);
+    act(() => usePhoneUi.setState({ nowPlaying: true }));
+    render(<PhoneNowPlaying />);
+    expect(screen.getByRole("dialog", { name: "Now playing" })).not.toHaveClass("is-art");
+    expect(screen.queryByTestId("np-art")).toBeNull();
+    const vis = within(screen.getByTestId("np-visualizer")).getByTestId("visualizer");
+    expect(vis).toHaveClass("vis--phone", "vis--meters");
+    expect(screen.queryByTestId("art-stage")).toBeNull();
   });
 
   it("hides the button with the setting off", async () => {
@@ -570,21 +870,41 @@ describe("the phone", () => {
 // ------------------------------------------------------------ the expanded view
 
 describe("the expanded view", () => {
-  it("has a Visualizer button and V that swap the cover for the visualizer, the cover moving to the corner", async () => {
+  it("has a Visualizer button and V that fill the view with the art round the cover", async () => {
     render(<FullWindow />);
     act(() => fullWindow.open());
     const button = within(screen.getByRole("group", { name: "Show" })).getByRole("button", { name: "Visualizer" });
     fireEvent.click(button);
     expect(useFullWindow.getState().mode).toBe("visualizer");
     const dialog = screen.getByRole("dialog", { name: "Expanded now playing" });
-    expect(dialog).toHaveClass("fw--visualizer");
-    expect(within(dialog).getByTestId("visualizer")).toBeInTheDocument();
-    expect(dialog.querySelector(".fw__now--row .fw__cover")).not.toBeNull();
+    expect(dialog).toHaveClass("fw--visualizer", "fw--art", "fw--art-sleeve");
+    const art = within(dialog).getByTestId("art-stage");
+    expect(art.querySelector(".art-stage__scrim--top")).not.toBeNull();
+    expect(dialog.querySelector(".fw__now--art .fw__cover.art-cover")).not.toBeNull();
+    expect(within(dialog).getByRole("group", { name: "Visualizer style" })).toBeInTheDocument();
+    // A click on the art hides the controls (and the bars), another brings them back.
+    fireEvent.click(dialog.querySelector(".fw__stage")!);
+    expect(dialog).toHaveClass("is-bare");
+    expect(document.documentElement).toHaveClass("fw-idle");
+    fireEvent.click(dialog.querySelector(".fw__stage")!);
+    expect(dialog).not.toHaveClass("is-bare");
     // V goes back to the artwork, and again to the visualizer.
     act(() => void fireEvent.keyDown(window, { key: "v" }));
     expect(useFullWindow.getState().mode).toBe("artwork");
     act(() => void fireEvent.keyDown(window, { key: "V" }));
     expect(useFullWindow.getState().mode).toBe("visualizer");
+  });
+
+  it("keeps the instruments in the stage with the cover in the corner", async () => {
+    await act(async () => void useSettings.setState({ settings: { ...DEFAULT_SETTINGS, visualizerStyle: "analyser" } }));
+    render(<FullWindow />);
+    act(() => fullWindow.open("visualizer"));
+    const dialog = screen.getByRole("dialog", { name: "Expanded now playing" });
+    expect(dialog).toHaveClass("fw--visualizer");
+    expect(dialog).not.toHaveClass("fw--art");
+    expect(within(dialog).getByTestId("visualizer")).toBeInTheDocument();
+    expect(dialog.querySelector(".fw__now--row .fw__cover")).not.toBeNull();
+    expect(screen.queryByTestId("art-stage")).toBeNull();
   });
 
   it("leaves V and L to a field being typed in", () => {
@@ -614,6 +934,7 @@ describe("the expanded view", () => {
     act(() => useFullWindow.setState({ mode: "visualizer" }));
     expect(screen.getByRole("dialog", { name: "Expanded now playing" })).toHaveClass("fw--artwork");
     expect(screen.queryByTestId("visualizer")).toBeNull();
+    expect(screen.queryByTestId("art-stage")).toBeNull();
   });
 });
 
@@ -628,18 +949,32 @@ describe("Settings", () => {
     expect(button).toBeChecked();
     expect(screen.getByRole("switch", { name: "Analyser under the cover in the now playing panel" })).not.toBeChecked();
     expect(screen.getByRole("switch", { name: "Rest the visualizer on battery" })).toBeChecked();
-    for (const key of ["visualizerButton", "visualizerStyle", "visualizerFps", "visualizerSmoothing", "visualizerPanelStrip", "visualizerBatteryPause"]) {
+    for (const key of ["visualizerButton", "visualizerStyle", "visualizerIntensity", "visualizerFps", "visualizerSmoothing", "visualizerPanelStrip", "visualizerBatteryPause"]) {
       const row = document.querySelector<HTMLElement>(`[data-setting="${key}"]`);
       expect(row, key).not.toBeNull();
       expect(row!.closest("section")?.querySelector("h2")?.textContent).toMatch(/Playback/);
     }
     const style = document.querySelector<HTMLElement>('[data-setting="visualizerStyle"]')!;
-    expect(style).toHaveTextContent("Analyser");
+    const select = style.querySelector("select")!;
+    expect(select.value).toBe("sleeve");
+    // The styles in their groups, Art first.
+    const groups = [...select.querySelectorAll("optgroup")];
+    expect(groups.map((g) => g.label)).toEqual(["Art", "Instruments"]);
+    expect([...groups[0].querySelectorAll("option")].map((o) => o.textContent)).toEqual(["Sleeve", "Ink", "Grooves", "Light"]);
+    expect([...groups[1].querySelectorAll("option")].map((o) => o.textContent)).toEqual(["Analyser", "Meters", "Scope"]);
+    const intensity = document.querySelector<HTMLElement>('[data-setting="visualizerIntensity"]')!;
+    expect(intensity.querySelector("select")!.value).toBe("calm");
+    expect([...intensity.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["Calm", "Lively"]);
     expect(document.querySelector('[data-setting="visualizerFps"]')).toHaveTextContent("60 frames a second");
     expect(document.querySelector('[data-setting="visualizerSmoothing"]')).toHaveTextContent("Medium");
     // The device-only ones say so.
     for (const key of ["visualizerFps", "visualizerPanelStrip", "visualizerBatteryPause"])
       expect(document.querySelector(`[data-setting="${key}"]`)).toHaveTextContent("This device only");
+    // Each is saved.
+    fireEvent.change(intensity.querySelector("select")!, { target: { value: "lively" } });
+    await waitFor(async () => expect((await mock.settingsGet()).visualizerIntensity).toBe("lively"));
+    fireEvent.change(select, { target: { value: "grooves" } });
+    await waitFor(async () => expect((await mock.settingsGet()).visualizerStyle).toBe("grooves"));
     // Turning the button off saves it.
     fireEvent.click(button);
     await waitFor(async () => expect((await mock.settingsGet()).visualizerButton).toBe(false));

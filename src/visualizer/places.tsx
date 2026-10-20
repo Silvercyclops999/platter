@@ -10,7 +10,7 @@ import { Analyser } from "./Analyser";
 import { useReducedMotion, useVisAccent } from "./draw";
 import { useSpectrumFeed } from "./feed";
 import { Meters } from "./Meters";
-import { visFps } from "./VisualizerView";
+import { visFps } from "./styles";
 import "./visualizer.css";
 
 /** Music is playing here (not on another device, not nothing). */

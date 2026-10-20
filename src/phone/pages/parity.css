@@ -272,6 +272,9 @@
 .ph-choice-page__list { list-style: none; margin: 8px var(--ph-gutter, 18px) 0; padding: 0; border-radius: 14px; overflow: hidden; background: color-mix(in srgb, var(--color-ink) 5%, var(--color-bg-raised)); box-shadow: var(--panel-highlight, none); }
 .ph-choice-page__list > li + li .ph-choice-page__row { box-shadow: inset 0 1px 0 var(--ph-line); }
 .ph-choice-page__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 52px; padding: 0 16px !important; font-size: 16px; text-align: left; }
+.ph-choice-page__group { display: block; padding: 14px 16px 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-text-muted); box-shadow: inset 0 1px 0 var(--ph-line); }
+.ph-choice-page__list > li:first-child .ph-choice-page__group { box-shadow: none; }
+.ph-choice-page__group + .ph-choice-page__row { box-shadow: none !important; }
 .ph-choice-page__row:active { background: var(--color-state-pressed) !important; }
 .ph-choice-page__row.is-on { font-weight: 600; }
 .ph-choice-page__row svg { color: var(--color-accent); flex: none; }

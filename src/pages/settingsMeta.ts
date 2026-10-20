@@ -197,9 +197,10 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "miniplayerSideBySide",
   // The phone shows the cover in now playing, never a record player.
   "recordMotion",
-  // Visualizer: its tuning, the panel strip and resting on battery.
+  // Visualizer: its tuning (intensity included), the panel strip and resting on battery.
   "visualizerFps",
   "visualizerSmoothing",
+  "visualizerIntensity",
   "visualizerPanelStrip",
   "visualizerBatteryPause",
   // Looks: building and files.

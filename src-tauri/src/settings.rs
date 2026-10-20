@@ -73,17 +73,31 @@ impl StreamQuality {
     }
 }
 
-/// The visualizer's picture: a spectrum analyser line, a pair of needle
-/// meters, a stereo phase scope, or the cover's colours breathing with the
-/// low end.
+/// The visualizer's picture. The art styles fill now playing with the
+/// cover and its colours moving with the music (Sleeve, Ink, Grooves,
+/// Light); the instruments are a spectrum analyser line, a pair of needle
+/// meters and a stereo phase scope. Glow, from before, is part of Sleeve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum VisualizerStyle {
     #[default]
+    #[serde(alias = "glow")]
+    Sleeve,
+    Ink,
+    Grooves,
+    Light,
     Analyser,
     Meters,
     Scope,
-    Glow,
+}
+
+/// How much the art styles move with the music.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum VisualizerIntensity {
+    #[default]
+    Calm,
+    Lively,
 }
 
 /// How slowly the visualizer's lines settle.
@@ -711,6 +725,8 @@ pub struct Settings {
     pub visualizer_fps: u32,
     /// How slowly the visualizer's lines settle (synced).
     pub visualizer_smoothing: VisualizerSmoothing,
+    /// How much the art styles move with the music (synced).
+    pub visualizer_intensity: VisualizerIntensity,
     /// A slim analyser under the cover in the now playing panel (this device only).
     pub visualizer_panel_strip: bool,
     /// The visualizer rests while on battery power (this device only).
@@ -1278,9 +1294,10 @@ impl Default for Settings {
             phone_mobile_quality: MobileQuality::Auto,
             phone_haptics: true,
             visualizer_button: true,
-            visualizer_style: VisualizerStyle::Analyser,
+            visualizer_style: VisualizerStyle::Sleeve,
             visualizer_fps: default_visualizer_fps(),
             visualizer_smoothing: VisualizerSmoothing::Medium,
+            visualizer_intensity: VisualizerIntensity::Calm,
             visualizer_panel_strip: false,
             visualizer_battery_pause: true,
             device_format: crate::devices::DeviceFormat::Original,
@@ -1447,6 +1464,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "visualizerButton",
     "visualizerStyle",
     "visualizerSmoothing",
+    "visualizerIntensity",
     "resumeContexts",
     "popularSource",
     "deviceFormat",
@@ -1894,6 +1912,7 @@ pub struct SettingsPatch {
     /// One of VISUALIZER_FPS.
     pub visualizer_fps: Option<u32>,
     pub visualizer_smoothing: Option<VisualizerSmoothing>,
+    pub visualizer_intensity: Option<VisualizerIntensity>,
     pub visualizer_panel_strip: Option<bool>,
     pub visualizer_battery_pause: Option<bool>,
     pub device_format: Option<crate::devices::DeviceFormat>,
@@ -2269,6 +2288,7 @@ impl Settings {
         set(&mut self.visualizer_button, p.visualizer_button);
         set(&mut self.visualizer_style, p.visualizer_style);
         set(&mut self.visualizer_smoothing, p.visualizer_smoothing);
+        set(&mut self.visualizer_intensity, p.visualizer_intensity);
         set(&mut self.visualizer_panel_strip, p.visualizer_panel_strip);
         set(&mut self.visualizer_battery_pause, p.visualizer_battery_pause);
         if let Some(n) = p.visualizer_fps {
@@ -5039,7 +5059,8 @@ mod tests {
     fn the_visualizer_settings_have_their_defaults_and_scopes() {
         let d = Settings::default();
         assert!(d.visualizer_button);
-        assert_eq!(d.visualizer_style, VisualizerStyle::Analyser);
+        assert_eq!(d.visualizer_style, VisualizerStyle::Sleeve);
+        assert_eq!(d.visualizer_intensity, VisualizerIntensity::Calm);
         assert_eq!(d.visualizer_fps, 60, "a computer runs at 60");
         assert_eq!(d.visualizer_smoothing, VisualizerSmoothing::Medium);
         assert!(!d.visualizer_panel_strip);
@@ -5048,7 +5069,7 @@ mod tests {
         let old: Settings = serde_json::from_str(r#"{"volume":0.5}"#).unwrap();
         assert!(old.visualizer_button && old.visualizer_battery_pause && !old.visualizer_panel_strip);
         assert_eq!(old.visualizer_fps, default_visualizer_fps());
-        for k in ["visualizerButton", "visualizerStyle", "visualizerSmoothing"] {
+        for k in ["visualizerButton", "visualizerStyle", "visualizerSmoothing", "visualizerIntensity"] {
             assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
         }
         for k in ["visualizerFps", "visualizerPanelStrip", "visualizerBatteryPause"] {
@@ -5071,6 +5092,23 @@ mod tests {
         let bad: SettingsPatch = serde_json::from_str(r#"{"visualizerFps":45}"#).unwrap();
         assert!(s.apply(&bad).is_err());
         assert_eq!(s.visualizer_fps, 30);
+        // The art styles and the intensity.
+        let art: SettingsPatch = serde_json::from_str(r#"{"visualizerStyle":"grooves","visualizerIntensity":"lively"}"#).unwrap();
+        s.apply(&art).unwrap();
+        assert_eq!(s.visualizer_style, VisualizerStyle::Grooves);
+        assert_eq!(s.visualizer_intensity, VisualizerIntensity::Lively);
+        assert_eq!(serde_json::to_value(&s).unwrap()["visualizerIntensity"], "lively");
+    }
+
+    #[test]
+    fn a_saved_glow_style_becomes_sleeve() {
+        let old: Settings = serde_json::from_str(r#"{"visualizerStyle":"glow"}"#).unwrap();
+        assert_eq!(old.visualizer_style, VisualizerStyle::Sleeve);
+        assert_eq!(serde_json::to_value(old).unwrap()["visualizerStyle"], "sleeve");
+        let p: SettingsPatch = serde_json::from_str(r#"{"visualizerStyle":"glow"}"#).unwrap();
+        let mut s = Settings { visualizer_style: VisualizerStyle::Meters, ..Settings::default() };
+        s.apply(&p).unwrap();
+        assert_eq!(s.visualizer_style, VisualizerStyle::Sleeve);
     }
 
     #[test]

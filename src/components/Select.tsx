@@ -6,6 +6,19 @@ import { usePhoneForm } from "../phone/form";
 export interface SelectOption<T extends string> {
   value: T;
   label: string;
+  /** A heading the option sits under; options with the same one in a row make a group. */
+  group?: string;
+}
+
+/** Options in runs by their group (an option without one is a run of its own). */
+function runs<T extends string>(options: readonly SelectOption<T>[]): { group?: string; options: SelectOption<T>[] }[] {
+  const out: { group?: string; options: SelectOption<T>[] }[] = [];
+  for (const o of options) {
+    const last = out[out.length - 1];
+    if (last && o.group && last.group === o.group) last.options.push(o);
+    else out.push({ group: o.group, options: [o] });
+  }
+  return out;
 }
 
 export interface SelectProps<T extends string> {
@@ -39,11 +52,23 @@ export function Select<T extends string>(props: SelectProps<T>) {
         aria-describedby={describedBy}
         onChange={(e) => onChange(e.target.value as T)}
       >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
+        {runs(options).map((r, i) =>
+          r.group ? (
+            <optgroup key={`${r.group}-${i}`} label={r.group}>
+              {r.options.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </optgroup>
+          ) : (
+            r.options.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))
+          ),
+        )}
       </select>
       <ChevronDown size={16} aria-hidden="true" className="select__icon" />
     </span>
@@ -97,12 +122,18 @@ function PhoneChoice<T extends string>({ value, options, onChange, label, labell
               <span className="ph-icon-btn" aria-hidden="true" />
             </div>
             <ul className="ph-choice-page__list" role="radiogroup" aria-label={title || "Choices"}>
-              {options.map((o) => (
+              {options.map((o, i) => (
                 <li key={o.value}>
+                  {o.group && o.group !== options[i - 1]?.group && (
+                    <span className="ph-choice-page__group" aria-hidden="true">
+                      {o.group}
+                    </span>
+                  )}
                   <button
                     type="button"
                     role="radio"
                     aria-checked={o.value === value}
+                    aria-label={o.group ? `${o.label}, ${o.group}` : undefined}
                     className={`ph-choice-page__row ${o.value === value ? "is-on" : ""}`}
                     onClick={() => {
                       setOpen(false);
