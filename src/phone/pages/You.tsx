@@ -1,13 +1,12 @@
 /**
  * You, the phone's fourth tab: your picture and name, this month in words
  * (the profile page's own sentence), your year's Wrapped as a ruled row
- * with its record, how your devices are keeping in sync (or the way to
- * copy from your computer), what you played lately, and the way into Settings. Drawn from what the core already has, like the profile page on
- * a computer; nothing here is published.
+ * with its record, then the same short list as the computer's profile
+ * menu: Stats, Devices, Settings and Help. Drawn from what the core already
+ * has, like the profile page on a computer; nothing here is published.
+ * Keeping devices in sync lives on Devices (the row below is shared with it).
  */
-import { ChevronRight, Settings as Cog, UsersRound } from "lucide-react";
-import { Art } from "../../components/Art";
-import { LikedCover } from "../../components/LikedCover";
+import { ChevronRight, UsersRound } from "lucide-react";
 import { backend } from "../../lib/backend";
 import { metaLine, profilePlaylists, thisMonth } from "../../lib/profile";
 import { timeAgo } from "../../lib/relativeTime";
@@ -70,6 +69,16 @@ export function latestOnce(list: RecentsEntry[], max = 5): ReturnType<typeof rec
   return out;
 }
 
+/** The You tab's short list: the same doors as the computer's profile menu. */
+export function youLinks(statsOn: boolean): { title: string; route: Route }[] {
+  return [
+    ...(statsOn ? [{ title: "Stats", route: { name: "stats" } as Route }] : []),
+    { title: "Devices", route: { name: "devices" } },
+    { title: "Settings", route: { name: "settings" } },
+    { title: "Help", route: { name: "help" } },
+  ];
+}
+
 export function PhoneYou() {
   const username = useApp((s) => s.auth?.username ?? null);
   const showAvatar = useSettings((s) => s.settings?.showPlexAvatar !== false);
@@ -82,7 +91,6 @@ export function PhoneYou() {
   const hasHistory = !!span.data?.first;
   const month = useLoad(() => (statsOn && today && hasHistory ? backend.statsOverview(thisMonth(today), 3) : NONE_YET), [statsOn, today, hasHistory]);
   const playlists = useLoad(() => backend.playlists(), []);
-  const recents = useLoad(() => backend.recents(20), []);
 
   const name = username ?? "You";
   const initial = name.trim().charAt(0).toUpperCase();
@@ -90,24 +98,7 @@ export function PhoneYou() {
   const lists = playlists.data ? profilePlaylists(playlists.data) : null;
   const meta = metaLine(lists?.length ?? null, statsOn ? (o?.totals.plays ?? (span.data && !hasHistory ? 0 : null)) : null);
   const year = Number((today ?? new Date().toISOString().slice(0, 10)).slice(0, 4));
-  const diaryOn = useSettings((s) => s.settings?.keepDiary !== false);
-  const bookmarksOn = useSettings((s) => s.settings?.bookmarksInLibrary !== false);
-  const links: { title: string; route: Route }[] = [
-    ...(statsOn ? [{ title: "All your stats", route: { name: "stats" } as Route }] : []),
-    ...(wrappedOn ? [{ title: "Your Top Songs", route: { name: "topSongs", year } as Route }] : []),
-    { title: "Everything you played", route: { name: "recents" } },
-    { title: "Mixes made for you", route: { name: "mixes" } },
-    ...(diaryOn ? [{ title: "Listening diary", route: { name: "diary" } as Route }] : []),
-    ...(bookmarksOn ? [{ title: "Bookmarks", route: { name: "bookmarks" } as Route }] : []),
-  ];
-  const tools: { title: string; route: Route }[] = [
-    { title: "Downloads", route: { name: "downloads" } },
-    { title: "Library import and Missing", route: { name: "import" } },
-    { title: "Library doctor", route: { name: "doctor" } },
-    { title: "Create a Blend", route: { name: "blendNew" } },
-    { title: "Devices", route: { name: "devices" } },
-    { title: "Settings", route: { name: "settings" } },
-  ];
+  const links = youLinks(statsOn);
 
   return (
     <div className="ph-page ph-you" data-testid="phone-you">
@@ -117,17 +108,6 @@ export function PhoneYou() {
           <h1 className="ph-title ph-you__name">{name}</h1>
           <p className="ph-you__meta tabular">{meta || " "}</p>
         </div>
-        <button
-          type="button"
-          className="ph-icon-btn ph-you__cog"
-          aria-label="Settings"
-          onClick={() => {
-            tap();
-            nav.go({ name: "settings" });
-          }}
-        >
-          <Cog size={22} aria-hidden="true" />
-        </button>
       </header>
 
       {statsOn && (
@@ -147,45 +127,17 @@ export function PhoneYou() {
         <YearEntry className="ph-you__wrapped" year={year} title={`Your ${year} Wrapped`} shown="Wrapped" sub="Your year in records, songs and hours" onOpen={() => wrapped.open(year)} />
       )}
 
-      <SyncRow />
-
-      <section aria-labelledby="ph-you-recent">
-        <h2 id="ph-you-recent" className="ph-section-title">
-          Recently played
-        </h2>
-        {recents.error && !recents.data ? (
-          <p className="ph-rows__note">Couldn't load what you played lately.</p>
-        ) : !recents.data ? (
-          <ul className="ph-rows" aria-busy="true">
-            {[0, 1, 2].map((i) => (
-              <li key={i} className="ph-lib-row--ghost" />
-            ))}
-          </ul>
-        ) : recents.data.length === 0 ? (
-          <p className="ph-rows__note">Nothing played on this phone yet.</p>
-        ) : (
-          <ul className="ph-rows" aria-label="Recently played">
-            {latestOnce(recents.data).map((r) => {
-              return (
-                <li key={r.key}>
-                  <button type="button" className="ph-row" onClick={r.open}>
-                    {r.liked ? <LikedCover size={48} /> : <Art path={r.thumb} size={48} round={r.round} kind={r.round ? "artist" : "album"} monogram={r.round ? r.title : undefined} />}
-                    <span className="ph-row__text">
-                      <span className="ph-row__title">{r.title}</span>
-                      <span className="ph-row__sub">{r.sub}</span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
-      <ul className="ph-set-list ph-you__links" aria-label="More">
+      <ul className="ph-set-list ph-you__links" aria-label="You">
         {links.map((l) => (
           <li key={l.title}>
-            <button type="button" className="ph-set-link" onClick={() => nav.go(l.route)}>
+            <button
+              type="button"
+              className="ph-set-link"
+              onClick={() => {
+                tap();
+                nav.go(l.route);
+              }}
+            >
               <span className="ph-set-link__text">
                 <span className="ph-set-link__title">{l.title}</span>
               </span>
@@ -193,20 +145,6 @@ export function PhoneYou() {
             </button>
           </li>
         ))}
-      </ul>
-
-      <ul className="ph-set-list ph-you__links" aria-label="Tools">
-        {tools.map((l) => (
-          <li key={l.title}>
-            <button type="button" className="ph-set-link" onClick={() => nav.go(l.route)}>
-              <span className="ph-set-link__text">
-                <span className="ph-set-link__title">{l.title}</span>
-              </span>
-              <ChevronRight size={18} aria-hidden="true" className="ph-set-link__chev" />
-            </button>
-          </li>
-        ))}
-
       </ul>
     </div>
   );
@@ -228,10 +166,10 @@ export function syncRowWords(d: DeviceSyncDevice, others: number): { title: stri
 }
 
 /**
- * Keep my devices in sync on You: before a computer is paired, the way to
- * copy from it; after, how the devices are doing, with Sync now.
+ * Keep my devices in sync, on Devices: before a computer is paired, the way
+ * to copy from it; after, how the devices are doing, with Sync now.
  */
-function SyncRow() {
+export function SyncRow() {
   const [ov, setOv, { failed, reload }] = useDeviceSync();
   const [busy, setBusy] = useState(false);
   const d = syncRowDevice(ov?.devices ?? []);

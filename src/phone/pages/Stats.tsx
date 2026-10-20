@@ -253,6 +253,7 @@ export function PhoneStats({ tab: openTab, month, friend }: { tab?: StatsTab; mo
               ...(wrappedOn ? [{ title: "Your Top Songs", sub: "Each year's hundred, and all time", route: { name: "topSongs", ...(years[0] ? { year: years[0] } : {}) } as const }] : []),
               { title: "Listening diary", route: { name: "diary" } },
               { title: "Recents", route: { name: "recents" } },
+              { title: "Bookmarks", sub: "Moments and pages you saved", route: { name: "bookmarks" } },
             ]}
           />
         </>

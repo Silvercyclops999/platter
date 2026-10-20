@@ -1,15 +1,19 @@
 /**
- * Devices on the phone. Syncing copies music to a USB drive, an SD card or
- * a music player plugged into a computer; a phone can't see those drives,
- * so this page says so and points at what does the job on a phone:
- * downloads, which keep music on the phone itself.
+ * Devices on the phone: first, keeping this phone in step with your other
+ * devices (or copying from your computer). Syncing music to a USB drive, an
+ * SD card or a music player needs a computer; a phone can't see those
+ * drives, so the page says so and points at downloads, which keep music on
+ * the phone itself.
  */
 import { HardDrive } from "lucide-react";
 import { GoPill, PageFrame } from "./kit";
+import { SyncRow } from "./You";
+import "../sync-setup.css";
 
 export function PhoneDevices() {
   return (
     <PageFrame name="devices" title="Devices">
+      <SyncRow />
       <div className="ph-empty" role="status">
         <span className="ph-x__link-icon" aria-hidden="true">
           <HardDrive size={20} />

@@ -1,9 +1,10 @@
 /**
- * The library on the phone: one mixed list with type pills, the current
- * sort as a label (it opens a sheet), a list or grid toggle, pinned items at
- * the top, and small glyphs for pinned and downloaded.
+ * The library on the phone: one mixed list with four pills (Playlists,
+ * Albums, Artists, Downloads), the current sort as a label (it opens a
+ * sheet), a list or grid toggle, pinned items at the top, and small glyphs
+ * for pinned and downloaded. Downloads also leads to managing them.
  */
-import { ArrowUpDown, LayoutGrid, List, Plus, X } from "lucide-react";
+import { ArrowUpDown, ChevronRight, LayoutGrid, List, Plus, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { Art } from "../../components/Art";
 import { LikedCover } from "../../components/LikedCover";
@@ -15,6 +16,7 @@ import { RowGlyphs, tap } from "../bits";
 import { letterOf, phoneRows, phoneSubtitle } from "../libraryRows";
 import "./parity.css";
 import { phone, usePhoneUi } from "../phoneUi";
+import { nav } from "../../stores/router";
 import { CratesBody } from "./Crates";
 
 type PhoneLibView = "list" | "grid";
@@ -70,14 +72,15 @@ export function PhoneLibrary() {
             Crates
           </button>
         )}
-        {model.downloaded.available && !crates && (
+        {!crates && (
           <button
             type="button"
             className={`ph-chip ${model.downloaded.on ? "is-on" : ""}`}
             aria-pressed={model.downloaded.on}
             onClick={() => (tap("selection"), useLibraryView.getState().setDownloaded(!model.downloaded.on))}
           >
-            Downloaded
+            Downloads
+            {model.downloaded.on && <X size={14} aria-hidden="true" className="ph-chip__x" />}
           </button>
         )}
       </div>
@@ -118,6 +121,19 @@ function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof use
           {view === "list" ? <LayoutGrid size={20} aria-hidden="true" /> : <List size={20} aria-hidden="true" />}
         </button>
       </div>
+      {model.downloaded.on && (
+        <ul className="ph-set-list ph-library__manage" aria-label="Downloads">
+          <li>
+            <button type="button" className="ph-set-link" onClick={() => (tap(), nav.go({ name: "downloads" }))}>
+              <span className="ph-set-link__text">
+                <span className="ph-set-link__title">Manage downloads</span>
+                <span className="ph-set-link__sub">Storage, quality and Go offline</span>
+              </span>
+              <ChevronRight size={18} aria-hidden="true" className="ph-set-link__chev" />
+            </button>
+          </li>
+        </ul>
+      )}
       {model.loading ? (
         <ul className="ph-lib-list" aria-busy="true">
           {Array.from({ length: 6 }, (_, i) => (
@@ -164,8 +180,10 @@ function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof use
       )}
       {!model.loading && rows.length === 0 && (
         <div className="ph-empty">
-          <p className="ph-empty__title">Nothing here yet</p>
-          <p className="ph-empty__text">Records, artists and playlists you save show up here.</p>
+          <p className="ph-empty__title">{model.downloaded.on ? "Nothing downloaded yet" : "Nothing here yet"}</p>
+          <p className="ph-empty__text">
+            {model.downloaded.on ? "Download a record or playlist from its page to play it without a connection." : "Records, artists and playlists you save show up here."}
+          </p>
         </div>
       )}
     </>

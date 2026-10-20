@@ -32,6 +32,8 @@ import {
   Trash2,
   UserRound,
   UsersRound,
+  MoreHorizontal,
+  Blend as BlendIcon,
   type LucideIcon,
 } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
@@ -705,6 +707,7 @@ export function TrackSheet({ track, inPlaylist, queueItemId }: { track: Track; i
       </span>
     </div>
   );
+  // What most people do with a song; the rest wait under More.
   const items: Action[] = [
     { label: liked ? "Remove from Liked Songs" : "Add to Liked Songs", icon: liked ? HeartOff : Heart, run: act(() => setLiked([track], !liked, { toast: !liked ? false : undefined })) },
     { label: "Add to playlist", icon: ListPlus, run: act(() => phone.push({ kind: "addTo", track }), true) },
@@ -714,23 +717,25 @@ export function TrackSheet({ track, inPlaylist, queueItemId }: { track: Track; i
     ...(fromPlaylist
       ? [{ label: "Remove from this playlist", icon: Trash2, danger: true, run: act(() => removeRows(fromPlaylist.playlist, [fromPlaylist.itemId], fromPlaylist.order)) }]
       : []),
+    { label: "Go to album", icon: Disc3, run: act(() => phone.go({ name: "album", id: track.albumId }), true) },
+    { label: "Go to artist", icon: UserRound, run: act(() => phone.go({ name: "artist", id: track.artistId }), true) },
+  ];
+  const more: Action[] = [
     ...(isCurrent
       ? [
           { label: "Lyrics", icon: MicVocal, run: act(() => (phone.closeSheets(), phone.openPlayer(), phone.openLyrics()), true) },
           { label: "Go to queue", icon: ListMusic, run: act(() => phone.show({ kind: "queue" }), true) },
         ]
       : []),
-    { label: "Credits", icon: UsersRound, run: act(() => openSongCredits(track)) },
-    { label: "Share", icon: Share, run: act(() => openShareCard({ kind: "track", id: track.id, title: track.title, subtitle: trackArtistLine(track), thumb: track.thumb })) },
-    { label: "Go to album", icon: Disc3, run: act(() => phone.go({ name: "album", id: track.albumId }), true) },
-    { label: "Go to artist", icon: UserRound, run: act(() => phone.go({ name: "artist", id: track.artistId }), true) },
     { label: "Song radio", icon: Radio, run: act(() => player.playRadio(`track:${track.id}`)) },
     ...((track.otherVersions ?? 0) > 0 ? [{ label: `Versions (${(track.otherVersions ?? 0) + 1})`, icon: GitBranch, run: act(() => phone.push({ kind: "versions", track }), true) }] : []),
+    { label: "Share", icon: Share, run: act(() => openShareCard({ kind: "track", id: track.id, title: track.title, subtitle: trackArtistLine(track), thumb: track.thumb })) },
+    { label: "Credits", icon: UsersRound, run: act(() => openSongCredits(track)) },
     { label: "Bookmark this moment", icon: Bookmark, run: act(() => bookmarkTrack(track)) },
   ];
   return (
     <SheetFrame title={track.title} onClose={phone.pop} head={head}>
-      <ActionList items={items} />
+      <ActionList items={items} more={more} />
     </SheetFrame>
   );
 }
@@ -742,11 +747,13 @@ interface Action {
   danger?: boolean;
 }
 
-/** A sheet's actions: an icon and a word each. */
-function ActionList({ items }: { items: Action[] }) {
+/** A sheet's actions: an icon and a word each. `more` waits behind one More row, opened in place. */
+function ActionList({ items, more = [] }: { items: Action[]; more?: Action[] }) {
+  const [open, setOpen] = useState(false);
+  const shown = open ? [...items, ...more] : items;
   return (
     <ul className="ph-rows ph-actions-list" aria-label="Actions">
-      {items.map((i) => (
+      {shown.map((i) => (
         <li key={i.label}>
           <button type="button" className={`ph-row ph-row--action ${i.danger ? "ph-row--danger" : ""}`} onClick={i.run}>
             <i.icon size={22} aria-hidden="true" className="ph-row__icon" />
@@ -754,6 +761,14 @@ function ActionList({ items }: { items: Action[] }) {
           </button>
         </li>
       ))}
+      {more.length > 0 && !open && (
+        <li>
+          <button type="button" className="ph-row ph-row--action" aria-expanded={false} onClick={() => (tap("selection"), setOpen(true))}>
+            <MoreHorizontal size={22} aria-hidden="true" className="ph-row__icon" />
+            More
+          </button>
+        </li>
+      )}
     </ul>
   );
 }
@@ -1032,6 +1047,7 @@ function SortSheet() {
 }
 
 function CreateSheet() {
+  const blends = useSettings((s) => s.settings?.blends !== false);
   return (
     <SheetFrame title="Create" onClose={phone.pop}>
       <ul className="ph-rows">
@@ -1071,6 +1087,26 @@ function CreateSheet() {
             </span>
           </button>
         </li>
+        {blends && (
+          <li>
+            <button
+              type="button"
+              className="ph-row"
+              onClick={() => {
+                phone.closeSheets();
+                phone.go({ name: "blendNew" });
+              }}
+            >
+              <span className="ph-row__glyph">
+                <BlendIcon size={22} aria-hidden="true" />
+              </span>
+              <span className="ph-row__text">
+                <span className="ph-row__title">Blend</span>
+                <span className="ph-row__sub">Combine friends' tastes into a playlist</span>
+              </span>
+            </button>
+          </li>
+        )}
       </ul>
     </SheetFrame>
   );

@@ -12,7 +12,8 @@ import { LikedPage } from "../pages/LikedPage";
 import { PlaylistPage } from "../pages/PlaylistPage";
 import { SearchPage } from "../pages/SearchPage";
 import { useApp } from "../stores/app";
-import { useCurrentEntry, type Route } from "../stores/router";
+import { useCurrentEntry, useRouter, type Route } from "../stores/router";
+import { help } from "../stores/help";
 import { useUi } from "../stores/ui";
 import { HealthBanner } from "./HealthBanner";
 import { DownloadsBanner } from "../components/DownloadButton";
@@ -255,7 +256,21 @@ export function Page({ route }: { route: Route }) {
     case "lyrics":
       // Never pushed: the router opens the expanded view in lyrics mode instead.
       return null;
+    case "help":
+      // A phone's page: a computer opens its help panel beside the page it came from.
+      return <HelpInPanel slug={route.slug} anchor={route.anchor} />;
   }
+}
+
+/** The help route on a computer: open the help panel and go back to where it was asked for. */
+function HelpInPanel({ slug, anchor }: { slug?: string; anchor?: string }) {
+  useEffect(() => {
+    help.open(slug ?? "", anchor);
+    const r = useRouter.getState();
+    if (r.index > 0) r.back();
+    else r.replace({ name: "home" });
+  }, [slug, anchor]);
+  return null;
 }
 
 export function MainView() {

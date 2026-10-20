@@ -92,6 +92,6 @@ export const phone = {
 export function tabOf(route: Route, current: PhoneTab): PhoneTab {
   if (route.name === "home" || route.name === "search" || route.name === "library") return route.name;
   if (route.name === "crates" || route.name === "crate") return "library";
-  if (route.name === "profile" || route.name === "settings" || route.name === "stats" || route.name === "diary" || route.name === "downloads") return "you";
+  if (route.name === "profile" || route.name === "settings" || route.name === "stats" || route.name === "diary" || route.name === "downloads" || route.name === "help") return "you";
   return current;
 }

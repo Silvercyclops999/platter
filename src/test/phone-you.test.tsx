@@ -123,7 +123,7 @@ describe("phone sign-in", () => {
 });
 
 describe("the You tab", () => {
-  it("shows the profile, this month's readouts, Wrapped and recent plays", async () => {
+  it("shows the profile, this month's readouts, Wrapped, then Stats, Devices, Settings and Help only", async () => {
     act(() => useApp.setState({ auth: { state: "signedIn", username: "listener", needsServerPick: false } }));
     render(<PhoneShell />);
     fireEvent.click(within(screen.getByRole("navigation", { name: "Tabs" })).getByRole("button", { name: "You" }));
@@ -134,8 +134,13 @@ describe("the You tab", () => {
     fireEvent.click(within(you).getByRole("button", { name: /Wrapped/ }));
     expect(useWrapped.getState().year).not.toBeNull();
     act(() => useWrapped.getState().close());
-    expect(within(you).getByRole("heading", { name: "Recently played" })).toBeInTheDocument();
-    fireEvent.click(within(you).getAllByRole("button", { name: "Settings" })[0]);
+    const links = within(you).getByRole("list", { name: "You" });
+    expect(within(links).getAllByRole("button").map((b) => b.textContent)).toEqual(["Stats", "Devices", "Settings", "Help"]);
+    // Nothing else: no recent plays, tools or a second way into Settings.
+    expect(within(you).queryByRole("heading", { name: "Recently played" })).toBeNull();
+    expect(within(you).getAllByRole("button", { name: "Settings" })).toHaveLength(1);
+    expect(within(you).queryByRole("button", { name: /Library doctor|Downloads|Bookmarks|Create a Blend/ })).toBeNull();
+    fireEvent.click(within(links).getByRole("button", { name: "Settings" }));
     expect(lastRoute()).toEqual({ name: "settings" });
   });
 
@@ -185,7 +190,8 @@ describe("phone settings screens", () => {
 
   it("integrations that need a computer have no page on the phone", async () => {
     render(<SettingsPage section="Integrations" />);
-    const more = await screen.findByRole("list", { name: "More in Integrations" });
+    // Nothing is set up, so every integration waits under More (open in tests).
+    const more = await screen.findByRole("list", { name: "More pages in Integrations" });
     expect(within(more).queryByText("Discord")).not.toBeInTheDocument();
     expect(within(more).queryByText("Stream Deck")).not.toBeInTheDocument();
     expect(within(more).getByText("Lidarr")).toBeInTheDocument();
@@ -388,6 +394,16 @@ describe("touch and sheets", () => {
     render(<PhoneShell />);
     act(() => phone.push({ kind: "track", track: t }));
     const sheet = await screen.findByRole("dialog", { name: t.title });
+    // A short list first; the rest behind More.
+    expect(within(sheet).getAllByRole("button").filter((b) => b.classList.contains("ph-row--action")).map((b) => b.textContent)).toEqual([
+      "Add to Liked Songs",
+      "Add to playlist",
+      "Add to queue",
+      "Go to album",
+      "Go to artist",
+      "More",
+    ]);
+    fireEvent.click(within(sheet).getByRole("button", { name: "More" }));
     expect(within(sheet).getByRole("button", { name: "Lyrics" })).toBeInTheDocument();
     expect(within(sheet).getByRole("button", { name: "Credits" })).toBeInTheDocument();
     expect(within(sheet).getByRole("button", { name: "Share" })).toBeInTheDocument();

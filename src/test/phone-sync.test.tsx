@@ -50,9 +50,11 @@ const shell = () =>
     </>,
   );
 
+/** The sync row lives on Devices, one tap from You. */
 async function openYou() {
   shell();
   fireEvent.click(within(screen.getByRole("navigation", { name: "Tabs" })).getByRole("button", { name: "You" }));
+  fireEvent.click(await within(await screen.findByTestId("phone-you")).findByRole("button", { name: "Devices" }));
   return within(await screen.findByTestId("you-sync", {}, { timeout: 3000 }));
 }
 
@@ -86,7 +88,7 @@ describe("Copy from my computer", () => {
     expect((await backend.settingsGet()).accent).toBe("brass");
     fireEvent.click(step().getByRole("button", { name: "Done" }));
     expect(screen.queryByTestId("phone-sync-step")).toBeNull();
-    // You now says how the two are doing.
+    // Devices now says how the two are doing.
     await waitFor(() => expect(row.getByText("In sync with Studio PC")).toBeInTheDocument());
     expect(row.getByRole("button", { name: "Sync now" })).toBeInTheDocument();
   });
@@ -168,7 +170,7 @@ describe("Copy from my computer", () => {
   });
 });
 
-describe("the sync row on You", () => {
+describe("the sync row on Devices", () => {
   it("says the devices are in step, and Sync now syncs", async () => {
     mock.deviceSync.addDevice("Studio PC");
     const row = await openYou();

@@ -1,6 +1,9 @@
 /**
  * Home on the phone: a type row, the 2 by 4 grid of recent and pinned
- * shortcuts, then the shelves as sideways carousels. Records first.
+ * shortcuts, then at most four more sections: Made for you, what's new in
+ * the library, your top artists and Explore. Everything else has its own
+ * tab (playlists in Library, what you played in Stats). A type picked shows
+ * every shelf of that type.
  */
 import { UserRound } from "lucide-react";
 import { useState } from "react";
@@ -8,6 +11,7 @@ import { Art } from "../../components/Art";
 import { backend } from "../../lib/backend";
 import { useLoad } from "../../lib/useLoad";
 import { GRID_TILES, HOME_FILTERS, filterItems, visibleShelves, type HomeFilter } from "../../pages/home";
+import type { HomeShelfId } from "../../lib/types";
 import { useApp } from "../../stores/app";
 import { usePlayer } from "../../stores/player";
 import { tap } from "../bits";
@@ -15,6 +19,9 @@ import { nav } from "../../stores/router";
 import { phone } from "../phoneUi";
 import { Carousel, PageFailed, PageLoading, ShelfCard, itemInfo } from "./common";
 import { HomeExplore, HomeMixes } from "./HomeExtras";
+
+/** The shelves All shows, besides Made for you and Explore. */
+export const PHONE_HOME_SHELVES: readonly HomeShelfId[] = ["recentlyAdded", "topArtists"];
 
 export function PhoneHome() {
   const { data, error, retry } = useLoad(() => backend.home(), []);
@@ -24,7 +31,7 @@ export function PhoneHome() {
   if (error && !data) return <PageFailed what="Home" retry={retry} framed />;
   if (!data) return <PageLoading />;
   const grid = filterItems(data.shortcuts, filter).slice(0, GRID_TILES);
-  const shelves = visibleShelves(data, filter);
+  const shelves = visibleShelves(data, filter).filter((s) => filter !== "all" || PHONE_HOME_SHELVES.includes(s.id));
   return (
     <div className="ph-page ph-home">
       <div className="ph-home__top">

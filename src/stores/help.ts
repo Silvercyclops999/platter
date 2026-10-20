@@ -4,6 +4,7 @@
  */
 import { create } from "zustand";
 import { useUi } from "./ui";
+import { usePhoneForm } from "../phone/form";
 
 interface HelpState {
   slug: string | null;
@@ -17,6 +18,11 @@ export const useHelp = create<HelpState>()(() => ({ slug: null, anchor: null, ti
 export const help = {
   /** Opens a page, or the list of pages for "". */
   open(slug: string, anchor?: string) {
+    // The phone has no side panel: help is a page there.
+    if (usePhoneForm.getState().phone) {
+      void import("./router").then(({ nav }) => nav.go({ name: "help", ...(slug ? { slug } : {}), ...(anchor ? { anchor } : {}) }));
+      return;
+    }
     useHelp.setState((s) => ({ slug: slug || null, anchor: anchor ?? null, tick: s.tick + 1 }));
     useUi.getState().setHelpOpen(true);
   },

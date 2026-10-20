@@ -24,6 +24,7 @@ import { PhoneDownloads } from "./pages/Downloads";
 import { PhoneEra } from "./pages/Era";
 import { PhoneHome } from "./pages/Home";
 import { PhoneHomeShelf } from "./pages/HomeShelf";
+import { PhoneHelp } from "./pages/Help";
 import { PhoneImport } from "./pages/Import";
 import { PhoneLibrary } from "./pages/Library";
 import { PhoneLineage } from "./pages/Lineage";
@@ -97,6 +98,7 @@ export const PHONE_PAGES: Pages = {
   mixes: () => <PhoneMixes />,
   archive: () => <PhoneArchive />,
   downloads: () => <PhoneDownloads />,
+  help: (r) => <PhoneHelp key={`${r.slug ?? ""}#${r.anchor ?? ""}`} slug={r.slug} anchor={r.anchor} />,
 };
 
 /** The phone page for a route. */

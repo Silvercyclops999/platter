@@ -32,7 +32,7 @@ export function letterOf(title: string): string {
 /** The phone Library's rows, from the shared list model; `counts` gives playlists their song counts. */
 export function phoneRows(rows: LibEntry[], sort: LibSort, counts?: ReadonlyMap<string, number>): LibEntry[] {
   const kept = rows
-    .filter((e) => !e.folder && !e.bookmarks && !e.stats && !isLikedCopy(e))
+    .filter((e) => !e.folder && !e.bookmarks && !e.stats && !e.page && !isLikedCopy(e))
     .map((e) => (e.kind === "playlist" && !e.trackCount && counts?.has(e.id) ? { ...e, trackCount: counts.get(e.id)! } : e));
   // Liked Songs stays at the top in every sort; with A to Z the rest go in order.
   const top = kept.filter((e) => e.liked);

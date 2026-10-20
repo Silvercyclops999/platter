@@ -328,3 +328,6 @@
 .ph-dl-card__offline { display: flex; align-items: center; gap: 12px; padding-top: 8px; border-top: 1px solid var(--ph-line); }
 .ph-dl-card__offline .ph-row__sub { white-space: normal; }
 .ph-song.is-unplayable { opacity: 0.4; }
+
+/* Library with Downloads picked: the way to manage them, above the list. */
+.ph-library__manage { margin: 0 0 8px; }

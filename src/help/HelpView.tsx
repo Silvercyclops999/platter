@@ -34,6 +34,8 @@ function inline(c: Inline[]): ReactNode {
           <a
             key={i}
             href={n.href}
+            // A link inside running text: sized by its words, like any text link.
+            data-tap-inline
             onClick={(e) => {
               e.preventDefault();
               follow(n.href);

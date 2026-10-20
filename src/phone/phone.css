@@ -1033,7 +1033,6 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 .ph-you__who { min-width: 0; }
 .ph-you__name { margin: 0 0 4px; font-size: 28px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ph-you__meta { margin: 0; font-size: 14px; color: var(--color-text-secondary); }
-.ph-you__cog { align-self: start; margin: -4px -10px 0 0; }
 .ph-you__month { margin-bottom: 16px; }
 /* This month and the Stats hero: the computer's sentences, scaled to the phone. */
 .phone .month-story { margin-top: 4px; padding: 14px 0 16px; border-color: var(--ph-line); }

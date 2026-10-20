@@ -104,6 +104,7 @@ const SAMPLES = `async (m) => {
     mixes: { name: "mixes" },
     archive: { name: "archive" },
     downloads: { name: "downloads" },
+    help: [{ name: "help" }, { name: "help", slug: "getting-started" }],
   };
 }`;
 

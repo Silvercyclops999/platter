@@ -110,6 +110,7 @@ const SAMPLES: { [N in Route["name"]]: Extract<Route, { name: N }> } = {
   mixes: { name: "mixes" },
   archive: { name: "archive" },
   downloads: { name: "downloads" },
+  help: { name: "help" },
 };
 
 /** Every route name in the router's own source, so a new one fails here until it has a phone page. */
@@ -165,8 +166,6 @@ describe("every page can be reached", () => {
     render(<PhoneShell />);
     await opens("home", "Show all: Recently added", { name: "homeShelf", shelf: "recentlyAdded" });
     act(() => phone.tab("home"));
-    await opens("home", "Show all: Recently played", { name: "recents" });
-    act(() => phone.tab("home"));
     await opens("home", "Show all: Made for you", { name: "mixes" });
     for (const [label, name] of [
       ["What's new", "whatsNew"],
@@ -183,25 +182,43 @@ describe("every page can be reached", () => {
     }
   });
 
-  it("from You: stats, top songs, recents, mixes, diary, bookmarks, import, doctor, Blend, devices and Settings", async () => {
+  it("from You: Stats, Devices, Settings and Help", async () => {
     render(<PhoneShell />);
     for (const [label, name] of [
-      ["All your stats", "stats"],
-      ["Your Top Songs", "topSongs"],
-      ["Everything you played", "recents"],
-      ["Mixes made for you", "mixes"],
-      ["Listening diary", "diary"],
-      ["Bookmarks", "bookmarks"],
-      ["Library import and Missing", "import"],
-      ["Library doctor", "doctor"],
-      ["Create a Blend", "blendNew"],
+      ["Stats", "stats"],
       ["Devices", "devices"],
+      ["Settings", "settings"],
+      ["Help", "help"],
     ] as const) {
       act(() => phone.tab("you"));
-      const links = await screen.findAllByRole("button", { name: label }, SLOW);
-      fireEvent.click(links[0]);
+      const you = await screen.findByTestId("phone-you", {}, SLOW);
+      fireEvent.click(within(within(you).getByRole("list", { name: "You" })).getByRole("button", { name: label }));
       await waitFor(() => expect(route().name).toBe(name));
     }
+  });
+
+  it("what left You is one step from where it belongs", async () => {
+    render(<PhoneShell />);
+    // Stats leads to Top Songs, the diary, everything you played and bookmarks.
+    for (const [label, name] of [
+      ["Your Top Songs", "topSongs"],
+      ["Listening diary", "diary"],
+      ["Recents", "recents"],
+      ["Bookmarks", "bookmarks"],
+    ] as const) {
+      act(() => useRouter.getState().navigate({ name: "stats" }));
+      fireEvent.click(await screen.findByRole("button", { name: new RegExp(`^${label}`) }, SLOW));
+      await waitFor(() => expect(route().name).toBe(name));
+    }
+    // Library's + makes a Blend.
+    act(() => phone.tab("library"));
+    fireEvent.click(await screen.findByRole("button", { name: "Create" }, SLOW));
+    fireEvent.click(await screen.findByRole("button", { name: /^Blend/ }, SLOW));
+    await waitFor(() => expect(route().name).toBe("blendNew"));
+    // Help is a page, and a help page opens in it.
+    act(() => useRouter.getState().navigate({ name: "help" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Getting started/ }, SLOW));
+    await waitFor(() => expect(route()).toMatchObject({ name: "help", slug: "getting-started" }));
   });
 
   it("from an artist: radio, eras, the discography, Appears on and Fans also like", async () => {
@@ -230,6 +247,7 @@ describe("every page can be reached", () => {
     const t = { ...mock.fx.tracks[0], otherVersions: 2 } as Track;
     render(<PhoneShell />);
     act(() => phone.push({ kind: "track", track: t }));
+    fireEvent.click(await screen.findByRole("button", { name: "More" }));
     fireEvent.click(await screen.findByRole("button", { name: "Versions (3)" }));
     expect(usePhoneUi.getState().sheets.slice(-1)[0]).toEqual({ kind: "versions", track: t });
   });
@@ -418,10 +436,13 @@ describe("downloads on the phone", () => {
     expect(countText({ total: 19, done: 12 })).toBe("12/19");
   });
 
-  it("the Downloads page lists what's on the phone and is reached from You", async () => {
+  it("the Downloads page lists what's on the phone and is reached from Library's Downloads", async () => {
     render(<PhoneShell />);
-    act(() => phone.tab("you"));
-    fireEvent.click(await screen.findByRole("button", { name: "Downloads" }, SLOW));
+    act(() => phone.tab("library"));
+    const show = await screen.findByRole("group", { name: "Show" }, SLOW);
+    expect(within(show).getAllByRole("button").map((b) => b.textContent)).toEqual(["Playlists", "Albums", "Artists", "Downloads"]);
+    fireEvent.click(within(show).getByRole("button", { name: "Downloads" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Manage downloads/ }, SLOW));
     await waitFor(() => expect(route()).toEqual({ name: "downloads" }));
     expect(await screen.findByRole("switch", { name: "Go offline" }, SLOW)).toBeInTheDocument();
   });
