@@ -1,4 +1,4 @@
-//! Bringing music over (spec 27): each step, and each step's failure faked.
+//! Bringing music over: each step, and each step's failure faked.
 
 use std::collections::HashMap;
 use std::path::PathBuf;

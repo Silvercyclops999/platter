@@ -1,5 +1,5 @@
 /**
- * Bring in music from another app (spec 27) in the UI: the door in Your
+ * Bring in music from another app in the UI: the door in Your
  * Library's + menu and on Home, the three steps, and each step's failure
  * faked: a file Platter doesn't know, a file with nothing usable, zero
  * matches, everything already there, Lidarr unreachable or its key

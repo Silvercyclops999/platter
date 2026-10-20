@@ -1,5 +1,5 @@
 /**
- * Bring in music from another app (spec 27), laid out like a playlist page.
+ * Bring in music from another app, laid out like a playlist page.
  *
  * The header says what came over in one sentence. Before a file: pick the
  * app for one line on getting the file, then drop it anywhere on the page

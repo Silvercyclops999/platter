@@ -1,4 +1,4 @@
-//! Bringing music over from another app (spec 27): one door, three steps.
+//! Bringing music over from another app: one door, three steps.
 //!
 //! 1. Where from: [`read`] works out what a dropped or picked file is
 //!    (`sources::detect`) and imports it the usual way (`store`). The source

@@ -8,7 +8,7 @@
 //!   and length, then names alone) into matched, unsure or missing
 //! - [`store`]    the import tables, the review queue and the Missing list
 //! - [`played`]   history plays with no library match ("Played a lot")
-//! - [`bring`]    bringing music over: one door, three steps (spec 27)
+//! - [`bring`]    bringing music over: one door, three steps
 //! - [`commands`] Tauri commands
 //!
 //! Nothing here writes to Plex, except bringing music over (`bring`). Saving an imported playlist to Plex or liking
