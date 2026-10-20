@@ -1637,17 +1637,38 @@ impl PlexClient {
 
     /// Resized artwork bytes from `/photo/:/transcode`.
     pub async fn photo(&self, image_path: &str, width: u32, height: u32) -> AppResult<Bytes> {
-        let rb = self.request(Method::GET, "/photo/:/transcode")?.query(&[
+        // A phone asks for JPEG: Plex otherwise keeps the source's format,
+        // and a PNG cover is several times the bytes over mobile data.
+        self.photo_as(image_path, width, height, cfg!(any(target_os = "ios", target_os = "android")))
+            .await
+    }
+
+    /// [`Self::photo`], as JPEG when `jpeg`. A JPEG request that fails or
+    /// comes back empty is asked again in the source's format, so a cover
+    /// the server can't convert still shows.
+    pub async fn photo_as(&self, image_path: &str, width: u32, height: u32, jpeg: bool) -> AppResult<Bytes> {
+        if jpeg {
+            match self.photo_once(image_path, width, height, true).await {
+                Ok(b) if !b.is_empty() => return Ok(b),
+                Ok(_) => tracing::info!("cover: JPEG came back empty, asking for the original format"),
+                Err(e) if e.kind() == "auth" => return Err(e),
+                Err(e) => tracing::info!("cover: JPEG failed ({e}), asking for the original format"),
+            }
+        }
+        self.photo_once(image_path, width, height, false).await
+    }
+
+    async fn photo_once(&self, image_path: &str, width: u32, height: u32, jpeg: bool) -> AppResult<Bytes> {
+        let mut rb = self.request(Method::GET, "/photo/:/transcode")?.query(&[
             ("url", self.raw(image_path)?.to_string()),
             ("width", width.to_string()),
             ("height", height.to_string()),
             ("minSize", "1".to_string()),
             ("upscale", "1".to_string()),
         ]);
-        // A phone asks for JPEG: Plex otherwise keeps the source's format,
-        // and a PNG cover is several times the bytes over mobile data.
-        #[cfg(any(target_os = "ios", target_os = "android"))]
-        let rb = rb.query(&[("format", "jpeg"), ("quality", "85")]);
+        if jpeg {
+            rb = rb.query(&[("format", "jpeg"), ("quality", "85")]);
+        }
         let resp = self.send(rb.header("accept", "image/*")).await?;
         crate::web::body_capped(resp, PLEX_MAX, map_send_error).await
     }
@@ -2349,6 +2370,63 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(&b[..], &[1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn a_jpeg_cover_that_fails_is_asked_again_in_its_own_format() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/photo/:/transcode"))
+            .and(query_param("format", "jpeg"))
+            .respond_with(ResponseTemplate::new(500))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/photo/:/transcode"))
+            .and(query_param("url", "/library/metadata/1/thumb/2"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![7u8, 8]))
+            .mount(&server)
+            .await;
+        let b = client(&server)
+            .photo_as("/library/metadata/1/thumb/2", 300, 300, true)
+            .await
+            .unwrap();
+        assert_eq!(&b[..], &[7, 8]);
+    }
+
+    #[tokio::test]
+    async fn an_empty_jpeg_cover_is_asked_again_in_its_own_format() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/photo/:/transcode"))
+            .and(query_param("format", "jpeg"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/photo/:/transcode"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![9u8]))
+            .mount(&server)
+            .await;
+        let b = client(&server).photo_as("/library/metadata/1/thumb/2", 300, 300, true).await.unwrap();
+        assert_eq!(&b[..], &[9]);
+    }
+
+    #[tokio::test]
+    async fn a_jpeg_cover_that_works_is_asked_once() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/photo/:/transcode"))
+            .and(query_param("format", "jpeg"))
+            .and(query_param("quality", "85"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![1u8]))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let b = client(&server).photo_as("/library/metadata/1/thumb/2", 300, 300, true).await.unwrap();
+        assert_eq!(&b[..], &[1]);
     }
 
     #[tokio::test]
