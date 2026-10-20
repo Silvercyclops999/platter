@@ -256,6 +256,8 @@ pub struct BroughtList {
     pub gone: bool,
     pub total: u64,
     pub found: u64,
+    /// The server playlist's cover.
+    pub thumb: Option<String>,
 }
 
 pub fn lists(c: &Connection) -> AppResult<Vec<BroughtList>> {
@@ -278,7 +280,11 @@ pub fn lists(c: &Connection) -> AppResult<Vec<BroughtList>> {
             Some(p) => Some(crate::db::playlists::resolve_id(c, &p)?),
             None => None,
         };
-        out.push(BroughtList { name, import_id: format!("pl:{id}"), playlist_id, gone, total: total as u64, found: found as u64 });
+        let thumb: Option<String> = match &playlist_id {
+            Some(p) => c.query_row("SELECT thumb FROM playlists WHERE id = ?1", [p], |r| r.get(0)).optional()?.flatten(),
+            None => None,
+        };
+        out.push(BroughtList { name, import_id: format!("pl:{id}"), playlist_id, gone, total: total as u64, found: found as u64, thumb });
     }
     Ok(out)
 }
@@ -358,17 +364,61 @@ fn applied(c: &Connection, target: &str) -> AppResult<HashSet<String>> {
 
 /// Matched songs still in the library, in order, each once, leaving out
 /// those already sent to `target`.
-fn fresh(c: &Connection, sql: &str, args: impl rusqlite::Params, target: &str) -> AppResult<Vec<String>> {
+fn fresh(c: &Connection, sql: &str, args: impl rusqlite::Params, target: &str, explicit_ok: bool) -> AppResult<Vec<String>> {
     let done = applied(c, target)?;
     let mut st = c.prepare_cached(sql)?;
     let ids: Vec<String> = st.query_map(args, |r| r.get(0))?.collect::<Result<_, _>>()?;
+    let ids = ids.into_iter().map(|id| rated_copy(c, &id, explicit_ok)).collect::<AppResult<Vec<_>>>()?;
     let mut seen = HashSet::new();
     Ok(ids.into_iter().filter(|id| !done.contains(id) && seen.insert(id.clone())).collect())
 }
 
+/// Whether a library song is the explicit copy (Some(true)), the clean one
+/// (Some(false)) or doesn't say: its file tag first, then a version note.
+fn rating(explicit_tag: Option<bool>, version_fold: &str) -> Option<bool> {
+    explicit_tag.or_else(|| {
+        let words: Vec<&str> = version_fold.split([' ', ';']).collect();
+        if words.iter().any(|w| *w == "explicit" || *w == "dirty") {
+            Some(true)
+        } else if words.contains(&"clean") {
+            Some(false)
+        } else {
+            None
+        }
+    })
+}
+
+/// Clean and explicit copies of a song match the same, and the file names
+/// neither. When the library has both, the copy the Explicit content setting
+/// plays: explicit unless it's filtered. Same album first.
+pub fn rated_copy(c: &Connection, track_id: &str, explicit_ok: bool) -> AppResult<String> {
+    let mut st = c.prepare_cached(
+        "SELECT b.track_id, b.version_fold, b.album_fold, b.duration_ms, f.explicit, b.track_id = a.track_id
+         FROM song_index a JOIN song_index b ON b.artist_fold = a.artist_fold AND b.title_fold = a.title_fold AND b.unreleased = 0
+         LEFT JOIN tracks t ON t.id = b.track_id LEFT JOIN file_tags f ON f.part_key = t.part_key AND f.status = 'ok'
+         WHERE a.track_id = ?1",
+    )?;
+    type Row = (String, String, String, i64, Option<bool>, bool);
+    let rows: Vec<Row> = st.query_map([track_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?.collect::<Result<_, _>>()?;
+    let Some(me) = rows.iter().find(|r| r.5) else { return Ok(track_id.to_string()) };
+    // A copy that doesn't say counts as either; one that says the other way doesn't play.
+    let plays = |r: &Row| rating(r.4, &r.1) != Some(!explicit_ok);
+    if plays(me) {
+        return Ok(track_id.to_string());
+    }
+    let core = crate::identity::fold::version_core(&me.1);
+    let close = |d: i64| me.3 == 0 || d == 0 || (me.3 - d).abs() <= 5_000;
+    let mut other: Vec<&Row> = rows
+        .iter()
+        .filter(|r| !r.5 && close(r.3) && plays(r) && crate::identity::fold::version_core(&r.1) == core)
+        .collect();
+    other.sort_by_key(|r| (rating(r.4, &r.1) != Some(explicit_ok), r.2 != me.2, r.0.clone()));
+    Ok(other.first().map_or_else(|| track_id.to_string(), |r| r.0.clone()))
+}
+
 /// What to send: with `likes`, the liked songs found and not liked by this
 /// before; with `lists`, the playlists to make and the songs to add.
-pub fn plan(c: &Connection, likes: bool, lists: bool) -> AppResult<Plan> {
+pub fn plan(c: &Connection, likes: bool, lists: bool, explicit_ok: bool) -> AppResult<Plan> {
     let mut out = Plan::default();
     let sources = brought(c)?;
     if likes {
@@ -380,6 +430,7 @@ pub fn plan(c: &Connection, likes: bool, lists: bool) -> AppResult<Plan> {
                  WHERE l.source = ?1 AND s.status = 'matched' ORDER BY l.position",
                 [src],
                 &target,
+                explicit_ok,
             )?;
             if !ids.is_empty() {
                 out.likes.push((target, ids));
@@ -404,6 +455,7 @@ pub fn plan(c: &Connection, likes: bool, lists: bool) -> AppResult<Plan> {
                  WHERE i.playlist_id = ?1 AND s.status = 'matched' ORDER BY i.position",
                 [id],
                 &target,
+                explicit_ok,
             )?;
             if !add.is_empty() {
                 out.lists.push(ListPlan { target, name, playlist_id, add });
@@ -554,6 +606,8 @@ pub struct BringAlbum {
     pub state: AlbumState,
     pub reason: Option<String>,
     pub release_group_id: Option<String>,
+    /// Its cover, once MusicBrainz has picked it.
+    pub thumb: Option<String>,
 }
 
 /// Every album to get, most loved first (liked songs, then songs wanted),
@@ -579,6 +633,7 @@ pub fn albums(c: &Connection) -> AppResult<Vec<BringAlbum>> {
             state: AlbumState::Missing,
             reason: None,
             release_group_id: None,
+            thumb: None,
         });
         a.songs += 1;
         a.liked += liked as u64;
@@ -600,6 +655,7 @@ pub fn albums(c: &Connection) -> AppResult<Vec<BringAlbum>> {
             state: AlbumState::Missing,
             reason: None,
             release_group_id: None,
+            thumb: None,
         });
     }
     // How asking went, and albums that arrived.
@@ -617,8 +673,10 @@ pub fn albums(c: &Connection) -> AppResult<Vec<BringAlbum>> {
             state: AlbumState::Missing,
             reason: None,
             release_group_id: None,
+            thumb: None,
         });
         a.state = if here { AlbumState::Here } else { AlbumState::parse(&state) };
+        a.thumb = rg.as_deref().and_then(crate::lidarr::request::cover_thumb);
         a.release_group_id = rg;
         a.reason = if a.state == AlbumState::NotFound { reason } else { None };
     }
@@ -832,7 +890,8 @@ impl Bring {
         let _g = self.lock.lock().await;
         let s = crate::settings::load(self.db());
         let (likes, lists) = if arrivals { (s.bring_like_arrivals, s.bring_fill_playlists) } else { (true, true) };
-        let plan = self.db().read_async(move |c| plan(c, likes, lists)).await?;
+        let explicit_ok = s.explicit_content == crate::settings::ExplicitContent::Allowed;
+        let plan = self.db().read_async(move |c| plan(c, likes, lists, explicit_ok)).await?;
         let mut sent = Sent::default();
         for (target, ids) in plan.likes {
             self.inner.server.like(ids.clone()).await?;

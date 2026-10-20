@@ -213,6 +213,26 @@ fn files_are_told_apart() {
 
 // ------------------------------------------------------------------ step 2
 
+#[test]
+fn clean_and_explicit_copies_follow_the_explicit_setting() {
+    let w = world();
+    w.db.write(|c| {
+        album(c, "al9", "The Paper Kites", "Lights Out (Clean)");
+        song(c, "9", "al9", "Lights Out (Clean)", "The Paper Kites", "Bloom (Clean)");
+        c.execute("INSERT INTO file_tags (part_key, status, explicit, scanned_at) VALUES ('/p/2', 'ok', 1, 0)", [])?;
+        index::rebuild(c)?;
+        Ok(())
+    })
+    .unwrap();
+    // Allowed: the explicit copy, whichever one matched.
+    assert_eq!(w.db.read(|c| bring::rated_copy(c, &tid("9"), true)).unwrap(), tid("2"));
+    assert_eq!(w.db.read(|c| bring::rated_copy(c, &tid("2"), true)).unwrap(), tid("2"));
+    // Filtered: the clean one.
+    assert_eq!(w.db.read(|c| bring::rated_copy(c, &tid("2"), false)).unwrap(), tid("9"));
+    // A song with one copy stays as it is.
+    assert_eq!(w.db.read(|c| bring::rated_copy(c, &tid("1"), false)).unwrap(), tid("1"));
+}
+
 #[tokio::test]
 async fn liked_songs_found_are_liked_and_playlists_made_with_what_is_found() {
     let w = world();
