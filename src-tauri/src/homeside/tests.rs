@@ -639,9 +639,16 @@ async fn the_bridge_never_keeps_the_plex_account_sign_in() {
     let d = side(tmp.path(), "desk");
     d.keys.set(ACCOUNT_TOKEN, &Token::new(PLEX_TOKEN).unwrap()).unwrap();
     let desk = desktop_for(&d, "Desk", Arc::new(Ntfy::new().unwrap()));
+    d.keys.set(crate::plex::keychain::SERVER_TOKEN, &Token::new(PLEX_TOKEN).unwrap()).unwrap();
     let cfg = desk.config().await;
     assert!(cfg.plex_token.is_none() && cfg.plex_server_token.is_none());
-    assert!(!serde_json::to_string(&cfg).unwrap().contains(PLEX_TOKEN));
+    assert_eq!(cfg.version, super::VERSION, "the config says which Platter sent it");
+    let sent = serde_json::to_value(Msg::Config(Box::new(cfg.clone()))).unwrap();
+    assert!(sent["plexToken"].is_null(), "no account sign-in, not even an empty one: {}", sent["plexToken"]);
+    assert!(!sent.to_string().contains(PLEX_TOKEN));
+    // Read back on a Bridge, it's still no sign-in.
+    let back: Msg = serde_json::from_value(sent).unwrap();
+    assert!(matches!(back, Msg::Config(c) if c.plex_token.is_none()));
 
     // An older computer's account sign-in is never kept; a server's own token is, in the keys file.
     let b = side(tmp.path(), "bridge");
@@ -683,6 +690,20 @@ async fn the_bridge_never_keeps_the_plex_account_sign_in() {
     let (m, t, uris) = super::run::server_only_token(&both, &account, Some("m2")).unwrap();
     assert_eq!((m.as_str(), t.expose(), uris.len()), ("m2", "shared-token", 1));
     assert!(super::run::server_only_token(&both, &account, None).is_none(), "which server isn't a guess");
+}
+
+#[test]
+fn the_ignored_sign_in_line_names_the_computer_and_its_version() {
+    use super::run::account_sign_in_note;
+    let old = account_sign_in_note("Desk", "0.2.29");
+    assert!(old.contains("Platter 0.2.29 on Desk") && old.contains("before 0.2.30") && old.contains("Update Platter"), "{old}");
+    let unknown = account_sign_in_note("", "");
+    assert!(unknown.contains("a computer") && unknown.contains("older than 0.2.30"), "{unknown}");
+    // A build that stopped sending it isn't called older.
+    for v in ["0.2.30", "0.2.31", "1.0.0"] {
+        let line = account_sign_in_note("Desk", v);
+        assert!(line.contains(&format!("Platter {v} on Desk")) && !line.contains("older") && !line.contains("before"), "{line}");
+    }
 }
 
 #[tokio::test]

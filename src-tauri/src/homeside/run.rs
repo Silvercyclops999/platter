@@ -177,6 +177,24 @@ pub fn server_only_token(servers: &[crate::plex::discovery::DiscoveredServer], a
     Some((s.machine_id.clone(), t, s.connections.iter().map(|c| c.uri.clone()).collect()))
 }
 
+/// The first Platter that stopped sending the Plex account's sign-in.
+pub const ACCOUNT_SIGN_IN_STOPPED: (u64, u64, u64) = (0, 2, 30);
+
+/// The log line for a Plex account sign-in a computer sent, naming that
+/// computer and its Platter version. A config without a version came from
+/// a build before 0.2.31, and one with a sign-in from before 0.2.30.
+pub fn account_sign_in_note(desktop: &str, version: &str) -> String {
+    let from = if desktop.trim().is_empty() { "a computer".to_string() } else { desktop.trim().to_string() };
+    let version = version.trim();
+    match crate::lidarr::api::parse_version(version) {
+        Some(v) if v >= ACCOUNT_SIGN_IN_STOPPED => {
+            format!("Ignored a Plex account sign-in from Platter {version} on {from}. The Bridge never keeps one.")
+        }
+        Some(_) => format!("Ignored the Plex account sign-in Platter {version} on {from} sent, as Platter before 0.2.30 does. Update Platter on that computer."),
+        None => format!("Ignored the Plex account sign-in {from} sent. It runs Platter older than 0.2.30, which doesn't say its version. Update Platter on that computer."),
+    }
+}
+
 /// What MUSIC_PLEX_PATH should be: Plex's folder that the files mounted at
 /// `mount` sit under, from some of the library's file paths as Plex gives
 /// them. Each path is matched by the longest tail of it that's there under
@@ -477,7 +495,12 @@ impl Bridge {
             let _ = self.wire.send(link, &hello).await;
         }
         match msg {
-            Msg::Config(cfg) => {
+            Msg::Config(mut cfg) => {
+                if cfg.version.is_empty()
+                    && let Some(p) = self.wire.links.get(&link.id)
+                {
+                    cfg.version = p.version;
+                }
                 if let Err(e) = self.apply_config(&cfg).await {
                     tracing::warn!("Couldn't use the settings from {}: {e}", cfg.desktop);
                 }
@@ -559,8 +582,8 @@ impl Bridge {
         let kept = serde_json::json!({ "desktop": cfg.desktop, "at": self.now_s() }).to_string();
         self.p.db.write(|c| kv_set(c, CONFIG_KEY, &kept))?;
         if cfg.plex_token.is_some() {
-            // An older Platter sends the account's own sign-in: never kept.
-            tracing::info!("Ignored the Plex account sign-in an older Platter sent. Update Platter on that computer.");
+            // Platter before 0.2.30 sends the account's own sign-in: never kept.
+            tracing::info!("{}", account_sign_in_note(&cfg.desktop, &cfg.version));
         }
         let mut plex_changed = first;
         if let Some(id) = cfg.plex_server.as_deref().filter(|id| !id.is_empty() && id.len() <= 100) {

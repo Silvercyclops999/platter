@@ -416,6 +416,7 @@ impl Desktop {
         };
         BridgeConfig {
             desktop: (self.d.name)(),
+            version: super::VERSION.to_string(),
             lidarr_url: url.clone(),
             // Only for an address the key was entered for on this computer
             // (not one that came from another device).

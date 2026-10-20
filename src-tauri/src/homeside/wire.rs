@@ -30,6 +30,10 @@ pub struct BridgeConfig {
     /// The desktop's name, for the Bridge's log.
     #[serde(default)]
     pub desktop: String,
+    /// The desktop's Platter version, for the Bridge's log. Empty from
+    /// builds before 0.2.31, which didn't send it.
+    #[serde(default)]
+    pub version: String,
     /// Lidarr's home address (the Bridge is at home).
     #[serde(default)]
     pub lidarr_url: String,
