@@ -172,19 +172,11 @@ pub fn is_lan(ip: Ipv4Addr) -> bool {
     ip.is_private() || ip.is_link_local()
 }
 
-/// This computer's LAN IPv4 addresses.
+/// This computer's LAN IPv4 addresses, the default route's adapter first
+/// and virtual adapters (WSL, Hyper-V, VPNs) left out when there's a real one.
 pub fn lan_addrs() -> Vec<Ipv4Addr> {
-    let mut out: Vec<Ipv4Addr> = if_addrs::get_if_addrs()
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|i| match i.ip() {
-            IpAddr::V4(v4) if is_lan(v4) => Some(v4),
-            _ => None,
-        })
-        .collect();
-    out.sort();
-    out.dedup();
-    out
+    let ifaces = crate::remote::netif::system();
+    crate::remote::netif::lan_v4(&ifaces, crate::remote::netif::default_route_v4())
 }
 
 /// The OS computer name ("Studio PC", "Adam's MacBook Air").

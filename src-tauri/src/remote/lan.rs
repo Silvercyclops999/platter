@@ -123,6 +123,7 @@ pub fn lan_player(id: String, name: String, product: String, kind: super::types:
         needs_password: false,
         unsupported: None,
         unreachable: false,
+        asleep: false,
     }
 }
 
@@ -210,6 +211,7 @@ impl MdnsSd {
                 return None;
             }
         };
+        crate::remote::netif::skip_virtual(&daemon);
         let seen: Arc<Mutex<HashMap<String, MdnsAnswer>>> = Arc::default();
         for ty in [CAST_SERVICE, RAOP_SERVICE] {
             let Ok(rx) = daemon.browse(ty) else { continue };

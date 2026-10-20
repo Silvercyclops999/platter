@@ -75,6 +75,7 @@ impl MdnsPeers {
                     return None;
                 }
             };
+            crate::remote::netif::skip_virtual(&daemon);
             let seen: Arc<Mutex<HashMap<String, MdnsAnswer>>> = Arc::default();
             if let Ok(rx) = daemon.browse(SERVICE) {
                 let seen = seen.clone();

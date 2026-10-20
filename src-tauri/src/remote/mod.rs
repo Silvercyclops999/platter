@@ -19,6 +19,7 @@
 //!   default media receiver).
 //! - [`airplay`]: AirPlay audio, played through a network output.
 //! - [`dlna`]: DLNA / UPnP renderers found with SSDP, fed stream URLs.
+//! - [`netif`]: which network adapters mDNS uses (virtual ones left out).
 //! - [`peer`]: the user's other Platter devices (announce, find, control).
 //! - [`commands`]: Tauri commands.
 //!
@@ -31,6 +32,7 @@ pub mod companion;
 pub mod dlna;
 pub mod discovery;
 pub mod lan;
+pub mod netif;
 pub mod peer;
 pub mod playqueue;
 pub mod service;
