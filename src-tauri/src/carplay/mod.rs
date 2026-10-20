@@ -39,8 +39,14 @@ pub enum CarAction {
     Play(PlayContext),
     /// Start it shuffled.
     Shuffle(PlayContext),
-    /// Play it from this song (its track id): a song in an opened list.
-    PlayFrom(PlayContext, String),
+    /// Play it from this song: a song in an opened list (its track id, and
+    /// its place in the list, so a song that's in it twice starts at the
+    /// right copy).
+    PlayFrom { context: PlayContext, track_id: String, index: usize },
+    /// An opened list's own Play (or Shuffle) row: plays like
+    /// [`CarAction::Play`] but is never the row marked as playing (the song
+    /// playing is).
+    Start { context: PlayContext, shuffle: bool },
     /// Shuffle every song: the songs are drawn when it's picked.
     ShuffleLibrary,
     /// Open another list.
@@ -430,26 +436,39 @@ fn songs_list(c: &Connection, kind: ContextKind, id: &str, liked_min: f64) -> Ap
         ContextKind::Album => queries::album_tracks(c, id)?,
         ContextKind::Playlist => {
             let ids: Vec<String> = crate::db::playlists::items(c, id)?.into_iter().map(|i| i.track_id).collect();
-            let found = queries::tracks_by_ids(c, &ids)?;
-            ids.iter().filter_map(|t| found.iter().find(|f| &f.id == t).cloned()).collect()
+            let found: std::collections::HashMap<String, crate::model::Track> =
+                queries::tracks_by_ids(c, &ids)?.into_iter().map(|t| (t.id.clone(), t)).collect();
+            ids.iter().filter_map(|t| found.get(t).cloned()).collect()
         }
         ContextKind::Mix => crate::mixes::store::tracks(c, id)?.0,
         ContextKind::Liked => crate::db::likes::liked_tracks(c, liked_min)?,
-        _ => Vec::new(),
+        ContextKind::Artist | ContextKind::Tracks | ContextKind::Search | ContextKind::Radio => Vec::new(),
     };
     let context = || PlayContext { kind, id: Some(id.to_string()), track_ids: None };
+    let total = tracks.len();
+    let count = if total == 1 { "1 song".to_string() } else { format!("{total} songs") };
     let mut out = vec![
-        CarItem { title: "Play".into(), subtitle: None, thumb: None, action: CarAction::Play(context()) },
-        CarItem { title: "Shuffle".into(), subtitle: None, thumb: None, action: CarAction::Shuffle(context()) },
+        CarItem {
+            title: "Play".into(),
+            subtitle: Some(count),
+            thumb: None,
+            action: CarAction::Start { context: context(), shuffle: false },
+        },
+        CarItem { title: "Shuffle".into(), subtitle: None, thumb: None, action: CarAction::Start { context: context(), shuffle: true } },
     ];
+    // Room for the songs, and a last row saying how many more there are.
+    let room = if total > LIST_MAX - 2 { LIST_MAX - 3 } else { LIST_MAX - 2 };
     // An album's songs share its cover; other lists show each song's.
     let own_covers = kind != ContextKind::Album;
-    out.extend(tracks.into_iter().take(LIST_MAX - 2).map(|t| CarItem {
+    out.extend(tracks.into_iter().take(room).enumerate().map(|(index, t)| CarItem {
         subtitle: Some(t.track_artist.clone().unwrap_or_else(|| t.artist_title.clone())),
         thumb: if own_covers { t.thumb.clone() } else { None },
-        action: CarAction::PlayFrom(context(), t.id.clone()),
+        action: CarAction::PlayFrom { context: context(), track_id: t.id.clone(), index },
         title: t.title,
     }));
+    if total > room {
+        out.push(info(&format!("Showing {room} of {total} songs"), Some("Play or Shuffle plays them all")));
+    }
     Ok(out)
 }
 
@@ -460,12 +479,22 @@ pub struct NowKey {
     pub context: Option<(ContextKind, String)>,
     /// The playing song's album.
     pub album_id: Option<String>,
+    /// The playing song.
+    pub track_id: Option<String>,
 }
 
 /// Whether a row plays what's playing now, to show it as playing: the same
 /// album, playlist, mix or Liked songs, or the album the playing song is on.
 pub fn is_playing(item: &CarItem, now: &NowKey) -> bool {
     let (kind, id) = match &item.action {
+        // A song in an opened list: that song, in that list.
+        CarAction::PlayFrom { context, track_id, .. } => {
+            let same_list = match (&context.id, &now.context) {
+                (Some(id), Some((k, cid))) => *k == context.kind && cid == id,
+                _ => false,
+            };
+            return same_list && now.track_id.as_deref() == Some(track_id.as_str());
+        }
         CarAction::Open(CarList::Songs { kind, id, .. }) => (*kind, id),
         CarAction::Play(ctx) | CarAction::Shuffle(ctx) if ctx.track_ids.is_none() => match &ctx.id {
             Some(id) => (ctx.kind, id),
@@ -643,7 +672,8 @@ impl Kept {
             // An album, playlist or mix to open: as playing it would.
             CarAction::Open(CarList::Songs { kind, id, .. }) => (*kind, id.as_str()),
             // A song in an opened list: that song.
-            CarAction::PlayFrom(_, track) => return self.tracks.contains(track),
+            CarAction::PlayFrom { track_id, .. } => return self.tracks.contains(track_id),
+            CarAction::Start { context, .. } => (context.kind, context.id.as_deref().unwrap_or_default()),
             CarAction::ShuffleLibrary => return !self.tracks.is_empty(),
             CarAction::Open(_) | CarAction::Jump(_) | CarAction::Info => return true,
         };

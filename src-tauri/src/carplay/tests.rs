@@ -218,7 +218,7 @@ fn repeat_button_cycles_off_all_one() {
 fn rows_playing_what_plays_now_are_marked() {
     let album = |id: &str| CarItem { title: "A".into(), subtitle: None, thumb: None, action: play(ContextKind::Album, id) };
     let playlist = CarItem { title: "P".into(), subtitle: None, thumb: None, action: play(ContextKind::Playlist, "p1") };
-    let now = NowKey { context: Some((ContextKind::Playlist, "p1".into())), album_id: Some("al9".into()) };
+    let now = NowKey { context: Some((ContextKind::Playlist, "p1".into())), album_id: Some("al9".into()), track_id: None };
     assert!(is_playing(&playlist, &now), "the playing playlist");
     assert!(is_playing(&album("al9"), &now), "the album the playing song is on");
     assert!(!is_playing(&album("al1"), &now));
@@ -609,12 +609,16 @@ async fn an_album_opens_to_play_shuffle_then_its_songs() {
     assert_eq!(which.title(), albums[0].title, "titled with the album");
     let rows = db.read(|c| list(c, which, 10.0)).unwrap();
     assert_eq!(rows[0].title, "Play");
-    assert!(matches!(&rows[0].action, CarAction::Play(p) if p.kind == ContextKind::Album));
+    assert_eq!(rows[0].subtitle.as_deref(), Some("3 songs"));
+    assert!(matches!(&rows[0].action, CarAction::Start { context, shuffle: false } if context.kind == ContextKind::Album));
     assert_eq!(rows[1].title, "Shuffle");
-    assert!(matches!(&rows[1].action, CarAction::Shuffle(p) if p.kind == ContextKind::Album));
+    assert!(matches!(&rows[1].action, CarAction::Start { context, shuffle: true } if context.kind == ContextKind::Album));
     assert_eq!(rows.len(), 2 + 3, "then its three songs");
-    for r in &rows[2..] {
-        assert!(matches!(&r.action, CarAction::PlayFrom(p, t) if p.kind == ContextKind::Album && !t.is_empty()), "a song plays the album from there");
+    for (n, r) in rows[2..].iter().enumerate() {
+        assert!(
+            matches!(&r.action, CarAction::PlayFrom { context, track_id, index } if context.kind == ContextKind::Album && !track_id.is_empty() && *index == n),
+            "a song plays the album from its own place"
+        );
         assert!(r.thumb.is_none(), "an album's songs share its cover");
     }
 }
@@ -622,9 +626,20 @@ async fn an_album_opens_to_play_shuffle_then_its_songs() {
 #[test]
 fn an_opened_album_is_marked_while_it_plays() {
     let row = CarItem { title: "A".into(), subtitle: None, thumb: None, action: songs(ContextKind::Album, "al1", "A") };
-    assert!(is_playing(&row, &NowKey { context: Some((ContextKind::Album, "al1".into())), album_id: None }));
-    assert!(is_playing(&row, &NowKey { context: None, album_id: Some("al1".into()) }));
+    let now = NowKey { context: Some((ContextKind::Album, "al1".into())), album_id: None, track_id: Some("t2".into()) };
+    assert!(is_playing(&row, &now));
+    assert!(is_playing(&row, &NowKey { album_id: Some("al1".into()), ..Default::default() }));
     assert!(!is_playing(&row, &NowKey::default()));
+    // Inside the opened album: the playing song is marked, Play and Shuffle aren't.
+    let ctx = PlayContext { kind: ContextKind::Album, id: Some("al1".into()), track_ids: None };
+    let song = |t: &str| CarItem { title: t.into(), subtitle: None, thumb: None, action: CarAction::PlayFrom { context: ctx.clone(), track_id: t.into(), index: 0 } };
+    assert!(is_playing(&song("t2"), &now));
+    assert!(!is_playing(&song("t1"), &now));
+    let start = CarItem { title: "Play".into(), subtitle: None, thumb: None, action: CarAction::Start { context: ctx.clone(), shuffle: false } };
+    assert!(!is_playing(&start, &now));
+    // The same song playing from another list isn't this row.
+    let elsewhere = NowKey { context: Some((ContextKind::Playlist, "p1".into())), track_id: Some("t2".into()), ..Default::default() };
+    assert!(!is_playing(&song("t2"), &elsewhere));
 }
 
 #[test]
@@ -635,7 +650,39 @@ fn offline_a_kept_album_opens_and_its_kept_songs_play() {
     assert!(kept.plays(&songs(ContextKind::Album, "al1", "A")));
     assert!(!kept.plays(&songs(ContextKind::Album, "al2", "B")));
     let ctx = PlayContext { kind: ContextKind::Album, id: Some("al1".into()), track_ids: None };
-    assert!(kept.plays(&CarAction::PlayFrom(ctx.clone(), "t1".into())));
-    assert!(!kept.plays(&CarAction::PlayFrom(ctx, "t2".into())));
+    assert!(kept.plays(&CarAction::PlayFrom { context: ctx.clone(), track_id: "t1".into(), index: 0 }));
+    assert!(!kept.plays(&CarAction::PlayFrom { context: ctx, track_id: "t2".into(), index: 1 }));
+    // Kept playlists, Liked songs and mixes open with no signal too.
+    use crate::downloads::store::ItemKind;
+    kept.items.insert((ItemKind::Playlist, "p1".into()));
+    kept.items.insert((ItemKind::Liked, String::new()));
+    kept.items.insert((ItemKind::Mix, "m1".into()));
+    assert!(kept.plays(&songs(ContextKind::Playlist, "p1", "P")));
+    assert!(kept.plays(&songs(ContextKind::Liked, "liked", "Liked songs")));
+    assert!(kept.plays(&songs(ContextKind::Mix, "m1", "M")));
+    assert!(!kept.plays(&songs(ContextKind::Playlist, "p2", "Q")));
+}
+
+#[tokio::test]
+async fn a_long_list_says_how_many_it_leaves_out() {
+    let (db, _dir) = synced(1, 1).await;
+    let ids: Vec<String> = db.read(|c| Ok(c.prepare("SELECT id FROM tracks")?.query_map([], |r| r.get(0))?.collect::<Result<Vec<String>, _>>()?)).unwrap();
+    let many: Vec<String> = ids.iter().cycle().take(150).cloned().collect();
+    let mix = crate::mixes::store::Stored {
+        id: "big".into(),
+        kind: crate::mixes::MixKind::Daily,
+        title: "Big".into(),
+        description: String::new(),
+        color: "#000000".into(),
+        artist_ids: vec![],
+        tag: None,
+        tracks: many.into_iter().map(|id| (id, false)).collect(),
+    };
+    db.write(|c| crate::mixes::store::save_one(c, &mix, 0, "2026-10-20", 0)).unwrap();
+    let rows = db.read(|c| list(c, &CarList::Songs { kind: ContextKind::Mix, id: "big".into(), title: "Big".into() }, 10.0)).unwrap();
+    assert_eq!(rows.len(), LIST_MAX, "stays within the car's limit");
+    let last = rows.last().unwrap();
+    assert!(last.title.starts_with("Showing ") && last.title.ends_with(" songs"), "{}", last.title);
+    assert_eq!(last.action, CarAction::Info);
 }
 
