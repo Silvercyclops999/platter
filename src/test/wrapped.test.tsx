@@ -298,7 +298,8 @@ describe("Top Songs list", () => {
     await user.type(screen.getByRole("searchbox", { name: "Find in Your Top Songs 2025" }), target.title);
     const rows = screen.getAllByRole("row").slice(1);
     expect(rows.length).toBeLessThan(list.rows.length);
-    const hit = rows.find((r) => within(r).queryByText(target.title));
+    // Several mock songs share a title, so match the album too.
+    const hit = rows.find((r) => within(r).queryByText(target.title) && r.textContent?.includes(target.albumTitle));
     expect(hit && within(hit).getByText("8")).toBeTruthy();
   });
 
