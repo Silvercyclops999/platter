@@ -10,6 +10,7 @@ import { player } from "../../stores/player";
 import { useSettings } from "../../stores/settings";
 import { toast } from "../../stores/toasts";
 import { Empty, GhostRows, GoPill, PageFrame, Row } from "./kit";
+import { SongRow } from "./common";
 
 function monthDay(date: string): string {
   const [y, m, d] = date.split("-").map(Number);
@@ -49,7 +50,16 @@ export function PhoneOnThisDay() {
               </button>
             </div>
             <ul className="ph-rows">
-              {y.songs.map((s) => (
+              {y.songs.map((s) =>
+                // A library song is a song row (it swipes like the rest); a missing one is just named.
+                s.track && s.trackId ? (
+                  <SongRow
+                    key={s.key}
+                    track={s.track}
+                    sub={`${s.artist} · ${s.plays === 1 ? "1 play" : `${s.plays} plays`}`}
+                    onPlay={() => playIds(y.trackIds, s.trackId!)}
+                  />
+                ) : (
                 <Row
                   key={s.key}
                   className={s.trackId ? "" : "is-missing"}
@@ -58,7 +68,8 @@ export function PhoneOnThisDay() {
                   sub={`${s.artist} · ${s.plays === 1 ? "1 play" : `${s.plays} plays`}${s.trackId ? "" : " · Not in your library"}`}
                   onOpen={s.trackId ? () => playIds(y.trackIds, s.trackId!) : undefined}
                 />
-              ))}
+                ),
+              )}
             </ul>
           </section>
         ))

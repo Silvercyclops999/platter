@@ -376,7 +376,8 @@ describe("queue and sleep timer", () => {
     });
     const queue = await screen.findByRole("dialog", { name: "Queue" });
     expect(within(queue).getByText(t.title)).toHaveClass("is-playing");
-    expect(within(queue).getByRole("button", { name: "Play" })).toHaveClass("ph-play--row");
+    // Under Now playing; a tap on the row plays or pauses it.
+    expect(within(within(queue).getByRole("region", { name: "Now playing" })).getByRole("button", { name: `Play ${t.title}` })).toBeInTheDocument();
     expect(within(queue).getAllByRole("button", { name: /^Move / })).toHaveLength(4);
     fireEvent.click(within(queue).getByRole("button", { name: "Sleep timer" }));
     const sleep = await screen.findByRole("dialog", { name: "Sleep timer" });

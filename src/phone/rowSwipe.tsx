@@ -1,35 +1,53 @@
 /**
- * Swipe a song row right to add it to the queue: the row follows the
- * finger, a queue mark shows under it, and letting go past QUEUE_SWIPE_PX
- * adds the song (a short buzz and "Added to queue"); the row slides back
- * either way. A press that heads up or down first is a scroll and the row
- * stays put (the row only takes sideways moves, see .ph-swipe in
- * phone.css). A press at the very left edge is left to the back swipe.
- * Under reduced motion the row doesn't move; the add still happens.
+ * Swipe a row sideways to act on it. A song row swipes right into the queue
+ * and left into (or out of) Liked Songs; a queue row swipes left out of the
+ * queue. The row follows the finger, the action's mark shows under it, and
+ * letting go past SWIPE_MARK_PX runs the action (a light tick as the mark
+ * lights, a short buzz on letting go); the row slides back either way.
+ *
+ * A press that heads up or down first is a scroll and the row stays put
+ * (the row only takes sideways moves, see .ph-swipe in phone.css). A press
+ * at the very left edge is left to the back swipe. A direction the row has
+ * no action for is left alone too (a shelf, say). Under reduced motion the
+ * row doesn't move; the action still happens.
  */
-import { ListEnd } from "lucide-react";
-import { useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { Heart, HeartOff, ListEnd } from "lucide-react";
+import { useCallback, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import type { Track } from "../lib/types";
+import { isLiked, setLiked, useIsLiked } from "../stores/likes";
+import { player } from "../stores/player";
 import { tap } from "./bits";
 import { lockAxis, type Axis } from "./gestures";
 import { EDGE_PX, reduced } from "./motion";
 
-/** Letting go this far right adds the song. */
-export const QUEUE_SWIPE_PX = 72;
+/** Letting go this far either way runs that side's action. */
+export const SWIPE_MARK_PX = 72;
+/** The older name: right swipes add to the queue at this distance. */
+export const QUEUE_SWIPE_PX = SWIPE_MARK_PX;
 /** Past the mark the row follows at this share of the finger. */
 const PAST_GIVE = 1 / 3;
 /** And never further than this. */
 export const SWIPE_MAX_PX = 128;
 
-/** Where the row sits for a finger `dx` to the right (never left). */
-export function swipeFollow(dx: number): number {
-  if (dx <= 0) return 0;
-  if (dx <= QUEUE_SWIPE_PX) return dx;
-  return Math.min(SWIPE_MAX_PX, QUEUE_SWIPE_PX + (dx - QUEUE_SWIPE_PX) * PAST_GIVE);
+export type SwipeSide = "right" | "left";
+
+/** Where the row sits for a finger `dx` (positive right), given the sides that act. */
+export function swipeFollow(dx: number, sides: { right?: boolean; left?: boolean } = { right: true }): number {
+  if (dx === 0 || (dx > 0 && !sides.right) || (dx < 0 && !sides.left)) return 0;
+  const d = Math.abs(dx);
+  const at = d <= SWIPE_MARK_PX ? d : Math.min(SWIPE_MAX_PX, SWIPE_MARK_PX + (d - SWIPE_MARK_PX) * PAST_GIVE);
+  return Math.sign(dx) * at;
+}
+
+/** Which side letting go would act on: sideways and far enough, or none. */
+export function swipeSide(axis: Axis | null, dx: number): SwipeSide | null {
+  if (axis !== "x" || Math.abs(dx) < SWIPE_MARK_PX) return null;
+  return dx > 0 ? "right" : "left";
 }
 
 /** Whether letting go adds the song: sideways, rightwards, far enough. */
 export function swipeAdds(axis: Axis | null, dx: number): boolean {
-  return axis === "x" && dx >= QUEUE_SWIPE_PX;
+  return swipeSide(axis, dx) === "right";
 }
 
 interface Press {
@@ -40,23 +58,46 @@ interface Press {
   dx: number;
 }
 
+export interface SwipeActions {
+  /** Swiping right (the song row's: add to the queue). */
+  right?: () => void;
+  /** Swiping left (like or unlike; in the queue, remove). */
+  left?: () => void;
+}
+
 /**
- * The row's handlers, class and style. `onAdd` runs once per swipe that
- * gets past the mark.
+ * The row's handlers, ref, class and style. Each action runs once per swipe
+ * that gets past the mark on its side.
  */
-export function useSwipeToQueue(onAdd: () => void, enabled = true) {
+export function useRowSwipe(actions: SwipeActions, enabled = true) {
   const press = useRef<Press | null>(null);
   const swiped = useRef(false);
+  const live = useRef(actions);
+  live.current = actions;
   const [offset, setOffset] = useState(0);
   const [dragging, setDragging] = useState(false);
-  const [armed, setArmed] = useState(false);
+  const [armed, setArmed] = useState<SwipeSide | null>(null);
+  const sides = { right: !!actions.right, left: !!actions.left };
+
+  // Once the row has the swipe, the page mustn't scroll under the finger
+  // (WebKit can start a scroll on a slightly slanted move and cancel ours).
+  // React's touch handlers are passive, so this one is added by hand.
+  const node = useRef<HTMLElement | null>(null);
+  const holdScroll = useRef((e: TouchEvent) => {
+    if (press.current?.axis === "x" && e.cancelable) e.preventDefault();
+  });
+  const ref = useCallback((el: HTMLElement | null) => {
+    node.current?.removeEventListener("touchmove", holdScroll.current);
+    node.current = el;
+    el?.addEventListener("touchmove", holdScroll.current, { passive: false });
+  }, []);
 
   /** Back to rest: no press, the row home, the mark out. */
   const reset = () => {
     press.current = null;
     setDragging(false);
     setOffset(0);
-    setArmed(false);
+    setArmed(null);
   };
   // The swipe's own click is swallowed; anything after it (a tap, Enter) gets through.
   const forgetSwipe = () => {
@@ -64,12 +105,17 @@ export function useSwipeToQueue(onAdd: () => void, enabled = true) {
       swiped.current = false;
     }, 0);
   };
+  /** Only sides with an action count. */
+  const acting = (axis: Axis | null, dx: number): SwipeSide | null => {
+    const side = swipeSide(axis, dx);
+    return side && live.current[side] ? side : null;
+  };
 
   const onPointerDown = (e: ReactPointerEvent<HTMLElement>) => {
     // One finger at a time: a second one while a press is live is ignored.
     if (press.current) return;
     swiped.current = false;
-    if (!enabled || (e.pointerType === "mouse" && e.button !== 0)) return;
+    if (!enabled || (!sides.right && !sides.left) || (e.pointerType === "mouse" && e.button !== 0)) return;
     // The left edge belongs to the back swipe.
     const left = e.currentTarget.closest(".phone")?.getBoundingClientRect().left ?? 0;
     if (e.clientX - left <= EDGE_PX) return;
@@ -81,34 +127,36 @@ export function useSwipeToQueue(onAdd: () => void, enabled = true) {
     const dx = e.clientX - p.x0;
     const dy = e.clientY - p.y0;
     if (!p.axis) {
-      p.axis = lockAxis(dx, dy);
-      if (!p.axis) return;
-      // Up or down first, or leftwards: a scroll (or a shelf), not ours.
-      if (p.axis === "y" || dx < 0) {
+      const axis = lockAxis(dx, dy);
+      if (!axis) return;
+      // Up or down first, or a way this row doesn't act: a scroll (or a shelf), not ours.
+      if (axis === "y" || (dx > 0 && !live.current.right) || (dx < 0 && !live.current.left)) {
         press.current = null;
         return;
       }
+      p.axis = axis;
       swiped.current = true;
       e.currentTarget.setPointerCapture?.(e.pointerId);
       setDragging(true);
     }
-    const wasArmed = swipeAdds(p.axis, p.dx);
+    const was = acting(p.axis, p.dx);
     p.dx = dx;
-    const nowArmed = swipeAdds(p.axis, dx);
-    // A light tick as the mark lights: letting go now adds.
-    if (nowArmed && !wasArmed) tap("light");
-    if (nowArmed !== wasArmed) setArmed(nowArmed);
-    if (!reduced()) setOffset(swipeFollow(dx));
+    const now = acting(p.axis, dx);
+    // A light tick as a mark lights: letting go now acts.
+    if (now && now !== was) tap("light");
+    if (now !== was) setArmed(now);
+    if (!reduced()) setOffset(swipeFollow(dx, { right: !!live.current.right, left: !!live.current.left }));
   };
   const end = (e: ReactPointerEvent<HTMLElement>, cancelled: boolean) => {
     const p = press.current;
     if (!p || p.id !== e.pointerId) return;
     reset();
     if (swiped.current) forgetSwipe();
-    if (!cancelled && swipeAdds(p.axis, p.dx)) {
+    const side = cancelled ? null : acting(p.axis, p.dx);
+    if (side) {
       // Felt even right after the tick at the mark.
       tap("success", true);
-      onAdd();
+      live.current[side]?.();
     }
   };
   // A swipe never also taps the row it started on.
@@ -118,8 +166,10 @@ export function useSwipeToQueue(onAdd: () => void, enabled = true) {
     e.preventDefault();
     e.stopPropagation();
   };
-  const reach = Math.min(1, offset / QUEUE_SWIPE_PX);
+  const reach = armed ? 1 : Math.min(1, Math.abs(offset) / SWIPE_MARK_PX);
+  const way = offset > 0 || armed === "right" ? "is-right" : offset < 0 || armed === "left" ? "is-left" : "";
   return {
+    ref,
     props: {
       onPointerDown,
       onPointerMove,
@@ -128,19 +178,50 @@ export function useSwipeToQueue(onAdd: () => void, enabled = true) {
       // Capture taken away (the system took the touch): the row never stays out.
       onLostPointerCapture: (e: ReactPointerEvent<HTMLElement>) => end(e, true),
       onClickCapture,
-      style: { "--ph-swipe": `${offset}px`, "--ph-swipe-reach": armed ? 1 : reach } as CSSProperties,
+      style: { "--ph-swipe": `${offset}px`, "--ph-swipe-reach": reach } as CSSProperties,
     },
-    className: `ph-swipe ${dragging ? "is-swiping" : ""} ${armed ? "is-armed" : ""}`,
+    className: `ph-swipe ${dragging ? "is-swiping" : ""} ${armed ? `is-armed is-armed-${armed}` : ""} ${way}`,
     offset,
     armed,
   };
 }
 
-/** The mark under a row while it is swiped. */
-export function SwipeUnder() {
+/** A song row's swipes: right adds it to the queue, left likes it (or unlikes a liked one). */
+export function useSongSwipe(track: Track, { queue = true }: { queue?: boolean } = {}) {
+  return useRowSwipe({
+    right: queue ? () => void player.addToQueue([track]) : undefined,
+    left: () => void setLiked([track], !isLiked(track.id)),
+  });
+}
+
+/** Swipe right to queue only (rows that don't like). */
+export function useSwipeToQueue(onAdd: () => void, enabled = true) {
+  return useRowSwipe({ right: onAdd }, enabled);
+}
+
+/**
+ * The marks under a row while it is swiped: the right swipe's at the left
+ * (what the row uncovers), the left swipe's at the right.
+ */
+export function SwipeUnder({ right = <ListEnd size={22} />, left }: { right?: ReactNode | false; left?: ReactNode }) {
   return (
-    <span className="ph-swipe__under" aria-hidden="true">
-      <ListEnd size={22} />
-    </span>
+    <>
+      {right !== false && (
+        <span className="ph-swipe__under ph-swipe__under--right" aria-hidden="true">
+          {right}
+        </span>
+      )}
+      {left && (
+        <span className="ph-swipe__under ph-swipe__under--left" aria-hidden="true">
+          {left}
+        </span>
+      )}
+    </>
   );
+}
+
+/** A song row's marks: the queue on one side, the heart on the other (broken when it would unlike). */
+export function SongSwipeUnder({ trackId, queue = true }: { trackId: string; queue?: boolean }) {
+  const liked = useIsLiked(trackId);
+  return <SwipeUnder right={queue ? undefined : false} left={liked ? <HeartOff size={22} /> : <Heart size={22} />} />;
 }

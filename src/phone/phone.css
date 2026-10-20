@@ -655,13 +655,24 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 .ph-track-head { display: flex; align-items: center; gap: 14px; padding: 6px var(--ph-gutter) 12px; border-bottom: 1px solid var(--ph-line); }
 .ph-track-head .art { border-radius: 4px; }
 
-.ph-queue__now { display: flex; align-items: center; gap: 14px; padding: 10px 12px; margin: 0 -12px 8px; border-radius: 12px; background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
-.ph-queue__next { margin: 12px 0 2px; font-size: 13px; font-weight: 700; color: var(--color-text-muted); }
-.ph-queue__ctx { color: var(--color-text-secondary); }
+/* The queue reads as the computer's queue panel: bold section headings, Clear queue beside Next in queue, rows of cover, title and artist. */
+.ph-queue__tabs { margin: 0 0 4px; }
+/* The heading keeps Edit's height when Edit isn't there, so the tabs don't jump. */
+.ph-queue .ph-sheet__head { min-height: 58px; }
+.ph-queue__title { margin: 18px 0 4px; font-size: 17px; font-weight: 700; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ph-queue__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ph-queue__head .ph-queue__title { flex: 1; }
+.ph-queue__action { flex: none; min-height: 44px; margin: 14px -8px 0 0; padding: 0 8px; font-size: 14px; font-weight: 600; color: var(--color-text-secondary) !important; }
+.ph-queue__ctx { color: var(--color-text-primary); }
+.ph-queue__empty { margin: 4px 0 0; font-size: 15px; color: var(--color-text-secondary); }
 .ph-queue__list { list-style: none; margin: 0; padding: 0; }
-.ph-queue__row { display: flex; align-items: center; gap: 4px; height: 64px; position: relative; }
+.ph-queue__row { height: 64px; position: relative; }
+.ph-queue__line { display: flex; align-items: center; gap: 4px; height: 100%; }
 .ph-queue__row.is-dragging { z-index: 2; background: var(--color-bg-raised2); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); border-radius: 8px; }
-.ph-queue__song { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; height: 100%; }
+.ph-queue__song { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; height: 100%; text-align: left; }
+.ph-queue__smart { display: inline-flex; margin-right: 4px; vertical-align: -1px; color: var(--color-accent); }
+.ph-queue__by { display: grid; place-items: center; flex: none; width: 32px; }
+.ph-queue__recent { margin-top: 8px; }
 .ph-handle { display: grid; place-items: center; width: 44px; height: 44px; color: var(--color-text-muted); touch-action: none; cursor: grab; }
 .ph-select { display: grid; place-items: center; flex: none; width: 24px; height: 24px; margin-right: 10px; border-radius: 50%; border: 2px solid var(--color-text-muted) !important; }
 .ph-select.is-on { background: var(--color-accent) !important; border-color: var(--color-accent) !important; color: var(--color-text-on-accent) !important; }
@@ -806,13 +817,18 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 .ph-song__main { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; height: 100%; }
 .ph-song__num { flex: none; min-width: 22px; text-align: right; font-size: 14px; color: var(--color-text-muted); }
 .ph-song__num.is-playing { color: var(--color-accent); }
-/* A song row swipes right into the queue: it takes sideways moves only (up and down still scroll), slides over a queue mark, and springs back. */
+/* A row swipes sideways: right into the queue, left into Liked Songs (in the queue, left removes). It takes sideways moves only (up and down still scroll), slides over the mark for that way, and springs back. */
 .ph-swipe { position: relative; touch-action: pan-y; overflow-x: clip; }
 .ph-swipe > :not(.ph-swipe__under) { transform: translateX(var(--ph-swipe, 0px)); transition: transform 220ms var(--ph-ease); }
 .ph-swipe.is-swiping > :not(.ph-swipe__under) { transition: none; }
-.ph-swipe__under { position: absolute; inset: 0 auto 0 0; display: flex; align-items: center; padding-left: 14px; color: var(--color-text-muted); opacity: var(--ph-swipe-reach, 0); pointer-events: none; }
+.ph-swipe__under { position: absolute; top: 0; bottom: 0; display: none; align-items: center; color: var(--color-text-muted); opacity: var(--ph-swipe-reach, 0); pointer-events: none; }
+.ph-swipe__under--right { left: 0; padding-left: 14px; }
+.ph-swipe__under--left { right: 0; padding-right: 14px; }
+.ph-swipe.is-right .ph-swipe__under--right, .ph-swipe.is-left .ph-swipe__under--left { display: flex; }
 .ph-swipe.is-armed .ph-swipe__under { color: var(--color-accent); }
+.ph-swipe.is-armed .ph-swipe__under--left svg { transform: scale(1.12); transition: transform 120ms var(--ph-ease); }
 :root[data-reduced-motion="true"] .ph-swipe > :not(.ph-swipe__under) { transform: none; transition: none; }
+:root[data-reduced-motion="true"] .ph-swipe.is-armed .ph-swipe__under--left svg { transform: none; }
 .ph-foot { margin: 16px 0 0; font-size: 13px; color: var(--color-text-muted); }
 .ph-album .ph-card { margin: 24px 0 0; }
 

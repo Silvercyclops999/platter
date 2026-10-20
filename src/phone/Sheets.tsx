@@ -15,12 +15,11 @@ import {
   Heart,
   HeartOff,
   ListEnd,
+  ListMinus,
   ListMusic,
   ListPlus,
   MicVocal,
   Moon,
-  Pause,
-  Play,
   Radio,
   Repeat,
   Repeat1,
@@ -34,7 +33,7 @@ import {
   UsersRound,
   type LucideIcon,
 } from "lucide-react";
-import { Fragment, memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Art } from "../components/Art";
 import { trackArtistLine } from "../lib/format";
 import { backend } from "../lib/backend";
@@ -52,7 +51,7 @@ import { retryDownload, toggleDownload, useDownloadItem, type DownloadTarget } f
 import { countText, phoneDownloadState } from "./PhoneDownload";
 import { useSettings } from "../stores/settings";
 import { openSongCredits } from "../stores/songCredits";
-import { countLine, PlayingBars } from "./pages/common";
+import { countLine, PlayingBars, SongRow } from "./pages/common";
 import { SORT_LABEL, useLibraryView, type LibSort } from "../stores/library";
 import { isLiked, setLiked } from "../stores/likes";
 import { player, usePlayer } from "../stores/player";
@@ -65,7 +64,11 @@ import { DeviceSheet } from "./DeviceSheet";
 import { SignalSheet } from "./SignalSheet";
 import { phone, usePhoneUi, type Sheet } from "./phoneUi";
 import { CUSTOM_MAX, CUSTOM_MIN, SLEEP_CHOICES, cancelSleep, sleepLabel, startSleep, useSleep } from "./sleepTimer";
-import { playingFrom } from "./NowPlaying";
+import { Dialog } from "../components/Dialog";
+import { RECENT_LIMIT } from "../shell/QueuePanel";
+import { PersonFace, addedBy } from "../shell/ListenStrip";
+import { useSocial } from "../stores/social";
+import { SwipeUnder, useRowSwipe } from "./rowSwipe";
 
 /** How long a closed sheet takes to slide away (0 drops it at once). */
 let sheetLeaveMs = import.meta.env?.MODE === "test" ? 0 : 260;
@@ -160,15 +163,146 @@ export function dropIndex(from: number, dy: number, count: number, rowPx = QUEUE
   return Math.max(0, Math.min(count - 1, from + Math.round(dy / rowPx)));
 }
 
+/** The queue sheet's two views, as on the computer. */
+type QueueTab = "queue" | "history";
+
+interface HandleDrag {
+  id: string;
+  from: number;
+  dy: number;
+}
+
+/**
+ * One queue row: cover, title, artist line, and the handle that drags it.
+ * A swipe left takes it out of the queue; in Edit a tap picks it. `i` is
+ * its place in play order (what a drag counts in).
+ */
+function QueueRow({
+  item,
+  i,
+  count,
+  editing,
+  picked,
+  drag,
+  onPick,
+  onHandleDown,
+  onHandleMove,
+  onHandleUp,
+  onHandleCancel,
+}: {
+  item: QueueItem;
+  i: number;
+  count: number;
+  editing: boolean;
+  picked: boolean;
+  drag: HandleDrag | null;
+  onPick: () => void;
+  onHandleDown: (e: ReactPointerEvent<HTMLElement>) => void;
+  onHandleMove: (e: ReactPointerEvent<HTMLElement>) => void;
+  onHandleUp: (e: ReactPointerEvent<HTMLElement>) => void;
+  onHandleCancel: () => void;
+}) {
+  const dragging = drag?.id === item.itemId;
+  // Swipe left: out of the queue, at once (as Remove from queue on the computer).
+  const swipe = useRowSwipe({ left: () => void player.queueRemove(item.itemId) }, !editing && !drag);
+  const t = item.track;
+  return (
+    <li
+      ref={swipe.ref}
+      className={`ph-queue__row ${swipe.className} ${dragging ? "is-dragging" : ""}`}
+      {...swipe.props}
+      style={{ ...swipe.props.style, ...(dragging ? { transform: `translateY(${drag!.dy}px)` } : {}) }}
+    >
+      <SwipeUnder right={false} left={<ListMinus size={22} />} />
+      <div className="ph-queue__line">
+        {editing && (
+          <button type="button" className={`ph-select ${picked ? "is-on" : ""}`} role="checkbox" aria-checked={picked} aria-label={`Select ${t.title}`} onClick={onPick}>
+            {picked && <Check size={14} aria-hidden="true" />}
+          </button>
+        )}
+        <button type="button" className="ph-queue__song" onClick={() => (editing ? onPick() : void player.queueJump(item.itemId))}>
+          <QueueSongText item={item} />
+        </button>
+        <AddedBy trackId={t.id} />
+        <span
+          className="ph-handle"
+          role="button"
+          tabIndex={0}
+          aria-label={`Move ${t.title}`}
+          data-testid={`handle-${item.itemId}`}
+          onPointerDown={(e) => {
+            // The handle drags up and down; it never starts the row's swipe.
+            e.stopPropagation();
+            onHandleDown(e);
+          }}
+          onPointerMove={onHandleMove}
+          onPointerUp={onHandleUp}
+          onPointerCancel={onHandleCancel}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowUp" && i > 0) void player.queueMove(item.itemId, i - 1);
+            if (e.key === "ArrowDown" && i < count - 1) void player.queueMove(item.itemId, i + 1);
+          }}
+        >
+          <GripVertical size={20} aria-hidden="true" />
+        </span>
+      </div>
+    </li>
+  );
+}
+
+/** A queue row's cover, title and artist line, with the sparkle on a smart shuffle pick. */
+function QueueSongText({ item, current = false }: { item: QueueItem; current?: boolean }) {
+  const t = item.track;
+  return (
+    <>
+      <Art path={t.thumb} size={48} sleeve={{ title: t.albumTitle, artist: t.artistTitle }} />
+      <span className="ph-row__text">
+        <span className={`ph-row__title ${current ? "is-playing" : ""}`}>
+          {current && <PlayingBars />}
+          {t.title}
+        </span>
+        <span className="ph-row__sub">
+          {item.source === "smart" && (
+            <span className="ph-queue__smart" title="Smart shuffle suggestion" aria-label="Smart shuffle suggestion" role="img">
+              <Sparkles size={12} />
+            </span>
+          )}
+          {trackArtistLine(t)}
+        </span>
+      </span>
+    </>
+  );
+}
+
+/** Listening along: the face of whoever added this song. */
+function AddedBy({ trackId, current = false }: { trackId: string; current?: boolean }) {
+  const by = useSocial((s) => addedBy(s.listen, trackId, current));
+  if (!by) return null;
+  return (
+    <span className="ph-queue__by" title={`Added by ${by.name}`} aria-label={`Added by ${by.name}`} role="img">
+      <PersonFace person={by} size={22} />
+    </span>
+  );
+}
+
+/**
+ * The queue, laid out as the computer's queue panel: Queue and Recently
+ * played; Now playing, then Next in queue (what you added, with Clear
+ * queue), then Next from the album or playlist. Rows drag by their handle
+ * and swipe left out of the queue; Edit picks several to move up or remove.
+ * Shuffle, repeat and the sleep timer sit at the foot, in thumb reach.
+ */
 export function QueueSheet() {
   const q = usePlayer((s) => s.state?.queue ?? null);
   const status = usePlayer((s) => s.state?.status ?? "idle");
   const shuffle = usePlayer((s) => !!s.state?.shuffle);
   const repeat = usePlayer((s) => s.state?.repeat ?? "off");
   const timer = useSleep((s) => s.timer);
+  const [tab, setTab] = useState<QueueTab>("queue");
   const [editing, setEditing] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [drag, setDrag] = useState<{ id: string; from: number; dy: number } | null>(null);
+  const [drag, setDrag] = useState<HandleDrag | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
   const start = useRef<{ y: number; pointer: number } | null>(null);
   const upcoming = useMemo(() => (q ? [...q.userQueue, ...q.nextUp] : []), [q]);
   const current = q?.current ?? null;
@@ -180,6 +314,14 @@ export function QueueSheet() {
     const t = setInterval(() => tick((n) => n + 1), 15_000);
     return () => clearInterval(t);
   }, [timer]);
+  // Nothing left to edit: Edit ends by itself.
+  const canEdit = tab === "queue" && upcoming.length > 0;
+  useEffect(() => {
+    if (!canEdit && editing) {
+      setEditing(false);
+      setPicked(new Set());
+    }
+  }, [canEdit, editing]);
 
   const toggle = (id: string) =>
     setPicked((p) => {
@@ -199,105 +341,69 @@ export function QueueSheet() {
     setPicked(new Set());
   };
 
-  const onHandleDown = (e: ReactPointerEvent<HTMLElement>, item: QueueItem, from: number) => {
-    e.preventDefault();
-    e.currentTarget.setPointerCapture?.(e.pointerId);
-    start.current = { y: e.clientY, pointer: e.pointerId };
-    setDrag({ id: item.itemId, from, dy: 0 });
-  };
-  const onHandleMove = (e: ReactPointerEvent<HTMLElement>) => {
-    if (!drag || start.current?.pointer !== e.pointerId) return;
-    setDrag({ ...drag, dy: e.clientY - start.current.y });
-  };
-  const onHandleUp = (e: ReactPointerEvent<HTMLElement>) => {
-    if (!drag || start.current?.pointer !== e.pointerId) return;
-    const to = dropIndex(drag.from, e.clientY - start.current.y, upcoming.length);
-    start.current = null;
-    setDrag(null);
-    if (to !== drag.from) {
-      tap("selection");
-      void player.queueMove(drag.id, to);
-    }
-  };
+  const handle = (item: QueueItem, from: number) => ({
+    onHandleDown: (e: ReactPointerEvent<HTMLElement>) => {
+      e.preventDefault();
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+      start.current = { y: e.clientY, pointer: e.pointerId };
+      setDrag({ id: item.itemId, from, dy: 0 });
+    },
+    onHandleMove: (e: ReactPointerEvent<HTMLElement>) => {
+      if (!drag || start.current?.pointer !== e.pointerId) return;
+      setDrag({ ...drag, dy: e.clientY - start.current.y });
+    },
+    onHandleUp: (e: ReactPointerEvent<HTMLElement>) => {
+      if (!drag || start.current?.pointer !== e.pointerId) return;
+      const to = dropIndex(drag.from, e.clientY - start.current.y, upcoming.length);
+      start.current = null;
+      setDrag(null);
+      if (to !== drag.from) {
+        tap("selection");
+        void player.queueMove(drag.id, to);
+      }
+    },
+    onHandleCancel: () => {
+      start.current = null;
+      setDrag(null);
+    },
+  });
+  const row = (item: QueueItem, i: number) => (
+    <QueueRow
+      key={item.itemId}
+      item={item}
+      i={i}
+      count={upcoming.length}
+      editing={editing}
+      picked={picked.has(item.itemId)}
+      drag={drag}
+      onPick={() => toggle(item.itemId)}
+      {...handle(item, i)}
+    />
+  );
 
-  // What the context is called: "Next from: <album>" (desktop's words).
+  // What the context is called: "Next from: <album>" (the computer's words).
   const ctxTitle = q?.context?.title || (q?.context?.kind === "liked" ? "Liked Songs" : null);
-  /** One upcoming row; `i` is its place in play order (what a drag counts in). */
-  const row = (item: QueueItem, i: number) => {
-    const on = picked.has(item.itemId);
-    const dragging = drag?.id === item.itemId;
-    const autoplayStarts = item.source === "autoplay" && upcoming[i - 1]?.source !== "autoplay";
-    return (
-      <Fragment key={item.itemId}>
-        {autoplayStarts && (
-          <li className="ph-queue__next" role="presentation">
-            Autoplay: chosen to follow
-          </li>
-        )}
-        <li className={`ph-queue__row ${dragging ? "is-dragging" : ""}`} style={dragging ? { transform: `translateY(${drag!.dy}px)` } : undefined}>
-          {editing && (
-            <button
-              type="button"
-              className={`ph-select ${on ? "is-on" : ""}`}
-              role="checkbox"
-              aria-checked={on}
-              aria-label={`Select ${item.track.title}`}
-              onClick={() => toggle(item.itemId)}
-            >
-              {on && <Check size={14} aria-hidden="true" />}
-            </button>
-          )}
-          <button type="button" className="ph-queue__song" onClick={() => (editing ? toggle(item.itemId) : void player.queueJump(item.itemId))}>
-            <Art path={item.track.thumb} size={44} sleeve={{ title: item.track.albumTitle, artist: item.track.artistTitle }} />
-            <span className="ph-row__text">
-              <span className="ph-row__title">{item.track.title}</span>
-              <span className="ph-row__sub">{trackArtistLine(item.track)}</span>
-            </span>
-          </button>
-          <span
-            className="ph-handle"
-            role="button"
-            tabIndex={0}
-            aria-label={`Move ${item.track.title}`}
-            data-testid={`handle-${item.itemId}`}
-            onPointerDown={(e) => onHandleDown(e, item, i)}
-            onPointerMove={onHandleMove}
-            onPointerUp={onHandleUp}
-            onPointerCancel={() => {
-              start.current = null;
-              setDrag(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowUp" && i > 0) void player.queueMove(item.itemId, i - 1);
-              if (e.key === "ArrowDown" && i < upcoming.length - 1) void player.queueMove(item.itemId, i + 1);
-            }}
-          >
-            <GripVertical size={20} aria-hidden="true" />
-          </span>
-        </li>
-      </Fragment>
-    );
-  };
-
   const RepeatIcon = repeat === "one" ? Repeat1 : Repeat;
   return (
     <SheetFrame
       title={editing ? "Edit queue" : "Queue"}
-      subtitle={editing ? `${picked.size} selected` : `Playing from ${playingFrom(q?.context, current?.source)}`}
+      subtitle={editing ? `${picked.size} selected` : undefined}
       onClose={phone.pop}
       tall
       className="ph-queue"
       action={
-        <button
-          type="button"
-          className="ph-text-btn"
-          onClick={() => {
-            setEditing(!editing);
-            setPicked(new Set());
-          }}
-        >
-          {editing ? "Done" : "Edit"}
-        </button>
+        canEdit ? (
+          <button
+            type="button"
+            className="ph-text-btn"
+            onClick={() => {
+              setEditing(!editing);
+              setPicked(new Set());
+            }}
+          >
+            {editing ? "Done" : "Edit"}
+          </button>
+        ) : undefined
       }
       footer={
         editing ? (
@@ -327,51 +433,145 @@ export function QueueSheet() {
         )
       }
     >
-      {current && (
-        <div className="ph-queue__now">
-          <Art path={current.track.thumb} size={48} sleeve={{ title: current.track.albumTitle, artist: current.track.artistTitle }} />
-          <span className="ph-row__text">
-            <span className="ph-row__title is-playing">
-              <PlayingBars />
-              {current.track.title}
-            </span>
-            <span className="ph-row__sub">{trackArtistLine(current.track)}</span>
-          </span>
-          <button type="button" className="ph-play ph-play--row" aria-label={playing ? "Pause" : "Play"} onClick={() => void player.toggle()}>
-            {playing ? <Pause size={20} fill="currentColor" aria-hidden="true" /> : <Play size={20} fill="currentColor" aria-hidden="true" />}
-          </button>
+      {!editing && (
+        <div className="ph-seg ph-queue__tabs" role="tablist" aria-label="Queue views">
+          {(
+            [
+              ["queue", "Queue"],
+              ["history", "Recently played"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              id={`ph-queue-tab-${id}`}
+              aria-selected={tab === id}
+              aria-controls="ph-queue-panel"
+              className={`ph-seg__tab ${tab === id ? "is-on" : ""}`}
+              onClick={() => (tap("selection"), setTab(id))}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       )}
-      {q && q.userQueue.length > 0 && (
-        <section aria-labelledby="ph-q-user">
-          <h3 id="ph-q-user" className="ph-queue__next">
-            Next in queue
-          </h3>
-          <ul className="ph-queue__list">
-            {q.userQueue.map((item, k) => row(item, k))}
-          </ul>
-        </section>
-      )}
-      {q && q.nextUp.length > 0 && (
-        <section aria-labelledby="ph-q-next">
-          <h3 id="ph-q-next" className="ph-queue__next">
-            {ctxTitle ? (
-              <>
-                Next from: <span className="ph-queue__ctx">{ctxTitle}</span>
-              </>
-            ) : (
-              "Next up"
+      <div id="ph-queue-panel" role="tabpanel" aria-labelledby={`ph-queue-tab-${tab}`}>
+        {tab === "queue" ? (
+          <>
+            <section aria-labelledby="ph-q-now">
+              <h3 id="ph-q-now" className="ph-queue__title">
+                Now playing
+              </h3>
+              {current ? (
+                <ul className="ph-queue__list">
+                  <li className="ph-queue__row is-current">
+                    <div className="ph-queue__line">
+                      <button
+                        type="button"
+                        className="ph-queue__song"
+                        aria-label={`${playing ? "Pause" : "Play"} ${current.track.title}`}
+                        onClick={() => (tap("selection"), void player.toggle())}
+                      >
+                        <QueueSongText item={current} current />
+                      </button>
+                      <AddedBy trackId={current.track.id} current />
+                    </div>
+                  </li>
+                </ul>
+              ) : (
+                <p className="ph-queue__empty">Nothing playing</p>
+              )}
+            </section>
+            {q && q.userQueue.length > 0 && (
+              <section aria-labelledby="ph-q-user">
+                <div className="ph-queue__head">
+                  <h3 id="ph-q-user" className="ph-queue__title">
+                    Next in queue
+                  </h3>
+                  {!editing && (
+                    <button type="button" className="ph-queue__action" onClick={() => setConfirmClear(true)}>
+                      Clear queue
+                    </button>
+                  )}
+                </div>
+                <ul className="ph-queue__list">{q.userQueue.map((item, k) => row(item, k))}</ul>
+              </section>
             )}
-          </h3>
-          <ul className="ph-queue__list">
-            {q.nextUp.map((item, k) => row(item, q.userQueue.length + k))}
-          </ul>
-        </section>
-      )}
-      {!current && !upcoming.length && <p className="ph-rows__note">Nothing is queued. Play something and it shows here.</p>}
+            {/* No placeholder: with nothing left in the context the section just isn't there. */}
+            {q && q.nextUp.length > 0 && (
+              <section aria-labelledby="ph-q-next">
+                <h3 id="ph-q-next" className="ph-queue__title">
+                  {ctxTitle ? (
+                    <>
+                      Next from: <span className="ph-queue__ctx">{ctxTitle}</span>
+                    </>
+                  ) : (
+                    "Next up"
+                  )}
+                </h3>
+                <ul className="ph-queue__list">{q.nextUp.map((item, k) => row(item, q.userQueue.length + k))}</ul>
+              </section>
+            )}
+          </>
+        ) : (
+          <RecentlyPlayed />
+        )}
+      </div>
+      <Dialog open={confirmClear} onClose={() => setConfirmClear(false)} label="Clear your queue?" className="confirm">
+        <h2 className="confirm__title">Clear your queue?</h2>
+        <p className="confirm__body">This removes the songs you added to your queue. You can't undo it.</p>
+        <div className="confirm__actions">
+          <button type="button" className="ph-pill" onClick={() => setConfirmClear(false)}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="ph-pill is-primary"
+            onClick={() => {
+              setConfirmClear(false);
+              tap("selection");
+              void player.queueClear();
+            }}
+          >
+            Clear queue
+          </button>
+        </div>
+      </Dialog>
     </SheetFrame>
   );
 }
+
+/**
+ * Recently played: songs played on this device, newest first (a song
+ * played twice shows twice). Loaded when the tab opens and again when the
+ * song changes. A tap plays the list from that song.
+ */
+function RecentlyPlayed() {
+  const trackId = usePlayer((s) => s.state?.track?.id);
+  const [tracks, setTracks] = useState<Track[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    backend.recentTracks(RECENT_LIMIT).then(
+      (t) => alive && setTracks(t),
+      () => alive && setTracks((cur) => cur ?? []),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [trackId]);
+  if (!tracks) return null;
+  if (!tracks.length) return <p className="ph-queue__empty">Songs you play will show up here.</p>;
+  const ids = tracks.map((t) => t.id);
+  return (
+    <ul className="ph-songs ph-queue__recent" aria-label="Recently played">
+      {tracks.map((t, i) => (
+        <SongRow key={`${i}:${t.id}`} track={t} onPlay={() => (t.id === trackId ? void player.toggle() : void player.playTracks(ids, t.id))} />
+      ))}
+    </ul>
+  );
+}
+
 
 // ---------------------------------------------------------------- sleep timer
 

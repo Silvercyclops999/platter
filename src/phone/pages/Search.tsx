@@ -14,7 +14,8 @@ import { useLoad } from "../../lib/useLoad";
 import { nav, useRouter } from "../../stores/router";
 import { phone } from "../phoneUi";
 import { RowGlyphs, tap } from "../bits";
-import { SwipeUnder, useSwipeToQueue } from "../rowSwipe";
+import { SongSwipeUnder, useRowSwipe } from "../rowSwipe";
+import { isLiked, setLiked } from "../../stores/likes";
 import { player, usePlayer } from "../../stores/player";
 import { PlayingBars } from "./common";
 
@@ -230,14 +231,26 @@ function HitRow({
   versions?: number;
 }) {
   const i = hitInfo(hit);
-  // A song swipes right into the queue.
-  const swipe = useSwipeToQueue(() => hit.track && void player.addToQueue([hit.track]), !!hit.track);
+  // A song swipes right into the queue, and left into (or out of) Liked Songs.
+  const song = hit.track;
+  const swipe = useRowSwipe(
+    song
+      ? {
+          right: () => void player.addToQueue([song]),
+          left: () => void setLiked([song], !isLiked(song.id)),
+        }
+      : {},
+  );
   // The playing song wears the level bars.
   const playing = usePlayer((s) => !!hit.track && s.state?.track?.id === hit.track.id);
   if (!i) return null;
   return (
-    <li className={`ph-hit ${hit.track ? swipe.className : ""} ${top ? "is-top" : ""} ${versions > 0 ? "has-versions" : ""}`} {...(hit.track ? swipe.props : {})}>
-      {hit.track && <SwipeUnder />}
+    <li
+      ref={song ? swipe.ref : undefined}
+      className={`ph-hit ${song ? swipe.className : ""} ${top ? "is-top" : ""} ${versions > 0 ? "has-versions" : ""}`}
+      {...(song ? swipe.props : {})}
+    >
+      {song && <SongSwipeUnder trackId={song.id} />}
       <button type="button" className="ph-row" onClick={onOpen}>
         <Art path={i.thumb} size={52} round={i.round} kind={i.kind === "track" ? "album" : i.kind} monogram={i.round ? i.title : undefined} />
         <span className="ph-row__text">

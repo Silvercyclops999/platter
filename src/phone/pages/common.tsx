@@ -10,11 +10,11 @@ import { RowGlyphs } from "../bits";
 import { trackArtistLine } from "../../lib/format";
 import type { HomeItem, Track } from "../../lib/types";
 import { useCanGoBack, useRouter, type Route } from "../../stores/router";
-import { player, usePlayer } from "../../stores/player";
+import { usePlayer } from "../../stores/player";
 import { isUnavailable, useApp, type AppStore } from "../../stores/app";
 import { useIsDownloaded } from "../../stores/downloads";
 import { phone, type InPlaylist } from "../phoneUi";
-import { SwipeUnder, useSwipeToQueue } from "../rowSwipe";
+import { SongSwipeUnder, useSongSwipe } from "../rowSwipe";
 
 /**
  * The bar over a page that was opened from another: Back, and once the page
@@ -96,11 +96,11 @@ export function SongRow({
   const here = useIsDownloaded(track.id);
   // Dimmed only when it really can't play: see `songCantPlay`.
   const unplayable = useApp((s) => songCantPlay(track.id, s, { playing, downloaded: here }));
-  // Swipe right: into the queue.
-  const swipe = useSwipeToQueue(() => void player.addToQueue([track]), !unplayable);
+  // Swipe right: into the queue (not a song that can't play). Swipe left: like it, or unlike it.
+  const swipe = useSongSwipe(track, { queue: !unplayable });
   return (
-    <li className={`ph-song ${swipe.className} ${unplayable ? "is-unplayable" : ""}`} aria-disabled={unplayable || undefined} {...swipe.props}>
-      <SwipeUnder />
+    <li ref={swipe.ref} className={`ph-song ${swipe.className} ${unplayable ? "is-unplayable" : ""}`} aria-disabled={unplayable || undefined} {...swipe.props}>
+      <SongSwipeUnder trackId={track.id} queue={!unplayable} />
       <button type="button" className="ph-song__main" onClick={onPlay} aria-current={playing ? "true" : undefined}>
         {index !== undefined && (
           <span className={`ph-song__num tabular ${playing ? "is-playing" : ""}`}>{playing ? <PlayingBars /> : index}</span>

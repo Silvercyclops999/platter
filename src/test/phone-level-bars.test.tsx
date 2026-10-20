@@ -87,7 +87,7 @@ describe("the playing song's row", () => {
     render(<PhoneShell />);
     act(() => phone.push({ kind: "queue" }));
     const queue = await screen.findByRole("dialog", { name: "Queue" });
-    expect(bars(queue.querySelector<HTMLElement>(".ph-queue__now")!)).toHaveLength(1);
+    expect(bars(within(queue).getByRole("region", { name: "Now playing" }))).toHaveLength(1);
     expect(bars(within(queue).getByRole("region", { name: `Next from: ${t.albumTitle}` }))).toHaveLength(0);
   });
 
