@@ -462,8 +462,12 @@ pub fn tab_rows(tab: Tab, reach: Reach, rows: impl FnOnce() -> Vec<CarItem>) -> 
     }
 }
 
+pub mod siri;
+
 #[cfg(target_os = "ios")]
 pub mod ios;
+#[cfg(target_os = "ios")]
+pub mod siri_ios;
 
 #[cfg(test)]
 mod tests;

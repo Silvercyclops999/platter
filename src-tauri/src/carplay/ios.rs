@@ -168,6 +168,8 @@ pub fn install() {
 pub fn attach(app: &AppHandle<Wry>) {
     let _ = APP.set(app.clone());
     let _ = app.run_on_main_thread(show_tabs);
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || super::siri_ios::install(&a));
     // Signing in or out, or the server coming and going, changes what the
     // tabs can show.
     for event in [crate::plex::types::EVENT_AUTH_CHANGED, crate::plex::types::EVENT_HEALTH_CHANGED] {
