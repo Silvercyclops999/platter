@@ -27,7 +27,7 @@ use objc2_foundation::{NSArray, NSData, NSObject, NSObjectProtocol, NSString};
 use objc2_ui_kit::UISceneDelegate;
 use tauri::{AppHandle, Listener, Manager, Wry};
 
-use super::{CarAction, CarItem, CarList, CarRow, CarSection, Reach, Tab};
+use super::{CarAction, CarItem, CarList, CarRow, CarSection, NowKey, Reach, Tab};
 use crate::audio::player::PlayerHandle;
 use crate::audio::queue::Repeat;
 use crate::backend::Backends;
@@ -192,21 +192,76 @@ pub fn attach(app: &AppHandle<Wry>) {
     });
 }
 
-/// The parts of the player's state the buttons show.
+/// The parts of the player's state the buttons and the playing marks show.
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Brief {
     track: Option<BriefTrack>,
     shuffle: bool,
     repeat: Repeat,
+    #[serde(default)]
+    queue: BriefQueue,
 }
 
 #[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct BriefTrack {
     id: String,
+    #[serde(default)]
+    album_id: String,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct BriefQueue {
+    #[serde(default)]
+    context: Option<BriefContext>,
+}
+
+#[derive(serde::Deserialize)]
+struct BriefContext {
+    kind: crate::audio::source::ContextKind,
+    id: Option<String>,
+}
+
+/// Rows on the car's screen that could be playing, to mark as it changes.
+/// Capped: lists opened long ago drop off the front.
+const MARKED_MAX: usize = 800;
+
+thread_local! {
+    static MARKABLE: RefCell<std::collections::VecDeque<(Retained<CPListItem>, CarItem)>> =
+        const { RefCell::new(std::collections::VecDeque::new()) };
+    static NOW_KEY: RefCell<NowKey> = RefCell::new(NowKey::default());
+}
+
+/// Marks every row on screen that plays what's playing now (main thread).
+fn mark_rows() {
+    NOW_KEY.with(|k| {
+        let now = k.borrow();
+        MARKABLE.with(|m| {
+            for (row, item) in m.borrow().iter() {
+                // SAFETY: a setter on our own row, on the main thread.
+                unsafe { row.setPlaying(super::is_playing(item, &now)) };
+            }
+        });
+    });
 }
 
 fn playing_changed(app: &AppHandle<Wry>, s: Brief) {
+    let key = NowKey {
+        context: s.queue.context.and_then(|c| Some((c.kind, c.id?))),
+        album_id: s.track.as_ref().map(|t| t.album_id.clone()).filter(|a| !a.is_empty()),
+    };
+    let _ = app.run_on_main_thread(move || {
+        let changed = NOW_KEY.with(|k| {
+            let mut k = k.borrow_mut();
+            let changed = *k != key;
+            *k = key;
+            changed
+        });
+        if changed {
+            mark_rows();
+        }
+    });
     let track = s.track.map(|t| t.id);
     let new_track = {
         let mut shown = SHOWN.lock();
@@ -269,8 +324,9 @@ fn show_tabs() {
     };
     let reach = APP.get().map(reach).unwrap_or(Reach::Online);
     REACH.with(|r| r.set(APP.get().map(|_| reach)));
-    // The old tabs' rows of covers are gone with them.
+    // The old tabs' rows are gone with them.
     COVER_ROWS.with(|m| m.borrow_mut().clear());
+    MARKABLE.with(|m| m.borrow_mut().clear());
     // Home keeps its sections and its row of covers; a message (signed
     // out, out of reach) is a single plain section.
     let home_sections = match reach {
@@ -639,6 +695,17 @@ fn row(mtm: MainThreadMarker, item: &CarItem) -> Retained<CPListItem> {
     }
     let action = item.action.clone();
     let opens = matches!(action, CarAction::Open(_));
+    if matches!(action, CarAction::Play(_) | CarAction::Shuffle(_)) {
+        // SAFETY: a setter on our own row, on the main thread.
+        unsafe { r.setPlaying(NOW_KEY.with(|k| super::is_playing(item, &k.borrow()))) };
+        MARKABLE.with(|m| {
+            let mut m = m.borrow_mut();
+            if m.len() >= MARKED_MAX {
+                m.pop_front();
+            }
+            m.push_back((r.clone(), item.clone()));
+        });
+    }
     if action == CarAction::Info {
         return r;
     }

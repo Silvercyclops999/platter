@@ -211,3 +211,20 @@ fn repeat_button_cycles_off_all_one() {
     assert_eq!(next_repeat(Repeat::All), Repeat::One);
     assert_eq!(next_repeat(Repeat::One), Repeat::Off);
 }
+
+#[test]
+fn rows_playing_what_plays_now_are_marked() {
+    let album = |id: &str| CarItem { title: "A".into(), subtitle: None, thumb: None, action: play(ContextKind::Album, id) };
+    let playlist = CarItem { title: "P".into(), subtitle: None, thumb: None, action: play(ContextKind::Playlist, "p1") };
+    let now = NowKey { context: Some((ContextKind::Playlist, "p1".into())), album_id: Some("al9".into()) };
+    assert!(is_playing(&playlist, &now), "the playing playlist");
+    assert!(is_playing(&album("al9"), &now), "the album the playing song is on");
+    assert!(!is_playing(&album("al1"), &now));
+    // The same id under another kind isn't it.
+    let mix = CarItem { title: "M".into(), subtitle: None, thumb: None, action: play(ContextKind::Mix, "p1") };
+    assert!(!is_playing(&mix, &now));
+    // Lists to open, and nothing playing, mark nothing.
+    assert!(!is_playing(&open(CarList::Albums), &now));
+    assert!(!is_playing(&playlist, &NowKey::default()));
+}
+

@@ -356,6 +356,29 @@ fn home_item(h: HomeItem) -> CarItem {
     }
 }
 
+/// What's playing, as far as marking rows goes.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct NowKey {
+    /// The context the queue plays (album, playlist, mix...), with its id.
+    pub context: Option<(ContextKind, String)>,
+    /// The playing song's album.
+    pub album_id: Option<String>,
+}
+
+/// Whether a row plays what's playing now, to show it as playing: the same
+/// album, playlist, mix or Liked songs, or the album the playing song is on.
+pub fn is_playing(item: &CarItem, now: &NowKey) -> bool {
+    let (CarAction::Play(ctx) | CarAction::Shuffle(ctx)) = &item.action else { return false };
+    let Some(id) = &ctx.id else { return false };
+    if ctx.track_ids.is_some() {
+        return false;
+    }
+    if now.context.as_ref().is_some_and(|(k, cid)| *k == ctx.kind && cid == id) {
+        return true;
+    }
+    ctx.kind == ContextKind::Album && now.album_id.as_deref() == Some(id.as_str())
+}
+
 /// Up next on the car: the songs queued by hand, then the rest of what's
 /// playing, at most [`LIST_MAX`]. Picking one plays it.
 pub fn up_next(q: &QueueView) -> Vec<CarItem> {
