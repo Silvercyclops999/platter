@@ -301,6 +301,7 @@ fn playing_changed(app: &AppHandle<Wry>, s: Brief) {
     let key = NowKey {
         context: s.queue.context.and_then(|c| Some((c.kind, c.id?))),
         album_id: s.track.as_ref().map(|t| t.album_id.clone()).filter(|a| !a.is_empty()),
+        track_id: s.track.as_ref().map(|t| t.id.clone()),
     };
     let _ = app.run_on_main_thread(move || {
         let changed = NOW_KEY.with(|k| {
@@ -857,7 +858,10 @@ fn row(mtm: MainThreadMarker, item: &CarItem) -> Retained<CPListItem> {
     }
     let action = item.action.clone();
     let opens = matches!(action, CarAction::Open(_));
-    if matches!(action, CarAction::Play(_) | CarAction::Shuffle(_)) {
+    if matches!(
+        action,
+        CarAction::Play(_) | CarAction::Shuffle(_) | CarAction::Open(CarList::Songs { .. }) | CarAction::PlayFrom { .. }
+    ) {
         // SAFETY: a setter on our own row, on the main thread.
         unsafe { r.setPlaying(NOW_KEY.with(|k| super::is_playing(item, &k.borrow()))) };
         MARKABLE.with(|m| {
@@ -1002,16 +1006,19 @@ fn picked(action: &CarAction) {
             });
             show_now_playing();
         }
-        CarAction::Play(ctx) | CarAction::Shuffle(ctx) | CarAction::PlayFrom(ctx, _) => {
+        CarAction::Play(ctx)
+        | CarAction::Shuffle(ctx)
+        | CarAction::PlayFrom { context: ctx, .. }
+        | CarAction::Start { context: ctx, .. } => {
             let player = app.state::<PlayerHandle>().inner().clone();
             let ctx = ctx.clone();
-            let shuffle = matches!(action, CarAction::Shuffle(_)).then_some(true);
-            let start = match action {
-                CarAction::PlayFrom(_, track) => Some(track.clone()),
-                _ => None,
+            let shuffle = matches!(action, CarAction::Shuffle(_) | CarAction::Start { shuffle: true, .. }).then_some(true);
+            let (start, index) = match action {
+                CarAction::PlayFrom { track_id, index, .. } => (Some(track_id.clone()), Some(*index)),
+                _ => (None, None),
             };
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = player.play_context_from(ctx, start, None, shuffle).await {
+                if let Err(e) = player.play_context_from(ctx, start, index, shuffle).await {
                     tracing::warn!("CarPlay play failed: {e}");
                 }
             });
