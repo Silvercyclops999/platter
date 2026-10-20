@@ -21,6 +21,7 @@ import type {
   MissingSong,
 } from "../importTypes";
 import type { Track } from "../types";
+import { BRING_LINKS } from "../importStrings";
 import type { Fixtures } from "./fixtures";
 
 interface Song {
@@ -470,6 +471,7 @@ export class MockImport {
 export function importLinkAllowed(url: string): boolean {
   try {
     const u = new URL(url);
+    if (BRING_LINKS.includes(url)) return true;
     return u.protocol === "https:" && ["bandcamp.com", "www.qobuz.com", "music.apple.com"].includes(u.hostname) && !u.port;
   } catch {
     return false;

@@ -1,4 +1,4 @@
-import { Blend, ChevronLeft, Folder, ListMusic, Maximize2, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
+import { Blend, ChevronLeft, Download, Folder, ListMusic, Maximize2, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
 import { useState, type MouseEvent } from "react";
 import { IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
@@ -18,7 +18,7 @@ import { StatusDot } from "./StatusDot";
 import "./library-create.css";
 import { useLibraryLoader, useLibraryModel, useLibraryRecents } from "./useLibrary";
 
-/** The Create menu: a playlist or a folder (inside the open folder, if any). */
+/** The Create menu: a playlist or a folder (inside the open folder, if any), and the way to bring music over. */
 export function createMenu(folderId: string | null): MenuItem[] {
   return [
     { label: "Playlist", icon: ListMusic, onSelect: () => void createPlaylistIn(folderId) },
@@ -27,6 +27,12 @@ export function createMenu(folderId: string | null): MenuItem[] {
       ? []
       : [{ label: "Blend", icon: Blend, description: "Combine friends' tastes into a playlist", onSelect: () => nav.go({ name: "blendNew" }) }]),
     { label: "Folder", icon: Folder, onSelect: () => void folders.create(folderId) },
+    {
+      label: "Bring in music from another app",
+      icon: Download,
+      description: "Your likes and playlists, and the albums you're missing",
+      onSelect: () => nav.go({ name: "bring" }),
+    },
   ];
 }
 

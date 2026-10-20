@@ -1,7 +1,7 @@
 /** Library import (docs/IPC.md, import_* commands). */
 import type { LidarrRequestState, PlayedPeriod, Track } from "./types";
 
-export type ImportSourceId = "streaming" | "streaming-account" | "transfer" | "lists";
+export type ImportSourceId = "streaming" | "streaming-account" | "transfer" | "lists" | "apple";
 
 export interface ImportSkipped {
   /** Plays marked private. */
@@ -191,4 +191,73 @@ export interface PlayedHidden {
   name: string;
   /** Unix seconds. */
   hiddenAt: number;
+}
+
+// ------------------------------------------------------------------ bringing music over (bring_* commands)
+
+export interface BringCounts {
+  total: number;
+  found: number;
+}
+
+/** What the files brought, against the library. */
+export interface BringSummary {
+  sources: ImportSourceId[];
+  liked: BringCounts;
+  /** Every song the likes and playlists name, once each. */
+  songs: BringCounts;
+  playlists: number;
+  missingSongs: number;
+  /** Albums to get. */
+  missingAlbums: number;
+  /** Songs waiting in the review queue. */
+  unsure: number;
+  /** "812 of 900 liked songs are already in your library. 88 songs from 31 albums aren't." */
+  sentence: string;
+}
+
+/** A playlist brought over. */
+export interface BroughtList {
+  name: string;
+  /** The imported list ("pl:<n>"), whose page shows the greyed rows. */
+  importId: string;
+  /** The server playlist it became; null until a song of it is found. */
+  playlistId: string | null;
+  /** The user deleted it: it isn't filled any more. */
+  gone: boolean;
+  total: number;
+  found: number;
+}
+
+export type BringAlbumState = "missing" | "picking" | "asked" | "notFound" | "here";
+
+export interface BringAlbum {
+  key: string;
+  artist: string;
+  album: string;
+  songs: number;
+  liked: number;
+  state: BringAlbumState;
+  /** Why it couldn't be found ("Lidarr couldn't find it. ..."). */
+  reason: string | null;
+  releaseGroupId: string | null;
+}
+
+/** "31 albums on the way, 4 here so far". */
+export interface BringProgress {
+  toGet: number;
+  /** Asked for, those here included. */
+  onTheWay: number;
+  here: number;
+  notFound: number;
+}
+
+export interface BringStatus {
+  summary: BringSummary;
+  lists: BroughtList[];
+  albums: BringAlbum[];
+  progress: BringProgress;
+  lidarr: { ready: boolean; practiceUntil: number | null };
+  /** What went to the server the last time anything was sent. */
+  sent: { liked: number; playlistsMade: number; songsAdded: number };
 }

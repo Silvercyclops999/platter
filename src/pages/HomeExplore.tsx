@@ -1,6 +1,7 @@
 /**
  * Explore at the foot of Home: the ways into the library that aren't shelves
- * (Crates, Sound map). Each can be pinned to Your Library.
+ * (Crates, Sound map). Each can be pinned to Your Library. Until anything has
+ * been imported, bringing music over from another app leads the list.
  */
 import { Pin, PinOff } from "lucide-react";
 import { useId } from "react";
@@ -18,8 +19,9 @@ export function HomeExplore() {
   const soundMapOn = useSoundMapEntry();
   const pinned = usePinnedPages((s) => s.pages);
   const toggle = usePinnedPages((s) => s.toggle);
+  const firstImport = useSettings((s) => !!s.settings && s.settings.importSources.length === 0);
   const pages: PinnablePage[] = [...(cratesOn ? (["crates"] as const) : []), ...(soundMapOn ? (["soundMap"] as const) : [])];
-  if (!pages.length) return null;
+  if (!pages.length && !firstImport) return null;
   return (
     <section className="shelf home-explore" aria-labelledby={id}>
       <div className="shelf__head">
@@ -28,6 +30,15 @@ export function HomeExplore() {
         </h2>
       </div>
       <ul className="home-explore__list">
+        {firstImport && (
+          <li className="home-explore__tile">
+            <LikedCover size={64} icon="bring" className="home-explore__icon" />
+            <button type="button" className="home-explore__open" onClick={() => nav.go({ name: "bring" })}>
+              <span className="home-explore__title">Bring in music from another app</span>
+              <span className="home-explore__sub">Your likes and playlists, and the albums you're missing</span>
+            </button>
+          </li>
+        )}
         {pages.map((p) => {
           const on = pinned.includes(p);
           const { title, sub } = PINNABLE[p];

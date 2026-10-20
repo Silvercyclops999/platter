@@ -88,6 +88,7 @@ const SAMPLES = `async (m) => {
     profile: { name: "profile" },
     topSongs: { name: "topSongs" },
     import: { name: "import" },
+    bring: { name: "bring" },
     doctor: { name: "doctor" },
     devices: { name: "devices" },
     soundMap: { name: "soundMap" },

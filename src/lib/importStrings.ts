@@ -47,7 +47,62 @@ export const IMPORT_SOURCES: ImportSourceText[] = [
     name: "CSV or M3U list",
     help: "Pick any CSV or M3U with at least artist and title columns.",
   },
+  {
+    id: "apple",
+    name: "Apple Music",
+    help: "In the Music app on a Mac or iTunes on Windows, choose File > Library > Export Library, then pick the XML file it saves. Loved songs come in as liked songs, with your own playlists.",
+    short: "Export your library from the Music app (File > Library > Export Library), then pick the XML file.",
+  },
 ];
+
+/** Bring music over, step 1: where it comes from, and how to get the file. */
+export interface BringChoice {
+  id: "streaming" | "apple" | "youtube" | "lastfm" | "lists";
+  name: string;
+  /** One line on how to get the file. */
+  how: string;
+  /** A page to start from, when there is one. */
+  link?: { label: string; url: string };
+  /** Said under the steps when it's worth knowing. */
+  note?: string;
+}
+
+export const BRING_CHOICES: BringChoice[] = [
+  {
+    id: "streaming",
+    name: "Spotify",
+    how: 'Request your "Account data" (and "Extended streaming history" if you like) from the privacy page, then drop the zip they email you here.',
+    link: { label: "Open the request page", url: "https://www.spotify.com/account/privacy/" },
+    note: "The file is usually ready in a few days. Your playlists can come over now while you wait.",
+  },
+  {
+    id: "apple",
+    name: "Apple Music",
+    how: "In the Music app choose File > Library > Export Library, then drop the XML file here.",
+  },
+  {
+    id: "youtube",
+    name: "YouTube Music",
+    how: "Export your YouTube Music library and playlists from Google Takeout, unzip it, then drop the CSV files here one at a time.",
+    link: { label: "Open Google Takeout", url: "https://takeout.google.com/" },
+  },
+  {
+    id: "lastfm",
+    name: "Last.fm",
+    how: "Export your loved tracks to a CSV with a free Last.fm export tool, then drop the CSV here.",
+  },
+  {
+    id: "lists",
+    name: "Any CSV or M3U",
+    how: "Any list with artist and title columns, from a transfer tool (TuneMyMusic, Soundiiz) or a player. Drop it here.",
+  },
+];
+
+/** Pages bringing music over may open in the browser. */
+export const BRING_LINKS = BRING_CHOICES.flatMap((c) => (c.link ? [c.link.url] : []));
+
+/** The playlist name that brings liked songs over through a connected account. */
+export const LIKED_LIST_NAME = "Liked Songs for Platter";
 
 /** Store search links on the Missing list, by the key the core gives them. */
 export const STORE_LINKS = [

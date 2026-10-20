@@ -57,6 +57,8 @@ export type Route =
   | { name: "topSongs"; year?: number }
   /** Library import: the reports and review queue, one imported list (`list:<id>`), or the Missing songs (`missing`). */
   | { name: "import"; view?: string }
+  /** Bring in music from another app: one page, three steps. */
+  | { name: "bring" }
   /** The library doctor: things worth fixing in the library. */
   | { name: "doctor" }
   /** Sync to a device: drives and players music is copied to. */

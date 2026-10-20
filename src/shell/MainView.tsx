@@ -19,6 +19,7 @@ import { HealthBanner } from "./HealthBanner";
 import { DownloadsBanner } from "../components/DownloadButton";
 import {
   ArtistShelfPage,
+  BringPage,
   BlendCreatePage,
   BlendPage,
   BookmarksPage,
@@ -226,6 +227,8 @@ export function Page({ route }: { route: Route }) {
       return <CratePage key={`${route.kind}:${route.key}`} kind={route.kind} crateKey={route.key} />;
     case "import":
       return <ImportPage key={route.view ?? "home"} view={route.view} />;
+    case "bring":
+      return <BringPage />;
     case "liked":
       return <LikedPage />;
     case "settings":

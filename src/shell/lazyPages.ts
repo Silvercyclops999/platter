@@ -2,6 +2,7 @@
 import { lazy } from "react";
 
 export const BookmarksPage = lazy(() => import("../pages/BookmarksPage").then((m) => ({ default: m.BookmarksPage })));
+export const BringPage = lazy(() => import("../pages/BringPage").then((m) => ({ default: m.BringPage })));
 export const ImportPage = lazy(() => import("../pages/ImportPage").then((m) => ({ default: m.ImportPage })));
 export const SmartPlaylistPage = lazy(() => import("../pages/SmartPlaylistPage").then((m) => ({ default: m.SmartPlaylistPage })));
 export const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));

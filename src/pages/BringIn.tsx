@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useDomId } from "../lib/domId";
 import { Button } from "../components/Button";
 import { Select, type SelectOption } from "../components/Select";
+import { Skeleton } from "../components/Skeleton";
 import { Switch } from "../components/Switch";
 import { backend } from "../lib/backend";
 import type { BringInStatus } from "../lib/types";
@@ -200,6 +201,22 @@ function keep(
   return options.some((o) => o.value === v)
     ? options
     : [...options, { value: v, label: label(v) }];
+}
+
+/** How many albums a day Lidarr is asked for (the waves' pace, shared with bringing music over). */
+export function PerDaySelect({ ids }: { ids: { title: string; desc: string } }) {
+  const v = useSettings((x) => x.settings?.bringInPerDay);
+  if (v === undefined) return <Skeleton width={120} height={32} />;
+  return (
+    <Select
+      label="Albums a day"
+      labelledBy={ids.title}
+      describedBy={ids.desc}
+      value={String(v)}
+      options={keep(PER_DAY, String(v), (x) => `${x} a day`)}
+      onChange={(x) => void updateSettings({ bringInPerDay: Number(x) })}
+    />
+  );
 }
 
 /** Parse "100, 50, 20" into waves, or null when it isn't. */

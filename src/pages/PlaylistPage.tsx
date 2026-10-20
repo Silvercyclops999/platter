@@ -30,6 +30,7 @@ import { toast } from "../stores/toasts";
 import type { MenuItem } from "../stores/ui";
 import { useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
+import { BringWaiting } from "./BringWaiting";
 import { PlaylistFinder } from "./PlaylistFinder";
 import { GapMarker, MixPill, MixToggle, SORT_LOCKED, bpmNote, mixMenuItem, sortLockedLabel, useAutomixView, useMix, useMixSwitch, useShuffleAsk } from "./PlaylistMix";
 import { Tooltip } from "../components/Tooltip";
@@ -464,6 +465,7 @@ export function PlaylistPage({ id }: { id: string }) {
             </TrackList>
           </div>
         )}
+        {own && pl && <BringWaiting playlistId={id} />}
         {own && pl && (
           <div className={`pl-more ${empty ? "pl-more--empty" : ""}`}>
             {finderOpen ? (

@@ -45,6 +45,7 @@ import { ComputerNameSetting } from "./DeviceSettings";
 import { INVITE_HOURS, ListenTextSetting } from "./ListenSettings";
 import { PlaylistNameSetting } from "./PlaylistSettings";
 import { LibraryImportSettings, importMatches } from "./LibraryImportSettings";
+import { PerDaySelect } from "./BringIn";
 import { AutomationSettings, StreamDeckSettings, automationMatches, streamDeckMatches } from "./StreamDeckSettings";
 import { AddBridge, BridgeSettings, NIGHT_HOURS_OPTIONS, PairWithCode, bridgeMatches, useBridge } from "./BridgeSettings";
 import { MixExclusions } from "./MixExclusions";
@@ -3038,6 +3039,36 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
             control: () => <GuideButton id="lidarr" />,
           },
         ] satisfies RowDef[])),
+    {
+      key: "bringLikeArrivals",
+      section: "Integrations",
+      page: "libraryImport",
+      group: "Bringing music over",
+      title: "Like songs as they arrive",
+      description: "When an album Lidarr got arrives, its songs you liked elsewhere are liked here.",
+      more: "Songs you liked in the other app that weren't in your library are liked once their album arrives. Each song only once: unlike one and it stays unliked.",
+      control: (ids) => toggle(s, "bringLikeArrivals", ids),
+    },
+    {
+      key: "bringFillPlaylists",
+      section: "Integrations",
+      page: "libraryImport",
+      group: "Bringing music over",
+      title: "Add missing songs to playlists as they arrive",
+      description: "A brought-over playlist's greyed songs are added once their album arrives.",
+      more: "Playlists you brought over show the songs your library lacks greyed. Once their album arrives they're added at the end. Each song only once: take one out and it stays out.",
+      control: (ids) => toggle(s, "bringFillPlaylists", ids),
+    },
+    {
+      key: "bringInPerDay",
+      section: "Integrations",
+      page: "libraryImport",
+      group: "Bringing music over",
+      title: "Albums a day",
+      description: "How many albums Lidarr is asked for each day, most loved first.",
+      more: "Albums go to Lidarr a few a day so it and its indexers aren't flooded. The same pace as Bring in my listening.",
+      control: (ids) => <PerDaySelect ids={ids} />,
+    },
     {
       key: "lidarrUrl",
       section: "Integrations",

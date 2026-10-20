@@ -276,6 +276,7 @@ import type {
 } from "./types";
 import type {
   AccountStatus,
+  BringStatus,
   ImportDecision,
   ImportOverview,
   ImportReport,
@@ -285,6 +286,7 @@ import type {
   PlayedPage,
   PlayedQuery,
   ImportedListPage,
+  ImportedRow,
   MissingSong,
 } from "./importTypes";
 import type {
@@ -1224,6 +1226,20 @@ export interface Backend {
   importChoose(folder: boolean): Promise<string | null>;
   /** Import from a file, folder or zip for a source that's turned on. */
   importRun(source: ImportSourceId, path: string): Promise<ImportReport>;
+  /** Bringing music over: what came over, the albums to get and how it's going. */
+  bringStatus(): Promise<BringStatus>;
+  /** Read a picked file, whatever it is, and send what's found (likes, playlists). */
+  bringRead(path: string): Promise<BringStatus>;
+  /** The same for a file dropped on the page. */
+  bringReadDropped(bytes: Uint8Array, name: string): Promise<BringStatus>;
+  /** Bring over a source imported another way (the connected account). */
+  bringAdopt(source: ImportSourceId): Promise<BringStatus>;
+  /** Get the albums through Lidarr: every one not asked for yet, or those named. */
+  bringGet(keys: string[] | null): Promise<BringStatus>;
+  /** Where Lidarr probably is, best first. */
+  bringLidarrGuesses(): Promise<string[]>;
+  /** A brought-over playlist's songs that aren't in the library yet. */
+  bringWaitingRows(playlistId: string): Promise<ImportedRow[]>;
   importReviewQueue(): Promise<ImportReviewItem[]>;
   importReview(songId: number, decision: ImportDecision): Promise<void>;
   importListPage(id: string): Promise<ImportedListPage>;
@@ -1772,6 +1788,13 @@ export function createTauriBackend(): Backend {
     importOverview: () => call("import_overview"),
     importChoose: (folder) => call("import_choose", { folder }),
     importRun: (source, path) => call("import_run", { source, path }),
+    bringStatus: () => call("bring_status"),
+    bringRead: (path) => call("bring_read", { path }),
+    bringReadDropped: (bytes, name) => invokeRaw("bring_read_dropped", bytes, { "x-file-name": encodeURIComponent(name) }),
+    bringAdopt: (source) => call("bring_adopt", { source }),
+    bringGet: (keys) => call("bring_get", { keys }),
+    bringLidarrGuesses: () => call("bring_lidarr_guesses"),
+    bringWaitingRows: (playlistId) => call("bring_waiting_rows", { playlistId }),
     importReviewQueue: () => call("import_review_queue"),
     importReview: (songId, decision) => call("import_review", { songId, decision }),
     importListPage: (id) => call("import_list_page", { id }),

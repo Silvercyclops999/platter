@@ -61,7 +61,6 @@ const NOT_A_ROW: Record<string, string> = {
   playedMinPlays: "showPlayedALot",
   playedPeriod: "showPlayedALot",
   bringInWaves: "bringIn",
-  bringInPerDay: "bringIn",
   bringInMinFreeGb: "bringIn",
   bringInMaxQueue: "bringIn",
   lookStepDone: "kept by the first-run step",

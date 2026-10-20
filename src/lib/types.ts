@@ -1357,6 +1357,10 @@ export interface Settings {
   bringInMinFreeGb: number;
   /** Pause while Lidarr's queue holds more than this. Synced. */
   bringInMaxQueue: number;
+  /** Bringing music over: like a liked song when its album arrives. */
+  bringLikeArrivals: boolean;
+  /** Bringing music over: add a playlist's missing songs as their albums arrive. */
+  bringFillPlaylists: boolean;
   /** Folder names on a song's path that hint it's unreleased (they only add weight). */
   archiveFolderKeywords: string[];
   /** The tag a file's release status is read from: "" for Auto (ARCHIVE_VERSION, STATUS, RELEASESTATUS, RELEASETYPE), else a tag name. */
@@ -1920,6 +1924,8 @@ export const DEFAULT_SETTINGS: Settings = {
   bringInPerDay: 30,
   bringInMinFreeGb: 50,
   bringInMaxQueue: 20,
+  bringLikeArrivals: true,
+  bringFillPlaylists: true,
   archiveFolderKeywords: ["Unreleased", "Leaks", "Demos", "Sessions", "Snippets"],
   releaseStatusTag: "",
   releaseStatusValues: [],

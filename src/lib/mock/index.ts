@@ -209,6 +209,7 @@ import { MockBookmarks, MockHidden, MockScrobble, MockSmart } from "./curate";
 import { MockPlexEdit } from "./plexEdit";
 import { MockTagEdit } from "./tagEdit";
 import { MockLidarr, isLidarrDemo, type LidarrDemo } from "./lidarr";
+import { MockBring } from "./bring";
 import { MockPlayHistory } from "./playhistory";
 import { MockLidarrWork } from "./lidarrModes";
 import { MOCK_STAGING, MockUpgrades, isUpgradeDemo, type UpgradeDemo } from "./upgrades";
@@ -446,6 +447,8 @@ export class MockBackend implements Backend {
   readonly deviceSync: MockDeviceSync;
   /** Library import (test hook: failNext). */
   readonly importMock: MockImport;
+  /** Bringing music over (test hooks: scenario, notFound, arrive). */
+  readonly bring = new MockBring();
   readonly account: MockAccount;
   /** Store links the Missing list opened. */
   readonly importLinksOpened: string[] = [];
@@ -4411,6 +4414,30 @@ export class MockBackend implements Backend {
   }
   importRun(source: ImportSourceId, path: string) {
     return this.delay(() => this.importMock.run(source, path));
+  }
+  private bringReady() {
+    return this.lidarr.status(this.settings).ready;
+  }
+  bringStatus() {
+    return this.delay(() => this.bring.status(this.bringReady()));
+  }
+  bringRead(path: string) {
+    return this.delay(() => this.bring.read(path, this.bringReady()));
+  }
+  bringReadDropped(_bytes: Uint8Array, name: string) {
+    return this.delay(() => this.bring.read(name, this.bringReady()));
+  }
+  bringAdopt(source: ImportSourceId) {
+    return this.delay(() => this.bring.adopt(source, this.bringReady()));
+  }
+  bringGet(keys: string[] | null) {
+    return this.delay(() => this.bring.get(keys, this.bringReady()));
+  }
+  bringLidarrGuesses() {
+    return this.delay(() => ["http://192.168.1.20:8686", "http://localhost:8686"]);
+  }
+  bringWaitingRows(playlistId: string) {
+    return this.delay(() => this.bring.waitingRows(playlistId));
   }
   importReviewQueue() {
     return this.delay(() => this.importMock.reviewQueue());

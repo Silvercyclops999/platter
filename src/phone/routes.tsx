@@ -46,6 +46,7 @@ import { PhoneYou } from "./pages/You";
 import "./pages/parity.css";
 
 const SettingsPage = lazy(() => import("../pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
+const BringPage = lazy(() => import("../pages/BringPage").then((m) => ({ default: m.BringPage })));
 
 type Pages = { [N in Route["name"]]: (r: Extract<Route, { name: N }>) => ReactNode };
 
@@ -82,6 +83,14 @@ export const PHONE_PAGES: Pages = {
   profile: () => <PhoneYou />,
   topSongs: (r) => <PhoneTopSongs key={r.year ?? "all"} year={r.year ?? null} />,
   import: (r) => <PhoneImport key={r.view ?? "home"} view={r.view} />,
+  bring: () => (
+    <div className="ph-page ph-bring">
+      <BackBar />
+      <Suspense fallback={<PageLoading />}>
+        <BringPage />
+      </Suspense>
+    </div>
+  ),
   doctor: () => <PhoneDoctor />,
   devices: () => <PhoneDevices />,
   soundMap: (r) => <PhoneSoundMap key={r.album ?? "all"} album={r.album} />,

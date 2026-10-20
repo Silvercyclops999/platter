@@ -2980,6 +2980,24 @@ With `bringIn` on, Platter asks Lidarr for albums from Played a lot in waves whi
 
 Settings (synced): `bringIn` (off), `bringInWaves` (`[100, 50, 20]`, 1 to 5 different counts), `bringInPerDay` (30), `bringInMinFreeGb` (50), `bringInMaxQueue` (20).
 
+### Bring music over from another app
+
+One page takes a streaming service's data download (the zip or its JSON), the Music app's library XML, or a CSV or M3U list. Platter reads it the way an import does, then writes to the server: liked songs that are in the library are liked, each playlist is made once its first song is found and gets its songs in the file's order. Songs already sent aren't sent again, so reading a newer file only adds what's new. A playlist the user deleted is left alone after that. Missing songs are grouped by album, most liked first, and "Get" puts them on the "Get albums" queue, so they go through the same per-day limit and setup check as Bring in my listening. Each album is picked on MusicBrainz first; one Lidarr can't find stays on the list with the reason and can be tried again. While the app is open it checks every 10 minutes and whenever the library changes: arrived songs are liked and added to their playlists when `bringLikeArrivals` and `bringFillPlaylists` are on, and new matches are looked for.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `bring_status` | – | `BringStatus` |
+| `bring_read` | `{ path }` | `BringStatus` after reading the file and sending what's in the library |
+| `bring_read_dropped` | raw file bytes, header `x-file-name` (percent-encoded) | the same, for a file dropped on the page. At most the import size limit |
+| `bring_adopt` | `{ source }` | `BringStatus`. Brings over a source already imported, such as a connected streaming account |
+| `bring_get` | `{ keys: string[] \| null }` | `BringStatus`. Puts the albums on the queue, all missing ones when null. Fails with "Set up Lidarr first." when Lidarr isn't ready |
+| `bring_lidarr_guesses` | – | `string[]`, Lidarr addresses worth trying, from the Plex server's private address and `localhost` |
+| `bring_waiting_rows` | `{ playlistId }` | `ImportedRow[]`, a brought-over playlist's songs not in the library yet |
+
+`BringStatus = { summary: { sources, liked: { total, found }, songs: { total, found }, playlists, missingSongs, missingAlbums, unsure, sentence }, lists: { name, importId, playlistId, gone, total, found }[], albums: { key, artist, album, songs, liked, state: "missing" | "picking" | "asked" | "notFound" | "here", reason, releaseGroupId }[], progress: { toGet, onTheWay, here, notFound }, lidarr: { ready, practiceUntil }, sent: { liked, playlistsMade, songsAdded } }`.
+
+Settings (synced): `bringLikeArrivals` (on), `bringFillPlaylists` (on). The daily limit is `bringInPerDay`.
+
 ## Physical collection
 
 Albums the user owns on vinyl, CD, cassette or another format, with notes on each copy. Marks live in the sync store's `physical` namespace (keyed by album id, synced with the library group). The optional Discogs import reads the user's own collection with their personal token, which is kept in the keychain under `discogs-token` and never returned, logged or put in a URL. Discogs is asked at most once a second; a 429 pauses it.

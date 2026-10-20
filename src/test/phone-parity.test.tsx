@@ -94,6 +94,7 @@ const SAMPLES: { [N in Route["name"]]: Extract<Route, { name: N }> } = {
   profile: { name: "profile" },
   topSongs: { name: "topSongs" },
   import: { name: "import" },
+  bring: { name: "bring" },
   doctor: { name: "doctor" },
   devices: { name: "devices" },
   soundMap: { name: "soundMap" },

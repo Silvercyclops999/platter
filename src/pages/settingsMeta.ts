@@ -199,6 +199,10 @@ export function saveMoreOpen(open: ReadonlySet<string>) {
  * names, and follow-up options of something else go under More.
  */
 export const ADVANCED: ReadonlySet<string> = new Set([
+  // Library import: what bringing music over does as albums arrive, and its pace.
+  "bringLikeArrivals",
+  "bringFillPlaylists",
+  "bringInPerDay",
   // Account and servers: only matter with Subsonic, a Plex Home or a picture to hide.
   "subsonicCheckMinutes",
   "saveQueueOnServer",
