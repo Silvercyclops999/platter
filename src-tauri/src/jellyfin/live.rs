@@ -148,7 +148,8 @@ async fn follow(core: Arc<Core>, db: DbHandle, mut stop: watch::Receiver<bool>) 
         if !core.signed_in() {
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(30)) => continue,
-                _ = stop.changed() => continue,
+                // A dropped sender would make `changed` return at once, forever.
+                r = stop.changed() => if r.is_err() { return } else { continue },
             }
         }
         let opened = tokio::time::Instant::now();
@@ -162,7 +163,7 @@ async fn follow(core: Arc<Core>, db: DbHandle, mut stop: watch::Receiver<bool>) 
         attempt = attempt.saturating_add(1);
         tokio::select! {
             _ = tokio::time::sleep(delay) => {}
-            _ = stop.changed() => {}
+            r = stop.changed() => if r.is_err() { return },
         }
     }
 }

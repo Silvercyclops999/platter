@@ -2025,3 +2025,36 @@ mod peers {
         assert_eq!(ids, ["mac", "amp", "airplay:BB"]);
     }
 }
+
+#[test]
+fn a_broken_search_socket_backs_off_instead_of_spinning() {
+    assert_eq!(target::gdm_backoff(1), Duration::from_secs(1));
+    assert_eq!(target::gdm_backoff(2), Duration::from_secs(2));
+    assert_eq!(target::gdm_backoff(6), Duration::from_secs(32));
+    assert_eq!(target::gdm_backoff(7), Duration::from_secs(60));
+    assert_eq!(target::gdm_backoff(500), Duration::from_secs(60));
+}
+
+#[tokio::test]
+async fn the_companion_server_ends_when_its_stop_is_dropped() {
+    let r = rig().await;
+    let handler = Arc::new(PlayerTarget {
+        local: Local::playing("a", &["b"], 1_000),
+        env: Arc::new(Env { base: Url::parse(&r.server.uri()).unwrap() }),
+        http: reqwest::Client::new(),
+    });
+    let info = Arc::new(TargetInfo {
+        client_id: "me".into(),
+        name: "Desk".into(),
+        product: "Platter".into(),
+        version: "0.1.0".into(),
+        platform: "Windows".into(),
+        platform_version: "x".into(),
+    });
+    let listener = target::bind(std::net::Ipv4Addr::LOCALHOST, 0, 1).await.unwrap();
+    let (tx, rx) = tokio::sync::watch::channel(false);
+    let task = tokio::spawn(target::serve(listener, handler, info, rx));
+    drop(tx);
+    tokio::time::timeout(Duration::from_secs(2), task).await.expect("ended, not spinning").unwrap();
+}
+

@@ -239,8 +239,10 @@ pub async fn serve(listener: TcpListener, handler: Arc<dyn TargetHandler>, info:
                     tokio::time::sleep(Duration::from_millis(200)).await;
                 }
             },
-            _ = stop.changed() => {
-                if *stop.borrow() { return; }
+            r = stop.changed() => {
+                // A dropped sender ends it too (else `changed` returns at
+                // once, forever, and this spins).
+                if r.is_err() || *stop.borrow() { return; }
             }
         }
         if *stop.borrow() {
@@ -285,6 +287,36 @@ pub fn gdm_bye(info: &TargetInfo, port: u16) -> String {
     format!("BYE * HTTP/1.0\r\n{}\r\n", gdm_fields(info, port))
 }
 
+/// How long to wait after the search socket failed `n` times in a row:
+/// 1 s, doubling, at most a minute.
+pub fn gdm_backoff(n: u32) -> Duration {
+    Duration::from_secs((1u64 << n.saturating_sub(1).min(6)).min(60))
+}
+
+/// With no socket, opening one is tried again this far up the backoff
+/// (half a minute).
+const GDM_RETRY_STEP: u32 = 6;
+
+/// The socket that hears GDM searches, or None when the port is taken.
+async fn gdm_listen(first: bool) -> Option<UdpSocket> {
+    match UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, GDM_PORT))).await {
+        Ok(s) => {
+            if let Err(e) = s.join_multicast_v4(GDM_GROUP, Ipv4Addr::UNSPECIFIED) {
+                tracing::debug!("GDM multicast join failed: {e}");
+            }
+            Some(s)
+        }
+        Err(e) => {
+            // Another Plex player on this computer has the port; the hello
+            // and the server's registration still list Platter.
+            if first {
+                tracing::info!("GDM search port busy: {e}");
+            }
+            None
+        }
+    }
+}
+
 pub fn is_search(datagram: &[u8]) -> bool {
     datagram.starts_with(b"M-SEARCH * HTTP/1.")
 }
@@ -296,38 +328,53 @@ pub async fn gdm(info: Arc<TargetInfo>, port: u16, mut stop: watch::Receiver<boo
     if let Some(s) = &announce {
         let _ = s.send_to(gdm_hello(&info, port).as_bytes(), group).await;
     }
-    let listen = match UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, GDM_PORT))).await {
-        Ok(s) => {
-            if let Err(e) = s.join_multicast_v4(GDM_GROUP, Ipv4Addr::UNSPECIFIED) {
-                tracing::debug!("GDM multicast join failed: {e}");
-            }
-            Some(s)
-        }
-        Err(e) => {
-            // Another Plex player on this computer has the port; the hello
-            // and the server's registration still list Platter.
-            tracing::info!("GDM search port busy: {e}");
-            None
-        }
-    };
+    let mut listen = gdm_listen(true).await;
     let mut buf = [0u8; 2048];
+    let mut failures: u32 = 0;
     loop {
         let recv = async {
             match &listen {
-                Some(s) => s.recv_from(&mut buf).await.ok(),
-                None => std::future::pending().await,
+                Some(s) => Some(s.recv_from(&mut buf).await),
+                // No socket (the port is taken, or reopening failed): try
+                // to open one again after a while.
+                None => {
+                    tokio::time::sleep(gdm_backoff(failures.max(GDM_RETRY_STEP))).await;
+                    None
+                }
             }
         };
-        tokio::select! {
-            r = recv => {
-                if let (Some((n, from)), Some(s)) = (r, &listen)
-                    && is_search(&buf[..n]) {
-                        let _ = s.send_to(gdm_reply(&info, port).as_bytes(), from).await;
-                    }
+        let got = tokio::select! {
+            r = recv => r,
+            r = stop.changed() => {
+                if r.is_err() || *stop.borrow() { break; }
+                continue;
             }
-            _ = stop.changed() => {
-                if *stop.borrow() { break; }
+        };
+        match got {
+            Some(Ok((n, from))) => {
+                failures = 0;
+                if let Some(s) = &listen
+                    && is_search(&buf[..n])
+                {
+                    let _ = s.send_to(gdm_reply(&info, port).as_bytes(), from).await;
+                }
             }
+            // The socket broke (iOS closes a suspended app's sockets, and
+            // every read then fails at once): wait, then open a new one,
+            // instead of reading again in a tight loop.
+            Some(Err(e)) => {
+                failures = failures.saturating_add(1);
+                tracing::debug!("GDM search socket failed ({failures}): {e}");
+                let wait = gdm_backoff(failures);
+                tokio::select! {
+                    _ = tokio::time::sleep(wait) => {}
+                    r = stop.changed() => if r.is_err() || *stop.borrow() { break; },
+                }
+                // The old socket closes before the port is bound again.
+                drop(listen.take());
+                listen = gdm_listen(false).await;
+            }
+            None => listen = gdm_listen(false).await,
         }
     }
     if let Some(s) = &announce {
