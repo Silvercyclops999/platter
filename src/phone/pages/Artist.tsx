@@ -5,7 +5,7 @@
  * their eras; the discography with the records you can get (Get, through
  * Lidarr); Appears on and Fans also like, each with See all.
  */
-import { Pause, Play, Radio, Shuffle } from "lucide-react";
+import { Pause, Play, Radio } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Art } from "../../components/Art";
 import { backend } from "../../lib/backend";
@@ -24,7 +24,7 @@ import { useSettings } from "../../stores/settings";
 import { setFollow, useSocial } from "../../stores/social";
 import { BackBar, Carousel, PageFailed, PageLoading, ShelfCard, SongRow } from "./common";
 import { DiscoShelf } from "./DiscoShelf";
-import { CataloguePhoto } from "./kit";
+import { CataloguePhoto, PhoneShuffleToggle } from "./kit";
 
 /** Top tracks shown at first. */
 export const TOP_TRACKS = 5;
@@ -142,9 +142,7 @@ export function PhoneArtist({ id }: { id: string }) {
             </button>
           </div>
           <div className="ph-actions__right">
-            <button type="button" className="ph-icon-btn" aria-label={`Shuffle ${artist.title}`} onClick={() => void player.playArtist(artist.id, undefined, true)}>
-              <Shuffle size={24} aria-hidden="true" />
-            </button>
+            <PhoneShuffleToggle id={artist.id} kind="artist" name={artist.title} />
             <button
               type="button"
               className="ph-play ph-play--page"

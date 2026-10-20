@@ -3,7 +3,7 @@
  * artist and year; download, more, shuffle and a large play;
  * then the songs, each with the downloaded mark before its artist line.
  */
-import { ChevronDown, MoreHorizontal, Pause, Play, Shuffle } from "lucide-react";
+import { ChevronDown, MoreHorizontal, Pause, Play } from "lucide-react";
 import { useState, type CSSProperties } from "react";
 import { Art } from "../../components/Art";
 import { discGroups } from "../../pages/album";
@@ -21,6 +21,7 @@ import { UpgradeCard, useAlbumUpgrade } from "../../pages/LidarrUpgrade";
 import { useSleeveNotes } from "../../lib/useSleeveNotes";
 import { RoleLines, SongBySong, songsWithCredits } from "../../pages/SleeveNotes";
 import { tap } from "../bits";
+import { PhoneShuffleToggle } from "./kit";
 
 
 
@@ -113,9 +114,7 @@ export function PhoneAlbum({ id }: { id: string }) {
           </button>
         </div>
         <div className="ph-actions__right">
-          <button type="button" className="ph-icon-btn" aria-label={`Shuffle ${album.title}`} onClick={() => void player.playAlbum(album.id, undefined, true)}>
-            <Shuffle size={24} aria-hidden="true" />
-          </button>
+          <PhoneShuffleToggle id={album.id} kind="album" name={album.title} />
           <button
             type="button"
             className="ph-play ph-play--page"

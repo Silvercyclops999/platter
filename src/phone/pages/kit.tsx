@@ -8,7 +8,11 @@ import { ChevronRight, Pause, Play, Shuffle } from "lucide-react";
 import { Suspense, useRef, type ReactNode } from "react";
 import { Art } from "../../components/Art";
 import { useArtistPhoto } from "../../lib/artistPhotos";
+import { contextShuffleMode, shuffleLabel, smartOffered } from "../../lib/shuffleMode";
+import type { PlayContextKind } from "../../lib/types";
+import { player, usePlayer } from "../../stores/player";
 import { nav, type Route } from "../../stores/router";
+import { useSettings } from "../../stores/settings";
 import { BackBar, PageLoading } from "./common";
 import "./parity.css";
 
@@ -316,6 +320,28 @@ export function ShowMore({ total, shown, onMore, noun }: { total: number; shown:
   return (
     <button type="button" className="ph-pill ph-pill--wide" onClick={onMore}>
       Show more {noun} ({(total - shown).toLocaleString()} left)
+    </button>
+  );
+}
+
+/**
+ * A page's shuffle switch for its context, as on the computer: a tap turns
+ * shuffle on or off (smart shuffle too where offered) and it stays lit while
+ * on; the play button then plays in that order. It never starts playback.
+ */
+export function PhoneShuffleToggle({ id, kind, name }: { id: string; kind: PlayContextKind; name: string }) {
+  const mode = usePlayer((st) => contextShuffleMode(st.state, id));
+  const smartAllowed = useSettings((st) => !!st.settings?.smartShuffle);
+  const label = shuffleLabel(mode, (smartAllowed && smartOffered(kind)) || mode === "smart", name);
+  return (
+    <button
+      type="button"
+      className={`ph-icon-btn ${mode !== "off" ? "is-on" : ""}`}
+      aria-label={label}
+      aria-pressed={mode !== "off"}
+      onClick={() => void player.cycleContextShuffle(id, kind, smartAllowed)}
+    >
+      <Shuffle size={24} aria-hidden="true" />
     </button>
   );
 }

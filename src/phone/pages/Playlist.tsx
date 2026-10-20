@@ -3,7 +3,7 @@
  * starts sooner, genre pills from the songs' own genres that narrow the
  * list in place, and the songs, each with the shared song sheet.
  */
-import { MoreHorizontal, Pause, Play, Shuffle } from "lucide-react";
+import { MoreHorizontal, Pause, Play } from "lucide-react";
 import { Art } from "../../components/Art";
 import { LikedCover } from "../../components/LikedCover";
 import { phone } from "../phoneUi";
@@ -16,6 +16,7 @@ import { useLoad } from "../../lib/useLoad";
 import { player, usePlayer } from "../../stores/player";
 import { BackBar, PageFailed, PageLoading, SongRow, countLine } from "./common";
 import { tap } from "../bits";
+import { PhoneShuffleToggle } from "./kit";
 
 /** Genre pills shown. */
 export const GENRE_PILLS = 6;
@@ -116,9 +117,7 @@ function SongList({
           )}
         </div>
         <div className="ph-actions__right">
-          <button type="button" className="ph-icon-btn" aria-label={`Shuffle ${title}`} onClick={() => play(undefined, true, ids)}>
-            <Shuffle size={24} aria-hidden="true" />
-          </button>
+          <PhoneShuffleToggle id={contextId} kind={contextKind} name={title} />
           <button
             type="button"
             className="ph-play ph-play--page"

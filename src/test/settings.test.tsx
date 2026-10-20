@@ -104,7 +104,7 @@ describe("settings page", () => {
     // Account, version and art cache usage arrive from the core.
     expect(screen.getByText("Signed in as listener")).toBeInTheDocument();
     expect(screen.getByText("Basement Server, Local connection")).toBeInTheDocument();
-    expect(await screen.findByText("You have version 0.1.0.")).toBeInTheDocument();
+    expect(await screen.findByText(`You have version ${mock.appVersion}.`)).toBeInTheDocument();
     expect(await screen.findByText("Using 412 MB.")).toBeInTheDocument();
     expect(screen.getByText(/GPL-3.0-or-later/)).toBeInTheDocument();
     expect(screen.getByText(/A music player for Plex\./)).toBeInTheDocument();
