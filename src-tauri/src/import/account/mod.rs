@@ -8,6 +8,9 @@
 //! download. And only playlists the user owns or collaborates on can be
 //! read (the API returns other people's playlists without their songs);
 //! those are counted in the report so the user knows to use the download.
+//! One playlist is read differently: one the user made of their liked songs
+//! under the name Platter suggests (`import::LIKED_LIST_NAME`) comes in as
+//! liked songs. It is still a playlist the user made and owns.
 //!
 //! What's read goes through the same pipeline as a file import (source
 //! `streaming-account`): matched to the library (ISRC first, the API has
@@ -437,7 +440,12 @@ impl AccountImport {
                     match api.all_items(client_id, &url, |_| {}).await {
                         Ok(items) => {
                             let songs = songs_of(&items, &mut out.skipped);
-                            out.playlists.push(PlaylistIn { name: name.to_string(), songs });
+                            if super::is_liked_list(name) {
+                                // The liked songs, copied into a playlist by the user.
+                                out.liked.get_or_insert_with(Vec::new).extend(songs);
+                            } else {
+                                out.playlists.push(PlaylistIn { name: name.to_string(), songs });
+                            }
                         }
                         Err(Fail::Forbidden(_)) => out.skipped.others_playlists += 1,
                         Err(f) => return Err(f),

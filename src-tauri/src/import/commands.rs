@@ -56,7 +56,7 @@ pub async fn import_choose(app: AppHandle, folder: bool) -> AppResult<Option<Str
             let _ = tx.send(p);
         });
     } else {
-        d.add_filter("Import files", &["zip", "json", "csv", "tsv", "txt", "m3u", "m3u8"]).pick_file(move |p| {
+        d.add_filter("Import files", &["zip", "json", "csv", "tsv", "txt", "m3u", "m3u8", "xml"]).pick_file(move |p| {
             let _ = tx.send(p);
         });
     }
@@ -250,4 +250,74 @@ pub async fn import_played_hidden(app: AppHandle) -> AppResult<Vec<played::Hidde
     let mut all: Vec<played::HiddenRow> = hidden(&app).await.into_iter().map(|(_, h)| h).collect();
     all.sort_by_key(|h| std::cmp::Reverse(h.hidden_at));
     Ok(all)
+}
+
+// ------------------------------------------------------------------ bring music over
+
+/// The bring-over page: what came over, the albums to get and how it's going.
+#[tauri::command]
+pub async fn bring_status(bring: State<'_, super::bring::Bring>) -> AppResult<super::bring::BringStatus> {
+    bring.status().await
+}
+
+/// Step 1: read a dropped or picked file, whatever it is, and send what's found.
+#[tauri::command]
+pub async fn bring_read(bring: State<'_, super::bring::Bring>, path: String) -> AppResult<super::bring::BringStatus> {
+    bring.read(PathBuf::from(path)).await
+}
+
+/// Bring over a source imported another way (the connected account).
+#[tauri::command]
+pub async fn bring_adopt(bring: State<'_, super::bring::Bring>, source: String) -> AppResult<super::bring::BringStatus> {
+    bring.adopt(&source).await
+}
+
+/// Step 3: get the albums (every one not asked for yet, or those named).
+#[tauri::command]
+pub async fn bring_get(bring: State<'_, super::bring::Bring>, keys: Option<Vec<String>>) -> AppResult<super::bring::BringStatus> {
+    bring.get(keys).await
+}
+
+/// Where Lidarr probably is, for the inline setup.
+#[tauri::command]
+pub async fn bring_lidarr_guesses(plex: State<'_, crate::plex::PlexState>) -> AppResult<Vec<String>> {
+    let url = match plex.client().await {
+        Ok(c) => Some(c.base_url().to_string()),
+        Err(_) => None,
+    };
+    Ok(super::bring::lidarr_guesses(url.as_deref()))
+}
+
+/// A brought-over playlist's songs that aren't in the library yet.
+#[tauri::command]
+pub async fn bring_waiting_rows(db: State<'_, DbHandle>, playlist_id: String) -> AppResult<Vec<store::ImportedRow>> {
+    db.read_async(move |c| super::bring::waiting_rows(c, &playlist_id)).await
+}
+
+/// Step 1 with a file dropped on the page: the body is the file, the
+/// `x-file-name` header (percent-encoded) its name. It's read from a
+/// private temporary copy, removed afterwards.
+#[tauri::command]
+pub async fn bring_read_dropped(bring: State<'_, super::bring::Bring>, request: tauri::ipc::Request<'_>) -> AppResult<super::bring::BringStatus> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(AppError::Invalid("The file didn't arrive. Try Choose file instead.".into()));
+    };
+    if bytes.len() as u64 > files::MAX_FILE_BYTES {
+        return Err(AppError::Invalid("That file is too big to drop. Unzip it and pick the folder instead.".into()));
+    }
+    let name = request
+        .headers()
+        .get("x-file-name")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| percent_encoding::percent_decode_str(v).decode_utf8_lossy().into_owned())
+        .unwrap_or_default();
+    let dir = std::env::temp_dir().join(format!("platter-bring-{}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&dir).map_err(|e| AppError::Io(format!("temp folder: {e}")))?;
+    let path = dir.join(super::bring::safe_file_name(&name));
+    let out = match std::fs::write(&path, bytes) {
+        Ok(()) => bring.read(path).await,
+        Err(e) => Err(AppError::Io(format!("write dropped file: {e}"))),
+    };
+    let _ = std::fs::remove_dir_all(&dir);
+    out
 }

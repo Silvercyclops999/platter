@@ -462,6 +462,16 @@ impl Waves {
     /// Albums already queued, or asked for before (and not failed), are
     /// left out. Returns how many were added.
     pub fn enqueue(&self, albums: Vec<QueuedGet>, artist: &str) -> AppResult<usize> {
+        self.enqueue_as(albums, &format!("by {artist} (Get albums)"))
+    }
+
+    /// [`Self::enqueue`] for another part of Platter: `what` names it in the
+    /// Changes log ("Queued 3 albums (Bring music over)").
+    pub fn enqueue_for(&self, albums: Vec<QueuedGet>, what: &str) -> AppResult<usize> {
+        self.enqueue_as(albums, &format!("({what})"))
+    }
+
+    fn enqueue_as(&self, albums: Vec<QueuedGet>, tail: &str) -> AppResult<usize> {
         let asked = self.l().asked_groups();
         let mut st = self.state();
         let mut added = 0;
@@ -479,7 +489,7 @@ impl Waves {
         }
         if added > 0 {
             self.save(&st)?;
-            let what = format!("Queued {added} album{} by {artist} (Get albums)", if added == 1 { "" } else { "s" });
+            let what = format!("Queued {added} album{} {tail}", if added == 1 { "" } else { "s" });
             self.l().log_change(&what, "", "", true, None)?;
             tracing::info!(added, "get albums: queued");
             self.poke();

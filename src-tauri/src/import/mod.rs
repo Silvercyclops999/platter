@@ -8,9 +8,10 @@
 //!   and length, then names alone) into matched, unsure or missing
 //! - [`store`]    the import tables, the review queue and the Missing list
 //! - [`played`]   history plays with no library match ("Played a lot")
+//! - [`bring`]    bringing music over: one door, three steps (spec 27)
 //! - [`commands`] Tauri commands
 //!
-//! Nothing here writes to Plex. Saving an imported playlist to Plex or liking
+//! Nothing here writes to Plex, except bringing music over (`bring`). Saving an imported playlist to Plex or liking
 //! its songs there goes through the usual playlist and like commands, and
 //! only when the user asks.
 //!
@@ -20,6 +21,7 @@
 //! private are dropped.
 
 pub mod account;
+pub mod bring;
 pub mod commands;
 pub mod files;
 pub mod matching;
@@ -30,9 +32,23 @@ pub mod store;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod bring_tests;
+#[cfg(test)]
 mod played_tests;
 
 use serde::Serialize;
+
+/// The name Platter suggests for a playlist made of the user's liked
+/// songs (select all in the liked list, drag onto a new playlist). A
+/// playlist with this name comes in as liked songs, not as a playlist.
+pub const LIKED_LIST_NAME: &str = "Liked Songs for Platter";
+
+/// Whether a playlist is the liked songs under [`LIKED_LIST_NAME`]
+/// (letters and digits compared, case ignored).
+pub fn is_liked_list(name: &str) -> bool {
+    let squash = |s: &str| -> String { s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect() };
+    squash(name) == squash(LIKED_LIST_NAME)
+}
 
 /// A song as an import file names it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

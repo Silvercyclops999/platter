@@ -966,6 +966,10 @@ pub struct Settings {
     pub bring_in_min_free_gb: u32,
     /// Pause while Lidarr's queue holds more than this.
     pub bring_in_max_queue: u32,
+    /// Bringing music over: like a liked song when its album arrives.
+    pub bring_like_arrivals: bool,
+    /// Bringing music over: add a playlist's missing songs as their albums arrive.
+    pub bring_fill_playlists: bool,
     /// Folder names on a song's path that hint it's unreleased. They only
     /// add weight to "Why?", never decide on their own.
     pub archive_folder_keywords: Vec<String>,
@@ -1410,6 +1414,8 @@ impl Default for Settings {
             bring_in_per_day: crate::lidarr::waves::DEFAULT_PER_DAY,
             bring_in_min_free_gb: crate::lidarr::waves::DEFAULT_MIN_FREE_GB,
             bring_in_max_queue: crate::lidarr::waves::DEFAULT_MAX_QUEUE,
+            bring_like_arrivals: true,
+            bring_fill_playlists: true,
             archive_folder_keywords: crate::db::release::default_folder_keywords(),
             release_status_tag: String::new(),
             release_status_values: Vec::new(),
@@ -1617,6 +1623,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "bringInPerDay",
     "bringInMinFreeGb",
     "bringInMaxQueue",
+    "bringLikeArrivals",
+    "bringFillPlaylists",
     "archiveFolderKeywords",
     "releaseStatusTag",
     "releaseStatusValues",
@@ -2037,6 +2045,8 @@ pub struct SettingsPatch {
     pub bring_in_per_day: Option<u32>,
     pub bring_in_min_free_gb: Option<u32>,
     pub bring_in_max_queue: Option<u32>,
+    pub bring_like_arrivals: Option<bool>,
+    pub bring_fill_playlists: Option<bool>,
     pub archive_folder_keywords: Option<Vec<String>>,
     pub release_status_tag: Option<String>,
     pub release_status_values: Option<Vec<crate::tags::provenance::ValueMap>>,
@@ -2642,6 +2652,8 @@ impl Settings {
         set(&mut self.bring_in_per_day, p.bring_in_per_day);
         set(&mut self.bring_in_min_free_gb, p.bring_in_min_free_gb);
         set(&mut self.bring_in_max_queue, p.bring_in_max_queue);
+        set(&mut self.bring_like_arrivals, p.bring_like_arrivals);
+        set(&mut self.bring_fill_playlists, p.bring_fill_playlists);
         eqprofile::apply_patch(self, p)?;
         self.clamp();
         Ok(())

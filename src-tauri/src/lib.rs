@@ -903,6 +903,8 @@ pub fn run() {
                 app.listen_any("settings://changed", move |_| w.settings_changed());
             }
             let bring_in_for_bridge = bring_in.clone();
+            let bring_over_waves = bring_in.clone();
+            let bring_over_lidarr = lidarr_service.clone();
             app.manage(bring_in);
             // Upgrades: better copies through the staging folder, swapped on this computer.
             let upgrades = lidarr::upgrade::Upgrades::new(lidarr::upgrade::UpgradeDeps {
@@ -1003,6 +1005,21 @@ pub fn run() {
                 Arc::new(likes::AppLikeEvents { app: app.handle().clone(), plex: plex.clone() }),
             );
             likes::spawn(likes.clone());
+            // Bringing music over: likes and playlists go out through the
+            // queues above, missing albums through the Get albums queue.
+            let bring_over = import::bring::Bring::new(import::bring::BringDeps {
+                db: db.clone(),
+                server: Arc::new(import::bring::AppServer { likes: likes.clone(), playlists: circle_playlists.clone() }),
+                getter: Arc::new(import::bring::AppGetter { lidarr: bring_over_lidarr, waves: bring_over_waves }),
+                clock_ms: Arc::new(|| db::queries::now_s() * 1000),
+            });
+            tauri::async_runtime::spawn(import::bring::watch(bring_over.clone()));
+            {
+                // Albums arriving show up as library changes.
+                let b = bring_over.clone();
+                app.listen_any("library://changed", move |_| b.poke());
+            }
+            app.manage(bring_over);
             app.manage(likes);
 
             // Listen on: other Plex players, and Platter as one (setting).
@@ -1608,7 +1625,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            import::commands::import_overview, import::commands::import_choose, import::commands::import_run, import::commands::import_review_queue, import::commands::import_review, import::commands::import_list_page, import::commands::import_missing, import::commands::import_missing_albums, import::commands::import_missing_album_add, import::commands::import_missing_album_remove, import::commands::import_open_link, import::commands::import_forget, import::commands::import_list_remove, import::commands::import_played, import::commands::import_played_hide, import::commands::import_played_hidden, import::account::commands::streaming_account_status, import::account::commands::streaming_account_sign_in, import::account::commands::streaming_account_read, import::account::commands::streaming_account_cancel, import::account::commands::streaming_account_sign_out, import::account::commands::streaming_account_client_id_set,
+            import::commands::import_overview, import::commands::import_choose, import::commands::import_run, import::commands::import_review_queue, import::commands::import_review, import::commands::import_list_page, import::commands::import_missing, import::commands::import_missing_albums, import::commands::import_missing_album_add, import::commands::import_missing_album_remove, import::commands::import_open_link, import::commands::import_forget, import::commands::import_list_remove, import::commands::import_played, import::commands::import_played_hide, import::commands::import_played_hidden, import::commands::bring_status, import::commands::bring_read, import::commands::bring_adopt, import::commands::bring_get, import::commands::bring_lidarr_guesses, import::commands::bring_waiting_rows, import::commands::bring_read_dropped, import::account::commands::streaming_account_status, import::account::commands::streaming_account_sign_in, import::account::commands::streaming_account_read, import::account::commands::streaming_account_cancel, import::account::commands::streaming_account_sign_out, import::account::commands::streaming_account_client_id_set,
             platform::route_picker::show_route_picker,
             platform::haptics::haptic,
             audio::hifi::headphone_detect,

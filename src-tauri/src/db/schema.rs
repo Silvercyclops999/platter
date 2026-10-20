@@ -1366,6 +1366,39 @@ CREATE INDEX IF NOT EXISTS artists_mbid ON artists (mbid) WHERE mbid IS NOT NULL
     r#"
 UPDATE sync_state SET last_full_sync_at = NULL;
 "#,
+    // v48: bringing music over from another app (import::bring). The
+    // sources the user brought over (their likes and playlists go to the
+    // server), the server playlist each imported playlist became (keyed by
+    // source and folded name, so a newer file fills the same one; `gone`
+    // once the user deleted it), the songs already liked or added to each
+    // (never added twice, and not again after the user takes one out), and
+    // the albums asked of Lidarr with how each went.
+    r#"
+CREATE TABLE IF NOT EXISTS import_bring_sources (
+    source     TEXT PRIMARY KEY,
+    brought_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS import_bring_lists (
+    target      TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    playlist_id TEXT,
+    gone        INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS import_bring_applied (
+    target   TEXT NOT NULL,
+    track_id TEXT NOT NULL,
+    PRIMARY KEY (target, track_id)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS import_bring_albums (
+    key              TEXT PRIMARY KEY,
+    artist           TEXT NOT NULL,
+    album            TEXT NOT NULL,
+    asked_at         INTEGER NOT NULL,
+    state            TEXT NOT NULL DEFAULT 'picking',
+    release_group_id TEXT,
+    reason           TEXT
+);
+"#,
 ];
 
 #[cfg(test)]

@@ -584,10 +584,12 @@ pub fn store_links(artist: &str, title: &str) -> StoreLinks {
     }
 }
 
-/// Only store search pages open from the Missing list.
+/// Only store search pages open from the Missing list (and the pages
+/// bringing music over says to request a file from).
 pub fn link_allowed(url: &str) -> bool {
     let Ok(u) = url::Url::parse(url) else { return false };
-    u.scheme() == "https" && matches!(u.host_str(), Some("bandcamp.com" | "www.qobuz.com" | "music.apple.com")) && u.port().is_none()
+    let store = matches!(u.host_str(), Some("bandcamp.com" | "www.qobuz.com" | "music.apple.com"));
+    u.scheme() == "https" && u.port().is_none() && (store || super::bring::REQUEST_PAGES.contains(&url))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -694,6 +696,7 @@ pub fn forget(c: &mut Connection, source: &str) -> AppResult<()> {
         params![format!("{source}:"), source.len() as i64 + 1],
     )?;
     tx.execute("DELETE FROM import_sources WHERE source = ?1", [source])?;
+    super::bring::forget(&tx, source)?;
     tx.commit()?;
     Ok(())
 }
