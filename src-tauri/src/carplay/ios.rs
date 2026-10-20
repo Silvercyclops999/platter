@@ -18,7 +18,7 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, Imp, ProtocolObject, Sel};
 use objc2::{AnyThread, ClassType, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send, sel};
 use objc2_car_play::{
-    CPInterfaceController, CPListItem, CPListItemAccessoryType, CPListSection, CPListTemplate, CPListTemplateItem,
+    CPInterfaceController, CPListImageRowItem, CPListImageRowItemRowElement, CPListItem, CPListItemAccessoryType, CPListSection, CPListTemplate, CPListTemplateItem,
     CPNowPlayingButton, CPNowPlayingImageButton, CPNowPlayingRepeatButton, CPNowPlayingShuffleButton,
     CPNowPlayingTemplate, CPNowPlayingTemplateObserver, CPSelectableListItem, CPTabBarTemplate, CPTemplate,
     CPTemplateApplicationScene, CPTemplateApplicationSceneDelegate, CPTemplateApplicationSceneSessionRoleApplication,
@@ -27,7 +27,7 @@ use objc2_foundation::{NSArray, NSData, NSObject, NSObjectProtocol, NSString};
 use objc2_ui_kit::UISceneDelegate;
 use tauri::{AppHandle, Listener, Manager, Wry};
 
-use super::{CarAction, CarItem, CarList, Reach, Tab};
+use super::{CarAction, CarItem, CarList, CarRow, CarSection, Reach, Tab};
 use crate::audio::player::PlayerHandle;
 use crate::audio::queue::Repeat;
 use crate::backend::Backends;
@@ -269,13 +269,38 @@ fn show_tabs() {
     };
     let reach = APP.get().map(reach).unwrap_or(Reach::Online);
     REACH.with(|r| r.set(APP.get().map(|_| reach)));
-    let home = super::tab_rows(Tab::Home, reach, || read("home", &super::home));
+    // The old tabs' rows of covers are gone with them.
+    COVER_ROWS.with(|m| m.borrow_mut().clear());
+    // Home keeps its sections and its row of covers; a message (signed
+    // out, out of reach) is a single plain section.
+    let home_sections = match reach {
+        Reach::Online if APP.get().is_some() => APP
+            .get()
+            .map(|app| {
+                app.state::<DbHandle>().read(super::home_sections).unwrap_or_else(|e| {
+                    tracing::warn!("CarPlay home not read: {e}");
+                    Vec::new()
+                })
+            })
+            .unwrap_or_default(),
+        _ => vec![CarSection {
+            header: None,
+            rows: super::tab_rows(Tab::Home, reach, Vec::new).into_iter().map(CarRow::Item).collect(),
+        }],
+    };
     let downloaded = super::tab_rows(Tab::Downloaded, reach, || read("downloads", &super::downloaded));
     let radio = super::tab_rows(Tab::Radio, reach, || read("radio", &|c| super::radio(c, None)));
     let library = if APP.get().is_some() { super::tab_rows(Tab::Library, reach, super::library) } else { Vec::new() };
     let loading = APP.get().is_none();
-    let tabs = [
-        ("Home", "house", home),
+    let home = sections_template(mtm, "Home", &home_sections, loading);
+    // SAFETY: plain setters on a template we own.
+    unsafe {
+        home.setTabTitle(Some(&ns("Home")));
+        home.setTabImage(symbol_image("house").as_deref());
+    }
+    let tabs = std::iter::once(Retained::into_super(home))
+        .chain(
+    [
         ("Library", "books.vertical", library),
         ("Downloaded", "arrow.down.circle", downloaded),
         ("Radio", "dot.radiowaves.left.and.right", radio),
@@ -289,7 +314,7 @@ fn show_tabs() {
                 t.setTabImage(symbol_image(symbol).as_deref());
             }
             Retained::into_super(t)
-        })
+        }))
         .collect::<Vec<Retained<CPTemplate>>>();
     // SAFETY: CarPlay calls on the main thread with templates we built.
     unsafe {
@@ -417,25 +442,182 @@ fn symbol_image(name: &str) -> Option<Retained<objc2_ui_kit::UIImage>> {
 }
 
 fn list_template(mtm: MainThreadMarker, title: &str, items: &[CarItem], loading: bool) -> Retained<CPListTemplate> {
-    let rows: Vec<Retained<ProtocolObject<dyn CPListTemplateItem>>> = if loading {
-        vec![ProtocolObject::from_retained(text_row(mtm, "Loading…", None))]
+    let section = CarSection { header: None, rows: items.iter().cloned().map(CarRow::Item).collect() };
+    sections_template(mtm, title, &[section], loading)
+}
+
+fn sections_template(mtm: MainThreadMarker, title: &str, sections: &[CarSection], loading: bool) -> Retained<CPListTemplate> {
+    let empty = sections.iter().all(|s| s.rows.is_empty());
+    let built: Vec<Retained<CPListSection>> = if loading {
+        let rows: Vec<Retained<ProtocolObject<dyn CPListTemplateItem>>> =
+            vec![ProtocolObject::from_retained(text_row(mtm, "Loading…", None))];
+        // SAFETY: a section made from rows we own.
+        vec![unsafe { CPListSection::initWithItems(CPListSection::alloc(), &NSArray::from_retained_slice(&rows)) }]
     } else {
-        items.iter().map(|i| ProtocolObject::from_retained(row(mtm, i))).collect()
+        sections
+            .iter()
+            .filter(|s| !s.rows.is_empty())
+            .map(|s| {
+                let rows: Vec<Retained<ProtocolObject<dyn CPListTemplateItem>>> = s
+                    .rows
+                    .iter()
+                    .map(|r| match r {
+                        CarRow::Item(i) => ProtocolObject::from_retained(row(mtm, i)),
+                        CarRow::Covers { title, items } => ProtocolObject::from_retained(covers_row(mtm, title, items)),
+                    })
+                    .collect();
+                let rows = NSArray::from_retained_slice(&rows);
+                // SAFETY: a section made from rows we own.
+                unsafe {
+                    match &s.header {
+                        Some(h) => CPListSection::initWithItems_header_sectionIndexTitle(
+                            CPListSection::alloc(),
+                            &rows,
+                            Some(&ns(h)),
+                            None,
+                        ),
+                        None => CPListSection::initWithItems(CPListSection::alloc(), &rows),
+                    }
+                }
+            })
+            .collect()
     };
-    // SAFETY: a section and a template made from rows we own.
+    // SAFETY: a template made from sections we own.
     unsafe {
-        let section =
-            CPListSection::initWithItems(CPListSection::alloc(), &NSArray::from_retained_slice(&rows));
         let t = CPListTemplate::initWithTitle_sections(
             CPListTemplate::alloc(mtm),
             Some(&ns(title)),
-            &NSArray::from_retained_slice(&[section]),
+            &NSArray::from_retained_slice(&built),
         );
-        if !loading && items.is_empty() {
+        if !loading && empty {
             t.setEmptyViewTitleVariants(&NSArray::from_retained_slice(&[ns("Nothing here yet")]));
         }
         t
     }
+}
+
+/// A row of covers under a title; tapping a cover plays it. Each cover
+/// starts as a note and is swapped in as it loads. iOS 26 and later take
+/// one element per cover (each updated on its own); older ones a list of
+/// images, replaced whole.
+fn covers_row(mtm: MainThreadMarker, title: &str, items: &[CarItem]) -> Retained<CPListImageRowItem> {
+    let items: Vec<CarItem> = items.iter().take(super::COVERS_MAX).cloned().collect();
+    let placeholder = symbol_image("music.note");
+    let images: Vec<Retained<objc2_ui_kit::UIImage>> = items.iter().filter_map(|_| placeholder.clone()).collect();
+    let titles: Vec<Retained<NSString>> = items.iter().map(|i| ns(&i.title)).collect();
+    let elements_api = AnyClass::get(c"CPListImageRowItemRowElement").is_some() && images.len() == items.len();
+    let (r, elements) = if elements_api {
+        let elements: Vec<Retained<CPListImageRowItemRowElement>> = images
+            .iter()
+            .zip(&items)
+            .map(|(img, i)| {
+                // SAFETY: the element's initialiser with our image and strings.
+                unsafe {
+                    CPListImageRowItemRowElement::initWithImage_title_subtitle(
+                        CPListImageRowItemRowElement::alloc(mtm),
+                        img,
+                        Some(&ns(&i.title)),
+                        i.subtitle.as_deref().map(ns).as_deref(),
+                    )
+                }
+            })
+            .collect();
+        let supers: Vec<Retained<CPListImageRowItemRowElement>> = elements.clone();
+        // SAFETY: the row's initialiser with elements we own.
+        let r = unsafe {
+            CPListImageRowItem::initWithText_elements_allowsMultipleLines(
+                CPListImageRowItem::alloc(mtm),
+                Some(&ns(title)),
+                &NSArray::from_retained_slice(&supers),
+                false,
+            )
+        };
+        (r, elements)
+    } else {
+        // SAFETY: the older initialiser, our images and titles, one each.
+        #[allow(deprecated)]
+        let r = unsafe {
+            CPListImageRowItem::initWithText_images_imageTitles(
+                CPListImageRowItem::alloc(mtm),
+                &ns(title),
+                &NSArray::from_retained_slice(&images),
+                &NSArray::from_retained_slice(&titles),
+            )
+        };
+        (r, Vec::new())
+    };
+    let actions: Vec<CarAction> = items.iter().map(|i| i.action.clone()).collect();
+    let handler = RcBlock::new(
+        move |_row: NonNull<CPListImageRowItem>, index: isize, done: *mut block2::DynBlock<dyn Fn()>| {
+            if let Some(a) = usize::try_from(index).ok().and_then(|i| actions.get(i)) {
+                picked(a);
+            }
+            if !done.is_null() {
+                // SAFETY: CarPlay's completion block, called once.
+                unsafe { (*done).call(()) };
+            }
+        },
+    );
+    // SAFETY: setter on our own row; CarPlay copies the handler.
+    unsafe { r.setListImageRowHandler(Some(&handler)) };
+    if let Some(app) = APP.get() {
+        let id = COVER_IDS.with(|n| {
+            let id = n.get() + 1;
+            n.set(id);
+            id
+        });
+        COVER_ROWS.with(|m| {
+            m.borrow_mut().insert(id, CoverRow { row: r.clone(), images, elements });
+        });
+        for (i, item) in items.iter().enumerate() {
+            if let Some(thumb) = &item.thumb {
+                load_cover(app, thumb.clone(), id, i);
+            }
+        }
+    }
+    r
+}
+
+/// A row of covers being filled in (main thread only).
+struct CoverRow {
+    row: Retained<CPListImageRowItem>,
+    /// The older API: every image, replaced whole.
+    images: Vec<Retained<objc2_ui_kit::UIImage>>,
+    /// iOS 26 and later: one element per cover.
+    elements: Vec<Retained<CPListImageRowItemRowElement>>,
+}
+
+thread_local! {
+    static COVER_ROWS: RefCell<std::collections::HashMap<u64, CoverRow>> = RefCell::new(std::collections::HashMap::new());
+    static COVER_IDS: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Fetches cover `i` of row `id` and shows it; only the numbers cross
+/// threads, the row stays on the main thread.
+fn load_cover(app: &AppHandle<Wry>, thumb: String, id: u64, i: usize) {
+    let art = app.state::<ArtCache>().inner().clone();
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let Ok(img) = art.get_or_fetch(&thumb, COVER_PX, COVER_PX).await else { return };
+        let _ = app.run_on_main_thread(move || {
+            // SAFETY: UIImage from bytes, set on our own row on the main thread.
+            unsafe {
+                let data = NSData::with_bytes(&img.bytes);
+                let Some(image) = objc2_ui_kit::UIImage::imageWithData(&data) else { return };
+                COVER_ROWS.with(|m| {
+                    let mut m = m.borrow_mut();
+                    let Some(c) = m.get_mut(&id) else { return };
+                    if let Some(e) = c.elements.get(i) {
+                        e.setImage(&image);
+                    } else if let Some(slot) = c.images.get_mut(i) {
+                        *slot = image;
+                        #[allow(deprecated)]
+                        c.row.updateImages(&NSArray::from_retained_slice(&c.images));
+                    }
+                });
+            }
+        });
+    });
 }
 
 fn text_row(mtm: MainThreadMarker, text: &str, detail: Option<&str>) -> Retained<CPListItem> {
@@ -514,6 +696,8 @@ fn load_art(app: &AppHandle<Wry>, thumb: String, row: OnMain) {
 
 /// Row covers: CarPlay draws them small.
 const ART_PX: u32 = 120;
+/// Covers in a row of covers are bigger.
+const COVER_PX: u32 = 240;
 
 fn picked(action: &CarAction) {
     let Some(app) = APP.get() else { return };
@@ -529,11 +713,12 @@ fn picked(action: &CarAction) {
             }
         }
         CarAction::Info => {}
-        CarAction::Play(ctx) => {
+        CarAction::Play(ctx) | CarAction::Shuffle(ctx) => {
             let player = app.state::<PlayerHandle>().inner().clone();
             let ctx = ctx.clone();
+            let shuffle = matches!(action, CarAction::Shuffle(_)).then_some(true);
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = player.play_context_from(ctx, None, None, None).await {
+                if let Err(e) = player.play_context_from(ctx, None, None, shuffle).await {
                     tracing::warn!("CarPlay play failed: {e}");
                 }
             });

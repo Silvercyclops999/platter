@@ -37,10 +37,38 @@ async fn an_empty_library_gives_empty_lists_not_errors() {
     for which in [CarList::RecentlyPlayed, CarList::RecentlyAdded, CarList::Playlists, CarList::Albums, CarList::Artists] {
         assert!(db.read(|c| list(c, &which)).unwrap().is_empty(), "{which:?}");
     }
-    // Home still offers the shelves to open.
+    // Home still offers shuffle, likes and the shelves to open.
     let home = db.read(home).unwrap();
-    assert_eq!(home.len(), 2);
-    assert!(home.iter().all(|i| matches!(i.action, CarAction::Open(_))));
+    let titles: Vec<_> = home.iter().map(|i| i.title.as_str()).collect();
+    assert_eq!(titles, ["Shuffle my library", "Liked songs", "Recently played", "Recently added"]);
+}
+
+#[tokio::test]
+async fn home_opens_on_shuffle_and_likes_then_what_you_played_then_mixes() {
+    let (db, _dir) = synced(4, 3).await;
+    db.write(|c| {
+        c.execute_batch("UPDATE albums SET last_viewed_at = 1000 + rowid, view_count = 1")?;
+        Ok(())
+    })
+    .unwrap();
+    let sections = db.read(home_sections).unwrap();
+    let CarRow::Item(shuffle) = &sections[0].rows[0] else { panic!("a row first") };
+    assert_eq!(shuffle.title, "Shuffle my library");
+    let CarAction::Shuffle(ctx) = &shuffle.action else { panic!("shuffles") };
+    assert_eq!(ctx.track_ids.as_ref().map(Vec::len), Some(4 * 3 * 3), "every song (under the cap)");
+    let CarRow::Covers { title, items } = &sections[1].rows[0] else { panic!("covers second: {:?}", sections[1]) };
+    assert_eq!(title, "Jump back in");
+    assert!(!items.is_empty() && items.len() <= COVERS_MAX);
+    assert!(items.iter().all(|i| matches!(&i.action, CarAction::Play(_))), "a cover plays in one tap");
+    assert_eq!(sections.last().unwrap().header.as_deref(), Some("More"));
+}
+
+#[tokio::test]
+async fn shuffle_my_library_starts_with_at_most_the_cap() {
+    let (db, _dir) = synced(40, 5).await;
+    let home = db.read(home).unwrap();
+    let CarAction::Shuffle(ctx) = &home[0].action else { panic!() };
+    assert_eq!(ctx.track_ids.as_ref().map(Vec::len), Some(SHUFFLE_MAX));
 }
 
 #[test]

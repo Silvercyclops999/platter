@@ -33,6 +33,8 @@ pub struct CarItem {
 pub enum CarAction {
     /// Start this album, playlist, artist or mix from the top.
     Play(PlayContext),
+    /// Start it shuffled.
+    Shuffle(PlayContext),
     /// Open another list.
     Open(CarList),
     /// Play this queue entry (its item id) now: a row in Up next.
@@ -83,24 +85,105 @@ fn open(list: CarList) -> CarItem {
     }
 }
 
-/// The Home tab: what was played lately, then the shelves to dig into.
-pub fn home(c: &Connection) -> AppResult<Vec<CarItem>> {
-    let mut out: Vec<CarItem> = queries::recently_played(c, 8)?.into_iter().map(home_item).collect();
-    out.push(open(CarList::RecentlyPlayed));
-    out.push(open(CarList::RecentlyAdded));
+/// Most covers one row of covers shows (CarPlay's image row holds 8).
+pub const COVERS_MAX: usize = 8;
+/// Songs "Shuffle my library" starts with; the queue tops up from there.
+pub const SHUFFLE_MAX: usize = 500;
+/// Mixes on Home.
+pub const MIXES_MAX: usize = 12;
+
+/// A titled group of rows.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CarSection {
+    pub header: Option<String>,
+    pub rows: Vec<CarRow>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CarRow {
+    Item(CarItem),
+    /// One row of covers under a title; each cover plays its item.
+    Covers { title: String, items: Vec<CarItem> },
+}
+
+/// The Home tab, as you'd use it in a car: shuffle everything or play your
+/// likes in one tap, then what you played lately as covers, then your
+/// mixes, then the longer lists.
+pub fn home_sections(c: &Connection) -> AppResult<Vec<CarSection>> {
+    let mut out = vec![CarSection {
+        header: None,
+        rows: vec![CarRow::Item(shuffle_library(c)?), CarRow::Item(liked_item())],
+    }];
+    let recent: Vec<CarItem> = queries::recently_played(c, COVERS_MAX * 2)?
+        .into_iter()
+        .filter(|h| !matches!(h, HomeItem::Artist { .. }))
+        .map(home_item)
+        .take(COVERS_MAX)
+        .collect();
+    if !recent.is_empty() {
+        out.push(CarSection {
+            header: None,
+            rows: vec![CarRow::Covers { title: "Jump back in".into(), items: recent }],
+        });
+    }
+    let mixes = mixes(c)?;
+    if !mixes.is_empty() {
+        out.push(CarSection { header: Some("Made for you".into()), rows: mixes.into_iter().map(CarRow::Item).collect() });
+    }
+    out.push(CarSection {
+        header: Some("More".into()),
+        rows: vec![CarRow::Item(open(CarList::RecentlyPlayed)), CarRow::Item(open(CarList::RecentlyAdded))],
+    });
     Ok(out)
+}
+
+/// The rows of [`home_sections`], flattened (covers become plain rows).
+pub fn home(c: &Connection) -> AppResult<Vec<CarItem>> {
+    Ok(home_sections(c)?
+        .into_iter()
+        .flat_map(|s| s.rows)
+        .flat_map(|r| match r {
+            CarRow::Item(i) => vec![i],
+            CarRow::Covers { items, .. } => items,
+        })
+        .collect())
+}
+
+fn liked_item() -> CarItem {
+    CarItem { title: "Liked songs".to_string(), subtitle: None, thumb: None, action: play(ContextKind::Liked, "liked") }
+}
+
+/// Every song, shuffled: a random draw the player shuffles and tops up.
+fn shuffle_library(c: &Connection) -> AppResult<CarItem> {
+    let mut st = c.prepare_cached("SELECT id FROM tracks ORDER BY random() LIMIT ?1")?;
+    let ids = st.query_map([SHUFFLE_MAX as i64], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+    Ok(CarItem {
+        title: "Shuffle my library".into(),
+        subtitle: None,
+        thumb: None,
+        action: CarAction::Shuffle(PlayContext { kind: ContextKind::Tracks, id: None, track_ids: Some(ids) }),
+    })
+}
+
+/// The made-for-you mixes (Daily Mixes, the daylist, Discover...), in their
+/// shelf order, each played in one tap.
+fn mixes(c: &Connection) -> AppResult<Vec<CarItem>> {
+    Ok(crate::mixes::store::all(c)?
+        .into_iter()
+        .take(MIXES_MAX)
+        .map(|(m, _, _)| CarItem {
+            thumb: m.art.clone().or_else(|| m.covers.first().cloned()),
+            subtitle: (!m.description.is_empty()).then(|| m.description.clone()),
+            action: play(ContextKind::Mix, &m.id),
+            title: m.title,
+        })
+        .collect())
 }
 
 /// The Library tab.
 pub fn library() -> Vec<CarItem> {
-    let liked = CarItem {
-        title: "Liked songs".to_string(),
-        subtitle: None,
-        thumb: None,
-        action: play(ContextKind::Liked, "liked"),
-    };
     vec![
-        liked,
+        liked_item(),
         open(CarList::Playlists),
         open(CarList::Albums),
         open(CarList::Artists),
