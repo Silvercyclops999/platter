@@ -750,11 +750,16 @@ interface Action {
 function ActionList({ items, more = [] }: { items: Action[]; more?: Action[] }) {
   const [open, setOpen] = useState(false);
   const shown = open ? [...items, ...more] : items;
+  const list = useRef<HTMLUListElement>(null);
+  // The More row goes once pressed: focus moves to the first action it showed.
+  useEffect(() => {
+    if (open) list.current?.querySelector<HTMLButtonElement>("[data-first-more]")?.focus();
+  }, [open]);
   return (
-    <ul className="ph-rows ph-actions-list" aria-label="Actions">
-      {shown.map((i) => (
+    <ul ref={list} className="ph-rows ph-actions-list" aria-label="Actions">
+      {shown.map((i, k) => (
         <li key={i.label}>
-          <button type="button" className={`ph-row ph-row--action ${i.danger ? "ph-row--danger" : ""}`} onClick={i.run}>
+          <button type="button" data-first-more={open && k === items.length ? "" : undefined} className={`ph-row ph-row--action ${i.danger ? "ph-row--danger" : ""}`} onClick={i.run}>
             <i.icon size={22} aria-hidden="true" className="ph-row__icon" />
             {i.label}
           </button>

@@ -476,6 +476,17 @@ describe("devices and search", () => {
     resetRouteWatch();
   });
 
+  it("with Stats off the Stats page still leads to the diary, Recents and Bookmarks; a computer-only tab opens Overview", async () => {
+    await setUp({ statsPage: false });
+    const { unmount } = render(<PhonePage route={{ name: "stats" }} />);
+    expect(await screen.findByText("Stats are off")).toBeInTheDocument();
+    for (const t of ["Listening diary", "Recents", "Bookmarks"]) expect(screen.getByText(t)).toBeInTheDocument();
+    unmount();
+    await setUp();
+    render(<PhonePage route={{ name: "stats", tab: "wrapped" }} />);
+    expect(await screen.findByRole("tab", { name: "Overview", selected: true })).toBeInTheDocument();
+  });
+
   it("a paused player's line says Paused once, a playing one says Playing", () => {
     expect(playingLine("Paused: Unhomme • Kanye West")).toBe("Paused: Unhomme • Kanye West");
     expect(playingLine("Unhomme • Kanye West")).toBe("Playing: Unhomme • Kanye West");

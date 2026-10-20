@@ -168,7 +168,9 @@ export function PhoneStats({ tab: openTab, month, friend }: { tab?: StatsTab; mo
   const monthly = useSettings((s) => s.settings?.monthlyStats !== false);
   const compareOn = useSettings((s) => !!s.settings?.statsCompare);
   const wrappedOn = useSettings((s) => s.settings?.wrappedTopSongs !== false);
-  const [tab, setTab] = useState<StatsTab>(openTab ?? (friend ? "compare" : "overview"));
+  // The phone has three tabs; a tab only the computer has (Wrapped, Diary) opens Overview.
+  const opened = openTab && TABS.some((t) => t.id === openTab) ? openTab : undefined;
+  const [tab, setTab] = useState<StatsTab>(opened ?? (friend ? "compare" : "overview"));
   const [choice, setChoice] = useState<RangeChoice>(month && /^\d{4}-\d{2}$/.test(month) ? { kind: "pickMonth", month } : { kind: "4w" });
   const span = useLoad(() => (on ? backend.statsSpan() : NEVER), [on]);
   const today = span.data?.today ?? null;
@@ -190,10 +192,23 @@ export function PhoneStats({ tab: openTab, month, friend }: { tab?: StatsTab; mo
     const r = useRouter.getState();
     if (r.entries[r.index]?.route.name === "stats") r.replace({ name: "stats", tab: t });
   };
+  // Diary, Recents and Bookmarks open from here even with Stats off or nothing played yet.
+  const more = (
+    <LinkList
+      label="More"
+      items={[
+        ...(wrappedOn ? [{ title: "Your Top Songs", sub: "Each year's hundred, and all time", route: { name: "topSongs", ...(years[0] ? { year: years[0] } : {}) } as const }] : []),
+        { title: "Listening diary", route: { name: "diary" } },
+        { title: "Recents", route: { name: "recents" } },
+        { title: "Bookmarks", sub: "Moments and pages you saved", route: { name: "bookmarks" } },
+      ]}
+    />
+  );
   if (!on)
     return (
       <PageFrame name="stats" title="Stats">
         <Empty title="Stats are off" text="Turn on the Stats page in Settings to see your listening here." action={<GoPill route={{ name: "settings", row: "statsPage" }}>Open Settings</GoPill>} />
+        {more}
       </PageFrame>
     );
   const empty = span.data && !span.data.first;
@@ -201,7 +216,8 @@ export function PhoneStats({ tab: openTab, month, friend }: { tab?: StatsTab; mo
     <PageFrame name="stats" title="Stats" lede="Counted from everything you've played and the history you imported." className="ph-stats">
       {empty ? (
         <Empty title="Nothing to count yet" text="Play some music, or import your past plays in Settings, and your stats show up here." action={<GoPill route={{ name: "settings", page: "libraryImport" }}>Import past plays</GoPill>} />
-      ) : (
+      ) : null}
+      {!empty && (
         <>
           <div className="ph-seg" role="tablist" aria-label="Stats">
             {TABS.map((t) => (
@@ -247,17 +263,9 @@ export function PhoneStats({ tab: openTab, month, friend }: { tab?: StatsTab; mo
               )}
             </div>
           )}
-          <LinkList
-            label="More"
-            items={[
-              ...(wrappedOn ? [{ title: "Your Top Songs", sub: "Each year's hundred, and all time", route: { name: "topSongs", ...(years[0] ? { year: years[0] } : {}) } as const }] : []),
-              { title: "Listening diary", route: { name: "diary" } },
-              { title: "Recents", route: { name: "recents" } },
-              { title: "Bookmarks", sub: "Moments and pages you saved", route: { name: "bookmarks" } },
-            ]}
-          />
         </>
       )}
+      {more}
     </PageFrame>
   );
 }
