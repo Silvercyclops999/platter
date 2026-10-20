@@ -2831,6 +2831,7 @@ impl Actor {
     /// `at_ms`, say so, and keep it to try again on Play. When the app knows
     /// it's offline, playback moves on to songs on this computer instead.
     fn pause_unreachable(&mut self, error: &AppError, at_ms: u64, listened_ms: u64) {
+        self.cancel_output_retry();
         let Some(item) = self.queue.current().cloned() else {
             self.end_of_queue();
             return;
