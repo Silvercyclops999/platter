@@ -136,8 +136,12 @@ jobs:
       # zip 4 (on Windows, even in its newest release), and it only extracts update
       # packages whose signature it has checked against Platter's own key. Drop these
       # ignores once the updater moves to zip 9 or later.
+      # RUSTSEC-2026-0381 also names webpki-roots 0.26.11, which tokio-tungstenite
+      # pulls in. That version only re-exports webpki-roots 1, which is on the fixed
+      # 1.0.10, so the roots it gives are the fixed ones. Drop it once
+      # tokio-tungstenite depends on webpki-roots 1 directly.
       - name: cargo audit
-        run: cargo audit --file src-tauri/Cargo.lock --ignore RUSTSEC-2026-0367 --ignore RUSTSEC-2026-0368 --ignore RUSTSEC-2026-0369
+        run: cargo audit --file src-tauri/Cargo.lock --ignore RUSTSEC-2026-0367 --ignore RUSTSEC-2026-0368 --ignore RUSTSEC-2026-0369 --ignore RUSTSEC-2026-0381
       - uses: actions/setup-node@v4
         with:
           node-version: 22
