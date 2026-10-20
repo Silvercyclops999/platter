@@ -313,7 +313,9 @@ describe("timing", () => {
     at(lines, 0);
     render(<LyricsPane />);
     const first = mockLyrics(lines)!.timed!.find((t) => t.text)!;
-    fireEvent.click(await screen.findByRole("button", { name: "Show lyrics 0.5 seconds later" }));
+    const later = await screen.findByRole("button", { name: "Show lyrics 0.5 seconds later" });
+    await waitFor(() => expect(later).toBeEnabled());
+    fireEvent.click(later);
     await waitFor(() => expect(mock.lyricsChoices.get(lines.id)?.offsetMs).toBe(500));
     expect(await screen.findByRole("button", { name: `Timing moved ${offsetText(500)}. Reset` })).toBeInTheDocument();
     expect((await loadLyrics(lines.id))!.timed!.find((t) => t.text)!.startMs).toBe(first.startMs + 500);
@@ -391,6 +393,8 @@ describe("timing", () => {
     at(lines, 0);
     render(<LyricsPane />);
     const later = await screen.findByRole("button", { name: "Show lyrics 0.5 seconds later" });
+    // The nudge waits while the check runs; on a slow machine it may not have landed yet.
+    await waitFor(() => expect(later).toBeEnabled());
     fireEvent.click(later);
     fireEvent.click(later);
     fireEvent.keyDown(window, { key: "+" });
