@@ -73,6 +73,9 @@ jobs:
           docker logs bridge 2>&1 | grep -q "PBB-"
           docker exec bridge platter-bridge status
           docker exec bridge platter-bridge status | grep -q "Pair code"
+          # Lyrics for every song: its line, and the speech helper starts and ends cleanly.
+          docker exec bridge platter-bridge status | grep -q "Lyrics"
+          docker exec bridge sh -c 'platter-bridge --speech-worker </dev/null >/dev/null'
           docker exec bridge platter-bridge health
           test "$(docker exec bridge id -u)" != "0"
           test -z "$(docker port bridge)"

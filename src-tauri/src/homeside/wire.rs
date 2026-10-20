@@ -66,6 +66,111 @@ pub struct BridgeConfig {
     pub practice_until: i64,
     #[serde(default)]
     pub upgrades_ask: bool,
+    /// Lyrics for every song: transcribe songs without lyrics at night.
+    /// None from builds before it (the Bridge keeps it off then).
+    #[serde(default)]
+    pub lyrics: Option<bool>,
+    /// The night hours that work runs in.
+    #[serde(default)]
+    pub lyrics_hours: NightHours,
+    /// The computer's offset from UTC (seconds east), so night is the
+    /// user's night whatever time zone the container is in.
+    #[serde(default)]
+    pub utc_offset_s: i64,
+    /// "Lyrics from LRCLIB when Plex has none" on the computer: the Bridge
+    /// asks LRCLIB too before transcribing a song.
+    #[serde(default)]
+    pub lrclib: bool,
+    /// Lidarr from anywhere: the Bridge does Lidarr work. None from builds
+    /// before the switch (on).
+    #[serde(default)]
+    pub lidarr: Option<bool>,
+}
+
+/// When the Bridge transcribes (in the computer's time zone).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NightHours {
+    /// 11 PM to 6 AM.
+    Late,
+    /// 1 AM to 7 AM.
+    #[default]
+    Night,
+    /// 2 AM to 8 AM.
+    Early,
+    /// Any time the server isn't busy.
+    Always,
+}
+
+impl NightHours {
+    /// (first hour, hour it stops), local; None: any time.
+    pub fn span(self) -> Option<(u32, u32)> {
+        match self {
+            NightHours::Late => Some((23, 6)),
+            NightHours::Night => Some((1, 7)),
+            NightHours::Early => Some((2, 8)),
+            NightHours::Always => None,
+        }
+    }
+
+    /// Whether a unix time is inside the hours, at this offset from UTC.
+    pub fn contains(self, at: i64, utc_offset_s: i64) -> bool {
+        let Some((from, to)) = self.span() else { return true };
+        let hour = ((at + utc_offset_s).rem_euclid(86_400) / 3600) as u32;
+        if from <= to { (from..to).contains(&hour) } else { hour >= from || hour < to }
+    }
+}
+
+/// Where the Bridge's lyrics work is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LyricsState {
+    /// Switched off.
+    #[default]
+    Off,
+    /// This Bridge was built without transcription.
+    Unavailable,
+    /// No music folder (or MUSIC_PLEX_PATH) to read songs from.
+    NoMusic,
+    /// The speech model is downloading.
+    Downloading,
+    /// Waiting for the night hours.
+    Waiting,
+    /// The server is busy: waiting until it's calm.
+    Busy,
+    Working,
+    /// Every song it can do has lyrics.
+    Done,
+    /// Something needs looking at (`problem` says what).
+    Problem,
+}
+
+impl LyricsState {
+    /// The Bridge is doing (or about to do) the background work, so
+    /// computers leave it to the Bridge.
+    pub fn takes_over(self) -> bool {
+        matches!(self, LyricsState::Downloading | LyricsState::Waiting | LyricsState::Busy | LyricsState::Working | LyricsState::Done)
+    }
+}
+
+/// The Bridge's lyrics work, for Settings > Bridge.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LyricsLine {
+    pub state: LyricsState,
+    /// Songs with lyrics made on the Bridge (no words found included).
+    #[serde(default)]
+    pub done: usize,
+    /// Songs still to look at, about.
+    #[serde(default)]
+    pub left: usize,
+    #[serde(default)]
+    pub hours: NightHours,
+    /// The song being transcribed, by title.
+    #[serde(default)]
+    pub song: Option<String>,
+    #[serde(default)]
+    pub problem: Option<String>,
 }
 
 impl std::fmt::Debug for BridgeConfig {
@@ -127,6 +232,9 @@ pub struct BridgeStatus {
     /// it isn't set to that.
     #[serde(default)]
     pub music_plex_path: Option<String>,
+    /// Lyrics for every song. None from a Bridge before it.
+    #[serde(default)]
+    pub lyrics: Option<LyricsLine>,
 }
 
 /// One message.
@@ -165,6 +273,9 @@ pub enum Msg {
     WavesPlan(Box<WavesPlan>),
     /// From the Bridge: how the waves are going.
     WavesProgress(Box<WavesProgress>),
+    /// From a computer: the songs it has lyrics for already (its own or
+    /// transcribed), so the Bridge doesn't transcribe them. Ids only.
+    LyricsHave { ids: Vec<String> },
     /// Between two of the user's own devices: who this is, its clock, and
     /// a digest of each namespace it keeps in step. `answer`: the reply to
     /// the other end's hello (it isn't answered again).
@@ -258,6 +369,7 @@ impl Msg {
             Msg::Unpair => "unpair",
             Msg::WavesPlan(_) => "wavesPlan",
             Msg::WavesProgress(_) => "wavesProgress",
+            Msg::LyricsHave { .. } => "lyricsHave",
             Msg::SyncHello(_) => "syncHello",
             Msg::SyncDiff { .. } => "syncDiff",
             Msg::SyncWant { .. } => "syncWant",

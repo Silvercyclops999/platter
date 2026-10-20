@@ -2802,6 +2802,18 @@ makes one from this computer after the yes, through the same checks;
 read the overview again. Lidarr routes now include `bridge` (the setup
 check's and a request preview's `route`).
 
+A Bridge's `status.lyrics` (missing from a Bridge before it) is Lyrics for
+every song: `state` (`off | unavailable | noMusic | downloading | waiting |
+busy | working | done | problem`), `done` and `left` (songs, about),
+`hours` (`late | night | early | always`), `song` (the title being
+transcribed) and `problem` (words to show). Its settings are `bridgeLyrics`,
+`bridgeLyricsHours` and `bridgeLidarr` (synced). While a Bridge answering in
+the last 75 minutes says `downloading`, `waiting`, `busy`, `working` or
+`done` and `bridgeLyrics` is on, `transcribe_status.paused` is `bridge` for
+the background batch; songs asked for one at a time still run. Lyrics a
+Bridge made arrive as transcriptions with `transcribe://done`. On the
+Bridge itself the queue waits with `paused` `hours` outside the night hours.
+
 ### Lidarr through a computer at home
 
 A computer with Lidarr set up answers Lidarr for the user's other paired

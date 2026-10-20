@@ -945,7 +945,17 @@ pub fn run() {
                 }));
             }
             bridge_desktop.set_waves(bring_in_for_bridge);
+            {
+                // Lyrics a Bridge transcribed show at once.
+                let app = app.handle().clone();
+                bridge_desktop.set_on_lyrics(Arc::new(move |changed| {
+                    for (id, found) in changed {
+                        lyrics::transcribe::TranscribeEvents::done(&app, &id, found);
+                    }
+                }));
+            }
             tauri::async_runtime::spawn(bridge_desktop.clone().run());
+            let bridge_for_lyrics = bridge_desktop.clone();
             app.manage(bridge_desktop);
             let radar_lidarr = lidarr_service.clone();
             let discover_lidarr = lidarr_service.clone();
@@ -1354,6 +1364,8 @@ pub fn run() {
                     app.manage(analyzer);
                 }
                 transcriber.set_options(initial.transcribe_lyrics, initial.transcribe_model);
+                // A paired Bridge doing Lyrics for every song: the background batch waits.
+                transcriber.set_defer(Arc::new(move || bridge_for_lyrics.lyrics_takes_over()));
                 transcriber.set_pace(initial.transcribe_processor, initial.transcribe_pause_busy, initial.transcribe_faster_away);
                 *live.transcriber.lock() = Some(transcriber.clone());
                 tauri::async_runtime::spawn({

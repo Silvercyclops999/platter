@@ -1,20 +1,56 @@
 # Platter Bridge
 
 Platter Bridge is a small, optional program for the server your music lives
-on. It's the part of Platter that looks after Lidarr, without the window, so
-that work carries on while every computer with Platter is closed or asleep.
+on. It's the part of Platter that works without the window, so the heavy
+and the always-on jobs happen on the server while every computer with
+Platter is closed or asleep. Today that's two things, each with its own
+switch in Settings > Bridge:
+
+1. Lyrics for every song. At night it transcribes the songs that have no
+   lyrics anywhere, on the server, and every device gets them. Your
+   computer never does that heavy work.
+2. Lidarr from anywhere, even with every computer off.
 
 You don't need it. Platter works fully without it: when you open Platter, it
-catches up with everything Lidarr did while it was closed. The Bridge just
-means that happens as it goes instead of later. Nothing is installed on your
-server unless you set the Bridge up yourself.
+catches up with everything Lidarr did while it was closed, and it can
+transcribe songs itself. Nothing is installed on your server unless you set
+the Bridge up yourself.
 
 A computer can be the home side too. When Platter is open on a computer at
 home that has Lidarr set up, your phone and your other paired devices reach
 Lidarr through it, at home and away, with the same checks the Bridge makes.
 The Bridge is for when every computer is off.
 
-## What it does
+## Lyrics for every song
+
+With your music folder mounted at `/music` (read-only is enough), the
+Bridge works through the songs that have no lyrics: not from Plex, not
+from LRCLIB (when Lyrics from LRCLIB is on in Platter), not written by you
+and not transcribed on one of your computers. Most played songs go first.
+It uses the same speech model as Platter on a computer, at night only (1 to
+7 AM in your computer's time zone unless you pick other hours), with two
+processor threads at the lowest priority. It waits while other programs
+keep the server busy and rests a few seconds between songs.
+
+Each song's lyrics go to every paired device through the sealed relay, and
+on from there to your other devices. They show as transcribed lyrics, like
+ones your computer made. Lyrics you wrote yourself always win.
+
+While the Bridge does this, your computers don't run their own background
+batch. A song you play that the Bridge hasn't reached yet is still
+transcribed on the spot when transcription is on there. If the Bridge stops
+answering, or can't do the work, your computers carry on as before.
+
+The speech model (Small, about 190 MB) downloads into the appdata folder
+the first time, from the same place and with the same checksum check as on
+a computer. A file that can't be read is skipped and tried again a week
+later. The Bridge never writes to the music folder for this.
+
+The Bridge needs to know which of Plex's folders `/music` is. Once it has
+read your Plex library it works that out by itself; setting
+`MUSIC_PLEX_PATH` is only needed for adding albums.
+
+## Lidarr
 
 Every few minutes, the same way an open Platter would:
 
@@ -49,20 +85,22 @@ one claims an event before acting, and only the earliest claim acts.
 
 ## Install it with one command
 
-On the server, with your own Lidarr address and key:
+On the server, with your own folders:
 
 ```sh
 docker run -d --name platter-bridge --restart unless-stopped \
   --user 1000:1000 \
-  -e LIDARR_URL=http://10.20.30.40:8686 \
-  -e LIDARR_API_KEY=your-lidarr-api-key \
   -v /path/to/appdata:/data \
+  -v /path/to/music:/music:ro \
   ghcr.io/silvercyclops999/platter-bridge:latest
 ```
 
 Set `--user` to the owner of the appdata folder (`id` shows yours). The
 image runs as a normal user, never root, and publishes no ports. Swap
-`:latest` for a version like `:0.2.29` to stay on one release.
+`:latest` for a version like `:0.2.29` to stay on one release. The music
+folder is for lyrics; read-only is enough. Add
+`-e LIDARR_URL=http://10.20.30.40:8686 -e LIDARR_API_KEY=your-lidarr-api-key`
+if you'd like it to reach Lidarr before a computer has told it how.
 
 Then pair it and let it into Plex:
 
@@ -110,9 +148,9 @@ The full file, pinned to the current release, is in
    with, never at main).
 2. Fill in **Lidarr address** and **Lidarr API key**, or leave them empty to
    take them from Platter on a computer.
-3. Optional: set **Music folder** to your music share. Leave it read-only
-   if you only want scans and safety checks; set it to read-write if you
-   want the Bridge to add protected albums itself. Leave **Plex's path for
+3. Set **Music folder** to your music share, for lyrics for every song.
+   Leave it read-only for lyrics, scans and safety checks; set it to
+   read-write if you want the Bridge to add protected albums itself. Leave **Plex's path for
    the music folder** empty at first (see below). For additions, also set
    **Lidarr staging folder**.
 4. Apply, open the container's log, and pair it as above.
@@ -137,7 +175,9 @@ folders it is. Once it has read your Plex library it compares the files
 under `/music` with the paths Plex gives, and when `MUSIC_PLEX_PATH` isn't
 set to the folder they match, it says what to set, in its log and in
 Settings > Bridge on your computer, for example "Set MUSIC_PLEX_PATH to
-/data/media/Music". Set it and restart the container.
+/data/media/Music". Lyrics for every song uses that match straight away,
+since it only reads. To let the Bridge add albums, set it and restart the
+container.
 
 ## Pairing
 
@@ -186,7 +226,9 @@ updates, it gives that up once and asks for its own sign-in instead.
 ## Privacy
 
 - The Bridge only makes outgoing connections: to the relay, Lidarr, Plex,
-  plex.tv and MusicBrainz (to check albums Bring in my listening asks for).
+  plex.tv, MusicBrainz (to check albums Bring in my listening asks for),
+  Hugging Face once for the speech model, and LRCLIB only while Lyrics from
+  LRCLIB is on in Platter. Your songs' audio never leaves the server.
   It opens no ports. Its health check and status page listen on 127.0.0.1
   inside the container, for Docker and `platter-bridge status` only.
 - Everything between the Bridge and your computers goes through the same

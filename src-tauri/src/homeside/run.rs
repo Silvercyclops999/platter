@@ -47,10 +47,13 @@ use crate::plex::keychain::{ACCOUNT_TOKEN, TokenStore};
 use crate::plex::token::Token;
 use crate::social::listen::relay::{RelayEvent, RelayFactory};
 use crate::sync::SyncStore;
-use crate::sync::store::LIDARR;
+use crate::sync::store::{LIDARR, TRANSCRIPTS};
+use super::lyrics::{BridgeLyrics, Opts};
 
 /// How often the Bridge says it's alive when nothing else happened.
 pub const HEARTBEAT: Duration = Duration::from_secs(30 * 60);
+/// How a Bridge's device id starts in the sync store.
+pub const DEVICE_PREFIX: &str = "bridge-";
 /// How often the library cache is brought up to date.
 const LIBRARY_EVERY: Duration = Duration::from_secs(6 * 3600);
 /// Wait after a shared change before sending it (changes come in bursts).
@@ -59,6 +62,10 @@ const USED_CODES_KEY: &str = "bridge.usedCodes";
 const CONFIG_KEY: &str = "bridge.config";
 const DEVICE_KEY: &str = "bridge.device";
 const SERVER_KEY: &str = "bridge.serverKey";
+/// "0" when the computers switched Lidarr from anywhere off.
+const LIDARR_ON_KEY: &str = "bridge.lidarrOn";
+/// Said while Lidarr from anywhere is off.
+pub const LIDARR_OFF: &str = "Lidarr from anywhere is off for this Bridge (Settings > Bridge on your computer).";
 /// In the keys file: a Plex server's own token (never the account's).
 pub const PLEX_SERVER_TOKEN: &str = "bridge-plex-server-token";
 /// Where that token works: `{"machine": .., "uris": [..]}`.
@@ -292,6 +299,12 @@ pub struct Bridge {
     links_changed: tokio::sync::Notify,
     plex_now: tokio::sync::Notify,
     plex_linking: AtomicBool,
+    /// Lyrics for every song (None: not set up, as in most tests).
+    lyrics: parking_lot::RwLock<Option<Arc<BridgeLyrics>>>,
+    /// Lidarr from anywhere.
+    lidarr_on: AtomicBool,
+    /// The lyrics line last sent, so a change goes out.
+    lyrics_sent: Mutex<Option<super::wire::LyricsLine>>,
 }
 
 impl Bridge {
@@ -312,6 +325,7 @@ impl Bridge {
             tracing::warn!("Couldn't use the Lidarr settings set on the Bridge: {e}");
         }
         let configured = p.db.read(|c| kv_get(c, CONFIG_KEY)).ok().flatten().is_some() || p.env.lidarr_url.is_some();
+        let lidarr_on = p.db.read(|c| kv_get(c, LIDARR_ON_KEY)).ok().flatten().as_deref() != Some("0");
         let day_db = p.db.clone();
         let waves = Waves::with_albums(
             WavesDeps {
@@ -338,7 +352,24 @@ impl Bridge {
             links_changed: tokio::sync::Notify::new(),
             plex_now: tokio::sync::Notify::new(),
             plex_linking: AtomicBool::new(false),
+            lyrics: Default::default(),
+            lidarr_on: AtomicBool::new(lidarr_on),
+            lyrics_sent: Mutex::default(),
         })
+    }
+
+    /// Lyrics for every song, once its parts are built (the binary does it).
+    pub fn set_lyrics(&self, l: Arc<BridgeLyrics>) {
+        *self.lyrics.write() = Some(l);
+    }
+
+    pub fn lyrics(&self) -> Option<Arc<BridgeLyrics>> {
+        self.lyrics.read().clone()
+    }
+
+    /// Lidarr from anywhere is on.
+    pub fn lidarr_on(&self) -> bool {
+        self.lidarr_on.load(Ordering::SeqCst)
     }
 
     /// The code the Bridge shows while it isn't paired.
@@ -351,7 +382,9 @@ impl Bridge {
     }
 
     pub fn status(&self) -> BridgeStatus {
-        self.status.lock().clone()
+        let mut s = self.status.lock().clone();
+        s.lyrics = self.lyrics().map(|l| l.line());
+        s
     }
 
     fn doing(&self, what: &str) {
@@ -537,6 +570,9 @@ impl Bridge {
                 }
                 let _ = Outbox::new(&self.p.db, &link.id).mark(&entries);
             }
+            Msg::Get { id, .. } | Msg::Write { id, .. } if !self.lidarr_on() => {
+                let _ = self.wire.send(link, &Msg::Failed { id, message: LIDARR_OFF.into() }).await;
+            }
             Msg::Get { .. } | Msg::Write { .. } => {
                 let home = self.home_route();
                 let staging = crate::settings::load(&self.p.db).lidarr_staging_folder;
@@ -546,7 +582,15 @@ impl Bridge {
             }
             Msg::Unpair => {
                 tracing::info!("Unpaired by the desktop.");
+                if let Some(l) = self.lyrics() {
+                    l.forget_link(&link.id);
+                }
                 let _ = self.wire.links.remove(&link.id);
+            }
+            Msg::LyricsHave { ids } => {
+                if let Some(l) = self.lyrics() {
+                    l.set_have(&link.id, ids);
+                }
             }
             Msg::WavesPlan(plan) => {
                 if let Err(e) = self.waves.take_plan(&plan).await {
@@ -588,6 +632,15 @@ impl Bridge {
         let server = crate::lidarr::url_key(&s.lidarr_url);
         self.p.db.write(|c| kv_set(c, SERVER_KEY, &server))?;
         self.p.lidarr.set_server_key(Some(server));
+        // A computer before the switches sends neither: Lidarr stays on, lyrics stay as they are.
+        let lidarr_on = cfg.lidarr.unwrap_or(true);
+        if self.lidarr_on.swap(lidarr_on, Ordering::SeqCst) != lidarr_on {
+            tracing::info!("Lidarr from anywhere: {}.", if lidarr_on { "on" } else { "off" });
+            self.p.db.write(|c| kv_set(c, LIDARR_ON_KEY, if lidarr_on { "1" } else { "0" }))?;
+        }
+        if let (Some(on), Some(l)) = (cfg.lyrics, self.lyrics()) {
+            l.set_opts(Opts { on, hours: cfg.lyrics_hours, utc_offset_s: cfg.utc_offset_s.clamp(-14 * 3600, 14 * 3600), lrclib: cfg.lrclib });
+        }
         let key = self.p.env.lidarr_key.clone().or_else(|| cfg.lidarr_key.clone());
         if let Some(k) = key {
             self.p.lidarr.set_key(Some(&k))?;
@@ -788,6 +841,12 @@ impl Bridge {
             })
             .unwrap_or_default();
         let Some(path) = suggest_plex_path(&files, &dir, |p| p.exists()) else { return };
+        // Lyrics only read, so they go by the match until MUSIC_PLEX_PATH is set.
+        if self.p.env.music.is_none()
+            && let Some(l) = self.lyrics()
+        {
+            l.suggest_root(&path);
+        }
         let set = self.p.env.music.as_ref().map(|(p, _)| p.trim_end_matches(['/', '\\']).to_string());
         if set.as_deref() == Some(path.trim_end_matches(['/', '\\'])) {
             self.status.lock().music_plex_path = None;
@@ -803,7 +862,8 @@ impl Bridge {
     pub async fn flush_entries(&self) {
         for link in self.wire.links.links() {
             let ob = Outbox::new(&self.p.db, &link.id);
-            let Ok(batches) = ob.pending(&self.p.store, &[LIDARR.name()]) else { continue };
+            // Shared Lidarr state, and the lyrics transcribed here.
+            let Ok(batches) = ob.pending(&self.p.store, &[LIDARR.name(), TRANSCRIPTS.name()]) else { continue };
             for b in batches {
                 if self.wire.send(&link, &Msg::Entries { entries: b.clone() }).await.is_ok() {
                     let _ = ob.mark(&b);
@@ -832,6 +892,10 @@ impl Bridge {
     pub async fn catch_up_once(&self) -> Option<CatchUpLine> {
         if self.wire.links.all().is_empty() {
             self.doing("Not paired yet. Enter the code from this log in Platter (Settings > Bridge > Add the Bridge), or start the Bridge with BRIDGE_PAIR_CODE set to a code from Platter.");
+            return None;
+        }
+        if !self.lidarr_on() {
+            self.doing(LIDARR_OFF);
             return None;
         }
         let st = self.p.lidarr.status();
@@ -874,7 +938,7 @@ impl Bridge {
     /// One pass of Bring in my listening, when a desktop handed it over,
     /// then its progress to the desktops.
     pub async fn waves_once(&self) -> Option<crate::lidarr::waves::PassOutcome> {
-        if !self.waves.plan_running() {
+        if !self.waves.plan_running() || !self.lidarr_on() {
             return None;
         }
         let st = self.p.lidarr.status();
@@ -933,6 +997,26 @@ impl Bridge {
             }
         }
         self.doing("Waiting for the next catch-up");
+    }
+
+    /// Lyrics for every song: the next songs in at night, and the lyrics
+    /// line to the computers when it changed.
+    pub async fn lyrics_tick(&self) {
+        let Some(l) = self.lyrics() else { return };
+        if self.wire.links.all().is_empty() {
+            return;
+        }
+        l.tick().await;
+        let line = l.line();
+        let changed = {
+            let mut sent = self.lyrics_sent.lock();
+            let changed = sent.as_ref().is_none_or(|s| s.state != line.state || s.problem != line.problem);
+            *sent = Some(line);
+            changed
+        };
+        if changed {
+            self.send_status().await;
+        }
     }
 
     /// The main loop: listens on every link, catches up every few minutes,
@@ -1017,7 +1101,7 @@ impl Bridge {
                 _ = self.library_now.notified() => self.sync_library().await,
                 _ = self.plex_now.notified() => self.connect_plex().await,
                 _ = self.links_changed.notified() => {}
-                _ = tick.tick() => {}
+                _ = tick.tick() => self.lyrics_tick().await,
             }
         }
     }
@@ -1032,7 +1116,7 @@ pub fn build(env: Env) -> AppResult<Parts> {
     let device = match db.read(|c| kv_get(c, DEVICE_KEY))? {
         Some(d) => d,
         None => {
-            let d = format!("bridge-{}", crate::remote::peer::auth::hex(&crate::social::listen::seal::random16()[..8]));
+            let d = format!("{DEVICE_PREFIX}{}", crate::remote::peer::auth::hex(&crate::social::listen::seal::random16()[..8]));
             db.write(|c| kv_set(c, DEVICE_KEY, &d))?;
             d
         }

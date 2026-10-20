@@ -19,6 +19,7 @@
 //! - [`route`]: the home Platter route, both halves.
 //! - [`links`]: pairings and per-link state; [`keys`]: the Bridge's secrets file.
 //! - [`health`]: `/health` on 127.0.0.1 for Docker's healthcheck.
+//! - [`lyrics`]: Lyrics for every song, transcribed on the Bridge at night.
 //!
 //! The Lidarr side of it (settings writes queued, modes shared by desktops,
 //! the Bridge route) is in `crate::lidarr::homeside`.
@@ -31,6 +32,7 @@ pub mod health;
 pub mod keys;
 pub mod link;
 pub mod links;
+pub mod lyrics;
 pub mod pair;
 pub mod peer;
 pub mod route;
@@ -39,6 +41,8 @@ pub mod wire;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod lyrics_tests;
 
 pub use crate::social::listen::DEFAULT_RELAY;
 

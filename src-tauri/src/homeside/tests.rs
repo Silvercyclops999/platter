@@ -808,3 +808,189 @@ fn the_status_page_is_plain_and_only_what_it_says() {
     assert_eq!(super::health::answer(&bridge, "POST /health HTTP/1.1\r\n", 0).0, "404 Not Found");
     assert!(super::health::answer(&bridge, "GET /health HTTP/1.1\r\n", 0).0.starts_with("200"));
 }
+
+// ---------------------------------------------------------------- lyrics for every song
+
+fn desktop_at(d: &End, clock: Arc<std::sync::atomic::AtomicU64>) -> Arc<Desktop> {
+    Desktop::new(DesktopDeps {
+        db: d.db.clone(),
+        keys: d.keys.clone(),
+        relays: Arc::new(Ntfy::new().unwrap()),
+        clock: Arc::new(move || clock.load(std::sync::atomic::Ordering::SeqCst)),
+        store: d.store.clone(),
+        lidarr: d.lidarr.clone(),
+        plex: None,
+        name: Arc::new(|| "Desk".to_string()),
+    })
+}
+
+fn lyrics_status(state: Option<super::wire::LyricsState>) -> Msg {
+    Msg::Status(Box::new(super::wire::BridgeStatus {
+        name: "Shed Bridge".into(),
+        version: "0.2.34".into(),
+        lyrics: state.map(|state| super::wire::LyricsLine { state, ..Default::default() }),
+        ..Default::default()
+    }))
+}
+
+#[tokio::test]
+async fn computers_leave_the_batch_to_a_bridge_only_while_it_answers_and_is_well() {
+    use super::wire::LyricsState;
+    let tmp = tempfile::tempdir().unwrap();
+    let d = side(tmp.path(), "desk");
+    let clock = Arc::new(std::sync::atomic::AtomicU64::new(NOW));
+    let desk = desktop_at(&d, clock.clone());
+    assert!(!desk.lyrics_takes_over(), "no Bridge");
+    let (link, _) = pair_links();
+    desk.wire.links.add(&link, "Shed Bridge", "0.2.34", (NOW / 1000) as i64).unwrap();
+    desk.handle(&link, lyrics_status(Some(LyricsState::Working))).await;
+    assert!(desk.lyrics_takes_over());
+    for s in [LyricsState::Waiting, LyricsState::Downloading, LyricsState::Busy, LyricsState::Done] {
+        desk.handle(&link, lyrics_status(Some(s))).await;
+        assert!(desk.lyrics_takes_over(), "{s:?}");
+    }
+    // A Bridge from before Lyrics for every song never holds a computer back.
+    desk.handle(&link, lyrics_status(None)).await;
+    assert!(!desk.lyrics_takes_over(), "an older Bridge");
+    // Nor one that can't do it.
+    for s in [LyricsState::Problem, LyricsState::NoMusic, LyricsState::Unavailable, LyricsState::Off] {
+        desk.handle(&link, lyrics_status(Some(s))).await;
+        assert!(!desk.lyrics_takes_over(), "{s:?}");
+    }
+    // Gone quiet in the night (not heard from in over an hour): the computer carries on.
+    desk.handle(&link, lyrics_status(Some(LyricsState::Working))).await;
+    clock.fetch_add(2 * 3600 * 1000, std::sync::atomic::Ordering::SeqCst);
+    assert!(!desk.lyrics_takes_over(), "offline");
+    desk.handle(&link, lyrics_status(Some(LyricsState::Working))).await;
+    assert!(desk.lyrics_takes_over(), "back");
+    // Switched off in Settings.
+    let mut s = crate::settings::load(&d.db);
+    s.bridge_lyrics = false;
+    crate::settings::save(&d.db, &s).unwrap();
+    assert!(!desk.lyrics_takes_over());
+    // What the computer sends the Bridge says so, with its night hours.
+    let cfg = desk.config().await;
+    assert_eq!(cfg.lyrics, Some(false));
+    assert_eq!(cfg.lyrics_hours, super::wire::NightHours::Night);
+    assert_eq!(cfg.lidarr, Some(true));
+}
+
+fn three_songs(db: &DbHandle) {
+    db.write(|c| {
+        c.execute_batch(
+            "INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, duration_ms, part_key)
+             VALUES ('t1', 'One', 'al', 'Late', 'a', 'Night Band', 500, '/p/t1'),
+                    ('t2', 'Two', 'al', 'Late', 'a', 'Night Band', 500, '/p/t2'),
+                    ('t3', 'Three', 'al', 'Late', 'a', 'Night Band', 500, '/p/t3');",
+        )?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[tokio::test]
+async fn lyrics_the_bridge_made_reach_a_computer_and_the_users_own_still_win() {
+    use crate::sync::store::TRANSCRIPTS;
+    let tmp = tempfile::tempdir().unwrap();
+    let d = side(tmp.path(), "desk");
+    three_songs(&d.db);
+    // The user wrote their own lyrics for t2 here.
+    d.db.write(|c| crate::lyrics::user::put(c, "t2", "my own words", true, 5)).unwrap();
+    // The Bridge (its own store and library) made t1 and t2.
+    let bdb = DbHandle::open(tmp.path().join("b.db")).unwrap();
+    three_songs(&bdb);
+    let bstore = SyncStore::new(bdb.clone(), "bridge-00aa");
+    for id in ["t1", "t2"] {
+        crate::sync::transcripts::saved(&bstore, &bdb, id, "[00:01.00]<00:01.00>Night <00:01.30>song", "small", 100).unwrap();
+    }
+    let desk = desktop_at(&d, Arc::new(std::sync::atomic::AtomicU64::new(NOW)));
+    let got: Arc<parking_lot::Mutex<Vec<(String, bool)>>> = Arc::default();
+    {
+        let g = got.clone();
+        desk.set_on_lyrics(Arc::new(move |c| g.lock().extend(c)));
+    }
+    let (link, _) = pair_links();
+    desk.wire.links.add(&link, "Shed Bridge", "0.2.34", (NOW / 1000) as i64).unwrap();
+    desk.handle(&link, Msg::Entries { entries: bstore.entries(&[TRANSCRIPTS.name()]).unwrap() }).await;
+    let own = |id: &str| d.db.read(|c| crate::lyrics::user::get(c, id)).unwrap();
+    let t1 = own("t1").expect("the Bridge's lyrics are here");
+    assert_eq!(t1.auto.as_deref(), Some("small"));
+    assert!(t1.text.contains("Night"));
+    assert_eq!(own("t2").unwrap().text, "my own words", "the user's own lyrics win");
+    assert_eq!(*got.lock(), vec![("t1".to_string(), true)], "the lyrics view hears about it");
+    assert!(d.store.has_entry(&TRANSCRIPTS, "t1|small").unwrap(), "kept for the user's other devices");
+    // What it tells the Bridge it has: its own lyrics, not what the Bridge made.
+    let have = super::desktop::have_list(&d.db, &d.store).unwrap();
+    assert_eq!(have, vec!["t2".to_string()]);
+    // A song transcribed on this computer (the Bridge hadn't got to it) is listed too.
+    d.db.write(|c| crate::lyrics::transcribe::store::save(c, "t3", "[00:01.00]words", "small", 6).map(|_| ())).unwrap();
+    assert_eq!(super::desktop::have_list(&d.db, &d.store).unwrap(), vec!["t2".to_string(), "t3".to_string()]);
+}
+
+#[tokio::test]
+async fn lidarr_from_anywhere_off_stops_the_bridges_lidarr_work_and_the_route() {
+    let tmp = tempfile::tempdir().unwrap();
+    let b = side(tmp.path(), "bridge");
+    let env = Env { name: "Shed Bridge".into(), lidarr_url: Some(ENV_LIDARR.into()), lidarr_key: Some(ENV_KEY.into()), ..Default::default() };
+    let bridge = bridge_from(&b, env.clone(), Arc::new(Ntfy::new().unwrap()));
+    assert!(bridge.lidarr_on(), "on until a computer says otherwise");
+    let cfg = super::wire::BridgeConfig { desktop: "Desk".into(), lidarr: Some(false), ..Default::default() };
+    bridge.apply_config(&cfg).await.unwrap();
+    assert!(!bridge.lidarr_on());
+    // Paired, so the catch-up would otherwise run.
+    let (_, blink) = pair_links();
+    bridge.wire.links.add(&blink, "Desk", "0.2.34", (NOW / 1000) as i64).unwrap();
+    assert!(bridge.catch_up_once().await.is_none());
+    assert_eq!(bridge.status().doing, super::run::LIDARR_OFF);
+    // Kept across a restart.
+    drop(bridge);
+    let again = bridge_from(&b, env, Arc::new(Ntfy::new().unwrap()));
+    assert!(!again.lidarr_on());
+    // A computer from before the switch sends nothing for it: on.
+    again.apply_config(&super::wire::BridgeConfig::default()).await.unwrap();
+    assert!(again.lidarr_on());
+    // On the computer, the switch off means no route through the Bridge.
+    let d = side(tmp.path(), "desk");
+    let desk = desktop_at(&d, Arc::new(std::sync::atomic::AtomicU64::new(NOW)));
+    let (link, _) = pair_links();
+    desk.wire.links.add(&link, "Shed Bridge", "0.2.34", (NOW / 1000) as i64).unwrap();
+    desk.handle(&link, lyrics_status(None)).await;
+    assert!(desk.route().is_some());
+    let mut s = crate::settings::load(&d.db);
+    s.bridge_lidarr = false;
+    crate::settings::save(&d.db, &s).unwrap();
+    assert!(desk.route().is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_bridges_lyrics_travel_to_a_paired_device_sealed() {
+    use crate::sync::store::TRANSCRIPTS;
+    let ntfy = FakeNtfy::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let relays: Arc<dyn RelayFactory> = Arc::new(Ntfy::new().unwrap());
+    let b = side(tmp.path(), "bridge");
+    three_songs(&b.db);
+    let env = Env { name: "Shed Bridge".into(), relay: Some(ntfy.url.clone()), ..Default::default() };
+    let bridge = bridge_from(&b, env, relays.clone());
+    let (stop_tx, stop) = tokio::sync::watch::channel(false);
+    tokio::spawn(bridge.clone().run(stop));
+    until("the Bridge's own code", || bridge.shown_code().is_some()).await;
+    let code = bridge.shown_code().unwrap();
+    let p = side(tmp.path(), "phone");
+    three_songs(&p.db);
+    let mut ps = crate::settings::load(&p.db);
+    ps.listen_relay = ntfy.url.clone();
+    crate::settings::save(&p.db, &ps).unwrap();
+    let phone = desktop_for(&p, "Adam's phone", relays.clone());
+    tokio::spawn(phone.clone().run());
+    tokio::time::timeout(Duration::from_secs(30), phone.join_bridge(&code)).await.unwrap().unwrap();
+    until("the Bridge answering", || phone.overview().bridges.first().is_some_and(|x| x.online)).await;
+    // The Bridge transcribes a song in the night: it reaches the phone.
+    crate::sync::transcripts::saved(&b.store, &b.db, "t1", "[00:01.00]<00:01.00>Quiet <00:01.40>Hours", "small", 100).unwrap();
+    until("the lyrics on the phone", || p.db.read(|c| crate::lyrics::user::get(c, "t1")).unwrap().is_some()).await;
+    assert!(p.store.has_entry(&TRANSCRIPTS, "t1|small").unwrap());
+    for m in ntfy.published() {
+        assert!(!m.body.contains("Quiet") && !m.body.contains("t1|small"), "lyrics travelled in the clear");
+    }
+    let _ = stop_tx.send(true);
+}

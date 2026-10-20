@@ -29,7 +29,7 @@ use crate::plex::PlexState;
 use crate::plex::keychain::TokenStore;
 use crate::social::listen::relay::{RelayEvent, RelayFactory};
 use crate::sync::SyncStore;
-use crate::sync::store::LIDARR;
+use crate::sync::store::{LIDARR, TRANSCRIPTS};
 
 /// A Bridge heard from within this long counts as answering (it says
 /// it's alive every half hour).
@@ -37,6 +37,35 @@ pub const ONLINE_S: i64 = 75 * 60;
 const SETTLE: Duration = Duration::from_secs(3);
 /// How long "Add the Bridge" waits for the Bridge's answer.
 pub const JOIN_WAIT: Duration = Duration::from_secs(60);
+/// Told which songs got lyrics from a Bridge: (song, words found).
+pub type OnLyrics = Arc<dyn Fn(Vec<(String, bool)>) + Send + Sync>;
+
+/// A changed have list goes to a Bridge at most this often.
+pub const HAVE_EVERY_S: i64 = 3600;
+/// Most song ids in one have list.
+pub const HAVE_MAX: usize = 20_000;
+
+/// The songs this device has lyrics for (written, edited, transcribed here
+/// or on another computer, or transcribed with no words found), for a
+/// Bridge to skip. Songs a Bridge transcribed are left out: it has those.
+pub fn have_list(db: &DbHandle, store: &SyncStore) -> AppResult<Vec<String>> {
+    let from_bridge: std::collections::HashSet<String> = store
+        .entries(&[TRANSCRIPTS.name()])?
+        .into_values()
+        .flat_map(|m| m.into_iter())
+        .filter(|(_, e)| e.device.starts_with(super::run::DEVICE_PREFIX))
+        .filter_map(|(k, _)| k.rsplit_once('|').map(|(id, _)| id.to_string()))
+        .collect();
+    db.read(|c| {
+        let mut st = c.prepare("SELECT track_id, auto IS NULL FROM user_lyrics UNION ALL SELECT track_id, 0 FROM lyrics_auto_empty")?;
+        let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?)))?;
+        let mut out: Vec<String> = rows.filter_map(Result::ok).filter(|(id, own)| *own || !from_bridge.contains(id)).map(|(id, _)| id).collect();
+        out.sort();
+        out.dedup();
+        out.truncate(HAVE_MAX);
+        Ok(out)
+    })
+}
 
 fn seen_key(id: &str) -> String {
     format!("bridge.seen.{id}")
@@ -120,6 +149,10 @@ pub struct Desktop {
     waves_changed: Arc<Notify>,
     /// The plan last sent, per link (this run only).
     sent_plan: Mutex<HashMap<String, String>>,
+    /// Lyrics a Bridge made were saved here: (song, words found).
+    on_lyrics: RwLock<Option<OnLyrics>>,
+    /// The have list last sent, per link (this run only): its digest and when.
+    sent_have: Mutex<HashMap<String, (u64, i64)>>,
 }
 
 impl Desktop {
@@ -142,6 +175,8 @@ impl Desktop {
             waves: RwLock::default(),
             waves_changed: Arc::new(Notify::new()),
             sent_plan: Mutex::default(),
+            on_lyrics: RwLock::default(),
+            sent_have: Mutex::default(),
         });
         // Lidarr's last route: through a Bridge that's answering.
         let weak = Arc::downgrade(&me);
@@ -198,6 +233,53 @@ impl Desktop {
         *self.notify.write() = Some(f);
     }
 
+    /// Told when lyrics a Bridge transcribed were saved here (set by the app).
+    pub fn set_on_lyrics(&self, f: OnLyrics) {
+        *self.on_lyrics.write() = Some(f);
+    }
+
+    /// A paired Bridge that's answering does the background transcription
+    /// (Lyrics for every song is on and its work is going), so this
+    /// computer's background batch waits. An older Bridge, one not heard
+    /// from lately, or one with a problem never holds it back.
+    pub fn lyrics_takes_over(&self) -> bool {
+        if !crate::settings::load(&self.d.db).bridge_lyrics {
+            return false;
+        }
+        let now = self.now_s();
+        self.wire.links.links().iter().any(|l| {
+            let s = self.seen(&l.id);
+            s.last_seen.is_some_and(|t| now - t < ONLINE_S) && s.status.and_then(|st| st.lyrics).is_some_and(|ly| ly.state.takes_over())
+        })
+    }
+
+    /// Send a Bridge the songs this computer has lyrics for, when the list
+    /// changed since the last time (at most hourly) or `always`.
+    async fn send_have_to(&self, link: &Link, always: bool) {
+        if !crate::settings::load(&self.d.db).bridge_lyrics {
+            return;
+        }
+        let (db, store) = (self.d.db.clone(), self.d.store.clone());
+        let ids = match tokio::task::spawn_blocking(move || have_list(&db, &store)).await {
+            Ok(Ok(ids)) => ids,
+            _ => return,
+        };
+        let digest = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            ids.hash(&mut h);
+            h.finish()
+        };
+        let now = self.now_s();
+        let last = self.sent_have.lock().get(&link.id).copied();
+        if !always && last.is_some_and(|(d, at)| d == digest || now - at < HAVE_EVERY_S) {
+            return;
+        }
+        if self.wire.send(link, &Msg::LyricsHave { ids }).await.is_ok() {
+            self.sent_have.lock().insert(link.id.clone(), (digest, now));
+        }
+    }
+
     fn changed(&self) {
         if let Some(f) = self.notify.read().clone() {
             f();
@@ -220,8 +302,12 @@ impl Desktop {
         }
     }
 
-    /// The route through the first Bridge that's answering.
+    /// The route through the first Bridge that's answering (unless Lidarr
+    /// from anywhere is off).
     pub(crate) fn route(&self) -> Option<Arc<dyn LidarrRoute>> {
+        if !crate::settings::load(&self.d.db).bridge_lidarr {
+            return None;
+        }
         let now = self.now_s();
         let link = self.wire.links.links().into_iter().find(|l| self.seen(&l.id).last_seen.is_some_and(|t| now - t < ONLINE_S))?;
         Some(Arc::new(BridgeRoute { wire: self.wire.clone(), link, pending: self.pending.clone() }))
@@ -432,6 +518,11 @@ impl Desktop {
             free_staging: s.lidarr_free_staging,
             practice_until: s.lidarr_practice_until,
             upgrades_ask: s.upgrades_ask,
+            lyrics: Some(s.bridge_lyrics),
+            lyrics_hours: s.bridge_lyrics_hours,
+            utc_offset_s: crate::lidarr::waves::local_offset(&self.d.db, self.now_s()),
+            lrclib: s.lyrics_lrclib,
+            lidarr: Some(s.bridge_lidarr),
         }
     }
 
@@ -483,6 +574,7 @@ impl Desktop {
                 });
                 self.send_config_to(link, true).await;
                 self.flush_entries().await;
+                self.send_have_to(link, true).await;
                 if waves {
                     self.send_waves_plan(true).await;
                 }
@@ -511,10 +603,14 @@ impl Desktop {
                 self.changed();
             }
             Msg::Entries { entries } => {
-                if let Err(e) = self.d.store.merge(&entries, &[LIDARR.name()]) {
+                // Shared Lidarr state, and lyrics the Bridge transcribed.
+                if let Err(e) = self.d.store.merge(&entries, &[LIDARR.name(), TRANSCRIPTS.name()]) {
                     tracing::debug!("bridge entries: {e}");
                 }
                 let _ = Outbox::new(&self.d.db, &link.id).mark(&entries);
+                if entries.get(TRANSCRIPTS.name()).is_some_and(|m| !m.is_empty()) {
+                    self.apply_lyrics().await;
+                }
             }
             Msg::Answer { id, status, body } => self.pending.resolve(id, Ok(route::response(status, &body))),
             Msg::Failed { id, message } => self.pending.resolve(id, Err(message)),
@@ -522,9 +618,25 @@ impl Desktop {
                 tracing::info!("A Bridge unpaired itself.");
                 let _ = self.forget(&link.id);
             }
-            Msg::Config(_) | Msg::Get { .. } | Msg::Write { .. } | Msg::WavesPlan(_) => {}
+            Msg::Config(_) | Msg::Get { .. } | Msg::Write { .. } | Msg::WavesPlan(_) | Msg::LyricsHave { .. } => {}
             // Device link messages and kinds from a newer build.
             Msg::SyncHello(_) | Msg::SyncDiff { .. } | Msg::SyncWant { .. } | Msg::SyncEntries { .. } | Msg::SyncCopyWant { .. } | Msg::SyncCopy { .. } | Msg::SyncBye | Msg::Unknown => {}
+        }
+    }
+
+    /// Lyrics from a Bridge into this device's tables (the user's own
+    /// lyrics win, then the bigger model, then the newest).
+    async fn apply_lyrics(&self) {
+        let db = self.d.db.clone();
+        match self.d.store.run(move |st| crate::sync::transcripts::apply(st, &db)).await {
+            Ok(changed) if !changed.is_empty() => {
+                tracing::info!(songs = changed.len(), "lyrics from the Bridge");
+                if let Some(f) = self.on_lyrics.read().clone() {
+                    f(changed);
+                }
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("lyrics from the Bridge not applied: {e}"),
         }
     }
 
@@ -580,7 +692,9 @@ impl Desktop {
                 _ = settings.tick() => {
                     for link in self.wire.links.links() {
                         self.send_config_to(&link, false).await;
+                        self.send_have_to(&link, false).await;
                     }
+
                     self.send_waves_plan(false).await;
                 }
                 c = changes.recv() => {

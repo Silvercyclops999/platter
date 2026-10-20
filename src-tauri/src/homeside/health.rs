@@ -31,6 +31,9 @@ pub fn status_text(bridge: &Bridge) -> String {
     if let Some(p) = &st.music_plex_path {
         out.push(format!("Music folder: set MUSIC_PLEX_PATH={p}"));
     }
+    if let Some(l) = &st.lyrics {
+        out.push(super::lyrics::words(l));
+    }
     if let Some(p) = &st.problem {
         out.push(format!("Problem: {p}"));
     }

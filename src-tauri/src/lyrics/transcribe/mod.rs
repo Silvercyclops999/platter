@@ -71,6 +71,11 @@ pub enum PauseReason {
     /// Other programs are keeping the processor busy, a fullscreen game
     /// or presentation is in front, or the computer is running warm.
     Busy,
+    /// On a Platter Bridge: outside the night hours it works in.
+    Hours,
+    /// A paired Platter Bridge transcribes these at night, so this
+    /// computer's background batch waits.
+    Bridge,
 }
 
 /// What went wrong last (shown in Settings and the lyrics view).
@@ -309,6 +314,9 @@ struct Job {
     now: bool,
     /// Done again with the chosen model (it was done with another).
     redo: bool,
+    /// Part of a long background run (the batch, Redo): it waits while a
+    /// paired Bridge does that work.
+    batch: bool,
 }
 
 struct Download {
@@ -379,6 +387,8 @@ struct Inner {
     st: Mutex<State>,
     wake: Notify,
     shared: parking_lot::RwLock<Option<Arc<dyn SharedResults>>>,
+    /// A paired Bridge transcribes in the background, so the batch waits.
+    defer: parking_lot::RwLock<Option<Arc<dyn Fn() -> bool + Send + Sync>>>,
 }
 
 /// The transcription queue and model manager. Cheap to clone.
@@ -402,7 +412,7 @@ fn mb(bytes: u64) -> u64 {
 impl Transcriber {
     pub fn new(deps: Deps) -> Self {
         let me = Self {
-            inner: Arc::new(Inner { deps, st: Mutex::new(State::default()), wake: Notify::new(), shared: Default::default() }),
+            inner: Arc::new(Inner { deps, st: Mutex::new(State::default()), wake: Notify::new(), shared: Default::default(), defer: Default::default() }),
         };
         // Once the card is known (or fails), the default model and Settings follow.
         let weak = Arc::downgrade(&me.inner);
@@ -449,6 +459,23 @@ impl Transcriber {
 
     fn shared(&self) -> Option<Arc<dyn SharedResults>> {
         self.inner.shared.read().clone()
+    }
+
+    /// Whether a paired Bridge does the background batch now (asked each
+    /// time a batch song would start, and while it waits).
+    pub fn set_defer(&self, f: Arc<dyn Fn() -> bool + Send + Sync>) {
+        *self.inner.defer.write() = Some(f);
+        self.inner.wake.notify_one();
+    }
+
+    fn deferring(&self) -> bool {
+        self.inner.defer.read().as_ref().is_some_and(|f| f())
+    }
+
+    /// Look at the pause conditions again now (the Bridge's night hours or
+    /// a Bridge coming or going).
+    pub fn poke(&self) {
+        self.inner.wake.notify_one();
     }
 
     /// Start the worker on the current runtime.
@@ -678,7 +705,7 @@ impl Transcriber {
             let mut st = self.inner.st.lock();
             for id in &p.ids {
                 if !st.queue.iter().any(|j| &j.track_id == id) {
-                    st.queue.push_back(Job { track_id: id.clone(), background: true, check_other: true, now: false, redo: false });
+                    st.queue.push_back(Job { track_id: id.clone(), background: true, check_other: true, now: false, redo: false, batch: true });
                 }
             }
             st.batch = BatchProgress { done: p.done.min(p.total), total: p.total.max(p.ids.len()) };
@@ -705,7 +732,7 @@ impl Transcriber {
                 if st.queue.iter().any(|j| j.track_id == id) || st.current.as_ref().is_some_and(|r| r.job.track_id == id) {
                     continue;
                 }
-                st.queue.push_back(Job { track_id: id, background: true, check_other: false, now: false, redo: true });
+                st.queue.push_back(Job { track_id: id, background: true, check_other: false, now: false, redo: true, batch: true });
                 added += 1;
             }
             st.batch.total += added;
@@ -936,6 +963,10 @@ impl Transcriber {
     /// Queue songs. Songs asked for now go before the background batch; a
     /// single song goes first. Returns how many were added.
     fn enqueue(&self, ids: Vec<String>, background: bool, check_other: bool, front: bool) -> AppResult<usize> {
+        self.enqueue_as(ids, background, check_other, front, false)
+    }
+
+    fn enqueue_as(&self, ids: Vec<String>, background: bool, check_other: bool, front: bool, batch: bool) -> AppResult<usize> {
         if front { self.check_usable()? } else { self.check_background()? }
         let start_download = {
             let st = self.inner.st.lock();
@@ -961,7 +992,7 @@ impl Transcriber {
                     st.queue.remove(pos);
                     st.batch.total = st.batch.total.saturating_sub(1);
                 }
-                let job = Job { track_id: id, background, check_other, now: front, redo: false };
+                let job = Job { track_id: id, background, check_other, now: front, redo: false, batch };
                 if front {
                     fronts.push(job);
                 } else if background {
@@ -1031,6 +1062,12 @@ impl Transcriber {
         self.check_background()?;
         self.settle_gpu().await;
         let ids = self.inner.deps.db.read_async(store::unreleased_todo).await?;
+        self.enqueue_as(ids, true, true, false, true)
+    }
+
+    /// These songs in the background, skipping any with lyrics from another
+    /// source (the Bridge's night run). Returns how many were added.
+    pub fn transcribe_background(&self, ids: Vec<String>) -> AppResult<usize> {
         self.enqueue(ids, true, true, false)
     }
 
@@ -1094,6 +1131,8 @@ impl Transcriber {
                 }
                 continue;
             }
+            // Left to a paired Bridge: other songs go before the batch.
+            let deferring = self.deferring();
             let job = {
                 let mut st = self.inner.st.lock();
                 // Paused: only songs asked for one at a time.
@@ -1101,6 +1140,8 @@ impl Transcriber {
                     None
                 } else if st.user_paused {
                     st.queue.iter().position(|j| j.now)
+                } else if deferring {
+                    st.queue.iter().position(|j| !j.batch).or((!st.queue.is_empty()).then_some(0))
                 } else {
                     (!st.queue.is_empty()).then_some(0)
                 };
@@ -1245,21 +1286,29 @@ impl Transcriber {
     /// Waits out the pause conditions for work nobody is waiting on: the
     /// computer being busy, and battery power for the background batch.
     /// Gives way to a song someone asks for meanwhile.
-    async fn wait_conditions(&self, cancel: &Stop, battery: bool) -> Waited {
+    async fn wait_conditions(&self, cancel: &Stop, battery: bool, batch: bool) -> Waited {
         let pacer = &self.inner.deps.pacer;
         loop {
             if cancel.is_set() {
                 return Waited::Cancelled;
             }
+            let held_back = batch && self.deferring();
             let asked_for = {
                 let st = self.inner.st.lock();
-                st.user_paused || st.queue.front().is_some_and(|j| j.now)
+                st.user_paused || st.queue.front().is_some_and(|j| j.now) || held_back && st.queue.iter().any(|j| !j.batch)
             };
             if asked_for {
+
                 self.inner.st.lock().paused = None;
                 return Waited::GiveWay;
             }
-            let mut reason = if battery { self.inner.deps.conditions.pause_reason().await } else { None };
+            let mut reason = if batch && self.deferring() {
+                Some(PauseReason::Bridge)
+            } else if battery {
+                self.inner.deps.conditions.pause_reason().await
+            } else {
+                None
+            };
             let load = pacer.load();
             if reason.is_none() && load == pace::Load::Busy {
                 reason = Some(PauseReason::Busy);
@@ -1402,7 +1451,7 @@ impl Transcriber {
             r.job.model = kind;
         }
         if !job.now {
-            match self.wait_conditions(cancel, job.background).await {
+            match self.wait_conditions(cancel, job.background, job.batch).await {
                 Waited::Go => {}
                 Waited::Cancelled => return Outcome::Cancelled,
                 Waited::GiveWay => return Outcome::Again,

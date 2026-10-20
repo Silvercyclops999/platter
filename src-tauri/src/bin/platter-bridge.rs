@@ -2,6 +2,8 @@
 //! container (docs/BRIDGE.md). `platter-bridge` runs it; `platter-bridge
 //! health` asks a running one whether it's well (Docker's healthcheck);
 //! `platter-bridge status` prints what it's doing and its pair code.
+//! `platter-bridge --speech-worker` is the speech helper the Bridge starts
+//! for Lyrics for every song (as Platter on a computer does).
 
 use std::sync::Arc;
 
@@ -9,6 +11,10 @@ use platter_lib::homeside::{health, run};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // The speech helper: before anything else starts.
+    if let Some(code) = platter_lib::speech_worker(&args) {
+        std::process::exit(code);
+    }
     let env = run::Env::from_env();
     let rt = match tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() {
         Ok(rt) => rt,
@@ -66,7 +72,23 @@ async fn start(env: run::Env) -> i32 {
     if !parts.env.set_here().is_empty() {
         tracing::info!("Using the Bridge's own settings for: {}. What a computer sends for these is ignored.", parts.env.set_here().join(", "));
     }
+    // Lyrics for every song: the speech model and the queue, from the mounted music folder.
+    let lyrics = platter_lib::homeside::lyrics::real(
+        &parts.env.data,
+        parts.db.clone(),
+        parts.store.clone(),
+        parts.env.music_dir.clone(),
+        parts.env.music.as_ref().map(|(root, _)| root.clone()),
+        parts.plex.clone(),
+    );
     let bridge = run::Bridge::new(parts);
+    match lyrics {
+        Ok(l) => {
+            l.spawn();
+            bridge.set_lyrics(l);
+        }
+        Err(e) => tracing::warn!("Lyrics for every song can't run here: {e}"),
+    }
     let h = bridge.clone();
     tokio::spawn(async move {
         if let Err(e) = health::serve(h, port).await {

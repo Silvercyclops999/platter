@@ -846,6 +846,15 @@ pub struct Settings {
     /// one over their device link, and the key stays here (this device
     /// only). On by default; does nothing until Lidarr is set up here.
     pub home_side_lidarr: bool,
+    /// Platter Bridge, Lyrics for every song: a paired Bridge transcribes
+    /// songs without lyrics at night and every device gets them; computers
+    /// then leave their background batch to it (synced).
+    pub bridge_lyrics: bool,
+    /// When the Bridge transcribes, in this computer's time zone (synced).
+    pub bridge_lyrics_hours: crate::homeside::wire::NightHours,
+    /// Platter Bridge, Lidarr from anywhere: the Bridge does Lidarr work
+    /// and answers Lidarr for devices away from home (synced).
+    pub bridge_lidarr: bool,
     /// Bookmarks has a row in the library.
     pub bookmarks_in_library: bool,
     /// The Stats page (profile menu and library row).
@@ -1346,6 +1355,9 @@ impl Default for Settings {
             device_sync_away: true,
             device_sync_wifi_only: true,
             home_side_lidarr: true,
+            bridge_lyrics: true,
+            bridge_lyrics_hours: Default::default(),
+            bridge_lidarr: true,
             bookmarks_in_library: true,
             stats_page: true,
             stats_strip: true,
@@ -1455,6 +1467,10 @@ impl Default for Settings {
 /// Every setting is in exactly one of this list, [`DEVICE_SETTINGS`] and
 /// [`FORM_FACTOR_ONLY`] (a test checks).
 pub const SYNCED_SETTINGS: &[&str] = &[
+    // Platter Bridge: its work is for every device.
+    "bridgeLyrics",
+    "bridgeLyricsHours",
+    "bridgeLidarr",
     "reportPlays",
     "shuffleStyle",
     "qualityHome",
@@ -1962,6 +1978,9 @@ pub struct SettingsPatch {
     pub device_sync_away: Option<bool>,
     pub device_sync_wifi_only: Option<bool>,
     pub home_side_lidarr: Option<bool>,
+    pub bridge_lyrics: Option<bool>,
+    pub bridge_lyrics_hours: Option<crate::homeside::wire::NightHours>,
+    pub bridge_lidarr: Option<bool>,
     pub bookmarks_in_library: Option<bool>,
     pub stats_page: Option<bool>,
     pub stats_strip: Option<bool>,
@@ -2325,6 +2344,9 @@ impl Settings {
         set(&mut self.device_sync_away, p.device_sync_away);
         set(&mut self.device_sync_wifi_only, p.device_sync_wifi_only);
         set(&mut self.home_side_lidarr, p.home_side_lidarr);
+        set(&mut self.bridge_lyrics, p.bridge_lyrics);
+        set(&mut self.bridge_lyrics_hours, p.bridge_lyrics_hours);
+        set(&mut self.bridge_lidarr, p.bridge_lidarr);
         if let Some(h) = p.daylist_hours {
             if !DAYLIST_HOURS.contains(&h) {
                 return Err(AppError::Invalid("The daylist refreshes every 1, 3 or 6 hours.".into()));
@@ -3821,6 +3843,12 @@ mod tests {
         //   third party, keeps the Lidarr key on this computer, and does
         //   nothing until Lidarr is set up here.
         assert_eq!(v["homeSideLidarr"], serde_json::json!(true));
+        // - bridgeLyrics, bridgeLidarr: a paired Bridge's work, on once the
+        //   user has set up and paired a Bridge (nothing happens without
+        //   one). It's the user's own server; nothing goes to anyone else.
+        assert_eq!(v["bridgeLyrics"], serde_json::json!(true));
+        assert_eq!(v["bridgeLidarr"], serde_json::json!(true));
+        assert_eq!(v["bridgeLyricsHours"], serde_json::json!("night"));
         assert!(DEVICE_SETTINGS.contains(&"homeSideLidarr") && !SYNCED_SETTINGS.contains(&"homeSideLidarr"));
         assert_eq!(s.ai_provider, crate::smart::prompt::AiProvider::None);
     }

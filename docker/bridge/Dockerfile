@@ -6,8 +6,12 @@
 FROM rust:1-bookworm AS build
 # The crate is the desktop app's too, so its build scripts look for the
 # desktop libraries. The Bridge binary links none of them (checked below).
+# Lyrics for every song builds whisper.cpp: CMake, libclang for its
+# bindings, and the Vulkan headers and glslc its build expects (the binary
+# never links the Vulkan loader, checked below).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libasound2-dev libssl-dev pkg-config \
+    cmake clang libclang-dev libvulkan-dev glslc \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
@@ -18,21 +22,22 @@ ARG TARGETPLATFORM
 RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-${TARGETPLATFORM} \
     --mount=type=cache,target=/src/src-tauri/target,id=bridge-target-${TARGETPLATFORM} \
     cd src-tauri \
- && cargo build --locked --profile bridge --bin platter-bridge --features bridge \
+ && cargo build --locked --profile bridge --bin platter-bridge --features bridge,transcribe \
  && cp target/bridge/platter-bridge /platter-bridge
-# Nothing of the desktop (webview, audio) may be linked in.
-RUN ldd /platter-bridge && ! ldd /platter-bridge | grep -Eiq 'webkit|gtk|asound|appindicator'
+# Nothing of the desktop (webview, audio) may be linked in, nor the Vulkan loader.
+RUN ldd /platter-bridge && ! ldd /platter-bridge | grep -Eiq 'webkit|gtk|asound|appindicator|vulkan'
 
 FROM debian:bookworm-slim
+# libgomp1: the speech model's threads (whisper.cpp uses OpenMP).
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates tzdata \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata libgomp1 \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --system --uid 1000 --user-group --home-dir /data --shell /usr/sbin/nologin platter \
  && mkdir -p /data \
  && chown platter:platter /data
 COPY --from=build /platter-bridge /usr/local/bin/platter-bridge
 LABEL org.opencontainers.image.title="Platter Bridge" \
-      org.opencontainers.image.description="Optional home side for Platter: Lidarr catch-up while no computer has Platter open." \
+      org.opencontainers.image.description="Optional home side for Platter: lyrics for every song at night, and Lidarr while no computer has Platter open." \
       org.opencontainers.image.source="https://github.com/Silvercyclops999/platter" \
       org.opencontainers.image.licenses="GPL-3.0-or-later"
 ENV BRIDGE_DATA=/data

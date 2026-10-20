@@ -680,6 +680,34 @@ async fn the_background_batch_takes_unreleased_songs_and_waits_on_battery() {
     assert!(f.db.read(store::unreleased_todo).unwrap().is_empty());
 }
 
+#[tokio::test]
+async fn a_bridge_doing_the_lyrics_holds_the_batch_but_not_songs_asked_for() {
+    let f = fx();
+    install(&f).await;
+    let bridge = Arc::new(AtomicBool::new(true));
+    {
+        let b = bridge.clone();
+        f.t.set_defer(Arc::new(move || b.load(Ordering::SeqCst)));
+    }
+    assert_eq!(f.t.transcribe_unreleased().await.unwrap(), 3);
+    let s = until(&f.t, "left to the Bridge", |s| s.paused == Some(PauseReason::Bridge)).await;
+    assert_eq!(s.batch.total, 3);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(f.songs.reads.load(Ordering::SeqCst), 0, "this computer doesn't do the Bridge's work");
+    // The song someone plays (the Bridge hasn't got to it yet) runs here, at once.
+    f.t.transcribe_track("501").unwrap();
+    until(&f.t, "501 done", |_| f.events.done.lock().iter().any(|d| d.0 == "501")).await;
+    // So does the quiet one for a song whose lyrics didn't match.
+    f.t.transcribe_quietly("502");
+    until(&f.t, "502 done", |_| f.events.done.lock().iter().any(|d| d.0 == "502")).await;
+    assert_eq!(f.t.status().paused, Some(PauseReason::Bridge), "the batch still waits");
+    // The Bridge went quiet (or a problem): the batch goes on here.
+    bridge.store(false, Ordering::SeqCst);
+    f.t.poke();
+    until(&f.t, "batch done", |s| idle(s) && f.events.done.lock().len() == 5).await;
+    assert!(f.db.read(store::unreleased_todo).unwrap().is_empty());
+}
+
 /// Results from the user's other devices: "802" was transcribed elsewhere.
 #[derive(Default)]
 struct FakeShared {

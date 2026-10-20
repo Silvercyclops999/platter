@@ -22,9 +22,9 @@ services:
       # Optional: Plex's address. Without PLEX_TOKEN the Bridge signs in on
       # its own through plex.tv/link.
       # PLEX_URL: "http://10.20.30.40:32400"
-      # Optional: add new protected albums from the server.
-      # The path Plex uses for the music folder mounted at /music below (the
-      # log suggests it once the folder is mounted):
+      # Lyrics for every song (and adding new protected albums): the path
+      # Plex uses for the music folder mounted at /music below (the log
+      # suggests it once the folder is mounted):
       # MUSIC_PLEX_PATH: "/data/media/Music"
       # Lidarr's staging folder, mounted at /staging below:
       # STAGING_DIR: "/staging"
@@ -32,7 +32,8 @@ services:
       # BRIDGE_RELAY: "https://ntfy.example.org"
     volumes:
       - ./appdata:/data
-      # Read-only: the Bridge only reads, and additions wait for a computer.
+      # Read-only is enough for lyrics: the Bridge only reads, and Lidarr
+      # additions wait for a computer.
       # - /path/to/music:/music:ro
       # Read-write: the Bridge can add new protected albums itself.
       # - /path/to/music:/music
