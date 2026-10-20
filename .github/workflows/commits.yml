@@ -1,0 +1,36 @@
+name: commits
+
+# Every commit on a pull request must be written by the project's noreply
+# address and carry no trailers (no Co-Authored-By, no session links). Pushes to
+# main and check/* branches are checked too, so a direct push shows up red.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, 'check/**']
+
+jobs:
+  author-and-trailers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check commits
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          REF: ${{ github.ref_name }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            range="$PR_BASE..$PR_HEAD"
+          elif [ "$REF" = main ] && [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
+            range="$BEFORE..$AFTER"
+          else
+            range="origin/main..$AFTER"
+          fi
+          sh scripts/check-commits.sh "$range"
