@@ -72,6 +72,24 @@ pub const PLEX_MIGRATED_KEY: &str = "bridge.plexMigrated";
 /// How long a plex.tv/link code is waited on before a new one.
 const PLEX_LINK_WAIT: Duration = Duration::from_secs(10 * 60);
 
+/// What came of BRIDGE_PAIR_CODE at start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FromEnv {
+    /// Not set.
+    NoCode,
+    /// Paired with it now.
+    Paired,
+    /// Used before: skipped.
+    UsedUp,
+    /// Never used and past its hour: skipped.
+    Expired,
+}
+
+pub const USED_UP: &str = "Already paired. BRIDGE_PAIR_CODE is used up and can be removed from the container.";
+const USED_UNPAIRED: &str = "BRIDGE_PAIR_CODE was used before and works only once. Remove it from the container, then make a new code in Platter or enter the code this log shows.";
+const EXPIRED: &str = "Already paired. BRIDGE_PAIR_CODE has expired and can be removed from the container.";
+const EXPIRED_UNPAIRED: &str = "BRIDGE_PAIR_CODE has expired. Make a new one in Platter (Settings > Bridge > Pair a Bridge), or remove it and enter the code this log shows.";
+
 /// Settings from the container's environment.
 #[derive(Clone, Default)]
 pub struct Env {
@@ -358,17 +376,24 @@ impl Bridge {
         }
     }
 
-    /// Pair with the code from the environment, unless it was used before.
-    /// Ok(false) when there's nothing to pair with.
-    pub async fn pair_from_env(&self) -> AppResult<bool> {
-        let Some(raw) = self.p.env.pair_code.clone() else { return Ok(false) };
+    /// Pair with the code from the environment, unless it was used before
+    /// or has expired (said once in the log, and skipped). A code is
+    /// remembered as used by its fingerprint, never the code itself.
+    pub async fn pair_from_env(&self) -> AppResult<FromEnv> {
+        let Some(raw) = self.p.env.pair_code.clone() else { return Ok(FromEnv::NoCode) };
         let Some(code) = PairCode::parse(&raw) else {
             return Err(AppError::Invalid("BRIDGE_PAIR_CODE isn't a pair code. Copy it again from Platter (Settings > Bridge > Pair a Bridge).".into()));
         };
+        let paired = !self.wire.links.all().is_empty();
         if self.used_codes().contains(&code.fingerprint()) {
-            return Ok(false);
+            tracing::info!("{}", if paired { USED_UP } else { USED_UNPAIRED });
+            return Ok(FromEnv::UsedUp);
         }
-        self.pair(code).await.map(|_| true)
+        if code.expired(self.now_s()) {
+            tracing::info!("{}", if paired { EXPIRED } else { EXPIRED_UNPAIRED });
+            return Ok(FromEnv::Expired);
+        }
+        self.pair(code).await.map(|_| FromEnv::Paired)
     }
 
     /// Pair with a code: publish the join, wait for the desktop's welcome.

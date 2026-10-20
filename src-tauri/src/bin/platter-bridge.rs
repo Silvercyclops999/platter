@@ -73,11 +73,9 @@ async fn start(env: run::Env) -> i32 {
             tracing::warn!("The health check couldn't listen on 127.0.0.1:{port}: {e}");
         }
     });
-    if bridge.wire.links.all().is_empty() || bridge.p.env.pair_code.is_some() {
-        match bridge.pair_from_env().await {
-            Ok(true) | Ok(false) => {}
-            Err(e) => tracing::error!("Pairing: {e}"),
-        }
+    // A used or expired code is said once and skipped; only a fresh one pairs.
+    if let Err(e) = bridge.pair_from_env().await {
+        tracing::error!("Pairing: {e}");
     }
     let (stop_tx, stop) = tokio::sync::watch::channel(false);
     let runner = tokio::spawn(Arc::clone(&bridge).run(stop));

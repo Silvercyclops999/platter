@@ -11,7 +11,7 @@ use super::code::PairCode;
 use super::desktop::{Desktop, DesktopDeps};
 use super::link::{self, Counter, Guard, Link, Reassembler, Side};
 use super::pair::{Joining, Offer};
-use super::run::{Bridge, Env, Parts};
+use super::run::{Bridge, Env, FromEnv, Parts};
 use super::wire::{MusicAccess, Msg};
 use crate::db::DbHandle;
 use crate::error::AppResult;
@@ -278,7 +278,7 @@ async fn a_desktop_and_a_bridge_pair_and_talk_only_in_sealed_messages() {
         plex: None,
         music: MusicAccess::ReadOnly,
     });
-    assert!(tokio::time::timeout(Duration::from_secs(20), bridge.pair_from_env()).await.unwrap().unwrap());
+    assert_eq!(tokio::time::timeout(Duration::from_secs(20), bridge.pair_from_env()).await.unwrap().unwrap(), FromEnv::Paired);
     let (stop_tx, stop) = tokio::sync::watch::channel(false);
     tokio::spawn(bridge.clone().run(stop));
 
@@ -291,8 +291,16 @@ async fn a_desktop_and_a_bridge_pair_and_talk_only_in_sealed_messages() {
     let ov = desk.overview();
     assert!(ov.pairing.is_none(), "the code is used up");
     assert_eq!(ov.bridges[0].music, MusicAccess::ReadOnly);
-    // The Bridge already used this code: starting again with it does nothing.
-    assert!(!bridge.pair_from_env().await.unwrap());
+    // The Bridge already used this code: starting again with it is skipped,
+    // and only the code's fingerprint was kept.
+    assert_eq!(bridge.pair_from_env().await.unwrap(), FromEnv::UsedUp);
+    let kept: Vec<String> = b.db.read(|c| {
+        let mut st = c.prepare("SELECT value FROM kv")?;
+        let rows = st.query_map([], |r| r.get::<_, String>(0))?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }).unwrap();
+    assert!(kept.iter().any(|v| v.contains(&PairCode::parse(&start.code).unwrap().fingerprint())));
+    assert!(kept.iter().all(|v| !v.contains(&start.code[4..])), "the code itself isn't kept");
 
     // The home Platter route: the desktop reads Lidarr through the Bridge.
     let route = desk.route().expect("a route through the Bridge");
@@ -442,7 +450,7 @@ async fn bring_in_my_listening_goes_to_the_bridge_sealed_and_comes_back() {
         plex: None,
         music: MusicAccess::ReadOnly,
     });
-    assert!(tokio::time::timeout(Duration::from_secs(20), bridge.pair_from_env()).await.unwrap().unwrap());
+    assert_eq!(tokio::time::timeout(Duration::from_secs(20), bridge.pair_from_env()).await.unwrap().unwrap(), FromEnv::Paired);
     let (stop_tx, stop) = tokio::sync::watch::channel(false);
     tokio::spawn(bridge.clone().run(stop));
 
@@ -690,6 +698,25 @@ async fn the_bridge_never_keeps_the_plex_account_sign_in() {
     let (m, t, uris) = super::run::server_only_token(&both, &account, Some("m2")).unwrap();
     assert_eq!((m.as_str(), t.expose(), uris.len()), ("m2", "shared-token", 1));
     assert!(super::run::server_only_token(&both, &account, None).is_none(), "which server isn't a guess");
+}
+
+#[tokio::test]
+async fn a_pair_code_left_in_the_container_is_skipped_once_used_or_expired() {
+    let tmp = tempfile::tempdir().unwrap();
+    let b = side(tmp.path(), "bridge");
+    let now = (super::peer::system_ms() / 1000) as i64;
+    // Never set: nothing to do.
+    let none = bridge_from(&b, Env { name: "Shed".into(), ..Default::default() }, Arc::new(Ntfy::new().unwrap()));
+    assert_eq!(none.pair_from_env().await.unwrap(), FromEnv::NoCode);
+    // Made more than an hour ago and never used: skipped, not waited on.
+    let old = PairCode::new(None, now - 2 * 3600).text();
+    let stale = bridge_from(&b, Env { name: "Shed".into(), pair_code: Some(old.clone()), ..Default::default() }, Arc::new(Ntfy::new().unwrap()));
+    let out = tokio::time::timeout(Duration::from_secs(2), stale.pair_from_env()).await.unwrap().unwrap();
+    assert_eq!(out, FromEnv::Expired);
+    // Not a code at all: said plainly.
+    let junk = bridge_from(&b, Env { name: "Shed".into(), pair_code: Some("hello".into()), ..Default::default() }, Arc::new(Ntfy::new().unwrap()));
+    assert!(junk.pair_from_env().await.is_err());
+    assert!(super::run::USED_UP.contains("can be removed from the container"));
 }
 
 #[test]

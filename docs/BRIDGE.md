@@ -153,6 +153,12 @@ status page, which only the server itself can open. Restarting or recreating
 the container before pairing makes a new code and the old one stops working,
 so use the latest one in the log.
 
+After pairing with `BRIDGE_PAIR_CODE`, clear it from the container's
+settings. The Bridge remembers the code was used (a fingerprint of it, not
+the code), so leaving it set does no harm: at each start it says the code is
+used up and can be removed, and skips it. An unused code that has expired
+is skipped the same way.
+
 Once paired, Platter sends the Bridge how to reach Lidarr (Lidarr's home
 address and API key) and its Lidarr settings, every time the Bridge starts,
 so a changed key reaches it too. Whatever is set on the Bridge itself
@@ -210,7 +216,7 @@ when something happens). If you run your own ntfy server, there's no limit.
 | `LIDARR_URL`, `LIDARR_API_KEY` | Lidarr as the server reaches it. They win over what a computer sends. |
 | `PLEX_URL` | Plex's address as the server reaches it. Optional. |
 | `PLEX_TOKEN` | A token for that Plex server, with `PLEX_URL`. Optional. |
-| `BRIDGE_PAIR_CODE` | A code from Settings > Bridge > Pair a Bridge. Used once. Optional. |
+| `BRIDGE_PAIR_CODE` | A code from Settings > Bridge > Pair a Bridge. Used once; clear it after pairing. Optional. |
 | `BRIDGE_NAME` | What Platter calls this Bridge. Default "Platter Bridge". |
 | `MUSIC_PLEX_PATH` | The path Plex uses for the folder mounted at `/music`. |
 | `MUSIC_DIR` | Where the music folder is mounted, if not `/music`. |
