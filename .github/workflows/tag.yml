@@ -1,0 +1,90 @@
+name: tag
+
+# Tags a commit vX.Y.Z and starts the release build, for places that can't push
+# tags themselves. The commit must be on main, carry that version in
+# tauri.conf.json, and have passed CI (this waits while CI is still running on it).
+#
+#   gh api repos/OWNER/REPO/actions/workflows/tag.yml/dispatches \
+#     -f ref=main -f 'inputs[version]=0.2.35' -f 'inputs[sha]=<commit>'
+#
+# A tag created with the workflow token doesn't start other workflows, so this
+# starts release.yml on the new tag itself.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without the v, like 0.2.35'
+        required: true
+      sha:
+        description: 'Commit to tag (default: the head of main)'
+        required: false
+
+concurrency:
+  group: tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    permissions:
+      actions: write
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      VERSION: ${{ inputs.version }}
+      SHA_IN: ${{ inputs.sha }}
+    steps:
+      - name: Check the version and commit
+        id: check
+        run: |
+          set -eu
+          echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "version must look like 1.2.3"; exit 1; }
+          tag="v$VERSION"
+          if [ -n "$SHA_IN" ]; then
+            sha=$(gh api "repos/$REPO/commits/$SHA_IN" --jq .sha)
+          else
+            sha=$(gh api "repos/$REPO/commits/main" --jq .sha)
+          fi
+          echo "Commit: $sha"
+          if gh api "repos/$REPO/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo "$tag already exists"; exit 1
+          fi
+          status=$(gh api "repos/$REPO/compare/$sha...main" --jq .status)
+          case "$status" in
+            identical|ahead) ;;
+            *) echo "$sha is not on main ($status)"; exit 1 ;;
+          esac
+          have=$(gh api "repos/$REPO/contents/src-tauri/tauri.conf.json?ref=$sha" -H 'Accept: application/vnd.github.raw' | jq -r .version)
+          [ "$have" = "$VERSION" ] || { echo "tauri.conf.json at that commit says $have, not $VERSION"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Wait for CI to pass on it
+        env:
+          SHA: ${{ steps.check.outputs.sha }}
+        run: |
+          set -eu
+          for i in $(seq 1 140); do
+            runs=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&per_page=20")
+            ok=$(echo "$runs" | jq '[.workflow_runs[] | select(.conclusion == "success")] | length')
+            busy=$(echo "$runs" | jq '[.workflow_runs[] | select(.status != "completed")] | length')
+            total=$(echo "$runs" | jq '.workflow_runs | length')
+            if [ "$ok" -gt 0 ]; then echo "CI passed on $SHA"; exit 0; fi
+            # A commit pushed a moment ago may not have its CI run yet.
+            if [ "$total" -eq 0 ] && [ "$i" -le 10 ]; then echo "no CI run yet on $SHA, waiting"; sleep 30; continue; fi
+            if [ "$busy" -eq 0 ]; then echo "CI has not passed on $SHA"; exit 1; fi
+            echo "CI still running on $SHA, waiting"
+            sleep 30
+          done
+          echo "gave up waiting for CI"; exit 1
+      - name: Tag and start the release
+        env:
+          SHA: ${{ steps.check.outputs.sha }}
+          TAG: ${{ steps.check.outputs.tag }}
+        run: |
+          set -eu
+          gh api "repos/$REPO/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$SHA" >/dev/null
+          echo "Tagged $SHA as $TAG"
+          gh api "repos/$REPO/actions/workflows/release.yml/dispatches" -f "ref=$TAG"
+          echo "Started release.yml on $TAG"
