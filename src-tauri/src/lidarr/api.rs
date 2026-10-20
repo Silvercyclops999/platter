@@ -401,6 +401,15 @@ pub struct QueueItem {
     /// Why a download failed or is stuck, as Lidarr words it.
     #[serde(default)]
     pub error_message: Option<String>,
+    /// The download client's id for it (history uses the same one).
+    #[serde(default)]
+    pub download_id: Option<String>,
+    /// Where the download client put it, as Lidarr sees the path.
+    #[serde(default)]
+    pub output_path: Option<String>,
+    /// `usenet` or `torrent`.
+    #[serde(default)]
+    pub protocol: Option<String>,
 }
 
 /// One event in Lidarr's history.
@@ -509,6 +518,58 @@ pub struct Rejection {
     pub kind: String,
 }
 
+/// One release an indexer has for an album (`GET /release?albumId=`), as
+/// Lidarr judged it against the album's quality profile.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Release {
+    #[serde(default)]
+    pub guid: String,
+    #[serde(default)]
+    pub indexer_id: i64,
+    #[serde(default)]
+    pub indexer: Option<String>,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub size: Option<i64>,
+    /// `usenet` or `torrent`.
+    #[serde(default)]
+    pub protocol: String,
+    #[serde(default)]
+    pub seeders: Option<i64>,
+    #[serde(default)]
+    pub quality: Option<ReleaseQuality>,
+    /// Lidarr would grab it: the profile allows it and nothing rejected it.
+    #[serde(default)]
+    pub approved: bool,
+    #[serde(default)]
+    pub rejected: bool,
+    /// Lidarr's reasons, in its words.
+    #[serde(default)]
+    pub rejections: Vec<String>,
+    /// False when the indexer or client can't take it now.
+    #[serde(default = "yes")]
+    pub download_allowed: bool,
+    /// A whole discography in one download.
+    #[serde(default)]
+    pub discography: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseQuality {
+    #[serde(default)]
+    pub quality: Option<QualityRef>,
+}
+
+impl Release {
+    /// The quality's name (`FLAC`, `MP3-320`...).
+    pub fn quality_name(&self) -> &str {
+        self.quality.as_ref().and_then(|q| q.quality.as_ref()).map(|q| q.name.as_str()).unwrap_or_default()
+    }
+}
+
 /// What Lidarr's manual import proposes for one file (`GET /manualimport`).
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -586,6 +647,11 @@ pub trait LidarrGet: Send + Sync {
     /// GET `/api/v1{path}` with `query`. A network failure is an error; any
     /// HTTP answer is returned as is.
     async fn get(&self, path: &str, query: &[(&str, &str)]) -> AppResult<HttpResponse>;
+    /// [`Self::get`] for a read that waits on Lidarr's indexers (a release
+    /// search), given longer to answer where the route allows it.
+    async fn get_long(&self, path: &str, query: &[(&str, &str)]) -> AppResult<HttpResponse> {
+        self.get(path, query).await
+    }
     fn route(&self) -> Route;
 }
 
@@ -654,20 +720,34 @@ impl DirectRoute {
     }
 }
 
-#[async_trait]
-impl LidarrGet for DirectRoute {
-    async fn get(&self, path: &str, query: &[(&str, &str)]) -> AppResult<HttpResponse> {
+/// How long a release search may take: Lidarr asks every indexer and answers
+/// when the slowest one has.
+pub const RELEASE_SEARCH_WAIT: Duration = Duration::from_secs(90);
+
+impl DirectRoute {
+    async fn get_with(&self, path: &str, query: &[(&str, &str)], timeout: Duration) -> AppResult<HttpResponse> {
         let mut url = url::Url::parse(&format!("{}{API}{path}", self.base))
             .map_err(|_| AppError::Invalid("Lidarr's address isn't a web address.".into()))?;
         if !query.is_empty() {
             url.query_pairs_mut().extend_pairs(query.iter());
         }
-        let mut req = WebRequest::get(url.to_string()).timeout(self.timeout);
+        let mut req = WebRequest::get(url.to_string()).timeout(timeout);
         for (k, v) in &self.headers {
             req = req.header(header_name(k), v.expose());
         }
         req = req.header("X-Api-Key", self.key.expose());
         self.web.send(req).await
+    }
+}
+
+#[async_trait]
+impl LidarrGet for DirectRoute {
+    async fn get(&self, path: &str, query: &[(&str, &str)]) -> AppResult<HttpResponse> {
+        self.get_with(path, query, self.timeout).await
+    }
+
+    async fn get_long(&self, path: &str, query: &[(&str, &str)]) -> AppResult<HttpResponse> {
+        self.get_with(path, query, self.timeout.max(RELEASE_SEARCH_WAIT)).await
     }
 
     fn route(&self) -> Route {
@@ -888,6 +968,19 @@ impl LidarrClient {
     /// release); the caller filters.
     pub async fn manual_import(&self, folder: &str) -> AppResult<Vec<ImportProposal>> {
         self.get("/manualimport", &[("folder", folder), ("filterExistingFiles", "false")]).await
+    }
+
+    /// What the indexers have for an album right now, each judged against
+    /// its profile (Lidarr's interactive search: one search of every
+    /// indexer, nothing grabbed).
+    pub async fn releases(&self, album_id: i64) -> AppResult<Vec<Release>> {
+        let id = album_id.to_string();
+        let resp = self.transport.get_long("/release", &[("albumId", id.as_str())]).await.map_err(|_| AppError::Network(UNREACHABLE.into()))?;
+        match resp.status {
+            200..=299 => serde_json::from_slice(&resp.body).map_err(|_| AppError::Decode(NOT_LIDARR.into())),
+            401 | 403 => Err(AppError::Auth(BAD_KEY.into())),
+            s => Err(AppError::Server(format!("Lidarr couldn't ask your indexers ({s}). Try again in a moment."))),
+        }
     }
 
     /// Lidarr's Connect entries.

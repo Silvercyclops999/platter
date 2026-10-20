@@ -19,7 +19,7 @@ use super::api::{Album, Artist, Route};
 use super::check::{CheckReport, Level};
 use super::mbpick::{Group, LibraryAlbum, MissingGroup, Picked, Picker, Want, library_albums, missing_in};
 use super::status::{RequestState, map_status};
-use super::write::{AddArtist, clear_exclusion};
+use super::write::{AddAlbum, AddArtist, clear_exclusion};
 use super::paths::NormPath;
 use super::{Checked, Lidarr};
 use crate::db::store::{kv_get, kv_set};
@@ -331,6 +331,16 @@ fn join_folder(root: &str, name: &str) -> String {
     format!("{}{sep}{}", root.trim_end_matches(['/', '\\']), name.trim_matches(['/', '\\']))
 }
 
+/// How a request goes to Lidarr.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Speed {
+    /// Lidarr reads the artist, then searches the album itself.
+    Usual,
+    /// Someone is waiting to hear it: only the album goes in, and Platter
+    /// grabs the fastest good release itself (`quick`).
+    Quick,
+}
+
 /// Where a request's files go.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Dest {
@@ -617,6 +627,11 @@ impl Lidarr {
 
     /// Request an album. Sends now, or waits when Lidarr can't be reached.
     pub async fn request(&self, input: RequestInput) -> AppResult<RequestRecord> {
+        self.request_with(input, Speed::Usual).await
+    }
+
+    /// [`Self::request`] at either speed.
+    pub(super) async fn request_with(&self, input: RequestInput, speed: Speed) -> AppResult<RequestRecord> {
         let _one = self.lock.lock().await;
         if !self.typed_confirmed() && !typed_matches(input.typed.as_deref().unwrap_or_default(), &input.title) {
             return Err(AppError::Invalid(format!("Type the album's name, {}, to send your first request.", input.title)));
@@ -626,7 +641,7 @@ impl Lidarr {
             return Ok(r);
         }
         let rec = self.new_record(&input, rgid, false);
-        let out = match self.send(rec.clone()).await {
+        let out = match self.send_to(rec.clone(), &Dest::Library, speed).await {
             Ok(r) => r,
             Err(e) if e.kind() == "network" => {
                 let mut r = rec;
@@ -765,13 +780,18 @@ impl Lidarr {
     /// the writes. Network failures come back as errors so the caller keeps
     /// the request waiting.
     pub(super) async fn send(&self, rec: RequestRecord) -> AppResult<RequestRecord> {
-        self.send_to(rec, &Dest::Library).await
+        self.send_to(rec, &Dest::Library, Speed::Usual).await
     }
 
     /// [`Self::send`] to the library's download folder, or to the staging
     /// folder for an upgrade (with a quality profile aiming above the
     /// files there now).
-    pub(super) async fn send_to(&self, mut rec: RequestRecord, dest: &Dest) -> AppResult<RequestRecord> {
+    ///
+    /// [`Speed::Quick`] (a song someone tapped to hear now) adds only the
+    /// album, with its artist when new and without reading the artist's
+    /// other albums, and grabs the fastest good release itself instead of
+    /// leaving the search to Lidarr. Every check is the same.
+    pub(super) async fn send_to(&self, mut rec: RequestRecord, dest: &Dest, speed: Speed) -> AppResult<RequestRecord> {
         tracing::info!(release_group = %rec.release_group_id, title = %rec.title, "lidarr request: checking");
         let want = self.want(&rec.artist, rec.artist_id.as_deref(), rec.artist_mbid.as_deref()).await;
         let library = self.library(&want).await?;
@@ -858,10 +878,12 @@ impl Lidarr {
             }
         }
 
+        let quick = speed == Speed::Quick && plan.existing.is_none();
+        let mut quick_album: Option<Album> = None;
         let artist_id = match (plan.in_lidarr, plan.existing.as_ref()) {
             (_, Some(a)) => a.artist_id,
-            (true, None) => plan.artist.id,
-            (false, None) => {
+            (true, None) if !quick => plan.artist.id,
+            (in_lidarr, None) => {
                 let root = plan.root.as_ref().ok_or_else(|| AppError::Invalid("Lidarr has no root folder to download into.".into()))?;
                 let quality = quality_choice
                     .or(root.default_quality_profile_id)
@@ -885,18 +907,40 @@ impl Lidarr {
                 } else {
                     AddArtist::managed(cleared, &plan.artist.artist_name, quality, metadata, &root.path)
                 };
-                let id = c.writer.add_artist(payload).await?;
-                tracing::info!(artist = id, title = %rec.title, "lidarr request: artist added with nothing monitored");
-                rec.added_artist = true;
-                rec.notes.push(format!("Added {} to Lidarr with only this album to download.", plan.artist.artist_name));
-                id
+                if quick {
+                    // Just this album, read back at once: no discography to wait for.
+                    let id = c.writer.add_album(AddAlbum::new(payload, &rec.release_group_id, &plan.group.title)).await?;
+                    let a = c
+                        .client
+                        .album_by_release_group(&rec.release_group_id)
+                        .await?
+                        .filter(|a| a.id == id)
+                        .ok_or_else(|| AppError::Server("Lidarr didn't show the album it just added. Nothing more was sent.".into()))?;
+                    tracing::info!(album = id, artist = a.artist_id, new_artist = !in_lidarr, title = %rec.title, "lidarr request: album added on its own");
+                    if !in_lidarr {
+                        rec.added_artist = true;
+                        rec.notes.push(format!("Added {} to Lidarr with only this album.", plan.artist.artist_name));
+                    }
+                    let artist = a.artist_id;
+                    quick_album = Some(a);
+                    artist
+                } else {
+                    let id = c.writer.add_artist(payload).await?;
+                    tracing::info!(artist = id, title = %rec.title, "lidarr request: artist added with nothing monitored");
+                    rec.added_artist = true;
+                    rec.notes.push(format!("Added {} to Lidarr with only this album to download.", plan.artist.artist_name));
+                    id
+                }
             }
         };
 
         // A new artist's albums take Lidarr a moment to read.
-        let mut album: Option<Album> = plan.existing.clone();
-        let mut albums: Vec<Album> = Vec::new();
+        let mut album: Option<Album> = quick_album.clone().or_else(|| plan.existing.clone());
+        let mut albums: Vec<Album> = quick_album.iter().cloned().collect();
         for i in 0..ALBUM_TRIES {
+            if quick_album.is_some() {
+                break;
+            }
             albums = c.client.albums_of(artist_id).await?;
             if let Some(a) = albums.iter().find(|a| a.foreign_album_id.eq_ignore_ascii_case(&rec.release_group_id)) {
                 album = Some(a.clone());
@@ -916,7 +960,7 @@ impl Lidarr {
         // it ends, the album has no length (a search rejects everything as
         // "duration is 0") and the refresh's own "monitor none" can undo the
         // monitoring. So wait for it to finish before monitoring or searching.
-        if rec.added_artist {
+        if rec.added_artist && quick_album.is_none() {
             let mut ready = false;
             for i in 0..ALBUM_TRIES {
                 let refreshing = match c.client.commands().await {
@@ -994,14 +1038,14 @@ impl Lidarr {
         tracing::info!(album = album.id, "lidarr request: monitored");
         rec.lidarr_album_id = Some(album.id);
         if !matches!(dest, Dest::Library) {
-            return self.search_step(&c, rec, album.id, artist_id, planned, protected).await;
+            return self.search_step(&c, rec, album.id, artist_id, planned, protected, speed).await;
         }
         // Lidarr has it marked for download now: the request is kept from
         // here, and a search that doesn't go out is tried again.
         rec.state = RequestState::Queued;
         rec.message = Some(SEARCH_PENDING.into());
         self.upsert(&rec)?;
-        match self.search_step(&c, rec.clone(), album.id, artist_id, planned, protected).await {
+        match self.search_step(&c, rec.clone(), album.id, artist_id, planned, protected, speed).await {
             Ok(r) => Ok(r),
             Err(e) => {
                 tracing::info!(album = album.id, error = %e, "lidarr request: the search didn't go out; tries again");
@@ -1012,7 +1056,17 @@ impl Lidarr {
     }
 
     /// After the album is monitored: read back, check everything again, and search.
-    async fn search_step(&self, c: &Checked, mut rec: RequestRecord, album_id: i64, artist_id: i64, planned: Option<i64>, protected: bool) -> AppResult<RequestRecord> {
+    #[allow(clippy::too_many_arguments)]
+    async fn search_step(
+        &self,
+        c: &Checked,
+        mut rec: RequestRecord,
+        album_id: i64,
+        artist_id: i64,
+        planned: Option<i64>,
+        protected: bool,
+        speed: Speed,
+    ) -> AppResult<RequestRecord> {
         let after = c.client.albums_of(artist_id).await?;
         let target_on = after.iter().any(|x| x.id == album_id && x.monitored);
         let extra = rec.added_artist && after.iter().any(|x| x.id != album_id && x.monitored);
@@ -1041,9 +1095,12 @@ impl Lidarr {
             rec.message = Some(e.to_string());
             return Ok(rec);
         }
+        let now = (self.inner.clock)();
+        if speed == Speed::Quick {
+            return self.grab_step(&after, rec, album_id, artist_id, now).await;
+        }
         c.writer.search(vec![album_id]).await?;
         tracing::info!(album = album_id, added_artist = rec.added_artist, "lidarr request: search sent");
-        let now = (self.inner.clock)();
         rec.state = RequestState::Searching;
         rec.message = None;
         rec.searched_at = Some(now);

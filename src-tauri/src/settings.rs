@@ -1024,6 +1024,15 @@ pub struct Settings {
     pub catalogue_source: String,
     /// Get shows the request dialog every time instead of sending at once.
     pub ask_before_get: bool,
+    /// Tapping a song the library doesn't have gets it through Lidarr and
+    /// plays it as soon as it's here.
+    pub lidarr_tap_to_get: bool,
+    /// A tapped song's release is the fastest good one (usenet first, well
+    /// seeded torrents next) rather than Lidarr's own first choice.
+    pub lidarr_prefer_fastest: bool,
+    /// A tapped song plays from the finished download, before Lidarr moves
+    /// it into the library, when this device can open the file.
+    pub lidarr_play_arriving: bool,
     /// The kinds "Get albums" offers ticked: `studio`, `ep`, `live`, `compilation`.
     pub get_albums_kinds: Vec<String>,
     /// The discography chip an artist page opens on (the last one picked):
@@ -1441,6 +1450,9 @@ impl Default for Settings {
             dismissed_artists: Vec::new(),
             catalogue_source: "lidarr".into(),
             ask_before_get: false,
+            lidarr_tap_to_get: true,
+            lidarr_prefer_fastest: true,
+            lidarr_play_arriving: true,
             get_albums_kinds: crate::discover::DEFAULT_GET_KINDS.iter().map(|k| k.to_string()).collect(),
             discography_chip: "popular".into(),
             discography_sort: "date".into(),
@@ -1644,6 +1656,9 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "dismissedArtists",
     "catalogueSource",
     "askBeforeGet",
+    "lidarrTapToGet",
+    "lidarrPreferFastest",
+    "lidarrPlayArriving",
     "getAlbumsKinds",
     "showPhysicalCollection",
     "shelfMissingList",
@@ -2069,6 +2084,9 @@ pub struct SettingsPatch {
     pub dismissed_artists: Option<Vec<crate::discover::Dismissed>>,
     pub catalogue_source: Option<String>,
     pub ask_before_get: Option<bool>,
+    pub lidarr_tap_to_get: Option<bool>,
+    pub lidarr_prefer_fastest: Option<bool>,
+    pub lidarr_play_arriving: Option<bool>,
     pub get_albums_kinds: Option<Vec<String>>,
     pub discography_chip: Option<String>,
     pub discography_sort: Option<String>,
@@ -2470,6 +2488,9 @@ impl Settings {
             self.catalogue_source = src.clone();
         }
         set(&mut self.ask_before_get, p.ask_before_get);
+        set(&mut self.lidarr_tap_to_get, p.lidarr_tap_to_get);
+        set(&mut self.lidarr_prefer_fastest, p.lidarr_prefer_fastest);
+        set(&mut self.lidarr_play_arriving, p.lidarr_play_arriving);
         if let Some(k) = &p.get_albums_kinds {
             self.get_albums_kinds = crate::discover::clean_kinds(k);
         }
@@ -5503,8 +5524,9 @@ mod tests {
         assert!(s.dismissed_artists.is_empty());
         assert_eq!(s.catalogue_source, "lidarr");
         assert!(!s.ask_before_get);
+        assert!(s.lidarr_tap_to_get && s.lidarr_prefer_fastest && s.lidarr_play_arriving, "tap to get and play is on by default");
         assert_eq!(s.get_albums_kinds, ["studio"]);
-        for k in ["catalogueSearch", "fansAlsoLikeCatalogue", "homeNewToYou", "dismissedArtists", "catalogueSource", "askBeforeGet", "getAlbumsKinds"] {
+        for k in ["catalogueSearch", "fansAlsoLikeCatalogue", "homeNewToYou", "dismissedArtists", "catalogueSource", "askBeforeGet", "getAlbumsKinds", "lidarrTapToGet", "lidarrPreferFastest", "lidarrPlayArriving"] {
             assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
         }
         let mut s = s;

@@ -5,6 +5,8 @@
 //! - add an artist (only with a fresh exclusion check, [`Cleared`]), with
 //!   nothing monitored; protected artists unmonitored, into staging
 //! - monitor or unmonitor albums, and search for them
+//! - add one album (with its artist, nothing else monitored, no refresh of
+//!   the artist's other albums), and grab one release Lidarr approved for it
 //! - add or remove import list exclusions
 //! - write back one settings page with one value changed
 //! - add the staging root folder; add the "Platter Hi-Res" profile (and
@@ -105,6 +107,65 @@ impl AddArtist {
     /// albums it requests.
     pub fn protected(cleared: Cleared, name: &str, quality_profile_id: i64, metadata_profile_id: i64, staging_root: &str) -> Self {
         Self { monitored: false, ..Self::managed(cleared, name, quality_profile_id, metadata_profile_id, staging_root) }
+    }
+}
+
+/// One album added on its own, with its artist when Lidarr doesn't have
+/// them yet: the quick way in for a song someone wants to hear now. The
+/// artist is added without reading its whole discography and with nothing
+/// else monitored ([`AddArtist`]), and Lidarr doesn't search: Platter
+/// picks the release itself ([`GrabRelease`]). Only [`AddAlbum::new`]
+/// makes one, from an [`AddArtist`], so the exclusion check can't be skipped.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddAlbum {
+    pub foreign_album_id: String,
+    pub title: String,
+    pub monitored: bool,
+    pub any_release_ok: bool,
+    pub artist: AddArtist,
+    pub add_options: AlbumAddOptions,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlbumAddOptions {
+    pub search_for_new_album: bool,
+}
+
+impl AddAlbum {
+    pub fn new(artist: AddArtist, release_group_id: &str, title: &str) -> Self {
+        Self {
+            foreign_album_id: release_group_id.trim().to_ascii_lowercase(),
+            title: title.to_string(),
+            monitored: true,
+            any_release_ok: true,
+            artist,
+            add_options: AlbumAddOptions { search_for_new_album: false },
+        }
+    }
+}
+
+/// One release from Lidarr's own search for an album, sent to the download
+/// client. Only [`GrabRelease::of`] makes one, and only from a release
+/// Lidarr approved that isn't a whole discography.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrabRelease {
+    guid: String,
+    indexer_id: i64,
+}
+
+impl GrabRelease {
+    pub fn of(r: &super::api::Release) -> AppResult<Self> {
+        if !r.approved || r.rejected || r.discography || r.guid.trim().is_empty() || r.indexer_id <= 0 {
+            return Err(AppError::Invalid("That release isn't one Lidarr approved for this album, so Platter didn't grab it.".into()));
+        }
+        Ok(Self { guid: r.guid.clone(), indexer_id: r.indexer_id })
+    }
+
+    pub fn guid(&self) -> &str {
+        &self.guid
     }
 }
 
@@ -237,6 +298,8 @@ pub fn only_switch_off(current: &serde_json::Value, body: &serde_json::Value) ->
 #[derive(Debug, Clone, PartialEq)]
 pub enum WriteCall {
     AddArtist(AddArtist),
+    AddAlbum(AddAlbum),
+    GrabRelease(GrabRelease),
     Monitor { album_ids: Vec<i64>, monitored: bool },
     AlbumSearch { album_ids: Vec<i64> },
     /// Put an artist on the import list exclusions.
@@ -288,7 +351,7 @@ impl RelayedWrite {
         let json = || serde_json::from_str::<serde_json::Value>(body).ok().filter(serde_json::Value::is_object);
         let ok = match m.as_str() {
             "POST" => match path {
-                "/artist" | "/importlistexclusion" | "/rootfolder" | "/qualityprofile" => json().is_some(),
+                "/artist" | "/album" | "/release" | "/importlistexclusion" | "/rootfolder" | "/qualityprofile" => json().is_some(),
                 "/command" => json().is_some_and(|v| matches!(v["name"].as_str(), Some("AlbumSearch" | "ManualImport"))),
                 _ => false,
             },
@@ -422,6 +485,8 @@ impl WriteCall {
     pub fn method(&self) -> WriteMethod {
         match self {
             WriteCall::AddArtist(_)
+            | WriteCall::AddAlbum(_)
+            | WriteCall::GrabRelease(_)
             | WriteCall::AlbumSearch { .. }
             | WriteCall::AddExclusion { .. }
             | WriteCall::AddRootFolder(_)
@@ -443,6 +508,8 @@ impl WriteCall {
     pub fn path(&self) -> String {
         match self {
             WriteCall::AddArtist(_) => "/artist".into(),
+            WriteCall::AddAlbum(_) => "/album".into(),
+            WriteCall::GrabRelease(_) => "/release".into(),
             WriteCall::Monitor { .. } => "/album/monitor".into(),
             WriteCall::AlbumSearch { .. } | WriteCall::ManualImport(_) => "/command".into(),
             WriteCall::AddExclusion { .. } => "/importlistexclusion".into(),
@@ -462,6 +529,8 @@ impl WriteCall {
         use serde_json::json;
         let v = match self {
             WriteCall::AddArtist(a) => serde_json::to_string(a),
+            WriteCall::AddAlbum(a) => serde_json::to_string(a),
+            WriteCall::GrabRelease(g) => serde_json::to_string(g),
             WriteCall::Monitor { album_ids, monitored } => serde_json::to_string(&MonitorBody { album_ids, monitored: *monitored }),
             WriteCall::AlbumSearch { album_ids } => serde_json::to_string(&CommandBody { name: "AlbumSearch", album_ids }),
             WriteCall::AddExclusion { foreign_id, artist_name } => serde_json::to_string(&json!({"foreignId": foreign_id, "artistName": artist_name})),
@@ -521,7 +590,7 @@ impl LidarrWriter {
             200..=299 => Ok(resp),
             401 | 403 => Err(AppError::Auth(BAD_KEY.into())),
             // Adding an artist makes Lidarr ask its metadata service.
-            s if s >= 500 && matches!(call, WriteCall::AddArtist(_)) => Err(AppError::Server(METADATA_DOWN.into())),
+            s if s >= 500 && matches!(call, WriteCall::AddArtist(_) | WriteCall::AddAlbum(_)) => Err(AppError::Server(METADATA_DOWN.into())),
             s => Err(AppError::Server(format!("Lidarr answered with an error ({s}). Nothing more was sent."))),
         }
     }
@@ -534,6 +603,21 @@ impl LidarrWriter {
             return Err(AppError::Server("Lidarr didn't say which artist it added. Nothing more was sent.".into()));
         }
         Ok(added.id)
+    }
+
+    /// Add one album (and its artist when new); returns Lidarr's id for the album.
+    pub async fn add_album(&self, a: AddAlbum) -> AppResult<i64> {
+        let resp = self.send(WriteCall::AddAlbum(a)).await?;
+        let added: Added = serde_json::from_slice(&resp.body).unwrap_or_default();
+        if added.id <= 0 {
+            return Err(AppError::Server("Lidarr didn't say which album it added. Nothing more was sent.".into()));
+        }
+        Ok(added.id)
+    }
+
+    /// Send one approved release to the download client.
+    pub async fn grab(&self, g: GrabRelease) -> AppResult<()> {
+        self.send(WriteCall::GrabRelease(g)).await.map(|_| ())
     }
 
     pub async fn monitor(&self, album_ids: Vec<i64>, monitored: bool) -> AppResult<()> {
@@ -589,6 +673,38 @@ mod tests {
         let s = WriteCall::AlbumSearch { album_ids: vec![7] };
         assert_eq!((s.method(), s.path().as_str()), (WriteMethod::Post, "/command"));
         assert_eq!(serde_json::from_str::<Value>(&s.body()).unwrap(), json!({"name": "AlbumSearch", "albumIds": [7]}));
+    }
+
+    #[test]
+    fn an_album_comes_in_on_its_own_and_only_an_approved_release_is_grabbed() {
+        let ok = clear_exclusion(&[], "a0000000-0000-0000-0000-000000000001", "Northlight").unwrap();
+        let artist = AddArtist::managed(ok, "Northlight", 2, 3, "/downloads/music");
+        let call = WriteCall::AddAlbum(AddAlbum::new(artist, " B0000000-0000-0000-0000-00000000000A ", "Second Wind"));
+        assert_eq!((call.method(), call.path().as_str()), (WriteMethod::Post, "/album"));
+        assert!(!call.is_settings_write());
+        let v: Value = serde_json::from_str(&call.body()).unwrap();
+        assert_eq!(v["foreignAlbumId"], "b0000000-0000-0000-0000-00000000000a");
+        assert_eq!((v["monitored"].as_bool(), v["addOptions"]["searchForNewAlbum"].as_bool()), (Some(true), Some(false)));
+        assert_eq!(v["artist"]["addOptions"], json!({"monitor": "none", "searchForMissingAlbums": false}));
+        assert_eq!(v["artist"]["monitorNewItems"], "none");
+
+        use super::super::api::Release;
+        let good = Release { guid: "g1".into(), indexer_id: 4, approved: true, download_allowed: true, ..Default::default() };
+        let call = WriteCall::GrabRelease(GrabRelease::of(&good).unwrap());
+        assert_eq!((call.method(), call.path().as_str()), (WriteMethod::Post, "/release"));
+        assert_eq!(serde_json::from_str::<Value>(&call.body()).unwrap(), json!({"guid": "g1", "indexerId": 4}));
+        for bad in [
+            Release { approved: false, ..good.clone() },
+            Release { rejected: true, ..good.clone() },
+            Release { discography: true, ..good.clone() },
+            Release { guid: " ".into(), ..good.clone() },
+            Release { indexer_id: 0, ..good.clone() },
+        ] {
+            assert!(GrabRelease::of(&bad).is_err(), "{bad:?}");
+        }
+        assert!(RelayedWrite::check("POST", "/release", r#"{"guid": "g1", "indexerId": 4}"#).is_ok());
+        assert!(RelayedWrite::check("POST", "/album", r#"{"foreignAlbumId": "x"}"#).is_ok());
+        assert!(RelayedWrite::check("DELETE", "/release", "").is_err());
     }
 
     #[test]
