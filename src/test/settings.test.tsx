@@ -60,7 +60,7 @@ describe("settings page", () => {
     render(<SettingsPage />);
     const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
     // The ten groups, with the sections of pages shown in place (the test setup's inline pages).
-    expect(headings).toEqual(["Account and servers", "Playback", "Sound", "Library", "Editing", "Downloads and devices", "Appearance", "Lyrics", "Integrations", "Stream Deck", "Automation", "Bridge", "Library import", "Sharing and friends", "App"]);
+    expect(headings).toEqual(["Account and servers", "Playback", "Sound", "Library", "Editing", "Downloads and devices", "Appearance", "Lyrics", "Integrations", "Stream Deck", "Automation", "Library import", "Sharing and friends", "App"]);
 
     expect(screen.getByRole("combobox", { name: "Streaming quality at home" })).toHaveValue("original");
     expect(screen.getByRole("combobox", { name: "Streaming quality away from home" })).toHaveValue("320");

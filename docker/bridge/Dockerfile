@@ -3,14 +3,15 @@
 # Build from the repository root:
 #   docker build -f docker/bridge/Dockerfile -t platter-bridge .
 
-FROM rust:1-bookworm AS build
+FROM rust:1-trixie AS build
 # The crate is the desktop app's too, so its build scripts look for the
 # desktop libraries. The Bridge binary links none of them (checked below).
 # Lyrics for every song builds whisper.cpp: CMake, libclang for its
-# bindings, and the Vulkan headers and glslc its build expects (the binary
+# bindings, and the Vulkan headers and glslc its build expects (Debian 13 for
+# headers new enough for whisper.cpp; the binary
 # never links the Vulkan loader, checked below).
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libasound2-dev libssl-dev pkg-config \
+ && apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev libssl-dev pkg-config \
     cmake clang libclang-dev libvulkan-dev glslc \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
@@ -27,7 +28,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-${TARG
 # Nothing of the desktop (webview, audio) may be linked in, nor the Vulkan loader.
 RUN ldd /platter-bridge && ! ldd /platter-bridge | grep -Eiq 'webkit|gtk|asound|appindicator|vulkan'
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 # libgomp1: the speech model's threads (whisper.cpp uses OpenMP).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates tzdata libgomp1 \
