@@ -5101,6 +5101,15 @@ mod tests {
     }
 
     #[test]
+    fn an_unknown_saved_style_falls_back_to_sleeve_and_keeps_the_rest() {
+        let (s, bad) = parse_stored(r#"{"visualizerStyle":"confetti","privateSession":true,"visualizerIntensity":"lively"}"#);
+        assert_eq!(s.visualizer_style, VisualizerStyle::Sleeve);
+        assert_eq!(s.visualizer_intensity, VisualizerIntensity::Lively);
+        assert!(s.private_session);
+        assert!(bad.is_some_and(|b| b.contains("visualizerStyle")));
+    }
+
+    #[test]
     fn a_saved_glow_style_becomes_sleeve() {
         let old: Settings = serde_json::from_str(r#"{"visualizerStyle":"glow"}"#).unwrap();
         assert_eq!(old.visualizer_style, VisualizerStyle::Sleeve);

@@ -19,6 +19,7 @@
   from { opacity: 0; }
   to { opacity: 1; }
 }
+.art-stage__gl { position: absolute; inset: 0; }
 .art-stage__canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
 .art-stage__canvas[hidden] { display: none; }
 .art-stage__scrim {
@@ -153,6 +154,26 @@
 .ph-np.is-bare .ph-np__top,
 .ph-np.is-bare .ph-np__deck,
 .ph-np.is-bare .ph-np__styles { opacity: 0; pointer-events: none; }
+/* The way back with the controls hidden: quiet, but always there to press or reach. */
+.ph-np__show {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  bottom: calc(20px + var(--ph-safe-bottom, 0px));
+  translate: -50% 0;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0.5px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(14, 12, 10, 0.34);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  color: rgba(246, 241, 232, 0.66);
+  font-size: 13px;
+  font-weight: 600;
+  animation: art-in 420ms var(--motion-easing, ease) 200ms both;
+}
+.ph-np__show:focus-visible { outline: 2px solid var(--color-focus-ring, #fff); outline-offset: 2px; color: #fffaf0; }
 .ph-np__styles { margin: 6px -8px 0; overflow-x: auto; scrollbar-width: none; }
 .ph-np__styles::-webkit-scrollbar { display: none; }
 .ph-np__styles .vis__styles { flex-wrap: nowrap; justify-content: flex-start; gap: 0 var(--space-4); width: max-content; margin: 0 auto; padding: 0 8px; }
@@ -176,7 +197,19 @@
 .fw__now--art .fw__artists { justify-content: center; }
 .fw__now--art .fw__cover { box-shadow: 0 28px 72px rgba(0, 0, 0, 0.55), 0 0 0 0.5px rgba(255, 255, 255, 0.14); }
 .fw--art-grooves .fw__now--art .fw__cover { width: 60%; margin-bottom: var(--space-8); }
-.fw.is-bare .fw__chrome { opacity: 0; pointer-events: none; }
+.fw__art-meta { width: 100%; }
+/* Hidden controls fade, then leave the tab order too (the bars with them). */
+.fw.is-bare .fw__chrome {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transition: opacity var(--motion-medium) var(--motion-easing), visibility 0s linear var(--motion-medium);
+}
+html.fw-bare .topbar > *,
+html.fw-bare .player-bar {
+  visibility: hidden;
+  transition: opacity var(--motion-medium) var(--motion-easing), visibility 0s linear var(--motion-medium);
+}
 .fw__styles { margin-top: var(--space-2); }
 .fw__styles .vis__style { color: rgba(246, 241, 232, 0.7); }
 .fw__styles .vis__style.is-on, .fw__styles .vis__style:hover { color: #fffaf0; }

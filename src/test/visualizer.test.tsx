@@ -37,6 +37,8 @@ import {
 import { CALM_FPS, CALM_NOTE, StylePicker, VisualizerView, shownStyle, visFps } from "../visualizer/VisualizerView";
 import { correlation } from "../visualizer/Scope";
 import { ArtStage, MAX_RENDER_PIXELS, PHONE_RENDER_CAP, renderScale } from "../visualizer/ArtStage";
+import { ArtGL, type ArtFrame } from "../visualizer/art/ArtGL";
+import { StrictMode } from "react";
 import { LOW_BANDS, MusicSignals } from "../visualizer/signals";
 import { normalizeStyle } from "../visualizer/styles";
 import { paletteFromPixels } from "../visualizer/palette";
@@ -113,7 +115,7 @@ function frames() {
 }
 
 /** A WebGL2 context that builds everything and records its draws. */
-function fakeGl(drawArrays = vi.fn()) {
+function fakeGl(drawArrays = vi.fn(), extra: Record<string, unknown> = {}) {
   const noop = () => {};
   return new Proxy(
     {
@@ -131,6 +133,7 @@ function fakeGl(drawArrays = vi.fn()) {
       getUniformLocation: () => ({}),
       getAttribLocation: () => 0,
       drawArrays,
+      ...extra,
     } as Record<string, unknown>,
     { get: (t, k: string) => (k in t ? t[k] : noop) },
   );
@@ -524,7 +527,7 @@ describe("Scope", () => {
     const run = frames();
     render(<VisualizerView />);
     const scope = await screen.findByRole("group", { name: "Stereo phase scope" });
-    for (const l of ["L", "R", "M", "S"]) expect(within(scope).getByText(l)).toBeInTheDocument();
+    for (const l of ["L", "R", "M", "S"]) expect(await within(scope).findByText(l)).toBeInTheDocument();
     // The scope needs the stereo pairs.
     await waitFor(() => expect(lastCall()).toEqual({ on: true, fps: 60, scope: true }));
     frame(1_000, true);
@@ -733,6 +736,115 @@ describe("the art stage", () => {
   });
 });
 
+
+describe("the art renderer", () => {
+  const loseContext = vi.fn();
+  /** A context that names its uniforms and records what they are set to. */
+  function recordingGl(over: Record<string, unknown> = {}) {
+    const set: { name: string; v: number }[] = [];
+    const textures: unknown[] = [];
+    const ctx = fakeGl(vi.fn(), {
+      getUniformLocation: (_p: unknown, name: string) => ({ name }),
+      uniform1f: (loc: { name: string }, v: number) => void set.push({ name: loc.name, v }),
+      createTexture: () => ({ id: textures.length }),
+      getExtension: (n: string) => (n === "WEBGL_lose_context" ? { loseContext } : null),
+      ...over,
+    });
+    return { ctx, set };
+  }
+  const canvas = () => document.createElement("canvas");
+  const artFrame = (): ArtFrame => ({
+    style: "sleeve",
+    time: 0,
+    spin: 0,
+    low: 0,
+    mid: 0,
+    high: 0,
+    pulse: 0,
+    flow: 0,
+    drift: 0,
+    anchor: [0, 0, 10, 0],
+    motion: 1,
+    beatAt: new Float32Array(4),
+    beatStrength: new Float32Array(4),
+  });
+  const mixAt = (r: ArtGL, set: { name: string; v: number }[], now: number) => {
+    set.length = 0;
+    r.draw(artFrame(), now, 10, 10);
+    return set.find((u) => u.name === "uMix")!.v;
+  };
+  beforeEach(() => loseContext.mockClear());
+
+  it("gives the GPU context back when it goes, and when the art can't build", () => {
+    gl = recordingGl().ctx;
+    const r = ArtGL.create(canvas())!;
+    expect(r).not.toBeNull();
+    r.dispose();
+    expect(loseContext).toHaveBeenCalledTimes(1);
+    gl = recordingGl({ getProgramParameter: () => false }).ctx;
+    expect(ArtGL.create(canvas())).toBeNull();
+    expect(loseContext).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps what shows when a cover can't be a texture, and a second cover mid-fade carries the same fade on", () => {
+    const { ctx, set } = recordingGl();
+    gl = ctx;
+    const r = ArtGL.create(canvas())!;
+    const img = {} as TexImageSource;
+    r.setCover(img, 0, 1000);
+    expect(mixAt(r, set, 500)).toBeCloseTo(0.5);
+    // Another cover while the first is still mostly fading in: the fade goes on from where it was.
+    r.setCover(img, 300, 1000);
+    expect(mixAt(r, set, 500)).toBeCloseTo(0.5);
+    // Once the cover mostly shows, a new one starts its own fade.
+    r.setCover(img, 800, 1000);
+    expect(mixAt(r, set, 800)).toBe(0);
+    expect(mixAt(r, set, 2000)).toBe(1);
+    // A cover that won't upload changes nothing.
+    (ctx as unknown as Record<string, unknown>).texImage2D = () => {
+      throw new Error("tainted");
+    };
+    expect(() => r.setCover(img, 3000, 1000)).toThrow();
+    expect(mixAt(r, set, 3000)).toBe(1);
+  });
+
+  it("fades to a plain texture with no cover", () => {
+    const uploads: unknown[][] = [];
+    const { ctx, set } = recordingGl({ texImage2D: (...a: unknown[]) => void uploads.push(a) });
+    gl = ctx;
+    const r = ArtGL.create(canvas())!;
+    uploads.length = 0;
+    r.setCover(null, 0, 1000);
+    // One dark pixel, not the last cover.
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0][3]).toBe(1);
+    expect(mixAt(r, set, 500)).toBeCloseTo(0.5);
+  });
+
+  it("draws with WebGL2 under StrictMode's second mount, on a canvas of its own", async () => {
+    gl = recordingGl().ctx;
+    render(
+      <StrictMode>
+        <ArtStage style="sleeve" fps={30} reduced={false} intensity="calm" cover={() => null} />
+      </StrictMode>,
+    );
+    const s = screen.getByTestId("art-stage");
+    await waitFor(() => expect(s).toHaveAttribute("data-renderer", "webgl2"));
+    expect(s.querySelectorAll("canvas")).toHaveLength(1);
+  });
+
+  it("never lets a broken frame poison the signals", () => {
+    const sig = new MusicSignals();
+    const broken = [NaN, undefined, Infinity, -Infinity] as unknown as number[];
+    for (let t = 0; t < 1_000; t += 33) sig.step(broken, {}, 33, t);
+    for (let t = 1_000; t < 2_000; t += 33) sig.step([-20, -30], {}, 33, t);
+    for (const v of [sig.low, sig.mid, sig.high, sig.pulse, sig.flow, sig.drift]) expect(Number.isFinite(v)).toBe(true);
+    // Real frames after that still find their beats.
+    for (let t = 2_000; t < 6_000; t += 33) sig.step(bandsWith(-44 + 34 * Math.exp(-(t % 500) / 70)), {}, 33, t);
+    expect(sig.beatCount).toBeGreaterThanOrEqual(6);
+  });
+});
+
 describe("the panel strip and the Deck's meters", () => {
   it("puts a slim Analyser under the panel's cover only with its setting on, and not under the expanded view", async () => {
     const { rerender } = render(<PanelStrip />);
@@ -823,6 +935,28 @@ describe("the phone", () => {
     expect(np).not.toHaveClass("is-bare");
   });
 
+  it("keeps a way back with the controls hidden: a focused Show controls button, and Escape", () => {
+    setPhoneVis(true);
+    act(() => usePhoneUi.setState({ nowPlaying: true }));
+    render(<PhoneNowPlaying />);
+    const np = screen.getByRole("dialog", { name: "Now playing" });
+    expect(screen.queryByRole("button", { name: "Show controls" })).toBeNull();
+    fireEvent.click(screen.getByTestId("np-art"));
+    const back = screen.getByRole("button", { name: "Show controls" });
+    // Outside the hidden part, and holding focus so the dialog always has something to press.
+    expect(back.closest("[inert]")).toBeNull();
+    expect(back).toHaveFocus();
+    fireEvent.click(back);
+    expect(np).not.toHaveClass("is-bare");
+    expect(screen.queryByRole("button", { name: "Show controls" })).toBeNull();
+    // Escape brings them back too, without closing now playing.
+    fireEvent.click(screen.getByTestId("np-art"));
+    expect(np).toHaveClass("is-bare");
+    act(() => void fireEvent.keyDown(window, { key: "Escape" }));
+    expect(np).not.toHaveClass("is-bare");
+    expect(usePhoneUi.getState().nowPlaying).toBe(true);
+  });
+
   it("still skips on a sideways swipe over the art", async () => {
     const next = vi.spyOn(player, "next").mockImplementation(() => Promise.resolve());
     setPhoneVis(true);
@@ -893,6 +1027,28 @@ describe("the expanded view", () => {
     expect(useFullWindow.getState().mode).toBe("artwork");
     act(() => void fireEvent.keyDown(window, { key: "V" }));
     expect(useFullWindow.getState().mode).toBe("visualizer");
+  });
+
+  it("takes hidden controls out of reach, and a key brings them back (Escape only that)", () => {
+    render(<FullWindow />);
+    act(() => fullWindow.open("visualizer"));
+    const dialog = screen.getByRole("dialog", { name: "Expanded now playing" });
+    const top = dialog.querySelector(".fw__top")!;
+    fireEvent.click(dialog.querySelector(".fw__stage")!);
+    expect(dialog).toHaveClass("is-bare");
+    expect(top).toHaveAttribute("inert");
+    expect(document.documentElement).toHaveClass("fw-bare");
+    for (const c of dialog.querySelectorAll(".fw__chrome")) expect(c).toHaveAttribute("inert");
+    // Any key shows them.
+    act(() => void fireEvent.keyDown(window, { key: "a" }));
+    expect(dialog).not.toHaveClass("is-bare");
+    expect(top).not.toHaveAttribute("inert");
+    expect(document.documentElement).not.toHaveClass("fw-bare");
+    // Escape shows them and leaves the view open.
+    fireEvent.click(dialog.querySelector(".fw__stage")!);
+    act(() => void fireEvent.keyDown(window, { key: "Escape" }));
+    expect(dialog).not.toHaveClass("is-bare");
+    expect(useFullWindow.getState().open).toBe(true);
   });
 
   it("keeps the instruments in the stage with the cover in the corner", async () => {

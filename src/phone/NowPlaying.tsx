@@ -127,6 +127,7 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
     >
       {art && <PhoneArtStage art={art} screen={screen} />}
       <PlayerBody track={track} screen={screen} art={art} bare={bare} onBare={setBare} />
+      {art && bare && <ShowControls screen={screen} onShow={() => setBare(false)} />}
     </section>
   );
 }
@@ -137,6 +138,52 @@ function PhoneArtStage({ art, screen }: { art: ArtStyle; screen: RefObject<HTMLE
   const intensity = useSettings((s) => s.settings?.visualizerIntensity ?? "calm");
   const [cover] = useState(() => currentCover(screen));
   return <ArtStage style={art} fps={fps} reduced={reduced} intensity={intensity} phone cover={cover} />;
+}
+
+/**
+ * With the controls hidden over the art, the way back for everyone: a quiet
+ * button outside the hidden part, which takes focus so it never lands on
+ * nothing; Escape, or focus moving anywhere else on the screen, brings the
+ * controls back too.
+ */
+function ShowControls({ screen, onShow }: { screen: RefObject<HTMLElement | null>; onShow: () => void }) {
+  const button = useRef<HTMLButtonElement>(null);
+  const show = useRef(onShow);
+  show.current = onShow;
+  useEffect(() => {
+    // Focus that sat on a control now hidden moves here, so it never rests on nothing.
+    button.current?.focus({ preventScroll: true });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      show.current();
+    };
+    const onFocus = (e: FocusEvent) => {
+      if (e.target !== button.current) show.current();
+    };
+    const sec = screen.current;
+    window.addEventListener("keydown", onKey, true);
+    sec?.addEventListener("focusin", onFocus);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      sec?.removeEventListener("focusin", onFocus);
+    };
+  }, [screen]);
+  return (
+    <button
+      ref={button}
+      type="button"
+      className="ph-np__show"
+      onClick={() => {
+        show.current();
+        // Back on the controls, at the top of the screen.
+        requestAnimationFrame?.(() => screen.current?.querySelector<HTMLElement>(".ph-np__top button")?.focus({ preventScroll: true }));
+      }}
+    >
+      Show controls
+    </button>
+  );
 }
 
 /** Presses that are the controls' own, not a tap on the art. */

@@ -80,8 +80,19 @@ const editable = (t: EventTarget | null) =>
  * play/pause, ←/→ seek 5 s, ↑/↓ volume, L lyrics (like the lyrics button),
  * F OS full screen, Esc leave (full screen first).
  */
+/**
+ * Set while the controls are hidden over the art: any key brings them back
+ * (and Escape does only that). Returns true when it used up the key.
+ */
+let revealOnKey: ((e: KeyboardEvent) => boolean) | null = null;
+
 function onFullWindowKey(e: KeyboardEvent) {
   if (e.defaultPrevented || useUi.getState().menu || document.querySelector("dialog[open], .dialog-backdrop")) return;
+  if (revealOnKey?.(e)) {
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
   // The signal path panel over the view handles its own keys (Esc closes it first).
   if (e.target instanceof Element && e.target.closest(".signal-panel")) return;
   const key = e.key;
@@ -205,6 +216,21 @@ function FullWindowView() {
   const art: ArtStyle | null = shown === "visualizer" && track && isArtStyle(visStyle) ? visStyle : null;
   if (bare && !art) setBare(false);
   useRootClasses(idle || bare);
+  // Hidden controls are out of reach of Tab too; a key brings them back, and focus never rests on them.
+  useEffect(() => {
+    document.documentElement.classList.toggle("fw-bare", bare);
+    if (!bare) return;
+    const el = document.activeElement;
+    if (el instanceof HTMLElement && (el.closest(".fw__chrome") || el.closest(".topbar, .player-bar"))) root.current?.focus({ preventScroll: true });
+    revealOnKey = (e) => {
+      setBare(false);
+      return e.key === "Escape";
+    };
+    return () => {
+      revealOnKey = null;
+      document.documentElement.classList.remove("fw-bare");
+    };
+  }, [bare]);
   const artCover = useRef<HTMLDivElement>(null);
   const { flip, play: flipOver } = useFlipPause(turntable && shown === "artwork");
 
@@ -244,9 +270,13 @@ function FullWindowView() {
           <div ref={artCover} className={`fw__cover art-cover art-cover--${art}`}>
             <Art path={track.thumb} fluid requestSize={COVER_ART} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} />
           </div>
-          <Meta track={track} className="fw__chrome" />
+          <div className="fw__chrome fw__art-meta" inert={bare || undefined}>
+            <Meta track={track} />
+          </div>
         </div>
-        <StylePicker className="fw__styles fw__chrome" />
+        <div className="fw__chrome" inert={bare || undefined}>
+          <StylePicker className="fw__styles" />
+        </div>
       </>
     );
   else if (shown === "visualizer")
@@ -320,7 +350,7 @@ function FullWindowView() {
       </div>
       <div className="fw__shade" aria-hidden="true" />
 
-      <header className="fw__top fw__chrome">
+      <header className="fw__top fw__chrome" inert={bare || undefined}>
         <ContextName />
         <div className="fw__actions">
           {/* Add lyrics lives in the empty state; the pencil edits lyrics you wrote. */}

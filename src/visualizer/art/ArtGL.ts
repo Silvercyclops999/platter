@@ -84,8 +84,15 @@ export class ArtGL {
     }
     if (!gl || gl.isContextLost?.()) return null;
     const r = new ArtGL(gl);
-    // A style that doesn't build means this GPU can't draw the art: fall back.
-    return r.program("sleeve") ? r : null;
+    // A style that doesn't build means this GPU can't draw the art: fall back, freeing what was made.
+    if (r.ready()) return r;
+    r.dispose();
+    return null;
+  }
+
+  /** Whether the art can draw: the base style builds on this GPU. */
+  ready(): boolean {
+    return !this.gl.isContextLost() && !!this.program("sleeve");
   }
 
   private setup() {
@@ -94,7 +101,15 @@ export class ArtGL {
     this.cover = this.texture();
     this.prev = this.texture();
     this.programs.clear();
-    if (this.lastSource) this.upload(this.cover, this.lastSource);
+    // Back after a lost context: the cover that showed, at once, without a fade.
+    if (this.lastSource) {
+      try {
+        this.upload(this.cover, this.lastSource);
+      } catch {
+        this.lastSource = null;
+      }
+    }
+    this.fadeMs = 0;
   }
 
   /** Builds everything again after the context comes back. */
@@ -106,6 +121,13 @@ export class ArtGL {
   private texture(): WebGLTexture | null {
     const gl = this.gl;
     const t = gl.createTexture();
+    this.blank(t);
+    return t;
+  }
+
+  /** A texture made one plain dark pixel: what shows with no cover. */
+  private blank(t: WebGLTexture | null) {
+    const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, t);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([24, 20, 18, 255]));
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
@@ -113,7 +135,6 @@ export class ArtGL {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.MIRRORED_REPEAT);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.MIRRORED_REPEAT);
     gl.generateMipmap(gl.TEXTURE_2D);
-    return t;
   }
 
   private upload(t: WebGLTexture | null, src: TexImageSource) {
@@ -164,13 +185,26 @@ export class ArtGL {
     return out;
   }
 
-  /** A new cover: the old one fades out under it over `fadeMs` (0 swaps at once). */
-  setCover(src: TexImageSource, nowMs: number, fadeMs: number) {
-    const swap = this.prev;
-    this.prev = this.cover;
-    this.cover = swap;
-    this.upload(this.cover, src);
+  /**
+   * A new cover (null: none, a plain dark texture): the old one fades out
+   * under it over `fadeMs`. Uploaded before anything changes, so a cover that
+   * can't be a texture leaves what shows as it was (and throws). A cover that
+   * comes while the last one is still mostly fading in takes its place in the
+   * same fade, so a quick second skip never jumps.
+   */
+  setCover(src: TexImageSource | null, nowMs: number, fadeMs: number) {
+    this.ease(nowMs);
+    const midFade = this.fadeMs > 0 && this.mix < 0.5;
+    const target = midFade ? this.cover : this.prev;
+    if (src) this.upload(target, src);
+    else this.blank(target);
     this.lastSource = src;
+    if (midFade) {
+      // The same fade carries on toward the newer cover, from where it is.
+      return;
+    }
+    this.prev = this.cover;
+    this.cover = target;
     this.fadeMs = fadeMs;
     this.coverStart = fadeMs > 0 ? nowMs : -Infinity;
   }
@@ -228,6 +262,7 @@ export class ArtGL {
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
+  /** Frees everything and gives the GPU context back (the stage makes a new canvas when it mounts again). */
   dispose() {
     const gl = this.gl;
     for (const p of this.programs.values()) if (p) gl.deleteProgram(p.prog);
@@ -235,5 +270,14 @@ export class ArtGL {
     gl.deleteTexture(this.cover);
     gl.deleteTexture(this.prev);
     gl.deleteVertexArray(this.vao);
+    this.cover = this.prev = null;
+    this.vao = null;
+    this.lastSource = null;
+    this.lost = true;
+    try {
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+    } catch {
+      /* already gone */
+    }
   }
 }

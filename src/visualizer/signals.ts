@@ -28,12 +28,19 @@ export const LOW_BANDS = bandRange(35, 160);
 export const MID_BANDS = bandRange(250, 2_500);
 export const HIGH_BANDS = bandRange(4_000, 14_000);
 
+/** What a missing or broken band reads as. */
+const SILENT_DB = -90;
+/** A band's level in dB, or silence for one that is missing or not a number. */
+const dbAt = (bands: ArrayLike<number>, k: number) => {
+  const v = bands[k];
+  return typeof v === "number" && Number.isFinite(v) ? v : SILENT_DB;
+};
 /** A band's dB as 0..1: -72 dB is nothing, -6 dB is full. */
 const unit = (db: number) => Math.min(1, Math.max(0, (db + 72) / 66));
 
 function mean(bands: ArrayLike<number>, [a, b]: [number, number]): number {
   let s = 0;
-  for (let k = a; k < b; k++) s += unit(bands[k]);
+  for (let k = a; k < b; k++) s += unit(dbAt(bands, k));
   return b > a ? s / (b - a) : 0;
 }
 
@@ -60,6 +67,10 @@ const FLUX_TAU_MS = 1_200;
 class Range {
   lo = 0.4;
   hi = 0.6;
+  reset() {
+    this.lo = 0.4;
+    this.hi = 0.6;
+  }
   read(v: number, dt: number): number {
     this.lo = v < this.lo ? follow(this.lo, v, dt, 120) : follow(this.lo, v, dt, 3_500);
     this.hi = v > this.hi ? follow(this.hi, v, dt, 60) : follow(this.hi, v, dt, 4_000);
@@ -95,6 +106,7 @@ export class MusicSignals {
   private fluxVar = 1;
   private readonly ranges = { low: new Range(), mid: new Range(), high: new Range() };
   private raw = { low: 0, mid: 0, high: 0 };
+  private lastFrameAt = -Infinity;
 
   /**
    * Moves everything `dtMs` on. `bands` is the latest frame's (null when
@@ -108,10 +120,15 @@ export class MusicSignals {
       this.lastFrame = frameKey;
       this.raw = { low: mean(bands, LOW_BANDS), mid: mean(bands, MID_BANDS), high: mean(bands, HIGH_BANDS) };
       this.onset(bands, nowMs, how.pulse);
-    } else if (!bands) {
+    } else if (!bands && this.lastFrame !== null) {
+      // Frames stopped: start the song's statistics afresh when they come back.
       this.raw = { low: 0, mid: 0, high: 0 };
       this.havePrev = false;
       this.lastFrame = null;
+      this.fluxMean = 0;
+      this.fluxVar = 1;
+      this.lastFrameAt = -Infinity;
+      for (const r of Object.values(this.ranges)) r.reset();
     }
     const lo = this.ranges.low.read(this.raw.low, dt) * how.gain;
     const mi = this.ranges.mid.read(this.raw.mid, dt) * how.gain;
@@ -130,10 +147,13 @@ export class MusicSignals {
     const [a, b] = LOW_BANDS;
     let flux = 0;
     if (this.havePrev) {
-      for (let k = a; k < b; k++) flux += Math.max(0, bands[k] - this.prev[k]);
+      for (let k = a; k < b; k++) flux += Math.max(0, dbAt(bands, k) - this.prev[k]);
       flux /= b - a;
     }
-    for (let k = 0; k < BANDS; k++) this.prev[k] = bands[k];
+    for (let k = 0; k < BANDS; k++) this.prev[k] = dbAt(bands, k);
+    // The time since the last frame, for the statistics (frames come at the rate asked for, not a fixed one).
+    const gap = Number.isFinite(this.lastFrameAt) ? Math.min(250, Math.max(1, nowMs - this.lastFrameAt)) : 33;
+    this.lastFrameAt = nowMs;
     const first = !this.havePrev;
     this.havePrev = true;
     if (first) return;
@@ -141,7 +161,7 @@ export class MusicSignals {
     const over = flux - this.fluxMean;
     const beat = flux > BEAT_MIN_FLUX && over > BEAT_K * sd && nowMs - this.lastBeat >= BEAT_MIN_GAP_MS;
     // The statistics: a running mean and variance over about FLUX_TAU_MS of frames.
-    const k = 1 - Math.exp(-33 / FLUX_TAU_MS);
+    const k = 1 - Math.exp(-gap / FLUX_TAU_MS);
     this.fluxMean += (flux - this.fluxMean) * k;
     this.fluxVar += (over * over - this.fluxVar) * k;
     if (!beat) return;

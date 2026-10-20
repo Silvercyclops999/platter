@@ -88,7 +88,7 @@ float coverDistance(vec2 fc) {
 vec3 finish(vec3 c, vec2 fc) {
   // A soft shoulder instead of clipping, then a little dither so gradients never band.
   c = c / (1.0 + max(vec3(0.0), c - 0.85) * 1.6);
-  c += (hash12(fc + fract(uTime) * 61.0) - 0.5) / 160.0;
+  c += (hash12(fc + fract(uTime) * 61.0 * uMotion) - 0.5) / 160.0;
   return clamp(c, 0.0, 1.0);
 }
 `;
@@ -294,7 +294,8 @@ void main() {
   col += leak * exp(-abs(p.y * 9.0)) * 0.1 * flare;
 
   // Grain, a new frame of it 24 times a second, strongest in the mid tones.
-  vec2 gp = floor(fc / 1.5) + floor(uTime * 24.0) * vec2(17.0, 59.0);
+  // Still under reduced motion: one frame of grain that stays.
+  vec2 gp = floor(fc / 1.5) + floor(uTime * 24.0) * uMotion * vec2(17.0, 59.0);
   float n = hash12(gp) + hash12(gp + 7.3) - 1.0;
   float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
   col += n * 0.07 * (1.0 - abs(luma - 0.45) * 1.2);
