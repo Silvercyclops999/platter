@@ -228,6 +228,8 @@ describe("the toolbar", () => {
     render(<LyricsPane />);
     const timing = await screen.findByRole("group", { name: "Lyrics timing" });
     expect(within(timing).getByText("0 s")).toBeInTheDocument();
+    // Tap to sync waits while the check runs; on a slow machine it may not have landed yet.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Tap to sync" })).toBeEnabled());
     // Hidden at this width (no layout here), so found by its label.
     fireEvent.click(screen.getByLabelText("More lyrics tools"));
     // jsdom lays nothing out, so every action that can move counts as moved.
@@ -369,7 +371,9 @@ describe("timing", () => {
     render(<LyricsPane />);
     // Wait for the lines themselves, so a late lyrics load can't reset tap mode after the click.
     await screen.findAllByRole("button", { name: target.text });
-    fireEvent.click(await screen.findByRole("button", { name: "Tap to sync" }));
+    const tap = await screen.findByRole("button", { name: "Tap to sync" });
+    await waitFor(() => expect(tap).toBeEnabled());
+    fireEvent.click(tap);
     await waitFor(() => expect(screen.getByRole("button", { name: "Tap to sync" })).toHaveAttribute("aria-pressed", "true"));
     expect(screen.getByText(/Click a line as it's sung/)).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: target.text }).find((b) => b.classList.contains("lyrics__line"))!);
@@ -416,7 +420,9 @@ describe("timing", () => {
     act(() => usePlayer.setState({ state: { ...state(lines), status: "playing" }, positionMs: target.startMs + 2_340 }));
     render(<LyricsPane />);
     await screen.findAllByRole("button", { name: target.text });
-    fireEvent.click(await screen.findByRole("button", { name: "Tap to sync" }));
+    const tap = await screen.findByRole("button", { name: "Tap to sync" });
+    await waitFor(() => expect(tap).toBeEnabled());
+    fireEvent.click(tap);
     await waitFor(() => expect(screen.getByRole("button", { name: "Tap to sync" })).toHaveAttribute("aria-pressed", "true"));
     // 200 ms after the last position tick.
     now = 1_200;
