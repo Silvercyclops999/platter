@@ -402,10 +402,15 @@ async fn a_managed_import_plex_misses_gets_a_partial_scan_then_is_announced() {
     r.event(2, "downloadImported", 20, 9);
     let rep = r.pass(&r.a).await;
     assert_eq!(rep.handled, 2);
+    // The import is one (the grab, which needs nothing, was read at an earlier pass).
+    assert_eq!((rep.imports, rep.skipped, rep.refused.len()), (1, 0, 0), "{rep:?}");
     // Plex didn't find it on its own within two minutes: just that folder is scanned.
     let folder = "/data/media/Music/Lidarr/Northlight/Second Wind (2021)";
     let all: Vec<String> = r.a.plex.scans.lock().clone();
     assert_eq!(all, vec![folder.to_string()], "only that folder");
+    assert_eq!(rep.scanned.len(), all.len(), "{rep:?}");
+    assert_eq!(rep.summary(), "Caught up with Lidarr: 1 import, 1 scan asked of Plex, 0 skipped, 0 refused");
+    assert!(rep.details().iter().any(|d| d == &format!("Asked Plex to scan {folder}.")), "{:?}", rep.details());
     r.advance(61);
     let rep = r.a.lidarr.catch_up().await.unwrap();
     assert_eq!(rep.announced, vec!["Second Wind"]);
@@ -457,6 +462,7 @@ async fn two_devices_never_act_on_the_same_event_and_share_the_cursor() {
     let ra = r.a.lidarr.catch_up().await.unwrap();
     let rb = b.lidarr.catch_up().await.unwrap();
     assert_eq!((ra.elsewhere, rb.elsewhere), (0, 1), "the earlier claim wins");
+    assert_eq!((ra.imports, ra.skipped, rb.imports, rb.skipped), (1, 0, 0, 1), "the other device's event is skipped here");
     assert_eq!(r.a.plex.scans.lock().len() + b.plex.scans.lock().len(), 1, "one scan between them");
     super::shared::tests::sync(&r.a.shared, &b.shared);
     assert_eq!(b.lidarr.catch_up_status().last_device.as_deref(), Some("aaa"), "the shared cursor says who did the work");
@@ -573,6 +579,47 @@ async fn unofficial_partial_and_clashing_albums_wait() {
     let s = staged(&r, 43, "Tapes", "40000000-0000-0000-0000-000000000004", "Official", &[], "downloadImported").await;
     assert!(s.reason.unwrap().contains("same as Tapes"), "a clash with the library");
     assert!(r.web.writes().is_empty());
+}
+
+#[tokio::test]
+async fn a_held_back_album_counts_as_refused_once() {
+    let r = rig();
+    let quiet = r.a.lidarr.catch_up().await.unwrap();
+    assert_eq!(quiet.summary(), "Caught up with Lidarr: 0 imports, 0 scans asked of Plex, 0 skipped, 0 refused");
+    assert!(quiet.details().is_empty(), "{:?}", quiet.details());
+    r.advance(5);
+    stage_album(&r, 40, "Bootleg Night", "40000000-0000-0000-0000-000000000001", "Bootleg", &[]);
+    r.event(40, "downloadImported", 40, 7);
+    let rep = r.pass(&r.a).await;
+    assert_eq!((rep.imports, rep.refused.len()), (1, 1), "{rep:?}");
+    assert!(rep.refused[0].starts_with("Bootleg Night by ") && rep.refused[0].contains("not Official"), "{:?}", rep.refused);
+    assert!(rep.summary().ends_with("1 import, 0 scans asked of Plex, 0 skipped, 1 refused"), "{}", rep.summary());
+    assert!(rep.details().iter().any(|d| d.starts_with("Held back from the library: Bootleg Night")));
+    // Still waiting for the same reason: not counted again.
+    r.advance(5);
+    assert!(r.a.lidarr.catch_up().await.unwrap().refused.is_empty());
+}
+
+#[test]
+fn the_catch_up_summary_counts_in_plain_words() {
+    let rep = super::catchup::CatchUpReport {
+        imports: 2,
+        skipped: 3,
+        scanned: vec!["/m/A".into(), "/m/B".into()],
+        refused: vec!["X by Y. Waiting for you.".into()],
+        healed: vec!["Old One".into()],
+        ..Default::default()
+    };
+    assert_eq!(rep.summary(), "Caught up with Lidarr: 2 imports, 2 scans asked of Plex, 3 skipped, 1 refused");
+    assert_eq!(
+        rep.details(),
+        [
+            "Asked Plex to scan /m/A.",
+            "Asked Plex to scan /m/B.",
+            "Held back from the library: X by Y. Waiting for you.",
+            "Stopped Lidarr looking for 1 protected album: Old One.",
+        ]
+    );
 }
 
 #[tokio::test]

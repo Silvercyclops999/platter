@@ -140,6 +140,12 @@ pub fn new_files(files: &[TrackFile], tracks: &[LidarrTrack], tags: &dyn Fn(&str
     out
 }
 
+/// A staged album held back from the library at this catch-up.
+fn refused_now(rep: &mut CatchUpReport, s: &Staged) {
+    let why = s.reason.as_deref().unwrap_or("no reason given");
+    rep.refused.push(format!("{} by {}. {why}", s.title, s.artist));
+}
+
 /// A quality's name from a track file ("FLAC", "FLAC 24bit", "MP3-320").
 fn quality_name(f: &TrackFile) -> String {
     f.quality.as_ref().and_then(|q| q["quality"]["name"].as_str().map(str::to_string)).unwrap_or_else(|| "unknown quality".into())
@@ -251,6 +257,10 @@ impl Lidarr {
                 Decision::Wait(why) => {
                     s.state = StagedState::Waiting;
                     s.reason = Some(why);
+                    // Counted once, when the reason is new.
+                    if s.state != before.state || s.reason != before.reason {
+                        refused_now(rep, &s);
+                    }
                 }
                 Decision::Ready { plan, folder, conv } => {
                     s.plan = Some(*plan);
@@ -271,6 +281,7 @@ impl Lidarr {
                             Err(e) => {
                                 s.state = StagedState::Waiting;
                                 s.reason = Some(e.to_string());
+                                refused_now(rep, &s);
                             }
                         }
                     } else {

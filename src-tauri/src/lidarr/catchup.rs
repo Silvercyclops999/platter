@@ -112,6 +112,14 @@ pub struct CatchUpReport {
     pub settling: usize,
     /// Events this device acted on.
     pub acted: usize,
+    /// Of those, imports (a Managed album to check in Plex, or a protected
+    /// one in staging).
+    pub imports: usize,
+    /// Events read with nothing for this device to do: another device has
+    /// them, or they need nothing from Platter.
+    pub skipped: usize,
+    /// Staged albums Platter newly held back from the library, with why.
+    pub refused: Vec<String>,
     pub gap: Option<String>,
     /// Folders Plex was asked to scan.
     pub scanned: Vec<String>,
@@ -123,6 +131,47 @@ pub struct CatchUpReport {
     pub healed: Vec<String>,
     /// Protected work is paused, and why.
     pub paused: Option<String>,
+}
+
+fn count(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+impl CatchUpReport {
+    /// One plain line for the log, every catch-up.
+    pub fn summary(&self) -> String {
+        format!(
+            "Caught up with Lidarr: {}, {} asked of Plex, {} skipped, {} refused",
+            count(self.imports, "import", "imports"),
+            count(self.scanned.len(), "scan", "scans"),
+            self.skipped,
+            self.refused.len()
+        )
+    }
+
+    /// A line each for anything that happened, after the summary.
+    pub fn details(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Some(g) = &self.gap {
+            out.push(g.clone());
+        }
+        out.extend(self.scanned.iter().map(|f| format!("Asked Plex to scan {f}.")));
+        out.extend(self.refused.iter().map(|r| format!("Held back from the library: {r}")));
+        if !self.healed.is_empty() {
+            out.push(format!("Stopped Lidarr looking for {}: {}.", count(self.healed.len(), "protected album", "protected albums"), self.healed.join(", ")));
+        }
+        if self.settling > 0 {
+            out.push(format!("{} claimed here, to finish at the next catch-up.", count(self.settling, "event", "events")));
+        }
+        out
+    }
+
+    fn log(&self) {
+        tracing::info!("{}", self.summary());
+        for d in self.details() {
+            tracing::info!("{d}");
+        }
+    }
 }
 
 /// Where catching up stands, for Settings.
@@ -298,9 +347,16 @@ impl Lidarr {
                     rep.settling += 1;
                     break;
                 }
-                ClaimState::Theirs(_) => rep.elsewhere += 1,
+                ClaimState::Theirs(_) => {
+                    rep.elsewhere += 1;
+                    rep.skipped += 1;
+                }
                 ClaimState::Ours => {
-                    self.act(&cx, ev, now, &mut rep).await?;
+                    if self.act(&cx, ev, now, &mut rep).await? {
+                        rep.imports += 1;
+                    } else {
+                        rep.skipped += 1;
+                    }
                     rep.acted += 1;
                 }
             }
@@ -329,17 +385,18 @@ impl Lidarr {
         }
         // ---- Self-healing.
         self.self_heal(&cx, &mut rep).await?;
-        tracing::info!(handled = rep.handled, elsewhere = rep.elsewhere, gap, "lidarr catch-up");
+        rep.log();
         Ok(rep)
     }
 
-    async fn act(&self, cx: &Ctx, ev: &HistoryItem, now: i64, rep: &mut CatchUpReport) -> AppResult<()> {
-        let Some(album_id) = ev.album_id.filter(|a| *a > 0) else { return Ok(()) };
+    /// Acts on one event; true when it was an import.
+    async fn act(&self, cx: &Ctx, ev: &HistoryItem, now: i64, rep: &mut CatchUpReport) -> AppResult<bool> {
+        let Some(album_id) = ev.album_id.filter(|a| *a > 0) else { return Ok(false) };
         let artist_id = ev.artist_id.unwrap_or(0);
         match classify(ev, cx.protected_artist(artist_id)) {
             EventKind::ManagedImported => {
                 let files = cx.client.track_files(album_id).await.unwrap_or_default();
-                let Some(folder) = files.first().and_then(|f| parent_raw(&f.path)) else { return Ok(()) };
+                let Some(folder) = files.first().and_then(|f| parent_raw(&f.path)) else { return Ok(false) };
                 let album = cx.client.album_detail(album_id).await.map(|a| a.title).unwrap_or_default();
                 let p = PendingScan { album_id, artist: cx.artist_name(artist_id), album, folder, due: unix_s(&ev.date).unwrap_or(now) + PLEX_GRACE_S, scanned: false };
                 self.inner.shared.put(&format!("scan:{}:{album_id}", cx.server), &p)?;
@@ -352,9 +409,9 @@ impl Lidarr {
                 self.on_staged(cx, album_id, true).await?;
                 rep.staged.push(album_id);
             }
-            EventKind::Status | EventKind::Ignore => {}
+            EventKind::Status | EventKind::Ignore => return Ok(false),
         }
-        Ok(())
+        Ok(true)
     }
 
     /// Scans for Managed imports Plex didn't find on its own, once their two

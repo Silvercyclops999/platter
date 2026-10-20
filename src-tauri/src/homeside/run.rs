@@ -857,10 +857,9 @@ impl Bridge {
             },
             Err(e) => CatchUpLine { at: self.now_s(), error: Some(e.to_string()), ..Default::default() },
         };
+        // The catch-up logs its own summary line, every time.
         if let Some(e) = &line.error {
             tracing::warn!("Catch-up didn't finish: {e}");
-        } else if line.acted > 0 || !line.announced.is_empty() || line.healed > 0 {
-            tracing::info!(handled = line.handled, acted = line.acted, scanned = line.scanned, healed = line.healed, "Caught up with Lidarr.");
         }
         {
             let mut s = self.status.lock();
