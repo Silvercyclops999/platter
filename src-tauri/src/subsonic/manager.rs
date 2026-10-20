@@ -737,7 +737,8 @@ async fn poll_loop(core: Arc<Core>, db: DbHandle, minutes: Arc<AtomicU32>, offli
             let wait = minutes.load(Ordering::Relaxed).clamp(POLL_MINUTES_MIN, POLL_MINUTES_MAX) as u64 * 60;
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(wait)) => {}
-                _ = stop.changed() => {}
+                // A dropped sender ends the loop; ignoring it would spin.
+                r = stop.changed() => if r.is_err() { return; },
             }
         }
         first = false;
