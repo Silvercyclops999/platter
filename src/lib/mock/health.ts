@@ -10,7 +10,7 @@ export const LOCAL_NETWORK_BLOCKED =
 
 /** Go offline is on (the core's wording). */
 export const GONE_OFFLINE =
-  "You're offline. Only music on this computer plays. Turn off Go offline in the app menu to use your server again.";
+  "You're offline. Only music on this computer plays. Turn off Go offline in Settings to use your server again.";
 
 export type HealthDemo =
   | HealthStatus

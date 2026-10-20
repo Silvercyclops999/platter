@@ -410,7 +410,7 @@ impl HealthMachine {
         if self.offline_by_choice {
             return b(
                 "goneOffline",
-                "You're offline. Only music on this computer plays. Turn off Go offline in the app menu to use your server again.",
+                "You're offline. Only music on this computer plays. Turn off Go offline in Settings to use your server again.",
             );
         }
         match self.status {
