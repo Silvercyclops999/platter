@@ -1,0 +1,62 @@
+name: publish
+
+# Publishes a release draft once the release build has put everything on it:
+# the Mac dmg, and latest.json with signed Windows and Mac entries (so the
+# in-app updater finds both). Runs when the release workflow finishes, or by
+# hand for one tag:
+#
+#   gh api repos/OWNER/REPO/actions/workflows/publish.yml/dispatches \
+#     -f ref=main -f 'inputs[tag]=v0.2.35'
+#
+# It leaves the draft alone while its notes are still the build's placeholder
+# text, so a release never goes out without notes written for listeners.
+on:
+  workflow_run:
+    workflows: [release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag, like v0.2.35'
+        required: true
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ vars.RELEASES_REPO && secrets.RELEASES_TOKEN || github.token }}
+      REPO: ${{ vars.RELEASES_OWNER || github.repository_owner }}/${{ vars.RELEASES_REPO || github.event.repository.name }}
+      TAG: ${{ inputs.tag || github.event.workflow_run.head_branch }}
+    steps:
+      - name: Check the draft and publish it
+        run: |
+          set -eu
+          echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "not a release tag: $TAG"; exit 1; }
+          rel=$(gh api "repos/$REPO/releases?per_page=30" --jq "[.[] | select(.tag_name == \"$TAG\")][0]")
+          [ -n "$rel" ] && [ "$rel" != null ] || { echo "no release for $TAG"; exit 1; }
+          if [ "$(echo "$rel" | jq .draft)" != true ]; then echo "$TAG is already published"; exit 0; fi
+          id=$(echo "$rel" | jq .id)
+
+          if ! echo "$rel" | jq -e '[.assets[].name | select(endswith(".dmg"))] | length > 0' >/dev/null; then
+            echo "no dmg on the $TAG draft yet"; exit 1
+          fi
+          json_id=$(echo "$rel" | jq '[.assets[] | select(.name == "latest.json")][0].id')
+          [ "$json_id" != null ] || { echo "no latest.json on the $TAG draft yet"; exit 1; }
+          gh api -H 'Accept: application/octet-stream' "repos/$REPO/releases/assets/$json_id" > latest.json
+          for p in windows-x86_64 darwin-aarch64 darwin-x86_64; do
+            jq -e --arg p "$p" '(.platforms[$p].signature // "") | length > 0' latest.json >/dev/null \
+              || { echo "latest.json has no signed $p entry"; exit 1; }
+          done
+          [ "$(jq -r .version latest.json)" = "${TAG#v}" ] || { echo "latest.json is for another version"; exit 1; }
+
+          body=$(echo "$rel" | jq -r '.body // ""')
+          case "$body" in
+            ""|"The Windows installer is not code-signed yet: on SmartScreen"*)
+              echo "the $TAG draft still has placeholder notes; write the notes, then run this by hand"; exit 1 ;;
+          esac
+
+          gh api -X PATCH "repos/$REPO/releases/$id" -F draft=false -f make_latest=true --jq '"Published " + .tag_name + ": " + .html_url'
