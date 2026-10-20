@@ -10,11 +10,13 @@
 //! there), hands control back: playback here is put on that song, paused at
 //! the last known position.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use futures::FutureExt;
 use parking_lot::Mutex;
 use serde::Serialize;
 use tokio::time::Instant;
@@ -154,6 +156,9 @@ pub struct RemoteConfig {
     pub misses: u32,
     /// Per-request timeout for player commands.
     pub timeout: Duration,
+    /// The longest one source of the device list may take (a search that
+    /// never ends leaves the others listed).
+    pub source_budget: Duration,
 }
 
 impl Default for RemoteConfig {
@@ -166,6 +171,7 @@ impl Default for RemoteConfig {
             grace: Duration::from_secs(8),
             misses: 3,
             timeout: Duration::from_secs(4),
+            source_budget: Duration::from_secs(8),
         }
     }
 }
@@ -202,6 +208,12 @@ struct Inner {
     http: reqwest::Client,
     companion: Companion,
     players: Mutex<Vec<Found>>,
+    /// The rows each source found last.
+    sources: Mutex<Sources>,
+    /// The refresh running now, which other callers join.
+    refresh: Mutex<Option<Refresh>>,
+    /// Phones running Platter seen lately, by device id.
+    phones: Mutex<HashMap<String, Remembered>>,
     active: Mutex<Option<Active>>,
     stopped_on: Mutex<Option<String>>,
     /// Bumped on every move and return; a follow loop from an older one stops.
@@ -256,6 +268,93 @@ pub struct RemoteService {
 const PEER_PROBE: Duration = Duration::from_millis(1500);
 /// A Platter device plex.tv saw this recently counts as on.
 const PEER_SEEN_SECS: i64 = 15 * 60;
+/// A phone seen this recently stays listed (as asleep) while it doesn't
+/// answer: a locked phone stops announcing Platter within minutes.
+pub(crate) const PHONE_KEEP_SECS: i64 = 3 * 60 * 60;
+
+/// The icon for another Platter device, from the platform it announces.
+fn peer_kind(platform: &str) -> PlayerKind {
+    match discovery::kind_of(peer::PRODUCT, platform, "") {
+        PlayerKind::Phone => PlayerKind::Phone,
+        _ => PlayerKind::Computer,
+    }
+}
+
+/// Where a Platter candidate came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Origin {
+    /// Announcing on this network now.
+    Announced,
+    /// Listed by plex.tv.
+    Plex,
+    /// A phone seen earlier that isn't announcing now.
+    Remembered,
+}
+
+/// A phone running Platter, kept for a while after it was last seen.
+#[derive(Debug, Clone)]
+struct Remembered {
+    dev: PeerDevice,
+    /// Unix seconds.
+    seen: i64,
+}
+
+type Probe = Result<(Url, peer::Hello), PeerError>;
+
+/// What each Platter device said during one refresh (the addresses asked,
+/// and the answer).
+#[derive(Default)]
+struct ProbeCache(Mutex<HashMap<String, Asked>>);
+
+/// The addresses a device was asked at, and what it said.
+type Asked = (Vec<Url>, Option<Probe>);
+
+/// One source of the picker answering.
+enum Part {
+    Platter(Vec<Found>),
+    Plex(Vec<Found>),
+    Lan(Vec<Found>),
+    Dlna(Vec<Found>),
+}
+
+/// The picker's rows by source, as each last answered.
+#[derive(Default)]
+struct Sources {
+    platter: Vec<Found>,
+    plex: Vec<Found>,
+    lan: Vec<Found>,
+    dlna: Vec<Found>,
+}
+
+impl Sources {
+    /// Platter devices, then Plex players, then Cast and AirPlay, then DLNA.
+    fn rows(&self) -> Vec<Found> {
+        let mut rows = self.platter.clone();
+        let mut plex: Vec<Found> = self
+            .plex
+            .iter()
+            .filter(|f| !rows.iter().any(|r| r.player.id == f.player.id))
+            .cloned()
+            .collect();
+        // A computer running Platter also answers AirPlay: that's it, not a speaker.
+        let peer_ips: Vec<std::net::IpAddr> = rows.iter().filter_map(|f| f.peer.as_ref()).flat_map(|d| d.ips()).collect();
+        let lan: Vec<Found> = self
+            .lan
+            .iter()
+            .filter(|f| match &f.lan {
+                Some(LanDevice::AirPlay(d)) => !peer_ips.contains(&d.addr.ip()),
+                _ => true,
+            })
+            .cloned()
+            .collect();
+        rows.append(&mut plex);
+        rows.extend(lan);
+        rows.extend(self.dlna.iter().cloned());
+        rows
+    }
+}
+
+type Refresh = futures::future::Shared<futures::future::BoxFuture<'static, Vec<RemotePlayer>>>;
 
 fn now_secs() -> i64 {
     (peer::auth::now_ms() / 1000) as i64
@@ -311,6 +410,9 @@ impl RemoteService {
                 http,
                 cfg,
                 players: Mutex::default(),
+                sources: Mutex::default(),
+                refresh: Mutex::default(),
+                phones: Mutex::default(),
                 active: Mutex::default(),
                 stopped_on: Mutex::default(),
                 generation: AtomicU64::new(0),
@@ -542,8 +644,37 @@ impl RemoteService {
     }
 
     /// Find players now (picker open, or the background refresh). Empty when
-    /// the setting hides them.
+    /// the setting hides them. Rows go out on `remote://players` as each
+    /// source answers; the answer is the whole list. A refresh already
+    /// running is joined instead of starting another.
     pub async fn players(&self) -> Vec<RemotePlayer> {
+        let refresh = {
+            let mut g = self.inner.refresh.lock();
+            match g.as_ref() {
+                Some(r) => r.clone(),
+                None => {
+                    let me = self.clone();
+                    let r = async move {
+                        let list = me.refresh().await;
+                        me.inner.refresh.lock().take();
+                        list
+                    }
+                    .boxed()
+                    .shared();
+                    *g = Some(r.clone());
+                    r
+                }
+            }
+        };
+        refresh.await
+    }
+
+    /// Whether a refresh is running now.
+    pub fn refreshing(&self) -> bool {
+        self.inner.refresh.lock().is_some()
+    }
+
+    async fn refresh(&self) -> Vec<RemotePlayer> {
         let plex = self.inner.switches.show_players();
         let cast = self.inner.switches.show_cast();
         let dlna = self.inner.switches.show_dlna();
@@ -553,37 +684,113 @@ impl RemoteService {
         if !dlna && let Some(d) = self.inner.dlna.lock().as_ref() {
             d.stop();
         }
-        let (found, lan, mdns_peers, renderers) = tokio::join!(
-            async {
-                if plex { self.discover().await } else { Vec::new() }
-            },
-            async {
-                if cast { self.lan_devices().await } else { Vec::new() }
-            },
-            self.peer_answers(),
-            async {
-                if dlna { self.dlna_devices().await } else { Vec::new() }
+        {
+            // What each source found last time stays until it answers again.
+            let mut s = self.inner.sources.lock();
+            if !plex {
+                s.plex.clear();
             }
-        );
-        let (platter, mut found): (Vec<Found>, Vec<Found>) =
-            found.into_iter().partition(|f| f.player.product == peer::PRODUCT);
-        let mut rows = self.platter_rows(mdns_peers, platter).await;
-        // A computer running Platter also answers AirPlay: that's it, not a speaker.
-        let peer_ips: Vec<std::net::IpAddr> = rows.iter().filter_map(|f| f.peer.as_ref()).flat_map(|d| d.ips()).collect();
-        let lan: Vec<Found> = lan
-            .into_iter()
-            .filter(|f| match &f.lan {
-                Some(LanDevice::AirPlay(d)) => !peer_ips.contains(&d.addr.ip()),
-                _ => true,
+            if !cast {
+                s.lan.clear();
+            }
+            if !dlna {
+                s.dlna.clear();
+            }
+        }
+        let budget = self.inner.cfg.source_budget;
+        let discover = async move {
+            if !plex {
+                return Vec::new();
+            }
+            tokio::time::timeout(budget, self.discover()).await.unwrap_or_else(|_| {
+                tracing::debug!("Plex players took too long to answer");
+                Vec::new()
             })
-            .collect();
-        rows.append(&mut found);
-        rows.extend(lan);
-        rows.extend(renderers);
-        let found = rows;
-        let list: Vec<RemotePlayer> = found.iter().map(|f| f.player.clone()).collect();
-        *self.inner.players.lock() = found;
+        }
+        .shared();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Part>();
+        let platter = {
+            let tx = tx.clone();
+            let discover = discover.clone();
+            async move {
+                let probes = ProbeCache::default();
+                let announced = tokio::time::timeout(budget, self.peer_answers()).await.unwrap_or_default();
+                if discover.peek().is_none() {
+                    // Plex is slow: the devices announcing here first.
+                    let _ = tx.send(Part::Platter(self.platter_rows(announced.clone(), Vec::new(), &probes).await));
+                }
+                let from_plex: Vec<Found> =
+                    discover.await.into_iter().filter(|f| f.player.product == peer::PRODUCT).collect();
+                let _ = tx.send(Part::Platter(self.platter_rows(announced, from_plex, &probes).await));
+            }
+        };
+        let players = {
+            let tx = tx.clone();
+            async move {
+                let found = discover.await.into_iter().filter(|f| f.player.product != peer::PRODUCT).collect();
+                let _ = tx.send(Part::Plex(found));
+            }
+        };
+        let lan = {
+            let tx = tx.clone();
+            async move {
+                if !cast {
+                    return;
+                }
+                match tokio::time::timeout(budget, self.lan_devices()).await {
+                    Ok(found) => {
+                        let _ = tx.send(Part::Lan(found));
+                    }
+                    Err(_) => tracing::debug!("Cast and AirPlay search took too long"),
+                }
+            }
+        };
+        let renderers = {
+            let tx = tx.clone();
+            async move {
+                if !dlna {
+                    return;
+                }
+                match tokio::time::timeout(budget, self.dlna_devices()).await {
+                    Ok(found) => {
+                        let _ = tx.send(Part::Dlna(found));
+                    }
+                    Err(_) => tracing::debug!("DLNA search took too long"),
+                }
+            }
+        };
+        drop(tx);
+        let collect = async {
+            let mut last: Option<Vec<RemotePlayer>> = None;
+            while let Some(part) = rx.recv().await {
+                let list = self.take_part(part);
+                // Partial lists go out once there's something to show.
+                if !list.is_empty() && last.as_ref() != Some(&list) {
+                    self.emit(EV_REMOTE_PLAYERS, &list);
+                    last = Some(list);
+                }
+            }
+        };
+        tokio::join!(platter, players, lan, renderers, collect);
+        let list: Vec<RemotePlayer> = self.inner.players.lock().iter().map(|f| f.player.clone()).collect();
         self.emit(EV_REMOTE_PLAYERS, &list);
+        list
+    }
+
+    /// One source answered: the picker's rows with it.
+    fn take_part(&self, part: Part) -> Vec<RemotePlayer> {
+        let rows = {
+            let mut s = self.inner.sources.lock();
+            match part {
+                Part::Platter(v) => s.platter = v,
+                Part::Plex(v) => s.plex = v,
+                Part::Lan(v) => s.lan = v,
+                Part::Dlna(v) => s.dlna = v,
+            }
+            s.rows()
+        };
+        let list = rows.iter().map(|f| f.player.clone()).collect();
+        *self.inner.players.lock() = rows;
         list
     }
 
@@ -601,10 +808,12 @@ impl RemoteService {
     async fn peer_answers(&self) -> Vec<PeerDevice> {
         let dir = self.inner.peers.lock().clone();
         let Some(dir) = dir else { return Vec::new() };
-        let Some(tag) = self.account_tag().await else { return Vec::new() };
+        // The account lookup and the first scan's wait run side by side.
+        let (tag, answers) = tokio::join!(self.account_tag(), dir.scan());
+        let Some(tag) = tag else { return Vec::new() };
         let own = self.inner.own_id.clone();
         let mut out: Vec<PeerDevice> = Vec::new();
-        for a in dir.scan().await {
+        for a in answers {
             if let Some(d) = peer::from_mdns(&a, &own, &tag)
                 && !out.iter().any(|o| o.id == d.id)
             {
@@ -614,13 +823,49 @@ impl RemoteService {
         out
     }
 
-    /// The Platter rows: devices announcing here and the ones Plex lists,
-    /// each asked whether it answers.
-    async fn platter_rows(&self, announced: Vec<PeerDevice>, from_plex: Vec<Found>) -> Vec<Found> {
+    /// Ask each candidate whether it answers, all at once. A device asked
+    /// earlier in this refresh is only asked again at addresses it wasn't
+    /// asked at.
+    async fn probe_all(&self, devices: &[PeerDevice], cache: &ProbeCache) -> Vec<Probe> {
+        let client = self.peer_client().await;
+        futures::future::join_all(devices.iter().map(|d| {
+            let client = client.clone();
+            async move {
+                let (tried, before) = cache.0.lock().get(&d.id).cloned().unwrap_or_default();
+                if let Some(Ok(hit)) = &before {
+                    return Ok(hit.clone());
+                }
+                let fresh: Vec<Url> = d.bases.iter().filter(|b| !tried.contains(b)).cloned().collect();
+                if fresh.is_empty()
+                    && let Some(before) = before
+                {
+                    return before;
+                }
+                let answer = match client {
+                    Some(c) => c.first_answer(&fresh, &d.id, PEER_PROBE).await,
+                    None => Err(PeerError::Unreachable),
+                };
+                // A refusal or another answer beats "no answer" at the new addresses.
+                let answer = match (answer, before) {
+                    (Err(PeerError::Unreachable), Some(b @ Err(_))) => b,
+                    (a, _) => a,
+                };
+                let mut all = tried;
+                all.extend(fresh);
+                cache.0.lock().insert(d.id.clone(), (all, Some(answer.clone())));
+                answer
+            }
+        }))
+        .await
+    }
+
+    /// The Platter rows: devices announcing here, the ones Plex lists, and
+    /// phones seen lately, each asked whether it answers.
+    async fn platter_rows(&self, announced: Vec<PeerDevice>, from_plex: Vec<Found>, probes: &ProbeCache) -> Vec<Found> {
         let own = self.inner.own_id.as_str();
         let now = now_secs();
         // Everything with an address gets asked.
-        let mut candidates: Vec<(PeerDevice, bool)> = announced.into_iter().map(|d| (d, true)).collect();
+        let mut candidates: Vec<(PeerDevice, Origin)> = announced.into_iter().map(|d| (d, Origin::Announced)).collect();
         for f in &from_plex {
             if f.player.id == own {
                 continue;
@@ -640,43 +885,88 @@ impl RemoteService {
                         platform: String::new(),
                         bases: f.direct.clone(),
                     },
-                    false,
+                    Origin::Plex,
                 )),
                 None => {}
             }
         }
-        let client = self.peer_client().await;
-        let probes = futures::future::join_all(candidates.iter().map(|(d, _)| {
-            let client = client.clone();
-            async move {
-                match client {
-                    Some(c) => c.first_answer(&d.bases, &d.id, PEER_PROBE).await,
-                    None => Err(PeerError::Unreachable),
-                }
+        // A phone that went quiet (locked, or Platter in the background)
+        // stops announcing; it stays listed for a while.
+        let kept: Vec<Remembered> = {
+            let mut m = self.inner.phones.lock();
+            m.retain(|_, r| now - r.seen <= PHONE_KEEP_SECS);
+            m.values().cloned().collect()
+        };
+        for r in kept {
+            if r.dev.id == own {
+                continue;
             }
-        }))
-        .await;
-        let recently = |f: &Found| f.player.online || f.last_seen.is_some_and(|t| now - t <= PEER_SEEN_SECS);
+            match candidates.iter_mut().find(|(d, _)| d.id == r.dev.id) {
+                Some((d, _)) => {
+                    for u in &r.dev.bases {
+                        if !d.bases.contains(u) {
+                            d.bases.push(u.clone());
+                        }
+                    }
+                    if d.platform.is_empty() {
+                        d.platform = r.dev.platform.clone();
+                    }
+                }
+                None => candidates.push((r.dev, Origin::Remembered)),
+            }
+        }
+        let devices: Vec<PeerDevice> = candidates.iter().map(|(d, _)| d.clone()).collect();
+        let answers = self.probe_all(&devices, probes).await;
+        let recently = |f: &Found, secs: i64| f.player.online || f.last_seen.is_some_and(|t| now - t <= secs);
         let mut rows: Vec<Found> = Vec::new();
-        for ((mut dev, announced), probe) in candidates.into_iter().zip(probes) {
+        for ((mut dev, origin), probe) in candidates.into_iter().zip(answers) {
             let plex = from_plex.iter().find(|f| f.player.id == dev.id);
-            let mut player = lan::lan_player(dev.id.clone(), dev.name.clone(), peer::PRODUCT.into(), PlayerKind::Computer, PlayerVia::Platter);
+            let phone = origin == Origin::Remembered
+                || peer_kind(&dev.platform) == PlayerKind::Phone
+                || plex.is_some_and(|f| f.player.kind == PlayerKind::Phone);
+            let kind = if phone { PlayerKind::Phone } else { PlayerKind::Computer };
+            let mut player = lan::lan_player(dev.id.clone(), dev.name.clone(), peer::PRODUCT.into(), kind, PlayerVia::Platter);
             match probe {
                 Ok((base, hello)) => {
                     dev.bases.retain(|b| *b != base);
                     dev.bases.insert(0, base);
                     player.name = hello.name.clone();
                     dev.name = hello.name;
+                    if !hello.platform.is_empty() {
+                        dev.platform = hello.platform;
+                    }
+                    if peer_kind(&dev.platform) == PlayerKind::Phone {
+                        player.kind = PlayerKind::Phone;
+                    }
                     player.playing = hello.playing;
                 }
                 Err(PeerError::Refused(why)) => player.unsupported = Some(why),
+                Err(_) if phone => {
+                    // Asleep: listed while it was seen lately.
+                    if origin == Origin::Plex && !plex.is_some_and(|f| recently(f, PHONE_KEEP_SECS)) {
+                        continue;
+                    }
+                    player.online = false;
+                    player.asleep = true;
+                }
                 Err(_) => {
                     // An old address plex.tv still has, from a computer that's off.
-                    if !announced && !plex.is_some_and(recently) {
+                    if origin == Origin::Plex && !plex.is_some_and(|f| recently(f, PEER_SEEN_SECS)) {
                         continue;
                     }
                     player.unreachable = true;
                 }
+            }
+            if player.kind == PlayerKind::Phone {
+                // Answering or announcing now: kept from now. Asleep: kept
+                // from when it was last seen.
+                let mut m = self.inner.phones.lock();
+                let seen = if origin == Origin::Announced || !player.asleep {
+                    now
+                } else {
+                    m.get(&dev.id).map(|r| r.seen).or(plex.and_then(|f| f.last_seen)).unwrap_or(now)
+                };
+                m.insert(dev.id.clone(), Remembered { dev: dev.clone(), seen });
             }
             rows.push(Found {
                 player,
@@ -691,18 +981,28 @@ impl RemoteService {
         }
         // Seen through Plex, with no address to try.
         for f in from_plex {
-            if f.player.id == own || rows.iter().any(|r| r.player.id == f.player.id) || !recently(&f) {
+            if f.player.id == own || rows.iter().any(|r| r.player.id == f.player.id) {
                 continue;
             }
-            let mut player = lan::lan_player(f.player.id.clone(), f.player.name.clone(), peer::PRODUCT.into(), PlayerKind::Computer, PlayerVia::Platter);
+            let phone = f.player.kind == PlayerKind::Phone;
+            if !recently(&f, if phone { PHONE_KEEP_SECS } else { PEER_SEEN_SECS }) {
+                continue;
+            }
+            let kind = if phone { PlayerKind::Phone } else { PlayerKind::Computer };
+            let mut player = lan::lan_player(f.player.id.clone(), f.player.name.clone(), peer::PRODUCT.into(), kind, PlayerVia::Platter);
             player.playing = f.player.playing.clone();
-            player.unreachable = true;
+            if phone && player.playing.is_none() {
+                player.online = false;
+                player.asleep = true;
+            } else {
+                player.unreachable = true;
+            }
             rows.push(Found { player, direct: Vec::new(), ..f });
         }
         rows.sort_by(|a, b| {
-            a.player
-                .unreachable
-                .cmp(&b.player.unreachable)
+            let quiet = |f: &Found| f.player.unreachable || f.player.asleep;
+            quiet(a)
+                .cmp(&quiet(b))
                 .then_with(|| a.player.name.to_lowercase().cmp(&b.player.name.to_lowercase()))
         });
         rows

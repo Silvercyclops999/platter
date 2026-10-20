@@ -178,18 +178,32 @@ impl PeerClient {
         self.call(base, to, PATH_HELLO, None, timeout).await
     }
 
-    /// The first base that answers hello, with its answer.
+    /// The first base that answers hello, with its answer. Every base is
+    /// asked at once and the whole try gives up after `timeout`, so a device
+    /// with several old addresses costs no more than one.
     pub async fn first_answer(&self, bases: &[Url], to: &str, timeout: Duration) -> Result<(Url, Hello), PeerError> {
-        let mut last = PeerError::Unreachable;
-        for b in bases {
-            match self.hello(b, to, timeout).await {
-                Ok(h) if h.id == to => return Ok((b.clone(), h)),
-                Ok(_) => last = PeerError::Failed("another device answered".into()),
-                Err(e @ PeerError::Refused(_)) => return Err(e),
-                Err(e) => last = e,
+        use futures::StreamExt;
+        let mut asks: futures::stream::FuturesUnordered<_> = bases
+            .iter()
+            .map(|b| async move { (b, self.hello(b, to, timeout).await) })
+            .collect();
+        let race = async {
+            let mut last = PeerError::Unreachable;
+            while let Some((b, answer)) = asks.next().await {
+                match answer {
+                    Ok(h) if h.id == to => return Ok((b.clone(), h)),
+                    Ok(_) => last = PeerError::Failed("another device answered".into()),
+                    Err(e @ PeerError::Refused(_)) => return Err(e),
+                    Err(e) => {
+                        if last == PeerError::Unreachable {
+                            last = e;
+                        }
+                    }
+                }
             }
-        }
-        Err(last)
+            Err(last)
+        };
+        tokio::time::timeout(timeout, race).await.unwrap_or(Err(PeerError::Unreachable))
     }
 
     pub async fn state(&self, base: &Url, to: &str, timeout: Duration) -> Result<PeerTimeline, PeerError> {

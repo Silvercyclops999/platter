@@ -255,6 +255,7 @@ mod tests {
                 needs_password: false,
                 unsupported: None,
                 unreachable: false,
+                asleep: false,
             },
             direct: direct.iter().map(|u| Url::parse(u).unwrap()).collect(),
             token: None,

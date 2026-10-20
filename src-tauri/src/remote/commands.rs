@@ -86,9 +86,43 @@ pub async fn remote_command(remote: State<'_, RemoteService>, command: RemoteCom
 /// Plex for the service: the selected server and the account token.
 pub struct PlexRemoteEnv(pub PlexState, pub AccountId);
 
-/// The account's id, looked up once per token.
+/// The account's id, looked up once per token. A failed lookup isn't
+/// tried again for a minute, and callers at the same time share one lookup.
 #[derive(Default)]
-pub struct AccountId(parking_lot::Mutex<Option<(String, String)>>);
+pub struct AccountId {
+    /// Token key, the id (None: the lookup failed), when it was looked up.
+    cache: parking_lot::Mutex<Option<(String, Option<String>, std::time::Instant)>>,
+    lookup: tokio::sync::Mutex<()>,
+}
+
+/// How long a failed account lookup is remembered.
+const ACCOUNT_RETRY: std::time::Duration = std::time::Duration::from_secs(60);
+
+impl AccountId {
+    fn cached(&self, key: &str) -> Option<Option<String>> {
+        let g = self.cache.lock();
+        let (k, id, at) = g.as_ref()?;
+        (k == key && (id.is_some() || at.elapsed() < ACCOUNT_RETRY)).then(|| id.clone())
+    }
+
+    /// The id for this token key, fetched only when it isn't known.
+    pub async fn get<F, Fut>(&self, key: String, fetch: F) -> Option<String>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Option<String>>,
+    {
+        if let Some(hit) = self.cached(&key) {
+            return hit;
+        }
+        let _one = self.lookup.lock().await;
+        if let Some(hit) = self.cached(&key) {
+            return hit;
+        }
+        let id = fetch().await.filter(|id| !id.is_empty());
+        *self.cache.lock() = Some((key, id.clone(), std::time::Instant::now()));
+        id
+    }
+}
 
 impl PlexRemoteEnv {
     pub fn new(plex: PlexState) -> Self {
@@ -145,17 +179,8 @@ impl RemoteEnv for PlexRemoteEnv {
     async fn account_id(&self) -> Option<String> {
         let token = self.0.account_token().await?;
         let key = crate::remote::peer::auth::hex(&crate::remote::peer::auth::hmac_sha256(b"account-id-cache", token.expose().as_bytes()));
-        if let Some((k, id)) = self.1.0.lock().as_ref()
-            && *k == key
-        {
-            return Some(id.clone());
-        }
-        let user = self.0.plex_tv().user(&token).await.ok()?;
-        if user.uuid.is_empty() {
-            return None;
-        }
-        *self.1.0.lock() = Some((key, user.uuid.clone()));
-        Some(user.uuid)
+        let plex = &self.0;
+        self.1.get(key, || async move { plex.plex_tv().user(&token).await.ok().map(|u| u.uuid) }).await
     }
 }
 
@@ -283,4 +308,37 @@ pub fn spawn_target(remote: &RemoteService, info: TargetInfo) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::AccountId;
+
+    #[tokio::test]
+    async fn the_account_id_is_looked_up_once_per_token() {
+        let ids = AccountId::default();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let fetch = |c: Arc<AtomicUsize>, answer: Option<&'static str>| {
+            move || async move {
+                c.fetch_add(1, Ordering::SeqCst);
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                answer.map(str::to_string)
+            }
+        };
+        // Two refreshes at once share one lookup.
+        let (a, b) = tokio::join!(
+            ids.get("t1".into(), fetch(calls.clone(), Some("acct"))),
+            ids.get("t1".into(), fetch(calls.clone(), Some("acct")))
+        );
+        assert_eq!((a.as_deref(), b.as_deref()), (Some("acct"), Some("acct")));
+        assert_eq!(ids.get("t1".into(), fetch(calls.clone(), Some("other"))).await.as_deref(), Some("acct"));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        // Another token: looked up again. Offline: not retried at once.
+        assert_eq!(ids.get("t2".into(), fetch(calls.clone(), None)).await, None);
+        assert_eq!(ids.get("t2".into(), fetch(calls.clone(), Some("late"))).await, None);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
 }

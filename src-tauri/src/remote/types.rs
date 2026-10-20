@@ -67,6 +67,11 @@ pub struct RemotePlayer {
     /// (another network, or a firewall on that computer).
     #[serde(default)]
     pub unreachable: bool,
+    /// A phone running Platter that was seen lately but doesn't answer now
+    /// (locked, or the app is in the background). Opening Platter on it
+    /// wakes it.
+    #[serde(default)]
+    pub asleep: bool,
 }
 
 /// Remote playback status.

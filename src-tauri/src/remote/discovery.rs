@@ -88,6 +88,7 @@ fn found(id: String, name: String, product: String, kind: PlayerKind) -> Found {
             needs_password: false,
             unsupported: None,
             unreachable: false,
+            asleep: false,
         },
         direct: Vec::new(),
         token: None,

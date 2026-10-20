@@ -3588,7 +3588,7 @@ AirPlay speakers on the local network, and remote mode while one plays.
 
 | Command | Args |
 | --- | --- |
-| `remote_players` | – → `RemotePlayer[]` (finds them now; other Platter computers always, Plex players only with `showPlexPlayers`, Cast and AirPlay devices only with `showCastDevices`) |
+| `remote_players` | – → `RemotePlayer[]` (finds them now, joining a refresh already running; other Platter computers always, Plex players only with `showPlexPlayers`, Cast and AirPlay devices only with `showCastDevices`) |
 | `remote_move_with_password` | `{ playerId, password }` → `RemoteState` (AirPlay speakers with a password; the password goes to the keychain once it works) |
 | `remote_state` | – → `RemoteState` |
 | `remote_move` | `{ playerId }` → `RemoteState` |
@@ -3597,7 +3597,7 @@ AirPlay speakers on the local network, and remote mode while one plays.
 | `remote_play_context` | `{ context, startTrackId? }` → `RemoteState` (same `context` as `play_context`) |
 | `remote_queue_jump` | `{ itemId }` → `RemoteState` |
 
-`RemotePlayer = { id, name, product, kind, playing: string | null, online, via, needsPassword, unsupported: string | null, unreachable }`
+`RemotePlayer = { id, name, product, kind, playing: string | null, online, via, needsPassword, unsupported: string | null, unreachable, asleep }`
 with `kind` one of `"computer" | "phone" | "speaker" | "browser" | "tv" | "group"`
 and `via` one of `"platter" | "plex" | "cast" | "airplay"`. Cast ids start with `cast:`,
 AirPlay ids with `airplay:`; Platter computers use their Plex client id.
@@ -3605,7 +3605,10 @@ The list comes in this order: Platter computers (reachable first), then Plex
 players, then Cast and AirPlay devices. `unreachable` is set on a Platter
 computer that announces itself or that Plex lists as on, but that doesn't
 answer directly (another network, or a firewall on that computer); the
-picker explains that once. `needsPassword` is set for an AirPlay speaker
+picker explains that once. `asleep` is set on a phone running Platter that
+was seen in the last few hours (announcing here, or on plex.tv) but doesn't
+answer now, usually because it's locked; it stays listed and opening Platter
+on it wakes it. `needsPassword` is set for an AirPlay speaker
 with a password that isn't in the keychain yet; the picker asks for it and
 calls `remote_move_with_password`. `unsupported` says why a listed device
 can't be played on (for example an AirPlay speaker that only takes encrypted
@@ -3773,7 +3776,7 @@ user.", and the picker row shows the same reason.
 
 Events:
 - `remote://state` → `RemoteState` (on every change and every poll while remote)
-- `remote://players` → `RemotePlayer[]` (after each refresh)
+- `remote://players` → `RemotePlayer[]` (as each source answers during a refresh, once there is something to list, and the whole list when it ends; a source keeps its last rows until it answers again)
 
 The player list refreshes when `remote_players` is called (the picker does
 every 10 s while open) and every 60 s in the background while a session is

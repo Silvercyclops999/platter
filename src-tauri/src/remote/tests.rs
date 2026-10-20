@@ -325,6 +325,7 @@ fn cfg(plex_tv: &MockServer) -> RemoteConfig {
         // is too slow to answer in time, which must not count as a miss.
         misses: 2,
         timeout: Duration::from_secs(10),
+        source_budget: Duration::from_secs(10),
     }
 }
 
@@ -1521,11 +1522,12 @@ mod peers {
         account: &'static str,
         machine: &'static str,
         publish_to: Option<Url>,
+        platform: &'static str,
     }
 
     impl Opts {
         fn new(id: &'static str, name: &'static str) -> Self {
-            Self { id, name, token: "account-token", account: "acct-1", machine: "srv", publish_to: None }
+            Self { id, name, token: "account-token", account: "acct-1", machine: "srv", publish_to: None, platform: "Windows" }
         }
     }
 
@@ -1543,7 +1545,7 @@ mod peers {
             tries: 1,
             recheck: Duration::from_millis(50),
             publish_to: o.publish_to,
-            platform: "Windows".into(),
+            platform: o.platform.into(),
             version: "0.3.0".into(),
         };
         let task = tokio::spawn(runtime::run(remote.clone(), dir, Arc::new(|| vec![Ipv4Addr::LOCALHOST]), rc, tx));
@@ -2024,6 +2026,132 @@ mod peers {
         let ids: Vec<String> = a.remote.players().await.into_iter().map(|p| p.id).collect();
         assert_eq!(ids, ["mac", "amp", "airplay:BB"]);
     }
+
+    /// Accepts connections and never answers: an address where the device
+    /// used to be, behind something that swallows the request.
+    async fn black_hole() -> (Url, tokio::task::JoinHandle<()>) {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        let task = tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((s, _)) = l.accept().await {
+                held.push(s);
+            }
+        });
+        (Url::parse(&format!("http://127.0.0.1:{port}")).unwrap(), task)
+    }
+
+    #[tokio::test]
+    async fn a_candidate_whose_addresses_all_time_out_costs_one_wait() {
+        let (r, lan) = net().await;
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let b = start(&r.server, &lan, idle(), Opts::new("mac", "Studio Mac")).await;
+        let (h1, t1) = black_hole().await;
+        let (h2, t2) = black_hole().await;
+        let (h3, t3) = black_hole().await;
+        let c = a.remote.peer_client().await.unwrap();
+        let wait = Duration::from_millis(400);
+        let t = std::time::Instant::now();
+        let e = c.first_answer(&[h1.clone(), h2.clone(), h3], "mac", wait).await.unwrap_err();
+        assert_eq!(e, PeerError::Unreachable);
+        assert!(t.elapsed() < wait * 2, "asked together, not one after another: {:?}", t.elapsed());
+        // The good address wins even behind two dead ones.
+        let t = std::time::Instant::now();
+        let (base, hello) = c.first_answer(&[h1, h2, b.base()], "mac", Duration::from_secs(5)).await.unwrap();
+        assert_eq!((base, hello.name.as_str()), (b.base(), "Studio Mac"));
+        assert!(t.elapsed() < Duration::from_secs(2), "didn't wait for the dead ones");
+        for t in [t1, t2, t3] {
+            t.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn a_sleeping_phone_stays_listed() {
+        let (r, lan) = net().await;
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let phone = start(&r.server, &lan, idle(), Opts { platform: "iOS", ..Opts::new("iph", "Adam's iPhone") }).await;
+        let list = a.remote.players().await;
+        let p = list.iter().find(|p| p.id == "iph").expect("the phone is listed");
+        assert_eq!((p.kind, p.via), (PlayerKind::Phone, PlayerVia::Platter));
+        assert!(p.online && !p.asleep && !p.unreachable);
+        // Locked: it stops announcing and answering.
+        phone.switches.set_peer(false, "Adam's iPhone", false);
+        let mut rx = phone.port.clone();
+        tokio::time::timeout(Duration::from_secs(5), rx.wait_for(Option::is_none)).await.unwrap().unwrap();
+        assert_eq!(lan.len(), 1, "only the PC is announced");
+        let list = a.remote.players().await;
+        let p = list.iter().find(|p| p.id == "iph").expect("still listed while asleep");
+        assert!(p.asleep && !p.online && !p.unreachable, "asleep, not a firewall: {p:?}");
+        assert_eq!(p.kind, PlayerKind::Phone);
+        // Awake again: back as it was.
+        phone.switches.set_peer(true, "Adam's iPhone", false);
+        let mut rx = phone.port.clone();
+        tokio::time::timeout(Duration::from_secs(5), rx.wait_for(Option::is_some)).await.unwrap().unwrap();
+        wait_for("announced again", || lan.len() == 2).await;
+        let list = a.remote.players().await;
+        let p = list.iter().find(|p| p.id == "iph").unwrap();
+        assert!(p.online && !p.asleep);
+    }
+
+    #[tokio::test]
+    async fn a_phone_plex_saw_lately_is_listed_asleep() {
+        let r = rig().await;
+        let lan = MemoryLan::new();
+        let now = (now_ms() / 1000) as i64;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/resources"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                {"name": "Adam's iPhone", "product": "Platter", "platform": "iOS", "device": "iPhone", "provides": "player",
+                 "clientIdentifier": "iph", "presence": false, "lastSeenAt": now - 3600,
+                 "connections": [{"protocol": "http", "address": "127.0.0.1", "port": 1, "uri": "http://127.0.0.1:1", "local": true}]},
+                {"name": "Old iPad", "product": "Platter", "platform": "iOS", "device": "iPad", "provides": "player",
+                 "clientIdentifier": "ipad", "presence": false, "lastSeenAt": now - 2 * 86_400, "connections": []},
+                {"name": "Spare Laptop", "product": "Platter", "platform": "Windows", "provides": "player",
+                 "clientIdentifier": "lap", "presence": false, "lastSeenAt": now - 3600, "connections": []}
+            ])))
+            .mount(&r.server)
+            .await;
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let list = a.remote.players().await;
+        let rows: Vec<_> = list.iter().map(|p| (p.id.as_str(), p.asleep)).collect();
+        assert_eq!(list[0].kind, PlayerKind::Phone);
+        assert_eq!(
+            rows,
+            [("iph", true), ("amp", false)],
+            "the phone seen an hour ago is asleep; the iPad and the laptop are off"
+        );
+    }
+
+    #[tokio::test]
+    async fn platter_rows_arrive_before_a_slow_search_finishes() {
+        use crate::remote::dlna::{DlnaDevice, DlnaSource};
+        struct Never;
+        #[async_trait]
+        impl DlnaSource for Never {
+            async fn renderers(&self) -> Vec<DlnaDevice> {
+                std::future::pending().await
+            }
+        }
+        let (r, lan) = net().await;
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let _b = start(&r.server, &lan, idle(), Opts::new("mac", "Studio Mac")).await;
+        a.remote.set_dlna(Arc::new(Never));
+        let me = a.remote.clone();
+        let refresh = tokio::spawn(async move { me.players().await });
+        let events = a.events.clone();
+        let partial = move || {
+            events
+                .0
+                .lock()
+                .iter()
+                .filter(|(e, _)| e == "remote://players")
+                .any(|(_, p)| p.as_array().is_some_and(|l| l.iter().any(|x| x["id"] == "mac")))
+        };
+        wait_for("the other Platter listed", partial).await;
+        assert!(!refresh.is_finished(), "listed while the DLNA search still runs");
+        assert!(a.remote.refreshing());
+        refresh.abort();
+    }
 }
 
 #[test]
@@ -2058,3 +2186,112 @@ async fn the_companion_server_ends_when_its_stop_is_dropped() {
     tokio::time::timeout(Duration::from_secs(2), task).await.expect("ended, not spinning").unwrap();
 }
 
+
+// ---- refreshing the list ----------------------------------------------------
+
+/// DLNA renderers that take a while (or forever) to answer, counting searches.
+struct SlowDlna {
+    wait: Option<Duration>,
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait]
+impl super::dlna::DlnaSource for SlowDlna {
+    async fn renderers(&self) -> Vec<super::dlna::DlnaDevice> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        match self.wait {
+            Some(d) => tokio::time::sleep(d).await,
+            None => std::future::pending().await,
+        }
+        Vec::new()
+    }
+}
+
+/// [`rig`]'s service again, with this budget per source.
+fn with_budget(r: &Rig, budget: Duration) -> (RemoteService, Arc<Events>) {
+    let events = Arc::new(Events::default());
+    let remote = RemoteService::new(
+        Arc::new(Env { base: Url::parse(&r.server.uri()).unwrap() }),
+        r.local.clone(),
+        events.clone(),
+        &ClientIdentity::with_id("me"),
+        r.switches.clone(),
+        RemoteConfig { source_budget: budget, ..cfg(&r.server) },
+    )
+    .unwrap();
+    (remote, events)
+}
+
+fn player_lists(events: &Events) -> Vec<Vec<String>> {
+    events
+        .0
+        .lock()
+        .iter()
+        .filter(|(e, _)| e == "remote://players")
+        .map(|(_, p)| p.as_array().unwrap().iter().map(|x| x["id"].as_str().unwrap().to_string()).collect())
+        .collect()
+}
+
+#[tokio::test]
+async fn a_source_that_never_answers_leaves_the_others_listed() {
+    let r = rig().await;
+    let (remote, events) = with_budget(&r, Duration::from_millis(300));
+    remote.set_dlna(Arc::new(SlowDlna { wait: None, calls: Default::default() }));
+    let t = std::time::Instant::now();
+    let list = tokio::time::timeout(Duration::from_secs(10), remote.players()).await.expect("the refresh ends");
+    assert!(t.elapsed() >= Duration::from_millis(300));
+    assert_eq!(list.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["amp"]);
+    // The Plex player went out before the search gave up, then the whole list.
+    let lists = player_lists(&events);
+    assert_eq!(lists, [vec!["amp".to_string()], vec!["amp".to_string()]]);
+    assert!(!remote.refreshing());
+}
+
+#[tokio::test]
+async fn overlapping_refreshes_share_one_search() {
+    let r = rig().await;
+    let dlna = Arc::new(SlowDlna { wait: Some(Duration::from_millis(200)), calls: Default::default() });
+    r.remote.set_dlna(dlna.clone());
+    let (a, b) = tokio::join!(r.remote.players(), async {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(r.remote.refreshing(), "the first one is still running");
+        r.remote.players().await
+    });
+    assert_eq!(a, b);
+    assert_eq!(dlna.calls.load(std::sync::atomic::Ordering::SeqCst), 1, "one search for both");
+    assert_eq!(requests(&r.server, "/clients").await.len(), 1, "one ask of the server");
+    // Once it's done, the next refresh searches again.
+    assert!(!r.remote.refreshing());
+    r.remote.players().await;
+    assert_eq!(dlna.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn rows_stay_until_their_source_answers_again() {
+    let r = rig().await;
+    let (remote, events) = with_budget(&r, Duration::from_secs(5));
+    remote.players().await;
+    // The player is gone from the server, which answers slowly: it stays
+    // listed while the server is asked, and goes with its answer.
+    r.server.reset().await;
+    Mock::given(method("GET"))
+        .and(path("/clients"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"MediaContainer": {"size": 0}})).set_delay(Duration::from_millis(300)))
+        .mount(&r.server)
+        .await;
+    events.0.lock().clear();
+    let list = remote.players().await;
+    assert!(list.is_empty());
+    assert_eq!(player_lists(&events), [vec!["amp".to_string()], vec![]]);
+}
+
+#[tokio::test]
+async fn an_empty_list_goes_out_only_as_the_final_answer() {
+    let r = rig().await;
+    r.server.reset().await;
+    let (remote, events) = with_budget(&r, Duration::from_millis(300));
+    remote.set_dlna(Arc::new(SlowDlna { wait: Some(Duration::from_millis(150)), calls: Default::default() }));
+    let list = remote.players().await;
+    assert!(list.is_empty());
+    assert_eq!(player_lists(&events), [Vec::<String>::new()], "no empty partial list, one final answer");
+}
