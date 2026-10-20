@@ -149,7 +149,9 @@ starts. Either way the two prove they both know the code without sending it
 anywhere, and agree on a key only they have. Each code works once, for an
 hour, and only for the first device to use it; a code of one kind never
 pairs as the other. The Bridge's own code is only in its log and on its
-status page, which only the server itself can open.
+status page, which only the server itself can open. Restarting or recreating
+the container before pairing makes a new code and the old one stops working,
+so use the latest one in the log.
 
 Once paired, Platter sends the Bridge how to reach Lidarr (Lidarr's home
 address and API key) and its Lidarr settings, every time the Bridge starts,

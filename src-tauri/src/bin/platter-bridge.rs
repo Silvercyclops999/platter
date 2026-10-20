@@ -52,10 +52,16 @@ async fn start(env: run::Env) -> i32 {
             return 1;
         }
     };
+    let mounted_unnamed = parts.env.music.is_none() && parts.env.music_dir.is_dir();
     tracing::info!("Music folder: {}", match parts.music {
-        platter_lib::homeside::wire::MusicAccess::ReadWrite => "mounted read-write, so new protected albums can be added",
-        platter_lib::homeside::wire::MusicAccess::ReadOnly => "mounted read-only, so additions wait for a desktop",
-        platter_lib::homeside::wire::MusicAccess::None => "not mounted, so additions wait for a desktop",
+        platter_lib::homeside::wire::MusicAccess::ReadWrite => "mounted read-write, so new protected albums can be added".to_string(),
+        platter_lib::homeside::wire::MusicAccess::ReadOnly => "mounted read-only, so additions wait for a desktop".to_string(),
+        // Mounted, but without MUSIC_PLEX_PATH the Bridge can't match it to Plex yet.
+        platter_lib::homeside::wire::MusicAccess::None if mounted_unnamed => format!(
+            "mounted at {}, but MUSIC_PLEX_PATH isn't set yet, so the Bridge waits for its suggestion once it has read Plex",
+            parts.env.music_dir.display()
+        ),
+        platter_lib::homeside::wire::MusicAccess::None => "not mounted, so additions wait for a desktop".to_string(),
     });
     if !parts.env.set_here().is_empty() {
         tracing::info!("Using the Bridge's own settings for: {}. What a computer sends for these is ignored.", parts.env.set_here().join(", "));
