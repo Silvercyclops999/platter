@@ -8,7 +8,9 @@ use async_trait::async_trait;
 use tauri::State;
 use tokio::sync::watch;
 
-use super::peer::directory::{MdnsPeers, PeerDirectory};
+#[cfg(not(target_os = "ios"))]
+use super::peer::directory::MdnsPeers;
+use super::peer::directory::PeerDirectory;
 use super::peer::runtime::{self, RuntimeConfig};
 use super::peer::{self};
 use super::service::{LocalPlayer, RemoteEnv, RemoteService, ServerCtx};
