@@ -227,6 +227,8 @@ export interface BroughtList {
   gone: boolean;
   total: number;
   found: number;
+  /** The server playlist's cover. */
+  thumb: string | null;
 }
 
 export type BringAlbumState = "missing" | "picking" | "asked" | "notFound" | "here";
@@ -241,6 +243,8 @@ export interface BringAlbum {
   /** Why it couldn't be found ("Lidarr couldn't find it. ..."). */
   reason: string | null;
   releaseGroupId: string | null;
+  /** Its cover, once MusicBrainz has picked it. */
+  thumb: string | null;
 }
 
 /** "31 albums on the way, 4 here so far". */

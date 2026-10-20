@@ -40,7 +40,16 @@ export class MockBring {
 
   static empty(): BringStatus {
     return {
-      summary: { sources: [], liked: { total: 0, found: 0 }, songs: { total: 0, found: 0 }, playlists: 0, missingSongs: 0, missingAlbums: 0, unsure: 0, sentence: "" },
+      summary: {
+        sources: [],
+        liked: { total: 0, found: 0 },
+        songs: { total: 0, found: 0 },
+        playlists: 0,
+        missingSongs: 0,
+        missingAlbums: 0,
+        unsure: 0,
+        sentence: "",
+      },
       lists: [],
       albums: [],
       progress: { toGet: 0, onTheWay: 0, here: 0, notFound: 0 },
@@ -88,6 +97,7 @@ export class MockBring {
             state: "missing",
             reason: null,
             releaseGroupId: null,
+            thumb: null,
           }));
     const missingSongs = albums.reduce((n, a) => n + a.songs, 0);
     const likedTotal = 900;
@@ -104,7 +114,10 @@ export class MockBring {
       summary: {
         sources,
         liked: { total: likedTotal, found: likedFound },
-        songs: { total: 1040, found: this.scenario === "all" ? 1040 : this.scenario === "none" ? 0 : 1009 },
+        songs: {
+          total: 1040,
+          found: this.scenario === "all" ? 1040 : this.scenario === "none" ? 0 : 1009,
+        },
         playlists: 3,
         missingSongs: this.scenario === "all" ? 0 : missingSongs,
         missingAlbums: albums.length,
@@ -112,9 +125,33 @@ export class MockBring {
         sentence,
       },
       lists: [
-        { name: "Road Trip", importId: "pl:1", playlistId: this.scenario === "none" ? null : "mock-bring-1", gone: false, total: 48, found: this.scenario === "none" ? 0 : 41 },
-        { name: "Rainy Sundays", importId: "pl:2", playlistId: this.scenario === "none" ? null : "mock-bring-2", gone: false, total: 62, found: this.scenario === "none" ? 0 : 60 },
-        { name: "Gym", importId: "pl:3", playlistId: this.scenario === "none" ? null : "mock-bring-3", gone: false, total: 30, found: this.scenario === "none" ? 0 : 30 },
+        {
+          name: "Road Trip",
+          importId: "pl:1",
+          playlistId: this.scenario === "none" ? null : "mock-bring-1",
+          gone: false,
+          thumb: this.scenario === "none" ? null : "/playlists/mock-bring-1/composite/1",
+          total: 48,
+          found: this.scenario === "none" ? 0 : 41,
+        },
+        {
+          name: "Rainy Sundays",
+          importId: "pl:2",
+          playlistId: this.scenario === "none" ? null : "mock-bring-2",
+          gone: false,
+          thumb: this.scenario === "none" ? null : "/playlists/mock-bring-2/composite/1",
+          total: 62,
+          found: this.scenario === "none" ? 0 : 60,
+        },
+        {
+          name: "Gym",
+          importId: "pl:3",
+          playlistId: this.scenario === "none" ? null : "mock-bring-3",
+          gone: false,
+          thumb: this.scenario === "none" ? null : "/playlists/mock-bring-3/composite/1",
+          total: 30,
+          found: this.scenario === "none" ? 0 : 30,
+        },
       ],
       albums,
       sent: this.scenario === "none" ? { liked: 0, playlistsMade: 0, songsAdded: 0 } : { liked: likedFound, playlistsMade: 3, songsAdded: 131 },
@@ -132,6 +169,9 @@ export class MockBring {
       } else {
         a.state = "asked";
         a.reason = null;
+        const i = this.st.albums.indexOf(a);
+        a.releaseGroupId = `mock-rg-${i}`;
+        a.thumb = `/library/metadata/mock-bring-${i}/thumb/${(i % 9) + 1}`;
       }
     }
     return this.status(lidarrReady);
@@ -149,7 +189,15 @@ export class MockBring {
     return this.st.albums
       .filter((a) => a.state !== "here")
       .slice(0, Math.max(0, l.total - l.found))
-      .map((a, i) => ({ songId: 9000 + i, artist: a.artist, title: `${a.album} (track ${i + 1})`, album: a.album, durationMs: 200_000, status: "missing", track: null }));
+      .map((a, i) => ({
+        songId: 9000 + i,
+        artist: a.artist,
+        title: `${a.album} (track ${i + 1})`,
+        album: a.album,
+        durationMs: 200_000,
+        status: "missing",
+        track: null,
+      }));
   }
 }
 

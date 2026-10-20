@@ -39,7 +39,11 @@ beforeEach(async () => {
   await settings();
 });
 
-const toastText = () => useToasts.getState().toasts.map((t) => t.message).join("\n");
+const toastText = () =>
+  useToasts
+    .getState()
+    .toasts.map((t) => t.message)
+    .join("\n");
 
 async function bringFile() {
   render(<BringPage />);
@@ -49,7 +53,9 @@ async function bringFile() {
 
 function drop(name: string) {
   const file = new File(["x"], name);
-  fireEvent.drop(screen.getByTestId("bring-page"), { dataTransfer: { files: [file], types: ["Files"] } });
+  fireEvent.drop(screen.getByTestId("bring-page"), {
+    dataTransfer: { files: [file], types: ["Files"] },
+  });
 }
 
 describe("the door", () => {
@@ -63,7 +69,11 @@ describe("the door", () => {
 
   it("leads Home's Explore until the first import", async () => {
     const { unmount } = render(<HomeExplore />);
-    await userEvent.click(await screen.findByRole("button", { name: /Bring in music from another app/ }));
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: /Bring in music from another app/,
+      }),
+    );
     expect(useRouter.getState().entries[useRouter.getState().index].route).toEqual({ name: "bring" });
     unmount();
     await settings({ importSources: ["streaming"] });
@@ -83,7 +93,11 @@ describe("step 1: where from", () => {
     expect(screen.getByRole("button", { name: "Open the request page" })).toBeTruthy();
     expect(screen.getByText(/usually ready in a few days/)).toBeTruthy();
     // The playlists can come over now, through a connected account.
-    await userEvent.click(screen.getByRole("button", { name: "Bring playlists now, the rest when your file arrives" }));
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Bring playlists now, the rest when your file arrives",
+      }),
+    );
     expect(await screen.findByTestId("bring-playlists-now")).toHaveTextContent("Liked Songs for Platter");
     await waitFor(() => expect(useSettings.getState().settings?.importSources).toContain("streaming-account"));
   });
@@ -107,17 +121,20 @@ describe("step 1: where from", () => {
   it("asks for one file at a time", async () => {
     render(<BringPage />);
     await screen.findByTestId("bring-drop");
-    fireEvent.drop(screen.getByTestId("bring-page"), { dataTransfer: { files: [new File(["a"], "a.csv"), new File(["b"], "b.csv")], types: ["Files"] } });
+    fireEvent.drop(screen.getByTestId("bring-page"), {
+      dataTransfer: {
+        files: [new File(["a"], "a.csv"), new File(["b"], "b.csv")],
+        types: ["Files"],
+      },
+    });
     await waitFor(() => expect(toastText()).toMatch(/one file at a time/));
   });
 });
 
 describe("step 2: what you already have", () => {
-  it("is one sentence and two numbers, with what went to your server", async () => {
+  it("is one sentence, with what went to your server", async () => {
     const sentence = await bringFile();
     expect(sentence).toHaveTextContent("812 of 900 liked songs are already in your library. 31 songs from 7 albums aren't.");
-    expect(screen.getByText("liked songs here").previousSibling).toHaveTextContent("812");
-    expect(screen.getByText("albums to get").previousSibling).toHaveTextContent("7");
     expect(screen.getByText(/Liked 812 songs and made 3 playlists/)).toBeTruthy();
     // Unsure matches go to a short review list, never blocking.
     expect(screen.getByText(/4 songs might be in your library/)).toBeTruthy();
@@ -139,7 +156,8 @@ describe("step 2: what you already have", () => {
     mock.bring.scenario = "all";
     const sentence = await bringFile();
     expect(sentence).toHaveTextContent("All 900 liked songs are already in your library.");
-    expect(screen.queryByRole("heading", { name: /Get the rest/ })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Albums to get" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Get the/ })).toBeNull();
   });
 
   it("shows a playlist's missing songs greyed under its songs", async () => {
@@ -202,7 +220,9 @@ describe("step 3: get the rest", () => {
     expect(await screen.findByTestId("bring-progress", undefined, SLOW)).toHaveTextContent("6 albums on the way, 0 here so far.");
     expect(useSettings.getState().settings?.lidarrUrl).toBe("http://192.168.1.20:8686");
     const albums = screen.getByRole("list", { name: "Albums to get" });
-    const punisher = within(albums).getByRole("listitem", { name: /Punisher by Phoebe Bridgers/ });
+    const punisher = within(albums).getByRole("listitem", {
+      name: /Punisher by Phoebe Bridgers/,
+    });
     expect(punisher).toHaveTextContent("Lidarr couldn't find it");
     // Try again once it's on MusicBrainz.
     mock.bring.notFound.clear();
