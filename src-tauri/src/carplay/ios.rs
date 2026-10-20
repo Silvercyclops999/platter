@@ -832,18 +832,20 @@ fn cover_image(bytes: &[u8]) -> Option<Retained<objc2_ui_kit::UIImage>> {
         if cg.is_null() {
             return Some(image);
         }
-        let (w, h) = (CGImageGetWidth(cg), CGImageGetHeight(cg));
-        if w == h || w == 0 || h == 0 {
+        let Some((x, y, side)) = super::square_crop(CGImageGetWidth(cg), CGImageGetHeight(cg)) else {
             return Some(image);
-        }
-        let side = w.min(h) as f64;
-        let rect = Rect { x: (w as f64 - side) / 2.0, y: (h as f64 - side) / 2.0, w: side, h: side };
+        };
+        let rect = Rect { x: x as f64, y: y as f64, w: side as f64, h: side as f64 };
         let cropped = CGImageCreateWithImageInRect(cg, rect);
         if cropped.is_null() {
             return Some(image);
         }
+        // Keep the picture's own scale and orientation.
+        let scale: f64 = msg_send![&*image, scale];
+        let orientation: isize = msg_send![&*image, imageOrientation];
         let ui_class = objc2_ui_kit::UIImage::class();
-        let square: Option<Retained<objc2_ui_kit::UIImage>> = msg_send![ui_class, imageWithCGImage: cropped];
+        let square: Option<Retained<objc2_ui_kit::UIImage>> =
+            msg_send![ui_class, imageWithCGImage: cropped, scale: scale, orientation: orientation];
         CGImageRelease(cropped);
         square.or(Some(image))
     }

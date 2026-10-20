@@ -279,3 +279,11 @@ fn release_lines_say_year_and_kind() {
     assert_eq!(release_line(None, None), None);
 }
 
+#[test]
+fn covers_crop_to_a_centred_whole_pixel_square() {
+    assert_eq!(square_crop(600, 600), None);
+    assert_eq!(square_crop(0, 10), None);
+    assert_eq!(square_crop(800, 600), Some((100, 0, 600)));
+    assert_eq!(square_crop(600, 901), Some((0, 150, 600)), "odd sizes stay square");
+}
+
