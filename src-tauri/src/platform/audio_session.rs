@@ -84,12 +84,25 @@ unsafe fn route_headphones(route: &AVAudioSessionRouteDescription) -> Option<Str
 
 /// Follows interruptions, route changes and media services resets for the
 /// app's life. Call once, after the player starts.
-pub fn watch(player: PlayerHandle) {
+pub fn watch(player: PlayerHandle, app: tauri::AppHandle) {
     static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| observe_session(player));
+    ONCE.call_once(|| observe_session(player, app));
 }
 
-fn observe_session(player: PlayerHandle) {
+/// Where the sound goes now (the first output port).
+pub fn current_route() -> Option<super::audio_route::AudioRoute> {
+    // SAFETY: reading the shared session's current route.
+    unsafe {
+        let route = AVAudioSession::sharedInstance().currentRoute();
+        let port = route.outputs().firstObject()?;
+        Some(super::audio_route::AudioRoute {
+            kind: super::audio_route::kind_of(&port.portType().to_string()),
+            name: port.portName().to_string(),
+        })
+    }
+}
+
+fn observe_session(player: PlayerHandle, app: tauri::AppHandle) {
     use block2::RcBlock;
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
@@ -142,6 +155,10 @@ fn observe_session(player: PlayerHandle) {
         observe(
             AVAudioSessionRouteChangeNotification,
             Box::new(move |note| {
+                {
+                    use tauri::Emitter;
+                    let _ = app.emit(super::audio_route::EV_ROUTE, current_route());
+                }
                 let Some(reason) = info_number(note, AVAudioSessionRouteChangeReasonKey) else { return };
                 // None: the notification didn't say what the route was.
                 let before: Option<Option<String>> = AVAudioSessionRouteChangePreviousRouteKey.and_then(|key| {

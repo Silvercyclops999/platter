@@ -698,7 +698,7 @@ pub fn run() {
                 },
             );
             #[cfg(target_os = "ios")]
-            platform::audio_session::watch(player.clone());
+            platform::audio_session::watch(player.clone(), app.handle().clone());
             downloads.attach(player.transfer_gate(), Some(player.transfer_host()), audio::http::http_client());
             tauri::async_runtime::spawn(downloads.clone().run());
             // Downloaded items follow library changes straight away.
@@ -1600,6 +1600,7 @@ pub fn run() {
             platform::route_picker::show_route_picker,
             platform::haptics::haptic,
             audio::hifi::headphone_detect,
+            platform::audio_route::audio_route,
             platform::status_bar::set_status_bar_style,
             plex::commands::auth_status,
             plex::commands::auth_start,
