@@ -1,0 +1,42 @@
+name: ios-check
+
+# Compiles the Rust core for the iPhone, so iPhone-only code (CarPlay, Siri,
+# the audio session) breaks here instead of on the next phone build.
+on:
+  push:
+    branches: [main, "check/**"]
+    paths:
+      - "src-tauri/src/**"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/Cargo.lock"
+      - ".github/workflows/ios-check.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: aarch64-apple-ios
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ios
+      - run: npm ci
+      - run: npm run build
+      - name: cargo clippy (iPhone)
+        working-directory: src-tauri
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+        run: cargo clippy --target aarch64-apple-ios --lib -- -D warnings
