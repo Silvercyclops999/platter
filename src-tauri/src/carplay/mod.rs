@@ -228,7 +228,9 @@ fn artist(c: &Connection, id: &str) -> AppResult<Vec<CarItem>> {
         action: play(ContextKind::Artist, id),
     };
     let albums = queries::artist_albums(c, id, LIST_MAX - 1)?;
-    Ok(std::iter::once(popular).chain(albums.into_iter().map(album_item)).collect())
+    // On the artist's own list the name says nothing new: the year and the
+    // kind of release do.
+    Ok(std::iter::once(popular).chain(albums.into_iter().map(artist_album_item)).collect())
 }
 
 /// The Downloaded tab: everything kept on the phone, newest first, so the
@@ -331,6 +333,31 @@ pub fn radio(c: &Connection, playing: Option<&Playing>) -> AppResult<Vec<CarItem
 fn album_item(a: crate::model::Album) -> CarItem {
     CarItem {
         subtitle: Some(a.artist_title.clone()),
+        thumb: a.thumb.clone(),
+        action: play(ContextKind::Album, &a.id),
+        title: a.title,
+    }
+}
+
+/// "2011", "EP · 2019", "Single".
+pub fn release_line(year: Option<i32>, format: Option<&str>) -> Option<String> {
+    let kind = match format {
+        Some("ep") => Some("EP"),
+        Some("single") => Some("Single"),
+        Some("compilation") => Some("Compilation"),
+        _ => None,
+    };
+    match (kind, year) {
+        (Some(k), Some(y)) => Some(format!("{k} · {y}")),
+        (Some(k), None) => Some(k.to_string()),
+        (None, Some(y)) => Some(y.to_string()),
+        (None, None) => None,
+    }
+}
+
+fn artist_album_item(a: crate::model::Album) -> CarItem {
+    CarItem {
+        subtitle: release_line(a.year, a.format.as_deref()),
         thumb: a.thumb.clone(),
         action: play(ContextKind::Album, &a.id),
         title: a.title,

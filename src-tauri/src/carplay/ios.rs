@@ -701,10 +701,9 @@ fn load_cover(app: &AppHandle<Wry>, thumb: String, id: u64, i: usize) {
     tauri::async_runtime::spawn(async move {
         let Ok(img) = art.get_or_fetch(&thumb, COVER_PX, COVER_PX).await else { return };
         let _ = app.run_on_main_thread(move || {
-            // SAFETY: UIImage from bytes, set on our own row on the main thread.
+            // SAFETY: setting an image on our own row on the main thread.
             unsafe {
-                let data = NSData::with_bytes(&img.bytes);
-                let Some(image) = objc2_ui_kit::UIImage::imageWithData(&data) else { return };
+                let Some(image) = cover_image(&img.bytes) else { return };
                 COVER_ROWS.with(|m| {
                     let mut m = m.borrow_mut();
                     let Some(c) = m.get_mut(&id) else { return };
@@ -794,16 +793,58 @@ fn load_art(app: &AppHandle<Wry>, thumb: String, row: OnMain) {
         let Ok(img) = art.get_or_fetch(&thumb, ART_PX, ART_PX).await else { return };
         let _ = app.run_on_main_thread(move || {
             let row = row.into_row();
-            // SAFETY: UIImage from bytes (nil for bytes it can't read), set on
-            // the main thread.
+            // SAFETY: setting an image on our own row on the main thread.
             unsafe {
-                let data = NSData::with_bytes(&img.bytes);
-                if let Some(image) = objc2_ui_kit::UIImage::imageWithData(&data) {
+                if let Some(image) = cover_image(&img.bytes) {
                     row.setImage(Some(&image));
                 }
             }
         });
     });
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Rect {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+}
+
+unsafe extern "C" {
+    fn CGImageGetWidth(image: *mut std::ffi::c_void) -> usize;
+    fn CGImageGetHeight(image: *mut std::ffi::c_void) -> usize;
+    fn CGImageCreateWithImageInRect(image: *mut std::ffi::c_void, rect: Rect) -> *mut std::ffi::c_void;
+    fn CGImageRelease(image: *mut std::ffi::c_void);
+}
+
+/// A cover from bytes, cropped to a square around its middle: CarPlay
+/// draws a wide or tall picture narrower, which shifts the row's text.
+fn cover_image(bytes: &[u8]) -> Option<Retained<objc2_ui_kit::UIImage>> {
+    // SAFETY: UIImage from bytes; CoreGraphics' own create/release pair on
+    // the image's CGImage; the cropped image is wrapped before release.
+    unsafe {
+        let image = objc2_ui_kit::UIImage::imageWithData(&NSData::with_bytes(bytes))?;
+        let cg: *mut std::ffi::c_void = msg_send![&*image, CGImage];
+        if cg.is_null() {
+            return Some(image);
+        }
+        let (w, h) = (CGImageGetWidth(cg), CGImageGetHeight(cg));
+        if w == h || w == 0 || h == 0 {
+            return Some(image);
+        }
+        let side = w.min(h) as f64;
+        let rect = Rect { x: (w as f64 - side) / 2.0, y: (h as f64 - side) / 2.0, w: side, h: side };
+        let cropped = CGImageCreateWithImageInRect(cg, rect);
+        if cropped.is_null() {
+            return Some(image);
+        }
+        let ui_class = objc2_ui_kit::UIImage::class();
+        let square: Option<Retained<objc2_ui_kit::UIImage>> = msg_send![ui_class, imageWithCGImage: cropped];
+        CGImageRelease(cropped);
+        square.or(Some(image))
+    }
 }
 
 /// Row covers: CarPlay draws them small.

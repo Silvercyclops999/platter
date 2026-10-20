@@ -271,3 +271,11 @@ fn home_out_of_reach_or_signed_out_says_so() {
     assert_eq!(away[0].title, UNREACHABLE);
 }
 
+#[test]
+fn release_lines_say_year_and_kind() {
+    assert_eq!(release_line(Some(2011), Some("album")).as_deref(), Some("2011"));
+    assert_eq!(release_line(Some(2019), Some("ep")).as_deref(), Some("EP · 2019"));
+    assert_eq!(release_line(None, Some("single")).as_deref(), Some("Single"));
+    assert_eq!(release_line(None, None), None);
+}
+
