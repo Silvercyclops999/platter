@@ -23,12 +23,14 @@ pub mod plexside;
 pub mod promote;
 pub mod provenance;
 pub mod quality;
+pub mod quick;
 pub mod rematch;
 pub mod relayed;
 pub mod request;
 pub mod shared;
 pub mod status;
 pub mod swap;
+pub mod tap;
 pub mod tagcarry;
 pub mod upgrade;
 pub mod upmatch;
@@ -54,6 +56,8 @@ mod request_tests;
 mod waves_tests;
 #[cfg(test)]
 mod waves_bridge_tests;
+#[cfg(test)]
+mod tap_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

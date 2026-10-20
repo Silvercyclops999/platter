@@ -101,6 +101,14 @@ pub(super) struct State {
     pub(super) fail_album: Option<String>,
     /// Searches answer with a server error.
     pub(super) fail_search: bool,
+    /// What the indexers have for any album (`GET /release`).
+    pub(super) releases: Vec<Value>,
+    /// The download client turns grabs down.
+    pub(super) refuse_grab: bool,
+    /// Releases sent to the download client (guids).
+    pub(super) grabbed: Vec<String>,
+    /// Imported files (`GET /trackfile`).
+    pub(super) track_files: Vec<Value>,
 }
 
 /// A faked Lidarr that keeps artists and albums. Logs method, path and body.
@@ -233,6 +241,35 @@ impl FakeLidarr {
                 }
                 (202, json!([]))
             }
+            (Method::Post, "/album") => {
+                let b: Value = serde_json::from_str(body).unwrap();
+                let a = &b["artist"];
+                let artist = match st.artists.iter().find(|x| x["foreignArtistId"] == a["foreignArtistId"]).and_then(|x| x["id"].as_i64()) {
+                    Some(id) => id,
+                    None => {
+                        st.next_id += 1;
+                        let id = st.next_id;
+                        st.artists.push(json!({"id": id, "artistName": a["artistName"], "foreignArtistId": a["foreignArtistId"],
+                            "path": format!("{}/{}", a["rootFolderPath"].as_str().unwrap(), a["artistName"].as_str().unwrap()),
+                            "monitored": a["monitored"], "monitorNewItems": a["monitorNewItems"], "qualityProfileId": a["qualityProfileId"]}));
+                        id
+                    }
+                };
+                st.next_id += 1;
+                let id = st.next_id;
+                let album = json!({"id": id, "title": b["title"], "foreignAlbumId": b["foreignAlbumId"], "artistId": artist, "monitored": b["monitored"],
+                    "duration": 3_153_000, "statistics": {"trackFileCount": 0, "trackCount": 10, "percentOfTracks": 0}});
+                st.albums.push(album.clone());
+                (201, album)
+            }
+            (Method::Get, "/release") => (200, Value::Array(st.releases.clone())),
+            (Method::Post, "/release") if st.refuse_grab => (400, json!({"message": "Download client isn't accepting downloads"})),
+            (Method::Post, "/release") => {
+                let b: Value = serde_json::from_str(body).unwrap();
+                st.grabbed.push(b["guid"].as_str().unwrap_or_default().to_string());
+                (200, b)
+            }
+            (Method::Get, "/trackfile") => (200, Value::Array(st.track_files.clone())),
             (Method::Post, "/command") if st.fail_search => (500, json!({"message": "Internal error"})),
             (Method::Post, "/command") => (201, json!({"id": 1, "name": "AlbumSearch"})),
             (Method::Get, "/command") => {
@@ -288,12 +325,14 @@ pub(super) struct Rig {
     /// The clock every Lidarr of this rig reads (starts at 1,800,000,000).
     pub(super) now: Arc<Mutex<i64>>,
     keys: Arc<MemoryStore>,
+    /// The Plex this rig's Lidarr asks for scans.
+    pub(super) plex: Arc<super::plexside::fake::FakePlex>,
 }
 
 impl Rig {
     /// Platter started again: a new Lidarr on the same database, keychain and server.
     pub(super) fn restart(&self) -> Lidarr {
-        lidarr_on(&self.db, &self.web, &self.mb, &self.keys, &self.now)
+        lidarr_on(&self.db, &self.web, &self.mb, &self.keys, &self.now, &self.plex)
     }
 }
 
@@ -336,7 +375,7 @@ impl Rig {
     }
 }
 
-fn lidarr_on(db: &DbHandle, web: &Arc<FakeLidarr>, mb: &Arc<FakeMb>, keys: &Arc<MemoryStore>, now: &Arc<Mutex<i64>>) -> Lidarr {
+fn lidarr_on(db: &DbHandle, web: &Arc<FakeLidarr>, mb: &Arc<FakeMb>, keys: &Arc<MemoryStore>, now: &Arc<Mutex<i64>>, plex: &Arc<super::plexside::fake::FakePlex>) -> Lidarr {
     let n = now.clone();
     Lidarr::new(LidarrDeps {
         web: web.clone(),
@@ -348,7 +387,7 @@ fn lidarr_on(db: &DbHandle, web: &Arc<FakeLidarr>, mb: &Arc<FakeMb>, keys: &Arc<
         artist_mbid: Arc::new(Mbid),
         album_wait: std::time::Duration::ZERO,
         shared: super::shared::tests::on(db),
-        plex_server: Arc::new(super::plexside::fake::FakePlex::default()),
+        plex_server: plex.clone(),
     })
 }
 
@@ -371,9 +410,10 @@ pub(super) fn rig() -> Rig {
     let mb = FakeMb::northlight();
     let keys = Arc::new(MemoryStore::new());
     let now = Arc::new(Mutex::new(1_800_000_000));
-    let lidarr = lidarr_on(&db, &web, &mb, &keys, &now);
+    let plex = Arc::new(super::plexside::fake::FakePlex::default());
+    let lidarr = lidarr_on(&db, &web, &mb, &keys, &now, &plex);
     lidarr.set_key(Some("abc123")).unwrap();
-    Rig { _dir: dir, db, web, mb, lidarr, now, keys }
+    Rig { _dir: dir, db, web, mb, lidarr, now, keys, plex }
 }
 
 pub(super) fn input(rgid: &str, title: &str, typed: Option<&str>) -> RequestInput {

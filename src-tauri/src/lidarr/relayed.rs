@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use super::api::{Exclusion, LidarrGet, RootFolder, TrackFile, UNREACHABLE};
 use super::changes::HIRES_PROFILE;
 use super::paths::NormPath;
-use super::write::{AddArtist, ConfigKind, NewRoot, RelayedWrite, StagingFiles, clear_exclusion};
+use super::write::{AddAlbum, AddArtist, ConfigKind, NewRoot, RelayedWrite, StagingFiles, clear_exclusion};
 use crate::error::{AppError, AppResult};
 
 /// Most ids one relayed write may name.
@@ -99,6 +99,29 @@ pub async fn vet(w: &RelayedWrite, get: &dyn LidarrGet, staging: &str) -> AppRes
                 AddArtist::managed(cleared, name, q, m, &root.path)
             };
             rebuilt(serde_json::to_value(add).unwrap_or_default())
+        }
+        ("POST", "/album") => {
+            // The same checks as adding the artist on its own, then only the
+            // fields Platter sends for the album.
+            let rgid = body["foreignAlbumId"].as_str().map(|s| s.trim().to_ascii_lowercase()).filter(|s| crate::artistinfo::is_mbid(s));
+            let title = body["title"].as_str().filter(|t| !t.trim().is_empty() && t.len() <= 500);
+            let (Some(rgid), Some(title)) = (rgid, title) else {
+                return Err(refuse("That album had no MusicBrainz id."));
+            };
+            let a = &body["artist"];
+            let artist = RelayedWrite::check("POST", "/artist", &a.to_string()).map_err(|_| refuse("That album's artist wasn't readable."))?;
+            let artist = Box::pin(vet(&artist, get, staging)).await?;
+            let artist: AddArtist = add_artist_from(&serde_json::from_str(artist.body()).unwrap_or_default())
+                .ok_or_else(|| refuse("That album's artist wasn't readable."))?;
+            rebuilt(serde_json::to_value(AddAlbum::new(artist, &rgid, title)).unwrap_or_default())
+        }
+        ("POST", "/release") => {
+            let guid = body["guid"].as_str().filter(|g| !g.trim().is_empty() && g.len() <= 2000);
+            let indexer = body["indexerId"].as_i64().filter(|n| *n > 0);
+            match (guid, indexer) {
+                (Some(g), Some(i)) => rebuilt(json!({"guid": g, "indexerId": i})),
+                _ => Err(refuse("That grab didn't name a release.")),
+            }
         }
         ("POST", "/importlistexclusion") => {
             let id = body["foreignId"].as_str().map(|s| s.trim().to_ascii_lowercase()).filter(|s| crate::artistinfo::is_mbid(s));
@@ -245,6 +268,14 @@ pub async fn vet(w: &RelayedWrite, get: &dyn LidarrGet, staging: &str) -> AppRes
     }
 }
 
+/// An artist write already vetted above, read back into its fixed shape.
+fn add_artist_from(v: &Value) -> Option<AddArtist> {
+    let name = v["artistName"].as_str()?;
+    let cleared = clear_exclusion(&[], v["foreignArtistId"].as_str()?, name).ok()?;
+    let (q, m, root) = (v["qualityProfileId"].as_i64()?, v["metadataProfileId"].as_i64()?, v["rootFolderPath"].as_str()?);
+    Some(if v["monitored"] == Value::Bool(true) { AddArtist::managed(cleared, name, q, m, root) } else { AddArtist::protected(cleared, name, q, m, root) })
+}
+
 /// The pages a Bridge reads for a desktop: exactly what Platter asks for.
 const READS: &[&str] = &[
     "/system/status",
@@ -268,6 +299,7 @@ const READS: &[&str] = &[
     "/history/since",
     "/track",
     "/trackfile",
+    "/release",
 ];
 
 /// The query names those reads use.
@@ -428,6 +460,38 @@ mod tests {
         let mut excluded = good.clone();
         excluded["foreignArtistId"] = json!("b0000000-0000-0000-0000-000000000002");
         assert!(vetted("POST", "/artist", excluded).await.is_err(), "exclusions respected");
+    }
+
+    #[tokio::test]
+    async fn a_relayed_album_add_gets_the_artist_checks_and_a_grab_names_only_a_release() {
+        let artist = json!({"artistName": "Northlight", "foreignArtistId": "a0000000-0000-0000-0000-000000000001", "qualityProfileId": 2,
+            "metadataProfileId": 3, "rootFolderPath": "/data/media/Music", "monitored": true, "monitorNewItems": "all",
+            "addOptions": {"monitor": "all", "searchForMissingAlbums": true}});
+        let album = json!({"foreignAlbumId": "B0000000-0000-0000-0000-00000000000A", "title": "Second Wind", "monitored": false,
+            "addOptions": {"searchForNewAlbum": true}, "artist": artist, "extra": 1});
+        let v = vetted("POST", "/album", album.clone()).await.unwrap();
+        assert_eq!(v["foreignAlbumId"], "b0000000-0000-0000-0000-00000000000a");
+        assert_eq!((v["monitored"].as_bool(), v["addOptions"]["searchForNewAlbum"].as_bool()), (Some(true), Some(false)));
+        assert_eq!(v["artist"]["addOptions"], json!({"monitor": "none", "searchForMissingAlbums": false}));
+        assert_eq!(v["artist"]["monitorNewItems"], "none");
+        assert!(v.get("extra").is_none());
+        let mut staged = album.clone();
+        staged["artist"]["rootFolderPath"] = json!(STAGING);
+        assert_eq!(vetted("POST", "/album", staged).await.unwrap()["artist"]["monitored"], false, "in staging: never monitored");
+        let mut excluded = album.clone();
+        excluded["artist"]["foreignArtistId"] = json!("b0000000-0000-0000-0000-000000000002");
+        assert!(vetted("POST", "/album", excluded).await.is_err(), "exclusions respected");
+        let mut elsewhere = album.clone();
+        elsewhere["artist"]["rootFolderPath"] = json!("/etc");
+        assert!(vetted("POST", "/album", elsewhere).await.is_err());
+        let mut no_id = album.clone();
+        no_id["foreignAlbumId"] = json!("Second Wind");
+        assert!(vetted("POST", "/album", no_id).await.is_err());
+
+        let g = vetted("POST", "/release", json!({"guid": "nzb-1", "indexerId": 4, "downloadClientId": 9})).await.unwrap();
+        assert_eq!(g, json!({"guid": "nzb-1", "indexerId": 4}));
+        assert!(vetted("POST", "/release", json!({"guid": "nzb-1"})).await.is_err());
+        assert!(read_allowed("/release", &[("albumId".to_string(), "9".to_string())]));
     }
 
     #[tokio::test]

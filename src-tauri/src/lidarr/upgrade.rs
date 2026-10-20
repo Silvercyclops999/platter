@@ -615,7 +615,7 @@ impl Upgrades {
         let dest = Dest::Staging { album_id: album_id.to_string(), current: aim, current_label: label.clone() };
         let sent = {
             let _req = l.lock.lock().await;
-            l.send_to(rec.clone(), &dest).await
+            l.send_to(rec.clone(), &dest, super::request::Speed::Usual).await
         };
         let request = match sent {
             Ok(r) => r,
@@ -686,7 +686,7 @@ impl Upgrades {
             let l = self.lidarr();
             let sent = {
                 let _req = l.lock.lock().await;
-                l.send_to(r.request.clone(), &dest).await
+                l.send_to(r.request.clone(), &dest, super::request::Speed::Usual).await
             };
             let now = self.now();
             match sent {
