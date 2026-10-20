@@ -363,24 +363,34 @@ fn read_tabs(app: Option<&AppHandle<Wry>>) -> TabData {
     }
 }
 
+/// Each tabs rebuild asked for; an older read that lands after a newer one
+/// is dropped.
+static TABS_ASKED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Reads the tabs off the main thread, then builds and shows them there,
 /// so a slow read never holds up the car's screen.
 fn show_tabs() {
+    use std::sync::atomic::Ordering;
     if CAR.with(|c| c.borrow().is_none()) {
         return;
     }
+    let asked = TABS_ASKED.fetch_add(1, Ordering::SeqCst) + 1;
     let Some(app) = APP.get().cloned() else {
-        build_tabs(read_tabs(None));
+        build_tabs(read_tabs(None), asked);
         return;
     };
     tauri::async_runtime::spawn_blocking(move || {
         let data = read_tabs(Some(&app));
-        let _ = app.run_on_main_thread(move || build_tabs(data));
+        let _ = app.run_on_main_thread(move || build_tabs(data, asked));
     });
 }
 
-/// Builds and shows the tab bar (main thread).
-fn build_tabs(data: TabData) {
+/// Builds and shows the tab bar (main thread), unless a newer rebuild was
+/// asked for meanwhile.
+fn build_tabs(data: TabData, asked: u64) {
+    if TABS_ASKED.load(std::sync::atomic::Ordering::SeqCst) != asked {
+        return;
+    }
     let Some(mtm) = MainThreadMarker::new() else { return };
     let Some(controller) = CAR.with(|c| c.borrow().clone()) else { return };
     REACH.with(|r| r.set((!data.loading).then_some(data.reach)));
@@ -843,17 +853,23 @@ fn picked(action: &CarAction) {
     }
 }
 
+/// Reads a list off the main thread, then pushes it there.
 fn open_list(app: &AppHandle<Wry>, which: &CarList) {
-    let db = app.state::<DbHandle>();
-    let items = db.read(|c| super::list(c, which)).unwrap_or_else(|e| {
-        tracing::warn!("CarPlay list not read: {e}");
-        Vec::new()
+    let app = app.clone();
+    let which = which.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let items = app.state::<DbHandle>().read(|c| super::list(c, &which)).unwrap_or_else(|e| {
+            tracing::warn!("CarPlay list not read: {e}");
+            Vec::new()
+        });
+        let _ = app.run_on_main_thread(move || {
+            let Some(controller) = CAR.with(|c| c.borrow().clone()) else { return };
+            let Some(mtm) = MainThreadMarker::new() else { return };
+            let t = list_template(mtm, which.title(), &items, false);
+            // SAFETY: main thread, our template.
+            unsafe { controller.pushTemplate_animated_completion(&t, true, None) };
+        });
     });
-    let Some(controller) = CAR.with(|c| c.borrow().clone()) else { return };
-    let Some(mtm) = MainThreadMarker::new() else { return };
-    let t = list_template(mtm, which.title(), &items, false);
-    // SAFETY: main thread (list handlers run there), our template.
-    unsafe { controller.pushTemplate_animated_completion(&t, true, None) };
 }
 
 fn show_now_playing() {
