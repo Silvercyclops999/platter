@@ -193,8 +193,9 @@ enum Cmd {
     /// The output stream may be dead (the media services were reset):
     /// rebuild it now if playing, else before the next sound.
     OutputStale,
-    /// Try the output again after a reopen failed while playing.
-    OutputRetry,
+    /// Try the output again after a reopen failed while playing (the retry
+    /// generation it was set for).
+    OutputRetry(u64),
     Next(Reply<()>),
     Previous(Reply<()>),
     Seek(u64, Reply<()>),
@@ -442,6 +443,7 @@ impl PlayerHandle {
             interrupted_playing: false,
             headphones_playing: false,
             output_retry: None,
+            retry_gen: 0,
             output_stale: false,
             writer: config.persist_path.as_ref().and_then(|_| persist::Writer::spawn()),
             sink,
@@ -1009,6 +1011,8 @@ struct Actor {
     /// Playing when the output wouldn't reopen: the tries made so far.
     /// Play on once it opens; a pause or play by hand ends it.
     output_retry: Option<u32>,
+    /// Bumped whenever retries are called off: a timer from before is ignored.
+    retry_gen: u64,
     /// The output stream may have been killed under us: reopened on the
     /// next Play.
     output_stale: bool,
@@ -1831,7 +1835,7 @@ impl Actor {
         ) {
             self.interrupted_playing = false;
             self.headphones_playing = false;
-            self.output_retry = None;
+            self.cancel_output_retry();
         }
         match cmd {
             Cmd::Wake => return,
@@ -1940,7 +1944,7 @@ impl Actor {
                 let _ = reply.send(self.do_resume());
             }
             Cmd::Interruption { began, resume, stale } => self.on_interruption(began, resume, stale),
-            Cmd::OutputRetry => self.retry_output(),
+            Cmd::OutputRetry(generation) => self.retry_output(generation),
             Cmd::OutputStale => {
                 self.output_stale = true;
                 if self.is_active()
@@ -2374,6 +2378,7 @@ impl Actor {
     }
 
     fn do_pause(&mut self) -> AppResult<()> {
+        self.cancel_output_retry();
         if !self.is_active() {
             return Ok(());
         }
@@ -2396,6 +2401,8 @@ impl Actor {
     /// their leaving cancels any pending resume, so nothing plays on out
     /// loud, and only their coming back resumes what they left playing.
     fn on_interruption(&mut self, began: bool, resume: bool, stale: bool) {
+        // A call or the headphones decide now, not a pending output retry.
+        self.cancel_output_retry();
         self.output_stale |= stale;
         let headphones = !stale;
         if began {
@@ -2416,6 +2423,12 @@ impl Actor {
         }
     }
 
+    /// Calls off pending output retries; timers already set are ignored.
+    fn cancel_output_retry(&mut self) {
+        self.output_retry = None;
+        self.retry_gen = self.retry_gen.wrapping_add(1);
+    }
+
     /// Waits a little longer each time, then tries the output again.
     fn schedule_output_retry(&mut self) {
         let Some(n) = self.output_retry else { return };
@@ -2426,14 +2439,21 @@ impl Actor {
         }
         self.output_retry = Some(n + 1);
         let Some(tx) = self.self_tx.upgrade() else { return };
+        let generation = self.retry_gen;
         tokio::spawn(async move {
             tokio::time::sleep(OUTPUT_RETRY_STEP * (n + 1)).await;
-            let _ = tx.send(Cmd::OutputRetry);
+            let _ = tx.send(Cmd::OutputRetry(generation));
         });
     }
 
-    fn retry_output(&mut self) {
-        if self.output_retry.is_none() {
+    fn retry_output(&mut self, generation: u64) {
+        // Called off, or overtaken, or something else holds playback now.
+        if generation != self.retry_gen
+            || self.output_retry.is_none()
+            || self.status != PlayerStatus::Paused
+            || self.interrupted_playing
+            || self.headphones_playing
+        {
             return;
         }
         #[cfg(target_os = "ios")]
@@ -2752,6 +2772,7 @@ impl Actor {
             }
             EngineEvent::DeviceLost { why, fell_back_from } => {
                 tracing::info!("audio device lost: {why}");
+                self.cancel_output_retry();
                 self.engine.close_output();
                 self.pause_for_output();
                 self.emit_output(&self.engine.output_state());
@@ -2769,6 +2790,7 @@ impl Actor {
                     if was_playing {
                         // A new route (the car, AirPods) can take a few
                         // seconds to come up: try again before giving up.
+                        self.cancel_output_retry();
                         self.output_retry = Some(0);
                         self.schedule_output_retry();
                     }
