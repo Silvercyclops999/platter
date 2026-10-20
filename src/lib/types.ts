@@ -1235,6 +1235,12 @@ export interface Settings {
   deviceSyncWifiOnly: boolean;
   /** Let my other devices use Lidarr through this computer: your own paired devices reach Lidarr through this one, and the key stays here. This device only. */
   homeSideLidarr: boolean;
+  /** Platter Bridge, Lyrics for every song: a paired Bridge transcribes songs without lyrics at night for every device. Synced. */
+  bridgeLyrics: boolean;
+  /** When the Bridge transcribes, in this computer's time zone. Synced. */
+  bridgeLyricsHours: BridgeNightHours;
+  /** Platter Bridge, Lidarr from anywhere: the Bridge does Lidarr work, even with every computer off. Synced. */
+  bridgeLidarr: boolean;
   /** Bookmarks has a row in the library. */
   bookmarksInLibrary: boolean;
   showDlnaDevices: boolean;
@@ -1846,6 +1852,9 @@ export const DEFAULT_SETTINGS: Settings = {
   deviceSyncAway: true,
   deviceSyncWifiOnly: true,
   homeSideLidarr: true,
+  bridgeLyrics: true,
+  bridgeLyricsHours: "night",
+  bridgeLidarr: true,
   bookmarksInLibrary: true,
   showDlnaDevices: true,
   allowAutomation: false,
@@ -2365,7 +2374,8 @@ export interface TranscribeStatus {
   batch: { done: number; total: number };
   /** About how long each song of a long run takes, breather included. */
   secsPerSong?: number;
-  paused?: "battery" | "offline" | "busy";
+  /** `hours`: on a Bridge, outside its night hours; `bridge`: a paired Bridge does the batch. */
+  paused?: "battery" | "offline" | "busy" | "hours" | "bridge";
   error?: { kind: "download" | "checksum" | "disk" | "transcribe"; message: string; trackId?: string };
   /** The user paused the batch (songs asked for one at a time still run). */
   userPaused?: boolean;
@@ -5179,7 +5189,29 @@ export interface BridgeStatus {
   plexLink: string | null;
   /** What MUSIC_PLEX_PATH should be on the Bridge, when it isn't that. */
   musicPlexPath: string | null;
+  /** Lyrics for every song (missing from a Bridge before it). */
+  lyrics?: BridgeLyricsLine | null;
 }
+
+/** When the Bridge transcribes: 11 PM to 6 AM, 1 to 7 AM, 2 to 8 AM, or any time. */
+export type BridgeNightHours = "late" | "night" | "early" | "always";
+
+/** Where a Bridge's lyrics work is. */
+export type BridgeLyricsState = "off" | "unavailable" | "noMusic" | "downloading" | "waiting" | "busy" | "working" | "done" | "problem";
+
+/** A Bridge's Lyrics for every song, in short. */
+export interface BridgeLyricsLine {
+  state: BridgeLyricsState;
+  /** Songs with lyrics made on the Bridge. */
+  done: number;
+  /** Songs still to look at, about. */
+  left: number;
+  hours: BridgeNightHours;
+  /** The song being transcribed, by title. */
+  song?: string | null;
+  problem?: string | null;
+}
+
 
 /** A setting given to the Bridge in its own environment. */
 export type BridgeEnvSetting = "lidarrUrl" | "lidarrKey" | "plexUrl" | "plexToken" | "musicPlexPath";

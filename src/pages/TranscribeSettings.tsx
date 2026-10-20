@@ -64,6 +64,8 @@ const PAUSED: Record<NonNullable<TranscribeStatus["paused"]>, string> = {
   battery: "Paused while on battery power.",
   offline: "Paused: the server can't be reached. Trying again soon.",
   busy: "Paused while your computer is busy.",
+  hours: "Waiting for the night hours.",
+  bridge: "Paused: your Bridge transcribes these at night, so this computer doesn't have to.",
 };
 
 /** "about 20 seconds per song" for a long run, once a song is done (measured, breather included). */

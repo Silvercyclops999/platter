@@ -69,7 +69,7 @@ export const PAGES: readonly PageMeta[] = [
   { id: "ai", title: "AI", group: "Integrations", kind: "integration", blurb: "Turn a description into a prompted playlist." },
   { id: "streamDeck", title: "Stream Deck", group: "Integrations", kind: "integration", blurb: "Control Platter from Stream Deck keys and scripts." },
   { id: "widgetFeed", title: "Desktop widget feed", group: "Integrations", kind: "integration", blurb: "What's playing, for OBS, Rainmeter and other widgets." },
-  { id: "bridge", title: "Bridge", group: "Integrations", kind: "integration", blurb: "A small container on your server that does Lidarr work." },
+  { id: "bridge", title: "Bridge", group: "Integrations", kind: "integration", blurb: "A helper on your server: lyrics for every song at night, and Lidarr from anywhere." },
   { id: "libraryImport", title: "Library import", group: "Integrations", kind: "integration", blurb: "Bring in playlists, likes and history from other services." },
   { id: "tags", title: "Tags and archive", group: "Library", kind: "manage", blurb: "Music folder, tag checks, release status and archive rules." },
   { id: "doctor", title: "Library doctor", group: "Library", kind: "manage", blurb: "Finds duplicates, small covers and tags worth fixing." },
@@ -331,6 +331,12 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "discordClearOnPause",
   "discordStatusLine",
   "discordListenAlong",
+  // Platter Bridge: each benefit's switch and the night hours, under its card's More; the other ways to pair.
+  "bridgeLyrics",
+  "bridgeLyricsHours",
+  "bridgeLidarr",
+  "bridgeAddAnother",
+  "bridgePairCode",
   // Sharing and friends: share cards, sessions, invites, and unreleased music feature by feature.
   "blends",
   "shareCardQr",

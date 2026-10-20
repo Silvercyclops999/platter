@@ -95,6 +95,10 @@ const SHOWN_WHEN: Record<string, string> = {
   phoneMobileQuality: "the phone layout",
   phoneHaptics: "the phone layout (phone.test.tsx)",
   streamingRecheck: "the account import source turned on (account-import.test.tsx)",
+  bridgeLyrics: "a Bridge paired (bridge-settings.test.tsx)",
+  bridgeLyricsHours: "a Bridge paired",
+  bridgeLidarr: "a Bridge paired",
+  bridgeAddAnother: "a Bridge paired",
 };
 
 describe("every setting", () => {

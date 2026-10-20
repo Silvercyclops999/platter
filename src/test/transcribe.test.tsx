@@ -234,6 +234,10 @@ describe("Settings", () => {
     expect(batchNote({ ...on, batch: { done: 2, total: 9 }, paused: "battery" })).toBe("2 of 9 songs. Paused while on battery power.");
     expect(batchNote({ ...on, batch: { done: 2, total: 9 }, paused: "offline" })).toMatch(/can't be reached/);
     expect(batchNote({ ...on, batch: { done: 2, total: 9 }, paused: "busy" })).toBe("2 of 9 songs. Paused while your computer is busy.");
+    // A paired Bridge does the batch at night instead of this computer.
+    expect(batchNote({ ...on, batch: { done: 2, total: 9 }, paused: "bridge" })).toBe(
+      "2 of 9 songs. Paused: your Bridge transcribes these at night, so this computer doesn't have to.",
+    );
     expect(batchNote({ ...on, batch: { done: 2, total: 9 }, secsPerSong: 170 })).toBe("Transcribing: 2 of 9 songs, about 3 minutes per song.");
     expect(batchNote({ ...on, batch: { done: 2, total: 9 }, secsPerSong: 40 })).toBe("Transcribing: 2 of 9 songs, about 40 seconds per song.");
     expect(batchNote({ ...on, batch: { done: 2, total: 9 }, secsPerSong: 20 })).toBe("Transcribing: 2 of 9 songs, about 20 seconds per song.");

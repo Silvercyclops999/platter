@@ -46,7 +46,7 @@ import { INVITE_HOURS, ListenTextSetting } from "./ListenSettings";
 import { PlaylistNameSetting } from "./PlaylistSettings";
 import { LibraryImportSettings, importMatches } from "./LibraryImportSettings";
 import { AutomationSettings, StreamDeckSettings, automationMatches, streamDeckMatches } from "./StreamDeckSettings";
-import { BridgeSettings, bridgeMatches, useBridge } from "./BridgeSettings";
+import { AddBridge, BridgeSettings, NIGHT_HOURS_OPTIONS, PairWithCode, bridgeMatches, useBridge } from "./BridgeSettings";
 import { MixExclusions } from "./MixExclusions";
 import { ArtistAliases } from "./ArtistAliases";
 import { DismissedArtists } from "./DiscoverSettings";
@@ -3114,6 +3114,55 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       control: () => null,
       block: () => <LidarrHomeSides />,
     },
+    // Integrations: Platter Bridge. Each benefit's switch, under the card's More once one is paired.
+    {
+      key: "bridgeLyrics",
+      section: "Integrations",
+      page: "bridge",
+      shown: !!bridge?.bridges.length,
+      title: "Lyrics for every song",
+      description: "The Bridge transcribes songs without lyrics at night, for every device.",
+      more: "Songs with no lyrics from Plex, LRCLIB or you are transcribed on your server at night, and every device gets them. While it does, this computer doesn't run its own background batch. A song you play that the Bridge hasn't reached yet is still transcribed here when transcription is on. Needs your music folder mounted on the Bridge (read-only is fine).",
+      control: (ids) => toggle(s, "bridgeLyrics", ids),
+    },
+    {
+      key: "bridgeLyricsHours",
+      section: "Integrations",
+      page: "bridge",
+      shown: !!bridge?.bridges.length,
+      title: "Night hours",
+      description: "When the Bridge transcribes, in this computer's time zone.",
+      more: "The Bridge starts songs only in these hours, and waits while other programs keep your server busy. Any time means whenever the server is calm.",
+      control: (ids) => select(s, (x) => x.bridgeLyricsHours ?? "night", NIGHT_HOURS_OPTIONS, ids, (v) => void updateSettings({ bridgeLyricsHours: v })),
+    },
+    {
+      key: "bridgeLidarr",
+      section: "Integrations",
+      page: "bridge",
+      shown: !!bridge?.bridges.length,
+      title: "Lidarr from anywhere",
+      description: "The Bridge does Lidarr work and answers your devices away from home.",
+      more: "The Bridge catches up with Lidarr after downloads, keeps protected albums safe, runs Bring in my listening and lets your phone reach Lidarr away from home, even with every computer off. Off, it leaves all of that to your computers.",
+      control: (ids) => toggle(s, "bridgeLidarr", ids),
+    },
+    {
+      key: "bridgeAddAnother",
+      section: "Integrations",
+      page: "bridge",
+      shown: !!bridge?.bridges.length,
+      title: "Add another Bridge",
+      description: "Type the code another Bridge shows in its log, starting with PBB-.",
+      control: () => null,
+      block: () => <AddBridge compact />,
+    },
+    {
+      key: "bridgePairCode",
+      section: "Integrations",
+      page: "bridge",
+      title: "Pair with a code made here",
+      description: "For starting a Bridge with BRIDGE_PAIR_CODE instead of typing its code here.",
+      control: () => <PairWithCode />,
+    },
     ...(lidarr.ready
       ? ([
           {
@@ -3947,7 +3996,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
   };
 
   /** Pages that hold whole sections of their own, and when search shows them. */
-  const extras: Partial<Record<PageId, { matches: (q: string) => boolean; render: () => ReactNode }>> = {
+  const extras: Partial<Record<PageId, { matches: (q: string) => boolean; render: () => ReactNode; first?: boolean }>> = {
     libraryImport: {
       matches: (x) => importMatches(x) || matchesText('Show "Played a lot" on the Missing page. Bring in my listening.', x),
       render: () => <LibraryImportSettings />,
@@ -3961,7 +4010,8 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
         </>
       ),
     },
-    bridge: { matches: bridgeMatches, render: () => <BridgeSettings /> },
+    // The Bridge's card comes first; its switches sit under More below it.
+    bridge: { matches: bridgeMatches, render: () => <BridgeSettings />, first: true },
     tags: { matches: (x) => !!caps.metadataEdit && plexEditMatches(x), render: () => (caps.metadataEdit ? <PlexEditSettings /> : null) },
   };
 
@@ -4329,13 +4379,14 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
           </p>
         ) : (
           <>
+            {extras[p.id]?.first && extras[p.id]?.render()}
             {foldedRows(`page:${p.id}`, list, domId)}
             {waiting && (
               <p className="setting-row__desc settings__waiting" role="note">
                 More settings show once this is connected.
               </p>
             )}
-            {extras[p.id]?.render()}
+            {!extras[p.id]?.first && extras[p.id]?.render()}
           </>
         )}
       </section>

@@ -1,0 +1,105 @@
+/* Settings > Bridge: one card. What it does for you (a numbered list, the
+   ones still to come muted), then the three steps or how each is going. */
+.bridge-settings { display: flex; flex-direction: column; gap: var(--space-4); margin-top: var(--space-2); }
+
+.bridge-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  border-radius: var(--radius-card);
+  background: var(--color-bg-raised);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 8%, transparent);
+}
+.bridge-card__head { display: flex; flex-direction: column; gap: var(--space-1); }
+.bridge-card__name { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-3); }
+.bridge-card__title { margin: 0; font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); color: var(--color-text-primary); overflow-wrap: anywhere; }
+.bridge-card__lead { margin: 0; font-size: var(--font-size-md); line-height: 1.45; color: var(--color-text-secondary); }
+.bridge-card__subtitle { margin: var(--space-2) 0 0; font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.bridge-card__now,
+.bridge-card__note { margin: 0; font-size: var(--font-size-sm); line-height: 1.45; color: var(--color-text-secondary); overflow-wrap: anywhere; }
+.bridge-card__note code { color: var(--color-text-primary); user-select: all; }
+.bridge-card__actions { display: flex; justify-content: flex-end; }
+
+/* What it does for you: numbered, in the order the Bridge earns its place. */
+.bridge-benefits { margin: 0; padding: 0; list-style: none; counter-reset: benefit; display: flex; flex-direction: column; }
+.bridge-benefit {
+  counter-increment: benefit;
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  column-gap: var(--space-3);
+  row-gap: 2px;
+  padding: var(--space-3) 0;
+  border-top: 1px solid color-mix(in srgb, var(--color-ink) 8%, transparent);
+}
+.bridge-benefit:first-child { border-top: 0; padding-top: 0; }
+.bridge-benefit::before {
+  content: counter(benefit);
+  grid-row: 1 / span 2;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+  line-height: 1.45;
+}
+.bridge-benefit__title { font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); line-height: 1.45; color: var(--color-text-primary); }
+.bridge-benefit__text { grid-column: 2; font-size: var(--font-size-sm); line-height: 1.45; color: var(--color-text-secondary); }
+.bridge-benefit__problem { color: var(--color-warning-text); }
+.bridge-benefit.is-coming { grid-template-columns: 24px auto 1fr; align-items: baseline; }
+.bridge-benefit.is-coming::before,
+.bridge-benefit.is-coming .bridge-benefit__title { color: var(--color-text-muted); font-weight: var(--font-weight-regular); }
+.bridge-benefit.is-coming::before { grid-row: auto; }
+.bridge-benefit__soon {
+  justify-self: start;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-xs);
+  line-height: 20px;
+  color: var(--color-text-muted);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 16%, transparent);
+}
+
+/* The three steps. */
+.bridge-steps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-4); }
+.bridge-step { display: grid; grid-template-columns: 32px 1fr; gap: var(--space-3); align-items: start; }
+.bridge-step__n {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-on-accent);
+  background: var(--color-accent);
+}
+.bridge-step__body { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); min-width: 0; padding-top: 3px; }
+.bridge-step__title { font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.bridge-step__hint { margin: 0; font-size: var(--font-size-sm); line-height: 1.45; color: var(--color-text-secondary); }
+.bridge-step__tabs { margin-bottom: var(--space-1); }
+#bridge-where-panel { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); width: 100%; }
+.bridge-line {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: var(--space-3);
+  border-radius: var(--radius-row);
+  background: var(--color-bg-base);
+  font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* The code field. */
+.bridge-add { display: flex; flex-direction: column; gap: var(--space-2); width: 100%; }
+.bridge-add__field { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.bridge-add__input { width: 280px; max-width: 100%; }
+.bridge-code-block { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
+.bridge-code { word-break: break-all; user-select: all; }
+
+@media (max-width: 600px) {
+  .bridge-card { padding: var(--space-4); }
+}
