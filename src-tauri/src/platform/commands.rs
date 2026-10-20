@@ -58,6 +58,9 @@ impl PlayerControl for PlayerHandle {
 /// Run one player command. Window commands (`Show`, `Quit`) are handled by
 /// the caller and ignored here. Returns whether it was a player command.
 pub async fn run(player: &dyn PlayerControl, cmd: OsCommand) -> AppResult<bool> {
+    // The phone's lock screen, Control Centre and the car all come here.
+    #[cfg(target_os = "ios")]
+    tracing::info!(?cmd, "system command");
     match cmd {
         OsCommand::Toggle => player.toggle().await?,
         OsCommand::Play => player.play().await?,
