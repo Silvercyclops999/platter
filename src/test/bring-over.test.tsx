@@ -180,7 +180,7 @@ describe("step 3: get the rest", () => {
   it("without Lidarr, opens a two-field setup with the address filled in", async () => {
     await userEvent.click(await getButton());
     const form = screen.getByRole("form");
-    expect(within(form).getByLabelText("Address")).toHaveValue("http://192.168.1.20:8686");
+    expect(within(form).getByLabelText("Address")).toHaveValue("http://10.20.30.40:8686");
     expect(within(form).getByLabelText("API key")).toHaveAttribute("placeholder", "Lidarr: Settings, General, API Key");
   });
 
@@ -218,7 +218,7 @@ describe("step 3: get the rest", () => {
     await userEvent.type(screen.getByLabelText("API key"), "abc123");
     await userEvent.click(screen.getByRole("button", { name: "Connect" }));
     expect(await screen.findByTestId("bring-progress", undefined, SLOW)).toHaveTextContent("6 albums on the way, 0 here so far.");
-    expect(useSettings.getState().settings?.lidarrUrl).toBe("http://192.168.1.20:8686");
+    expect(useSettings.getState().settings?.lidarrUrl).toBe("http://10.20.30.40:8686");
     const albums = screen.getByRole("list", { name: "Albums to get" });
     const punisher = within(albums).getByRole("listitem", {
       name: /Punisher by Phoebe Bridgers/,

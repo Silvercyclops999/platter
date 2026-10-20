@@ -477,10 +477,10 @@ fn the_sentence() {
 
 #[test]
 fn where_lidarr_probably_is() {
-    assert_eq!(bring::lidarr_guesses(Some("http://192.168.1.20:32400")), ["http://192.168.1.20:8686", "http://localhost:8686"]);
+    assert_eq!(bring::lidarr_guesses(Some("http://10.20.30.40:32400")), ["http://10.20.30.40:8686", "http://localhost:8686"]);
     assert_eq!(
-        bring::lidarr_guesses(Some("https://192-168-1-20.0123456789abcdef.plex.direct:32400")),
-        ["http://192.168.1.20:8686", "http://localhost:8686"]
+        bring::lidarr_guesses(Some("https://10-20-30-40.0123456789abcdef.plex.direct:32400")),
+        ["http://10.20.30.40:8686", "http://localhost:8686"]
     );
     // Remote access or the relay: never guessed (the key would leave home).
     assert_eq!(bring::lidarr_guesses(Some("https://81-2-3-4.0123456789abcdef.plex.direct:32400")), ["http://localhost:8686"]);

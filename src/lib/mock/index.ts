@@ -4434,7 +4434,7 @@ export class MockBackend implements Backend {
     return this.delay(() => this.bring.get(keys, this.bringReady()));
   }
   bringLidarrGuesses() {
-    return this.delay(() => ["http://192.168.1.20:8686", "http://localhost:8686"]);
+    return this.delay(() => ["http://10.20.30.40:8686", "http://localhost:8686"]);
   }
   bringWaitingRows(playlistId: string) {
     return this.delay(() => this.bring.waitingRows(playlistId));

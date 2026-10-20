@@ -251,7 +251,7 @@ function LidarrInline({ onReady }: { onReady: () => void }) {
           className="setting-text"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          placeholder="http://192.168.1.20:8686"
+          placeholder="http://192.168.x.x:8686"
           spellCheck={false}
           autoComplete="off"
           required
