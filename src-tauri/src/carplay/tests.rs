@@ -37,10 +37,10 @@ async fn an_empty_library_gives_empty_lists_not_errors() {
     for which in [CarList::RecentlyPlayed, CarList::RecentlyAdded, CarList::Playlists, CarList::Albums, CarList::Artists] {
         assert!(db.read(|c| list(c, &which)).unwrap().is_empty(), "{which:?}");
     }
-    // Home still offers shuffle, likes and the shelves to open.
+    // With no songs there's nothing to shuffle; likes and the shelves stay.
     let home = db.read(home).unwrap();
     let titles: Vec<_> = home.iter().map(|i| i.title.as_str()).collect();
-    assert_eq!(titles, ["Shuffle my library", "Liked songs", "Recently played", "Recently added"]);
+    assert_eq!(titles, ["Liked songs", "Recently played", "Recently added"]);
 }
 
 #[tokio::test]
@@ -54,7 +54,10 @@ async fn home_opens_on_shuffle_and_likes_then_what_you_played_then_mixes() {
     let sections = db.read(home_sections).unwrap();
     let CarRow::Item(shuffle) = &sections[0].rows[0] else { panic!("a row first") };
     assert_eq!(shuffle.title, "Shuffle my library");
-    let CarAction::Shuffle(ctx) = &shuffle.action else { panic!("shuffles") };
+    assert_eq!(shuffle.action, CarAction::ShuffleLibrary, "the songs are drawn when it's picked");
+    let CarRow::Item(liked) = &sections[0].rows[1] else { panic!("a row second") };
+    assert_eq!(liked.title, "Liked songs");
+    let ctx = db.read(shuffle_library_context).unwrap();
     assert_eq!(ctx.track_ids.as_ref().map(Vec::len), Some(4 * 3 * 3), "every song (under the cap)");
     let CarRow::Covers { title, items } = &sections[1].rows[0] else { panic!("covers second: {:?}", sections[1]) };
     assert_eq!(title, "Jump back in");
@@ -66,8 +69,7 @@ async fn home_opens_on_shuffle_and_likes_then_what_you_played_then_mixes() {
 #[tokio::test]
 async fn shuffle_my_library_starts_with_at_most_the_cap() {
     let (db, _dir) = synced(40, 5).await;
-    let home = db.read(home).unwrap();
-    let CarAction::Shuffle(ctx) = &home[0].action else { panic!() };
+    let ctx = db.read(shuffle_library_context).unwrap();
     assert_eq!(ctx.track_ids.as_ref().map(Vec::len), Some(SHUFFLE_MAX));
 }
 
@@ -226,5 +228,46 @@ fn rows_playing_what_plays_now_are_marked() {
     // Lists to open, and nothing playing, mark nothing.
     assert!(!is_playing(&open(CarList::Albums), &now));
     assert!(!is_playing(&playlist, &NowKey::default()));
+}
+
+#[tokio::test]
+async fn home_lists_the_mixes_and_leaves_artists_out_of_the_covers() {
+    let (db, _dir) = synced(4, 3).await;
+    db.write(|c| {
+        // An artist and an album played lately; only the album is a cover.
+        c.execute_batch("UPDATE albums SET last_viewed_at = 1000 + rowid, view_count = 1")?;
+        let ids: Vec<String> = c
+            .prepare("SELECT id FROM tracks LIMIT 30")?
+            .query_map([], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        let mix = crate::mixes::store::Stored {
+            id: "daily-1".into(),
+            kind: crate::mixes::MixKind::Daily,
+            title: "Daily Mix 1".into(),
+            description: "Some artists and more".into(),
+            color: "#334455".into(),
+            artist_ids: vec![],
+            tag: None,
+            tracks: ids.into_iter().map(|id| (id, false)).collect(),
+        };
+        crate::mixes::store::save_one(c, &mix, 0, "2026-10-20", 0)?;
+        Ok(())
+    })
+    .unwrap();
+    let sections = db.read(home_sections).unwrap();
+    let made = sections.iter().find(|s| s.header.as_deref() == Some("Made for you")).expect("a mixes section");
+    let CarRow::Item(m) = &made.rows[0] else { panic!("a mix row") };
+    assert_eq!(m.title, "Daily Mix 1");
+    assert!(matches!(&m.action, CarAction::Play(p) if p.kind == ContextKind::Mix && p.id.as_deref() == Some("daily-1")));
+    let CarRow::Covers { items, .. } = &sections[1].rows[0] else { panic!("covers") };
+    assert!(items.iter().all(|i| !matches!(i.action, CarAction::Open(CarList::Artist { .. }))), "no artists among the covers");
+}
+
+#[test]
+fn home_out_of_reach_or_signed_out_says_so() {
+    let signed_out = tab_rows(Tab::Home, Reach::SignedOut, Vec::new);
+    assert_eq!(signed_out[0].title, SIGN_IN);
+    let away = tab_rows(Tab::Home, Reach::Unreachable, Vec::new);
+    assert_eq!(away[0].title, UNREACHABLE);
 }
 

@@ -35,6 +35,8 @@ pub enum CarAction {
     Play(PlayContext),
     /// Start it shuffled.
     Shuffle(PlayContext),
+    /// Shuffle every song: the songs are drawn when it's picked.
+    ShuffleLibrary,
     /// Open another list.
     Open(CarList),
     /// Play this queue entry (its item id) now: a row in Up next.
@@ -110,10 +112,12 @@ pub enum CarRow {
 /// likes in one tap, then what you played lately as covers, then your
 /// mixes, then the longer lists.
 pub fn home_sections(c: &Connection) -> AppResult<Vec<CarSection>> {
-    let mut out = vec![CarSection {
-        header: None,
-        rows: vec![CarRow::Item(shuffle_library(c)?), CarRow::Item(liked_item())],
-    }];
+    let mut first = Vec::new();
+    if has_songs(c)? {
+        first.push(CarRow::Item(shuffle_library()));
+    }
+    first.push(CarRow::Item(liked_item()));
+    let mut out = vec![CarSection { header: None, rows: first }];
     let recent: Vec<CarItem> = queries::recently_played(c, COVERS_MAX * 2)?
         .into_iter()
         .filter(|h| !matches!(h, HomeItem::Artist { .. }))
@@ -153,16 +157,20 @@ fn liked_item() -> CarItem {
     CarItem { title: "Liked songs".to_string(), subtitle: None, thumb: None, action: play(ContextKind::Liked, "liked") }
 }
 
-/// Every song, shuffled: a random draw the player shuffles and tops up.
-fn shuffle_library(c: &Connection) -> AppResult<CarItem> {
+fn has_songs(c: &Connection) -> AppResult<bool> {
+    Ok(c.query_row("SELECT EXISTS (SELECT 1 FROM tracks)", [], |r| r.get(0))?)
+}
+
+fn shuffle_library() -> CarItem {
+    CarItem { title: "Shuffle my library".into(), subtitle: None, thumb: None, action: CarAction::ShuffleLibrary }
+}
+
+/// What "Shuffle my library" plays: a fresh random draw of every song (at
+/// most [`SHUFFLE_MAX`]), for the player to shuffle and top up.
+pub fn shuffle_library_context(c: &Connection) -> AppResult<PlayContext> {
     let mut st = c.prepare_cached("SELECT id FROM tracks ORDER BY random() LIMIT ?1")?;
     let ids = st.query_map([SHUFFLE_MAX as i64], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
-    Ok(CarItem {
-        title: "Shuffle my library".into(),
-        subtitle: None,
-        thumb: None,
-        action: CarAction::Shuffle(PlayContext { kind: ContextKind::Tracks, id: None, track_ids: Some(ids) }),
-    })
+    Ok(PlayContext { kind: ContextKind::Tracks, id: None, track_ids: Some(ids) })
 }
 
 /// The made-for-you mixes (Daily Mixes, the daylist, Discover...), in their

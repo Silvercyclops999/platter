@@ -311,67 +311,103 @@ fn ns(s: &str) -> Retained<NSString> {
     NSString::from_str(s)
 }
 
-/// Builds and shows the tab bar (main thread).
-fn show_tabs() {
-    let Some(mtm) = MainThreadMarker::new() else { return };
-    let Some(controller) = CAR.with(|c| c.borrow().clone()) else { return };
-    let read = |name: &str, f: &dyn Fn(&rusqlite::Connection) -> crate::error::AppResult<Vec<CarItem>>| match APP.get() {
-        Some(app) => app.state::<DbHandle>().read(|c| f(c)).unwrap_or_else(|e| {
+/// What the tabs show, read off the main thread.
+struct TabData {
+    reach: Reach,
+    /// The app isn't set up yet: every tab says "Loading".
+    loading: bool,
+    home: Vec<CarSection>,
+    library: Vec<CarItem>,
+    downloaded: Vec<CarItem>,
+    radio: Vec<CarItem>,
+}
+
+fn read_tabs(app: Option<&AppHandle<Wry>>) -> TabData {
+    let Some(app) = app else {
+        return TabData {
+            reach: Reach::Online,
+            loading: true,
+            home: Vec::new(),
+            library: Vec::new(),
+            downloaded: Vec::new(),
+            radio: Vec::new(),
+        };
+    };
+    let db = app.state::<DbHandle>();
+    let read = |name: &str, f: &dyn Fn(&rusqlite::Connection) -> crate::error::AppResult<Vec<CarItem>>| {
+        db.read(|c| f(c)).unwrap_or_else(|e| {
             tracing::warn!("CarPlay {name} not read: {e}");
             Vec::new()
-        }),
-        None => Vec::new(),
+        })
     };
-    let reach = APP.get().map(reach).unwrap_or(Reach::Online);
-    REACH.with(|r| r.set(APP.get().map(|_| reach)));
-    // The old tabs' rows are gone with them.
-    COVER_ROWS.with(|m| m.borrow_mut().clear());
-    MARKABLE.with(|m| m.borrow_mut().clear());
+    let reach = reach(app);
     // Home keeps its sections and its row of covers; a message (signed
     // out, out of reach) is a single plain section.
-    let home_sections = match reach {
-        Reach::Online if APP.get().is_some() => APP
-            .get()
-            .map(|app| {
-                app.state::<DbHandle>().read(super::home_sections).unwrap_or_else(|e| {
-                    tracing::warn!("CarPlay home not read: {e}");
-                    Vec::new()
-                })
-            })
-            .unwrap_or_default(),
+    let home = match reach {
+        Reach::Online => db.read(super::home_sections).unwrap_or_else(|e| {
+            tracing::warn!("CarPlay home not read: {e}");
+            Vec::new()
+        }),
         _ => vec![CarSection {
             header: None,
             rows: super::tab_rows(Tab::Home, reach, Vec::new).into_iter().map(CarRow::Item).collect(),
         }],
     };
-    let downloaded = super::tab_rows(Tab::Downloaded, reach, || read("downloads", &super::downloaded));
-    let radio = super::tab_rows(Tab::Radio, reach, || read("radio", &|c| super::radio(c, None)));
-    let library = if APP.get().is_some() { super::tab_rows(Tab::Library, reach, super::library) } else { Vec::new() };
-    let loading = APP.get().is_none();
-    let home = sections_template(mtm, "Home", &home_sections, loading);
+    TabData {
+        reach,
+        loading: false,
+        home,
+        library: super::tab_rows(Tab::Library, reach, super::library),
+        downloaded: super::tab_rows(Tab::Downloaded, reach, || read("downloads", &super::downloaded)),
+        radio: super::tab_rows(Tab::Radio, reach, || read("radio", &|c| super::radio(c, None))),
+    }
+}
+
+/// Reads the tabs off the main thread, then builds and shows them there,
+/// so a slow read never holds up the car's screen.
+fn show_tabs() {
+    if CAR.with(|c| c.borrow().is_none()) {
+        return;
+    }
+    let Some(app) = APP.get().cloned() else {
+        build_tabs(read_tabs(None));
+        return;
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let data = read_tabs(Some(&app));
+        let _ = app.run_on_main_thread(move || build_tabs(data));
+    });
+}
+
+/// Builds and shows the tab bar (main thread).
+fn build_tabs(data: TabData) {
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    let Some(controller) = CAR.with(|c| c.borrow().clone()) else { return };
+    REACH.with(|r| r.set((!data.loading).then_some(data.reach)));
+    // The old tabs' rows are gone with them.
+    COVER_ROWS.with(|m| m.borrow_mut().clear());
+    MARKABLE.with(|m| m.borrow_mut().clear());
+    let home = sections_template(mtm, "Home", &data.home, data.loading);
     // SAFETY: plain setters on a template we own.
     unsafe {
         home.setTabTitle(Some(&ns("Home")));
         home.setTabImage(symbol_image("house").as_deref());
     }
-    let tabs = std::iter::once(Retained::into_super(home))
-        .chain(
-    [
-        ("Library", "books.vertical", library),
-        ("Downloaded", "arrow.down.circle", downloaded),
-        ("Radio", "dot.radiowaves.left.and.right", radio),
-    ]
-        .into_iter()
-        .map(|(title, symbol, items)| {
-            let t = list_template(mtm, title, &items, loading);
-            // SAFETY: plain setters on a template we own.
-            unsafe {
-                t.setTabTitle(Some(&ns(title)));
-                t.setTabImage(symbol_image(symbol).as_deref());
-            }
-            Retained::into_super(t)
-        }))
-        .collect::<Vec<Retained<CPTemplate>>>();
+    let lists = [
+        ("Library", "books.vertical", data.library),
+        ("Downloaded", "arrow.down.circle", data.downloaded),
+        ("Radio", "dot.radiowaves.left.and.right", data.radio),
+    ];
+    let mut tabs: Vec<Retained<CPTemplate>> = vec![Retained::into_super(home)];
+    for (title, symbol, items) in lists {
+        let t = list_template(mtm, title, &items, data.loading);
+        // SAFETY: plain setters on a template we own.
+        unsafe {
+            t.setTabTitle(Some(&ns(title)));
+            t.setTabImage(symbol_image(symbol).as_deref());
+        }
+        tabs.push(Retained::into_super(t));
+    }
     // SAFETY: CarPlay calls on the main thread with templates we built.
     unsafe {
         let bar = CPTabBarTemplate::initWithTemplates(CPTabBarTemplate::alloc(mtm), &NSArray::from_retained_slice(&tabs));
@@ -578,13 +614,12 @@ fn covers_row(mtm: MainThreadMarker, title: &str, items: &[CarItem]) -> Retained
                 }
             })
             .collect();
-        let supers: Vec<Retained<CPListImageRowItemRowElement>> = elements.clone();
         // SAFETY: the row's initialiser with elements we own.
         let r = unsafe {
             CPListImageRowItem::initWithText_elements_allowsMultipleLines(
                 CPListImageRowItem::alloc(mtm),
                 Some(&ns(title)),
-                &NSArray::from_retained_slice(&supers),
+                &NSArray::from_slice(&elements.iter().map(|e| &**e).collect::<Vec<_>>()),
                 false,
             )
         };
@@ -780,6 +815,20 @@ fn picked(action: &CarAction) {
             }
         }
         CarAction::Info => {}
+        CarAction::ShuffleLibrary => {
+            let player = app.state::<PlayerHandle>().inner().clone();
+            let db = app.state::<DbHandle>().inner().clone();
+            tauri::async_runtime::spawn(async move {
+                let ctx = match db.read_async(super::shuffle_library_context).await {
+                    Ok(c) => c,
+                    Err(e) => return tracing::warn!("CarPlay shuffle not read: {e}"),
+                };
+                if let Err(e) = player.play_context_from(ctx, None, None, Some(true)).await {
+                    tracing::warn!("CarPlay play failed: {e}");
+                }
+            });
+            show_now_playing();
+        }
         CarAction::Play(ctx) | CarAction::Shuffle(ctx) => {
             let player = app.state::<PlayerHandle>().inner().clone();
             let ctx = ctx.clone();
