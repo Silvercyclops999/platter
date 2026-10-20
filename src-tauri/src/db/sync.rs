@@ -22,6 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
+use rusqlite::OptionalExtension;
 
 use crate::error::{AppError, AppResult};
 
@@ -619,8 +620,15 @@ async fn sync_playlists(ctx: &Ctx, force_items: bool, owner: Option<&str>) -> Ap
                         let local = store::playlists_with_local_changes(&tx)?.contains(&pid);
                         let drop = (gone || failed_before) && !local;
                         if drop {
+                            // Kept out until it changes on the server, so the
+                            // next playlist list doesn't bring it back to fail again.
+                            let updated_at: Option<i64> = tx
+                                .query_row("SELECT updated_at FROM playlists WHERE id = ?1", [&pid], |r| r.get(0))
+                                .optional()?
+                                .flatten();
                             tx.execute("DELETE FROM playlists WHERE id = ?1", [&pid])?;
                             store::playlist_failed(&tx, &pid, false)?;
+                            store::set_playlist_unlistable(&tx, &pid, Some(updated_at))?;
                         }
                         tx.commit()?;
                         Ok(drop)
@@ -628,7 +636,11 @@ async fn sync_playlists(ctx: &Ctx, force_items: bool, owner: Option<&str>) -> Ap
                     .await?;
                 // Usually a Plex smart playlist its server can't list (Plex answers 500), so a
                 // note, not a warning; a second failure in a row drops it.
-                tracing::info!(dropped, "playlist {id} skipped: the server couldn't list it ({})", e.kind());
+                if dropped {
+                    tracing::info!("playlist {id} left out until it changes on the server: the server couldn't list it twice ({})", e.kind());
+                } else {
+                    tracing::debug!("playlist {id} skipped: the server couldn't list it ({})", e.kind());
+                }
                 continue;
             }
             Err(e) => return Err(e),

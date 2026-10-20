@@ -2245,6 +2245,57 @@ async fn a_playlist_the_server_cannot_list_is_dropped_not_fatal() {
 }
 
 #[tokio::test]
+async fn a_dropped_playlist_stays_out_until_it_changes_on_the_server() {
+    let t = open();
+    let mut lib = fake::generated(2, 2, 3);
+    let ids: Vec<String> = lib.tracks.iter().map(|t| t.id.clone()).collect();
+    lib.playlists.push((fake::playlist("ok", "Fine", 1), vec![ids[0].clone()]));
+    let mut orphan = fake::playlist("orphan", "From a deleted library", 5);
+    orphan.smart = true;
+    orphan.updated_at = Some(100);
+    lib.playlists.push((orphan, vec![]));
+    lib.broken_playlists.push("orphan".into());
+    let src = Arc::new(FakeSource::new(lib));
+    let ids = |db: &DbHandle| db.read(queries::playlists).unwrap().into_iter().map(|p| p.id).collect::<Vec<_>>();
+    sync(&t.db, &src, false).await;
+    sync(&t.db, &src, false).await;
+    assert_eq!(ids(&t.db), ["ok"], "dropped after failing twice");
+    let asked = |src: &FakeSource| src.playlist_item_calls.lock().iter().filter(|i| *i == "orphan").count();
+    let before = asked(&src);
+    // The server keeps listing it, unchanged: it stays out and isn't asked for again.
+    for _ in 0..3 {
+        sync(&t.db, &src, false).await;
+        assert_eq!(ids(&t.db), ["ok"], "no drop and re-add on alternate syncs");
+    }
+    assert_eq!(asked(&src), before, "an unlistable playlist isn't read again while unchanged");
+    // Changed on the server and listable now: back.
+    {
+        let mut l = src.lib.lock();
+        l.playlists[1].0.updated_at = Some(200);
+        l.broken_playlists.clear();
+    }
+    sync(&t.db, &src, false).await;
+    assert_eq!(ids(&t.db), ["ok", "orphan"]);
+}
+
+#[test]
+fn an_unlistable_mark_goes_when_the_playlist_leaves_the_list() {
+    let t = open();
+    t.db.write(|c| {
+        store::set_playlist_unlistable(c, "gone", Some(Some(5)))?;
+        store::set_playlist_unlistable(c, "kept", Some(None))?;
+        let tx = c.transaction()?;
+        store::replace_playlists_in(&tx, &[fake::playlist("kept", "Kept", 1)], false, None)?;
+        tx.commit()?;
+        Ok(())
+    })
+    .unwrap();
+    let marks = t.db.read(store::unlistable_playlists).unwrap();
+    assert_eq!(marks.keys().collect::<Vec<_>>(), ["kept"], "kept is still listed unchanged; gone left the list");
+    assert!(t.db.read(queries::playlists).unwrap().is_empty(), "an unchanged unlistable playlist isn't added");
+}
+
+#[tokio::test]
 async fn a_playlist_that_fails_once_keeps_its_songs() {
     let t = open();
     let mut lib = fake::generated(2, 2, 3);

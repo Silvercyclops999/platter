@@ -1,6 +1,6 @@
 //! Row mapping and writes for the library cache.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 
@@ -454,7 +454,21 @@ pub fn replace_playlists_in(
 ) -> AppResult<Vec<String>> {
     let mine = |id: &str| owner.is_none_or(|o| crate::sid::tag_of(id).is_none_or(|t| t == o));
     let local = playlists_with_local_changes(tx)?;
-    let items: Vec<&Playlist> = items.iter().filter(|p| !local.contains(&p.id)).collect();
+    // Playlists the server couldn't list stay out until they change there.
+    let unlistable = unlistable_playlists(tx)?;
+    for (id, at) in &unlistable {
+        let listed = items.iter().find(|p| &p.id == id);
+        let changed = listed.is_some_and(|p| unlistable_mark(p.updated_at) != *at);
+        // Changed on the server (try it again), or gone from its list.
+        if changed || (listed.is_none() && !items.is_empty() && mine(id)) {
+            set_playlist_unlistable(tx, id, None)?;
+        }
+    }
+    let items: Vec<&Playlist> = items
+        .iter()
+        .filter(|p| !local.contains(&p.id))
+        .filter(|p| unlistable.get(&p.id).is_none_or(|at| *at != unlistable_mark(p.updated_at)))
+        .collect();
     let mut stale = Vec::new();
     {
         let mut prev =
@@ -491,6 +505,41 @@ pub fn replace_playlists_in(
         upsert_playlist(tx, p)?;
     }
     Ok(stale)
+}
+
+const UNLISTABLE_PREFIX: &str = "playlistUnlistable:";
+
+/// How a playlist's `updatedAt` is remembered with an unlistable mark.
+fn unlistable_mark(updated_at: Option<i64>) -> String {
+    updated_at.map_or_else(|| "-".into(), |t| t.to_string())
+}
+
+/// Playlists the server couldn't list, with the `updatedAt` they had then.
+pub fn unlistable_playlists(c: &Connection) -> AppResult<HashMap<String, String>> {
+    let mut st = c.prepare("SELECT key, value FROM kv WHERE key LIKE 'playlistUnlistable:%'")?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    let mut out = HashMap::new();
+    for row in rows {
+        let (k, v) = row?;
+        if let Some(id) = k.strip_prefix(UNLISTABLE_PREFIX) {
+            out.insert(id.to_string(), v);
+        }
+    }
+    Ok(out)
+}
+
+/// Remember (with its `updatedAt`) or forget (`None`) a playlist the server
+/// can't list. A remembered one is left out of the playlist list until its
+/// `updatedAt` on the server changes.
+pub fn set_playlist_unlistable(c: &Connection, id: &str, updated_at: Option<Option<i64>>) -> AppResult<()> {
+    let key = format!("{UNLISTABLE_PREFIX}{id}");
+    match updated_at {
+        Some(at) => kv_set(c, &key, &unlistable_mark(at)),
+        None => {
+            c.execute("DELETE FROM kv WHERE key = ?1", [&key])?;
+            Ok(())
+        }
+    }
 }
 
 fn playlist_failed_key(id: &str) -> String {
