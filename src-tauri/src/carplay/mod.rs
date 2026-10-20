@@ -339,6 +339,16 @@ fn album_item(a: crate::model::Album) -> CarItem {
     }
 }
 
+/// The centred square to crop a `w` x `h` picture to, as (x, y, side) in
+/// whole pixels; None when it's square already (or empty).
+pub fn square_crop(w: usize, h: usize) -> Option<(usize, usize, usize)> {
+    if w == h || w == 0 || h == 0 {
+        return None;
+    }
+    let side = w.min(h);
+    Some(((w - side) / 2, (h - side) / 2, side))
+}
+
 /// "2011", "EP · 2019", "Single".
 pub fn release_line(year: Option<i32>, format: Option<&str>) -> Option<String> {
     let kind = match format {
