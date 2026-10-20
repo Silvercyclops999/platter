@@ -19,6 +19,7 @@ use parking_lot::Mutex;
 use super::lyrics::{self, BridgeLyrics, LyricsDeps, MountSongs, Opts};
 use super::wire::{LyricsState, NightHours};
 use crate::db::DbHandle;
+use crate::db::store::kv_get;
 use crate::lyrics::transcribe::engine::{Progress, RecognizeError, Recognizer, Stop};
 use crate::lyrics::transcribe::lines::{Segment, Word};
 use crate::lyrics::transcribe::model::{ModelFetch, ModelKind, ModelSpec, ModelStore, sha256_hex};
@@ -203,8 +204,8 @@ fn fx() -> (Fx, tempfile::TempDir) {
     fx_retry(lyrics::DOWNLOAD_RETRY)
 }
 
-fn on(f: &Fx) {
-    f.l.set_opts(Opts { on: true, hours: NightHours::Night, utc_offset_s: 0, lrclib: false });
+async fn on(f: &Fx) {
+    f.l.set_opts(Opts { on: true, hours: NightHours::Night, utc_offset_s: 0, lrclib: false }).await;
 }
 
 const WAIT: Duration = Duration::from_secs(20);
@@ -336,8 +337,8 @@ async fn the_bridge_transcribes_at_night_and_the_lyrics_go_to_every_device() {
     assert_eq!(f.l.tick().await, 0);
     assert_eq!(f.l.line().state, LyricsState::Off);
     f.other.0.lock().push("t4".into());
-    f.l.set_have("link-1", vec!["t3".into(), "../bad".into()]);
-    on(&f);
+    f.l.set_have("link-1", vec!["t3".into(), "../bad".into()]).await;
+    on(&f).await;
     let before = files(&f.mount);
     run_night(&f).await;
     // The model came down once, checked.
@@ -369,7 +370,7 @@ async fn the_bridge_transcribes_at_night_and_the_lyrics_go_to_every_device() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn by_day_nothing_starts_and_songs_in_the_queue_wait_for_the_night() {
     let (f, _tmp) = fx();
-    on(&f);
+    on(&f).await;
     f.clock.store(NOON, Ordering::SeqCst);
     assert_eq!(f.l.tick().await, 0, "nothing goes in by day");
     assert_eq!(f.l.line().state, LyricsState::Waiting);
@@ -381,7 +382,7 @@ async fn by_day_nothing_starts_and_songs_in_the_queue_wait_for_the_night() {
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(f.rec.runs.load(Ordering::SeqCst), 0);
     // Night again (in the computer's time zone, six hours behind UTC).
-    f.l.set_opts(Opts { on: true, hours: NightHours::Night, utc_offset_s: -6 * 3600, lrclib: false });
+    f.l.set_opts(Opts { on: true, hours: NightHours::Night, utc_offset_s: -6 * 3600, lrclib: false }).await;
     f.clock.store(NOON - 4 * 3600, Ordering::SeqCst);
     until("t1 done", || has_lyrics(&f.db, "t1")).await;
 }
@@ -390,7 +391,7 @@ async fn by_day_nothing_starts_and_songs_in_the_queue_wait_for_the_night() {
 async fn a_failed_model_download_is_said_and_tried_again_later() {
     let (f, _tmp) = fx_retry(Duration::from_millis(300));
     f.fetch.refuse.store(true, Ordering::SeqCst);
-    on(&f);
+    on(&f).await;
     f.l.tick().await;
     until("the failure", || f.l.line().state == LyricsState::Problem).await;
     let line = f.l.line();
@@ -412,7 +413,7 @@ async fn a_failed_model_download_is_said_and_tried_again_later() {
 async fn a_damaged_model_download_is_deleted_and_said() {
     let (f, _tmp) = fx();
     f.fetch.body.lock()[7] ^= 0xff;
-    on(&f);
+    on(&f).await;
     f.l.tick().await;
     until("the failure", || f.l.line().state == LyricsState::Problem).await;
     assert!(f.l.line().problem.unwrap().contains("checksum"));
@@ -423,7 +424,7 @@ async fn a_damaged_model_download_is_deleted_and_said() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_busy_server_holds_the_work_until_its_calm() {
     let (f, _tmp) = fx();
-    on(&f);
+    on(&f).await;
     f.load.set(90.0);
     f.l.tick().await;
     until("busy", || f.l.line().state == LyricsState::Busy).await;
@@ -438,7 +439,7 @@ async fn without_the_music_folder_it_waits_and_says_what_to_set() {
     let tmp = tempfile::tempdir().unwrap();
     let db = DbHandle::open(tmp.path().join("bridge.db")).unwrap();
     let f = build(tmp.path(), db.clone(), SyncStore::new(db, "bridge-1"), false, Arc::new(AtomicI64::new(NIGHT)), lyrics::DOWNLOAD_RETRY);
-    on(&f);
+    on(&f).await;
     assert_eq!(f.l.tick().await, 0);
     let line = f.l.line();
     assert_eq!(line.state, LyricsState::NoMusic);
@@ -453,7 +454,7 @@ async fn without_music_plex_path_it_uses_its_own_match_of_the_folder() {
     std::fs::create_dir_all(tmp.path().join("music")).unwrap();
     library(&db, &tmp.path().join("music"));
     let f = build_with_root(tmp.path(), db.clone(), SyncStore::new(db, "bridge-1"), true, Arc::new(AtomicI64::new(NIGHT)), lyrics::DOWNLOAD_RETRY, "");
-    on(&f);
+    on(&f).await;
     assert_eq!(f.l.tick().await, 0, "it doesn't know which of Plex's folders this is yet");
     assert_eq!(f.l.line().state, LyricsState::NoMusic);
     // Once it has read Plex's library it matches the folder (run::suggest_plex_path).
@@ -473,8 +474,8 @@ async fn a_bridge_restarted_in_the_night_carries_on_from_what_it_did() {
     let clock = Arc::new(AtomicI64::new(NIGHT));
     {
         let f = build(tmp.path(), db.clone(), store.clone(), true, clock.clone(), lyrics::DOWNLOAD_RETRY);
-        on(&f);
-        f.l.set_have("link-1", vec!["t2".into()]);
+        on(&f).await;
+        f.l.set_have("link-1", vec!["t2".into()]).await;
         f.l.tick().await;
         until("t1 done", || has_lyrics(&f.db, "t1")).await;
         f.l.transcriber().cancel(None);
@@ -486,4 +487,51 @@ async fn a_bridge_restarted_in_the_night_carries_on_from_what_it_did() {
     assert_eq!(g.fetch.opened.load(Ordering::SeqCst), 0, "the model was already there");
     assert!(!has_lyrics(&db, "t2"), "the computer's list was kept");
     assert!(has_lyrics(&db, "t3"));
+}
+
+fn junk_mark(db: &DbHandle) -> Option<String> {
+    db.read(|c| kv_get(c, &format!("{}junk|/p/junk", lyrics::SKIP_PREFIX))).unwrap()
+}
+
+async fn until_mark(db: &DbHandle, want: &str) {
+    let deadline = std::time::Instant::now() + WAIT;
+    while junk_mark(db).as_deref() != Some(want) {
+        assert!(std::time::Instant::now() < deadline, "mark is {:?}, not {want}", junk_mark(db));
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_song_that_fails_again_after_its_week_gets_a_fresh_week() {
+    let (f, _tmp) = fx();
+    on(&f).await;
+    run_night(&f).await;
+    // The mark is written off the async threads.
+    until_mark(&f.db, &format!("retry:{}", NIGHT + lyrics::RETRY_S)).await;
+    // A week later (same hour of the night) it's tried again, fails again, and waits another week.
+    let later = NIGHT + lyrics::RETRY_S + 60;
+    f.clock.store(later, Ordering::SeqCst);
+    run_night(&f).await;
+    until_mark(&f.db, &format!("retry:{}", later + lyrics::RETRY_S)).await;
+    let next = f.db.read(|c| lyrics::next_songs(c, &HashSet::new(), later, 0)).unwrap();
+    assert!(!next.contains(&"junk".to_string()), "not served again tonight: {next:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_song_without_a_file_version_is_never_picked_and_a_huge_file_is_skipped() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = DbHandle::open(tmp.path().join("b.db")).unwrap();
+    let mount = tmp.path().join("music");
+    std::fs::create_dir_all(&mount).unwrap();
+    library(&db, &mount);
+    db.write(|c| Ok(c.execute("UPDATE tracks SET part_key = '' WHERE id = 't1'", [])?)).unwrap();
+    let next = db.read(|c| lyrics::next_songs(c, &HashSet::new(), NIGHT, 0)).unwrap();
+    assert!(!next.contains(&"t1".to_string()), "it could never be marked, so it would come back every tick");
+    assert_eq!(db.read(|c| lyrics::counts(c, &HashSet::new(), NIGHT)).unwrap().1, next.len());
+    // A file over the cap is never read into memory.
+    let big = mount.join("Night Band").join("Late").join("02 Two.wav");
+    std::fs::OpenOptions::new().write(true).open(&big).unwrap().set_len(lyrics::MAX_SONG_BYTES + 1).unwrap();
+    let songs = MountSongs { db: db.clone(), plex_root: Arc::new(parking_lot::RwLock::new(PLEX_ROOT.into())), mount };
+    let got = crate::lyrics::transcribe::SongReader::read(&songs, "t2", &AtomicBool::new(false)).await;
+    assert!(matches!(got, Err(crate::lyrics::transcribe::audio::AudioError::Unreadable(_))), "skipped");
 }

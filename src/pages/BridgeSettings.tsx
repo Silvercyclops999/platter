@@ -7,7 +7,8 @@
  * is going. Each benefit's switch, the night hours and the other ways to
  * pair sit under the page's More (rows in SettingsPage).
  */
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { create } from "zustand";
 import { Button } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import { Tabs } from "../components/Tabs";
@@ -175,7 +176,7 @@ export function bridgeVersionLine(bridge: string | null | undefined, app: string
   if (c === -1)
     return {
       behind: true,
-      text: `Platter Bridge ${bridge} is behind this app (${app}). Update it on your server: on Unraid the Docker tab shows the update, or the Auto Update Applications plugin does it for you.`,
+      text: "The Bridge is out of date. Update it on your server.",
     };
   if (c === 1) return { behind: false, text: "Platter Bridge is newer than this app; update Platter." };
   return null;
@@ -199,25 +200,57 @@ function useAppVersion(): string | null {
   return v;
 }
 
+/**
+ * One overview for every part of the page (the card, the page's status and
+ * its More rows), so pairing or unpairing anywhere updates all of them.
+ */
+export const useBridgeStore = create<{ overview: BridgeOverview | null; set: (o: BridgeOverview) => void; load: () => void }>((set) => ({
+  overview: null,
+  set: (overview) => set({ overview }),
+  load: () => {
+    backend.bridgeOverview().then(
+      (overview) => set({ overview }),
+      () => {},
+    );
+  },
+}));
+
+/** Components using the overview now; the event is heard while there are any. */
+let users = 0;
+let unlisten: Promise<() => void> | null = null;
+
 /** Kept current from `bridge://changed`. */
 export function useBridge(): [BridgeOverview | null, (o: BridgeOverview) => void, () => void] {
-  const [overview, setOverview] = useState<BridgeOverview | null>(null);
-  const load = useCallback(() => {
-    backend.bridgeOverview().then(setOverview, () => {});
-  }, []);
+  const overview = useBridgeStore((s) => s.overview);
+  const set = useBridgeStore((s) => s.set);
+  const load = useBridgeStore((s) => s.load);
   useEffect(() => {
+    users += 1;
+    if (users === 1) unlisten = backend.listen("bridge://changed", () => useBridgeStore.getState().load());
     load();
-    const un = backend.listen("bridge://changed", load);
-    return () => void un.then((f) => f());
+    return () => {
+      users -= 1;
+      if (users === 0 && unlisten) {
+        const un = unlisten;
+        unlisten = null;
+        void un.then((f) => f());
+      }
+    };
   }, [load]);
-  return [overview, setOverview, load];
+  return [overview, set, load];
 }
 
 function copy(text: string, what: string) {
-  void Promise.resolve(navigator.clipboard?.writeText(text)).then(
-    () => toast.info(`${what} copied`),
-    () => toast.error("Couldn't copy. Select the text and copy it instead"),
-  );
+  const failed = () => toast.error("Couldn't copy. Select the text and copy it instead");
+  try {
+    if (!navigator.clipboard?.writeText) {
+      failed();
+      return;
+    }
+    navigator.clipboard.writeText(text).then(() => toast.info(`${what} copied`), failed);
+  } catch {
+    failed();
+  }
 }
 
 /** One benefit: its name, and what it's doing (or what it does). */

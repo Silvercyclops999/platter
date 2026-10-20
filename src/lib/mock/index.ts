@@ -949,7 +949,9 @@ export class MockBackend implements Backend {
   listen<E extends EventName>(event: E, cb: (payload: EventMap[E]) => void): Promise<Unlisten> {
     let set = this.listeners.get(event);
     if (!set) this.listeners.set(event, (set = new Set()));
-    const fn = cb as (p: unknown) => void;
+    // Each subscription its own entry: the same callback listened twice
+    // (React's double effects) and unlistened once still hears events.
+    const fn = (p: unknown) => (cb as (p: unknown) => void)(p);
     set.add(fn);
     return Promise.resolve(() => set!.delete(fn));
   }

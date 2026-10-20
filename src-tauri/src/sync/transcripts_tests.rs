@@ -199,3 +199,20 @@ fn shared_songs_are_remembered_everywhere() {
     assert!(transcripts::was_shared(&b.store, "501").unwrap());
     assert!(!transcripts::was_shared(&b.store, "502").unwrap());
 }
+
+#[test]
+fn odd_results_from_another_device_are_left_out_and_a_future_time_is_clamped() {
+    let b = Dev::new("dev-b");
+    let put = |id: &str, t: Transcript| b.store.put(&super::store::TRANSCRIPTS, &transcripts::key(id, &t.model), &t).unwrap();
+    let t = |text: String, model: &str, at: i64| Transcript { text, model: model.into(), part: "/p/1".into(), at, timing: 2 };
+    // A model Platter doesn't have, and lyrics far longer than the editor takes.
+    put("501", t(LRC.into(), "huge-v9", 100));
+    put("501", t("x".repeat(user::MAX_BYTES + 1), "medium", 100));
+    assert!(b.apply().is_empty());
+    assert!(b.db.read(|c| user::get(c, "501")).unwrap().is_none());
+    // Stamped years ahead: kept, but as made now, so a later result can still win.
+    put("501", t(LRC.into(), "small", i64::MAX / 4));
+    assert_eq!(b.apply(), vec![("501".to_string(), true)]);
+    let own = b.db.read(|c| user::get(c, "501")).unwrap().unwrap();
+    assert!(own.updated_at <= crate::db::queries::now_s());
+}

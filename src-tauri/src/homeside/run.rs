@@ -583,13 +583,13 @@ impl Bridge {
             Msg::Unpair => {
                 tracing::info!("Unpaired by the desktop.");
                 if let Some(l) = self.lyrics() {
-                    l.forget_link(&link.id);
+                    l.forget_link(&link.id).await;
                 }
                 let _ = self.wire.links.remove(&link.id);
             }
             Msg::LyricsHave { ids } => {
                 if let Some(l) = self.lyrics() {
-                    l.set_have(&link.id, ids);
+                    l.set_have(&link.id, ids).await;
                 }
             }
             Msg::WavesPlan(plan) => {
@@ -639,7 +639,7 @@ impl Bridge {
             self.p.db.write(|c| kv_set(c, LIDARR_ON_KEY, if lidarr_on { "1" } else { "0" }))?;
         }
         if let (Some(on), Some(l)) = (cfg.lyrics, self.lyrics()) {
-            l.set_opts(Opts { on, hours: cfg.lyrics_hours, utc_offset_s: cfg.utc_offset_s.clamp(-14 * 3600, 14 * 3600), lrclib: cfg.lrclib });
+            l.set_opts(Opts { on, hours: cfg.lyrics_hours, utc_offset_s: cfg.utc_offset_s.clamp(-14 * 3600, 14 * 3600), lrclib: cfg.lrclib }).await;
         }
         let key = self.p.env.lidarr_key.clone().or_else(|| cfg.lidarr_key.clone());
         if let Some(k) = key {

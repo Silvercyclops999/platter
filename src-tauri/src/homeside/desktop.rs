@@ -42,8 +42,11 @@ pub type OnLyrics = Arc<dyn Fn(Vec<(String, bool)>) + Send + Sync>;
 
 /// A changed have list goes to a Bridge at most this often.
 pub const HAVE_EVERY_S: i64 = 3600;
-/// Most song ids in one have list.
-pub const HAVE_MAX: usize = 20_000;
+/// Most song ids in one have list (as many as a Bridge keeps).
+pub const HAVE_MAX: usize = super::lyrics::HAVE_MAX;
+/// A Bridge kept waiting by a busy server this long gives the background
+/// batch back to this computer.
+pub const BUSY_RELEASE_S: i64 = 6 * 3600;
 
 /// The songs this device has lyrics for (written, edited, transcribed here
 /// or on another computer, or transcribed with no words found), for a
@@ -83,6 +86,9 @@ pub struct Seen {
     /// It can run Bring in my listening.
     #[serde(default)]
     pub waves: bool,
+    /// Since when (unix s) its lyrics work has waited on a busy server.
+    #[serde(default)]
+    pub lyrics_busy_since: Option<i64>,
 }
 
 /// One paired Bridge, for Settings.
@@ -249,7 +255,10 @@ impl Desktop {
         let now = self.now_s();
         self.wire.links.links().iter().any(|l| {
             let s = self.seen(&l.id);
-            s.last_seen.is_some_and(|t| now - t < ONLINE_S) && s.status.and_then(|st| st.lyrics).is_some_and(|ly| ly.state.takes_over())
+            let busy_long = s.lyrics_busy_since.is_some_and(|t| now - t > BUSY_RELEASE_S);
+            s.last_seen.is_some_and(|t| now - t < ONLINE_S)
+                && !busy_long
+                && s.status.and_then(|st| st.lyrics).is_some_and(|ly| ly.state.takes_over())
         })
     }
 
@@ -596,6 +605,9 @@ impl Desktop {
                 self.set_seen(&link.id, |s| {
                     s.music = st.music;
                     s.status = Some(*st);
+                    let busy = s.status.as_ref().and_then(|st| st.lyrics.as_ref()).is_some_and(|l| l.state == super::wire::LyricsState::Busy);
+                    s.lyrics_busy_since = if busy { s.lyrics_busy_since.or(Some(now)) } else { None };
+
                 });
                 if self.seen(&link.id).waves {
                     self.send_waves_plan(false).await;

@@ -863,6 +863,14 @@ async fn computers_leave_the_batch_to_a_bridge_only_while_it_answers_and_is_well
     assert!(!desk.lyrics_takes_over(), "offline");
     desk.handle(&link, lyrics_status(Some(LyricsState::Working))).await;
     assert!(desk.lyrics_takes_over(), "back");
+    // A server busy for hours on end: the computer takes its batch back.
+    desk.handle(&link, lyrics_status(Some(LyricsState::Busy))).await;
+    assert!(desk.lyrics_takes_over(), "busy a while");
+    clock.fetch_add(7 * 3600 * 1000, std::sync::atomic::Ordering::SeqCst);
+    desk.handle(&link, lyrics_status(Some(LyricsState::Busy))).await;
+    assert!(!desk.lyrics_takes_over(), "busy for over six hours");
+    desk.handle(&link, lyrics_status(Some(LyricsState::Working))).await;
+    assert!(desk.lyrics_takes_over(), "working again");
     // Switched off in Settings.
     let mut s = crate::settings::load(&d.db);
     s.bridge_lyrics = false;

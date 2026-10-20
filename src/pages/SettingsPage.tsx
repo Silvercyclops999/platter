@@ -3122,7 +3122,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       shown: !!bridge?.bridges.length,
       title: "Lyrics for every song",
       description: "The Bridge transcribes songs without lyrics at night, for every device.",
-      more: "Songs with no lyrics from Plex, LRCLIB or you are transcribed on your server at night, and every device gets them. While it does, this computer doesn't run its own background batch. A song you play that the Bridge hasn't reached yet is still transcribed here when transcription is on. Needs your music folder mounted on the Bridge (read-only is fine).",
+      more: "While it does, this computer leaves its own background transcribing to the Bridge.",
       control: (ids) => toggle(s, "bridgeLyrics", ids),
     },
     {

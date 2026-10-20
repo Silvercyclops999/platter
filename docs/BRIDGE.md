@@ -43,8 +43,14 @@ answering, or can't do the work, your computers carry on as before.
 
 The speech model (Small, about 190 MB) downloads into the appdata folder
 the first time, from the same place and with the same checksum check as on
-a computer. A file that can't be read is skipped and tried again a week
-later. The Bridge never writes to the music folder for this.
+a computer. A file that can't be read, or is bigger than 300 MB, is skipped
+and tried again a week later. The Bridge never writes to the music folder
+for this.
+
+A song is read whole and decoded by the Bridge itself; only the speech model
+runs in a separate helper process. With the Small model the Bridge can use
+around 1.5 GB of memory while it works, so if you like to cap containers,
+add `--memory 2g` (or the same under Unraid's Extra Parameters).
 
 The Bridge needs to know which of Plex's folders `/music` is. Once it has
 read your Plex library it works that out by itself; setting

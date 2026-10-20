@@ -31,7 +31,7 @@ use super::wire::{LyricsLine, LyricsState, NightHours};
 use crate::db::DbHandle;
 use crate::db::store::{kv_get, kv_set};
 use crate::error::AppResult;
-use crate::lyrics::transcribe::audio::{AudioError, MAX_FILE};
+use crate::lyrics::transcribe::audio::AudioError;
 use crate::lyrics::transcribe::engine::Recognizer;
 use crate::lyrics::transcribe::model::{ModelFetch, ModelKind, ModelStore};
 use crate::lyrics::transcribe::{
@@ -56,6 +56,9 @@ pub const DOWNLOAD_RETRY: Duration = Duration::from_secs(3600);
 pub const HAVE_MAX: usize = 100_000;
 /// How long the done and left counts are reused.
 const COUNTS_FOR: Duration = Duration::from_secs(60);
+/// The biggest song file the Bridge reads (it's held in memory to decode).
+/// Bigger ones are skipped and marked like an unreadable file.
+pub const MAX_SONG_BYTES: u64 = 300 * 1024 * 1024;
 /// The model the Bridge uses: no graphics card in a container.
 pub const MODEL: ModelKind = ModelKind::Small;
 
@@ -114,7 +117,7 @@ pub struct MountSongs {
 #[async_trait]
 impl SongReader for MountSongs {
     async fn read(&self, track_id: &str, cancel: &AtomicBool) -> Result<SongAudio, AudioError> {
-        self.read_up_to(track_id, cancel, MAX_FILE).await?.ok_or_else(|| AudioError::Unreadable("file too big".into()))
+        self.read_up_to(track_id, cancel, MAX_SONG_BYTES).await?.ok_or_else(|| AudioError::Unreadable("file too big".into()))
     }
 
     async fn read_up_to(&self, track_id: &str, cancel: &AtomicBool, max_bytes: u64) -> Result<Option<SongAudio>, AudioError> {
@@ -147,7 +150,7 @@ impl SongReader for MountSongs {
             return Err(AudioError::Cancelled);
         }
         let len = tokio::fs::metadata(&path).await.map_err(|e| AudioError::Unreadable(e.to_string()))?.len();
-        if len > max_bytes {
+        if len > max_bytes.min(MAX_SONG_BYTES) {
             return Ok(None);
         }
         // tokio::fs::read opens the file read-only.
@@ -171,7 +174,9 @@ impl OtherLyrics for MarkOther {
         let yes = self.inner.has_lyrics(track_id).await;
         if yes {
             let id = track_id.to_owned();
-            let _ = self.db.write_async(move |c| mark(c, &id, "other")).await;
+            if let Err(e) = self.db.write_async(move |c| mark(c, &id, "other")).await {
+                tracing::warn!("Lyrics: couldn't note a song that has lyrics already: {e}");
+            }
         }
         yes
     }
@@ -198,7 +203,7 @@ pub fn mark(c: &Connection, track_id: &str, what: &str) -> AppResult<()> {
 pub fn next_songs(c: &Connection, have: &HashSet<String>, now: i64, n: usize) -> AppResult<Vec<String>> {
     let mut st = c.prepare(
         "SELECT t.id FROM tracks t
-         WHERE t.file IS NOT NULL AND t.file != ''
+         WHERE t.file IS NOT NULL AND t.file != '' AND t.part_key != ''
            AND NOT EXISTS (SELECT 1 FROM user_lyrics u WHERE u.track_id = t.id)
            AND NOT EXISTS (SELECT 1 FROM lyrics_auto_empty e WHERE e.track_id = t.id)
            AND NOT EXISTS (SELECT 1 FROM kv k WHERE k.key = ?1 || t.id || '|' || t.part_key
@@ -246,15 +251,24 @@ impl TranscribeEvents for Recorder {
         {
             let model_here = s.models.iter().any(|m| m.kind == s.model && m.installed);
             let mut m = self.marked.lock();
+            // The same failure is said in every status until the next song
+            // goes in; each new failure (the same song again included) is marked.
             if model_here && m.as_deref() != Some(id.as_str()) {
                 *m = Some(id.clone());
                 let until = format!("retry:{}", (self.clock)() + RETRY_S);
-                if let Err(e) = self.db.write(|c| mark(c, id, &until)) {
-                    tracing::warn!("Lyrics: couldn't note a song to try again later: {e}");
-                } else {
-                    tracing::info!("Lyrics: a song couldn't be transcribed ({}). It's tried again in a week.", f.message);
+                let (db, id, message) = (self.db.clone(), id.clone(), f.message.clone());
+                let write = move || match db.write(|c| mark(c, &id, &until)) {
+                    Err(e) => tracing::warn!("Lyrics: couldn't note a song to try again later: {e}"),
+                    Ok(()) => tracing::info!("Lyrics: a song couldn't be transcribed ({message}). It's tried again in a week."),
+                };
+                match tokio::runtime::Handle::try_current() {
+                    Ok(rt) => drop(rt.spawn_blocking(write)),
+                    Err(_) => write(),
                 }
             }
+        } else {
+            // No failure said now (the queue moved on): the next one is new.
+            *self.marked.lock() = None;
         }
         *self.last.lock() = Some(s.clone());
     }
@@ -286,6 +300,10 @@ pub struct BridgeLyrics {
     db: DbHandle,
     opts: Arc<RwLock<Opts>>,
     have: RwLock<HashMap<String, HashSet<String>>>,
+    /// Every computer's list together (rebuilt when one changes).
+    have_all: RwLock<Arc<HashSet<String>>>,
+    /// The counts need reading again.
+    counts_stale: AtomicBool,
     music: bool,
     root: MusicRoot,
     rec: Arc<Recorder>,
@@ -338,11 +356,14 @@ impl BridgeLyrics {
             let ids: Vec<String> = serde_json::from_str(&v).unwrap_or_default();
             have.insert(k[HAVE_PREFIX.len()..].to_string(), ids.into_iter().collect());
         }
+        let all: HashSet<String> = have.values().flat_map(|s| s.iter().cloned()).collect();
         Arc::new(Self {
             t,
             db: d.db,
             opts,
             have: RwLock::new(have),
+            have_all: RwLock::new(Arc::new(all)),
+            counts_stale: AtomicBool::new(true),
             music: d.music,
             root: d.root,
             rec,
@@ -368,14 +389,16 @@ impl BridgeLyrics {
     }
 
     /// What a computer sent. Kept, so a restart before the next one keeps it.
-    pub fn set_opts(&self, o: Opts) {
+    pub async fn set_opts(&self, o: Opts) {
         let before = std::mem::replace(&mut *self.opts.write(), o);
         self.lrclib.store(o.lrclib, Ordering::Relaxed);
         if before == o {
             return;
         }
-        if let Ok(json) = serde_json::to_string(&o) {
-            let _ = self.db.write(|c| kv_set(c, OPTS_KEY, &json));
+        if let Ok(json) = serde_json::to_string(&o)
+            && let Err(e) = self.db.write_async(move |c| kv_set(c, OPTS_KEY, &json)).await
+        {
+            tracing::warn!("Lyrics: couldn't keep the settings from the computer: {e}");
         }
         if before.on != o.on {
             tracing::info!("Lyrics for every song: {}.", if o.on { "on" } else { "off" });
@@ -385,28 +408,43 @@ impl BridgeLyrics {
     }
 
     /// A computer's list of songs it has lyrics for.
-    pub fn set_have(&self, link: &str, ids: Vec<String>) {
+    pub async fn set_have(&self, link: &str, ids: Vec<String>) {
         let set: HashSet<String> = ids.into_iter().filter(|i| crate::lyrics::user::valid_track_id(i)).take(HAVE_MAX).collect();
         if let Ok(json) = serde_json::to_string(&set.iter().collect::<Vec<_>>()) {
             let key = format!("{HAVE_PREFIX}{link}");
-            let _ = self.db.write(|c| kv_set(c, &key, &json));
+            if let Err(e) = self.db.write_async(move |c| kv_set(c, &key, &json)).await {
+                tracing::warn!("Lyrics: couldn't keep a computer's list of songs with lyrics: {e}");
+            }
         }
         self.have.write().insert(link.to_string(), set);
-        *self.counts.lock() = None;
+        self.rebuild_have();
     }
 
     /// An unpaired computer's list goes.
-    pub fn forget_link(&self, link: &str) {
+    pub async fn forget_link(&self, link: &str) {
         self.have.write().remove(link);
+        self.rebuild_have();
         let key = format!("{HAVE_PREFIX}{link}");
-        let _ = self.db.write(|c| {
-            c.execute("DELETE FROM kv WHERE key = ?1", [key])?;
-            Ok(())
-        });
+        let gone = self
+            .db
+            .write_async(move |c| {
+                c.execute("DELETE FROM kv WHERE key = ?1", [key])?;
+                Ok(())
+            })
+            .await;
+        if let Err(e) = gone {
+            tracing::warn!("Lyrics: couldn't forget an unpaired computer's list: {e}");
+        }
     }
 
-    fn have_all(&self) -> HashSet<String> {
-        self.have.read().values().flat_map(|s| s.iter().cloned()).collect()
+    fn rebuild_have(&self) {
+        let all: HashSet<String> = self.have.read().values().flat_map(|s| s.iter().cloned()).collect();
+        *self.have_all.write() = Arc::new(all);
+        self.counts_stale.store(true, Ordering::SeqCst);
+    }
+
+    fn have_all(&self) -> Arc<HashSet<String>> {
+        self.have_all.read().clone()
     }
 
     /// The folder is mounted and Plex's path for it is known.
@@ -452,6 +490,9 @@ impl BridgeLyrics {
     /// next few songs go in. Returns how many.
     pub async fn tick(&self) -> usize {
         let o = self.opts();
+        if o.on {
+            self.refresh_counts().await;
+        }
         if !o.on || !self.music() || !self.in_hours() {
             return 0;
         }
@@ -471,7 +512,7 @@ impl BridgeLyrics {
         if ids.is_empty() {
             return 0;
         }
-        *self.counts.lock() = None;
+        self.counts_stale.store(true, Ordering::SeqCst);
         match self.t.transcribe_background(ids) {
             Ok(n) => n,
             Err(e) => {
@@ -481,10 +522,25 @@ impl BridgeLyrics {
         }
     }
 
+    /// The done and left counts, read off the async threads when they're
+    /// old or something changed (each tick).
+    async fn refresh_counts(&self) {
+        let fresh = self.counts.lock().is_some_and(|(at, _, _)| at.elapsed() < COUNTS_FOR);
+        if fresh && !self.counts_stale.load(Ordering::SeqCst) {
+            return;
+        }
+        self.counts_stale.store(false, Ordering::SeqCst);
+        let have = self.have_all();
+        let now = (self.clock)();
+        match self.db.read_async(move |c| counts(c, &have, now)).await {
+            Ok((d, l)) => *self.counts.lock() = Some((Instant::now(), d, l)),
+            Err(e) => tracing::warn!("Lyrics: couldn't count the songs: {e}"),
+        }
+    }
+
+    /// The counts as last read (read once here when there are none yet).
     fn counted(&self) -> (usize, usize) {
-        if let Some((at, d, l)) = *self.counts.lock()
-            && at.elapsed() < COUNTS_FOR
-        {
+        if let Some((_, d, l)) = *self.counts.lock() {
             return (d, l);
         }
         let have = self.have_all();
@@ -493,6 +549,7 @@ impl BridgeLyrics {
         *self.counts.lock() = Some((Instant::now(), d, l));
         (d, l)
     }
+
 
     /// The line for Settings > Bridge on the computers.
     pub fn line(&self) -> LyricsLine {

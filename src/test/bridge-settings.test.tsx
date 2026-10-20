@@ -1,4 +1,5 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { backend } from "../lib/backend";
@@ -10,6 +11,7 @@ import {
   BRIDGE_UPDATE_DOCS,
   BridgeSettings,
   DOCKER_LINE,
+  useBridgeStore,
   PairWithCode,
   bridgeMatches,
   bridgeVersionLine,
@@ -25,6 +27,7 @@ import { loadSettings } from "../stores/settings";
 const mock = backend as MockBackend;
 
 beforeEach(async () => {
+  useBridgeStore.setState({ overview: null });
   mock.bridgeState = { bridges: [], pairing: null, queued: [] };
   mock.bridgePairAfterMs = 20;
   await mock.settingsSet({ ...DEFAULT_SETTINGS });
@@ -230,9 +233,14 @@ describe("Settings > Bridge", () => {
       await waitFor(async () => expect((await mock.settingsGet()).bridgeLidarr).toBe(false));
     });
 
-    it("pairing from the card brings the switches and Connected at once", async () => {
+    it("pairing from the card brings the switches and Connected at once, and unpairing takes them away", async () => {
       const user = userEvent.setup();
-      render(<SettingsPage page="bridge" />);
+      // StrictMode runs effects twice: every part must still hear bridge://changed.
+      render(
+        <StrictMode>
+          <SettingsPage page="bridge" />
+        </StrictMode>,
+      );
       const page = await screen.findByRole("region", { name: "Bridge" });
       const add = await within(page).findByTestId("bridge-add");
       await user.type(within(add).getByRole("textbox"), "PBB-q3Vx8bN2kLm9TzR4wYc7HdE1fGj5sAo6pUi0eWn3vXb8yZaQk{Enter}");
@@ -240,6 +248,12 @@ describe("Settings > Bridge", () => {
       await waitFor(() => expect(page.querySelector(".settings__page-blurb")).toHaveTextContent("Connected"));
       await user.click(within(page).getByRole("button", { name: /^More in Bridge/ }));
       expect(await within(page).findByRole("switch", { name: "Lyrics for every song" })).toBeChecked();
+      const card = within(page).getByTestId("bridge-row");
+      await user.click(within(card).getByRole("button", { name: "Unpair" }));
+      await user.click(within(card).getByRole("button", { name: "Unpair Shed Bridge" }));
+      await within(page).findByTestId("bridge-setup");
+      await waitFor(() => expect(page.querySelector(".settings__page-blurb")).toHaveTextContent("Not set up"));
+      expect(within(page).queryByRole("switch", { name: "Lyrics for every song" })).toBeNull();
     });
 
     it("before pairing, More holds only the other way to pair", async () => {
@@ -271,7 +285,7 @@ describe("Settings > Bridge", () => {
       render(<BridgeSettings />);
       const v = await screen.findByTestId("bridge-version");
       expect(v).toHaveTextContent(
-        "Platter Bridge 0.2.29 is behind this app (0.2.31). Update it on your server: on Unraid the Docker tab shows the update, or the Auto Update Applications plugin does it for you.",
+        "The Bridge is out of date. Update it on your server.",
       );
       await user.click(within(v).getByRole("button", { name: "How to update" }));
       await waitFor(() => expect(mock.helpLinksOpened).toEqual([BRIDGE_UPDATE_DOCS]));

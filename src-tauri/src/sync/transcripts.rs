@@ -26,6 +26,8 @@ use crate::lyrics::user;
 
 /// The models, smallest first.
 pub const MODELS: [&str; 2] = ["small", "medium"];
+/// Every model a transcription can come from (Turbo too, unranked).
+pub const KNOWN_MODELS: [&str; 3] = ["small", "medium", "turbo"];
 
 /// A transcription as it travels.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -76,6 +78,12 @@ pub fn best<'a>(results: impl IntoIterator<Item = &'a Transcript>) -> Option<&'a
     results.into_iter().max_by(|a, b| (rank(&a.model), a.at).cmp(&(rank(&b.model), b.at)))
 }
 
+/// A result from another device Platter would show: a model it has, and
+/// lyrics no longer than the editor takes.
+pub fn usable(t: &Transcript) -> bool {
+    KNOWN_MODELS.contains(&t.model.as_str()) && t.text.len() <= user::MAX_BYTES
+}
+
 /// After a result was saved here.
 pub fn saved(store: &SyncStore, db: &DbHandle, track_id: &str, body: &str, model: &str, at: i64) -> AppResult<()> {
     let Some(part) = db.read(|c| tstore::part_key(c, track_id))? else { return Ok(()) };
@@ -98,6 +106,7 @@ fn for_track(store: &SyncStore, db: &DbHandle, track_id: &str) -> AppResult<Vec<
     for m in MODELS {
         if let Some(t) = store.get(&TRANSCRIPTS, &key(track_id, m))?
             && t.part == part
+            && usable(&t)
         {
             out.push(t);
         }
@@ -118,6 +127,20 @@ pub fn take(store: &SyncStore, db: &DbHandle, track_id: &str) -> AppResult<Optio
 /// user's own lyrics, or a result from a bigger model (or as big and newer).
 /// True when it changed anything.
 fn put_here(db: &DbHandle, track_id: &str, t: &Transcript) -> AppResult<bool> {
+    // From another device (or a Bridge): only a model Platter has, lyrics
+    // no longer than the editor takes, and never stamped in the future
+    // (so it can't win every later comparison).
+    if !usable(t) {
+        tracing::warn!("a transcription from another device was left out (unknown model or too long)");
+        return Ok(false);
+    }
+    let clamped;
+    let t = if t.at > crate::db::queries::now_s() {
+        clamped = Transcript { at: crate::db::queries::now_s(), ..t.clone() };
+        &clamped
+    } else {
+        t
+    };
     // Made with the first timing: moved into place before comparing, the
     // way this device moved its own.
     let moved;
@@ -167,7 +190,7 @@ pub fn apply(store: &SyncStore, db: &DbHandle) -> AppResult<Vec<(String, bool)>>
             continue;
         }
         let Some(part) = db.read(|c| tstore::part_key(c, id))? else { continue };
-        let Some(t) = best(results.iter().filter(|t| t.part == part)) else { continue };
+        let Some(t) = best(results.iter().filter(|t| t.part == part && usable(t))) else { continue };
         if put_here(db, id, t)? {
             changed.push((id.clone(), !t.text.is_empty()));
         }
