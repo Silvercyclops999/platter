@@ -6,6 +6,7 @@
 //! through its public handle. The UI is not involved beyond Settings.
 
 pub mod art;
+pub mod audio_route;
 #[cfg(target_os = "ios")]
 pub mod audio_session;
 #[cfg(target_os = "ios")]
