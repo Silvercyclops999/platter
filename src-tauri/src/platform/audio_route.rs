@@ -56,6 +56,8 @@ mod tests {
         assert_eq!(kind_of("CarAudio"), "car");
         assert_eq!(kind_of("USBAudio"), "usb");
         assert_eq!(kind_of("Receiver"), "receiver");
+        assert_eq!(kind_of("LineOut"), "headphones");
+        assert_eq!(kind_of("DisplayPort"), "hdmi");
         assert_eq!(kind_of("Something new"), "other");
     }
 
