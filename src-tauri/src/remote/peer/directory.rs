@@ -162,6 +162,10 @@ impl MemoryLan {
     pub fn answers(&self) -> Vec<MdnsAnswer> {
         self.entries.lock().values().cloned().collect()
     }
+    /// Take answers off the network (devices that left).
+    pub fn remove_where(&self, gone: impl Fn(&MdnsAnswer) -> bool) {
+        self.entries.lock().retain(|_, a| !gone(a));
+    }
     pub fn len(&self) -> usize {
         self.entries.lock().len()
     }

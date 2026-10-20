@@ -2152,6 +2152,169 @@ mod peers {
         assert!(a.remote.refreshing());
         refresh.abort();
     }
+
+    /// An announcement of this account at an address nothing answers on.
+    fn fake_phone(lan: &MemoryLan, id: &str, name: &str) {
+        lan.insert(crate::remote::lan::answer(
+            SERVICE,
+            id,
+            "127.0.0.1",
+            1,
+            &[("id", id), ("name", name), ("platform", "iOS"), ("acct", &account_tag("acct-1"))],
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_flood_of_announced_phones_stays_capped_and_unremembered() {
+        use crate::remote::service::MAX_CANDIDATES;
+        let (r, lan) = net().await;
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let _b = start(&r.server, &lan, idle(), Opts::new("mac", "Studio Mac")).await;
+        for i in 0..200 {
+            fake_phone(&lan, &format!("fake{i:03}"), "Phone");
+        }
+        let list = a.remote.players().await;
+        let platter: Vec<_> = list.iter().filter(|p| p.via == PlayerVia::Platter).collect();
+        assert!(platter.len() <= MAX_CANDIDATES, "{} rows", platter.len());
+        assert!(platter.iter().filter(|p| p.id.starts_with("fake")).all(|p| p.unreachable && !p.asleep));
+        assert!(a.remote.remembered_phones().is_empty(), "none of them answered");
+        // Gone from the network: nothing of them stays.
+        lan.remove_where(|x| x.instance.starts_with("fake"));
+        let list = a.remote.players().await;
+        assert!(list.iter().all(|p| !p.id.starts_with("fake")), "{list:?}");
+    }
+
+    #[tokio::test]
+    async fn an_announced_phone_that_never_answers_shows_unreachable() {
+        let (r, lan) = net().await;
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        fake_phone(&lan, "iph", "Adam's iPhone");
+        let list = a.remote.players().await;
+        let p = list.iter().find(|p| p.id == "iph").expect("listed");
+        assert_eq!(p.kind, PlayerKind::Phone);
+        assert!(p.unreachable && !p.asleep, "a firewall, not asleep: {p:?}");
+        assert!(a.remote.remembered_phones().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_long_name_in_a_hello_is_cut() {
+        let (r, lan) = net().await;
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let fake = MockServer::start().await;
+        let long = format!("Studio\u{7} {}", "Mac".repeat(100));
+        Mock::given(method("GET"))
+            .and(path(PATH_HELLO))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "mac", "name": long, "platform": "macOS", "version": "1", "playing": "x".repeat(5000)
+            })))
+            .mount(&fake)
+            .await;
+        let port = Url::parse(&fake.uri()).unwrap().port().unwrap();
+        lan.insert(crate::remote::lan::answer(SERVICE, "mac", "127.0.0.1", port, &[("id", "mac"), ("name", "Mac"), ("acct", &account_tag("acct-1"))]));
+        let list = a.remote.players().await;
+        let mac = list.iter().find(|p| p.id == "mac").unwrap();
+        assert_eq!(mac.name.chars().count(), peer::MAX_NAME);
+        assert!(mac.name.starts_with("Studio MacMac"), "{}", mac.name);
+        assert_eq!(mac.playing.as_ref().map(|p| p.chars().count()), Some(peer::MAX_PLAYING));
+    }
+
+    #[tokio::test]
+    async fn a_redirecting_or_oversized_hello_is_refused() {
+        let (r, lan) = net().await;
+        let a = start(&r.server, &lan, r.local.clone(), Opts::new("pc", "Studio PC")).await;
+        let b = start(&r.server, &lan, idle(), Opts::new("mac", "Studio Mac")).await;
+        let c = a.remote.peer_client().await.unwrap();
+        // Sent on to the real device: not followed.
+        let hop = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(PATH_HELLO))
+            .respond_with(ResponseTemplate::new(302).insert_header("location", format!("{}platter/v1/hello", b.base()).as_str()))
+            .mount(&hop)
+            .await;
+        let hop_url = Url::parse(&hop.uri()).unwrap();
+        assert!(c.hello(&hop_url, "mac", Duration::from_secs(2)).await.is_err());
+        assert!(c.first_answer(&[hop_url], "mac", Duration::from_secs(2)).await.is_err());
+        // Too large, said up front or not.
+        let big = MockServer::start().await;
+        let body = format!(r#"{{"id":"mac","name":"Mac","platform":"macOS","version":"1","playing":"{}"}}"#, "x".repeat(200 * 1024));
+        Mock::given(method("GET"))
+            .and(path(PATH_HELLO))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body.into_bytes(), "application/json"))
+            .mount(&big)
+            .await;
+        let e = c.hello(&Url::parse(&big.uri()).unwrap(), "mac", Duration::from_secs(2)).await.unwrap_err();
+        assert_eq!(e, PeerError::Failed("the answer was too large".into()));
+        // The real one still answers.
+        assert_eq!(c.hello(&b.base(), "mac", Duration::from_secs(2)).await.unwrap().name, "Studio Mac");
+    }
+
+    #[tokio::test]
+    async fn an_oversized_answer_without_a_length_is_refused() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        let task = tokio::spawn(async move {
+            while let Ok((mut s, _)) = l.accept().await {
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let _ = s.read(&mut buf).await;
+                    let _ = s.write_all(b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n").await;
+                    let chunk = vec![b'x'; 16 * 1024];
+                    for _ in 0..64 {
+                        if s.write_all(&chunk).await.is_err() {
+                            return;
+                        }
+                    }
+                });
+            }
+        });
+        let c = PeerClient::new(reqwest::Client::new(), "pc".into(), PeerKey::from_token(&Token::new("account-token").unwrap()));
+        let url = Url::parse(&format!("http://127.0.0.1:{port}")).unwrap();
+        let e = c.hello(&url, "mac", Duration::from_secs(5)).await.unwrap_err();
+        assert_eq!(e, PeerError::Failed("the answer was too large".into()));
+        task.abort();
+    }
+
+    /// An account whose token never comes: the asking can't start.
+    struct Stuck(Url);
+
+    #[async_trait]
+    impl RemoteEnv for Stuck {
+        async fn server(&self) -> AppResult<ServerCtx> {
+            Ok(ServerCtx { base: self.0.clone(), token: Token::new("server-token").unwrap(), machine_id: "srv".into() })
+        }
+        async fn account_token(&self) -> Option<Token> {
+            std::future::pending().await
+        }
+        async fn account_id(&self) -> Option<String> {
+            Some("acct-1".into())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_hung_account_lookup_doesnt_wedge_refreshes() {
+        let (r, lan) = net().await;
+        let _b = start(&r.server, &lan, idle(), Opts::new("mac", "Studio Mac")).await;
+        let budget = Duration::from_millis(300);
+        let remote = RemoteService::new(
+            Arc::new(Stuck(Url::parse(&r.server.uri()).unwrap())),
+            r.local.clone(),
+            Arc::new(Events::default()),
+            &ClientIdentity::with_id("pc"),
+            RemoteSwitches::default(),
+            RemoteConfig { source_budget: budget, ..cfg(&r.server) },
+        )
+        .unwrap();
+        remote.set_peers(Arc::new(MemoryDirectory::new(lan.clone())));
+        let t = std::time::Instant::now();
+        let list = tokio::time::timeout(Duration::from_secs(15), remote.players()).await.expect("the refresh ends");
+        assert!(t.elapsed() < Duration::from_secs(6), "{:?}", t.elapsed());
+        // The device announcing here is still listed.
+        assert!(list.iter().any(|p| p.id == "mac"), "{list:?}");
+        assert!(!remote.refreshing());
+        // And the next one runs too.
+        tokio::time::timeout(Duration::from_secs(15), remote.players()).await.expect("again");
+    }
 }
 
 #[test]
@@ -2294,4 +2457,64 @@ async fn an_empty_list_goes_out_only_as_the_final_answer() {
     let list = remote.players().await;
     assert!(list.is_empty());
     assert_eq!(player_lists(&events), [Vec::<String>::new()], "no empty partial list, one final answer");
+}
+
+/// A DLNA search that panics the first time it's asked.
+struct Panicky(std::sync::atomic::AtomicUsize);
+
+#[async_trait]
+impl super::dlna::DlnaSource for Panicky {
+    async fn renderers(&self) -> Vec<super::dlna::DlnaDevice> {
+        if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            panic!("a search that breaks");
+        }
+        Vec::new()
+    }
+}
+
+#[tokio::test]
+async fn a_panicking_refresh_doesnt_wedge_the_next() {
+    let r = rig().await;
+    let dlna = Arc::new(Panicky(Default::default()));
+    r.remote.set_dlna(dlna.clone());
+    let first = tokio::time::timeout(Duration::from_secs(10), r.remote.players()).await.expect("it ends");
+    assert!(first.is_empty(), "{first:?}");
+    assert!(!r.remote.refreshing(), "cleared after the panic");
+    let next = tokio::time::timeout(Duration::from_secs(10), r.remote.players()).await.expect("the next one runs");
+    assert_eq!(next.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["amp"]);
+    assert_eq!(dlna.0.load(std::sync::atomic::Ordering::SeqCst), 2, "searched again");
+}
+
+/// AirPlay answers once, then a search that never ends.
+struct FadingMdns(std::sync::atomic::AtomicUsize);
+
+#[async_trait]
+impl super::lan::MdnsSource for FadingMdns {
+    async fn scan(&self) -> Vec<super::lan::MdnsAnswer> {
+        if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            return vec![super::lan::answer(super::lan::RAOP_SERVICE, "BB@Kitchen", "192.0.2.40", 7000, &[])];
+        }
+        std::future::pending().await
+    }
+    fn stop(&self) {}
+}
+
+#[tokio::test]
+async fn a_timed_out_cast_search_loses_its_rows_after_the_limit() {
+    use super::service::SOURCE_MISSES;
+    let r = rig().await;
+    let (remote, _events) = with_budget(&r, Duration::from_millis(200));
+    remote.set_lan(super::LanEnv {
+        mdns: Arc::new(FadingMdns(Default::default())),
+        route: Default::default(),
+        passwords: Arc::new(crate::plex::keychain::MemoryStore::new()),
+        tls: super::cast::conn::tls_config().unwrap(),
+    });
+    let ids = |l: Vec<super::types::RemotePlayer>| l.into_iter().map(|p| p.id).collect::<Vec<_>>();
+    assert_eq!(ids(remote.players().await), ["amp", "airplay:BB"]);
+    // It stops answering: kept for a couple of refreshes, then gone.
+    for _ in 1..SOURCE_MISSES {
+        assert_eq!(ids(remote.players().await), ["amp", "airplay:BB"]);
+    }
+    assert_eq!(ids(remote.players().await), ["amp"]);
 }

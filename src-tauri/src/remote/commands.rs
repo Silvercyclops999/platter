@@ -88,17 +88,31 @@ pub struct PlexRemoteEnv(pub PlexState, pub AccountId);
 
 /// The account's id, looked up once per token. A failed lookup isn't
 /// tried again for a minute, and callers at the same time share one lookup.
-#[derive(Default)]
 pub struct AccountId {
     /// Token key, the id (None: the lookup failed), when it was looked up.
     cache: parking_lot::Mutex<Option<(String, Option<String>, std::time::Instant)>>,
     lookup: tokio::sync::Mutex<()>,
+    /// The longest one lookup may take (others wait on it).
+    wait: std::time::Duration,
+}
+
+impl Default for AccountId {
+    fn default() -> Self {
+        Self { cache: Default::default(), lookup: Default::default(), wait: ACCOUNT_LOOKUP }
+    }
 }
 
 /// How long a failed account lookup is remembered.
 const ACCOUNT_RETRY: std::time::Duration = std::time::Duration::from_secs(60);
+/// How long plex.tv gets to say who the account is.
+const ACCOUNT_LOOKUP: std::time::Duration = std::time::Duration::from_secs(6);
 
 impl AccountId {
+    /// Another limit for one lookup (tests).
+    pub fn with_wait(wait: std::time::Duration) -> Self {
+        Self { wait, ..Self::default() }
+    }
+
     fn cached(&self, key: &str) -> Option<Option<String>> {
         let g = self.cache.lock();
         let (k, id, at) = g.as_ref()?;
@@ -118,7 +132,11 @@ impl AccountId {
         if let Some(hit) = self.cached(&key) {
             return hit;
         }
-        let id = fetch().await.filter(|id| !id.is_empty());
+        // A lookup that hangs counts as failed, so nobody waits on it for good.
+        let id = tokio::time::timeout(self.wait, fetch()).await.ok().flatten().filter(|id| !id.is_empty());
+        if id.is_none() {
+            tracing::debug!("the account lookup failed or took too long");
+        }
         *self.cache.lock() = Some((key, id.clone(), std::time::Instant::now()));
         id
     }
@@ -340,5 +358,19 @@ mod tests {
         assert_eq!(ids.get("t2".into(), fetch(calls.clone(), None)).await, None);
         assert_eq!(ids.get("t2".into(), fetch(calls.clone(), Some("late"))).await, None);
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn a_hung_account_lookup_gives_up_and_frees_the_others() {
+        let ids = AccountId::with_wait(std::time::Duration::from_millis(100));
+        let t = std::time::Instant::now();
+        let hung = || std::future::pending::<Option<String>>();
+        // Two callers at once: the second waits on the first, which gives up.
+        let (a, b) = tokio::join!(ids.get("t1".into(), hung), ids.get("t1".into(), hung));
+        assert_eq!((a, b), (None, None));
+        assert!(t.elapsed() < std::time::Duration::from_secs(2), "{:?}", t.elapsed());
+        // Another token isn't held up by it either.
+        let ok = || async { Some("acct".to_string()) };
+        assert_eq!(ids.get("t2".into(), ok).await.as_deref(), Some("acct"));
     }
 }

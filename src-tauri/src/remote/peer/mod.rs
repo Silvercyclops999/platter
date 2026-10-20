@@ -125,31 +125,78 @@ impl PeerDevice {
     }
 }
 
+/// The longest name, platform and now-playing line kept from another
+/// device's announcement or hello.
+pub const MAX_NAME: usize = 60;
+pub const MAX_PLATFORM: usize = 40;
+pub const MAX_PLAYING: usize = 200;
+
+/// Text from another device, cut to `max` characters with control
+/// characters taken out.
+pub fn clean(s: &str, max: usize) -> String {
+    s.chars().filter(|c| !c.is_control()).take(max).collect()
+}
+
+impl Hello {
+    /// The answer with its text cut to size.
+    pub fn cleaned(self) -> Self {
+        Self {
+            name: clean(&self.name, MAX_NAME),
+            platform: clean(&self.platform, MAX_PLATFORM),
+            version: clean(&self.version, MAX_PLATFORM),
+            playing: self.playing.map(|p| clean(&p, MAX_PLAYING)),
+            id: self.id,
+        }
+    }
+}
+
+/// An address another Platter device may be asked at: a private LAN
+/// address (not the cloud metadata address in the link-local range), or
+/// for IPv6 a link-local or unique local one. Loopback only in tests.
+pub fn is_peer_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => (is_lan(v4) && v4 != Ipv4Addr::new(169, 254, 169, 254)) || (v4.is_loopback() && cfg!(test)),
+        IpAddr::V6(v6) => {
+            let s0 = v6.segments()[0];
+            (s0 & 0xffc0) == 0xfe80 || (s0 & 0xfe00) == 0xfc00 || (v6.is_loopback() && cfg!(test))
+        }
+    }
+}
+
+/// A control API base that may be probed: http to a LAN address
+/// ([`is_peer_ip`]) on a real port.
+pub fn is_peer_base(u: &Url) -> bool {
+    let ip = match u.host() {
+        Some(url::Host::Ipv4(v4)) => IpAddr::V4(v4),
+        Some(url::Host::Ipv6(v6)) => IpAddr::V6(v6),
+        _ => return false,
+    };
+    u.scheme() == "http" && u.port_or_known_default().is_some_and(|p| p != 0) && is_peer_ip(ip)
+}
+
 /// A `_platter._tcp` answer as a device of this account: the account tag
-/// must match and it mustn't be this computer.
+/// must match and it mustn't be this computer. Only LAN addresses are kept.
 pub fn from_mdns(a: &MdnsAnswer, own_id: &str, account_tag: &str) -> Option<PeerDevice> {
-    if !a.service.starts_with("_platter.") {
+    if !a.service.starts_with("_platter.") || a.port == 0 {
         return None;
     }
     let id = a.txt("id")?.to_string();
     if id == own_id || a.txt("acct") != Some(account_tag) {
         return None;
     }
-    let mut addrs: Vec<IpAddr> = a.addrs.clone();
+    let mut addrs: Vec<IpAddr> = a.addrs.iter().copied().filter(|ip| is_peer_ip(*ip)).collect();
     addrs.sort_by_key(|ip| !ip.is_ipv4());
     let bases = addrs
         .into_iter()
-        .filter(|ip| !ip.is_loopback() || cfg!(test))
         .filter_map(|ip| Url::parse(&format!("http://{}", SocketAddr::new(ip, a.port))).ok())
         .collect::<Vec<_>>();
     if bases.is_empty() {
         return None;
     }
-    let name = a.txt("name").unwrap_or(&a.instance).chars().take(60).collect();
     Some(PeerDevice {
         id,
-        name,
-        platform: a.txt("platform").unwrap_or_default().to_string(),
+        name: clean(a.txt("name").unwrap_or(&a.instance), MAX_NAME),
+        platform: clean(a.txt("platform").unwrap_or_default(), MAX_PLATFORM),
         bases,
     })
 }
@@ -242,18 +289,68 @@ mod tests {
         let tag = auth::account_tag("acct");
         let txt = txt("mac", "Studio Mac", "macOS", "0.3.0", &tag);
         let pairs: Vec<(&str, &str)> = txt.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-        let a = answer(SERVICE, "mac", "192.0.2.7", 32520, &pairs);
+        let a = answer(SERVICE, "mac", "10.0.0.7", 32520, &pairs);
         let d = from_mdns(&a, "pc", &tag).unwrap();
         assert_eq!((d.id.as_str(), d.name.as_str(), d.platform.as_str()), ("mac", "Studio Mac", "macOS"));
-        assert_eq!(d.bases[0].as_str(), "http://192.0.2.7:32520/");
-        assert_eq!(d.ips(), vec!["192.0.2.7".parse::<IpAddr>().unwrap()]);
+        assert_eq!(d.bases[0].as_str(), "http://10.0.0.7:32520/");
+        assert_eq!(d.ips(), vec!["10.0.0.7".parse::<IpAddr>().unwrap()]);
         assert!(from_mdns(&a, "mac", &tag).is_none(), "this computer");
         assert!(from_mdns(&a, "pc", &auth::account_tag("other")).is_none(), "another account");
-        let wrong = answer("_raop._tcp.local.", "mac", "192.0.2.7", 1, &pairs);
+        let wrong = answer("_raop._tcp.local.", "mac", "10.0.0.7", 1, &pairs);
         assert!(from_mdns(&wrong, "pc", &tag).is_none());
         // The TXT record carries no token and no addresses.
         let keys: Vec<&str> = txt.iter().map(|(k, _)| k.as_str()).collect();
         assert_eq!(keys, ["id", "name", "platform", "version", "acct"]);
+    }
+
+    #[test]
+    fn announcements_off_the_lan_or_without_a_port_are_dropped() {
+        let tag = auth::account_tag("acct");
+        let txt = txt("mac", "Studio Mac", "macOS", "0.3.0", &tag);
+        let pairs: Vec<(&str, &str)> = txt.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        for ip in ["8.8.8.8", "192.0.2.7", "169.254.169.254", "100.64.0.7", "0.0.0.0", "2001:db8::7", "ff02::fb"] {
+            assert!(from_mdns(&answer(SERVICE, "mac", ip, 32520, &pairs), "pc", &tag).is_none(), "{ip}");
+        }
+        assert!(from_mdns(&answer(SERVICE, "mac", "10.0.0.7", 0, &pairs), "pc", &tag).is_none(), "port 0");
+        for ip in ["172.16.4.2", "169.254.10.1", "fe80::1", "fd12:3456::1"] {
+            assert!(from_mdns(&answer(SERVICE, "mac", ip, 32520, &pairs), "pc", &tag).is_some(), "{ip}");
+        }
+        // A public address beside a LAN one: only the LAN one is kept.
+        let mut both = answer(SERVICE, "mac", "10.0.0.7", 32520, &pairs);
+        both.addrs.push("8.8.8.8".parse().unwrap());
+        assert_eq!(from_mdns(&both, "pc", &tag).unwrap().bases.len(), 1);
+        // Addresses from plex.tv get the same check.
+        for (u, ok) in [
+            ("http://10.0.0.7:32520", true),
+            ("http://[fe80::1]:32520", true),
+            ("http://8.8.8.8:32520", false),
+            ("http://169.254.169.254:80", false),
+            ("http://10.0.0.7:0", false),
+            ("https://10.0.0.7:32520", false),
+            ("http://10-0-0-7.abc.plex.direct:32520", false),
+        ] {
+            assert_eq!(is_peer_base(&Url::parse(u).unwrap()), ok, "{u}");
+        }
+    }
+
+    #[test]
+    fn long_or_odd_names_are_cut() {
+        let tag = auth::account_tag("acct");
+        let long = "N".repeat(500);
+        let name = format!("Bad\nName{long}");
+        let platform = format!("i\u{7}OS{}", "x".repeat(100));
+        let a = answer(SERVICE, "mac", "10.0.0.7", 32520, &[("id", "mac"), ("name", &name), ("platform", &platform), ("acct", &tag)]);
+        let d = from_mdns(&a, "pc", &tag).unwrap();
+        assert_eq!(d.name.chars().count(), MAX_NAME);
+        assert!(d.name.starts_with("BadName"), "{}", d.name);
+        assert_eq!(d.platform.chars().count(), MAX_PLATFORM);
+        assert!(d.platform.starts_with("iOS"), "{}", d.platform);
+        let playing = format!("\u{1b}[2J{}", "p".repeat(1000));
+        let h = Hello { id: "mac".into(), name: long, platform, version: "1".into(), playing: Some(playing) }.cleaned();
+        assert_eq!((h.name.chars().count(), h.platform.chars().count()), (MAX_NAME, MAX_PLATFORM));
+        let p = h.playing.unwrap();
+        assert_eq!(p.chars().count(), MAX_PLAYING);
+        assert!(p.starts_with("[2J"), "the escape character is gone: {p}");
     }
 
     #[test]

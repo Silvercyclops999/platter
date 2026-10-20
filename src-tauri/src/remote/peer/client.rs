@@ -86,6 +86,31 @@ impl From<PeerError> for AppError {
     }
 }
 
+/// The largest answer read from another device. Device sync rounds carry
+/// sealed changes and may be as large as a request the control API takes.
+pub const MAX_ANSWER: usize = 64 * 1024;
+pub const MAX_SYNC_ANSWER: usize = 512 * 1024;
+
+fn answer_cap(path: &str) -> usize {
+    if path == PATH_SYNC_HELLO || path == PATH_SYNC_ENTRIES { MAX_SYNC_ANSWER } else { MAX_ANSWER }
+}
+
+/// The body, read a chunk at a time and refused once it passes `cap`.
+async fn read_capped(mut resp: reqwest::Response, cap: usize) -> Result<String, PeerError> {
+    let too_big = || PeerError::Failed("the answer was too large".into());
+    if resp.content_length().is_some_and(|n| n > cap as u64) {
+        return Err(too_big());
+    }
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|_| PeerError::Unreachable)? {
+        if buf.len() + chunk.len() > cap {
+            return Err(too_big());
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
 /// Signed requests from this computer.
 #[derive(Clone)]
 pub struct PeerClient {
@@ -141,7 +166,7 @@ impl PeerClient {
                 .await
                 .map_err(|_| PeerError::Unreachable)?;
             let status = resp.status().as_u16();
-            let text = resp.text().await.map_err(|_| PeerError::Unreachable)?;
+            let text = read_capped(resp, answer_cap(path)).await?;
             if status == 401
                 && !corrected
                 && let Some(theirs) = their_clock(&text)
@@ -175,7 +200,7 @@ impl PeerClient {
     }
 
     pub async fn hello(&self, base: &Url, to: &str, timeout: Duration) -> Result<Hello, PeerError> {
-        self.call(base, to, PATH_HELLO, None, timeout).await
+        self.call::<Hello>(base, to, PATH_HELLO, None, timeout).await.map(Hello::cleaned)
     }
 
     /// The first base that answers hello, with its answer. Every base is

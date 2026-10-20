@@ -161,7 +161,7 @@ mod tests {
     #[test]
     fn multicast_skips_virtual_adapters_when_a_real_one_exists() {
         let ifaces = [
-            i("Ethernet", "192.168.1.20"),
+            i("Ethernet", "10.0.1.20"),
             i("Ethernet", "fe80::1"),
             i("Tailscale", "100.90.1.2"),
             i("Tailscale", "fd7a:115c:a1e0::1"),
@@ -181,22 +181,25 @@ mod tests {
         // Only a VPN: better to search there than nowhere.
         assert!(multicast_skip(&[i("Tailscale", "100.90.1.2"), i("lo", "127.0.0.1")]).is_empty());
         // No VPN at all: nothing to skip.
-        assert!(multicast_skip(&[i("Wi-Fi", "10.0.0.4"), i("Ethernet", "192.168.1.3")]).is_empty());
+        assert!(multicast_skip(&[i("Wi-Fi", "10.0.0.4"), i("Ethernet", "172.16.1.3")]).is_empty());
     }
 
     #[test]
     fn the_default_route_adapter_comes_first() {
         let ifaces = [
-            i("Ethernet", "192.168.56.1"),
-            i("Wi-Fi", "192.168.1.40"),
+            // A second wired adapter on a host-only network, below the Wi-Fi.
+            i("Ethernet 2", "10.0.56.1"),
+            i("Wi-Fi", "172.16.1.40"),
             i("vEthernet (WSL)", "172.20.0.1"),
             i("Tailscale", "100.90.1.2"),
         ];
-        let got = lan_v4(&ifaces, Some("192.168.1.40".parse().unwrap()));
-        let want: Vec<Ipv4Addr> = ["192.168.1.40", "192.168.56.1"].iter().map(|s| s.parse().unwrap()).collect();
-        assert_eq!(got, want, "WSL and Tailscale left out");
-        // Default route over the VPN (an exit node): the LAN still comes first.
-        assert_eq!(lan_v4(&ifaces, Some("100.90.1.2".parse().unwrap())), want);
+        let got = lan_v4(&ifaces, Some("172.16.1.40".parse().unwrap()));
+        let want: Vec<Ipv4Addr> = ["172.16.1.40", "10.0.56.1"].iter().map(|s| s.parse().unwrap()).collect();
+        assert_eq!(got, want, "the default route first, WSL and Tailscale left out");
+        // Default route over the VPN (an exit node): the LAN adapters still
+        // come first, and the VPN is left out.
+        let lan: Vec<Ipv4Addr> = ["10.0.56.1", "172.16.1.40"].iter().map(|s| s.parse().unwrap()).collect();
+        assert_eq!(lan_v4(&ifaces, Some("100.90.1.2".parse().unwrap())), lan);
         // Only a virtual LAN address: kept, rather than nothing.
         assert_eq!(lan_v4(&[i("vEthernet (WSL)", "172.20.0.1")], None), vec!["172.20.0.1".parse::<Ipv4Addr>().unwrap()]);
     }

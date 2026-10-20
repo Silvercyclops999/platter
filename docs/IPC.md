@@ -3605,10 +3605,15 @@ The list comes in this order: Platter computers (reachable first), then Plex
 players, then Cast and AirPlay devices. `unreachable` is set on a Platter
 computer that announces itself or that Plex lists as on, but that doesn't
 answer directly (another network, or a firewall on that computer); the
-picker explains that once. `asleep` is set on a phone running Platter that
-was seen in the last few hours (announcing here, or on plex.tv) but doesn't
-answer now, usually because it's locked; it stays listed and opening Platter
-on it wakes it. `needsPassword` is set for an AirPlay speaker
+picker explains that once. A phone that announces itself here but doesn't
+answer is `unreachable` too. `asleep` is set on a phone running Platter that
+answered in the last few hours, or that plex.tv saw lately, but that doesn't
+answer now and isn't announcing, usually because it's locked; it stays listed
+and opening Platter on it wakes it. At most 32 such phones are remembered,
+and at most 32 Platter devices are asked per refresh. Only private LAN
+addresses are asked (IPv6 link-local or unique local), from announcements and
+from plex.tv alike. Names are cut to 60 characters, platforms to 40 and the
+`playing` line to 200. `needsPassword` is set for an AirPlay speaker
 with a password that isn't in the keychain yet; the picker asks for it and
 calls `remote_move_with_password`. `unsupported` says why a listed device
 can't be played on (for example an AirPlay speaker that only takes encrypted
@@ -3776,7 +3781,7 @@ user.", and the picker row shows the same reason.
 
 Events:
 - `remote://state` → `RemoteState` (on every change and every poll while remote)
-- `remote://players` → `RemotePlayer[]` (as each source answers during a refresh, once there is something to list, and the whole list when it ends; a source keeps its last rows until it answers again)
+- `remote://players` → `RemotePlayer[]` (as each source answers during a refresh, once there is something to list, and the whole list when it ends; a source keeps its last rows until it answers again, except that Cast, AirPlay and DLNA rows go once their search has missed 3 refreshes in a row or hasn't answered for 60 s)
 
 The player list refreshes when `remote_players` is called (the picker does
 every 10 s while open) and every 60 s in the background while a session is
