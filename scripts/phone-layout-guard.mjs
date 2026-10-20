@@ -12,6 +12,8 @@
 //   tap targets (buttons, links, role=button, inputs) smaller than 44 x 44 CSS px.
 // An inline text link that is meant to be small can opt out with data-tap-inline.
 //
+// Now playing is checked too, open over Home with a queue behind it.
+//
 // The pages come from src/phone/routes.tsx, so a new route is covered as soon
 // as it has a sample in SAMPLES below (the guard fails until it has one).
 import { readFileSync } from "node:fs";
@@ -367,6 +369,22 @@ try {
           for (const f of await page.evaluate(audit)) failures.push({ route: where, width, look, ...f });
         }
       }
+      // Now playing, over Home, with a song and a queue behind it.
+      if (!only.length || only.includes("nowPlaying")) {
+        await page.evaluate(async () => {
+          const m = window.__platterMock;
+          const { player } = await import("/src/stores/player.ts");
+          const { usePhoneUi } = await import("/src/phone/phoneUi.ts");
+          window.__guardGo({ name: "home" });
+          await player.playTracks(m.fx.tracks.slice(0, 4).map((t) => t.id), m.fx.tracks[0].id);
+          await new Promise((r) => setTimeout(r, 300));
+          usePhoneUi.setState({ nowPlaying: true });
+        });
+        await page.waitForTimeout(300);
+        await settle(page);
+        if (shots) await page.screenshot({ path: path.join(shots, `${look}-${width}-nowPlaying.png`) });
+        for (const f of await page.evaluate(audit)) failures.push({ route: "nowPlaying", width, look, ...f });
+      }
       await ctx.close();
     }
   }
@@ -394,4 +412,4 @@ if (groups.size) {
   console.log(`\n${groups.size} phone layout fault(s) in ${secs}s.`);
   process.exit(1);
 }
-console.log(`Phone layout guard: ${only.length ? names.filter((n) => only.includes(n)).length : names.length} routes, widths ${widths.join("/")}, looks ${looks.map((l) => LOOK_NAME[l] ?? l).join("/")}: no faults (${secs}s).`);
+console.log(`Phone layout guard: ${only.length ? names.filter((n) => only.includes(n)).length : names.length} routes${!only.length || only.includes("nowPlaying") ? " and now playing" : ""}, widths ${widths.join("/")}, looks ${looks.map((l) => LOOK_NAME[l] ?? l).join("/")}: no faults (${secs}s).`);

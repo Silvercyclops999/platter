@@ -7,6 +7,9 @@
  * way: the small settle a pause gives the cover waits until the row is
  * still, and a pause that only flickers between songs is ignored.
  *
+ * At rest the neighbours are out of sight altogether (no edge, no shadow
+ * at the screen's sides); they show only while the row moves.
+ *
  * A pull down moves the whole screen instead and closes it past its
  * distance. Nothing here redraws while a finger moves: the moves are
  * transforms written straight to the row or the screen.
@@ -89,6 +92,7 @@ export const CoverDeck = memo(function CoverDeck({ screen, onClose, art: artStyl
     if (!el) return;
     dropAnimations(el);
     el.style.transform = "";
+    el.classList.remove("is-moving");
   }, [held]);
 
   // Let go of the old song once the player says what plays now (or gives up waiting).
@@ -116,6 +120,7 @@ export const CoverDeck = memo(function CoverDeck({ screen, onClose, art: artStyl
         const el = strip.current;
         if (!el) return;
         el.style.willChange = "transform";
+        el.classList.add("is-moving");
         el.style.transform = `translateX(${at.x}px)`;
       } else {
         const sec = screen.current;
@@ -158,8 +163,11 @@ export const CoverDeck = memo(function CoverDeck({ screen, onClose, art: artStyl
         if (g.at.x && !reduced()) {
           const a = run(el, [{ transform: `translateX(${g.at.x}px)` }, { transform: "none" }], SNAP_MS);
           settle.current = a;
-          void a.done.then(() => dropAnimations(el));
-        }
+          void a.done.then(() => {
+            dropAnimations(el);
+            el.classList.remove("is-moving");
+          });
+        } else el.classList.remove("is-moving");
         if (skip) go();
         return;
       }

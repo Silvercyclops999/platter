@@ -7,19 +7,20 @@
  */
 import { AudioLines, ChevronDown, ListMusic, MicVocal, MoreHorizontal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from "lucide-react";
 import { memo, useDeferredValue, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
-import { preloadArt } from "../components/Art";
-import { nextInQueue } from "../shell/nowPlaying";
+import { Art, preloadArt, sleeveHue } from "../components/Art";
+import { contextRoute, nextInQueue } from "../shell/nowPlaying";
 import { holdLightStatusBar, mixIsDark } from "./statusBar";
 import { Slider } from "../components/Slider";
 import { formatDuration, trackArtistLine } from "../lib/format";
-import type { Track } from "../lib/types";
+import type { QueueContextInfo, Track } from "../lib/types";
 import { useArtColours } from "../lib/useTint";
 import { useSleeveNotes } from "../lib/useSleeveNotes";
 import { linerHasFacts, SleeveLiner } from "../pages/SleeveNotes";
 import { useCreditRows } from "../shell/creditRows";
 import { SEEK_KEY_STEP, SEEK_PAGE_STEP } from "../shell/PlayerBar";
 import { player, usePlayer } from "../stores/player";
-import { FormatPlate, LikeControl, Marquee, remaining, RowGlyphs, tap } from "./bits";
+import { LikeControl, Marquee, remaining, RowGlyphs, tap } from "./bits";
+import { SignalPlate } from "./SignalSheet";
 
 import { OutputButton } from "./DeviceSheet";
 import { CoverDeck, NP_ART_CSS } from "./CoverDeck";
@@ -61,6 +62,33 @@ export function playingFrom(ctx: { kind: string; title?: string | null } | null 
 export { NP_ART_CSS };
 /** How much of the cover's colour tints the top of now playing (phone.css .ph-np). */
 export const NP_TOP_TINT = 0.46;
+
+/**
+ * How big the title is set: a short one large, a long one smaller so it
+ * still reads in two lines at most. By length, so it never jumps once drawn.
+ */
+export function titleFit(title: string): "short" | "medium" | "long" {
+  const n = Array.from(title).length;
+  return n <= 16 ? "short" : n <= 30 ? "medium" : "long";
+}
+
+/** The printed sleeve's tone as a colour the screen can be lit with, for a record with no cover. */
+export function sleeveTint(title: string): string {
+  // hsl(h 18% 30%), as hex so the status bar can tell how dark it is.
+  const h = sleeveHue(title) / 360;
+  const s = 0.18;
+  const l = 0.3;
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const ch = (t: number) => {
+    const k = ((t % 1) + 1) % 1;
+    const v = k < 1 / 6 ? p + (q - p) * 6 * k : k < 1 / 2 ? q : k < 2 / 3 ? p + (q - p) * (2 / 3 - k) * 6 : p;
+    return Math.round(v * 255)
+      .toString(16)
+      .padStart(2, "0");
+  };
+  return `#${ch(h + 1 / 3)}${ch(h)}${ch(h - 1 / 3)}`;
+}
 
 
 export function NowPlaying() {
@@ -106,7 +134,8 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
   const [bare, setBare] = useState(false);
   if (bare && !art) setBare(false);
   // Over a dark cover colour (or the art) the top of the screen is dark even on the light look: light status bar text then.
-  const vivid = colours?.vivid ?? null;
+  // With no cover the screen takes the printed sleeve's tone.
+  const vivid = track.thumb ? (colours?.vivid ?? null) : sleeveTint(track.albumTitle || track.title);
   const darkTop = !!art || mixIsDark(vivid, NP_TOP_TINT);
   useEffect(() => {
     if (closing || document.documentElement.dataset.themeBase !== "light" || !darkTop) return;
@@ -115,7 +144,7 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
     return () => void (usePhoneUi.getState().nowPlaying ? release() : setTimeout(release, CLOSE_MS));
   }, [darkTop, closing]);
   // The pull down writes its transform and is-dragging straight onto the screen (CoverDeck).
-  const style = { "--ph-tint": colours?.vivid ?? "var(--color-bg-overlay)" } as CSSProperties;
+  const style = { "--ph-tint": vivid ?? "var(--color-bg-overlay)" } as CSSProperties;
   return (
     <section
       ref={screen}
@@ -207,8 +236,10 @@ const PlayerBody = memo(function PlayerBody({ track, screen, art = null, bare = 
   // The visualizer in the cover's place, when its button is on.
   const visButton = useSettings((s) => s.settings?.visualizerButton !== false);
   const vis = usePhoneVis((s) => s.open) && visButton;
+  const scroller = useRef<HTMLDivElement>(null);
+  useScrolled(scroller);
   return (
-    <div className="ph-np__scroll">
+    <div ref={scroller} className="ph-np__scroll">
       <div
         className="ph-np__player"
         data-testid="np-player"
@@ -222,10 +253,7 @@ const PlayerBody = memo(function PlayerBody({ track, screen, art = null, bare = 
           <button type="button" className="ph-icon-btn" aria-label="Close now playing" onClick={phone.closePlayer}>
             <ChevronDown size={28} aria-hidden="true" />
           </button>
-          <div className="ph-np__from">
-            <span className="ph-np__from-label">Playing from</span>
-            <span className="ph-np__from-name">{playingFrom(ctx, source)}</span>
-          </div>
+          <PlayingFrom ctx={ctx} source={source} />
           <button type="button" className="ph-icon-btn" aria-label="More for this song" onClick={() => phone.push({ kind: "track", track })}>
             <MoreHorizontal size={24} aria-hidden="true" />
           </button>
@@ -245,8 +273,8 @@ const PlayerBody = memo(function PlayerBody({ track, screen, art = null, bare = 
         <div className="ph-np__deck" inert={bare || undefined}>
         <div className="ph-np__meta">
           <div className="ph-np__names">
-            <button type="button" className="ph-np__title" onClick={() => phone.go({ name: "album", id: track.albumId })}>
-              {track.title}
+            <button type="button" className="ph-np__title" data-fit={titleFit(track.title)} onClick={() => phone.go({ name: "album", id: track.albumId })}>
+              <span className="ph-np__title-text">{track.title}</span>
             </button>
             <span className="ph-np__artist-line">
               <RowGlyphs trackId={track.id} />
@@ -254,6 +282,12 @@ const PlayerBody = memo(function PlayerBody({ track, screen, art = null, bare = 
                 <Marquee text={trackArtistLine(track)} moving={playing} />
               </button>
             </span>
+            {/* The album, unless it is what's playing from (the top bar says so already). */}
+            {track.albumTitle && !(ctx?.kind === "album" && ctx.id === track.albumId) && (
+              <button type="button" className="ph-np__album" onClick={() => phone.go({ name: "album", id: track.albumId })}>
+                <span>{track.albumTitle}</span>
+              </button>
+            )}
           </div>
           <LikeControl track={track} />
         </div>
@@ -262,7 +296,7 @@ const PlayerBody = memo(function PlayerBody({ track, screen, art = null, bare = 
         <div className="ph-np__bottom">
           <div className="ph-np__out">
             <OutputButton />
-            <FormatPlate track={track} />
+            <SignalPlate track={track} />
           </div>
           <div className="ph-np__right">
           {visButton && (
@@ -305,12 +339,83 @@ const PlayerBody = memo(function PlayerBody({ track, screen, art = null, bare = 
         </div>
         </div>
       </div>
+      <UpNext />
       <LyricsCard track={below} />
       <SleeveCard track={below} />
       <CreditsCard track={below} />
     </div>
   );
 });
+
+/**
+ * "Playing from" and where: a link back to it when it is a page.
+ */
+function PlayingFrom({ ctx, source }: { ctx: QueueContextInfo | null; source?: string }) {
+  const name = playingFrom(ctx, source);
+  const route = source === "autoplay" || source === "user" ? null : contextRoute(ctx);
+  const inner = (
+    <>
+      <span className="ph-np__from-label">Playing from</span>
+      <span className="ph-np__from-name">{name}</span>
+    </>
+  );
+  if (!route) return <div className="ph-np__from">{inner}</div>;
+  return (
+    <button type="button" className="ph-np__from" onClick={() => phone.go(route)}>
+      {inner}
+    </button>
+  );
+}
+
+/** The top bar takes a backing only once the screen has scrolled, so at rest it is the screen itself. */
+function useScrolled(ref: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const sec = el.closest(".ph-np");
+    let on = false;
+    const check = () => {
+      const now = el.scrollTop > 8;
+      if (now === on) return;
+      on = now;
+      sec?.classList.toggle("is-scrolled", now);
+    };
+    el.addEventListener("scroll", check, { passive: true });
+    return () => el.removeEventListener("scroll", check);
+  }, [ref]);
+}
+
+/**
+ * The next song, just under the player so the foot of the screen is never
+ * empty: its cover, title and artist. A tap opens the queue.
+ */
+function UpNext() {
+  const next = usePlayer((s) => nextInQueue(s.state?.queue)?.track ?? null);
+  if (!next) return null;
+  return (
+    <section className="ph-upnext" aria-label="Up next">
+      <button
+        type="button"
+        className="ph-upnext__row"
+        aria-label={`Up next: ${next.title}, ${trackArtistLine(next)}. Open the queue`}
+        onClick={() => {
+          tap();
+          phone.push({ kind: "queue" });
+        }}
+      >
+        <span className="ph-upnext__art">
+          <Art path={next.thumb} size={40} sleeve={{ title: next.albumTitle, artist: next.artistTitle }} />
+        </span>
+        <span className="ph-upnext__text">
+          <span className="ph-upnext__label">Up next</span>
+          <span className="ph-upnext__title">{next.title}</span>
+          <span className="ph-upnext__artist">{trackArtistLine(next)}</span>
+        </span>
+        <ListMusic className="ph-upnext__icon" size={20} aria-hidden="true" />
+      </button>
+    </section>
+  );
+}
 
 /**
  * The small cover now playing grows from: the mini player's, or on Home

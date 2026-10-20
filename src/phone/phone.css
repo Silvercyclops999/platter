@@ -295,12 +295,20 @@
 .ph-output__name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46vw; }
 
 /* ---------------------------------------------------------------- now playing */
+/* The room the record plays in: lit by the cover's own colour from the top,
+   with one soft pool of it behind the sleeve (the desktop's cover light),
+   settling into the page colour toward the controls. The top keeps 46% of
+   the colour (NP_TOP_TINT), which the status bar reads. */
 .ph-np {
+  --np-side: clamp(24px, 6.8vw, 34px);
+  --np-peek: 0px;
   position: absolute;
   inset: 0;
   z-index: 40;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--ph-tint) 46%, var(--color-bg-base)) 0, color-mix(in srgb, var(--ph-tint) 12%, var(--color-bg-base)) 62%, var(--color-bg-base) 100%);
-  background-attachment: local;
+  background:
+    radial-gradient(ellipse 90% 42% at 50% 30%, color-mix(in srgb, var(--ph-tint) 30%, transparent), transparent 74%),
+    linear-gradient(180deg, color-mix(in srgb, var(--ph-tint) 46%, var(--color-bg-base)) 0, color-mix(in srgb, var(--ph-tint) 22%, var(--color-bg-base)) 46%, color-mix(in srgb, var(--ph-tint) 6%, var(--color-bg-base)) 78%, var(--color-bg-base) 100%);
+  background-color: var(--color-bg-base);
   transition: transform var(--ph-slide) var(--ph-ease);
   animation: ph-rise var(--ph-np-open) var(--ph-ease);
 }
@@ -310,73 +318,118 @@
 @keyframes ph-rise { from { transform: translateY(100%); } to { transform: none; } }
 .ph-np__scroll { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding-bottom: calc(24px + var(--ph-safe-bottom)); }
 .ph-np__scroll::-webkit-scrollbar { display: none; }
+/* With a song up next, the player stops a little short of the screen's foot so its row shows there. */
+.ph-np:has(.ph-upnext) { --np-peek: calc(66px + var(--ph-safe-bottom)); }
 .ph-np__player {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
-  min-height: 100dvh;
-  padding: calc(var(--ph-safe-top) + 4px) var(--ph-gutter) calc(20px + var(--ph-safe-bottom));
+  min-height: calc(100% - var(--np-peek));
+  min-height: calc(100dvh - var(--np-peek));
+  padding: calc(var(--ph-safe-top) + 2px) var(--np-side) 18px;
 }
-.ph-np__top { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; margin: 0 -8px; }
+/* The top bar is the screen itself at rest; scrolled to the cards, it takes the top's colour and a cut line. */
+.ph-np__top {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  align-items: center;
+  margin: calc(-1 * var(--ph-safe-top)) calc(-1 * var(--np-side)) 0;
+  padding: var(--ph-safe-top) calc(var(--np-side) - 10px) 0;
+  transition: background-color var(--ph-quick) var(--ph-ease), box-shadow var(--ph-quick) var(--ph-ease);
+}
+.ph-np.is-scrolled .ph-np__top {
+  background: color-mix(in srgb, var(--ph-tint) 46%, var(--color-bg-base));
+  box-shadow: 0 1px 0 color-mix(in srgb, #000 22%, transparent);
+}
 .ph-np__top .ph-icon-btn { color: var(--color-text-primary); }
-.ph-np__from { display: flex; flex-direction: column; align-items: center; min-width: 0; text-align: center; }
-.ph-np__from-label { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); }
+.ph-np__from { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; min-width: 0; min-height: 44px; text-align: center; }
+.ph-np__from-label { font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: color-mix(in srgb, var(--color-text-primary) 62%, transparent); }
 .ph-np__from-name { max-width: 100%; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* The cover is the hero: as wide as the screen less its margins (less when
-   the screen is short), square and sharp, a real shadow and a thin edge.
-   Paused, it settles back a little. It sits in a row with the previous and
-   the next song's covers just off each side, the same size; the row slides
-   under a sideways drag and the screen's edges cut it off. */
+/* The cover is the hero: inside real margins (less when the screen is
+   short), square, with the shadow of a sleeve lifted off the table and a
+   hairline edge. Paused, it settles back a little. It sits in a row with
+   the previous and next songs' covers, the same size, which show only
+   while the row slides; at rest nothing of them reaches the screen. */
 .ph-np__art {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 0;
-  padding: 16px 0 8px;
+  padding: 14px 0 18px;
   touch-action: none;
 }
 .ph-np__art:not(.ph-np__art--vis) {
-  margin: 0 calc(-1 * var(--ph-gutter));
-  padding-inline: var(--ph-gutter);
+  margin: 0 calc(-1 * var(--np-side));
+  padding-inline: var(--np-side);
   overflow-x: clip;
+  clip-path: inset(-160px 0);
 }
-/* The gap keeps a neighbour's shadow off the screen while the row is still. */
-.ph-np__deck-row { --np-deck-gap: calc(var(--ph-gutter) + 48px); position: relative; display: flex; align-items: center; justify-content: center; width: 100%; }
+.ph-np__deck-row { --np-deck-gap: calc(var(--np-side) + 64px); position: relative; display: flex; align-items: center; justify-content: center; width: 100%; }
 .ph-np__slide { display: flex; align-items: center; justify-content: center; width: 100%; }
 .ph-np__slide--prev, .ph-np__slide--next { position: absolute; inset: 0; pointer-events: none; }
 .ph-np__slide--prev { transform: translateX(calc(-100% - var(--np-deck-gap))); }
 .ph-np__slide--next { transform: translateX(calc(100% + var(--np-deck-gap))); }
+.ph-np__deck-row:not(.is-moving) :is(.ph-np__slide--prev, .ph-np__slide--next) { visibility: hidden; }
 .ph-np__cover {
-  width: min(100%, 440px, max(220px, calc(100dvh - var(--ph-safe-top) - var(--ph-safe-bottom) - 400px)));
+  position: relative;
+  width: min(100%, 460px, max(220px, calc(100dvh - var(--ph-safe-top) - var(--ph-safe-bottom) - 460px)));
   aspect-ratio: 1;
-  border-radius: 6px;
+  border-radius: 4px;
   overflow: hidden;
-  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.42), 0 4px 12px rgba(0, 0, 0, 0.22), 0 0 0 0.5px rgba(255, 255, 255, 0.14);
+  box-shadow: 0 30px 50px -22px rgba(0, 0, 0, 0.7), 0 12px 24px -10px rgba(0, 0, 0, 0.45), 0 0 0 0.5px rgba(0, 0, 0, 0.35);
   transform: scale(0.94);
   transition: transform var(--ph-slide) var(--ph-ease);
 }
+/* The sleeve's edge catching the light: a hairline and a lit top, over the picture. */
+.ph-np__cover::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.1); }
+:root[data-theme-base="light"] .ph-np__cover { box-shadow: 0 26px 44px -22px rgba(0, 0, 0, 0.42), 0 8px 18px -8px rgba(0, 0, 0, 0.22), 0 0 0 0.5px rgba(0, 0, 0, 0.12); }
 .ph-np__cover.is-playing { transform: none; }
 .ph-np__cover .art { width: 100%; height: 100%; border-radius: 0; }
+/* No cover: the printed sleeve, set like a real one. A printed frame line,
+   the title large in the display face, the artist in spaced capitals over
+   a short rule, and the paper's grain. */
+.ph-np__cover .art__sleeve { padding: 11% 11% 12%; justify-content: space-between; background-image: linear-gradient(160deg, rgba(255, 255, 255, 0.07), transparent 55%), var(--paper-grain-print, none); }
+.ph-np__cover .art__sleeve::before { content: ""; position: absolute; inset: 5.5%; border: 1px solid color-mix(in srgb, currentColor 22%, transparent); pointer-events: none; }
+.ph-np__cover .art__sleeve-title { font-size: 11.5cqi; line-height: 1.08; -webkit-line-clamp: 5; line-clamp: 5; text-wrap: balance; }
+.ph-np__cover .art__sleeve-artist { position: relative; padding-top: 3.2cqi; font-size: 4.2cqi; letter-spacing: 0.16em; }
+.ph-np__cover .art__sleeve-artist::before { content: ""; position: absolute; left: 0; top: 0; width: 9cqi; height: 1px; background: currentColor; opacity: 0.6; }
 .ph-np__deck { flex: none; }
-.ph-np__meta { display: flex; align-items: flex-end; gap: 12px; padding-top: 12px; }
-.ph-np__names { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
-/* Up to two lines of title; the artists drift sideways while playing when they don't fit. */
+.ph-np__meta { display: flex; align-items: center; gap: 12px; }
+.ph-np__names { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; flex: 1; min-width: 0; }
+/* The title in the display face, sized to its length: up to two lines, balanced. */
 .ph-np__title {
+  display: block;
+  max-width: 100%;
+  /* A finger-high target even on one line, without pushing the artist away. */
+  min-height: 44px;
+  padding: 6px 0;
+  margin: -6px 0 -4px;
   font-family: var(--ph-title-font);
-  font-size: 24px;
-  line-height: 1.18;
+  font-size: 26px;
+  line-height: 1.12;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.012em;
+}
+.ph-np__title-text {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
+  text-wrap: balance;
 }
-.ph-np__artist-line { display: flex; align-items: center; min-width: 0; }
+.ph-np__title[data-fit="short"] { font-size: 30px; line-height: 1.08; }
+.ph-np__title[data-fit="long"] { font-size: 22px; line-height: 1.18; }
+.ph-np__artist-line { display: flex; align-items: center; align-self: stretch; min-width: 0; }
 .ph-np__artist-line .ph-glyphs { flex: none; vertical-align: 0; }
-.ph-np__artist { display: block; flex: 1; min-width: 0; min-height: 24px; font-size: 16px; color: var(--color-text-secondary); }
+.ph-np__artist { position: relative; display: block; flex: 1; min-width: 0; min-height: 22px; font-size: 16px; color: color-mix(in srgb, var(--color-text-primary) 76%, transparent); }
+.ph-np__album { position: relative; display: block; max-width: 100%; min-height: 20px; font-size: 14px; color: var(--color-text-secondary); }
+.ph-np__album > span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The names are links: each takes a finger-high tap frame without spacing the lines apart. */
+.ph-np__album::before, .ph-np__artist::before { content: ""; position: absolute; left: 0; right: 0; top: min(0px, calc(50% - 22px)); bottom: min(0px, calc(50% - 22px)); }
 .ph-marquee { display: block; overflow: hidden; white-space: nowrap; }
 .ph-marquee.is-over { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
 .ph-marquee.is-over.is-moving { -webkit-mask-image: linear-gradient(90deg, transparent, #000 16px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, transparent, #000 16px, #000 calc(100% - 28px), transparent); }
@@ -386,20 +439,60 @@
 .ph-like { color: var(--color-text-secondary); }
 .ph-like.is-on { color: var(--color-accent); }
 
-.ph-seek { margin-top: 20px; }
-.ph-seek .slider { height: 28px; }
-.ph-seek__times { display: flex; justify-content: space-between; margin-top: 2px; font-size: 12px; color: var(--color-text-muted); }
+.ph-seek { margin-top: 18px; }
+.ph-seek__times { display: flex; justify-content: space-between; margin-top: 4px; font-family: var(--font-readout, var(--font-family)); font-size: 11.5px; letter-spacing: 0.02em; color: var(--color-text-secondary); }
+.ph-seek__times > :last-child { color: var(--color-text-muted); }
 .ph-transport {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 18px -6px 0;
+  margin: 12px -10px 0;
 }
-.ph-transport .ph-icon-btn { color: var(--color-text-primary); }
-.ph-transport .ph-icon-btn.is-on { color: var(--color-accent); }
-.ph-transport__skip { width: 56px; height: 56px; }
-.ph-np__bottom { display: flex; align-items: center; justify-content: space-between; margin: 20px -6px 0; }
-.ph-np__out { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--color-text-secondary); }
+.ph-transport .ph-icon-btn { position: relative; color: var(--color-text-primary); }
+/* Shuffle and repeat: off reads quiet, on is brass with a lamp under it, like a lit switch. */
+.ph-transport > .ph-icon-btn:not(.ph-transport__skip) { color: color-mix(in srgb, var(--color-text-primary) 62%, transparent); }
+.ph-transport > .ph-icon-btn.is-on { color: var(--color-accent); }
+.ph-transport > .ph-icon-btn.is-on::after { content: ""; position: absolute; left: 50%; bottom: 3px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: currentColor; }
+.ph-transport__skip { width: 60px; height: 60px; }
+.ph-np .ph-transport .ph-play {
+  width: 64px;
+  height: 64px;
+  box-shadow: 0 10px 22px -10px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -1px 0 rgba(0, 0, 0, 0.18);
+}
+.ph-np__bottom { display: flex; align-items: center; justify-content: space-between; margin: 14px -10px 0; }
+.ph-np__out { display: flex; align-items: center; gap: 2px; min-width: 0; color: var(--color-text-secondary); }
+.ph-np__right { display: flex; align-items: center; gap: 2px; }
+.ph-np__bottom .ph-icon-btn { color: color-mix(in srgb, var(--color-text-primary) 70%, transparent); }
+.ph-np__bottom .ph-icon-btn.is-on { color: var(--color-accent); }
+/* The format plate: a tap on it opens the signal path. */
+.ph-np__plate { display: inline-flex; align-items: center; min-width: 44px; min-height: 44px; padding: 0 4px; }
+.ph-np__plate .plate { height: 20px; }
+.ph-signal .signal-chain { margin-top: 4px; }
+.ph-signal__verdict--bitPerfect { color: var(--color-accent); }
+
+/* The next song, peeking at the foot of the player. */
+.ph-upnext { margin: 0 var(--np-side, var(--ph-gutter)) 16px; }
+.ph-upnext__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 60px;
+  padding: 8px 6px 8px 8px !important;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-ink) 7%, transparent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 7%, transparent);
+}
+.ph-upnext__art { flex: none; width: 44px; height: 44px; border-radius: 3px; overflow: hidden; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3); }
+.ph-upnext__art .art { width: 44px !important; height: 44px !important; border-radius: 0; }
+.ph-upnext__text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.ph-upnext__label { font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-text-muted); }
+.ph-upnext__title { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ph-upnext__artist { font-size: 13px; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ph-upnext__icon { flex: none; margin: 0 8px; color: var(--color-text-secondary); }
+/* The cards under the player line up with it, and sit on the room's colour rather than a grey box. */
+.ph-np__scroll > :is(.ph-card, .ph-sleeve-card) { margin: 0 var(--np-side) 16px; }
+.ph-np__scroll > .ph-card:not(.ph-lyrics-card) { background: color-mix(in srgb, var(--color-ink) 6%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 7%, transparent); }
 
 /* Cards under the player. */
 .ph-card {
@@ -459,8 +552,10 @@
 .ph-sleeve-credits .sleeve-song__line { font-size: 14px; }
 
 .ph-credits { list-style: none; margin: 0; padding: 0; }
-.ph-credits__row { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; }
+.ph-credits__row { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 8px 0; }
 .ph-credits__name { font-size: 15px; font-weight: 600; text-align: left; }
+/* A person's name is a link: the whole row, name and roles, is what a finger taps. */
+button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 .ph-credits__roles { font-size: 13px; color: var(--color-text-secondary); }
 
 /* ---------------------------------------------------------------- lyrics full screen */
@@ -997,9 +1092,10 @@
 .ph-seek .slider.is-dragging .slider__thumb { transform: scale(1.5); }
 .ph-seek .slider:not(.is-dragging) .slider__fill { transition: width 250ms linear; }
 .ph-seek .slider:not(.is-dragging) .slider__thumb { transition: left 250ms linear, transform var(--ph-quick) var(--ph-ease); }
-/* Now playing keeps its close and source in view while you scroll to the cards. */
-.ph-np__top { position: sticky; top: 0; z-index: 3; margin: 0 -8px; padding-top: var(--ph-safe-top); margin-top: calc(-1 * var(--ph-safe-top)); background: linear-gradient(180deg, color-mix(in srgb, var(--ph-tint) 40%, var(--color-bg-base)) 60%, transparent); }
-.ph-np__meta { align-items: center; }
+/* Now playing: a finer line, the played part in brass (what's playing), and a knob that always shows. */
+.ph-np .ph-seek .slider__track { height: 3px; background: color-mix(in srgb, var(--color-text-primary) 20%, transparent); }
+.ph-np .ph-seek .slider__fill { background: var(--color-playing, var(--color-accent)); }
+.ph-np .ph-seek .slider__thumb { width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px; background: var(--color-text-primary); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 0 0 0.5px rgba(0, 0, 0, 0.2); }
 /* Sheet actions: an icon and a word. */
 .ph-row--action { gap: 16px; min-height: 52px; padding: 0; font-size: 16px; }
 .ph-row__icon { flex: none; color: var(--color-text-secondary); }
@@ -1037,7 +1133,6 @@
 .ph-playlist__cover .art, .ph-playlist__cover .liked-cover { width: 100% !important; height: auto !important; aspect-ratio: 1; }
 .ph-backbar.is-titled .ph-backbar__back { background: none !important; }
 :root[data-theme-base="light"] .ph-artist__name { text-shadow: none; }
-.ph-np__right { display: flex; align-items: center; gap: 4px; }
 /* Plates on the dark mini player and Home card read light on every look. */
 .ph-mini .plate, .ph-now .plate { --plate-lit: #e2c68c; }
 /* Settings pieces built for a wide window, folded to one column. */
@@ -1180,8 +1275,6 @@
   backdrop-filter: blur(16px) saturate(1.4);
   pointer-events: none;
 }
-/* Now playing's top bar is solid where its words sit, so the cover never shows through them. */
-.ph-np__top { background: linear-gradient(180deg, color-mix(in srgb, var(--ph-tint) 46%, var(--color-bg-base)) 78%, transparent); }
 /* Inputs take a caret and a selection even though the rest of the phone doesn't. */
 .phone :is(input, textarea, [contenteditable="true"]) { -webkit-user-select: text; user-select: text; }
 :root[data-reduced-motion="true"] .ph-sheet-layer.is-closing:not([data-sliding-out]) .ph-sheet { opacity: 0; transition: opacity 120ms ease-out; }
@@ -1226,8 +1319,8 @@
   font-weight: 600;
   animation: ph-note-in 220ms var(--ph-ease);
 }
-/* Over now playing the note sits under its top bar, clear of the controls. */
-.phone:has(.ph-np:not(.is-closing)) .toaster { top: calc(var(--ph-safe-top) + 60px); bottom: auto; }
+/* Over now playing the note sits low, over the output and queue row, clear of the cover and the transport. */
+.phone:has(.ph-np:not(.is-closing)) .toaster { top: auto; bottom: calc(var(--ph-safe-bottom) + 20px); }
 .phone .toast :is(.toast__icon, .toast__art, .toast__close) { display: none; }
 .phone .toast__msg { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .phone .toast__action { flex: none; min-height: 32px; padding: 0 2px; background: none; border: 0; color: inherit; font: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
