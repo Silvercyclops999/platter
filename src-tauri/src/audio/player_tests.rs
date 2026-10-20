@@ -758,6 +758,49 @@ async fn a_pause_by_hand_while_the_output_comes_up_stays_paused() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_call_while_the_output_comes_up_stays_paused() {
+    let mut r = rig(&["a"], 3.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.cap.fail_opens(1);
+    r.cap.reset_stream();
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    r.player.interruption(true, false);
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Paused, "not out loud during the call");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn headphones_leaving_while_the_output_comes_up_stay_paused() {
+    let mut r = rig(&["a"], 3.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.cap.fail_opens(1);
+    r.cap.reset_stream();
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    r.player.headphones(false);
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Paused);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_second_reset_starts_the_tries_over_once() {
+    let mut r = rig(&["a"], 3.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.cap.fail_opens(100);
+    r.cap.reset_stream();
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    // Another reset while the first tries wait: a fresh round, not two.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    r.player.resume().await.ok();
+    r.cap.reset_stream();
+    tokio::time::sleep(Duration::from_millis(7000)).await;
+    let tried = 100 - r.cap.fail_opens_left();
+    assert!(tried <= 6, "one round after each reset at most, tried {tried}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_output_that_never_comes_up_stays_paused_after_three_tries() {
     let mut r = rig(&["a"], 3.0, true, PlayerConfig::default()).await;
     r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
