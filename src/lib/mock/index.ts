@@ -3113,8 +3113,10 @@ export class MockBackend implements Backend {
       return freed;
     });
   }
+  /** What appInfo says this app's version is (tests set it). */
+  appVersion = "0.1.0";
   appInfo() {
-    return this.delay(() => ({ version: "0.1.0", licence: "GPL-3.0-or-later", repoUrl: "https://github.com/Silvercyclops999/platter", form: "desktop" as const }));
+    return this.delay(() => ({ version: this.appVersion, licence: "GPL-3.0-or-later", repoUrl: "https://github.com/Silvercyclops999/platter", form: "desktop" as const }));
   }
   openProjectPage() {
     return this.delay(() => undefined);

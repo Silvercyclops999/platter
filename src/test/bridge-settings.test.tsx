@@ -1,9 +1,10 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
-import { BridgeSettings, bridgeMatches, envList } from "../pages/BridgeSettings";
+import { compareSemver } from "../lib/version";
+import { BRIDGE_UPDATE_DOCS, BridgeSettings, bridgeMatches, bridgeVersionLine, envList } from "../pages/BridgeSettings";
 import { LidarrWorkStatus } from "../pages/LidarrModes";
 
 const mock = backend as MockBackend;
@@ -81,6 +82,104 @@ describe("Settings > Bridge", () => {
     expect(q).toHaveTextContent("PUT /config/naming/1");
     await user.click(within(q).getByRole("button", { name: "Dismiss" }));
     expect(screen.queryByTestId("bridge-queued")).toBeNull();
+  });
+
+  describe("when the Bridge and this app aren't the same version", () => {
+    const paired = (version: string, statusVersion?: string) => {
+      mock.bridgeState.bridges = [
+        {
+          id: "b1",
+          name: "Shed Bridge",
+          version,
+          pairedAt: 1,
+          lastSeen: 1,
+          online: true,
+          status:
+            statusVersion === undefined
+              ? null
+              : {
+                  name: "Shed Bridge",
+                  version: statusVersion,
+                  at: 1,
+                  doing: "Waiting for Lidarr",
+                  lastCatchUp: null,
+                  music: "none",
+                  plex: true,
+                  lidarr: true,
+                  problem: null,
+                  fromEnv: [],
+                  plexLink: null,
+                  musicPlexPath: null,
+                },
+          music: "none",
+        },
+      ];
+    };
+    afterEach(() => {
+      mock.appVersion = "0.1.0";
+    });
+
+    it("says a Bridge behind this app needs updating, with a link to how", async () => {
+      mock.appVersion = "0.2.31";
+      // What the Bridge said last wins over the version it paired with.
+      paired("0.2.20", "0.2.29");
+      mock.helpLinksOpened.length = 0;
+      const user = userEvent.setup();
+      render(<BridgeSettings />);
+      const line = await screen.findByTestId("bridge-version");
+      expect(line).toHaveTextContent(
+        "Platter Bridge 0.2.29 is behind this app (0.2.31). Update it on your server: on Unraid the Docker tab shows the update, or the Auto Update Applications plugin does it for you.",
+      );
+      await user.click(within(line).getByRole("button", { name: "How to update" }));
+      await waitFor(() => expect(mock.helpLinksOpened).toEqual([BRIDGE_UPDATE_DOCS]));
+      expect(BRIDGE_UPDATE_DOCS).toBe("https://github.com/Silvercyclops999/platter/blob/main/docs/BRIDGE.md#updates");
+    });
+
+    it("says to update Platter when the Bridge is newer", async () => {
+      mock.appVersion = "0.2.29";
+      paired("0.2.31");
+      render(<BridgeSettings />);
+      const line = await screen.findByTestId("bridge-version");
+      expect(line).toHaveTextContent("Platter Bridge is newer than this app; update Platter.");
+      expect(within(line).queryByRole("button")).toBeNull();
+    });
+
+    it("says nothing when they match, or when the Bridge's version isn't known", async () => {
+      mock.appVersion = "0.2.31";
+      paired("0.2.31", "0.2.31");
+      const { unmount } = render(<BridgeSettings />);
+      await screen.findByTestId("bridge-row");
+      expect(screen.queryByTestId("bridge-version")).toBeNull();
+      unmount();
+      paired("", "");
+      render(<BridgeSettings />);
+      await screen.findByTestId("bridge-row");
+      expect(screen.queryByTestId("bridge-version")).toBeNull();
+    });
+
+    it("ignores pre-release tags", async () => {
+      mock.appVersion = "0.2.31-beta.2";
+      paired("0.2.31");
+      render(<BridgeSettings />);
+      await screen.findByTestId("bridge-row");
+      expect(screen.queryByTestId("bridge-version")).toBeNull();
+    });
+
+    it("compares versions as numbers, not text", () => {
+      expect(compareSemver("0.2.29", "0.2.31")).toBe(-1);
+      expect(compareSemver("0.2.10", "0.2.9")).toBe(1);
+      expect(compareSemver("1.0.0", "0.99.99")).toBe(1);
+      expect(compareSemver("0.2.31", "0.2.31")).toBe(0);
+      expect(compareSemver("v0.2.31", "0.2.31")).toBe(0);
+      expect(compareSemver("0.2.31-rc.1", "0.2.31")).toBe(0);
+      expect(compareSemver("0.2.30-beta", "0.2.31+build.5")).toBe(-1);
+      expect(compareSemver("0.3", "0.3.0")).toBe(0);
+      expect(compareSemver("", "0.2.31")).toBeNull();
+      expect(compareSemver("unknown", "0.2.31")).toBeNull();
+      expect(compareSemver("0.2.31", null)).toBeNull();
+      expect(bridgeVersionLine("0.2.31", null)).toBeNull();
+      expect(bridgeVersionLine("0.2.29", "0.2.31")?.behind).toBe(true);
+    });
   });
 
   it("the Lidarr work line names the Bridge when one is paired", async () => {

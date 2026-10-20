@@ -14,6 +14,7 @@ import type { BridgeEnvSetting, BridgeInfo, BridgeMusicAccess, BridgeOverview } 
 import { toast } from "../stores/toasts";
 import "./feed-settings.css";
 import { failText } from "../lib/errorText";
+import { compareSemver } from "../lib/version";
 
 export const BRIDGE_DESCRIPTION =
   "Optional. A small Docker container for your server that does Platter's Lidarr work while no computer has Platter open: catching up after downloads, scanning just the new folders, and adding protected albums when it can reach your music folder. Platter works fully without it, and nothing is installed on your server unless you set it up. It talks to Platter only through the same sealed relay as Listen along, and opens no ports.";
@@ -108,6 +109,38 @@ const MUSIC: Record<BridgeMusicAccess, string> = {
   none: "No music folder mounted: additions wait for a computer.",
 };
 
+export const BRIDGE_UPDATE_DOCS = "https://github.com/Silvercyclops999/platter/blob/main/docs/BRIDGE.md#updates";
+
+/** When the Bridge and this app aren't the same version: what to do about it. Null when equal or unknown. */
+export function bridgeVersionLine(bridge: string | null | undefined, app: string | null | undefined): { behind: boolean; text: string } | null {
+  const c = compareSemver(bridge, app);
+  if (c === -1)
+    return {
+      behind: true,
+      text: `Platter Bridge ${bridge} is behind this app (${app}). Update it on your server: on Unraid the Docker tab shows the update, or the Auto Update Applications plugin does it for you.`,
+    };
+  if (c === 1) return { behind: false, text: "Platter Bridge is newer than this app; update Platter." };
+  return null;
+}
+
+/** This app's version, once. */
+function useAppVersion(): string | null {
+  const [v, setV] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    backend.appInfo().then(
+      (i) => {
+        if (live) setV(i.version);
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+  return v;
+}
+
 /** Kept current from `bridge://changed`. */
 export function useBridge(): [BridgeOverview | null, (o: BridgeOverview) => void, () => void] {
   const [overview, setOverview] = useState<BridgeOverview | null>(null);
@@ -122,10 +155,11 @@ export function useBridge(): [BridgeOverview | null, (o: BridgeOverview) => void
   return [overview, setOverview, load];
 }
 
-function BridgeRow({ b, onUnpair }: { b: BridgeInfo; onUnpair: () => void }) {
+function BridgeRow({ b, appVersion, onUnpair }: { b: BridgeInfo; appVersion: string | null; onUnpair: () => void }) {
   const [sure, setSure] = useState(false);
   const st = b.status;
   const last = st?.lastCatchUp;
+  const ver = bridgeVersionLine(st?.version || b.version, appVersion);
   return (
     <div className="setting-row" data-testid="bridge-row">
       <div className="setting-row__text">
@@ -135,6 +169,23 @@ function BridgeRow({ b, onUnpair }: { b: BridgeInfo; onUnpair: () => void }) {
           {b.lastSeen ? `, last seen ${timeAgo(b.lastSeen)}` : ""}. {MUSIC[b.music]}
         </p>
         {st && <p className="setting-row__desc">Now: {st.doing}</p>}
+        {ver && (
+          <p className="setting-row__desc" data-testid="bridge-version">
+            {ver.text}
+            {ver.behind && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  className="link bridge-version__link"
+                  onClick={() => void backend.helpOpenLink(BRIDGE_UPDATE_DOCS).catch(() => toast.error("Couldn't open the browser"))}
+                >
+                  How to update
+                </button>
+              </>
+            )}
+          </p>
+        )}
         <p className="setting-row__desc">
           {last
             ? last.error
@@ -183,6 +234,7 @@ function BridgeRow({ b, onUnpair }: { b: BridgeInfo; onUnpair: () => void }) {
 
 export function BridgeSettings() {
   const [ov, setOv, load] = useBridge();
+  const appVersion = useAppVersion();
   const pair = () =>
     backend.bridgePairStart().then(
       () => load(),
@@ -237,7 +289,7 @@ export function BridgeSettings() {
           )
         )}
       </div>
-      {ov?.bridges.map((b) => <BridgeRow key={b.id} b={b} onUnpair={() => void unpair(b)} />)}
+      {ov?.bridges.map((b) => <BridgeRow key={b.id} b={b} appVersion={appVersion} onUnpair={() => void unpair(b)} />)}
       {ov && !ov.pairing && <AddBridge onAdded={load} />}
       {ov?.queued.map((q) => (
         <div className="setting-row" key={q.id} data-testid="bridge-queued">

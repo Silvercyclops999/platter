@@ -23,3 +23,5 @@
   color: var(--color-text-secondary);
 }
 .deck-plugin__missing { margin: 0 0 var(--space-3); }
+/* "How to update" inside the Bridge version line: reads as a link at rest. */
+.bridge-version__link { color: var(--color-text-primary); text-decoration: underline; text-underline-offset: 2px; }
