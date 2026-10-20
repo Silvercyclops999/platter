@@ -10,7 +10,10 @@ import { useState } from "react";
 import { Art } from "../../components/Art";
 import { backend } from "../../lib/backend";
 import { useLoad } from "../../lib/useLoad";
-import { GRID_TILES, HOME_FILTERS, filterItems, visibleShelves, type HomeFilter } from "../../pages/home";
+import { HOME_FILTERS, gridItems, showsLikedTile, visibleShelves, type HomeFilter } from "../../pages/home";
+import { LikedCover } from "../../components/LikedCover";
+import { useLikes } from "../../stores/likes";
+import { useSettings } from "../../stores/settings";
 import type { HomeShelfId } from "../../lib/types";
 import { useApp } from "../../stores/app";
 import { usePlayer } from "../../stores/player";
@@ -28,9 +31,13 @@ export function PhoneHome() {
   const [filter, setFilter] = useState<HomeFilter>("all");
   const avatar = useApp((s) => s.auth?.avatar ?? null);
   const playingCtx = usePlayer((s) => s.state?.queue.context ?? null);
+  const likedCount = useLikes((s) => s.ids.size);
+  const showGrid = useSettings((s) => s.settings?.homeShortcuts !== false);
   if (error && !data) return <PageFailed what="Home" retry={retry} framed />;
   if (!data) return <PageLoading />;
-  const grid = filterItems(data.shortcuts, filter).slice(0, GRID_TILES);
+  // Liked Songs leads the grid, as on the computer, and takes one of its places.
+  const liked = showsLikedTile(filter, likedCount, showGrid);
+  const grid = gridItems(data, filter, showGrid, liked);
   const shelves = visibleShelves(data, filter).filter((s) => filter !== "all" || PHONE_HOME_SHELVES.includes(s.id));
   return (
     <div className="ph-page ph-home">
@@ -46,8 +53,16 @@ export function PhoneHome() {
           ))}
         </div>
       </div>
-      {grid.length > 0 && (
+      {(grid.length > 0 || liked) && (
         <ul className="ph-shortcuts" aria-label="Recent and pinned">
+          {liked && (
+            <li key="liked">
+              <button type="button" className={`ph-shortcut ${playingCtx?.kind === "liked" ? "is-playing" : ""}`} onClick={() => nav.go({ name: "liked" })}>
+                <LikedCover size={56} />
+                <span className="ph-shortcut__title">Liked Songs</span>
+              </button>
+            </li>
+          )}
           {grid.map((i) => {
             const info = itemInfo(i);
             const id = info.route.name === "album" || info.route.name === "artist" || info.route.name === "playlist" ? info.route.id : "";
@@ -74,7 +89,7 @@ export function PhoneHome() {
         </Carousel>
       ))}
       {filter === "all" && <HomeExplore />}
-      {!grid.length && !shelves.length && (
+      {!grid.length && !liked && !shelves.length && (
         <div className="ph-empty">
           <p className="ph-empty__title">Nothing played yet</p>
           <p className="ph-empty__text">Play a record from your library and it shows up here.</p>

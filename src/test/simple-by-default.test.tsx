@@ -29,6 +29,7 @@ import { HelpPanel } from "../help/HelpPanel";
 import { usePinnedPages } from "../stores/pinnedPages";
 import { useRouter } from "../stores/router";
 import { loadSettings, useSettings } from "../stores/settings";
+import { useLikes } from "../stores/likes";
 import { useUi } from "../stores/ui";
 
 const mock = backend as MockBackend;
@@ -163,5 +164,14 @@ describe("the phone's Home", () => {
     expect(new Set(titles)).toEqual(new Set(["Made for you", "Recently added", "Your top artists", "Explore"]));
     // No tools or settings on Home.
     expect(within(home).queryByRole("button", { name: /Settings|Library doctor|Downloads/ })).toBeNull();
+  });
+
+  it("leads the grid with Liked Songs, as the computer does, in eight places", async () => {
+    usePhoneForm.setState({ phone: true });
+    useLikes.getState().setIds(["t1"]);
+    render(<PhoneShell />);
+    const grid = await screen.findByRole("list", { name: "Recent and pinned" }, SLOW);
+    await waitFor(() => expect(within(grid).getAllByRole("listitem")[0]).toHaveTextContent("Liked Songs"), SLOW);
+    expect(within(grid).getAllByRole("listitem").length).toBeLessThanOrEqual(8);
   });
 });
