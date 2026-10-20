@@ -37,7 +37,7 @@ define_class!(
     impl PlayMediaHandler {
         #[unsafe(method(handlePlayMedia:completion:))]
         fn handlePlayMedia_completion(&self, intent: &AnyObject, completion: &DynBlock<dyn Fn(*mut AnyObject)>) {
-            let done = Completion(completion.copy());
+            let done = Completion(Some(completion.copy()));
             let ask = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_ask(intent))).ok();
             let Some(app) = APP.get().cloned() else {
                 done.finish(FAILURE);
@@ -55,14 +55,31 @@ define_class!(
 );
 
 /// Siri's completion block, copied so it can be called once from another
-/// thread.
-struct Completion(block2::RcBlock<dyn Fn(*mut AnyObject)>);
+/// thread. Dropped unanswered (a panic on the way), it answers Failure.
+struct Completion(Option<block2::RcBlock<dyn Fn(*mut AnyObject)>>);
 // SAFETY: Intents' completion blocks may be called from any thread.
 unsafe impl Send for Completion {}
 
+impl Drop for Completion {
+    fn drop(&mut self) {
+        if let Some(block) = self.0.take() {
+            answer(&block, FAILURE);
+        }
+    }
+}
+
 impl Completion {
-    /// Answers Siri with `code`; always calls the block, once.
-    fn finish(self, code: isize) {
+    /// Answers Siri with `code`; the block is called once.
+    fn finish(mut self, code: isize) {
+        if let Some(block) = self.0.take() {
+            answer(&block, code);
+        }
+    }
+}
+
+/// Calls Siri's block with a response for `code`.
+fn answer(block: &block2::RcBlock<dyn Fn(*mut AnyObject)>, code: isize) {
+    {
         // SAFETY: the response class's designated initialiser; the response
         // is handed to the block and released after.
         unsafe {
@@ -73,7 +90,7 @@ impl Completion {
                 Retained::from_raw(r)
             });
             let ptr = response.as_ref().map_or(std::ptr::null_mut(), |r| Retained::as_ptr(r) as *mut AnyObject);
-            self.0.call((ptr,));
+            block.call((ptr,));
         }
     }
 }
@@ -185,7 +202,7 @@ fn add_handler_to(delegate: *mut AnyObject) {
             handler_for_intent as extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject, *mut AnyObject) -> *mut AnyObject,
         );
         if !objc2::ffi::class_addMethod(class, sel!(application:handlerForIntent:), imp, c"@@:@@".as_ptr()).as_bool() {
-            tracing::warn!("Siri: the app delegate already handles intents; Platter's handler isn't used");
+            tracing::debug!("Siri: the app delegate already handles intents");
         }
     }
 }
@@ -193,33 +210,42 @@ fn add_handler_to(delegate: *mut AnyObject) {
 /// `setDelegate:` that gives the delegate the intent handler first.
 extern "C-unwind" fn set_delegate(this: *mut AnyObject, cmd: Sel, delegate: *mut AnyObject) {
     add_handler_to(delegate);
-    if let Some(original) = SET_DELEGATE.get() {
+    match SET_DELEGATE.get() {
         // SAFETY: the original has this exact signature.
-        unsafe {
+        Some(original) => unsafe {
             let f: extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject) = std::mem::transmute(*original);
             f(this, cmd, delegate);
-        }
+        },
+        // Can't happen: ours is only put in after the original is kept.
+        None => tracing::error!("Siri: UIApplication's setDelegate: is missing"),
     }
 }
 
 /// Runs before the app starts (before UIKit sets the app delegate and
-/// caches what it answers to).
+/// caches what it answers to). Keeps the original setter, and only then
+/// puts ours in its place; once.
 pub fn install_early() {
-    let _ = PlayMediaHandler::class();
-    let Some(ui_app) = AnyClass::get(c"UIApplication") else { return };
-    // SAFETY: swaps one setter for a function of the same shape that calls
-    // the original; done once, before the delegate is set.
-    unsafe {
-        let ours: Imp = std::mem::transmute(set_delegate as extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject));
-        if let Some(original) = objc2::ffi::class_replaceMethod(
-            ui_app as *const AnyClass as *mut AnyClass,
-            sel!(setDelegate:),
-            ours,
-            c"v@:@".as_ptr(),
-        ) {
-            let _ = SET_DELEGATE.set(original);
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let _ = PlayMediaHandler::class();
+        let Some(ui_app) = AnyClass::get(c"UIApplication") else { return };
+        // SAFETY: the runtime's own lookup of an existing method, and
+        // swapping its implementation for one of the same shape that calls
+        // the kept original.
+        unsafe {
+            let method = objc2::ffi::class_getInstanceMethod(ui_app, sel!(setDelegate:));
+            if method.is_null() {
+                tracing::warn!("Siri: UIApplication has no setDelegate:");
+                return;
+            }
+            let Some(original) = objc2::ffi::method_getImplementation(method) else { return };
+            if SET_DELEGATE.set(original).is_err() {
+                return;
+            }
+            let ours: Imp = std::mem::transmute(set_delegate as extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject));
+            objc2::ffi::method_setImplementation(method as *mut _, ours);
         }
-    }
+    });
 }
 
 /// The app is up: requests can be played.
