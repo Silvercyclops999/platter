@@ -3114,7 +3114,7 @@ export class MockBackend implements Backend {
     });
   }
   /** What appInfo says this app's version is (tests set it). */
-  appVersion = "0.1.0";
+  appVersion = "0.2.20"; // the same as the mock Bridge, so the mock shows no version line
   appInfo() {
     return this.delay(() => ({ version: this.appVersion, licence: "GPL-3.0-or-later", repoUrl: "https://github.com/Silvercyclops999/platter", form: "desktop" as const }));
   }

@@ -116,7 +116,7 @@ describe("Settings > Bridge", () => {
       ];
     };
     afterEach(() => {
-      mock.appVersion = "0.1.0";
+      mock.appVersion = "0.2.20";
     });
 
     it("says a Bridge behind this app needs updating, with a link to how", async () => {
