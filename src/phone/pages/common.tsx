@@ -11,7 +11,7 @@ import { trackArtistLine } from "../../lib/format";
 import type { HomeItem, Track } from "../../lib/types";
 import { useCanGoBack, useRouter, type Route } from "../../stores/router";
 import { player, usePlayer } from "../../stores/player";
-import { useApp } from "../../stores/app";
+import { isUnavailable, useApp, type AppStore } from "../../stores/app";
 import { useIsDownloaded } from "../../stores/downloads";
 import { phone, type InPlaylist } from "../phoneUi";
 import { SwipeUnder, useSwipeToQueue } from "../rowSwipe";
@@ -58,6 +58,21 @@ export function BackBar({ title, after = 160, right }: { title?: string; after?:
 }
 
 /**
+ * Whether a song row is dimmed as unplayable. Only while just music on the
+ * phone can play (health `cachedOnly`: server unreachable, files gone, Go
+ * offline), and then only songs that aren't on the phone: downloaded or in
+ * the audio cache. The song playing now is never dimmed (it plays), and while
+ * the list of songs on the phone isn't known yet nothing is dimmed.
+ */
+export function songCantPlay(
+  trackId: string,
+  s: Pick<AppStore, "health" | "cached">,
+  { playing, downloaded }: { playing: boolean; downloaded: boolean },
+): boolean {
+  return !playing && !downloaded && isUnavailable(trackId, s);
+}
+
+/**
  * A song: optional number or art, title, artist line with the downloaded
  * mark, and its sheet. The playing song wears the level bars: in place of
  * its number, or before its title on a row without one.
@@ -78,10 +93,9 @@ export function SongRow({
   inPlaylist?: InPlaylist;
 }) {
   const playing = usePlayer((s) => s.state?.track?.id === track.id);
-  // Offline (or Go offline on), a song that isn't on the phone is dimmed: it can't play.
-  const offline = useApp((s) => !!s.health?.cachedOnly);
   const here = useIsDownloaded(track.id);
-  const unplayable = offline && !here;
+  // Dimmed only when it really can't play: see `songCantPlay`.
+  const unplayable = useApp((s) => songCantPlay(track.id, s, { playing, downloaded: here }));
   // Swipe right: into the queue.
   const swipe = useSwipeToQueue(() => void player.addToQueue([track]), !unplayable);
   return (

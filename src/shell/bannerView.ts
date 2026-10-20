@@ -85,6 +85,37 @@ export function offlineCallout(h: Health | null, now: number = Date.now(), mac =
   return { title, body: "Check your connection; it reconnects by itself." };
 }
 
+/**
+ * Why only music on this device can play, in one sentence, or null when
+ * everything can. Shown wherever songs are dimmed for it (the phone's strip
+ * over the tabs), so a dimmed list is never left unexplained.
+ */
+export function cachedOnlyReason(h: Health | null, device = "computer"): string | null {
+  if (!h?.cachedOnly) return null;
+  const only = `only songs on this ${device} play`;
+  switch (h.banner?.kind) {
+    case "goneOffline":
+      return `You chose Go offline, so ${only}.`;
+    case "noInternet":
+      return `You're offline, so ${only}. Platter reconnects by itself.`;
+    case "offline":
+      return `Can't reach your server, so ${only}. Platter reconnects by itself.`;
+    case "starting":
+    case "updating":
+    case "startTimeout":
+      return `Your server is starting, so ${only} for now.`;
+    case "filesUnavailable":
+      return `Your server is up, but your music files aren't available, so ${only}.`;
+    case "localNetwork":
+      return h.banner.message;
+    case "signIn":
+    case "accessRemoved":
+      return `${h.banner.message} Until then, ${only}.`;
+    default:
+      return `Can't reach your server right now, so ${only}.`;
+  }
+}
+
 export function healthBanner(h: Health | null, now: number = Date.now()): BannerView | null {
   if (!h) return null;
   const b = h.banner;

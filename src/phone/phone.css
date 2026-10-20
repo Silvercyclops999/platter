@@ -237,6 +237,8 @@
   pointer-events: none;
 }
 .ph-dock > * { pointer-events: auto; }
+/* Why songs are dimmed: a quiet line on the page colour over the mini player and tabs. */
+.ph-offline-strip { margin: 0; padding: 8px var(--ph-gutter); background-color: var(--color-bg-base); color: var(--color-text-secondary); font-size: 13px; line-height: 1.35; text-align: center; border-top: 1px solid var(--color-border); }
 /* With the mini player up, the dock is one opaque strip from its top to the bottom of the screen: no see-through gap between it and the tabs. */
 .phone.has-mini .ph-dock:not(.is-mini-away) { background-color: var(--color-bg-base); background-image: var(--paper-grain, none); pointer-events: auto; }
 .ph-dock .ph-mini { transition: transform var(--ph-slide) var(--ph-ease), opacity var(--ph-quick) var(--ph-ease); }

@@ -16,6 +16,8 @@ import { startDownloads } from "../stores/downloads";
 import { loadOwnLyricsIds } from "../stores/lyricsEditor";
 import { useCurrentEntry, type HistoryEntry, type Route } from "../stores/router";
 import { usePlayer } from "../stores/player";
+import { useApp } from "../stores/app";
+import { cachedOnlyReason } from "../shell/bannerView";
 import { tap } from "./bits";
 import { LyricsScreen } from "./LyricsScreen";
 import { MiniPlayer } from "./MiniPlayer";
@@ -46,6 +48,20 @@ const TAB_ICON: Record<PhoneTab, typeof Home> = { home: Home, search: Search, li
 
 /** The browser mock's stand-in for a notch and home indicator (`?notch=1`). */
 export const NOTCH = typeof window !== "undefined" && notchFromUrl(window.location.search);
+
+/**
+ * One line over the tabs while only songs on the phone can play, saying why:
+ * the songs dimmed in every list are explained wherever you are.
+ */
+export function CachedOnlyStrip() {
+  const reason = useApp((s) => cachedOnlyReason(s.health, "phone"));
+  if (!reason) return null;
+  return (
+    <p className="ph-offline-strip" role="status" data-testid="phone-offline-strip">
+      {reason}
+    </p>
+  );
+}
 
 export function PhoneShell() {
   const entry = useCurrentEntry();
@@ -84,6 +100,7 @@ export function PhoneShell() {
         <PageStack render={renderPage} />
       </main>
       <div ref={dock} className="ph-dock" aria-hidden={covered || undefined} inert={inertUnder || undefined}>
+        <CachedOnlyStrip />
         <MiniPlayer />
         <nav className="ph-tabs" aria-label="Tabs">
           {TABS.map((t) => {
