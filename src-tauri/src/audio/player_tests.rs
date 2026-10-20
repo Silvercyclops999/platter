@@ -766,8 +766,10 @@ async fn a_call_while_the_output_comes_up_stays_paused() {
     r.cap.reset_stream();
     wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
     r.player.interruption(true, false);
+    let opens = r.cap.opens();
     tokio::time::sleep(Duration::from_millis(1500)).await;
     assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Paused, "not out loud during the call");
+    assert_eq!(r.cap.opens(), opens, "the retry was called off");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -779,8 +781,10 @@ async fn headphones_leaving_while_the_output_comes_up_stay_paused() {
     r.cap.reset_stream();
     wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
     r.player.headphones(false);
+    let opens = r.cap.opens();
     tokio::time::sleep(Duration::from_millis(1500)).await;
     assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Paused);
+    assert_eq!(r.cap.opens(), opens, "the retry was called off");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -798,6 +802,20 @@ async fn a_second_reset_starts_the_tries_over_once() {
     tokio::time::sleep(Duration::from_millis(7000)).await;
     let tried = 100 - r.cap.fail_opens_left();
     assert!(tried <= 6, "one round after each reset at most, tried {tried}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_second_reset_without_play_between_doesnt_double_the_tries() {
+    let mut r = rig(&["a"], 3.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.cap.fail_opens(100);
+    r.cap.reset_stream();
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    // Paused, with retries pending: a reset now isn't a playing stream's.
+    r.cap.reset_stream();
+    tokio::time::sleep(Duration::from_millis(6500)).await;
+    assert_eq!(100 - r.cap.fail_opens_left(), 4, "one round only");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
