@@ -70,6 +70,7 @@ import type {
   ArtistInfo,
   ArtistPage,
   ArtistSort,
+  AudioRoute,
   AuthStatus,
   EventMap,
   EventName,
@@ -3069,6 +3070,15 @@ export class MockBackend implements Backend {
   }
   eqProfileDelete(name: string) {
     return this.changeEq((s) => eq.remove(s, name));
+  }
+  /** Where the phone's sound goes; tests set it and call emitRoute. */
+  route: AudioRoute | null = null;
+  audioRoute() {
+    return this.delay(() => this.route);
+  }
+  emitRoute(route: AudioRoute | null) {
+    this.route = route;
+    this.emit("audio://route", route);
   }
   headphoneSearch(query: string) {
     return this.delay(() => hifi.search(query));

@@ -4383,6 +4383,13 @@ export interface ServerLibrary {
 // ---------------------------------------------------------------- events
 
 /** Every event in docs/IPC.md → its payload. */
+/** Where this phone's sound goes now (iPhone only). */
+export interface AudioRoute {
+  kind: "speaker" | "headphones" | "bluetooth" | "airplay" | "car" | "usb" | "hdmi" | "receiver" | "other";
+  /** The output's own name ("Living Room", "AirPods Pro"). */
+  name: string;
+}
+
 export interface EventMap {
   /** A connected streaming account's sign-in or read moved on. */
   "streaming-account://status": AccountStatus;
@@ -4435,6 +4442,8 @@ export interface EventMap {
   "remote://state": RemoteState;
   /** The Plex player list was refreshed. */
   "remote://players": RemotePlayer[];
+  /** This phone's sound moved to another output (iPhone only). */
+  "audio://route": AudioRoute | null;
   "health://changed": Health;
   toast: ToastEvent;
   "update://ready": { version: string };

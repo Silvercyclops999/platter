@@ -22,7 +22,8 @@ import { alphaKey, isLikedCopy, letterOf, phoneRows, phoneSubtitle } from "../ph
 import { baseTitle, groupEditions } from "../phone/editions";
 import { hitLine, versionsCount } from "../phone/pages/Search";
 import { countText, phoneDownloadProgress, phoneDownloadState } from "../phone/PhoneDownload";
-import { playingLine, sortPlaces } from "../phone/DeviceSheet";
+import { DeviceSheet, OutputButton, playingLine, sortPlaces } from "../phone/DeviceSheet";
+import { resetRouteWatch, routeLine } from "../phone/audioRoute";
 import { PHONE_PAGES } from "../phone/routes";
 import { PhonePage, PhoneShell } from "../phone/PhoneShell";
 import { phone, usePhoneUi } from "../phone/phoneUi";
@@ -430,6 +431,28 @@ describe("devices and search", () => {
   it("other Platters are listed first", () => {
     const p = (name: string, via: "platter" | "plex" | "cast") => ({ id: name, name, via }) as never;
     expect(sortPlaces([p("Den TV", "cast"), p("Laptop", "platter"), p("Attic", "plex")]).map((x: { name: string }) => x.name)).toEqual(["Laptop", "Attic", "Den TV"]);
+  });
+
+  it("names where the phone's sound goes: the speaker or headphones by name, nothing on its own speaker", async () => {
+    expect(routeLine({ kind: "speaker", name: "iPhone" })).toBeNull();
+    expect(routeLine({ kind: "bluetooth", name: "JBL Flip 5" })?.line).toBe("Bluetooth · JBL Flip 5");
+    expect(routeLine({ kind: "airplay", name: "Living Room" })?.line).toBe("AirPlay · Living Room");
+    resetRouteWatch();
+    mock.route = { kind: "bluetooth", name: "JBL Flip 5" };
+    render(
+      <>
+        <OutputButton compact />
+        <DeviceSheet />
+      </>,
+    );
+    expect(await screen.findByText("Bluetooth · JBL Flip 5")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Playing on Bluetooth · JBL Flip 5. Choose where music plays" })).toBeInTheDocument();
+    act(() => mock.emitRoute({ kind: "headphones", name: "AirPods Pro" }));
+    expect(await screen.findByText("Headphones · AirPods Pro")).toBeInTheDocument();
+    act(() => mock.emitRoute({ kind: "speaker", name: "iPhone" }));
+    await waitFor(() => expect(screen.queryByText(/AirPods Pro/)).toBeNull());
+    mock.route = null;
+    resetRouteWatch();
   });
 
   it("a paused player's line says Paused once, a playing one says Playing", () => {

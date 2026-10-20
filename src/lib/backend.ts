@@ -117,6 +117,7 @@ import type {
   NowPlayingDetails,
   OutputState,
   SignalPath,
+  AudioRoute,
   HeadphoneEntry,
   Page,
   PinInfo,
@@ -623,6 +624,8 @@ export interface Backend {
   eqProfileDelete(name: string): Promise<Settings>;
   /** Uses the selected EQ preset or profile whenever the output in use plays (false removes it). */
   eqUseForOutput(on: boolean): Promise<Settings>;
+  /** Where this phone's sound goes now; null off iPhone. */
+  audioRoute(): Promise<AudioRoute | null>;
   /** Headphones in the bundled correction index matching `query` (at most 50). */
   headphoneSearch(query: string): Promise<HeadphoneEntry[]>;
   /** Uses a headphone's correction whenever the output in use plays (null turns it off there). Fetches the profile once. */
@@ -1534,6 +1537,7 @@ export function createTauriBackend(): Backend {
     eqProfileRename: (from, to) => call("eq_profile_rename", { from, to }),
     eqProfileDelete: (name) => call("eq_profile_delete", { name }),
     eqUseForOutput: (on) => call("eq_use_for_output", { on }),
+    audioRoute: () => call("audio_route"),
     headphoneSearch: (query) => call("headphone_search", { query }),
     headphoneCorrectionSet: (path) => call("headphone_correction_set", { path }),
     headphoneCorrectionCompare: (bypass) => call("headphone_correction_compare", { bypass }),

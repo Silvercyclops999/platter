@@ -13,6 +13,7 @@ import { player, usePlayer } from "../stores/player";
 import { loadPlayers, moveTo, returnHere, useRemote, watchPlayers } from "../stores/remote";
 import { toast } from "../stores/toasts";
 import { SheetFrame, tap } from "./bits";
+import { routeLine, useAudioRoute, useWatchRoute } from "./audioRoute";
 import { phone } from "./phoneUi";
 
 const KIND_ICON: Record<PlayerKind, typeof Speaker> = {
@@ -60,13 +61,15 @@ export function sortPlaces(list: RemotePlayer[]): RemotePlayer[] {
 /** The output button in the mini player and on now playing; "Playing on <device>" in the accent while remote. */
 export function OutputButton({ compact = false }: { compact?: boolean }) {
   useWarmPlayers();
+  useWatchRoute();
   const remote = usePlayer((s) => s.remote);
-  const Icon = remote ? KIND_ICON[remote.kind] : Smartphone;
+  const out = routeLine(useAudioRoute((s) => s.route));
+  const Icon = remote ? KIND_ICON[remote.kind] : (out?.Icon ?? Smartphone);
   return (
     <button
       type="button"
       className={`ph-output ${remote ? "is-remote" : ""} ${compact ? "ph-output--compact" : ""}`}
-      aria-label={remote ? `Playing on ${remote.playerName}. Choose where music plays` : "Choose where music plays"}
+      aria-label={remote ? `Playing on ${remote.playerName}. Choose where music plays` : out ? `Playing on ${out.line}. Choose where music plays` : "Choose where music plays"}
       onClick={() => {
         tap();
         phone.push({ kind: "device" });
@@ -85,13 +88,17 @@ export function DeviceSheet() {
   const busy = useRemote((s) => s.busy);
   const [help, setHelp] = useState(false);
   useEffect(() => watchPlayers(), []);
+  useWatchRoute();
+  const route = useAudioRoute((s) => s.route);
+  const out = remote ? null : routeLine(route);
   const others = sortPlaces((players ?? []).filter((p) => p.id !== remote?.playerId && p.online));
-  const CardIcon = remote ? KIND_ICON[remote.kind] : Smartphone;
+  const CardIcon = remote ? KIND_ICON[remote.kind] : (out?.Icon ?? Smartphone);
   return (
     <SheetFrame title="Where music plays" onClose={phone.pop}>
       <div className={`ph-device-card ${remote ? "is-remote" : ""}`}>
         <div className="ph-device-card__text">
           <span className="ph-device-card__name">{remote ? remote.playerName : "This phone"}</span>
+          {out && <span className="ph-device-card__route">{out.line}</span>}
           {track && (
             <span className="ph-device-card__now">
               {track.title} · {track.artistTitle}

@@ -694,6 +694,7 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 }
 .ph-device-card__text { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
 .ph-device-card__name { font-size: 18px; font-weight: 700; }
+.ph-device-card__route { font-size: 13px; color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .ph-device-card__now { font-size: 13px; color: var(--color-accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .ph-device-card__icon { color: var(--color-accent); }
 .ph-device-card__volume { grid-column: 1 / -1; margin-top: 8px; }
