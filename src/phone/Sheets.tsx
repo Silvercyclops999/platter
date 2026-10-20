@@ -32,7 +32,6 @@ import {
   Trash2,
   UserRound,
   UsersRound,
-  MoreHorizontal,
   Blend as BlendIcon,
   type LucideIcon,
 } from "lucide-react";
