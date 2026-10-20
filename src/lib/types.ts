@@ -1129,6 +1129,10 @@ export interface Settings {
   phoneMobileQuality: MobileQuality;
   /** Phone: a light tap of feedback on the player's controls. This device only. */
   phoneHaptics: boolean;
+  /** CarPlay: play on where you left off when the car connects. This device only. */
+  carplayResume: boolean;
+  /** CarPlay: with no signal, lists show only what's downloaded. This device only. */
+  carplayOfflineDownloads: boolean;
   /** Now playing has a Visualizer button. Synced. */
   visualizerButton: boolean;
   /** The visualizer's picture. Synced. */
@@ -1799,6 +1803,8 @@ export const DEFAULT_SETTINGS: Settings = {
   phoneKeepRecent: 50,
   phoneMobileQuality: "auto",
   phoneHaptics: true,
+  carplayResume: true,
+  carplayOfflineDownloads: true,
   visualizerButton: true,
   visualizerStyle: "sleeve",
   visualizerFps: 60,

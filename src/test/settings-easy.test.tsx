@@ -94,6 +94,8 @@ const SHOWN_WHEN: Record<string, string> = {
   phoneKeepRecent: "the phone layout",
   phoneMobileQuality: "the phone layout",
   phoneHaptics: "the phone layout (phone.test.tsx)",
+  carplayResume: "the phone layout (phone.test.tsx)",
+  carplayOfflineDownloads: "the phone layout (phone.test.tsx)",
   streamingRecheck: "the account import source turned on (account-import.test.tsx)",
   bridgeLyrics: "a Bridge paired (bridge-settings.test.tsx)",
   bridgeLyricsHours: "a Bridge paired",

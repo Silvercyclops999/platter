@@ -555,6 +555,23 @@ describe("phone settings", () => {
     expect(screen.queryByText("Haptics on controls")).not.toBeInTheDocument();
   });
 
+  it("CarPlay's two rows start on and persist", async () => {
+    render(<SettingsPage section="Downloads and devices" />);
+    expect(await screen.findByText("Resume when the car connects")).toBeInTheDocument();
+    expect(screen.getByText("Show downloads only when offline")).toBeInTheDocument();
+    const row = (key: string) => document.querySelector(`[data-setting="${key}"]`) as HTMLElement;
+    for (const key of ["carplayResume", "carplayOfflineDownloads"]) {
+      const sw = within(row(key)).getByRole("switch");
+      expect(sw).toBeChecked();
+      fireEvent.click(sw);
+    }
+    await waitFor(async () => {
+      const s = await backend.settingsGet();
+      expect(s.carplayResume).toBe(false);
+      expect(s.carplayOfflineDownloads).toBe(false);
+    });
+  });
+
   it("keeps only the offered counts of recent songs", async () => {
     await expect(backend.settingsSet({ phoneKeepRecent: 7 })).rejects.toMatchObject({ kind: "invalid" });
     await backend.settingsSet({ phoneKeepRecent: 250, phoneMobileQuality: "192" });
