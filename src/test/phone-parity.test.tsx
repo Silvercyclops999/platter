@@ -22,7 +22,7 @@ import { alphaKey, isLikedCopy, letterOf, phoneRows, phoneSubtitle } from "../ph
 import { baseTitle, groupEditions } from "../phone/editions";
 import { hitLine, versionsCount } from "../phone/pages/Search";
 import { countText, phoneDownloadProgress, phoneDownloadState } from "../phone/PhoneDownload";
-import { sortPlaces } from "../phone/DeviceSheet";
+import { playingLine, sortPlaces } from "../phone/DeviceSheet";
 import { PHONE_PAGES } from "../phone/routes";
 import { PhonePage, PhoneShell } from "../phone/PhoneShell";
 import { phone, usePhoneUi } from "../phone/phoneUi";
@@ -430,6 +430,11 @@ describe("devices and search", () => {
   it("other Platters are listed first", () => {
     const p = (name: string, via: "platter" | "plex" | "cast") => ({ id: name, name, via }) as never;
     expect(sortPlaces([p("Den TV", "cast"), p("Laptop", "platter"), p("Attic", "plex")]).map((x: { name: string }) => x.name)).toEqual(["Laptop", "Attic", "Den TV"]);
+  });
+
+  it("a paused player's line says Paused once, a playing one says Playing", () => {
+    expect(playingLine("Paused: Unhomme • Kanye West")).toBe("Paused: Unhomme • Kanye West");
+    expect(playingLine("Unhomme • Kanye West")).toBe("Playing: Unhomme • Kanye West");
   });
 
   it("every pill shows results in one row style; under a type pill the type word goes", () => {

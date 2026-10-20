@@ -47,6 +47,11 @@ export function useWarmPlayers() {
   }, []);
 }
 
+/** A player's line: the core sends "Song • Artist", or "Paused: Song • Artist" when paused. */
+export function playingLine(playing: string): string {
+  return playing.startsWith("Paused: ") ? playing : `Playing: ${playing}`;
+}
+
 /** Other Platters first (they take the queue and the exact place in the song), then the rest by name. */
 export function sortPlaces(list: RemotePlayer[]): RemotePlayer[] {
   return [...list].sort((a, b) => Number(b.via === "platter") - Number(a.via === "platter") || a.name.localeCompare(b.name));
@@ -108,7 +113,7 @@ export function DeviceSheet() {
           <DeviceRow
             key={p.id}
             name={p.name}
-            line={p.unsupported ?? (p.playing ? `Playing ${p.playing}` : p.via === "platter" ? "Platter · picks up where you are" : VIA_LINE[p.via])}
+            line={p.unsupported ?? (p.playing ? playingLine(p.playing) : p.via === "platter" ? "Platter · picks up where you are" : VIA_LINE[p.via])}
             Icon={p.via === "cast" ? Cast : KIND_ICON[p.kind]}
             busy={busy === p.id}
             disabled={!!p.unsupported || p.unreachable}
