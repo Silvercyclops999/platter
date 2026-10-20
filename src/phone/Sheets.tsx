@@ -62,6 +62,7 @@ import { newSmartPlaylist } from "../stores/curate";
 import { SheetFrame, SheetLeaving, tap } from "./bits";
 import { FADE_MS, reduced } from "./motion";
 import { DeviceSheet } from "./DeviceSheet";
+import { SignalSheet } from "./SignalSheet";
 import { phone, usePhoneUi, type Sheet } from "./phoneUi";
 import { CUSTOM_MAX, CUSTOM_MIN, SLEEP_CHOICES, cancelSleep, sleepLabel, startSleep, useSleep } from "./sleepTimer";
 import { playingFrom } from "./NowPlaying";
@@ -144,6 +145,8 @@ const SheetFor = memo(function SheetFor({ sheet }: { sheet: Sheet }) {
       return <SortSheet />;
     case "create":
       return <CreateSheet />;
+    case "signal":
+      return <SignalSheet />;
   }
 });
 

@@ -5,7 +5,7 @@
  * live while it's open (the core sends `audio://signal-path` on changes).
  */
 import { ArrowDown, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { PlateButton } from "../components/Plate";
 import { qualityLabel } from "../lib/format";
@@ -203,6 +203,36 @@ function Arrow() {
   );
 }
 
+/**
+ * The chain of plates and, when it isn't bit-perfect, why: the panel's body,
+ * shared with the phone's sheet. `onSetting` opens the setting that would fix it.
+ */
+export function SignalBody({ path, stream, onSetting }: { path: SignalPath | null; stream: string | null; onSetting: (row: string) => void }) {
+  if (!path) return <p className="signal-panel__empty">Looking at the signal path…</p>;
+  if (path.verdict.kind === "idle") return <p className="signal-panel__empty">Nothing playing. Play something to see its signal path.</p>;
+  const list = stages(path, stream);
+  return (
+    <>
+      <ol className="signal-chain" aria-label="From the file to your speakers">
+        {list.map((s, i) => (
+          <PlateWithArrow key={s.name} stage={s} last={i === list.length - 1} />
+        ))}
+      </ol>
+      {path.why && (
+        <div className="signal-why">
+          <h3 className="signal-why__title">Why isn't this bit-perfect?</h3>
+          <p className="signal-why__text">{path.why.text}</p>
+          {path.why.setting && (
+            <button type="button" className="signal-why__go" onClick={() => onSetting(path.why!.setting!)}>
+              Open the setting
+            </button>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 /** The panel; mounted once, shown while the store says it's open. */
 export function SignalPanel() {
   const open = useSignal((s) => s.open);
@@ -249,39 +279,16 @@ export function SignalPanel() {
     closeSignal();
   };
 
-  let body: ReactNode;
-  if (!path) body = <p className="signal-panel__empty">Looking at the signal path…</p>;
-  else if (path.verdict.kind === "idle") body = <p className="signal-panel__empty">Nothing playing. Play something to see its signal path.</p>;
-  else {
-    const list = stages(path, stream);
-    body = (
-      <>
-        <ol className="signal-chain" aria-label="From the file to your speakers">
-          {list.map((s, i) => (
-            <PlateWithArrow key={s.name} stage={s} last={i === list.length - 1} />
-          ))}
-        </ol>
-        {path.why && (
-          <div className="signal-why">
-            <h3 className="signal-why__title">Why isn't this bit-perfect?</h3>
-            <p className="signal-why__text">{path.why.text}</p>
-            {path.why.setting && (
-              <button
-                type="button"
-                className="signal-why__go"
-                onClick={() => {
-                  closeSignal();
-                  nav.go({ name: "settings", row: path.why!.setting! });
-                }}
-              >
-                Open the setting
-              </button>
-            )}
-          </div>
-        )}
-      </>
-    );
-  }
+  const body = (
+    <SignalBody
+      path={path}
+      stream={stream}
+      onSetting={(row) => {
+        closeSignal();
+        nav.go({ name: "settings", row });
+      }}
+    />
+  );
   const kind = path?.verdict.kind ?? "idle";
   return createPortal(
     <div

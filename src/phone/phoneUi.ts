@@ -35,7 +35,9 @@ export type Sheet =
   /** Every version of a song in the library, each playable. */
   | { kind: "versions"; track: Track }
   | { kind: "librarySort" }
-  | { kind: "create" };
+  | { kind: "create" }
+  /** What happens to the sound between the file and the output. */
+  | { kind: "signal" };
 
 interface PhoneUi {
   tab: PhoneTab;
