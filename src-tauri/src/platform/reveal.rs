@@ -18,10 +18,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::window::Color;
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, Runtime, Window, WindowEvent};
+use tauri::{AppHandle, Manager, Runtime, Window, WindowEvent};
+#[cfg(desktop)]
+use tauri::{PhysicalPosition, PhysicalSize};
 
+use super::StartMode;
 use super::miniplayer::{ScreenRect, WindowBounds, on_a_screen};
-use super::{StartMode, visibility};
+#[cfg(desktop)]
+use super::visibility;
 
 /// Where the window's place and colour are kept.
 pub const PLACE_FILE: &str = "window.json";
@@ -185,6 +189,7 @@ impl Reveal {
         self.0.lock().saved.background.as_deref().and_then(parse_color).unwrap_or(DEFAULT_BACKGROUND)
     }
 
+    #[cfg(desktop)]
     fn update_place(&self, f: impl FnOnce(Option<Place>) -> Option<Place>) {
         let mut g = self.0.lock();
         g.saved.place = f(g.saved.place);

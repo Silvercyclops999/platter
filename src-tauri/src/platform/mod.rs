@@ -44,7 +44,9 @@ use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::Instant;
 
-use tauri::{AppHandle, Manager, Runtime};
+#[cfg(desktop)]
+use tauri::Manager;
+use tauri::{AppHandle, Runtime};
 use tokio::sync::watch;
 
 use crate::audio::events::{ErrorPayload, EventSink, OutputLost, PlayerState, PositionPayload};

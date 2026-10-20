@@ -9,15 +9,22 @@
 //! window opens in the bottom-right corner of the main screen.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
+#[cfg(desktop)]
+use std::sync::atomic::Ordering;
+#[cfg(desktop)]
 use std::time::Duration;
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindowBuilder, Window};
+use tauri::{AppHandle, Emitter, Manager, Runtime, Window};
+#[cfg(desktop)]
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 use crate::error::{AppError, AppResult};
-use crate::settings::{Settings, SettingsState};
+use crate::settings::Settings;
+#[cfg(desktop)]
+use crate::settings::SettingsState;
 
 /// The window's label (also in `capabilities/miniplayer.json`).
 pub const LABEL: &str = "miniplayer";
@@ -34,6 +41,7 @@ pub const QUEUE_HEIGHT: f64 = 500.0;
 /// Gap from the screen edges when it opens in the corner.
 const CORNER_GAP: f64 = 24.0;
 /// How long the window has to sit still before its place is saved.
+#[cfg(desktop)]
 const SAVE_AFTER: Duration = Duration::from_millis(800);
 /// How much of the top strip has to be on a screen to count as visible.
 const VISIBLE_STRIP: (f64, f64) = (80.0, 24.0);
@@ -149,6 +157,7 @@ pub fn grow_for_queue<R: Runtime>(app: &AppHandle<R>) {
 
 /// Live state: the last place seen, and a counter so only the last move saves.
 #[derive(Default, Clone)]
+#[cfg_attr(mobile, allow(dead_code))]
 pub struct Miniplayer {
     last: Arc<Mutex<Option<WindowBounds>>>,
     moves: Arc<AtomicU64>,
@@ -182,6 +191,7 @@ fn screens<R: Runtime>(app: &AppHandle<R>) -> (Vec<ScreenRect>, Option<ScreenRec
     (all, main)
 }
 
+#[cfg(desktop)]
 fn emit<R: Runtime>(app: &AppHandle<R>, open: bool) {
     if let Err(e) = app.emit("miniplayer://changed", MiniplayerState { open }) {
         tracing::warn!("emit miniplayer://changed: {e}");
