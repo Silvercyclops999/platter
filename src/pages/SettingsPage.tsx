@@ -137,8 +137,8 @@ import "./playlist.css";
 import { toast } from "../stores/toasts";
 import { HelpButton, LearnMore } from "../help/HelpButton";
 import {
-  ADVANCED,
   DESKTOP_ONLY_PAGES,
+  MANAGE_IN_MORE,
   GROUPS,
   GROUP_BLURB,
   GROUP_HELP,
@@ -146,10 +146,13 @@ import {
   advancedView,
   groupId,
   helpFor,
+  inMore,
+  loadMoreOpen,
   onPhone,
   pageMeta,
   phoneWords,
   resetPatch,
+  saveMoreOpen,
   settingsOfRows,
   settingsView,
   type GroupName,
@@ -462,7 +465,7 @@ export interface RowDef {
   shown?: boolean;
 }
 
-function Row({ row }: { row: RowDef }) {
+function Row({ row, markMore }: { row: RowDef; markMore?: boolean }) {
   const id = useDomId();
   const ids = useMemo(() => ({ title: `${id}-t`, desc: `${id}-d` }), [id]);
   return (
@@ -475,6 +478,7 @@ function Row({ row }: { row: RowDef }) {
         more={row.more}
         note={row.note}
         footnote={row.footnote}
+        inMoreMark={markMore && !row.key.startsWith("manage-") && inMore(row)}
       />
       <div className="setting-row__control">{row.control(ids)}</div>
       {row.block && <div className="setting-row__block">{row.block(ids)}</div>}
@@ -503,6 +507,7 @@ const RowText = memo(function RowText({
   more,
   note,
   footnote,
+  inMoreMark,
 }: {
   settingKey: string;
   ids: { title: string; desc: string };
@@ -511,6 +516,8 @@ const RowText = memo(function RowText({
   more?: string;
   note?: ReactNode;
   footnote?: string;
+  /** Search results: the row sits under its section's More. */
+  inMoreMark?: boolean;
 }) {
   const learn = helpFor(settingKey);
   // On a phone each row keeps one short line; the whole explanation is behind its info button.
@@ -523,6 +530,7 @@ const RowText = memo(function RowText({
         <div id={ids.title} className="setting-row__title">
           {title}
         </div>
+        {inMoreMark && <span className="setting-row__in-more">In More</span>}
         {info && <MoreText title={title} text={info} />}
       </div>
       <p id={ids.desc} className="setting-row__desc">
@@ -787,7 +795,8 @@ function NoticesDialog({ open, onClose }: { open: boolean; onClose: () => void }
 }
 
 /** Rows with a small heading wherever their group starts. */
-function RowList({ rows }: { rows: RowDef[] }) {
+/** `markMore`: search results, where rows from under More say so. */
+function RowList({ rows, markMore }: { rows: RowDef[]; markMore?: boolean }) {
   // Rows of one small heading stay together, after the rows without one.
   const order = [undefined, ...new Set(rows.map((r) => r.group).filter(Boolean))];
   const sorted = [...rows].sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group));
@@ -805,7 +814,7 @@ function RowList({ rows }: { rows: RowDef[] }) {
           ) : (
             <h3 className="settings__subheading">{r.group}</h3>
           ))}
-        <Row row={r} />
+        <Row row={r} markMore={markMore} />
       </Fragment>
     );
   });
@@ -871,7 +880,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
   const routePage = entry.route.name === "settings" ? entry.route.page : undefined;
   /** The phone shows one group at a time. */
   const routeSection = entry.route.name === "settings" ? entry.route.section : undefined;
-  /** A row a link opened Settings at: its page shows, with its Advanced fold open. */
+  /** A row a link opened Settings at: its page shows, with its More open. */
   const routeRow = entry.route.name === "settings" ? entry.route.row : undefined;
   const prevRoute = useRouter((x) => x.entries[x.index - 1]?.route);
   const npPrefs = useUi((x) => x.nowPlayingPrefs);
@@ -895,10 +904,11 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
   const syncing = useApp((x) => !!x.sync && x.sync.phase !== "idle");
   const [query, setQuery] = useState("");
   const searching = query.trim() !== "";
-  const [openAdvanced, setOpenAdvanced] = useState<ReadonlySet<string>>(() => new Set());
   const allOpen = advancedView.startOpen;
+  /** Sections whose More is open (remembered on this device); with allOpen, the ones closed. */
+  const [openAdvanced, setOpenAdvanced] = useState<ReadonlySet<string>>(() => (allOpen ? new Set() : loadMoreOpen()));
   const [resetSection, setResetSection] = useState<string | null>(null);
-  /** A sharing rule waiting for an OK, since it undoes exceptions under Advanced. */
+  /** A sharing rule waiting for an OK, since it undoes exceptions under More. */
   const [pendingRule, setPendingRule] = useState<{ rule: UnreleasedSharing; lost: number } | null>(null);
   const chooseRule = (rule: UnreleasedSharing) => {
     const cur = useSettings.getState().settings;
@@ -1416,7 +1426,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       section: "Downloads and devices",
       title: "Go offline",
       description: "Stops using the network; only music on this computer plays. This device only.",
-      more: "Platter stops using the network: no server, artist info, lyrics lookups, Discord status, share links or update checks. Only music on this computer plays. Also in the app menu. This device only.",
+      more: "Platter stops using the network: no server, artist info, lyrics lookups, Discord status, share links or update checks. Only music on this computer plays. Also in the tray menu. This device only.",
       control: (ids) => toggle(s, "goOffline", ids),
     },
     // Devices (Sync to a device)
@@ -2206,7 +2216,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       section: "App",
       title: "Show \"?\" help buttons",
       description: "Small \"?\" buttons next to busier screens open their help page.",
-      more: "Small \"?\" buttons next to busier screens open their help page beside them. Help is also in the app menu and in search.",
+      more: "Small \"?\" buttons next to busier screens open their help page beside them. Help is also in your profile menu and in search.",
       control: (ids) => toggle(s, "showHelpButtons", ids),
     },
     {
@@ -2302,7 +2312,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       section: "Library",
       title: "Show the Stats page",
       description: "Your listening in numbers, counted on this computer.",
-      more: "Your listening in numbers: minutes, top songs, artists, albums and genres for any range of days. Opens from the app menu and a Stats row in Your Library. The strip shows your plays, minutes and rank under an artist's or album's buttons. Compare shares only a summary of your top artists and songs, never your history. Wrapped is your year in cards from December 1, with a Your Top Songs list for each year with 30 plays or more.",
+      more: "Your listening in numbers: minutes, top songs, artists, albums and genres for any range of days. Opens from your profile menu and a Stats row in Your Library. The strip shows your plays, minutes and rank under an artist's or album's buttons. Compare shares only a summary of your top artists and songs, never your history. Wrapped is your year in cards from December 1, with a Your Top Songs list for each year with 30 plays or more.",
       control: (ids) => toggle(s, "statsPage", ids),
       block: () => (
         <Checklist
@@ -2418,7 +2428,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       key: "showCrates",
       section: "Library",
       title: "Show crates",
-      description: "A Crates page in the app menu: your records by label, producer, studio, era and genre.",
+      description: "A Crates page in Explore on Home: your records by label, producer, studio, era and genre.",
       more: "Crates file your records the way a shop would. Labels come from your files' tags, Plex and the sleeve notes you've opened; producers from credit tags and sleeve notes; studios from sleeve notes looked up online. A crate needs two records or more. Each crate's page plays everything in it, and a record that's on the sound map opens there.",
       control: (ids) => toggle(s, "showCrates", ids),
     },
@@ -2705,10 +2715,10 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       section: "Sharing and friends",
       title: "Share unreleased music",
       description: "Whether demos, leaks and other unreleased songs can leave this computer.",
-      more: "Never keeps them off Discord, scrobbles, mixes, shared playlists, Blends, listening sessions and public lyrics. Always lets them through. Ask each time asks where Platter can, like before sharing a library or a transcription, and otherwise uses each feature's own choice under Advanced. Picking a rule sets those choices; change one there to make an exception.",
+      more: "Never keeps them off Discord, scrobbles, mixes, shared playlists, Blends, listening sessions and public lyrics. Always lets them through. Ask each time asks where Platter can, like before sharing a library or a transcription, and otherwise uses each feature's own choice under More. Picking a rule sets those choices; change one there to make an exception.",
       note: (() => {
         const n = s ? exceptionsTo(s).length : 0;
-        return n ? `${n} ${n === 1 ? "feature is" : "features are"} set differently under Advanced.` : undefined;
+        return n ? `${n} ${n === 1 ? "feature is" : "features are"} set differently under More.` : undefined;
       })(),
       control: (ids) =>
         select(s, (x) => x.unreleasedSharing ?? "ask", UNRELEASED_RULE_OPTIONS, ids, chooseRule),
@@ -3500,7 +3510,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       section: "Appearance",
       title: "Miniplayer always on top",
       description: "The miniplayer stays above other windows. This device only.",
-      more: "The miniplayer stays above other windows. Open it from the player bar or the app menu. It keeps its size and place on this computer. This device only.",
+      more: "The miniplayer stays above other windows. Open it from the player bar. It keeps its size and place on this computer. This device only.",
       control: (ids) => toggle(s, "miniplayerOnTop", ids),
     },
     {
@@ -3733,7 +3743,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       section: "Library",
       title: "Show the sound map",
       description: "A map of your library where songs that sound alike sit together.",
-      more: "A map of your library where songs that sound alike sit together, in the app menu once songs are analysed. It fills in as Automix analyses songs on this computer and works offline.",
+      more: "A map of your library where songs that sound alike sit together, in Explore on Home once songs are analysed. It fills in as Automix analyses songs on this computer and works offline.",
       note: s && !s.automix ? "Songs are analysed while Automix is on." : undefined,
       control: (ids) => toggle(s, "showSoundMap", ids),
     },
@@ -3744,7 +3754,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       page: "doctor",
       title: "Check the library in the background",
       description: "Lists what's worth fixing, with a fix for each. Nothing changes until you confirm.",
-      more: "Checks your library in the background, after each sync and when new tags are read, and lists what's worth fixing with a fix for each. Nothing changes until you pick a fix and confirm it. The count shows in the app menu.",
+      more: "Checks your library in the background, after each sync and when new tags are read, and lists what's worth fixing with a fix for each. Nothing changes until you pick a fix and confirm it. The count shows under Your Library.",
       note: <DoctorNote on={s?.libraryDoctor !== false} />,
       control: (ids) => toggle(s, "libraryDoctor", ids),
     },
@@ -3955,17 +3965,12 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
     tags: { matches: (x) => !!caps.metadataEdit && plexEditMatches(x), render: () => (caps.metadataEdit ? <PlexEditSettings /> : null) },
   };
 
-  const runDoctor = () =>
-    backend.doctorRun().then(
-      () => toast.info("The library doctor is checking your library"),
-      (e) => toast.error(failText(`Couldn't start the library doctor`, e)),
-    );
   /** Buttons a Manage row carries besides Manage itself. */
   const manageActions: Partial<Record<PageId, ReactNode>> = {
     tags: <CheckTagsButton />,
     doctor: (
-      <Button size="sm" onClick={() => void runDoctor()} disabled={s?.libraryDoctor === false}>
-        Run library doctor
+      <Button size="sm" onClick={() => nav.go({ name: "doctor" })} disabled={s?.libraryDoctor === false} aria-label="Open Library doctor">
+        Open
       </Button>
     ),
     looks: (
@@ -4081,12 +4086,12 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
   };
 
   // ------------------------------------------------------------ parts
-  /** The linked row whose Advanced section was opened (once, so its toggle still works). */
+  /** The linked row whose More was opened (once, so its toggle still works). */
   const seededRow = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!routeRow || seededRow.current === routeRow || !ADVANCED.has(routeRow)) return;
+    if (!routeRow || seededRow.current === routeRow) return;
     const r = usable.find((x) => x.key === routeRow);
-    if (!r) return;
+    if (!r || !inMore(r)) return;
     seededRow.current = routeRow;
     const scope = r.page ? `page:${r.page}` : r.section;
     setOpenAdvanced((prev) => {
@@ -4101,44 +4106,49 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       const next = new Set(prev);
       if (next.has(scope)) next.delete(scope);
       else next.add(scope);
+      if (!allOpen) saveMoreOpen(next);
       return next;
     });
+  const moreOpen = (scope: string) => allOpen !== openAdvanced.has(scope);
 
-  /** Rows, with rarely needed ones folded under one Advanced row (on a phone, set out under "More options" instead). */
-  const foldedRows = (scope: string, list: RowDef[], domId: string, between?: ReactNode) => {
-    const everyday = list.filter((r) => !ADVANCED.has(r.key));
-    const advanced = list.filter((r) => ADVANCED.has(r.key));
-    if (isPhone)
-      return (
-        <>
-          <RowList rows={everyday} />
-          {between}
-          {advanced.length > 0 && <RowList rows={advanced.map((r) => (r.group ? r : { ...r, group: "More options" }))} />}
-        </>
-      );
-    // A search shows matching Advanced rows without a click, and so does a link to one.
-    // A link to an Advanced row opens it until the effect below takes over; the toggle works after.
-    const open = searching || allOpen !== openAdvanced.has(scope) || (advanced.some((r) => r.key === routeRow) && seededRow.current !== routeRow);
+  /**
+   * Rows: the common ones, then one More at the end that opens the rest in
+   * place (remembered per section). `between` sits above More; `hidden` is
+   * extra content under it (integrations not set up), with how many it holds.
+   */
+  const foldedRows = (scope: string, list: RowDef[], domId: string, between?: ReactNode, hidden?: { node: ReactNode; count: number }) => {
+    const everyday = list.filter((r) => !inMore(r));
+    const advanced = list.filter((r) => inMore(r));
+    const count = advanced.length + (hidden?.count ?? 0);
+    // A search shows matching rows without a click, and so does a link to one.
+    // A link to a row under More opens it until the effect above takes over; the toggle works after.
+    const open = searching || moreOpen(scope) || (advanced.some((r) => r.key === routeRow) && seededRow.current !== routeRow);
     return (
       <>
         <RowList rows={everyday} />
         {between}
-        {advanced.length > 0 && (
+        {count > 0 && (
           <div className="settings__advanced">
             <button
               type="button"
               className="settings__advanced-toggle"
               aria-expanded={open}
               aria-controls={`${domId}-advanced`}
+              aria-label={`More in ${scopeTitle(scope)}, ${count} ${count === 1 ? "setting" : "settings"}`}
               disabled={searching}
               onClick={() => toggleAdvanced(scope)}
             >
               <ChevronRight size={16} aria-hidden="true" className="settings__advanced-chevron" />
-              Advanced
-              <span className="settings__advanced-count">{advanced.length}</span>
+              More
+              <span className="settings__advanced-count">{count}</span>
             </button>
             <div id={`${domId}-advanced`} hidden={!open}>
-              {open && <RowList rows={advanced} />}
+              {open && (
+                <>
+                  <RowList rows={advanced} />
+                  {hidden?.node}
+                </>
+              )}
             </div>
           </div>
         )}
@@ -4171,10 +4181,16 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
           </Button>
         )}
       </div>
-      <RowList rows={list} />
+      <RowList rows={list} markMore={searching} />
       {withExtras && extras[p.id]?.render()}
     </div>
   );
+
+  /** A group's pages: integrations set up and everyday tools show; the rest go under More. */
+  const splitPages = (pages: PageMeta[]) => {
+    const under = (p: PageMeta) => (p.kind === "integration" ? !connected[p.id] : MANAGE_IN_MORE.has(p.id));
+    return { shown: pages.filter((p) => !under(p)), more: pages.filter(under) };
+  };
 
   const groupPages = (g: GroupName) => PAGES.filter((p) => p.group === g && pageOn(p.id) && (!isPhone || !DESKTOP_ONLY_PAGES.has(p.id)));
 
@@ -4183,8 +4199,12 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
     const domId = groupId(g);
     const list = usable.filter((r) => r.section === g && !r.page);
     const pages = groupPages(g);
-    const cards = pages.filter((p) => p.kind === "integration");
-    const manage = pages.filter((p) => p.kind === "manage");
+    const { shown: shownPages, more: morePages } = splitPages(pages);
+    const cards = shownPages.filter((p) => p.kind === "integration");
+    const manage = shownPages.filter((p) => p.kind === "manage");
+    const moreCards = morePages.filter((p) => p.kind === "integration");
+    const moreManage = morePages.filter((p) => p.kind === "manage");
+    const noneSetUp = moreCards.length > 0 && cards.length === 0;
     return (
       <section key={g} id={`${domId}-section`} className="settings__group" aria-labelledby={domId} data-group={g}>
         {sectionHead(g, g, domId)}
@@ -4200,12 +4220,43 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
                 ))}
               </div>
             )}
+            {noneSetUp && (
+              <div className="settings__add">
+                <p className="setting-row__desc">Nothing is set up here yet.</p>
+                {!moreOpen(g) && (
+                  <Button size="sm" onClick={() => toggleAdvanced(g)}>
+                    Add an integration
+                  </Button>
+                )}
+              </div>
+            )}
             {manage.length > 0 && (
               <div className="settings__manage">
                 <RowList rows={manage.map(manageRow)} />
               </div>
             )}
           </>,
+          morePages.length > 0
+            ? {
+                count: morePages.length,
+                node: (
+                  <>
+                    {moreCards.length > 0 && (
+                      <div className="settings-cards">
+                        {moreCards.map((p) => (
+                          <IntegrationCard key={p.id} p={p} on={!!connected[p.id]} onOpen={() => openPage(p.id)} />
+                        ))}
+                      </div>
+                    )}
+                    {moreManage.length > 0 && (
+                      <div className="settings__manage">
+                        <RowList rows={moreManage.map(manageRow)} />
+                      </div>
+                    )}
+                  </>
+                ),
+              }
+            : undefined,
         )}
         {inline &&
           pages.map((p) =>
@@ -4219,7 +4270,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
     );
   };
 
-  /** Search results: matching rows from every group and page, Advanced ones included. */
+  /** Search results: matching rows from every group and page, those under More included (and marked). */
   const results = () => {
     const out: ReactNode[] = [];
     for (const g of GROUPS) {
@@ -4240,7 +4291,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       out.push(
         <section key={g} id={`${domId}-section`} className="settings__group" aria-labelledby={domId} data-group={g}>
           {sectionHead(g, g, domId)}
-          <RowList rows={own} />
+          <RowList rows={own} markMore />
           {pages.some((x) => x.offer) && (
             <div className="settings__manage">
               <RowList rows={pages.filter((x) => x.offer).map((x) => manageRow(x.p))} />
@@ -4328,7 +4379,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       <ConfirmDialog
         open={pendingRule !== null}
         title="Undo your exceptions?"
-        body={`${pendingRule?.lost === 1 ? "1 feature is" : `${pendingRule?.lost ?? 0} features are`} set differently under Advanced. This rule sets ${pendingRule?.lost === 1 ? "it" : "them"} back.`}
+        body={`${pendingRule?.lost === 1 ? "1 feature is" : `${pendingRule?.lost ?? 0} features are`} set differently under More. This rule sets ${pendingRule?.lost === 1 ? "it" : "them"} back.`}
         confirm="Change the rule"
         onConfirm={() => pendingRule && void updateSettings(patchForRule(pendingRule.rule, useSettings.getState().settings))}
         onClose={() => setPendingRule(null)}
@@ -4347,7 +4398,23 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
     if (page) body = pageView(page);
     else if (g) {
       const domId = groupId(g);
-      const pages = groupPages(g);
+      const { shown: shownPages, more: morePages } = splitPages(groupPages(g));
+      const pageList = (list: PageMeta[], label: string) => (
+        <ul className="ph-set-list ph-set-list--pages" aria-label={label}>
+          {list.map((p) => (
+            <li key={p.id}>
+              <button type="button" className="ph-set-link" onClick={() => openPage(p.id)} data-page={p.id}>
+                <span className="ph-set-link__text">
+                  <span className="ph-set-link__title">{p.title}</span>
+                  <span className="ph-set-link__sub">{p.blurb}</span>
+                </span>
+                {p.kind === "integration" && <span className={`ph-set-link__state${connected[p.id] ? " is-on" : ""}`}>{connected[p.id] ? "On" : "Off"}</span>}
+                <ChevronRight size={18} aria-hidden="true" className="ph-set-link__chev" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      );
       body = (
         <section className="settings__group ph-set-section" aria-labelledby={domId} data-group={g}>
           <h1 id={domId} className="ph-title" tabIndex={-1}>
@@ -4358,22 +4425,8 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
             // The phone's Look leads Appearance, where Theme stands on a computer.
             usable.filter((r) => r.section === g && !r.page).sort((a, b) => Number(b.key === "phoneLook") - Number(a.key === "phoneLook")),
             domId,
-            pages.length > 0 && (
-              <ul className="ph-set-list ph-set-list--pages" aria-label={`More in ${g}`}>
-                {pages.map((p) => (
-                  <li key={p.id}>
-                    <button type="button" className="ph-set-link" onClick={() => openPage(p.id)} data-page={p.id}>
-                      <span className="ph-set-link__text">
-                        <span className="ph-set-link__title">{p.title}</span>
-                        <span className="ph-set-link__sub">{p.blurb}</span>
-                      </span>
-                      {p.kind === "integration" && <span className={`ph-set-link__state${connected[p.id] ? " is-on" : ""}`}>{connected[p.id] ? "On" : "Off"}</span>}
-                      <ChevronRight size={18} aria-hidden="true" className="ph-set-link__chev" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ),
+            shownPages.length > 0 && pageList(shownPages, `Pages in ${g}`),
+            morePages.length > 0 ? { count: morePages.length, node: pageList(morePages, `More pages in ${g}`) } : undefined,
           )}
           {scopeSettings(g).length > 0 && (
             <button type="button" className="ph-set-reset" onClick={() => setResetSection(g)}>

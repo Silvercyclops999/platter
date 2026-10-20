@@ -150,26 +150,28 @@ describe("every setting", () => {
   });
 });
 
-describe("Advanced", () => {
-  it("folds rarely needed rows away in each section, and opens on a click", async () => {
+describe("More", () => {
+  it("folds the rows most people don't need in each section, and opens on a click", async () => {
     advancedView.startOpen = false;
+    localStorage.removeItem("platter.settings.moreOpen");
     const user = userEvent.setup();
     render(<SettingsPage />);
     const playback = await screen.findByRole("region", { name: "Playback" });
-    expect(within(playback).getByRole("combobox", { name: "Shuffle style" })).toBeInTheDocument();
+    expect(within(playback).getByRole("combobox", { name: "Crossfade songs" })).toBeInTheDocument();
     expect(within(playback).queryByRole("spinbutton", { name: "Songs to load ahead" })).toBeNull();
-    const toggle = within(playback).getByRole("button", { name: /^Advanced/ });
+    const toggle = within(playback).getByRole("button", { name: /^More in Playback/ });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     await user.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(within(playback).getByRole("spinbutton", { name: "Songs to load ahead" })).toBeInTheDocument();
     // Other sections stay folded.
     const library = screen.getByRole("region", { name: "Library" });
-    expect(within(library).getByRole("button", { name: /^Advanced/ })).toHaveAttribute("aria-expanded", "false");
+    expect(within(library).getByRole("button", { name: /^More in Library/ })).toHaveAttribute("aria-expanded", "false");
+    localStorage.removeItem("platter.settings.moreOpen");
     expect(within(library).queryByRole("switch", { name: "Forgive typos in search" })).toBeNull();
   });
 
-  it("settings search finds Advanced rows without opening anything", async () => {
+  it("settings search finds rows under More without opening anything", async () => {
     advancedView.startOpen = false;
     await mock.settingsSet({ discordStatus: true });
     await loadSettings();

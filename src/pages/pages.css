@@ -503,6 +503,10 @@
 .settings__advanced-chevron { transition: transform var(--motion-quick) var(--motion-easing); }
 .settings__advanced-toggle[aria-expanded="true"] .settings__advanced-chevron { transform: rotate(90deg); }
 .settings__advanced-count { color: var(--color-text-muted); font-weight: var(--font-weight-regular, 400); font-size: var(--font-size-sm); }
+/* Search results: a row that sits under its section's More says so. */
+.setting-row__in-more { flex: none; padding: 0 var(--space-2); border-radius: var(--radius-pill); background: color-mix(in srgb, var(--color-ink) 8%, transparent); color: var(--color-text-secondary); font-size: var(--font-size-xs); line-height: 20px; }
+/* Integrations with none set up: a line and the way to add one. */
+.settings__add { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) 0; }
 .settings__heading {
   margin-bottom: var(--space-2);
   font-size: var(--font-size-xl);

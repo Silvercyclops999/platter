@@ -1,7 +1,7 @@
 /**
  * What the Settings page needs to know about its rows beyond their text:
- * which sit under a section's collapsed Advanced row, where "Learn more"
- * goes, and which settings Reset this section puts back.
+ * which show by default and which sit under a section's More, where "Learn
+ * more" goes, and which settings Reset this section puts back.
  */
 import type { Settings } from "../lib/types";
 
@@ -96,10 +96,107 @@ export const settingsView = { inlinePages: false };
 export const DESCRIPTION_MAX = 100;
 
 /**
- * Rows most people never need, folded under each section's Advanced row.
- * Settings search still finds them (and opens Advanced to show them).
+ * The rows a section shows by default: what most people use. Every other
+ * row of a section's main view sits under its More, which search still
+ * reaches (marking the row "In More"). A new row goes under More unless it
+ * is added here, so a section stays short.
+ */
+export const COMMON: ReadonlySet<string> = new Set([
+  // Account and servers: who you are and which server.
+  "account",
+  "servers",
+  "libraries",
+  // Playback: the switches people actually change.
+  "queueEnd",
+  "smartShuffle",
+  "crossfade",
+  "automix",
+  "visualizerButton",
+  // Sound: quality, where it plays, loudness and the equalizer.
+  "qualityHome",
+  "qualityAway",
+  "outputDevice",
+  "leveling",
+  "eqEnabled",
+  // Library: syncing, search beyond the library, mixes and Stats.
+  "resync",
+  "catalogueSearch",
+  "homeMixes",
+  "statsPage",
+  "releaseRadar",
+  "explicitContent",
+  // Downloads and devices: the basics, and going offline.
+  "downloadQuality",
+  "downloadsStorage",
+  "downloadLiked",
+  "goOffline",
+  "showDevices",
+  // Appearance: look, layout and colour.
+  "layout",
+  "theme",
+  "phoneLook",
+  "accent",
+  "artworkColours",
+  "reduceMotion",
+  // Lyrics: whether and how they show.
+  "lyricsMode",
+  "lyricsPreferOwn",
+  "showPronunciation",
+  "transcribeLyrics",
+  // Sharing and friends: privacy and the main ways to share.
+  "privateSession",
+  "sharePublicLinks",
+  "showFriendActivity",
+  "collabPlaylists",
+  "shareMyMusic",
+  "sharePeople",
+  // App: updates, notifications, the tray and start-up, and About.
+  "updates",
+  "notifications",
+  "closeToTray",
+  "launchAtLogin",
+  "about",
+  // The phone's own: mobile data for downloads.
+  "phoneMobileDownloads",
+]);
+
+/** Tool pages whose Manage row sits under its section's More (rarely needed). */
+export const MANAGE_IN_MORE: ReadonlySet<PageId> = new Set<PageId>(["tags", "soundId", "hidden", "devices", "guides"]);
+
+/**
+ * Whether a row sits under More: on a section's main view, any row that isn't
+ * common; on an integration's or tool's own page, the finer ones (ADVANCED).
+ */
+export function inMore(row: { key: string; page?: string }): boolean {
+  return row.page ? ADVANCED.has(row.key) : !COMMON.has(row.key);
+}
+
+/** Where each section's More is remembered open, on this device. */
+export const MORE_OPEN_KEY = "platter.settings.moreOpen";
+
+export function loadMoreOpen(): Set<string> {
+  try {
+    const v = JSON.parse(localStorage.getItem(MORE_OPEN_KEY) ?? "[]");
+    return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function saveMoreOpen(open: ReadonlySet<string>) {
+  try {
+    localStorage.setItem(MORE_OPEN_KEY, JSON.stringify([...open]));
+  } catch {
+    // Kept for this visit only.
+  }
+}
+
+/**
+ * On a page, rows most people never need, folded under its More (on a
+ * section's main view, COMMON decides instead; the section names below
+ * still say what each holds). Settings search still finds them.
  * The rule: everyday choices stay in view; tuning, numbers, technical
- * names, and follow-up options of something else stay in Advanced.
+ * names, and follow-up options of something else go under More.
  */
 export const ADVANCED: ReadonlySet<string> = new Set([
   // Account and servers: only matter with Subsonic, a Plex Home or a picture to hide.
@@ -274,8 +371,8 @@ export const ADVANCED: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Whether Advanced starts open. Off in the app (each visit starts tidy); the
- * test setup opens it so tests of a row needn't click Advanced first.
+ * Whether More starts open everywhere. Off in the app (each section opens as
+ * it was left); the test setup opens it so tests of a row needn't click More first.
  */
 export const advancedView = { startOpen: false };
 

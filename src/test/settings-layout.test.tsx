@@ -1,7 +1,7 @@
 /**
  * The Settings layout: ten groups with a side nav (a dropdown when narrow),
- * one Advanced fold per group, integrations as cards with pages of their
- * own, tools moved out behind a Manage row, rows that wait for their
+ * the common rows with one More per group (remembered open), integrations
+ * set up as cards and the rest under More, tools moved out behind a Manage row, rows that wait for their
  * service, search across all of it, Reset in each group's menu, and the
  * one "Share unreleased music" rule with its exceptions.
  */
@@ -13,7 +13,7 @@ import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS, type Settings } from "../lib/types";
 import { SettingsPage } from "../pages/SettingsPage";
-import { ADVANCED, GROUPS, PAGES, advancedView, settingsView } from "../pages/settingsMeta";
+import { COMMON, GROUPS, MANAGE_IN_MORE, MORE_OPEN_KEY, PAGES, advancedView, inMore, settingsView } from "../pages/settingsMeta";
 import { UNRELEASED_OVERRIDES, exceptionsTo, patchForRule } from "../pages/unreleasedRule";
 import { useRouter } from "../stores/router";
 import { loadSettings, useSettings } from "../stores/settings";
@@ -29,6 +29,7 @@ async function settings(p: Partial<Settings> = {}) {
 beforeEach(async () => {
   settingsView.inlinePages = false;
   advancedView.startOpen = false;
+  localStorage.removeItem(MORE_OPEN_KEY);
   useRouter.getState().reset({ name: "settings" });
   await settings();
 });
@@ -109,19 +110,76 @@ describe("groups and nav", () => {
   });
 });
 
-describe("Advanced folds", () => {
-  it("each group shows about eight rows and folds the rest under one Advanced", async () => {
+/** Rows in view in a group, not counting Manage rows for pages. */
+const shownRows = (region: HTMLElement) =>
+  [...region.querySelectorAll<HTMLElement>("[data-setting]")].filter((r) => !r.dataset.setting!.startsWith("manage-") && !r.closest("[hidden]")).map((r) => r.dataset.setting!);
+
+describe("More", () => {
+  it("each group shows its common rows, about a third, with one More for the rest", async () => {
     render(<SettingsPage />);
     await screen.findByRole("region", { name: "Playback" });
+    const visible: Record<string, string[]> = {};
     for (const g of GROUPS) {
       const region = screen.getByRole("region", { name: g });
-      const toggles = within(region).queryAllByRole("button", { name: /^Advanced/ });
-      expect(toggles.length, `${g} has at most one Advanced`).toBeLessThanOrEqual(1);
-      // Rows in view, not counting Manage rows for pages.
-      const visible = [...region.querySelectorAll<HTMLElement>("[data-setting]")].filter((r) => !r.dataset.setting!.startsWith("manage-") && !r.closest("[hidden]"));
-      expect(visible.length, `${g} shows ${visible.length} rows`).toBeLessThanOrEqual(9);
-      for (const r of visible) expect(ADVANCED.has(r.dataset.setting!), `${r.dataset.setting} is everyday`).toBe(false);
+      expect(within(region).queryAllByRole("button", { name: /^More in / }).length, `${g} has at most one More`).toBeLessThanOrEqual(1);
+      visible[g] = shownRows(region);
+      for (const k of visible[g]) expect(COMMON.has(k), `${k} is common`).toBe(true);
     }
+    expect(Object.fromEntries(GROUPS.map((g) => [g, visible[g].length]))).toEqual({
+      "Account and servers": 3,
+      Playback: 5,
+      Sound: 5,
+      Library: 6,
+      "Downloads and devices": 5,
+      Appearance: 5,
+      Lyrics: 4,
+      Integrations: 0,
+      "Sharing and friends": 6,
+      App: 5,
+    });
+  });
+
+  it("the visible share is about a third of every row", async () => {
+    advancedView.startOpen = true;
+    render(<SettingsPage />);
+    await screen.findByRole("region", { name: "Playback" });
+    const all = GROUPS.flatMap((g) => shownRows(screen.getByRole("region", { name: g })));
+    const common = all.filter((k) => !inMore({ key: k }));
+    expect(all.length).toBeGreaterThan(150);
+    expect(common.length / all.length).toBeGreaterThan(0.2);
+    expect(common.length / all.length).toBeLessThan(0.36);
+  });
+
+  it("More opens in place and stays open next time, per section, on this device", async () => {
+    const user = userEvent.setup();
+    localStorage.removeItem(MORE_OPEN_KEY);
+    const first = render(<SettingsPage />);
+    const playback = await screen.findByRole("region", { name: "Playback" });
+    expect(within(playback).queryByRole("combobox", { name: "Shuffle style" })).toBeNull();
+    const more = within(playback).getByRole("button", { name: /^More in Playback, \d+ settings$/ });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    await user.click(more);
+    expect(more).toHaveAttribute("aria-expanded", "true");
+    expect(within(playback).getByRole("combobox", { name: "Shuffle style" })).toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem(MORE_OPEN_KEY) ?? "[]")).toEqual(["Playback"]);
+    first.unmount();
+    render(<SettingsPage />);
+    const again = await screen.findByRole("region", { name: "Playback" });
+    expect(within(again).getByRole("button", { name: /^More in Playback/ })).toHaveAttribute("aria-expanded", "true");
+    // Other sections stay as they were.
+    expect(within(screen.getByRole("region", { name: "Sound" })).getByRole("button", { name: /^More in Sound/ })).toHaveAttribute("aria-expanded", "false");
+    localStorage.removeItem(MORE_OPEN_KEY);
+  });
+
+  it("search finds a row under More and marks it In More", async () => {
+    render(<SettingsPage />);
+    const box = await screen.findByRole("searchbox", { name: "Search settings" });
+    fireEvent.change(box, { target: { value: "shuffle style" } });
+    const row = (await screen.findByRole("combobox", { name: "Shuffle style" })).closest<HTMLElement>(".setting-row")!;
+    expect(within(row).getByText("In More")).toBeInTheDocument();
+    fireEvent.change(box, { target: { value: "crossfade songs" } });
+    const common = (await screen.findByText("Crossfade songs", { selector: ".setting-row__title" })).closest<HTMLElement>(".setting-row")!;
+    expect(within(common).queryByText("In More")).toBeNull();
   });
 });
 
@@ -131,8 +189,11 @@ describe("pages", () => {
     await settings({ nowPlayingFeed: true });
     render(<SettingsPage />);
     const group = await screen.findByRole("region", { name: "Integrations" });
-    const cards = [...group.querySelectorAll<HTMLElement>(".settings-card")].map((c) => c.dataset.page);
-    expect(cards).toEqual(PAGES.filter((p) => p.kind === "integration").map((p) => p.id));
+    // Only what's set up shows; the rest wait under More.
+    const shownCards = () => [...group.querySelectorAll<HTMLElement>(".settings-card")].filter((c) => !c.closest("[hidden]")).map((c) => c.dataset.page);
+    expect(shownCards()).toEqual(["widgetFeed"]);
+    await user.click(within(group).getByRole("button", { name: /^More in Integrations/ }));
+    expect(shownCards()).toEqual(["widgetFeed", ...PAGES.filter((p) => p.kind === "integration" && p.id !== "widgetFeed").map((p) => p.id)]);
     // No integration rows on the main page.
     expect(within(group).queryAllByRole("switch")).toHaveLength(0);
     const feed = group.querySelector<HTMLElement>('[data-page="widgetFeed"]')!;
@@ -158,6 +219,14 @@ describe("pages", () => {
     const pages = PAGES.filter((p) => p.kind === "manage");
     for (const p of pages) {
       const region = screen.getByRole("region", { name: p.group });
+      // Rarely needed tools sit under their section's More.
+      if (MANAGE_IN_MORE.has(p.id)) {
+        const more = within(region).getByRole("button", { name: /^More in / });
+        if (more.getAttribute("aria-expanded") === "false") {
+          expect(within(region).queryByRole("button", { name: `Manage ${p.title}` })).toBeNull();
+          await user.click(more);
+        }
+      }
       expect(within(region).getByRole("button", { name: `Manage ${p.title}` })).toBeInTheDocument();
       // Their rows aren't on the main page.
       expect(document.querySelector(`[data-page="${p.id}"]`)).toBeNull();
@@ -174,7 +243,7 @@ describe("pages", () => {
     }
   });
 
-  it("a link to a row opens its page, with its Advanced fold open", async () => {
+  it("a link to a row opens its page, with its More open", async () => {
     act(() => useRouter.getState().navigate({ name: "settings", row: "showSoundMap" }));
     const { unmount } = render(<SettingsPage />);
     const library = await screen.findByRole("region", { name: "Library" });
@@ -205,8 +274,8 @@ describe("pages", () => {
     await waitFor(() => expect(rowKeys()).toContain("discordCoverSource"));
     expect(rowKeys()).toContain("discordFindSong");
     expect(within(page).queryByRole("note")).toBeNull();
-    // The finer ones fold under the page's Advanced.
-    await user.click(within(page).getByRole("button", { name: /^Advanced/ }));
+    // The finer ones fold under the page's More.
+    await user.click(within(page).getByRole("button", { name: /^More in Discord/ }));
     expect(rowKeys()).toEqual(expect.arrayContaining(["discordStatusLine", "discordListenAlong", "discordClearOnPause"]));
   });
 
@@ -227,7 +296,7 @@ describe("pages", () => {
 });
 
 describe("search", () => {
-  it("reaches every row, on the main page or any page, Advanced ones included", async () => {
+  it("reaches every row, on the main page or any page, those under More included", async () => {
     // Every row as the test setup shows them: pages in place, services connected.
     settingsView.inlinePages = true;
     advancedView.startOpen = true;
@@ -324,23 +393,23 @@ describe("Share unreleased music", () => {
     expect(exceptionsTo({ ...DEFAULT_SETTINGS, ...never, mixUnreleased: true })).toEqual(["mixUnreleased"]);
   });
 
-  it("is one row in Sharing and friends with the per-feature choices under Advanced", async () => {
+  it("is one row in Sharing and friends, under More, with the per-feature choices", async () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
     const sharing = await screen.findByRole("region", { name: "Sharing and friends" });
+    expect(within(sharing).queryByRole("combobox", { name: "Share unreleased music" })).toBeNull();
+    await user.click(within(sharing).getByRole("button", { name: /^More in Sharing/ }));
     const rule = within(sharing).getByRole("combobox", { name: "Share unreleased music" });
     expect(rule).toHaveValue("ask");
-    expect(within(sharing).queryByRole("switch", { name: "Scrobble unreleased music" })).toBeNull();
     await user.selectOptions(rule, "never");
     await waitFor(() => expect(useSettings.getState().settings?.unreleasedSharing).toBe("never"));
     const s = (await mock.settingsGet()) as Settings;
     expect(s).toMatchObject({ mixUnreleased: false, discordShowUnreleased: false, discordUnreleasedArt: false, listenHideUnreleased: true, shareUnreleased: false });
-    await user.click(within(sharing).getByRole("button", { name: /^Advanced/ }));
     expect(within(sharing).getByRole("heading", { level: 3, name: "Unreleased music, feature by feature" })).toBeInTheDocument();
     const mixes = within(sharing).getByRole("switch", { name: "Include unreleased music in mixes" });
     expect(mixes).not.toBeChecked();
     await user.click(mixes);
-    expect(await within(sharing).findByText("1 feature is set differently under Advanced.")).toBeInTheDocument();
+    expect(await within(sharing).findByText("1 feature is set differently under More.")).toBeInTheDocument();
     await user.selectOptions(rule, "always");
     await waitFor(() => expect(useSettings.getState().settings).toMatchObject({ unreleasedSharing: "always", scrobbleUnreleased: true, shareTranscriptionsUnreleased: true, listenHideUnreleased: false }));
     expect(within(sharing).queryByText(/set differently/)).toBeNull();
@@ -358,6 +427,7 @@ describe("Share unreleased music", () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
     const sharing = await screen.findByRole("region", { name: "Sharing and friends" });
+    await user.click(within(sharing).getByRole("button", { name: /^More in Sharing/ }));
     const rule = within(sharing).getByRole("combobox", { name: "Share unreleased music" });
     await user.selectOptions(rule, "never");
     await waitFor(() => expect(useSettings.getState().settings?.unreleasedSharing).toBe("never"));
@@ -367,7 +437,6 @@ describe("Share unreleased music", () => {
     // An exception the next rule would undo: asked first, and Cancel keeps it.
     await user.selectOptions(rule, "never");
     await waitFor(() => expect(useSettings.getState().settings?.unreleasedSharing).toBe("never"));
-    await user.click(within(sharing).getByRole("button", { name: /^Advanced/ }));
     await user.click(within(sharing).getByRole("switch", { name: "Scrobble unreleased music" }));
     await waitFor(() => expect(useSettings.getState().settings?.scrobbleUnreleased).toBe(true));
     await user.selectOptions(rule, "ask");

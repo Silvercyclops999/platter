@@ -1,7 +1,7 @@
 /**
  * "Share unreleased music": one rule for demos, leaks and other unreleased
  * songs leaving this computer. Choosing it sets each feature's own switch;
- * those switches stay under Advanced as exceptions. The core gives settings
+ * those switches stay under More as exceptions. The core gives settings
  * saved before the rule the one their switches already make.
  */
 import type { Settings, UnreleasedSharing } from "../lib/types";
