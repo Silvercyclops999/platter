@@ -164,10 +164,16 @@ struct Picked {
     matched: String,
 }
 
+/// Words too common to tell two titles apart.
+const STOP_WORDS: &[&str] = &["the", "a", "an", "of", "and", "in", "on", "to", "my", "by", "for", "it", "is"];
+
 fn shares_a_word(title: &str, name: &str) -> bool {
     let title = words(title);
     let title: Vec<&str> = title.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
-    words(name).split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() > 1).any(|w| title.contains(&w))
+    words(name)
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() > 1 && !STOP_WORDS.contains(w))
+        .any(|w| title.contains(&w))
 }
 
 fn song(t: &crate::model::Track, shuffle: bool) -> Picked {
@@ -239,6 +245,13 @@ mod tests {
 
     fn ask(name: &str, kind: SiriKind) -> SiriAsk {
         SiriAsk { name: Some(name.into()), kind, ..Default::default() }
+    }
+
+    #[test]
+    fn common_words_dont_make_a_match() {
+        assert!(!shares_a_word("The Less I Know the Better", "The Wall"));
+        assert!(shares_a_word("The Less I Know the Better", "less i know"));
+        assert!(shares_a_word("Otis", "otis"));
     }
 
     #[test]

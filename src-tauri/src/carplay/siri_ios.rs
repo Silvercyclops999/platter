@@ -12,7 +12,7 @@ use std::sync::OnceLock;
 use block2::DynBlock;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, Imp, NSObject, Sel};
-use objc2::{AnyThread, define_class, msg_send, sel};
+use objc2::{AnyThread, ClassType, define_class, msg_send, sel};
 use objc2_foundation::{NSNumber, NSString};
 use tauri::{AppHandle, Manager, Wry};
 
@@ -37,26 +37,52 @@ define_class!(
     impl PlayMediaHandler {
         #[unsafe(method(handlePlayMedia:completion:))]
         fn handlePlayMedia_completion(&self, intent: &AnyObject, completion: &DynBlock<dyn Fn(*mut AnyObject)>) {
-            let code = if play(intent) { SUCCESS } else { FAILURE };
-            // SAFETY: the response class's designated initialiser; the
-            // completion block is Siri's, called once with it.
-            unsafe {
-                let Some(class) = AnyClass::get(c"INPlayMediaIntentResponse") else { return };
-                let response: *mut AnyObject = msg_send![class, alloc];
-                let response: *mut AnyObject =
-                    msg_send![response, initWithCode: code, userActivity: std::ptr::null::<AnyObject>()];
-                completion.call((response,));
-            }
+            let done = Completion(completion.copy());
+            let ask = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_ask(intent))).ok();
+            let Some(app) = APP.get().cloned() else {
+                done.finish(FAILURE);
+                return;
+            };
+            // Matching reads the library: off this (possibly main) thread.
+            tauri::async_runtime::spawn_blocking(move || {
+                let ok = ask
+                    .and_then(|ask| std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| play(&app, ask))).ok())
+                    .unwrap_or(false);
+                done.finish(if ok { SUCCESS } else { FAILURE });
+            });
         }
     }
 );
 
-/// Reads Siri's request and starts playing it; false when nothing fits.
-fn play(intent: &AnyObject) -> bool {
-    let Some(app) = APP.get() else { return false };
+/// Siri's completion block, copied so it can be called once from another
+/// thread.
+struct Completion(block2::RcBlock<dyn Fn(*mut AnyObject)>);
+// SAFETY: Intents' completion blocks may be called from any thread.
+unsafe impl Send for Completion {}
+
+impl Completion {
+    /// Answers Siri with `code`; always calls the block, once.
+    fn finish(self, code: isize) {
+        // SAFETY: the response class's designated initialiser; the response
+        // is handed to the block and released after.
+        unsafe {
+            let response: Option<Retained<AnyObject>> = AnyClass::get(c"INPlayMediaIntentResponse").and_then(|class| {
+                let alloc: *mut AnyObject = msg_send![class, alloc];
+                let r: *mut AnyObject =
+                    msg_send![alloc, initWithCode: code, userActivity: std::ptr::null::<AnyObject>()];
+                Retained::from_raw(r)
+            });
+            let ptr = response.as_ref().map_or(std::ptr::null_mut(), |r| Retained::as_ptr(r) as *mut AnyObject);
+            self.0.call((ptr,));
+        }
+    }
+}
+
+/// What Siri heard, from an INPlayMediaIntent.
+fn read_ask(intent: &AnyObject) -> SiriAsk {
     // SAFETY: INPlayMediaIntent's documented properties: an INMediaSearch
     // (strings and an INMediaItemType) and an optional NSNumber.
-    let ask = unsafe {
+    unsafe {
         let text = |obj: *mut AnyObject, sel: Sel| -> Option<String> {
             let obj = obj.as_ref()?;
             let s: *mut NSString = msg_send![obj, performSelector: sel];
@@ -78,15 +104,28 @@ fn play(intent: &AnyObject) -> bool {
             kind,
             shuffle: shuffled.as_ref().is_some_and(|n| n.boolValue()),
         }
-    };
+    }
+}
+
+/// Matches the request and starts playing it; false when nothing fits.
+fn play(app: &AppHandle<Wry>, ask: SiriAsk) -> bool {
     tracing::info!(kind = ?ask.kind, shuffle = ask.shuffle, "Siri asked to play");
-    let db = app.state::<DbHandle>().inner().clone();
-    let picked = super::siri::resolve(&db, &ask, || db.read(super::shuffle_library_context));
-    let Ok(Some(p)) = picked else {
-        tracing::info!("Siri: nothing in the library fits");
+    let (Some(db), Some(player)) = (app.try_state::<DbHandle>(), app.try_state::<PlayerHandle>()) else {
         return false;
     };
-    let player = app.state::<PlayerHandle>().inner().clone();
+    let db = db.inner().clone();
+    let player = player.inner().clone();
+    let p = match super::siri::resolve(&db, &ask, || db.read(super::shuffle_library_context)) {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            tracing::info!("Siri: nothing in the library fits");
+            return false;
+        }
+        Err(e) => {
+            tracing::warn!("Siri: the library couldn't be searched: {e}");
+            return false;
+        }
+    };
     tauri::async_runtime::spawn(async move {
         if let Err(e) = player.play_context_from(p.context, p.start_track_id, None, Some(p.shuffle)).await {
             tracing::warn!("Siri play failed: {e}");
@@ -131,26 +170,59 @@ extern "C-unwind" fn handler_for_intent(
     if play_media { handler() } else { std::ptr::null_mut() }
 }
 
-/// Adds the intent handler to the app delegate's class (main thread, once
-/// the app is up).
-pub fn install(app: &AppHandle<Wry>) {
-    let _ = APP.set(app.clone());
-    // SAFETY: reading the app's delegate on the main thread, and adding one
-    // method (that it doesn't have) to its class.
+/// The original `-[UIApplication setDelegate:]`.
+static SET_DELEGATE: OnceLock<Imp> = OnceLock::new();
+
+/// Adds `application:handlerForIntent:` to a delegate's class (if it has
+/// none), before UIKit looks at what the delegate answers to.
+fn add_handler_to(delegate: *mut AnyObject) {
+    // SAFETY: adding one method to the delegate's class; the class is the
+    // object's own.
     unsafe {
-        let Some(ui_app) = AnyClass::get(c"UIApplication") else { return };
-        let shared: *mut AnyObject = msg_send![ui_app, sharedApplication];
-        let Some(shared) = shared.as_ref() else { return };
-        let delegate: *mut AnyObject = msg_send![shared, delegate];
-        let Some(delegate) = delegate.as_ref() else {
-            tracing::warn!("Siri: no app delegate to hand requests to");
-            return;
-        };
-        let class = delegate.class() as *const AnyClass as *mut AnyClass;
+        let Some(d) = delegate.as_ref() else { return };
+        let class = d.class() as *const AnyClass as *mut AnyClass;
         let imp: Imp = std::mem::transmute(
             handler_for_intent as extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject, *mut AnyObject) -> *mut AnyObject,
         );
-        let added = objc2::ffi::class_addMethod(class, sel!(application:handlerForIntent:), imp, c"@@:@@".as_ptr());
-        tracing::debug!(added = added.as_bool(), "Siri intent handler");
+        if !objc2::ffi::class_addMethod(class, sel!(application:handlerForIntent:), imp, c"@@:@@".as_ptr()).as_bool() {
+            tracing::warn!("Siri: the app delegate already handles intents; Platter's handler isn't used");
+        }
     }
+}
+
+/// `setDelegate:` that gives the delegate the intent handler first.
+extern "C-unwind" fn set_delegate(this: *mut AnyObject, cmd: Sel, delegate: *mut AnyObject) {
+    add_handler_to(delegate);
+    if let Some(original) = SET_DELEGATE.get() {
+        // SAFETY: the original has this exact signature.
+        unsafe {
+            let f: extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject) = std::mem::transmute(*original);
+            f(this, cmd, delegate);
+        }
+    }
+}
+
+/// Runs before the app starts (before UIKit sets the app delegate and
+/// caches what it answers to).
+pub fn install_early() {
+    let _ = PlayMediaHandler::class();
+    let Some(ui_app) = AnyClass::get(c"UIApplication") else { return };
+    // SAFETY: swaps one setter for a function of the same shape that calls
+    // the original; done once, before the delegate is set.
+    unsafe {
+        let ours: Imp = std::mem::transmute(set_delegate as extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject));
+        if let Some(original) = objc2::ffi::class_replaceMethod(
+            ui_app as *const AnyClass as *mut AnyClass,
+            sel!(setDelegate:),
+            ours,
+            c"v@:@".as_ptr(),
+        ) {
+            let _ = SET_DELEGATE.set(original);
+        }
+    }
+}
+
+/// The app is up: requests can be played.
+pub fn attach(app: &AppHandle<Wry>) {
+    let _ = APP.set(app.clone());
 }

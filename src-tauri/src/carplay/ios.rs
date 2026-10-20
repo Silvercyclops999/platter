@@ -144,6 +144,7 @@ extern "C-unwind" fn set_delegate_class(this: *mut AnyObject, cmd: Sel, class: *
 /// Runs before the app starts, so a car that is already connected (or
 /// launches Platter) is routed here from the first scene.
 pub fn install() {
+    super::siri_ios::install_early();
     let _ = CarDelegate::class();
     let Some(config) = AnyClass::get(c"UISceneConfiguration") else { return };
     // SAFETY: swaps one setter for a function of the same shape that calls
@@ -168,8 +169,7 @@ pub fn install() {
 pub fn attach(app: &AppHandle<Wry>) {
     let _ = APP.set(app.clone());
     let _ = app.run_on_main_thread(show_tabs);
-    let a = app.clone();
-    let _ = app.run_on_main_thread(move || super::siri_ios::install(&a));
+    super::siri_ios::attach(app);
     // Signing in or out, or the server coming and going, changes what the
     // tabs can show.
     for event in [crate::plex::types::EVENT_AUTH_CHANGED, crate::plex::types::EVENT_HEALTH_CHANGED] {
