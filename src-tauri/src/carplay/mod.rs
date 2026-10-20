@@ -5,11 +5,15 @@
 //! module builds the lists from the library cache; `ios.rs` turns them into
 //! templates and plays what is picked.
 
+use std::collections::HashSet;
+
 use rusqlite::Connection;
 
+use crate::audio::events::PlayerStatus;
 use crate::audio::queue::{QueueView, Repeat};
 use crate::audio::source::{ContextKind, PlayContext};
 use crate::db::queries;
+use crate::downloads::store::{self as dl_store, ItemKind};
 use crate::db::types::{AlbumSort, ArtistSort, HomeItem};
 use crate::error::AppResult;
 use crate::plex::types::{Health, HealthStatus};
@@ -497,6 +501,157 @@ pub fn tab_rows(tab: Tab, reach: Reach, rows: impl FnOnce() -> Vec<CarItem>) -> 
         (Reach::Unreachable, Tab::Downloaded) | (Reach::Online, _) => rows(),
         (Reach::Unreachable, _) => vec![info(UNREACHABLE, Some("Downloaded music still plays"))],
     }
+}
+
+/// A car that drops and comes back within this many seconds is the same
+/// drive (a loose cable, a car that restarts its screen): nothing changes.
+pub const RECONNECT_GRACE_S: u64 = 30;
+
+/// How things stand when a car connects.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Connect {
+    /// "Resume when the car connects".
+    pub resume_on: bool,
+    pub reach: Reach,
+    pub status: PlayerStatus,
+    /// The song the player would play on: (id, kept on the phone).
+    pub track: Option<(String, bool)>,
+    /// Seconds since the car last left, if it left during this run.
+    pub since_disconnect_s: Option<u64>,
+}
+
+/// What to do when a car connects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnConnect {
+    Nothing,
+    /// Play on from where the player stopped.
+    Resume,
+}
+
+/// Plays on where you left off when the car connects, if the setting is
+/// on. Never when it's already playing, when nothing was playing, when the
+/// car only blinked, or when the song can't play (out of reach and not
+/// kept on the phone). Nothing new is started: no queue, no sound.
+pub fn on_connect(c: &Connect) -> OnConnect {
+    if !c.resume_on || c.since_disconnect_s.is_some_and(|s| s < RECONNECT_GRACE_S) {
+        return OnConnect::Nothing;
+    }
+    if !matches!(c.status, PlayerStatus::Paused | PlayerStatus::Idle) {
+        return OnConnect::Nothing;
+    }
+    match (&c.track, c.reach) {
+        (None, _) | (_, Reach::SignedOut) => OnConnect::Nothing,
+        (Some((_, kept)), Reach::Unreachable) if !kept => OnConnect::Nothing,
+        _ => OnConnect::Resume,
+    }
+}
+
+/// What's kept on the phone: items with at least one finished song, and
+/// every finished song.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Kept {
+    pub items: HashSet<(ItemKind, String)>,
+    pub tracks: HashSet<String>,
+}
+
+impl Kept {
+    pub fn read(c: &Connection) -> AppResult<Self> {
+        let items = dl_store::all_item_counts(c)?
+            .into_iter()
+            .filter(|(_, n)| n.done > 0)
+            .filter_map(|((kind, id), _)| Some((ItemKind::parse(&kind).ok()?, id)))
+            .collect();
+        let tracks = dl_store::done_files(c)?.into_iter().map(|(t, _)| t).collect();
+        Ok(Self { items, tracks })
+    }
+
+    fn item(&self, kind: ItemKind, id: &str) -> bool {
+        self.items.contains(&(kind, id.to_string()))
+    }
+
+    /// Whether picking this row plays something with no signal. Rows that
+    /// don't play (lists, messages, Up next) always count.
+    pub fn plays(&self, action: &CarAction) -> bool {
+        let ctx = match action {
+            CarAction::Play(ctx) | CarAction::Shuffle(ctx) => ctx,
+            CarAction::ShuffleLibrary => return !self.tracks.is_empty(),
+            CarAction::Open(_) | CarAction::Jump(_) | CarAction::Info => return true,
+        };
+        if let Some(ids) = &ctx.track_ids {
+            return ids.iter().any(|t| self.tracks.contains(t));
+        }
+        let id = ctx.id.as_deref().unwrap_or_default();
+        match ctx.kind {
+            ContextKind::Album => self.item(ItemKind::Album, id),
+            ContextKind::Playlist => self.item(ItemKind::Playlist, id),
+            ContextKind::Liked => self.item(ItemKind::Liked, ""),
+            ContextKind::Mix => self.item(ItemKind::Mix, id),
+            // Popular and radio are drawn from the server.
+            ContextKind::Artist | ContextKind::Radio | ContextKind::Tracks | ContextKind::Search => false,
+        }
+    }
+}
+
+/// The subtitle of a row that can't play with no signal.
+pub const NEEDS_CONNECTION: &str = "Needs a connection";
+
+/// A list's rows with no signal. With "Show downloads only when offline",
+/// rows that can't play go; without it they stay, say so, and do nothing.
+pub fn offline_rows(items: Vec<CarItem>, kept: &Kept, only_downloads: bool) -> Vec<CarItem> {
+    items
+        .into_iter()
+        .filter_map(|i| {
+            if kept.plays(&i.action) {
+                Some(i)
+            } else if only_downloads {
+                None
+            } else {
+                Some(CarItem { subtitle: Some(NEEDS_CONNECTION.into()), action: CarAction::Info, ..i })
+            }
+        })
+        .collect()
+}
+
+/// Home's sections with no signal, as [`offline_rows`]. A row of covers
+/// keeps only covers that play (they have no room to say why not); a
+/// section left empty goes.
+pub fn offline_sections(sections: Vec<CarSection>, kept: &Kept, only_downloads: bool) -> Vec<CarSection> {
+    sections
+        .into_iter()
+        .filter_map(|s| {
+            let rows: Vec<CarRow> = s
+                .rows
+                .into_iter()
+                .filter_map(|r| match r {
+                    CarRow::Item(i) => offline_rows(vec![i], kept, only_downloads).pop().map(CarRow::Item),
+                    CarRow::Covers { title, items } => {
+                        let items: Vec<CarItem> = items.into_iter().filter(|i| kept.plays(&i.action)).collect();
+                        (!items.is_empty()).then_some(CarRow::Covers { title, items })
+                    }
+                })
+                .collect();
+            (!rows.is_empty()).then_some(CarSection { header: s.header, rows })
+        })
+        .collect()
+}
+
+/// A tab's rows with the server out of reach: what plays, or the message
+/// when nothing does.
+pub fn offline_tab(items: Vec<CarItem>, kept: &Kept, only_downloads: bool) -> Vec<CarItem> {
+    let rows = offline_rows(items, kept, only_downloads);
+    if rows.iter().all(|r| r.action == CarAction::Info) {
+        return vec![info(UNREACHABLE, Some("Downloaded music still plays"))];
+    }
+    rows
+}
+
+/// "Shuffle my library" with no signal: a random draw of the kept songs.
+pub fn shuffle_downloads_context(c: &Connection) -> AppResult<PlayContext> {
+    let mut st = c.prepare_cached(
+        "SELECT track_id FROM download_files WHERE state = 'done' AND file IS NOT NULL ORDER BY random() LIMIT ?1",
+    )?;
+    let ids = st.query_map([SHUFFLE_MAX as i64], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+    Ok(PlayContext { kind: ContextKind::Tracks, id: None, track_ids: Some(ids) })
 }
 
 #[cfg(target_os = "ios")]

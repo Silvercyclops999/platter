@@ -27,7 +27,7 @@ use objc2_foundation::{NSArray, NSData, NSObject, NSObjectProtocol, NSString};
 use objc2_ui_kit::UISceneDelegate;
 use tauri::{AppHandle, Listener, Manager, Wry};
 
-use super::{CarAction, CarItem, CarList, CarRow, CarSection, NowKey, Reach, Tab};
+use super::{CarAction, CarItem, CarList, CarRow, CarSection, Connect, Kept, NowKey, OnConnect, Reach, Tab};
 use crate::audio::player::PlayerHandle;
 use crate::audio::queue::Repeat;
 use crate::backend::Backends;
@@ -36,6 +36,7 @@ use crate::db::DbHandle;
 use crate::db::artcache::ArtCache;
 use crate::likes::Likes;
 use crate::plex::PlexState;
+use crate::settings::SettingsState;
 
 std::arch::global_asm!(".linker_option \"-framework\", \"CarPlay\"");
 
@@ -70,6 +71,9 @@ struct Shown {
 
 static SHOWN: parking_lot::Mutex<Option<Shown>> = parking_lot::const_mutex(None);
 
+/// When the car last left during this run, to tell a blink from a new drive.
+static LAST_LEFT: parking_lot::Mutex<Option<std::time::Instant>> = parking_lot::const_mutex(None);
+
 define_class!(
     #[unsafe(super(NSObject))]
     #[name = "PlatterCarPlayDelegate"]
@@ -90,6 +94,7 @@ define_class!(
             tracing::info!("CarPlay connected");
             CAR.with(|c| *c.borrow_mut() = Some(controller.retain()));
             show_tabs();
+            resume_on_connect();
         }
 
         #[unsafe(method(templateApplicationScene:didDisconnectInterfaceController:))]
@@ -100,6 +105,7 @@ define_class!(
         ) {
             tracing::info!("CarPlay disconnected");
             CAR.with(|c| *c.borrow_mut() = None);
+            *LAST_LEFT.lock() = Some(std::time::Instant::now());
         }
     }
 );
@@ -167,7 +173,13 @@ pub fn install() {
 /// its tabs filled.
 pub fn attach(app: &AppHandle<Wry>) {
     let _ = APP.set(app.clone());
-    let _ = app.run_on_main_thread(show_tabs);
+    // A car that connected before the app was set up couldn't resume yet.
+    let _ = app.run_on_main_thread(|| {
+        show_tabs();
+        if CAR.with(|c| c.borrow().is_some()) {
+            resume_on_connect();
+        }
+    });
     // Signing in or out, or the server coming and going, changes what the
     // tabs can show.
     for event in [crate::plex::types::EVENT_AUTH_CHANGED, crate::plex::types::EVENT_HEALTH_CHANGED] {
@@ -341,17 +353,38 @@ fn read_tabs(app: Option<&AppHandle<Wry>>) -> TabData {
         })
     };
     let reach = reach(app);
-    // Home keeps its sections and its row of covers; a message (signed
-    // out, out of reach) is a single plain section.
-    let home = match reach {
-        Reach::Online => db.read(super::home_sections).unwrap_or_else(|e| {
+    let sections = || {
+        db.read(super::home_sections).unwrap_or_else(|e| {
             tracing::warn!("CarPlay home not read: {e}");
             Vec::new()
-        }),
-        _ => vec![CarSection {
+        })
+    };
+    let message = |tab| {
+        vec![CarSection {
             header: None,
-            rows: super::tab_rows(Tab::Home, reach, Vec::new).into_iter().map(CarRow::Item).collect(),
-        }],
+            rows: super::tab_rows(tab, reach, Vec::new).into_iter().map(CarRow::Item).collect(),
+        }]
+    };
+    // Out of reach, the lists keep what plays from the phone (and, with the
+    // setting off, say what needs a connection).
+    if reach == Reach::Unreachable {
+        let kept = db.read(Kept::read).unwrap_or_default();
+        let only = offline_only(app);
+        let home = super::offline_sections(sections(), &kept, only);
+        return TabData {
+            reach,
+            loading: false,
+            home: if home.is_empty() { message(Tab::Home) } else { home },
+            library: super::offline_tab(super::library(), &kept, only),
+            downloaded: read("downloads", &super::downloaded),
+            radio: super::offline_tab(read("radio", &|c| super::radio(c, None)), &kept, only),
+        };
+    }
+    // Home keeps its sections and its row of covers; a message (signed
+    // out) is a single plain section.
+    let home = match reach {
+        Reach::Online => sections(),
+        _ => message(Tab::Home),
     };
     TabData {
         reach,
@@ -361,6 +394,46 @@ fn read_tabs(app: Option<&AppHandle<Wry>>) -> TabData {
         downloaded: super::tab_rows(Tab::Downloaded, reach, || read("downloads", &super::downloaded)),
         radio: super::tab_rows(Tab::Radio, reach, || read("radio", &|c| super::radio(c, None))),
     }
+}
+
+/// "Show downloads only when offline" (blocking: off the main thread only).
+fn offline_only(app: &AppHandle<Wry>) -> bool {
+    let Some(s) = app.try_state::<SettingsState>() else { return true };
+    tauri::async_runtime::block_on(s.get()).map(|s| s.carplay_offline_downloads).unwrap_or(true)
+}
+
+/// Plays on where you left off as the car connects, if the setting says
+/// so ([`super::on_connect`] decides). Main thread: reads how things stand,
+/// then asks the player off it.
+fn resume_on_connect() {
+    let Some(app) = APP.get().cloned() else { return };
+    let since_disconnect_s = LAST_LEFT.lock().map(|t| t.elapsed().as_secs());
+    let reach = reach(&app);
+    tauri::async_runtime::spawn(async move {
+        let Some(settings) = app.try_state::<SettingsState>() else { return };
+        let resume_on = settings.get().await.map(|s| s.carplay_resume).unwrap_or(true);
+        let player = app.state::<PlayerHandle>().inner().clone();
+        let Ok(state) = player.state().await else { return };
+        let track = match state.track {
+            Some(t) => {
+                let id = t.id.clone();
+                let kept = app
+                    .state::<DbHandle>()
+                    .read_async(move |c| Ok(crate::downloads::store::file(c, &id)?.is_some_and(|f| f.state == "done")))
+                    .await
+                    .unwrap_or(false);
+                Some((t.id, kept))
+            }
+            None => None,
+        };
+        let c = Connect { resume_on, reach, status: state.status, track, since_disconnect_s };
+        if super::on_connect(&c) == OnConnect::Resume {
+            tracing::info!("CarPlay: playing on where it left off");
+            if let Err(e) = player.resume().await {
+                tracing::warn!("CarPlay resume failed: {e}");
+            }
+        }
+    });
 }
 
 /// Each tabs rebuild asked for; an older read that lands after a newer one
@@ -869,10 +942,12 @@ fn picked(action: &CarAction) {
         }
         CarAction::Info => {}
         CarAction::ShuffleLibrary => {
+            let offline = REACH.with(Cell::get) == Some(Reach::Unreachable);
             let player = app.state::<PlayerHandle>().inner().clone();
             let db = app.state::<DbHandle>().inner().clone();
             tauri::async_runtime::spawn(async move {
-                let ctx = match db.read_async(super::shuffle_library_context).await {
+                let read = if offline { super::shuffle_downloads_context } else { super::shuffle_library_context };
+                let ctx = match db.read_async(read).await {
                     Ok(c) => c,
                     Err(e) => return tracing::warn!("CarPlay shuffle not read: {e}"),
                 };
@@ -900,11 +975,17 @@ fn picked(action: &CarAction) {
 fn open_list(app: &AppHandle<Wry>, which: &CarList) {
     let app = app.clone();
     let which = which.clone();
+    let offline = REACH.with(Cell::get) == Some(Reach::Unreachable);
     tauri::async_runtime::spawn_blocking(move || {
-        let items = app.state::<DbHandle>().read(|c| super::list(c, &which)).unwrap_or_else(|e| {
+        let db = app.state::<DbHandle>();
+        let mut items = db.read(|c| super::list(c, &which)).unwrap_or_else(|e| {
             tracing::warn!("CarPlay list not read: {e}");
             Vec::new()
         });
+        if offline {
+            let kept = db.read(Kept::read).unwrap_or_default();
+            items = super::offline_rows(items, &kept, offline_only(&app));
+        }
         let _ = app.run_on_main_thread(move || {
             let Some(controller) = CAR.with(|c| c.borrow().clone()) else { return };
             let Some(mtm) = MainThreadMarker::new() else { return };

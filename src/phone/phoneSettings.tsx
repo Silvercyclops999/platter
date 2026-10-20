@@ -1,5 +1,6 @@
 /**
- * The phone's own settings rows (Downloads and devices, "On this phone").
+ * The phone's own settings rows (Downloads and devices, "On this phone" and
+ * "CarPlay").
  * They show only when Platter runs as a phone; every one is this device only.
  */
 import { Select, type SelectOption } from "../components/Select";
@@ -26,12 +27,15 @@ export const KEEP_RECENT: SelectOption<string>[] = PHONE_KEEP_RECENT_CHOICES.map
 type Ids = { title: string; desc: string };
 const wait = <Skeleton width={40} height={24} radius="pill" />;
 
-function sw(s: Settings | null, key: "phoneMobileDownloads" | "phoneHaptics", ids: Ids) {
+type PhoneSwitch = "phoneMobileDownloads" | "phoneHaptics" | "carplayResume" | "carplayOfflineDownloads";
+
+function sw(s: Settings | null, key: PhoneSwitch, ids: Ids) {
   if (!s) return wait;
   return <Switch checked={s[key]} onChange={(v) => updateSettings({ [key]: v })} labelledBy={ids.title} describedBy={ids.desc} />;
 }
 
 const GROUP = "On this phone";
+const CARPLAY = "CarPlay";
 
 /** The phone's one look choice: follow the phone's light or dark, or one look. */
 export type PhoneLook = "device" | "studio" | "studioBlack" | "sleeve" | "other";
@@ -122,6 +126,24 @@ export function phoneRows(s: Settings | null): RowDef[] {
       title: "Haptics on controls",
       description: "A light tap when you press play, skip or switch tabs. This device only.",
       control: (ids) => sw(s, "phoneHaptics", ids),
+    },
+    {
+      key: "carplayResume",
+      section: "Downloads and devices",
+      group: CARPLAY,
+      title: "Resume when the car connects",
+      description: "Plays on where you left off when CarPlay starts. This device only.",
+      more: "Only what was playing plays on: nothing new starts, and a car that drops for a moment changes nothing. This device only.",
+      control: (ids) => sw(s, "carplayResume", ids),
+    },
+    {
+      key: "carplayOfflineDownloads",
+      section: "Downloads and devices",
+      group: CARPLAY,
+      title: "Show downloads only when offline",
+      description: "With no signal, CarPlay lists only what's downloaded. This device only.",
+      more: "Off: everything stays listed, and what needs a connection says so. This device only.",
+      control: (ids) => sw(s, "carplayOfflineDownloads", ids),
     },
   ];
 }

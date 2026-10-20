@@ -717,6 +717,10 @@ pub struct Settings {
     pub phone_mobile_quality: MobileQuality,
     /// Phone: a light tap of feedback on the player's controls (this device only).
     pub phone_haptics: bool,
+    /// CarPlay: play on where you left off when the car connects (this device only).
+    pub carplay_resume: bool,
+    /// CarPlay: with no signal, lists show only what's downloaded (this device only).
+    pub carplay_offline_downloads: bool,
     /// Now playing has a Visualizer button (synced).
     pub visualizer_button: bool,
     /// The visualizer's picture (synced).
@@ -1293,6 +1297,8 @@ impl Default for Settings {
             phone_keep_recent: 50,
             phone_mobile_quality: MobileQuality::Auto,
             phone_haptics: true,
+            carplay_resume: true,
+            carplay_offline_downloads: true,
             visualizer_button: true,
             visualizer_style: VisualizerStyle::Sleeve,
             visualizer_fps: default_visualizer_fps(),
@@ -1724,6 +1730,8 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "phoneKeepRecent",
     "phoneMobileQuality",
     "phoneHaptics",
+    "carplayResume",
+    "carplayOfflineDownloads",
     "visualizerFps",
     "visualizerPanelStrip",
     "visualizerBatteryPause",
@@ -1907,6 +1915,8 @@ pub struct SettingsPatch {
     pub phone_keep_recent: Option<u32>,
     pub phone_mobile_quality: Option<MobileQuality>,
     pub phone_haptics: Option<bool>,
+    pub carplay_resume: Option<bool>,
+    pub carplay_offline_downloads: Option<bool>,
     pub visualizer_button: Option<bool>,
     pub visualizer_style: Option<VisualizerStyle>,
     /// One of VISUALIZER_FPS.
@@ -2285,6 +2295,8 @@ impl Settings {
         set(&mut self.phone_mobile_downloads, p.phone_mobile_downloads);
         set(&mut self.phone_mobile_quality, p.phone_mobile_quality);
         set(&mut self.phone_haptics, p.phone_haptics);
+        set(&mut self.carplay_resume, p.carplay_resume);
+        set(&mut self.carplay_offline_downloads, p.carplay_offline_downloads);
         set(&mut self.visualizer_button, p.visualizer_button);
         set(&mut self.visualizer_style, p.visualizer_style);
         set(&mut self.visualizer_smoothing, p.visualizer_smoothing);
@@ -5684,6 +5696,21 @@ mod tests {
         // Saved settings from before the phone keep their defaults.
         let old: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(old.phone_keep_recent, 50);
+    }
+
+    #[test]
+    fn carplay_settings_default_on_and_stay_on_this_device() {
+        let d = Settings::default();
+        assert!(d.carplay_resume && d.carplay_offline_downloads);
+        for k in ["carplayResume", "carplayOfflineDownloads"] {
+            assert!(DEVICE_SETTINGS.contains(&k) && !SYNCED_SETTINGS.contains(&k), "{k} is this device only");
+        }
+        let mut s = Settings::default();
+        let p: SettingsPatch = serde_json::from_str(r#"{"carplayResume":false,"carplayOfflineDownloads":false}"#).unwrap();
+        s.apply(&p).unwrap();
+        assert!(!s.carplay_resume && !s.carplay_offline_downloads);
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(old.carplay_resume && old.carplay_offline_downloads, "saved settings from before CarPlay keep the defaults");
     }
 
     #[test]
