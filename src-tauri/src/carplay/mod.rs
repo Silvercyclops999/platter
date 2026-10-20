@@ -664,8 +664,12 @@ pub fn shuffle_downloads_context(c: &Connection) -> AppResult<PlayContext> {
     Ok(PlayContext { kind: ContextKind::Tracks, id: None, track_ids: Some(ids) })
 }
 
+pub mod siri;
+
 #[cfg(target_os = "ios")]
 pub mod ios;
+#[cfg(target_os = "ios")]
+pub mod siri_ios;
 
 #[cfg(test)]
 mod tests;
