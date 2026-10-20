@@ -18,6 +18,11 @@ use crate::error::AppError;
 pub const PING_INTERVAL: Duration = Duration::from_secs(30);
 /// Starting / restarting / updating is only an error after this long.
 pub const START_GRACE_MS: i64 = 120_000;
+/// Right after waking (or coming back to the front on the phone) the network
+/// often isn't up yet: failed checks in this window don't count as offline.
+pub const WAKE_GRACE_MS: i64 = 20_000;
+/// How soon a check that failed in the wake window is tried again.
+pub const WAKE_RETRY: Duration = Duration::from_secs(3);
 
 /// Result of one ping of the current connection.
 #[derive(Debug, Clone, PartialEq)]
@@ -35,8 +40,18 @@ pub enum ProbeOutcome {
     Unreachable,
 }
 
+/// The server sent a reply, even if Platter couldn't use it: a body that
+/// wouldn't decode (a broken character, a cut-off read), a 404 or another
+/// unexpected status. A server that answered is reachable, so none of these
+/// may count as offline.
+pub fn server_answered(e: &AppError) -> bool {
+    matches!(e, AppError::Decode(_) | AppError::NotFound(_) | AppError::Invalid(_))
+}
+
 impl ProbeOutcome {
-    /// Classify an error from a ping.
+    /// Classify an error from a ping. Errors where the server answered
+    /// ([`server_answered`]) are not offline; the ping treats them as a
+    /// reply before it gets here.
     pub fn from_error(e: &AppError) -> Self {
         match e {
             AppError::Auth(_) => ProbeOutcome::Unauthorized,
@@ -93,6 +108,9 @@ pub struct HealthMachine {
     local_network_blocked: bool,
     /// Go offline is on: no network use, only music on this computer plays.
     offline_by_choice: bool,
+    /// When the computer woke or the app came back to the front, until the
+    /// server next answers (see [`WAKE_GRACE_MS`]).
+    woke_at: Option<i64>,
 }
 
 /// What the macOS Local Network banner says.
@@ -124,7 +142,20 @@ impl HealthMachine {
             low_disk: false,
             local_network_blocked: false,
             offline_by_choice: false,
+            woke_at: None,
         }
+    }
+
+    /// The computer woke, the app came back to the front, or the network
+    /// changed: the next few failures may be the network still coming up.
+    pub fn on_woke(&mut self, now_ms: i64) {
+        self.woke_at = Some(now_ms);
+    }
+
+    /// Within [`WAKE_GRACE_MS`] of [`Self::on_woke`], with the server not
+    /// heard from since.
+    pub fn in_wake_grace(&self, now_ms: i64) -> bool {
+        self.woke_at.is_some_and(|at| now_ms - at < WAKE_GRACE_MS)
     }
 
     /// Go offline turned on or off. On, the status is offline until it's
@@ -214,6 +245,7 @@ impl HealthMachine {
                     self.version = version;
                 }
                 self.last_seen_at = Some(now_ms);
+                self.woke_at = None;
                 self.starting_since = None;
                 self.updating = false;
                 self.access_removed = false;
@@ -267,7 +299,9 @@ impl HealthMachine {
     /// answered during the same attempt: if it didn't either, the problem is
     /// this computer's connection, not the server.
     pub fn on_rediscover_failed(&mut self, now_ms: i64, internet: bool) {
-        if !self.signed_in {
+        if !self.signed_in || self.in_wake_grace(now_ms) {
+            // Just woke: the network may not be up yet. Keep the last state;
+            // the caller tries again in a few seconds.
             return;
         }
         self.internet = internet;
@@ -282,6 +316,11 @@ impl HealthMachine {
     /// The computer has no network route at all (cable out, Wi-Fi off).
     pub fn on_no_network(&mut self) {
         if !self.signed_in || self.status == HealthStatus::NoAuth {
+            return;
+        }
+        if self.woke_at.is_some() && self.connected() {
+            // Just woke: the network is still coming up. The wake checks
+            // say offline if it doesn't.
             return;
         }
         self.internet = false;
@@ -555,6 +594,55 @@ mod tests {
         let mut m = HealthMachine::new();
         m.on_server_selected("Home", None);
         m
+    }
+
+    #[test]
+    fn a_reply_that_couldnt_be_used_is_still_an_answer() {
+        for e in [
+            AppError::Decode("error decoding response body".into()),
+            AppError::Decode("/: invalid unicode code point".into()),
+            AppError::NotFound("/".into()),
+            AppError::Invalid("Unexpected response 418.".into()),
+        ] {
+            assert!(server_answered(&e), "{e}");
+        }
+        for e in [AppError::Network("Couldn't connect.".into()), AppError::Network("The request timed out.".into())] {
+            assert!(!server_answered(&e), "{e}");
+        }
+    }
+
+    #[test]
+    fn failures_right_after_waking_dont_count_as_offline() {
+        let mut m = signed_in();
+        m.on_probe(ok(ConnectionKind::Local), T0);
+        m.on_woke(T0 + 1_000);
+        // The network isn't up yet: no route, then nothing answers.
+        m.on_no_network();
+        m.on_rediscover_failed(T0 + 2_000, false);
+        m.on_rediscover_failed(T0 + 8_000, false);
+        assert!(m.connected() && !m.cached_only(), "still in the wake window");
+        // Still nothing once the window is over: offline.
+        m.on_rediscover_failed(T0 + 1_000 + WAKE_GRACE_MS, false);
+        assert!(m.cached_only());
+        // An answer ends the window, so a later failure counts at once.
+        let mut m = signed_in();
+        m.on_woke(T0);
+        m.on_probe(ok(ConnectionKind::Local), T0 + 1_000);
+        assert!(!m.in_wake_grace(T0 + 2_000));
+        m.on_rediscover_failed(T0 + 2_000, true);
+        assert!(m.cached_only());
+    }
+
+    #[test]
+    fn offline_recovers_on_the_next_answer() {
+        let mut m = signed_in();
+        m.on_probe(ok(ConnectionKind::Local), T0);
+        m.on_rediscover_failed(T0 + 1_000, true);
+        assert!(m.cached_only());
+        // However long it was out, one answer brings it back.
+        m.on_probe(ok(ConnectionKind::Remote), T0 + 3_600_000);
+        assert!(!m.cached_only());
+        assert_eq!(m.snapshot(T0 + 3_600_000).banner, None);
     }
 
     #[test]

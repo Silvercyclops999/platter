@@ -328,7 +328,10 @@ async fn probe_one(
     if !resp.status().is_success() {
         return Err(ProbeFail::Other);
     }
-    let body: IdentityEnvelope = resp.json().await.map_err(|_| ProbeFail::Other)?;
+    // Read like every other Plex reply, so a broken character doesn't turn a
+    // server that answered into one that didn't.
+    let bytes = resp.bytes().await.map_err(|_| ProbeFail::Other)?;
+    let body: IdentityEnvelope = super::client::decode_json(&bytes).map_err(|_| ProbeFail::Other)?;
     let latency = started.elapsed();
     if let Some(expected) = expect_machine_id
         && body.media_container.machine_identifier != expected

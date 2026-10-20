@@ -19,7 +19,7 @@ use super::discovery::{
     load_servers,
 };
 use super::types::ConnectionKind;
-use super::health::{HealthAction, HealthMachine, PING_INTERVAL, ProbeOutcome, ScanTracker};
+use super::health::{HealthAction, HealthMachine, PING_INTERVAL, ProbeOutcome, ScanTracker, server_answered};
 use super::identity::ClientIdentity;
 use super::keychain::{ACCOUNT_TOKEN, KeyringStore, SERVER_TOKEN, TokenStore};
 use super::notifications::{self, PlexEvent};
@@ -104,6 +104,9 @@ struct Inner {
     background_stop: Mutex<Option<watch::Sender<bool>>>,
     notif_stop: Mutex<Option<watch::Sender<bool>>>,
     recheck: Notify,
+    /// When a reply from the server last asked for a check (see
+    /// `should_recheck_on_answer`), so a burst of events asks once.
+    answer_recheck_at: Mutex<Option<std::time::Instant>>,
     events: broadcast::Sender<PlexEvent>,
     /// False while `start` is restoring the saved session; true otherwise.
     restored: watch::Sender<bool>,
@@ -116,6 +119,12 @@ struct Inner {
     /// server tag, with when their connection was picked.
     others: Mutex<std::collections::HashMap<String, (PlexClient, std::time::Instant)>>,
 }
+
+/// Least time between checks asked for by replies from the server.
+const ANSWER_RECHECK_GAP: Duration = Duration::from_secs(5);
+/// Longest one health check may take before the loop gives up on it and
+/// tries again: a request that never ends must not stop the checks.
+const TICK_LIMIT: Duration = Duration::from_secs(120);
 
 /// A connection picked for another server is raced again after this.
 const OTHER_SERVER_TTL: Duration = Duration::from_secs(10 * 60);
@@ -182,6 +191,7 @@ impl PlexState {
                 background_stop: Mutex::new(None),
                 notif_stop: Mutex::new(None),
                 recheck: Notify::new(),
+                answer_recheck_at: Mutex::new(None),
                 events,
                 restored: watch::channel(true).0,
                 account_read: watch::channel(true).0,
@@ -269,6 +279,18 @@ impl PlexState {
                     h.status,
                     HealthStatus::Local | HealthStatus::Remote | HealthStatus::Relay
                 );
+            // Say each change of state once (not every ping's latency), so
+            // the log shows when and why songs could only play from here.
+            let said = |x: &Health| (x.status, x.cached_only, x.banner.as_ref().map(|b| b.kind.clone()));
+            if last.as_ref().map(said) != Some(said(&h)) {
+                tracing::info!(
+                    status = ?h.status,
+                    cached_only = h.cached_only,
+                    files = h.files_available,
+                    banner = h.banner.as_ref().map_or("none", |b| b.kind.as_str()),
+                    "health changed"
+                );
+            }
             *last = Some(h.clone());
             drop(last);
             self.emit(EVENT_HEALTH_CHANGED, &h);
@@ -591,6 +613,41 @@ impl PlexState {
         self.inner.recheck.notify_one();
     }
 
+    /// Given to the selected server's client: any reply from the server
+    /// (playback reports, library reads) while health says it can't be
+    /// reached asks for a check now. Holds no strong reference.
+    fn answer_hook(&self) -> super::client::OnAnswer {
+        let weak = Arc::downgrade(&self.inner);
+        super::client::OnAnswer(Arc::new(move || {
+            if let Some(inner) = weak.upgrade() {
+                let me = PlexState { inner };
+                if me.should_recheck_on_answer() {
+                    me.recheck();
+                }
+            }
+        }))
+    }
+
+    /// The server answered something (a notification) while health says it
+    /// can't be reached: worth a check now. At most once every few seconds.
+    fn should_recheck_on_answer(&self) -> bool {
+        if self.offline_by_choice() {
+            return false;
+        }
+        {
+            let h = self.inner.health.lock();
+            if h.connected() || h.status() == HealthStatus::NoAuth {
+                return false;
+            }
+        }
+        let mut at = self.inner.answer_recheck_at.lock();
+        if at.is_some_and(|t| t.elapsed() < ANSWER_RECHECK_GAP) {
+            return false;
+        }
+        *at = Some(std::time::Instant::now());
+        true
+    }
+
     /// Check again now if the home network was blocked (the window came back
     /// to the front, maybe from System Settings).
     pub fn recheck_if_local_network_blocked(&self) {
@@ -613,6 +670,9 @@ impl PlexState {
         if let Some(c) = client {
             self.start_notifications(c);
         }
+        // The network may still be coming up: the first failed checks don't
+        // count as offline (the wake window), and are tried again soon.
+        self.inner.health.lock().on_woke(now_ms());
         self.recheck();
     }
 
@@ -961,7 +1021,7 @@ impl PlexState {
                 token.clone(),
                 self.inner.identity.clone(),
                 Some(p.kind),
-            )?.with_server(&server.machine_id)),
+            )?.with_server(&server.machine_id).on_answer(self.answer_hook())),
             None => None,
         };
         {
@@ -1094,6 +1154,11 @@ impl PlexState {
 
     fn on_plex_event(&self, ev: &PlexEvent) {
         let now = now_ms();
+        // The server just said something, so it can be reached: check now
+        // rather than at the next ping if health still says it can't.
+        if !matches!(ev, PlexEvent::Disconnected | PlexEvent::Shutdown) && self.should_recheck_on_answer() {
+            self.recheck();
+        }
         let scan = {
             let mut t = self.inner.scan.lock();
             t.on_event(ev).then(|| t.progress())
@@ -1135,27 +1200,41 @@ impl PlexState {
                 if *stop_rx.borrow() {
                     return;
                 }
-                me.health_tick().await;
+                // A check that hangs or panics must not end the checks: the
+                // app would then stay offline with the server back.
+                use futures::FutureExt;
+                match tokio::time::timeout(TICK_LIMIT, std::panic::AssertUnwindSafe(me.health_tick()).catch_unwind()).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(_)) => tracing::warn!("server check failed unexpectedly; trying again at the next one"),
+                    Err(_) => tracing::warn!("server check took too long; trying again at the next one"),
+                }
             }
         });
     }
 
-    async fn ping(client: &PlexClient) -> ProbeOutcome {
+    /// One ping of the current connection. A reply that couldn't be read
+    /// (see [`server_answered`]) still means the server is there.
+    pub(crate) async fn ping(client: &PlexClient) -> ProbeOutcome {
         let started = tokio::time::Instant::now();
-        if let Err(e) = client.identity_info().await {
-            return ProbeOutcome::from_error(&e);
+        match client.identity_info().await {
+            Err(e) if server_answered(&e) => tracing::info!(kind = e.kind(), "server check: the server answered, but its reply couldn't be read"),
+            Err(e) => return ProbeOutcome::from_error(&e),
+            Ok(_) => {}
         }
         let latency_ms = started.elapsed().as_millis().min(u32::MAX as u128) as u32;
         // `/identity` ignores the token; `/` checks it.
-        match client.root().await {
-            Ok(root) => ProbeOutcome::Ok {
-                connection: client
-                    .connection()
-                    .unwrap_or(super::types::ConnectionKind::Remote),
-                latency_ms,
-                version: root.version,
-            },
-            Err(e) => ProbeOutcome::from_error(&e),
+        let version = match client.root().await {
+            Ok(root) => root.version,
+            Err(e) if server_answered(&e) => {
+                tracing::info!(kind = e.kind(), "server check: the server answered, but its reply couldn't be read");
+                None
+            }
+            Err(e) => return ProbeOutcome::from_error(&e),
+        };
+        ProbeOutcome::Ok {
+            connection: client.connection().unwrap_or(super::types::ConnectionKind::Remote),
+            latency_ms,
+            version,
         }
     }
 
@@ -1240,7 +1319,7 @@ impl PlexState {
                     self.inner.identity.clone(),
                     Some(p.kind),
                 ) {
-                    Ok(c) => c.with_server(&server.machine_id),
+                    Ok(c) => c.with_server(&server.machine_id).on_answer(self.answer_hook()),
                     Err(_) => return,
                 };
                 let changed = current
@@ -1270,7 +1349,21 @@ impl PlexState {
                     self.emit_auth().await;
                 }
             }
+            None if self.inner.health.lock().in_wake_grace(now_ms()) => {
+                // Just woke: keep the connection and the state, try again soon.
+                tracing::info!(plex_tv = internet, "server check: no answer yet after waking; trying again in a few seconds");
+                let me = self.clone();
+                spawn(async move {
+                    tokio::time::sleep(super::health::WAKE_RETRY).await;
+                    me.recheck();
+                });
+            }
             None => {
+                tracing::info!(
+                    connections = server.connections.len(),
+                    plex_tv = internet,
+                    "server check: none of the server's connections answered"
+                );
                 {
                     let mut s = self.inner.session.write().await;
                     if let Some(cur) = &mut s.current {
@@ -1783,6 +1876,113 @@ mod tests {
         st.restore().await.unwrap();
         assert_eq!(st.health().status, HealthStatus::Local);
         (st, rec, dir, tv)
+    }
+
+    fn bare_client(uri: &str) -> PlexClient {
+        PlexClient::new(uri, Token::new(ACCT).unwrap(), Arc::new(ClientIdentity::with_id("cid")), Some(ConnectionKind::Local)).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_reply_that_wont_decode_still_means_the_server_answered() {
+        let server = MockServer::builder().start().await;
+        // Cut off mid-reply, and a broken byte: neither decodes.
+        Mock::given(method("GET"))
+            .and(path("/identity"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(b"{\"MediaContainer\": {\"version\": \"1.4".to_vec(), "application/json"))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(b"{\"MediaContainer\": [\xff".to_vec(), "application/json"))
+            .mount(&server)
+            .await;
+        let uri = server.uri();
+        let c = bare_client(&uri);
+        let out = PlexState::ping(&c).await;
+        assert!(
+            matches!(out, ProbeOutcome::Ok { connection: ConnectionKind::Local, version: None, .. }),
+            "answered, so reachable: {out:?}"
+        );
+        // A 404 from `/` is an answer too.
+        server.reset().await;
+        Mock::given(method("GET"))
+            .and(path("/identity"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"MediaContainer": {"machineIdentifier": "m1"}})))
+            .mount(&server)
+            .await;
+        assert!(matches!(PlexState::ping(&c).await, ProbeOutcome::Ok { .. }));
+        // A server that doesn't answer at all is still unreachable.
+        drop(server);
+        assert_eq!(PlexState::ping(&bare_client(&uri)).await, ProbeOutcome::Unreachable);
+    }
+
+    #[tokio::test]
+    async fn an_undecodable_reply_never_puts_the_app_offline() {
+        let server = pms("m1", true).await;
+        let (st, _rec, _d, _tv) = connected(&server).await;
+        // `/` now answers with a body that won't decode.
+        server.reset().await;
+        Mock::given(method("GET"))
+            .and(path("/identity"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"MediaContainer": {"machineIdentifier": "m1"}})))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(b"{\"MediaContainer\": {\"friendlyName\": \"x\xff\"".to_vec(), "application/json"))
+            .mount(&server)
+            .await;
+        for _ in 0..3 {
+            st.health_tick().await;
+            assert_eq!(st.health().status, HealthStatus::Local);
+            assert!(!st.health().cached_only, "songs aren't greyed out");
+        }
+        st.sign_out().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_reply_from_the_server_while_offline_asks_for_a_check_now() {
+        let server = pms("m1", true).await;
+        let (st, _rec, _d, _tv) = connected(&server).await;
+        assert!(!st.should_recheck_on_answer(), "connected: nothing to check");
+        st.inner.health.lock().on_rediscover_failed(now_ms(), true);
+        assert!(st.should_recheck_on_answer(), "the server said something while marked offline");
+        assert!(!st.should_recheck_on_answer(), "a burst of events asks once");
+        // The check that follows brings it back.
+        st.health_tick().await;
+        assert_eq!(st.health().status, HealthStatus::Local);
+        assert!(!st.health().cached_only);
+        st.sign_out().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn any_reply_through_the_server_client_while_offline_asks_for_a_check() {
+        let server = pms("m1", true).await;
+        let (st, _rec, _d, _tv) = connected(&server).await;
+        let c = st.client().await.unwrap();
+        st.inner.health.lock().on_rediscover_failed(now_ms(), true);
+        assert!(st.health().cached_only);
+        // Playback reports or a library read get answered: that reply asked
+        // for the check (so the next one within the gap doesn't).
+        c.root().await.unwrap();
+        assert!(!st.should_recheck_on_answer(), "the reply already asked");
+        st.health_tick().await;
+        assert!(!st.health().cached_only);
+        st.sign_out().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_failed_check_just_after_waking_keeps_the_songs_playable() {
+        let server = pms("m1", true).await;
+        let (st, _rec, _d, _tv) = connected(&server).await;
+        st.reconnect().await;
+        // The network isn't back yet: the server doesn't answer.
+        server.reset().await;
+        st.health_tick().await;
+        assert_eq!(st.health().status, HealthStatus::Local);
+        assert!(!st.health().cached_only, "not offline on the first failure after waking");
+        assert!(st.client().await.is_ok(), "the connection is kept for the retry");
+        st.sign_out().await.unwrap();
     }
 
     #[tokio::test]

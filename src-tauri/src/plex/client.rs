@@ -853,6 +853,19 @@ pub struct PlexClient {
     /// from it, and taken off every id sent to it. None in tests that use
     /// plain Plex ids.
     tag: Option<Arc<str>>,
+    /// Told whenever the server answers a request (any status), so the app
+    /// can notice the server is back without waiting for the next ping.
+    answered: Option<OnAnswer>,
+}
+
+/// See [`PlexClient::on_answer`].
+#[derive(Clone)]
+pub struct OnAnswer(pub Arc<dyn Fn() + Send + Sync>);
+
+impl std::fmt::Debug for OnAnswer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("OnAnswer")
+    }
 }
 
 impl PlexClient {
@@ -881,7 +894,14 @@ impl PlexClient {
             identity,
             connection,
             tag: None,
+            answered: None,
         })
+    }
+
+    /// Call `f` each time the server answers a request through this client.
+    pub fn on_answer(mut self, f: OnAnswer) -> Self {
+        self.answered = Some(f);
+        self
     }
 
     /// Name the server: ids read from it get its tag (`crate::sid`).
@@ -1026,6 +1046,9 @@ impl PlexClient {
 
     async fn send(&self, rb: RequestBuilder) -> AppResult<Response> {
         let resp = rb.send().await.map_err(map_send_error)?;
+        if let Some(f) = &self.answered {
+            (f.0)();
+        }
         check_status(resp).await
     }
 

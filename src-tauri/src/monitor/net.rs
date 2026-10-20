@@ -171,9 +171,33 @@ pub fn describe_change(old: Route, new: Route) -> String {
     if parts.is_empty() { "no change".into() } else { parts.join(", ") }
 }
 
+/// The app came back to the front (the phone resumed it): check the server
+/// now, as after a wake, instead of at the next ping.
+pub async fn follow_foreground<F, Fut>(mut rx: tokio::sync::watch::Receiver<bool>, on_front: F)
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    while rx.changed().await.is_ok() {
+        let fg = *rx.borrow_and_update();
+        if fg {
+            tracing::info!("network: back in the foreground");
+            on_front().await;
+        }
+    }
+}
+
 /// Background loop: wake or network change → reconnect now; no network →
 /// "You're offline" at once.
 pub fn spawn(plex: PlexState) {
+    let front = plex.clone();
+    tauri::async_runtime::spawn(async move {
+        follow_foreground(crate::platform::foreground::subscribe(), || {
+            let p = front.clone();
+            async move { p.reconnect().await }
+        })
+        .await
+    });
     tauri::async_runtime::spawn(async move {
         let mut watch = NetWatch::new(SystemTime::now());
         loop {
@@ -203,6 +227,31 @@ pub fn spawn(plex: PlexState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn coming_back_to_the_front_checks_the_server_now() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let (tx, rx) = tokio::sync::watch::channel(true);
+        let n = Arc::new(AtomicUsize::new(0));
+        let seen = n.clone();
+        let follow = tokio::spawn(follow_foreground(rx, move || {
+            let seen = seen.clone();
+            async move {
+                seen.fetch_add(1, Ordering::SeqCst);
+            }
+        }));
+        tx.send(false).unwrap(); // to the background: nothing
+        tx.send(true).unwrap(); // back to the front: a check
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while n.load(Ordering::SeqCst) == 0 {
+            assert!(std::time::Instant::now() < deadline, "no check after coming to the front");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(n.load(Ordering::SeqCst), 1, "only coming to the front checks");
+        follow.abort();
+    }
 
     fn v4(a: u8, b: u8) -> Option<Ipv4Addr> {
         Some(Ipv4Addr::new(192, 168, a, b))

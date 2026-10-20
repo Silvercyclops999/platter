@@ -14,7 +14,7 @@ import { useToasts } from "./toasts";
 import { loadPins } from "./pins";
 import { loadFolders, onStoreChanged } from "./folders";
 
-interface AppStore {
+export interface AppStore {
   auth: AuthStatus | null;
   /** Saved servers (Plex and those added by address); null until known. */
   servers: SavedServer[] | null;
@@ -95,7 +95,18 @@ export function connectApp(b: Backend = backend): () => void {
       cachedTimer = null;
     }
   };
-  b.health().then((h) => alive && onHealth(h)).catch(() => {});
+  // A change sent while the first answer was on its way is newer than it:
+  // the answer must not put back an older state (songs greyed after the
+  // server came back).
+  let healthEvents = 0;
+  keep(
+    b.listen("health://changed", (h) => {
+      healthEvents++;
+      onHealth(h);
+    }),
+  );
+  const seen = healthEvents;
+  b.health().then((h) => alive && healthEvents === seen && onHealth(h)).catch(() => {});
   b.syncStatus().then((x) => alive && s.setSync(x)).catch(() => {});
   loadSettings(b);
   void loadPins(b);
@@ -108,7 +119,6 @@ export function connectApp(b: Backend = backend): () => void {
   loadArtistNames();
 
   keep(b.listen("auth://changed", (a) => useApp.getState().setAuth(a)));
-  keep(b.listen("health://changed", onHealth));
   keep(b.listen("sync://progress", (x) => useApp.getState().setSync(x)));
   keep(
     b.listen("library://changed", () => {
