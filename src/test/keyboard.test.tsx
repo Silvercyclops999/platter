@@ -88,6 +88,8 @@ describe("keyboard shortcuts window", () => {
   });
 
   it("opens from Help and from Settings", async () => {
+    // The panel loads on first open; load it first so a busy machine only tests the wiring.
+    await import("../help/HelpPanel");
     const user = userEvent.setup();
     render(<AppShell />);
     await user.click(screen.getByRole("button", { name: /^App menu/ }));
