@@ -75,6 +75,23 @@ jobs:
       - run: npx playwright-core install --with-deps --only-shell chromium
       - run: node scripts/phone-layout-guard.mjs
 
+  # The UI tests again in a time zone where it's already tomorrow (UTC+14), so a
+  # test that only passes on one side of midnight fails here instead of in a
+  # release.
+  ui-tomorrow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TZ: Pacific/Kiritimati
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
   # The Stream Deck plugin: types, tests, and that it builds and packs.
   streamdeck:
     runs-on: ubuntu-latest

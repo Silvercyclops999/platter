@@ -24,23 +24,43 @@ env:
 jobs:
   gate:
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
     steps:
+      # The tagged commit already passed the full CI run: don't run it all again.
+      - name: Already green in CI?
+        id: green
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=${{ github.sha }}&status=success" --jq '.total_count' || echo 0)
+          if [ "${n:-0}" -gt 0 ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; echo "CI passed on this commit; skipping the gate's tests."; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
       - uses: actions/checkout@v4
-      - run: |
+        if: steps.green.outputs.skip != 'true'
+      - if: steps.green.outputs.skip != 'true'
+        run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev libssl-dev libvulkan-dev glslc
       - uses: actions/setup-node@v4
+        if: steps.green.outputs.skip != 'true'
         with: { node-version: 22, cache: npm }
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.green.outputs.skip != 'true'
         with: { components: clippy }
       - uses: swatinem/rust-cache@v2
+        if: steps.green.outputs.skip != 'true'
         with: { workspaces: src-tauri }
       - run: npm ci
+        if: steps.green.outputs.skip != 'true'
       - run: npm test
+        if: steps.green.outputs.skip != 'true'
       - name: Stream Deck plugin
+        if: steps.green.outputs.skip != 'true'
         working-directory: streamdeck
         run: npm ci && npm run typecheck && npm test
       - working-directory: src-tauri
+        if: steps.green.outputs.skip != 'true'
         run: cargo clippy --all-targets --features transcribe -- -D warnings && cargo test --features transcribe
 
   build:
