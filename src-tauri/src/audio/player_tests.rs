@@ -731,6 +731,49 @@ async fn a_media_services_reset_while_playing_keeps_playing() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_output_slow_to_come_up_after_a_route_change_plays_on() {
+    let mut r = rig(&["a"], 3.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    // The car connects: the stream resets, and the first open fails.
+    r.cap.fail_opens(1);
+    r.cap.reset_stream();
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    let s = tokio::time::timeout(Duration::from_secs(5), wait_state(&r.player, |s| s.status == PlayerStatus::Playing)).await;
+    assert!(s.is_ok(), "plays on once the output opens");
+    audio_flows(&r).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_pause_by_hand_while_the_output_comes_up_stays_paused() {
+    let mut r = rig(&["a"], 3.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.cap.fail_opens(1);
+    r.cap.reset_stream();
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    r.player.pause().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Paused);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_output_that_never_comes_up_stays_paused_after_three_tries() {
+    let mut r = rig(&["a"], 3.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.cap.fail_opens(100);
+    let opens = r.cap.opens();
+    r.cap.reset_stream();
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    tokio::time::sleep(Duration::from_millis(6500)).await;
+    assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Paused);
+    // The reset's own try, then three more, then no more.
+    let tried = 100 - r.cap.fail_opens_left();
+    assert_eq!(tried, 4, "opens before: {opens}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_paused_song_stays_paused_after_an_interruption() {
     let mut r = rig(&["a"], 3.0, true, PlayerConfig::default()).await;
     r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
