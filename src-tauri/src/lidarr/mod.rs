@@ -104,7 +104,13 @@ pub struct PlexMusicFiles(pub PlexState);
 #[async_trait]
 impl PlexMusic for PlexMusicFiles {
     async fn music_files(&self) -> AppResult<PlexFiles> {
-        let unreachable = |_| AppError::Network("Platter can't reach your Plex server, so it can't compare folders. Try again when it's back.".into());
+        // Only a server that didn't answer is "can't reach"; a reply that
+        // couldn't be read says so.
+        let unreachable = |e: AppError| match e {
+            AppError::Network(_) => AppError::Network("Platter can't reach your Plex server, so it can't compare folders. Try again when it's back.".into()),
+            AppError::Decode(m) => AppError::Decode(format!("Your Plex server answered, but Platter couldn't read its file list, so it can't compare folders: {m}")),
+            e => e,
+        };
         let c = self.0.client().await.map_err(unreachable)?;
         let mut out = PlexFiles::default();
         for s in c.music_sections().await.map_err(unreachable)? {

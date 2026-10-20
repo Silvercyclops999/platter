@@ -162,9 +162,13 @@ fn redact_url_host(w: &str) -> String {
 fn redact_ipv6(w: &str) -> String {
     let mut out = String::with_capacity(w.len());
     let mut run = String::new();
-    let flush = |run: &mut String, out: &mut String| {
+    // A run glued to a word (`platter_lib::lyrics` holds `b::`) is a Rust
+    // path, not an address.
+    let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+    let mut before: Option<char> = None;
+    let flush = |run: &mut String, out: &mut String, before: Option<char>, after: Option<char>| {
         let bare = run.trim_matches(|c| c == '[' || c == ']');
-        if bare.matches(':').count() >= 2 && bare.parse::<std::net::Ipv6Addr>().is_ok() {
+        if !word(before) && !word(after) && bare.matches(':').count() >= 2 && bare.parse::<std::net::Ipv6Addr>().is_ok() {
             out.push_str("<ip>");
         } else {
             out.push_str(run);
@@ -175,11 +179,14 @@ fn redact_ipv6(w: &str) -> String {
         if c.is_ascii_hexdigit() || c == ':' || c == '.' || c == '%' {
             run.push(c);
         } else {
-            flush(&mut run, &mut out);
+            if !run.is_empty() {
+                flush(&mut run, &mut out, before, Some(c));
+            }
             out.push(c);
+            before = Some(c);
         }
     }
-    flush(&mut run, &mut out);
+    flush(&mut run, &mut out, before, None);
     out
 }
 
@@ -324,7 +331,11 @@ pub fn open<R: Runtime>(app: &AppHandle<R>) {
     let Some(dir) = dir(app) else { return };
     match open_file(&dir) {
         Ok((_, file)) => {
-            let _ = FILE.set(Mutex::new(file));
+            if FILE.set(Mutex::new(file)).is_ok() {
+                // Each run starts with its version, so a gap in the log reads
+                // as closed and opened again (an update, say) or not.
+                tracing::info!("Platter {} started", app.package_info().version);
+            }
         }
         Err(e) => tracing::warn!("log file: {e}"),
     }
@@ -392,7 +403,17 @@ mod tests {
         let r = super::redact("peer fe80::1c2d:3e4f, server [2001:db8::5]:32400, at 12:30:45 v2.0.1");
         assert!(!r.contains("fe80") && !r.contains("2001:db8"), "{r}");
         assert!(r.contains("at 12:30:45 v2.0.1"), "{r}");
-        let h = super::redact("GET https://music.myhouse.example:4533/rest/ping and http://jellyfin.local/x then https://plex.tv/api/v2/user");
+        // Module paths in every line hold address-like runs (`b::c`); they stay.
+        for line in [
+            "INFO platter_lib::lyrics::checker: x",
+            "INFO platter_lib::analysis: x",
+            "INFO platter_lib::platform::discord: x",
+            "INFO symphonia_bundle_mp3::demuxer: x",
+        ] {
+            assert_eq!(super::redact(line), line);
+        }
+        assert!(super::redact("addr=fe80::1 at").contains("addr=<ip> at"));
+        let h =super::redact("GET https://music.myhouse.example:4533/rest/ping and http://jellyfin.local/x then https://plex.tv/api/v2/user");
         assert!(!h.contains("myhouse") && !h.contains("jellyfin.local"), "{h}");
         assert!(h.contains("https://<host>:4533/rest/ping") && h.contains("https://plex.tv/api/v2/user"), "{h}");
         let hd = super::redact(r#"headers X-Emby-Token: em-secret, X-Api-Key=lk-secret, "X-Plex-Token": "px-secret", Authorization: Bearer au-secret"#);

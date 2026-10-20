@@ -168,6 +168,21 @@ pub async fn body_capped(mut resp: reqwest::Response, max: usize, net: impl Fn(r
     Ok(out.freeze())
 }
 
+/// What went wrong reading a reply's body, in words. The HTTP library
+/// reports any failure mid-body (the connection closing early, a reset) as
+/// "error decoding response body", which reads like a bad reply when the
+/// server did answer and the transfer was cut short.
+pub fn body_error_text(e: reqwest::Error) -> String {
+    let e = e.without_url();
+    if e.is_timeout() {
+        "the read timed out".into()
+    } else if e.is_decode() {
+        "the transfer was cut short".into()
+    } else {
+        e.to_string()
+    }
+}
+
 /// Most one answer from a music server (Jellyfin, OpenSubsonic) may be.
 pub const SERVER_MAX: usize = 256 * 1024 * 1024;
 

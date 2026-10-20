@@ -2124,6 +2124,8 @@ pub fn run() {
                 d.sync.kick();
             }
             if let tauri::RunEvent::ExitRequested { .. } = event {
+                // So a log that ends shows whether the app closed or stopped.
+                tracing::info!("Platter is closing");
                 platform::reveal::save(app);
                 let player = app.state::<PlayerHandle>().inner().clone();
                 tauri::async_runtime::block_on(player.flush());

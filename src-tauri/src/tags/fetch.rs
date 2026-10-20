@@ -154,7 +154,7 @@ async fn body(mut resp: reqwest::Response, cap: u64) -> Result<Vec<u8>, FetchErr
         match resp.chunk().await {
             Ok(Some(c)) => out.extend_from_slice(&c),
             Ok(None) => break,
-            Err(e) => return Err(FetchError::Transient(e.without_url().to_string())),
+            Err(e) => return Err(FetchError::Transient(crate::web::body_error_text(e))),
         }
     }
     out.truncate(cap as usize);

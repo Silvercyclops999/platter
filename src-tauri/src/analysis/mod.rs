@@ -433,7 +433,7 @@ impl Analyzer {
                 return Ok(Outcome::Skipped);
             }
             Err(AudioError::Unreachable(m)) => {
-                tracing::info!("song analysis: the server can't be reached, trying again later: {m}");
+                tracing::info!("song analysis: couldn't read the song from the server now, trying again later: {m}");
                 return Ok(Outcome::Later);
             }
             Err(AudioError::Cancelled) => return Ok(Outcome::Stopped),
