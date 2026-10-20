@@ -368,12 +368,9 @@ impl AudioOutput for CaptureOutput {
         on_event: OutputCallback,
     ) -> AppResult<OutputFormat> {
         self.close();
-        if self
-            .shared
-            .fail_opens
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
-            .is_ok()
-        {
+        // Test-only: one thread opens at a time.
+        if self.shared.fail_opens.load(Ordering::SeqCst) > 0 {
+            self.shared.fail_opens.fetch_sub(1, Ordering::SeqCst);
             return Err(AppError::Io("audio device did not open in time".into()));
         }
         self.shared.stop.store(false, Ordering::SeqCst);
