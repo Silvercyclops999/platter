@@ -12,7 +12,7 @@
  * row doesn't move; the action still happens.
  */
 import { Heart, HeartOff, ListEnd } from "lucide-react";
-import { useCallback, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type { Track } from "../lib/types";
 import { isLiked, setLiked, useIsLiked } from "../stores/likes";
 import { player } from "../stores/player";
@@ -50,6 +50,31 @@ export function swipeAdds(axis: Axis | null, dx: number): boolean {
   return swipeSide(axis, dx) === "right";
 }
 
+/**
+ * Once a row has a sideways swipe, the page mustn't scroll under the finger
+ * (WebKit can start a scroll on a slightly slanted move and cancel ours).
+ * React's touch handlers are passive, so one blocking touchmove listener is
+ * added by hand per list (not per row), before any touch starts, and it only
+ * acts while a swipe is sideways; an up or down press passes untouched.
+ */
+let sideways = false;
+const holders = new WeakMap<Element, number>();
+function holdScroll(e: TouchEvent) {
+  if (sideways && e.cancelable) e.preventDefault();
+}
+function holdList(el: Element) {
+  const n = holders.get(el) ?? 0;
+  if (n === 0) el.addEventListener("touchmove", holdScroll as EventListener, { passive: false });
+  holders.set(el, n + 1);
+}
+function releaseList(el: Element) {
+  const n = (holders.get(el) ?? 1) - 1;
+  if (n <= 0) {
+    el.removeEventListener("touchmove", holdScroll as EventListener);
+    holders.delete(el);
+  } else holders.set(el, n);
+}
+
 interface Press {
   id: number;
   x0: number;
@@ -79,22 +104,29 @@ export function useRowSwipe(actions: SwipeActions, enabled = true) {
   const [armed, setArmed] = useState<SwipeSide | null>(null);
   const sides = { right: !!actions.right, left: !!actions.left };
 
-  // Once the row has the swipe, the page mustn't scroll under the finger
-  // (WebKit can start a scroll on a slightly slanted move and cancel ours).
-  // React's touch handlers are passive, so this one is added by hand.
-  const node = useRef<HTMLElement | null>(null);
-  const holdScroll = useRef((e: TouchEvent) => {
-    if (press.current?.axis === "x" && e.cancelable) e.preventDefault();
-  });
+  // The row's list holds the page still while this row swipes (see holdList).
+  const list = useRef<Element | null>(null);
   const ref = useCallback((el: HTMLElement | null) => {
-    node.current?.removeEventListener("touchmove", holdScroll.current);
-    node.current = el;
-    el?.addEventListener("touchmove", holdScroll.current, { passive: false });
+    if (list.current) releaseList(list.current);
+    list.current = el?.parentElement ?? null;
+    if (list.current) holdList(list.current);
   }, []);
+  // A row that goes away mid-swipe doesn't leave the lists holding the page.
+  useEffect(
+    () => () => {
+      if (press.current?.axis === "x") sideways = false;
+    },
+    [],
+  );
+  /** Let go of the press without acting. */
+  const drop = () => {
+    if (press.current?.axis === "x") sideways = false;
+    press.current = null;
+  };
 
   /** Back to rest: no press, the row home, the mark out. */
   const reset = () => {
-    press.current = null;
+    drop();
     setDragging(false);
     setOffset(0);
     setArmed(null);
@@ -131,10 +163,11 @@ export function useRowSwipe(actions: SwipeActions, enabled = true) {
       if (!axis) return;
       // Up or down first, or a way this row doesn't act: a scroll (or a shelf), not ours.
       if (axis === "y" || (dx > 0 && !live.current.right) || (dx < 0 && !live.current.left)) {
-        press.current = null;
+        drop();
         return;
       }
       p.axis = axis;
+      sideways = true;
       swiped.current = true;
       e.currentTarget.setPointerCapture?.(e.pointerId);
       setDragging(true);
@@ -177,6 +210,12 @@ export function useRowSwipe(actions: SwipeActions, enabled = true) {
       onPointerCancel: (e: ReactPointerEvent<HTMLElement>) => end(e, true),
       // Capture taken away (the system took the touch): the row never stays out.
       onLostPointerCapture: (e: ReactPointerEvent<HTMLElement>) => end(e, true),
+      // A mouse press that leaves the row before it picked a way would stay live
+      // (no capture yet, so its release lands elsewhere): drop it.
+      onPointerLeave: (e: ReactPointerEvent<HTMLElement>) => {
+        const p = press.current;
+        if (p && p.id === e.pointerId && e.pointerType === "mouse" && !p.axis) drop();
+      },
       onClickCapture,
       style: { "--ph-swipe": `${offset}px`, "--ph-swipe-reach": reach } as CSSProperties,
     },

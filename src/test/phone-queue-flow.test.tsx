@@ -17,6 +17,7 @@ import { PhonePage, PhoneShell } from "../phone/PhoneShell";
 import { phone, usePhoneUi } from "../phone/phoneUi";
 import { QUEUE_SWIPE_PX, SWIPE_MARK_PX, SWIPE_MAX_PX, swipeAdds, swipeFollow, swipeSide } from "../phone/rowSwipe";
 import { useLikes } from "../stores/likes";
+import { EDGE_PX } from "../phone/motion";
 import { player, queuedToast, usePlayer } from "../stores/player";
 import { useRouter } from "../stores/router";
 import { loadSettings } from "../stores/settings";
@@ -374,12 +375,12 @@ describe("swipe a song row left to like it", () => {
 
   it("once the row has a sideways swipe, the page doesn't scroll under the finger", () => {
     const li = row(tracks()[2]);
-    const early = new Event("touchmove", { cancelable: true });
+    const early = new Event("touchmove", { cancelable: true, bubbles: true });
     li.dispatchEvent(early);
     expect(early.defaultPrevented).toBe(false);
     fireEvent.pointerDown(li, { pointerId: 7, clientX: 100, clientY: 300, button: 0, pointerType: "touch" });
     fireEvent.pointerMove(li, { pointerId: 7, clientX: 140, clientY: 304, pointerType: "touch" });
-    const during = new Event("touchmove", { cancelable: true });
+    const during = new Event("touchmove", { cancelable: true, bubbles: true });
     li.dispatchEvent(during);
     expect(during.defaultPrevented).toBe(true);
     fireEvent.pointerUp(li, { pointerId: 7, clientX: 140, clientY: 304, pointerType: "touch" });
@@ -508,5 +509,140 @@ describe("the queue sheet reads like the computer's queue panel", () => {
     const li = within(queue).getByRole("button", { name: `Move ${c.title}` }).closest("li")!;
     swipe(li, [300, 300], [[260, 300], [180, 300]]);
     expect(remove).not.toHaveBeenCalled();
+  });
+});
+
+describe("left swipes keep the right swipe's guards", () => {
+  it("a cancelled left swipe or a lost capture likes nothing", () => {
+    act(() => useLikes.getState().setIds([]));
+    const set = vi.spyOn(backend, "likesSet");
+    const li = row(tracks()[2]);
+    swipe(li, [300, 300], [[260, 300], [180, 300]], { cancel: true });
+    fireEvent.pointerDown(li, { pointerId: 7, clientX: 300, clientY: 300, button: 0, pointerType: "touch" });
+    fireEvent.pointerMove(li, { pointerId: 7, clientX: 180, clientY: 300, pointerType: "touch" });
+    expect(li).toHaveClass("is-armed-left");
+    fireEvent.lostPointerCapture(li, { pointerId: 7 });
+    expect(li.style.getPropertyValue("--ph-swipe")).toBe("0px");
+    expect(set).not.toHaveBeenCalled();
+  });
+
+  it("a second finger during a left swipe is ignored, and the like happens once", () => {
+    act(() => useLikes.getState().setIds([]));
+    const set = vi.spyOn(backend, "likesSet");
+    const li = row(tracks()[2]);
+    fireEvent.pointerDown(li, { pointerId: 7, clientX: 300, clientY: 300, button: 0, pointerType: "touch" });
+    fireEvent.pointerMove(li, { pointerId: 7, clientX: 260, clientY: 300, pointerType: "touch" });
+    fireEvent.pointerDown(li, { pointerId: 9, clientX: 200, clientY: 300, button: 0, pointerType: "touch" });
+    fireEvent.pointerMove(li, { pointerId: 9, clientX: 100, clientY: 300, pointerType: "touch" });
+    fireEvent.pointerUp(li, { pointerId: 9, clientX: 100, clientY: 300, pointerType: "touch" });
+    expect(li.style.getPropertyValue("--ph-swipe")).toBe("-40px");
+    fireEvent.pointerMove(li, { pointerId: 7, clientX: 180, clientY: 300, pointerType: "touch" });
+    fireEvent.pointerUp(li, { pointerId: 7, clientX: 180, clientY: 300, pointerType: "touch" });
+    expect(set).toHaveBeenCalledTimes(1);
+  });
+
+  it("a press inside the left edge is the back swipe's: no queue, no like", () => {
+    const add = vi.spyOn(player, "addToQueue");
+    const set = vi.spyOn(backend, "likesSet");
+    const li = row(tracks()[2]);
+    swipe(li, [EDGE_PX - 4, 300], [[60, 300], [200, 300]]);
+    swipe(li, [EDGE_PX - 4, 300], [[EDGE_PX - 4, 300], [EDGE_PX - 4 - 100, 300]]);
+    expect(add).not.toHaveBeenCalled();
+    expect(set).not.toHaveBeenCalled();
+    expect(li).not.toHaveClass("is-swiping");
+  });
+
+  it("an up or down drag leaves touchmove alone, so the list scrolls", () => {
+    const li = row(tracks()[2]);
+    fireEvent.pointerDown(li, { pointerId: 7, clientX: 100, clientY: 300, button: 0, pointerType: "touch" });
+    fireEvent.pointerMove(li, { pointerId: 7, clientX: 104, clientY: 340, pointerType: "touch" });
+    // Then sideways: still a scroll, the row never takes it.
+    fireEvent.pointerMove(li, { pointerId: 7, clientX: 220, clientY: 350, pointerType: "touch" });
+    const move = new Event("touchmove", { cancelable: true, bubbles: true });
+    li.dispatchEvent(move);
+    expect(move.defaultPrevented).toBe(false);
+    fireEvent.pointerUp(li, { pointerId: 7, clientX: 220, clientY: 350, pointerType: "touch" });
+    // After a sideways swipe ends, scrolling is free again.
+    swipe(li, [100, 300], [[140, 300], [200, 300]]);
+    const after = new Event("touchmove", { cancelable: true, bubbles: true });
+    li.dispatchEvent(after);
+    expect(after.defaultPrevented).toBe(false);
+  });
+
+  it("rows don't each carry a blocking listener: their list holds one for all of them", () => {
+    const rowAdds = vi.spyOn(HTMLLIElement.prototype, "addEventListener");
+    const listAdds = vi.spyOn(HTMLUListElement.prototype, "addEventListener");
+    render(
+      <div className="phone">
+        <ul>
+          {tracks()
+            .slice(0, 5)
+            .map((t) => (
+              <SongRow key={t.id} track={t} onPlay={() => undefined} />
+            ))}
+        </ul>
+      </div>,
+    );
+    expect(rowAdds.mock.calls.filter(([type]) => type === "touchmove")).toHaveLength(0);
+    expect(listAdds.mock.calls.filter(([type]) => type === "touchmove")).toHaveLength(1);
+  });
+
+  it("a mouse press that leaves the row before picking a way is dropped", () => {
+    const add = vi.spyOn(player, "addToQueue");
+    const li = row(tracks()[2]);
+    fireEvent.pointerDown(li, { pointerId: 1, clientX: 100, clientY: 300, button: 0, pointerType: "mouse" });
+    fireEvent.pointerLeave(li, { pointerId: 1, clientX: 100, clientY: 260, pointerType: "mouse" });
+    // Coming back in with the button still down doesn't pick the old press up.
+    fireEvent.pointerMove(li, { pointerId: 1, clientX: 200, clientY: 300, pointerType: "mouse" });
+    fireEvent.pointerUp(li, { pointerId: 1, clientX: 200, clientY: 300, pointerType: "mouse" });
+    expect(li).not.toHaveClass("is-swiping");
+    expect(add).not.toHaveBeenCalled();
+  });
+
+  it("a tap after a left swipe plays the song", async () => {
+    const onPlay = vi.fn();
+    act(() => useLikes.getState().setIds([]));
+    const { container } = render(
+      <ul>
+        <SongRow track={tracks()[1]} onPlay={onPlay} />
+      </ul>,
+    );
+    const li = container.querySelector<HTMLLIElement>("li.ph-song")!;
+    const main = li.querySelector<HTMLButtonElement>(".ph-song__main")!;
+    swipe(li, [300, 300], [[260, 300], [180, 300]]);
+    fireEvent.click(main);
+    expect(onPlay).not.toHaveBeenCalled();
+    await act(() => new Promise((r) => setTimeout(r, 0)));
+    fireEvent.pointerDown(li, { pointerId: 8, clientX: 150, clientY: 300, button: 0, pointerType: "touch" });
+    fireEvent.pointerUp(li, { pointerId: 8, clientX: 150, clientY: 300, pointerType: "touch" });
+    fireEvent.click(main);
+    expect(onPlay).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("removing one song from the queue without a swipe", () => {
+  it("a queued row's More opens its sheet with Remove from queue", async () => {
+    const [t, a, , c] = tracks();
+    play(t, {
+      queue: {
+        current: item(t, 0),
+        userQueue: [item(c, 10, "user")],
+        nextUp: [item(a, 1)],
+        history: [],
+        context: { kind: "album", id: t.albumId, title: t.albumTitle },
+      },
+    });
+    const remove = vi.spyOn(player, "queueRemove").mockResolvedValue(undefined);
+    render(<PhoneShell />);
+    act(() => phone.push({ kind: "queue" }));
+    const queue = await screen.findByRole("dialog", { name: "Queue" });
+    fireEvent.click(within(queue).getByRole("button", { name: `More for ${c.title}` }));
+    const sheet = await screen.findByRole("dialog", { name: c.title });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Remove from queue" }));
+    expect(remove).toHaveBeenCalledWith("q10");
+    // A song's sheet opened anywhere else doesn't offer it.
+    act(() => phone.push({ kind: "track", track: a }));
+    const other = await screen.findByRole("dialog", { name: a.title });
+    expect(within(other).queryByRole("button", { name: "Remove from queue" })).toBeNull();
   });
 });

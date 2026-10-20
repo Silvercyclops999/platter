@@ -16,6 +16,7 @@ import {
   HeartOff,
   ListEnd,
   ListMinus,
+  MoreHorizontal,
   ListMusic,
   ListPlus,
   MicVocal,
@@ -135,7 +136,7 @@ const SheetFor = memo(function SheetFor({ sheet }: { sheet: Sheet }) {
     case "device":
       return <DeviceSheet />;
     case "track":
-      return <TrackSheet track={sheet.track} inPlaylist={sheet.inPlaylist} />;
+      return <TrackSheet track={sheet.track} inPlaylist={sheet.inPlaylist} queueItemId={sheet.queueItemId} />;
     case "album":
       return <AlbumSheet album={sheet.album} />;
     case "playlist":
@@ -224,6 +225,12 @@ function QueueRow({
           <QueueSongText item={item} />
         </button>
         <AddedBy trackId={t.id} />
+        {!editing && (
+          // The song's sheet, with Remove from queue: the way out that isn't a swipe.
+          <button type="button" className="ph-icon-btn" aria-label={`More for ${t.title}`} onClick={() => phone.push({ kind: "track", track: t, queueItemId: item.itemId })}>
+            <MoreHorizontal size={20} aria-hidden="true" />
+          </button>
+        )}
         <span
           className="ph-handle"
           role="button"
@@ -677,7 +684,7 @@ export { cycleRepeat };
 
 // ---------------------------------------------------------------- a song
 
-export function TrackSheet({ track, inPlaylist }: { track: Track; inPlaylist?: import("./phoneUi").InPlaylist }) {
+export function TrackSheet({ track, inPlaylist, queueItemId }: { track: Track; inPlaylist?: import("./phoneUi").InPlaylist; queueItemId?: string }) {
   const liked = isLiked(track.id);
   const isCurrent = usePlayer((s) => s.state?.track?.id === track.id);
   // "Remove from this playlist": only from that playlist's own page.
@@ -702,6 +709,8 @@ export function TrackSheet({ track, inPlaylist }: { track: Track; inPlaylist?: i
     { label: liked ? "Remove from Liked Songs" : "Add to Liked Songs", icon: liked ? HeartOff : Heart, run: act(() => setLiked([track], !liked, { toast: !liked ? false : undefined })) },
     { label: "Add to playlist", icon: ListPlus, run: act(() => phone.push({ kind: "addTo", track }), true) },
     { label: "Add to queue", icon: ListEnd, run: act(() => player.addToQueue([track])) },
+    // From a queue row: take this one out (the same words as the computer's menu).
+    ...(queueItemId ? [{ label: "Remove from queue", icon: ListMinus, run: act(() => player.queueRemove(queueItemId)) }] : []),
     ...(fromPlaylist
       ? [{ label: "Remove from this playlist", icon: Trash2, danger: true, run: act(() => removeRows(fromPlaylist.playlist, [fromPlaylist.itemId], fromPlaylist.order)) }]
       : []),

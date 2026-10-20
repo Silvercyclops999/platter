@@ -28,7 +28,8 @@ export type Sheet =
   | { kind: "queue" }
   | { kind: "sleep" }
   | { kind: "device" }
-  | { kind: "track"; track: Track; inPlaylist?: InPlaylist }
+  /** `queueItemId`: opened from a queue row, so the sheet offers Remove from queue. */
+  | { kind: "track"; track: Track; inPlaylist?: InPlaylist; queueItemId?: string }
   | { kind: "album"; album: Album }
   | { kind: "playlist"; playlist: Playlist }
   | { kind: "addTo"; track: Track }
