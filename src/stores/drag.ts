@@ -149,10 +149,10 @@ export type DropRule = "ok" | "dim";
 
 /** Whether a library row takes the songs: your playlists do, Liked does unless they're all liked. */
 export function libraryDropRule(
-  entry: { kind: string; id: string; smart: boolean; liked?: boolean; unavailable?: boolean; bookmarks?: boolean; stats?: boolean; blend?: boolean; shared?: { role: string; gone: boolean } },
+  entry: { kind: string; id: string; smart: boolean; liked?: boolean; unavailable?: boolean; bookmarks?: boolean; stats?: boolean; page?: string; blend?: boolean; shared?: { role: string; gone: boolean } },
   songs: DragSongs,
 ): DropRule {
-  if (entry.unavailable || entry.bookmarks || entry.stats || entry.blend) return "dim";
+  if (entry.unavailable || entry.bookmarks || entry.stats || entry.page || entry.blend) return "dim";
   // Someone else's playlist takes songs from its collaborators only.
   if (entry.shared && (entry.shared.role !== "collaborator" || entry.shared.gone)) return "dim";
   if (entry.liked) return songs.tracks && songs.tracks.length > 0 && songs.tracks.every((t) => isLiked(t.id)) ? "dim" : "ok";

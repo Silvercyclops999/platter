@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { IconButton } from "../components/Button";
 import { SearchField } from "../components/SearchField";
 import { help, useHelp } from "../stores/help";
+import { useUi } from "../stores/ui";
+import { shortcutLabel } from "../shell/shortcuts";
 import { HelpView } from "./HelpView";
 import { HELP_PAGES, helpPage, searchHelp } from "./pages";
 import "./help.css";
@@ -49,6 +51,12 @@ export function HelpPanel() {
             <div className="help-panel__search">
               <SearchField value={query} onChange={setQuery} label="Search help" placeholder="Search help" />
             </div>
+            {!query.trim() && (
+              <button type="button" className="help-panel__item help-panel__keys" onClick={() => useUi.getState().setShortcutsOpen(true)}>
+                <span className="help-panel__item-title">Keyboard shortcuts</span>
+                <span className="help-panel__item-snippet">Every key Platter knows. Also {shortcutLabel("help")}.</span>
+              </button>
+            )}
             <ul className="help-panel__list">
               {(query.trim() ? hits : HELP_PAGES.map((p) => ({ slug: p.slug, title: p.title, snippet: p.summary, anchor: undefined, page: undefined }))).map(
                 (h) => (

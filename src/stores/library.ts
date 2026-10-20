@@ -257,6 +257,8 @@ export interface LibEntry {
   bookmarks?: boolean;
   /** The Stats page (pinned after Bookmarks while its setting is on). */
   stats?: boolean;
+  /** A page pinned from Home's Explore row (Crates, Sound map). */
+  page?: import("./pinnedPages").PinnablePage;
   /** A Platter smart playlist (kept and filled on this computer). */
   platter?: boolean;
   /** Someone else's playlist shared with you. */
@@ -328,6 +330,7 @@ export function typeLabel(e: Pick<LibEntry, "kind" | "smart" | "format" | "folde
 export function subtitle(e: LibEntry, filtered: boolean): string {
   if (e.bookmarks) return "Songs and pages";
   if (e.stats) return "Your listening";
+  if (e.page) return e.page === "crates" ? "By label, producer and era" : "Songs that sound alike";
   if (e.unavailable) return "Not available";
   if (e.folder) return e.folder.count === 1 ? "1 playlist" : `${e.folder.count} playlists`;
   if (filtered) return e.kind === "artist" ? "" : (e.creator ?? "");

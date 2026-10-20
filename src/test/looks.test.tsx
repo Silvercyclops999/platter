@@ -243,7 +243,7 @@ describe("layout in the app", () => {
     Element.prototype.scrollTo = vi.fn();
     await act(() => updateSettings({ homeMixes: false, layout: layout({ homeShelves: ["topArtists", "playlists"], homeGreeting: true, quickAccess: 4 }) }));
     render(<HomePage />);
-    await waitFor(() => expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual(["Your top artists", "Your playlists"]));
+    await waitFor(() => expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent).filter((t) => t !== "Explore")).toEqual(["Your top artists", "Your playlists"]));
     expect(screen.getByRole("heading", { level: 1 })).toHaveClass("home__greeting");
     expect(within(screen.getByRole("list", { name: "Shortcuts" })).getAllByRole("listitem")).toHaveLength(4);
   });

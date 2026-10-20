@@ -1,7 +1,7 @@
 /**
- * Wrapped and Top Songs on the Stats page's Recaps: a ruled list, newest
- * first. Each year with plays has its Wrapped (this year's from December 1;
- * the app menu has it any time) and its Top Songs list, then All-Time. Each
+ * Wrapped and Top Songs on the Stats page's Wrapped tab: a ruled list, newest
+ * first. Each year with plays has its Wrapped (this year's from December 1,
+ * or any time with `current`) and its Top Songs list, then All-Time. Each
  * row is that year's record sleeve, the year and what opening it shows.
  */
 import { ChevronRight } from "lucide-react";
@@ -39,11 +39,13 @@ function Entry(p: { year: number | null; title: string; shown: string; sub: stri
   );
 }
 
-export function WrappedSection({ index }: { index?: TopSongsIndex }) {
+/** `current`: this year's Wrapped is listed even before December (the Stats tab). */
+export function WrappedSection({ index, current }: { index?: TopSongsIndex; current?: number }) {
   const on = useSettings((s) => s.settings?.wrappedTopSongs !== false);
   const loaded = useLoad(() => (index ? Promise.resolve(index) : backend.topSongsIndex()), [index, on]);
   const ix = loaded.data;
-  if (!on || !ix || (!ix.wrappedYears.length && !ix.years.length && !ix.allTime)) return null;
+  const wrappedYears = ix ? (current && !ix.wrappedYears.includes(current) ? [current, ...ix.wrappedYears] : ix.wrappedYears) : [];
+  if (!on || !ix || (!wrappedYears.length && !ix.years.length && !ix.allTime)) return null;
   return (
     <section className="stats-section wrapped-section" aria-labelledby="stats-wrapped" data-shot="wrapped">
       <div className="lg-head">
@@ -51,9 +53,9 @@ export function WrappedSection({ index }: { index?: TopSongsIndex }) {
           Wrapped and Top Songs
         </h2>
       </div>
-      {ix.wrappedYears.length > 0 && (
+      {wrappedYears.length > 0 && (
         <ul className="lg-years" aria-label="Wrapped">
-          {ix.wrappedYears.map((y) => (
+          {wrappedYears.map((y) => (
             <Entry key={y} year={y} title={`${y} Wrapped`} shown="Wrapped" sub="Your year in records, songs and hours" onOpen={() => wrapped.open(y)} />
           ))}
         </ul>

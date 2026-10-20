@@ -1,6 +1,6 @@
 /**
  * The miniplayer window from the main window's side: whether it's open (the
- * player bar button and the app menu show it), and opening or closing it.
+ * player bar button and the menu bar show it), and opening or closing it.
  * The window itself is made by the core; its page is `MiniplayerApp`.
  */
 import { create } from "zustand";

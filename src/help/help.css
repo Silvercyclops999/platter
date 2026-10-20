@@ -21,6 +21,7 @@
 .help-panel__item-title { font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
 .help-panel__item-snippet { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 .help-panel__empty { color: var(--color-text-secondary); }
+.help-panel__keys { margin-bottom: var(--space-2); border-bottom: 1px solid color-mix(in srgb, var(--color-ink) 8%, transparent); border-radius: var(--radius-card) var(--radius-card) 0 0; }
 
 .help-view { line-height: 1.6; color: var(--color-text-primary); }
 .help-view h2, .help-view h3, .help-view h4 { margin: var(--space-6) 0 var(--space-2); line-height: 1.3; }

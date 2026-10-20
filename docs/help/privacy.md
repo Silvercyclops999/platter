@@ -58,6 +58,6 @@ Your library copy, artwork, search history, listening history and downloads live
 
 A private session, from the app menu or Settings, Sharing and friends, Private session, keeps plays out of your listening history on this device, and stops Discord status, scrobbling and showing what you're playing to friends. Plex still counts finished plays unless Report plays to your server is off.
 
-Go offline, in the app menu, stops all network use until you turn it off. See [Downloads and offline](downloads-and-offline.md#go-offline).
+Go offline, in Settings, Downloads and devices, stops all network use until you turn it off. See [Downloads and offline](downloads-and-offline.md#go-offline).
 
 The full list, with every detail, is in [Platter's privacy file](https://github.com/Silvercyclops999/platter/blob/main/PRIVACY.md).

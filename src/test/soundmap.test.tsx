@@ -27,7 +27,7 @@ import {
   toScreen,
   wheelPixels,
 } from "../pages/soundmap/geometry";
-import { AppMenu } from "../shell/TopBar";
+import { HomeExplore } from "../pages/HomeExplore";
 import { useApp } from "../stores/app";
 import { player } from "../stores/player";
 import { useRouter } from "../stores/router";
@@ -516,12 +516,11 @@ describe("the map's helpers", () => {
 });
 
 describe("the Show sound map setting", () => {
-  it("is on by default and turning it off hides the app menu entry and the page", async () => {
+  it("is on by default and turning it off hides its Explore entry and the page", async () => {
     const user = userEvent.setup();
-    const menu = render(<AppMenu />);
-    fireEvent.click(screen.getByRole("button", { name: /^App menu/ }));
-    expect(await screen.findByRole("menuitem", { name: "Sound map" })).toBeInTheDocument();
-    menu.unmount();
+    const explore = render(<HomeExplore />);
+    expect(await screen.findByRole("button", { name: /^Sound map/ })).toBeInTheDocument();
+    explore.unmount();
 
     render(<SettingsPage />);
     const toggle = await screen.findByRole("switch", { name: "Show the sound map" });
@@ -529,21 +528,18 @@ describe("the Show sound map setting", () => {
     await user.click(toggle);
     await waitFor(() => expect(useSettings.getState().settings?.showSoundMap).toBe(false));
 
-    render(<AppMenu />);
-    const avatars = screen.getAllByRole("button", { name: /^App menu/ });
-    fireEvent.click(avatars[avatars.length - 1]);
-    expect(screen.getByRole("menuitem", { name: "Devices" })).toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Sound map" })).not.toBeInTheDocument();
+    render(<HomeExplore />);
+    expect(screen.getByRole("button", { name: /^Crates/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Sound map/ })).not.toBeInTheDocument();
   });
 
   it("the entry waits for analysis when Automix is off", async () => {
     await mock.settingsSet({ automix: false });
     await loadSettings();
     mock.soundmap.limit = 0;
-    render(<AppMenu />);
-    fireEvent.click(screen.getByRole("button", { name: /^App menu/ }));
+    render(<HomeExplore />);
     await waitFor(() => expect(useSoundMap.getState().info).not.toBeNull());
-    expect(screen.queryByRole("menuitem", { name: "Sound map" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Sound map/ })).not.toBeInTheDocument();
   });
 
   it("the page says when it's off", async () => {

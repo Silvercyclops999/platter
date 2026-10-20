@@ -67,7 +67,8 @@ function data(over: Partial<HomeData> = {}): HomeData {
   };
 }
 
-const shelfTitles = () => screen.queryAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+// Explore at the foot is a list of ways in, not a shelf.
+const shelfTitles = () => screen.queryAllByRole("heading", { level: 2 }).map((h) => h.textContent).filter((t) => t !== "Explore");
 const tiles = () => {
   const grid = screen.queryByRole("list", { name: "Shortcuts" });
   return grid ? within(grid).getAllByRole("listitem") : [];

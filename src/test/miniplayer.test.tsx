@@ -26,7 +26,6 @@ import {
   upNext,
 } from "../shell/Miniplayer";
 import { PlayerBar } from "../shell/PlayerBar";
-import { AppMenu } from "../shell/TopBar";
 import { connectMiniplayer, isMiniplayerWindow, MINIPLAYER_FAILED, useMiniplayer } from "../stores/miniplayer";
 import { player, usePlayer } from "../stores/player";
 import { useRouter } from "../stores/router";
@@ -93,14 +92,13 @@ describe("opening and closing", () => {
     stop();
   });
 
-  it("the app menu opens it and shows a tick while it's open", async () => {
+  it("the player bar's button opens it and stays pressed while it's open", async () => {
     const stop = connectMiniplayer();
-    render(<AppMenu />);
-    fireEvent.click(screen.getByRole("button", { name: /^App menu/ }));
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Miniplayer" }));
+    play(track());
+    render(<PlayerBar />);
+    fireEvent.click(screen.getByRole("button", { name: "Open miniplayer" }));
     await waitFor(() => expect(useMiniplayer.getState().open).toBe(true));
-    fireEvent.click(screen.getByRole("button", { name: /^App menu/ }));
-    expect(screen.getByRole("menuitemcheckbox", { name: "Miniplayer" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("button", { name: "Close miniplayer" })).toHaveAttribute("aria-pressed", "true");
     stop();
   });
 

@@ -187,13 +187,13 @@ describe("Profile page", () => {
 });
 
 describe("Stats tabs", () => {
-  it("is a tab list: arrows move between Overview, Recaps and Compare, and the panel follows", async () => {
+  it("is a tab list: arrows move between Overview, Recaps, Wrapped, Diary and Compare, and the panel follows", async () => {
     const user = userEvent.setup();
     render(<StatsPage />);
     await screen.findByTestId("stats-hero");
     const list = screen.getByRole("tablist", { name: "Stats" });
     const tabs = within(list).getAllByRole("tab");
-    expect(tabs.map((t) => t.textContent)).toEqual(["Overview", "Recaps", "Compare"]);
+    expect(tabs.map((t) => t.textContent)).toEqual(["Overview", "Recaps", "Wrapped", "Diary", "Compare"]);
     expect(tabs[0]).toHaveAttribute("aria-selected", "true");
     expect(tabs[1]).toHaveAttribute("tabindex", "-1");
     const panel = screen.getByTestId("stats-panel-overview");
@@ -223,19 +223,21 @@ describe("Stats tabs", () => {
     expect(screen.queryByRole("heading", { name: "On your shelf" })).toBeNull();
   });
 
-  it("Recaps has the range's months and Wrapped; tabs switched in place keep Back on the same tab", async () => {
+  it("Recaps has the range's months, Wrapped its own tab; tabs switched in place keep Back on the same tab", async () => {
     const user = userEvent.setup();
     useRouter.getState().navigate({ name: "stats" });
     render(<StatsPage />);
     await user.click(await screen.findByRole("tab", { name: "Recaps" }));
     expect(route()).toEqual({ name: "stats", tab: "recaps" });
     expect(await screen.findByRole("heading", { name: "Monthly recaps" })).toBeInTheDocument();
-    expect(await screen.findByRole("heading", { name: "Wrapped and Top Songs" })).toBeInTheDocument();
     const span = await backend.statsSpan();
     // Last 4 weeks touches one or two months.
     await waitFor(() => expect(screen.getAllByTestId("recap-card").length).toBeGreaterThan(0));
     expect(screen.getAllByTestId("recap-card").length).toBeLessThanOrEqual(2);
     expect(span.months.length).toBeGreaterThan(2);
+    await user.click(screen.getByRole("tab", { name: "Wrapped" }));
+    expect(route()).toEqual({ name: "stats", tab: "wrapped" });
+    expect(await screen.findByRole("heading", { name: "Wrapped and Top Songs" })).toBeInTheDocument();
   });
 
   it("opens on a month, and on Compare with a friend", async () => {

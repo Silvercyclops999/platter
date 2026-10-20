@@ -4,9 +4,9 @@
  * three tabs. Overview: the range in a sentence with two facts, top songs,
  * artists, albums and genres with Play these and Save as playlist, when you
  * listened (each chart led by a sentence) and moments. Recaps: the range's
- * monthly recaps you can share as a card, then Wrapped and the Top Songs
- * lists. Compare: comparing with a friend when that's on. Everything is
- * counted on this computer.
+ * monthly recaps you can share as a card. Wrapped: your years and the Top
+ * Songs lists. Diary: the listening diary, when it's kept. Compare: comparing
+ * with a friend when that's on. Everything is counted on this computer.
  */
 import { RotateCw, UserRound } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
@@ -24,6 +24,7 @@ import { useSettings } from "../stores/settings";
 import { MinutesStory, WhenYouListened } from "./StatsCharts";
 import { CompareSection } from "./StatsCompare";
 import { WrappedSection } from "./StatsWrapped";
+import { DiaryPage } from "./DiaryPage";
 import { StatsHero, StatsHeroSkeleton } from "./StatsHero";
 import { MomentsSection } from "./StatsMoments";
 import { MonthlySection, monthsIn } from "./StatsRecaps";
@@ -38,6 +39,8 @@ type ChipId = RangeChoice["kind"];
 const TABS: { id: StatsTab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "recaps", label: "Recaps" },
+  { id: "wrapped", label: "Wrapped" },
+  { id: "diary", label: "Diary" },
   { id: "compare", label: "Compare" },
 ];
 const CHIPS: { id: ChipId; label: string }[] = [
@@ -155,7 +158,10 @@ export function StatsPage({ tab: openTab, month, friend }: { tab?: StatsTab; mon
   const monthly = useSettings((s) => s.settings?.monthlyStats !== false);
   const wrappedOn = useSettings((s) => s.settings?.wrappedTopSongs !== false);
   const compare = useSettings((s) => !!s.settings?.statsCompare);
-  const [tab, setTab] = useState<StatsTab>(openTab ?? (friend ? "compare" : "overview"));
+  const diaryOn = useSettings((s) => s.settings?.keepDiary !== false);
+  const tabs = TABS.filter((t) => (t.id !== "wrapped" || wrappedOn) && (t.id !== "diary" || diaryOn));
+  const [picked, setTab] = useState<StatsTab>(openTab ?? (friend ? "compare" : "overview"));
+  const tab: StatsTab = tabs.some((t) => t.id === picked) ? picked : "overview";
   const [choice, setChoice] = useState<RangeChoice>(() => firstChoice(month));
   const [attempt, setAttempt] = useState(0);
   const { data: span } = useLoad(() => backend.statsSpan(), [attempt]);
@@ -201,15 +207,12 @@ export function StatsPage({ tab: openTab, month, friend }: { tab?: StatsTab; mon
         />
       );
     if (tab === "recaps") {
-      if (!monthly && !wrappedOn)
-        return <StatsState title="Recaps are off" text="Turn on monthly recaps or Wrapped in Settings to see them here." action={<Button onClick={() => nav.go({ name: "settings" })}>Open Settings</Button>} />;
-      return (
-        <>
-          {monthly && span && <MonthlySection months={monthsIn(span, range)} />}
-          <WrappedSection />
-        </>
-      );
+      if (!monthly)
+        return <StatsState title="Recaps are off" text="Turn on monthly recaps in Settings to see them here." action={<Button onClick={() => nav.go({ name: "settings" })}>Open Settings</Button>} />;
+      return span ? <MonthlySection months={monthsIn(span, range)} /> : <LoadingBody />;
     }
+    if (tab === "wrapped") return <WrappedSection current={Number((span?.today ?? new Date().toISOString()).slice(0, 4))} />;
+    if (tab === "diary") return <DiaryPage embedded />;
     if (error && !o)
       return (
         <StatsState
@@ -252,16 +255,16 @@ export function StatsPage({ tab: openTab, month, friend }: { tab?: StatsTab; mon
         />
       ) : (
         <>
-          {tab === "compare" ? (
+          {tab === "diary" ? null : tab === "compare" ? (
             <div className="stats-range">
               <p className="stats-range__note">Compare looks at your top artists and songs from the last six months.</p>
             </div>
           ) : (
             <RangePicker choice={choice} span={span} onChange={setChoice} />
           )}
-          <Tabs label="Stats" items={TABS} value={tab} onChange={pickTab} idPrefix="stats-tabs" className="stats-tabs" />
+          <Tabs label="Stats" items={tabs} value={tab} onChange={pickTab} idPrefix="stats-tabs" className="stats-tabs" />
           <div id="stats-tabs-panel" role="tabpanel" aria-labelledby={`stats-tabs-tab-${tab}`} className="stats-panel" tabIndex={0} data-testid={`stats-panel-${tab}`}>
-            {tab !== "compare" && (
+            {tab !== "compare" && tab !== "diary" && (
               <h2 className="sr-only" aria-live="polite">
                 {title}
               </h2>

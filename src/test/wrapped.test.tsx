@@ -35,7 +35,7 @@ import {
 import { HomePage } from "../pages/HomePage";
 import { SearchPage } from "../pages/SearchPage";
 import { findRows, rowNotes, TopSongsPage } from "../pages/TopSongsPage";
-import { AppMenu } from "../shell/TopBar";
+import { StatsPage } from "../pages/StatsPage";
 import { CARD_MS, HOLD_MS, WrappedView, wrappedCards } from "../shell/Wrapped";
 import { useApp } from "../stores/app";
 import { player } from "../stores/player";
@@ -357,18 +357,17 @@ describe("Home", () => {
 describe("settings", () => {
   it("Wrapped and Top Songs can be turned off", async () => {
     await settings({ wrappedTopSongs: false });
-    const user = userEvent.setup();
-    render(<AppMenu />);
-    await user.click(screen.getByRole("button", { name: /^App menu/ }));
-    expect(screen.queryByRole("menuitem", { name: /Wrapped$/ })).not.toBeInTheDocument();
+    render(<StatsPage />);
+    const tabs = await screen.findByRole("tablist", { name: "Stats" });
+    expect(within(tabs).queryByRole("tab", { name: "Wrapped" })).not.toBeInTheDocument();
     await expect(backend.topSongsIndex()).rejects.toMatchObject({ kind: "invalid" });
   });
 
-  it("the profile menu opens this year's Wrapped any time", async () => {
+  it("the Wrapped tab in Stats opens this year's Wrapped any time", async () => {
     const user = userEvent.setup();
-    render(<AppMenu />);
-    await user.click(screen.getByRole("button", { name: /^App menu/ }));
-    await user.click(screen.getByRole("menuitem", { name: `${new Date().getFullYear()} Wrapped` }));
+    render(<StatsPage />);
+    await user.click(await screen.findByRole("tab", { name: "Wrapped" }));
+    await user.click(await screen.findByRole("button", { name: `${new Date().getFullYear()} Wrapped` }));
     expect(useWrapped.getState().year).toBe(new Date().getFullYear());
   });
 

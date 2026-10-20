@@ -1,5 +1,5 @@
 /**
- * Whether the sound map has an entry in the app menu: its setting is on and
+ * Whether the sound map has an entry in Explore on Home: its setting is on and
  * songs are analysed (or being analysed, with Automix on).
  */
 import { useEffect } from "react";

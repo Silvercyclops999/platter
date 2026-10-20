@@ -3054,7 +3054,7 @@ Names fold so spellings share a crate: case, spacing and punctuation don't count
 
 The answer is worked out once and kept until the library, the credit index, `album_facts`, the files' tags or the view change.
 
-Settings: `showCrates` (on) shows the Crates page, its app menu entry and the Home link in Platter's own looks; while off `crates` is empty and `crate_page` null. `crateShelves` (on) shows the album page shelves (needs `showCrates`); while either is off `album_crates` is empty. Both synced.
+Settings: `showCrates` (on) shows the Crates page, its tile in Explore on Home and the Home link in Platter's own looks; while off `crates` is empty and `crate_page` null. `crateShelves` (on) shows the album page shelves (needs `showCrates`); while either is off `album_crates` is empty. Both synced.
 
 ## Listening diary
 
@@ -3943,7 +3943,7 @@ The rest of the fields, with their defaults:
 | `searchRecents` | bool, true | Show items opened from search when the empty search box is focused, and remember new ones. |
 | `mediaSession` | bool, true | Show the current track in the system media controls (the Windows media flyout and lock screen, macOS Now Playing) and take play, pause, next, previous and seek from them. |
 | `mediaKeys` | bool, true | Hardware media keys control Platter in the background. While `mediaSession` is on the OS sends the keys to that session; with it off, Platter registers the keys itself. |
-| `closeToTray` | bool, false | Shows a tray icon (menu bar item on macOS). Closing the window hides it instead of quitting. Turning it off brings a hidden window back. |
+| `closeToTray` | bool, false | Shows a tray icon (menu bar item on macOS). Closing the window hides it instead of quitting. Turning it off brings a hidden window back. The tray menu has the track, Play or Pause, Next, Previous, a Go offline check (sent as the `goOffline` menu action), Show Platter and Quit. |
 | `launchAtLogin` | bool, false | Starts Platter at sign-in, hidden in the tray when `closeToTray` is on, otherwise minimised. |
 | `abLoopHandles` | bool, true | Right-click or Alt+click on the seek bar sets A-B loop points. Turning it off clears a loop that's set. |
 | `upNextLine` | bool, true | In the last 15 s of a track (last 30 % under 50 s) the player bar's artist line shows what's next. |
@@ -4084,7 +4084,7 @@ The rest of the fields, with their defaults:
 | `showPronunciation` | bool, false | A romanised line under lyrics in Japanese, Korean, Chinese, Hindi and Cyrillic (`lyrics_pronounce`). |
 | `translationService` | string, "" | A LibreTranslate-compatible address for `lyrics_translate`; empty means no translation. This device only. |
 | `translateTo` | string, "en" | The language code lyrics are translated into. |
-| `libraryDoctor` | bool, true | The library doctor checks the library in the background and shows a count in the app menu. |
+| `libraryDoctor` | bool, true | The library doctor checks the library in the background and shows a count under Your Library. |
 | `doctorChecks` | `{ duplicates, covers, albumTags, splitAlbums, albumArtist, lowQuality, unmatched, soundsLike }`, all true | Which library doctor checks run. |
 | `doctorCoverPx` | 300, 500, 600 (default), 800, 1000 or 1400 | Covers smaller than this on their longest side count as small. |
 | `releaseRadar` | bool, false | The release radar looks for new releases about once a day and shows them on Home and its page. Synced. |

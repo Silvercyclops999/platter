@@ -395,6 +395,23 @@
   margin: var(--space-1) calc(-1 * var(--space-3)) 0;
   padding: var(--space-2) var(--space-3);
 }
+/* The library doctor's quiet line under Your Library, with its count. */
+.lib-doctor-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  height: 32px;
+  margin-top: var(--space-1);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-row);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  text-align: left;
+}
+.lib-doctor-note:hover { background: var(--color-state-hover); color: var(--color-text-primary); }
+.lib-doctor-note:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
 
 /* Status dot + popover */
 .status-dot-btn {

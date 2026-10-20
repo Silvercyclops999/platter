@@ -7,7 +7,7 @@ import { buildRecents, seedListens, type MockListen } from "../lib/mock/recents"
 import type { RecentsEntry, Track } from "../lib/types";
 import { RecentsPage } from "../pages/RecentsPage";
 import { dayLabel, entryLines, groupByDay } from "../pages/recents";
-import { AppMenu } from "../shell/TopBar";
+import { HomePage } from "../pages/HomePage";
 import { useRouter } from "../stores/router";
 import { body } from "./rows";
 
@@ -118,12 +118,12 @@ describe("Recents page", () => {
     expect(await screen.findByText(/Couldn't load your recents/)).toBeInTheDocument();
   });
 
-  it("opens from the app menu", async () => {
+  it("opens from Home's Recently played", async () => {
     const user = userEvent.setup();
     useRouter.getState().reset();
-    render(<AppMenu />);
-    await user.click(screen.getByRole("button", { name: /App menu/ }));
-    await user.click(screen.getByRole("menuitem", { name: "Recents" }));
+    render(<HomePage />);
+    const title = await screen.findByRole("heading", { name: "Recently played" }, { timeout: 5000 });
+    await user.click(within(title.closest("section")!).getByRole("button", { name: "Show all" }));
     expect(route()).toEqual({ name: "recents" });
   });
 });

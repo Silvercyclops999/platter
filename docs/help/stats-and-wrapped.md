@@ -18,7 +18,7 @@ Open Stats from the app menu, the Stats row in Your Library, or Your profile. Ev
 
 The chips at the top pick the days to count: 4 weeks, 6 months, This year, A year, A month, All time or Custom. A year and A month add a picker, and Custom lets you choose two dates.
 
-Under the range are three tabs: Overview, Recaps and Compare. Arrow keys move between them.
+Under the range are the tabs: Overview, Recaps, Wrapped, Diary and Compare. Wrapped shows while Wrapped is on and Diary while you keep a listening diary. Arrow keys move between them.
 
 Overview starts by summing up the range: minutes listened, plays, songs, artists, albums and days, the share your top artist took, your longest streak and how many new artists you found. Your top song and artist lead the top lists just below.
 
@@ -42,7 +42,7 @@ Moments are small stories from the range: your first song, On repeat (the day yo
 
 ## Monthly recaps
 
-Recaps shows a card for each month in the range (up to 12, newest first), then Wrapped and your Top Songs lists. With Monthly recaps ticked under Settings, Library, Show the Stats page, each month gets a card with its minutes, the change on the month before, and its top artist and song. Choose Share to make an image in Story or Square shape, then Copy image or Save image. Unreleased songs are left off the card and nothing is uploaded.
+Recaps shows a card for each month in the range (up to 12, newest first). Wrapped lists your Wrapped for each year, this year's included, and your Top Songs lists. With Monthly recaps ticked under Settings, Library, Show the Stats page, each month gets a card with its minutes, the change on the month before, and its top artist and song. Choose Share to make an image in Story or Square shape, then Copy image or Save image. Unreleased songs are left off the card and nothing is uploaded.
 
 ## A whole year
 

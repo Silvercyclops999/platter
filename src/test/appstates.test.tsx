@@ -54,7 +54,7 @@ const EXPECTED: Record<HealthDemo, { message: string; kind: string; action?: str
   localNetwork: { kind: "warning", message: LOCAL_NETWORK_BLOCKED, action: "localNetwork" },
   localNetworkRemote: { kind: "warning", message: LOCAL_NETWORK_BLOCKED, action: "localNetwork" },
   scanning: { kind: "progress", message: "Adding new music… 120 of 340" },
-  // Go offline: the top bar icon says it; the app menu turns it off.
+  // Go offline: the top bar icon says it; Settings or the tray turns it off.
   goneOffline: null,
 };
 
@@ -81,10 +81,10 @@ describe("banner for each app state", () => {
     // Chosen by the user: says so, and where to turn it off.
     expect(offlineCallout(h("goneOffline"), NOW)).toEqual({
       title: "You chose Go offline.",
-      body: "Only music on this computer plays. Turn it off in your profile menu.",
+      body: "Only music on this computer plays. Turn it off in Settings, Downloads and devices, or the tray menu.",
     });
     expect(offlineCallout(h("goneOffline"), NOW, true)!.body).toBe(
-      "Only music on this computer plays. Turn it off in your profile menu, or File › Go Offline.",
+      "Only music on this computer plays. Turn it off in Settings, Downloads and devices, or File › Go Offline.",
     );
     for (const d of ["local", "remote", "relay", "localNetworkRemote", "signIn", "filesUnavailable"] as HealthDemo[])
       expect(offlineCallout(h(d), NOW), d).toBeNull();
@@ -188,7 +188,7 @@ describe("HealthBanner component", () => {
     render(<OfflineIndicator />);
     await user.click(screen.getByRole("button", { name: "You're offline" }));
     const callout = screen.getByRole("dialog", { name: "You chose Go offline." });
-    expect(callout).toHaveTextContent("Turn it off in your profile menu");
+    expect(callout).toHaveTextContent("Turn it off in Settings, Downloads and devices");
   });
 
   it("macOS blocking the home network: banner with a button to the settings", async () => {

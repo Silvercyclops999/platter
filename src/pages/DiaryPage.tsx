@@ -199,7 +199,10 @@ function DiaryLead({ list }: { list: DiaryList }) {
   );
 }
 
-export function DiaryPage({ edit }: { edit?: string }) {
+/** `embedded`: shown as a tab inside Stats, under its heading. */
+export function DiaryPage({ edit, embedded = false }: { edit?: string; embedded?: boolean }) {
+  const Title = embedded ? "h2" : "h1";
+  const frame = embedded ? "diary-page diary-page--embedded" : "page-pad diary-page";
   const on = useDiaryOn();
   const synced = useSettings((s) => !!s.settings?.syncDiary);
   const version = useDiaryVersion();
@@ -268,8 +271,8 @@ export function DiaryPage({ edit }: { edit?: string }) {
 
   if (!on) {
     return (
-      <div className="page-pad diary-page">
-        <h1 className="page-title">Listening diary</h1>
+      <div className={frame}>
+        <Title className="page-title">Listening diary</Title>
         <div className="empty-state" role="status">
           <h2 className="empty-state__title">The listening diary is off</h2>
           <p className="empty-state__text">Turn it on to keep a private journal of the albums you play start to finish.</p>
@@ -298,10 +301,10 @@ export function DiaryPage({ edit }: { edit?: string }) {
           : `${plural(list.total, "entry", "entries")} since ${MONTHS[since.getMonth()]} ${since.getFullYear()}. ${where}`;
 
   return (
-    <div className="page-pad diary-page">
+    <div className={frame}>
       <header className="diary-head">
         <p className="lg-eyebrow diary-head__eyebrow">Private</p>
-        <h1 className="page-title diary-head__title">Listening diary</h1>
+        <Title className="page-title diary-head__title">Listening diary</Title>
         {led && <DiaryLead list={list} />}
         <p className="diary-head__lede">{lede}</p>
       </header>

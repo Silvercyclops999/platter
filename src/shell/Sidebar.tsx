@@ -8,6 +8,7 @@ import { nav } from "../stores/router";
 import { smartCreateItems } from "../stores/curate";
 import { useLayout } from "../stores/theme";
 import { useSettings } from "../stores/settings";
+import { badgeText, useDoctorCount } from "../stores/doctor";
 import { useUi, type MenuItem } from "../stores/ui";
 import { createPlaylistIn, folderMenu } from "./FolderMenus";
 import { LibraryCollection } from "./LibraryCollection";
@@ -31,6 +32,24 @@ export function createMenu(folderId: string | null): MenuItem[] {
 
 const openCreate = (folderId: string | null) => (e: MouseEvent<HTMLButtonElement>) =>
   openContextMenu("Create", createMenu(folderId), e.currentTarget);
+
+/**
+ * A quiet line under Your Library while the library doctor has something to
+ * fix: its count, and a way to the list.
+ */
+export function DoctorNote() {
+  const on = useSettings((s) => s.settings?.libraryDoctor !== false);
+  const count = useDoctorCount();
+  if (!on || count <= 0) return null;
+  return (
+    <button type="button" className="lib-doctor-note" aria-label={`Library doctor, ${count} to fix`} onClick={() => nav.go({ name: "doctor" })}>
+      <span className="lib-doctor-note__text">Library doctor</span>
+      <span className="doctor-badge" aria-hidden="true">
+        {badgeText(count)}
+      </span>
+    </button>
+  );
+}
 
 /**
  * Left sidebar: the library (every playlist, album and artist) with its
@@ -125,6 +144,7 @@ export function Sidebar({ collapsed, auto = false }: { collapsed: boolean; auto?
         ) : (
           <LibraryCollection model={model} view={view} mode={collapsed ? "rail" : "sidebar"} query={query} showArt={showArt} label={drill ? `${drill.name} items` : undefined} />
         )}
+        {!collapsed && !drill && <DoctorNote />}
         {sections.includes("status") && (
           <div className="sidebar__status">
             <StatusDot compact={collapsed} />

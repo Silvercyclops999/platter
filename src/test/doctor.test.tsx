@@ -3,8 +3,8 @@
  * count, filters by kind, shows "Why?" with each song's tags, ignores and
  * brings back findings, opens the app's own fixes (Change cover, Fix match,
  * merge with a confirm, the better copy, a Lidarr request when ready), and
- * follows the settings (off, each check, the small cover size). The app
- * menu shows the count.
+ * follows the settings (off, each check, the small cover size). A quiet
+ * line under Your Library shows the count, and Settings > Library opens it.
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -15,7 +15,7 @@ import type { DoctorFinding } from "../lib/types";
 import { DEFAULT_SETTINGS } from "../lib/types";
 import { DoctorPage, countLine, fixLabel } from "../pages/DoctorPage";
 import { SettingsPage } from "../pages/SettingsPage";
-import { TopBar } from "../shell/TopBar";
+import { DoctorNote } from "../shell/Sidebar";
 import { useApp } from "../stores/app";
 import { badgeText } from "../stores/doctor";
 import { reloadEditAccess, usePlexEdit } from "../stores/plexEdit";
@@ -247,22 +247,27 @@ describe("the library doctor page", () => {
 });
 
 describe("where it opens from", () => {
-  it("the app menu shows the count and opens the page", async () => {
+  it("the line under Your Library shows the count and opens the page", async () => {
     const user = userEvent.setup();
-    render(<TopBar />);
-    await user.click(screen.getByRole("button", { name: /^App menu/ }));
-    const item = await screen.findByRole("menuitem", { name: "Library doctor, 15 to fix" });
+    render(<DoctorNote />);
+    const item = await screen.findByRole("button", { name: "Library doctor, 15 to fix" });
     expect(within(item).getByText("15")).toBeInTheDocument();
     await user.click(item);
     expect(lastRoute()).toEqual({ name: "doctor" });
   });
 
-  it("the app menu leaves it out while the doctor is off", async () => {
-    const user = userEvent.setup();
+  it("the line stays away while the doctor is off", async () => {
     await settings({ libraryDoctor: false });
-    render(<TopBar />);
-    await user.click(screen.getByRole("button", { name: /^App menu/ }));
-    expect(screen.queryByRole("menuitem", { name: /Library doctor/ })).not.toBeInTheDocument();
+    render(<DoctorNote />);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByRole("button", { name: /Library doctor/ })).not.toBeInTheDocument();
+  });
+
+  it("Settings > Library has a row that opens it", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage />);
+    await user.click(await screen.findByRole("button", { name: "Open Library doctor" }));
+    expect(lastRoute()).toEqual({ name: "doctor" });
   });
 
   it("Settings > Library doctor has its switch, each check and the small cover size", async () => {

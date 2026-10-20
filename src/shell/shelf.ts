@@ -35,7 +35,7 @@ export const SHELF_TILE_MARGIN = 6;
 
 /** An entry stands as a spine (an album you can open); anything else is a tile. */
 export function isSpine(e: LibEntry): boolean {
-  return e.kind === "album" && !e.folder && !e.liked && !e.bookmarks && !e.stats && !e.unavailable;
+  return e.kind === "album" && !e.folder && !e.liked && !e.bookmarks && !e.stats && !e.page && !e.unavailable;
 }
 
 /**

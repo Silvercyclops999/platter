@@ -1,16 +1,18 @@
 //! Tray icon (Windows) / menu bar item (macOS), shown while "close to tray"
 //! is on. Left click shows the window; the menu has the current track,
-//! play/pause, next, previous, Show Platter and Quit.
+//! play/pause, next, previous, Go offline, Show Platter and Quit.
 
 use parking_lot::Mutex;
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Emitter, Runtime};
 
 use super::media::OsCommand;
 use crate::audio::events::{PlayerState, PlayerStatus};
 
 const TRAY_ID: &str = "platter-tray";
+/// The Go offline check. The UI flips the setting, the same as its own switch.
+const OFFLINE_ID: &str = "tray-offline";
 
 /// The tray glyph (icons/tray.svg drawn at 32 px): the app icon's P, whose
 /// bowl is a record, on its graphite tile. On macOS the menu bar takes the black template
@@ -62,6 +64,11 @@ pub fn tray_view(state: &PlayerState) -> TrayView {
     }
 }
 
+/// The UI action a tray item runs instead of a player command, if any.
+pub fn menu_ui_action(id: &str) -> Option<&'static str> {
+    (id == OFFLINE_ID).then_some("goOffline")
+}
+
 /// Map a tray menu item id to a command.
 pub fn menu_command(id: &str) -> Option<OsCommand> {
     Some(match id {
@@ -79,17 +86,19 @@ struct Items<R: Runtime> {
     toggle: MenuItem<R>,
     next: MenuItem<R>,
     previous: MenuItem<R>,
+    offline: CheckMenuItem<R>,
 }
 
 /// The tray while it exists, plus the last view so a new tray starts current.
 pub struct Tray<R: Runtime> {
     items: Mutex<Option<Items<R>>>,
     view: Mutex<TrayView>,
+    offline: Mutex<bool>,
 }
 
 impl<R: Runtime> Default for Tray<R> {
     fn default() -> Self {
-        Self { items: Mutex::new(None), view: Mutex::new(TrayView::default()) }
+        Self { items: Mutex::new(None), view: Mutex::new(TrayView::default()), offline: Mutex::new(false) }
     }
 }
 
@@ -118,6 +127,7 @@ impl<R: Runtime> Tray<R> {
         let toggle = MenuItem::with_id(app, "tray-toggle", if v.playing { "Pause" } else { "Play" }, v.has_track, None::<&str>)?;
         let next = MenuItem::with_id(app, "tray-next", "Next", v.has_track, None::<&str>)?;
         let previous = MenuItem::with_id(app, "tray-previous", "Previous", v.has_track, None::<&str>)?;
+        let offline = CheckMenuItem::with_id(app, OFFLINE_ID, "Go offline", true, *self.offline.lock(), None::<&str>)?;
         let show = MenuItem::with_id(app, "tray-show", "Show Platter", true, None::<&str>)?;
         let quit = MenuItem::with_id(app, "tray-quit", "Quit Platter", true, None::<&str>)?;
         let menu = Menu::with_items(
@@ -129,6 +139,8 @@ impl<R: Runtime> Tray<R> {
                 &next,
                 &previous,
                 &PredefinedMenuItem::separator(app)?,
+                &offline,
+                &PredefinedMenuItem::separator(app)?,
                 &show,
                 &quit,
             ],
@@ -138,8 +150,11 @@ impl<R: Runtime> Tray<R> {
             .tooltip("Platter")
             .menu(&menu)
             .show_menu_on_left_click(false)
-            .on_menu_event(move |_, e| {
-                if let Some(c) = menu_command(e.id().as_ref()) {
+            .on_menu_event(move |app, e| {
+                let id = e.id().as_ref();
+                if let Some(action) = menu_ui_action(id) {
+                    let _ = app.emit(super::menubar::ACTION_EVENT, super::menubar::ActionPayload { action });
+                } else if let Some(c) = menu_command(id) {
                     menu_cmd(c)
                 }
             })
@@ -154,8 +169,16 @@ impl<R: Runtime> Tray<R> {
             builder = builder.icon(icon.clone());
         }
         builder.build(app)?;
-        *items = Some(Items { label, toggle, next, previous });
+        *items = Some(Items { label, toggle, next, previous, offline });
         Ok(())
+    }
+
+    /// The Go offline setting changed: move the check to match.
+    pub fn set_offline(&self, on: bool) {
+        *self.offline.lock() = on;
+        if let Some(items) = self.items.lock().as_ref() {
+            let _ = items.offline.set_checked(on);
+        }
     }
 
     /// Player state changed: refresh the menu text if it differs.
@@ -211,5 +234,12 @@ mod tests {
         assert_eq!(menu_command("tray-show"), Some(OsCommand::Show));
         assert_eq!(menu_command("tray-quit"), Some(OsCommand::Quit));
         assert_eq!(menu_command("tray-label"), None);
+    }
+
+    #[test]
+    fn go_offline_is_a_ui_action_not_a_player_command() {
+        assert_eq!(menu_ui_action("tray-offline"), Some("goOffline"));
+        assert_eq!(menu_command("tray-offline"), None);
+        assert_eq!(menu_ui_action("tray-toggle"), None);
     }
 }

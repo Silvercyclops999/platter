@@ -55,7 +55,7 @@ On this day lists what you played on today's date in earlier years, one card for
 
 ## Crates
 
-Crates file your library the way a record shop would: by label, producer, studio, era and genre. Open them from the app menu, or from the link on Home in Platter's own looks. Pick a kind at the top, filter by name, and sort by most records or A to Z. A crate needs two records or more. Its page plays everything in it, and a record that's on the sound map opens there.
+Crates file your library the way a record shop would: by label, producer, studio, era and genre. Open them from Explore at the foot of Home, where the pin button keeps them in Your Library, or from the link on Home in Platter's own looks. Pick a kind at the top, filter by name, and sort by most records or A to Z. A crate needs two records or more. Its page plays everything in it, and a record that's on the sound map opens there.
 
 Labels come from your files' tags, Plex and the sleeve notes you've opened. Producers come from credit tags and sleeve notes, and studios from sleeve notes looked up online, so crates fill in as you open albums.
 
@@ -103,9 +103,9 @@ Settings, Playback, Pause to flip at the end of a side (off at first) works with
 
 ## Where to find Settings
 
-Click your profile picture (or the first letter of your name) at the top of the window to open the app menu, then choose **Settings**. You can also press `Ctrl+,` (`⌘,` on a Mac). At the top of Settings, Search settings finds a setting by its name or description.
+Click your profile picture (or the first letter of your name) at the top of the window to open the app menu, then choose **Settings**. You can also press `Ctrl+,` (`⌘,` on a Mac). At the top of Settings, Search settings finds a setting by its name or description. Each section shows the settings most people use; More at the end of a section shows the rest, and stays open next time. Search finds every setting, and marks the ones under More.
 
-The app menu also has the miniplayer, Private session, Go offline, Check for updates, Keyboard shortcuts and Sign out.
+The app menu also has your Profile, Stats, Devices, Help, Private session and Sign out. The miniplayer opens from its button in the player bar, Go offline and Check for updates are in Settings, and Keyboard shortcuts is at the top of Help (or press `Ctrl+/`).
 
 ## Getting help
 

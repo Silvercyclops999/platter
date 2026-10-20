@@ -17,7 +17,7 @@ When Platter can't reach your server, a small offline icon appears in the top ba
 
 While you're offline, music stored on this computer still plays. Songs that aren't on this computer are dimmed and skipped. Everything comes back on its own, and Platter says "Your server is back."
 
-If the tooltip says you turned on Go offline, turn it off in the app menu. To keep music for times like this, see [Downloads and offline](downloads-and-offline.md).
+If the tooltip says you turned on Go offline, turn it off in Settings, Downloads and devices. To keep music for times like this, see [Downloads and offline](downloads-and-offline.md).
 
 ## Server unreachable or slow
 

@@ -11,6 +11,8 @@
 .diary-head__eyebrow { margin: 0 0 var(--space-2); }
 .diary-head .diary-head__title { margin: 0 0 var(--space-4); }
 .diary-page > .page-title { margin-left: 0; }
+.diary-page--embedded { padding-top: var(--space-4); }
+.diary-page--embedded .page-title { font-size: var(--font-size-xl); }
 .diary-head .diary-head__lead { margin-bottom: var(--space-3); }
 .diary-head__lede { margin: 0; color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 

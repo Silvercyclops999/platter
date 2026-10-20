@@ -38,7 +38,7 @@ export const MENU_ACTIONS: Record<string, MenuAction> = {
   },
   newPlaylist: { run: () => void createPlaylist() },
   newFolder: { run: () => void folders.create() },
-  /** The same switch as the app menu's; the core moves the menu's check. */
+  /** The same switch as Settings' (from the menu bar or the tray); the core moves the check. */
   goOffline: { run: () => void updateSettings({ goOffline: !useSettings.getState().settings?.goOffline }) },
   signOut: {
     run: () => {

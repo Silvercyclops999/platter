@@ -1,5 +1,5 @@
 /**
- * The library doctor's count for the badge in the app menu, kept current
+ * The library doctor's count for the note under Your Library, kept current
  * from `doctor://changed` and reloaded when its settings change. Zero while
  * the doctor is off.
  */

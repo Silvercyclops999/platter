@@ -169,8 +169,8 @@ export function withFolders(entries: LibEntry[], tree: LibraryFolders, view: Fol
     return i < 0 ? pinOrder.length : i;
   };
   // Liked Songs and the other built-in rows stay first; then the pins in pin order.
-  const builtIn = entries.filter((e) => e.pinned && (e.liked || e.bookmarks || e.stats));
-  const pinned = [...entries.filter((e) => e.pinned && !(e.liked || e.bookmarks || e.stats)), ...tree.folders.filter((f) => pinnedFolders.has(f.id)).map(folderRow)]
+  const builtIn = entries.filter((e) => e.pinned && (e.liked || e.bookmarks || e.stats || e.page));
+  const pinned = [...entries.filter((e) => e.pinned && !(e.liked || e.bookmarks || e.stats || e.page)), ...tree.folders.filter((f) => pinnedFolders.has(f.id)).map(folderRow)]
     .map((e, i) => ({ e, i }))
     .sort((a, b) => rank(a.e) - rank(b.e) || a.i - b.i)
     .map(({ e }) => e);

@@ -195,7 +195,7 @@ export function ProfilePage() {
             <Skeleton width="100%" height={200} radius="card" />
           )
         ) : lists.length === 0 ? (
-          <p className="profile-muted">No playlists yet. Make one from the app menu.</p>
+          <p className="profile-muted">No playlists yet. Make one with the + in Your Library.</p>
         ) : (
           <ul className="profile-cards" aria-label="Playlists">
             {lists.slice(0, 6).map((p) => (

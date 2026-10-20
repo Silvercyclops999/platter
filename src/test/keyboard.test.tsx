@@ -87,11 +87,12 @@ describe("keyboard shortcuts window", () => {
     expect(useUi.getState().shortcutsOpen).toBe(false);
   });
 
-  it("opens from the app menu and from Settings", async () => {
+  it("opens from Help and from Settings", async () => {
     const user = userEvent.setup();
     render(<AppShell />);
     await user.click(screen.getByRole("button", { name: /^App menu/ }));
-    await user.click(screen.getByRole("menuitem", { name: /Keyboard shortcuts/ }));
+    await user.click(screen.getByRole("menuitem", { name: "Help" }));
+    await user.click(await screen.findByRole("button", { name: /^Keyboard shortcuts/ }));
     expect(useUi.getState().shortcutsOpen).toBe(true);
     act(() => useUi.setState({ shortcutsOpen: false }));
     render(<SettingsPage />);

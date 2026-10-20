@@ -1,0 +1,36 @@
+/* Explore at the foot of Home: tiles like the shortcuts, with a pin. */
+.home-explore__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-2) var(--space-3);
+  margin: 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+.home-explore__tile {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 64px;
+  min-width: 0;
+  padding-right: var(--space-2);
+  overflow: hidden;
+  border-radius: var(--radius-row);
+  background: color-mix(in srgb, var(--color-ink) 8%, transparent);
+  transition: background-color var(--motion-quick) var(--motion-easing);
+}
+.home-explore__tile:hover,
+.home-explore__tile:focus-within { background: color-mix(in srgb, var(--color-ink) 16%, transparent); }
+.home-explore__icon { flex: none; border-radius: 0; }
+.home-explore__open {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  height: 100%;
+  align-content: center;
+  padding: 0 var(--space-3);
+  text-align: left;
+}
+.home-explore__open:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; border-radius: var(--radius-row); }
+.home-explore__title { font-weight: var(--font-weight-bold); color: var(--color-text-primary); }
+.home-explore__sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -373,7 +373,7 @@ export function SearchPage({ query }: { query: string }) {
         ) : (
           <div className="sr-empty" role="status">
             <h2 className="section-title">No help for “{q.length > 60 ? `${q.slice(0, 60)}…` : q}”</h2>
-            <p>Try another word, or open Help from the app menu to see every page.</p>
+            <p>Try another word, or open Help from your profile menu to see every page.</p>
           </div>
         )}
       </div>

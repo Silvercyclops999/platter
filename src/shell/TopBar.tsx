@@ -6,13 +6,9 @@ import { Tooltip } from "../components/Tooltip";
 import { artUrl, backend } from "../lib/backend";
 import { chrome, modKey, platform } from "../lib/platform";
 import { useApp } from "../stores/app";
-import { miniplayer, useMiniplayer } from "../stores/miniplayer";
 import { nav, useCanGoBack, useCanGoForward, useCurrentEntry } from "../stores/router";
 import { updateSettings, useSettings } from "../stores/settings";
 import { help } from "../stores/help";
-import { createPlaylist } from "../stores/playlists";
-import { badgeText, useDoctorCount } from "../stores/doctor";
-import { useSoundMapEntry } from "../stores/soundmap";
 import { toast, useToasts } from "../stores/toasts";
 import { offlineCallout } from "./bannerView";
 import { useUi } from "../stores/ui";
@@ -20,12 +16,10 @@ import { useSocial } from "../stores/social";
 import { useCap } from "../stores/caps";
 import "./social.css";
 import { Logo } from "./Logo";
-import { shortcutLabel } from "./shortcuts";
 import { SearchBox } from "./SearchBox";
 import { HomePinDialog, HomeUserItems, switchHomeUser, useHomeUsers } from "./HomeUsers";
 import type { HomeUser } from "../lib/types";
 import { StatsGlyph } from "../components/StatsGlyph";
-import { wrapped } from "../stores/wrapped";
 import "./topbar.css";
 
 /** Below this window width the search pill becomes a round button beside Home. */
@@ -106,7 +100,7 @@ export function WindowBar() {
   );
 }
 
-/** Check for an update now and say what came of it (app menu and menu bar). */
+/** Check for an update now and say what came of it (Settings and the menu bar). */
 export function checkForUpdates() {
   toast.info("Checking for updates…");
   backend.updateCheck().then(
@@ -158,15 +152,7 @@ export function AppMenu() {
   const showAvatar = useSettings((s) => s.settings?.showPlexAvatar !== false);
   const avatar = useApp((s) => (showAvatar ? (s.auth?.avatar ?? null) : null));
   const privateSession = useSettings((s) => !!s.settings?.privateSession);
-  const goOffline = useSettings((s) => !!s.settings?.goOffline);
   const statsPage = useSettings((s) => s.settings?.statsPage !== false);
-  const wrappedOn = useSettings((s) => s.settings?.wrappedTopSongs !== false);
-  const diaryOn = useSettings((s) => s.settings?.keepDiary !== false);
-  const doctorOn = useSettings((s) => s.settings?.libraryDoctor !== false);
-  const doctorCount = useDoctorCount();
-  const soundMapOn = useSoundMapEntry();
-  const cratesOn = useSettings((s) => s.settings?.showCrates !== false);
-  const miniOpen = useMiniplayer((s) => s.open);
   const [open, setOpen] = useState(false);
   const confirmSignOut = useUi((s) => s.signOutOpen);
   const setConfirmSignOut = useUi((s) => s.setSignOutOpen);
@@ -261,75 +247,18 @@ export function AppMenu() {
             <span>Profile</span>
           </button>
           <HomeUserItems users={homeUsers} onPick={(u) => run(() => switchHomeUser(u, setPinFor))()} />
-          <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => void createPlaylist())}>
-            <span>Create playlist</span>
-          </button>
-          <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "recents" }))}>
-            <span>Recents</span>
-          </button>
           {statsPage && (
             <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "stats" }))}>
               <span>Stats</span>
               <StatsGlyph size={18} className="appmenu__glyph" />
             </button>
           )}
-          {diaryOn && (
-            <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "diary" }))}>
-              <span>Listening diary</span>
-            </button>
-          )}
-          {wrappedOn && (
-            <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => wrapped.open(new Date().getFullYear()))}>
-              <span>{new Date().getFullYear()} Wrapped</span>
-            </button>
-          )}
-          {doctorOn && (
-            <button
-              type="button"
-              role="menuitem"
-              className="appmenu__item"
-              aria-label={doctorCount > 0 ? `Library doctor, ${doctorCount} to fix` : "Library doctor"}
-              onClick={run(() => nav.go({ name: "doctor" }))}
-            >
-              <span>Library doctor</span>
-              {doctorCount > 0 && (
-                <span className="doctor-badge" aria-hidden="true">
-                  {badgeText(doctorCount)}
-                </span>
-              )}
-            </button>
-          )}
           <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "devices" }))}>
             <span>Devices</span>
           </button>
-          {cratesOn && (
-            <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "crates" }))}>
-              <span>Crates</span>
-            </button>
-          )}
-          {soundMapOn && (
-            <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "soundMap" }))}>
-              <span>Sound map</span>
-            </button>
-          )}
-          <button
-            type="button"
-            role="menuitemcheckbox"
-            aria-checked={miniOpen}
-            className="appmenu__item"
-            onClick={run(() => void miniplayer.toggle())}
-          >
-            <span>Miniplayer</span>
-            {miniOpen && <Check size={16} className="appmenu__check" aria-hidden="true" />}
-          </button>
-          <div className="appmenu__sep" role="separator" />
           <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => nav.go({ name: "settings" }))}>
             <span>Settings</span>
             <kbd className="appmenu__hint">{modKey}+,</kbd>
-          </button>
-          <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => useUi.getState().setShortcutsOpen(true))}>
-            <span>Keyboard shortcuts</span>
-            <kbd className="appmenu__hint">{shortcutLabel("help")}</kbd>
           </button>
           <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => help.open(""))}>
             <span>Help</span>
@@ -343,19 +272,6 @@ export function AppMenu() {
           >
             <span>Private session</span>
             {privateSession && <Check size={16} className="appmenu__check" aria-hidden="true" />}
-          </button>
-          <button
-            type="button"
-            role="menuitemcheckbox"
-            aria-checked={goOffline}
-            className="appmenu__item"
-            onClick={run(() => void updateSettings({ goOffline: !goOffline }))}
-          >
-            <span>Go offline</span>
-            {goOffline && <Check size={16} className="appmenu__check" aria-hidden="true" />}
-          </button>
-          <button type="button" role="menuitem" className="appmenu__item" onClick={run(checkForUpdates)}>
-            <span>Check for updates</span>
           </button>
           <div className="appmenu__sep" role="separator" />
           <button type="button" role="menuitem" className="appmenu__item" onClick={run(() => setConfirmSignOut(true))}>

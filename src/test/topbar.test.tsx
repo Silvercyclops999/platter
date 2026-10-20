@@ -99,7 +99,7 @@ describe("narrow windows", () => {
 });
 
 describe("app menu", () => {
-  it("opens from the avatar with Settings, Private session, Check for updates and Sign out", async () => {
+  it("opens from the avatar with seven short items, then Sign out", async () => {
     const user = userEvent.setup();
     render(<TopBar />);
     const avatar = screen.getByRole("button", { name: "App menu, signed in as listener" });
@@ -107,11 +107,13 @@ describe("app menu", () => {
     await user.click(avatar);
     const menu = screen.getByRole("menu", { name: "App menu" });
     expect(avatar).toHaveAttribute("aria-expanded", "true");
-    // The sound map shows once the core says songs are analysed.
-    await screen.findByRole("menuitem", { name: "Sound map" });
-    // The library doctor's count (when it has loaded) is a badge after its name.
-    const items = [...menu.querySelectorAll('[role^="menuitem"]')].map((i) => i.textContent?.replace(/^(Library doctor)\d+$/, "$1"));
-    expect(items).toEqual(["Profile", "Create playlist", "Recents", "Stats", "Listening diary", `${new Date().getFullYear()} Wrapped`, "Library doctor", "Devices", "Crates", "Sound map", "Miniplayer", `Settings${"Ctrl+,"}`, `Keyboard shortcuts${"Ctrl+/"}`, "Help", "Private session", "Go offline", "Check for updates", "Sign out"]);
+    const items = [...menu.querySelectorAll('[role^="menuitem"]')].map((i) => i.textContent);
+    // Switch account joins only with Plex Home users (see the Home users tests).
+    expect(items).toEqual(["Profile", "Stats", "Devices", `Settings${"Ctrl+,"}`, "Help", "Private session", "Sign out"]);
+    // The rest live where they belong now, not here.
+    for (const gone of ["Create playlist", "Recents", "Listening diary", "Library doctor", "Crates", "Sound map", "Miniplayer", "Keyboard shortcuts", "Go offline", "Check for updates"])
+      expect(screen.queryByRole("menuitem", { name: new RegExp(gone) }), gone).toBeNull();
+    expect(screen.queryByRole("menuitemcheckbox", { name: /Miniplayer|Go offline/ })).toBeNull();
   });
 
   it("Escape closes it and returns focus to the avatar", async () => {
@@ -144,37 +146,22 @@ describe("app menu", () => {
     render(<TopBar />);
     screen.getByRole("button", { name: /^App menu/ }).focus();
     await user.keyboard("{Enter}");
-    await screen.findByRole("menuitem", { name: "Sound map" });
     expect(screen.getByRole("menuitem", { name: "Profile" })).toHaveFocus();
-    await user.keyboard("{ArrowDown}");
-    expect(screen.getByRole("menuitem", { name: "Create playlist" })).toHaveFocus();
-    await user.keyboard("{ArrowDown}");
-    expect(screen.getByRole("menuitem", { name: "Recents" })).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: "Stats" })).toHaveFocus();
     await user.keyboard("{ArrowDown}");
-    expect(screen.getByRole("menuitem", { name: "Listening diary" })).toHaveFocus();
-    await user.keyboard("{ArrowDown}");
-    expect(screen.getByRole("menuitem", { name: `${new Date().getFullYear()} Wrapped` })).toHaveFocus();
-    await user.keyboard("{ArrowDown}");
-    expect(screen.getByRole("menuitem", { name: /^Library doctor/ })).toHaveFocus();
-    await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: "Devices" })).toHaveFocus();
     await user.keyboard("{ArrowDown}");
-    expect(screen.getByRole("menuitem", { name: "Crates" })).toHaveFocus();
-    await user.keyboard("{ArrowDown}");
-    expect(screen.getByRole("menuitem", { name: "Sound map" })).toHaveFocus();
-    await user.keyboard("{ArrowDown}");
-    expect(screen.getByRole("menuitemcheckbox", { name: "Miniplayer" })).toHaveFocus();
-    await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: /Settings/ })).toHaveFocus();
-    await user.keyboard("{ArrowDown}");
-    expect(screen.getByRole("menuitem", { name: /Keyboard shortcuts/ })).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: "Help" })).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitemcheckbox", { name: "Private session" })).toHaveFocus();
-    await user.keyboard("{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}");
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitem", { name: "Sign out" })).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitem", { name: "Profile" })).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
     expect(screen.getByRole("menuitem", { name: "Sign out" })).toHaveFocus();
   });
 
@@ -192,16 +179,18 @@ describe("app menu", () => {
     expect(screen.getByRole("menuitemcheckbox", { name: "Private session" })).toHaveAttribute("aria-checked", "true");
   });
 
-  it("Settings opens the settings page; Check for updates asks the updater", async () => {
-    const check = vi.spyOn(backend, "updateCheck");
+  it("Settings opens the settings page; Stats and Devices open theirs", async () => {
     const user = userEvent.setup();
     render(<TopBar />);
     await user.click(screen.getByRole("button", { name: /^App menu/ }));
     await user.click(screen.getByRole("menuitem", { name: /Settings/ }));
     expect(route()).toEqual({ name: "settings" });
     await user.click(screen.getByRole("button", { name: /^App menu/ }));
-    await user.click(screen.getByRole("menuitem", { name: "Check for updates" }));
-    expect(check).toHaveBeenCalled();
+    await user.click(screen.getByRole("menuitem", { name: "Stats" }));
+    expect(route()).toEqual({ name: "stats" });
+    await user.click(screen.getByRole("button", { name: /^App menu/ }));
+    await user.click(screen.getByRole("menuitem", { name: "Devices" }));
+    expect(route()).toEqual({ name: "devices" });
   });
 
   it("Sign out asks first, then signs out", async () => {

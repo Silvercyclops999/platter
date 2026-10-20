@@ -9,7 +9,7 @@ import { fullWindow, useFullWindow } from "./fullWindow";
 export type LibraryTab = "artists" | "albums" | "playlists";
 
 /** The Stats page's tabs. */
-export type StatsTab = "overview" | "recaps" | "compare";
+export type StatsTab = "overview" | "recaps" | "wrapped" | "diary" | "compare";
 
 export type Route =
   | { name: "home" }
@@ -88,7 +88,9 @@ export type Route =
   /** The archive: demos, mixtapes and unreleased albums (the library with that filter on). */
   | { name: "archive" }
   /** What's downloaded on this device, storage used and Remove all. */
-  | { name: "downloads" };
+  | { name: "downloads" }
+  /** Help as a page (the phone; a computer opens its help panel instead): the list, or one page and section. */
+  | { name: "help"; slug?: string; anchor?: string };
 
 export interface HistoryEntry {
   key: number;

@@ -320,6 +320,7 @@ impl Platform {
                 }
                 sync_autostart(&app, s.launch_at_login);
                 app.state::<menubar::MenuBar<R>>().set_offline(s.go_offline);
+                app.state::<tray::Tray<R>>().set_offline(s.go_offline);
                 first = false;
                 if rx.changed().await.is_err() {
                     break;

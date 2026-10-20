@@ -20,7 +20,7 @@ import { PlaylistPage } from "../pages/PlaylistPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import { offlineCallout } from "../shell/bannerView";
 import { Sidebar } from "../shell/Sidebar";
-import { AppMenu } from "../shell/TopBar";
+import { MENU_ACTIONS } from "../shell/menuBar";
 import { useApp } from "../stores/app";
 import { catchingUpMessage, findItem, resetDownloads, setDownload, startDownloads, useDownloads } from "../stores/downloads";
 import { useLibraryView } from "../stores/library";
@@ -329,10 +329,9 @@ describe("app states", () => {
 });
 
 describe("Go offline", () => {
-  it("the app menu switch goes offline and back", async () => {
-    render(<AppMenu />);
-    await userEvent.click(screen.getByRole("button", { name: /App menu/ }));
-    const item = screen.getByRole("menuitemcheckbox", { name: "Go offline" });
+  it("Settings' switch goes offline, and the tray's (or menu bar's) Go offline comes back", async () => {
+    render(<SettingsPage section="Downloads and devices" />);
+    const item = await screen.findByRole("switch", { name: "Go offline" });
     expect(item).toHaveAttribute("aria-checked", "false");
     await userEvent.click(item);
     await waitFor(() => expect(useSettings.getState().settings?.goOffline).toBe(true));
@@ -344,8 +343,9 @@ describe("Go offline", () => {
     expect(h.cachedOnly).toBe(true);
     expect(offlineCallout(h)?.title).toBe("You chose Go offline.");
     expect(useDownloads.getState().status?.paused ?? (await mock.downloadsStatus()).paused).toBe("offline");
-    await userEvent.click(screen.getByRole("button", { name: /App menu/ }));
-    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "Go offline" }));
+    // The tray's check sends the same action as the Mac menu bar's.
+    act(() => MENU_ACTIONS.goOffline.run());
+    await waitFor(() => expect(useSettings.getState().settings?.goOffline).toBe(false));
     await waitFor(async () => expect((await mock.health()).status).toBe("local"));
   });
 

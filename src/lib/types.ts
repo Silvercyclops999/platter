@@ -1357,7 +1357,7 @@ export interface Settings {
   showEraCards: boolean;
   /** "+N versions" on song rows. */
   showVersionCounts: boolean;
-  /** The library doctor checks the library in the background (a count shows in the app menu). */
+  /** The library doctor checks the library in the background (a count shows under Your Library). */
   libraryDoctor: boolean;
   /** Which library doctor checks run. */
   doctorChecks: DoctorChecks;

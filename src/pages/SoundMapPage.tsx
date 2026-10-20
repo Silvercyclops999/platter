@@ -37,7 +37,7 @@ const WALK_MAX = 1500;
 const fmt = (n: number) => n.toLocaleString();
 const songs = (n: number) => (n === 1 ? "1 song" : `${fmt(n)} songs`);
 
-/** Opens Settings at one row (on its page, with its Advanced fold open). */
+/** Opens Settings at one row (on its page, with its More open). */
 export function openSetting(key: string) {
   openSettingsAt(`[data-setting="${key}"]`, { row: key });
 }
@@ -140,7 +140,7 @@ export function SoundMapPage({ album }: { album?: string } = {}) {
       const i = await backend.soundmapInfo();
       if (n !== request.current) return;
       setInfo(i);
-      // The app menu's entry follows what the page knows.
+      // Explore's entry on Home follows what the page knows.
       useSoundMap.setState({ info: i });
       const was = shown.current;
       if (was && was.placed === i.placed && was.revision === i.revision) {

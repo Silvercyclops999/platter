@@ -48,7 +48,7 @@ const ACTION: Record<string, BannerAction> = {
   localNetwork: "localNetwork",
 };
 
-/** States with nothing for the user to do: the top bar icon covers them (Go offline is undone from the app menu). */
+/** States with nothing for the user to do: the top bar icon covers them (Go offline is undone in Settings or the tray). */
 const QUIET = new Set(["offline", "noInternet", "goneOffline"]);
 
 /** The core's message, with "Last seen" kept current. */
@@ -73,7 +73,7 @@ export function offlineCallout(h: Health | null, now: number = Date.now(), mac =
   if (!h || h.status !== "offline") return null;
   const kind = h.banner?.kind;
   if (kind === "goneOffline") {
-    const where = mac ? "your profile menu, or File › Go Offline" : "your profile menu";
+    const where = mac ? "Settings, Downloads and devices, or File › Go Offline" : "Settings, Downloads and devices, or the tray menu";
     return { title: "You chose Go offline.", body: `Only music on this computer plays. Turn it off in ${where}.` };
   }
   const title = "Platter is offline.";

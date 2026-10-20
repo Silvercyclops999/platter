@@ -81,7 +81,7 @@ const home: HomeData = {
 const STUDIO = resolveTheme({ theme: "studio", accent: "brass", themeFile: null, followSystem: false }, true);
 const CLASSIC = resolveTheme({ theme: "dark", accent: "ivory", themeFile: null, followSystem: false }, true);
 
-const titles = () => screen.queryAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+const titles = () => screen.queryAllByRole("heading", { level: 2 }).map((h) => h.textContent).filter((t) => t !== "Explore");
 
 async function renderHome(r: RecordHome | null = records(), settings: Partial<typeof DEFAULT_SETTINGS> = {}) {
   vi.spyOn(backend, "home").mockResolvedValue(home);

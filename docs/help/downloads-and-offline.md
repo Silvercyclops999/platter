@@ -49,7 +49,7 @@ Settings, Downloads and devices, Download only on your home network is on to beg
 
 ## Go offline
 
-Go offline stops Platter using the network. Turn it on from the app menu, or in Settings, Downloads and devices, Go offline.
+Go offline stops Platter using the network. Turn it on in Settings, Downloads and devices, Go offline, or from the tray menu while Platter sits in the tray.
 
 While it's on, nothing goes to your server, plex.tv, artist info sources, lyrics lookups, Discord, share links or update checks. Only music on this computer plays. The one exception is a speech model download you start yourself in Settings. Turn Go offline off to use your server again.
 

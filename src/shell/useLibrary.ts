@@ -33,7 +33,8 @@ import { usePins } from "../stores/pins";
 import { folders, useFolders, withFolders } from "../stores/folders";
 import { folderMenu, moveToFolderItem } from "./FolderMenus";
 import { player, usePlayer } from "../stores/player";
-import { nav } from "../stores/router";
+import { nav, type Route } from "../stores/router";
+import { PINNABLE, usePinnedPages, type PinnablePage } from "../stores/pinnedPages";
 import { leavePlaylist, openCircleDialog, playBlend, playShared, setInLibrary } from "../stores/circle";
 
 /** Load the library items, and again after every library change. */
@@ -161,6 +162,34 @@ export function statsEntry(): LibEntry {
   };
 }
 
+/** A page pinned from Home's Explore row, after the built-in rows. */
+export function pageEntry(page: PinnablePage): LibEntry {
+  const title = PINNABLE[page].title;
+  return {
+    kind: "playlist",
+    id: `page:${page}`,
+    title,
+    sortTitle: title,
+    creator: null,
+    creatorId: null,
+    thumb: null,
+    smart: false,
+    format: null,
+    addedAt: null,
+    playedAt: null,
+    pinned: true,
+    page,
+  };
+}
+
+/** The route a built-in row opens (Stats or a pinned page), if it is one. */
+export function builtInRoute(e: LibEntry): Route | null {
+  if (e.stats) return { name: "stats" };
+  if (e.page === "crates") return { name: "crates" };
+  if (e.page === "soundMap") return { name: "soundMap" };
+  return null;
+}
+
 /** `drillable`: the list follows the folder the sidebar is drilled into (not the rail). */
 export function useLibraryModel(query: string, drillable = true): LibraryModel {
   const items = useLibraryView((s) => s.items);
@@ -178,6 +207,9 @@ export function useLibraryModel(query: string, drillable = true): LibraryModel {
   const ownedIds = useOwnedIds();
   const showBookmarks = useSettings((s) => s.settings?.bookmarksInLibrary !== false);
   const showStats = useSettings((s) => s.settings?.statsPage !== false);
+  const cratesOn = useSettings((s) => s.settings?.showCrates !== false);
+  const soundMapOn = useSettings((s) => s.settings?.showSoundMap !== false);
+  const pinnedPages = usePinnedPages((s) => s.pages);
   const dlChoice = useLibraryView((s) => s.downloaded);
   const cachedOnly = useApp((s) => !!s.health?.cachedOnly);
   // Going offline or back online hands the chip back to the connection.
@@ -196,9 +228,10 @@ export function useLibraryModel(query: string, drillable = true): LibraryModel {
         ? { ...e, ...(on ? { downloaded: true } : {}), ...(followed ? { followed: true } : {}), ...(owned ? { owned: true } : {}) }
         : e;
     };
-    const top = [likedEntry(owner), ...(showBookmarks ? [bookmarksEntry()] : []), ...(showStats ? [statsEntry()] : [])];
+    const pages = pinnedPages.filter((p) => (p === "crates" ? cratesOn : soundMapOn)).map(pageEntry);
+    const top = [likedEntry(owner), ...(showBookmarks ? [bookmarksEntry()] : []), ...(showStats ? [statsEntry()] : []), ...pages];
     return [...top, ...mergePins(toEntries(items, owner), pins)].map(mark);
-  }, [items, owner, pins, dlItems, followIds, ownedIds, showBookmarks, showStats]);
+  }, [items, owner, pins, dlItems, followIds, ownedIds, showBookmarks, showStats, pinnedPages, cratesOn, soundMapOn]);
   const shelf = !!ownedIds && all.some((e) => e.owned);
   const dlAvailable = all.some((e) => e.downloaded);
   const downloadedOnly = dlChoice ?? (cachedOnly && dlAvailable);
@@ -240,7 +273,8 @@ export function useLibraryModel(query: string, drillable = true): LibraryModel {
 export function playEntry(e: LibEntry) {
   if (e.folder) return;
   if (e.bookmarks) return nav.go({ name: "bookmarks" });
-  if (e.stats) return nav.go({ name: "stats" });
+  const built = builtInRoute(e);
+  if (built) return nav.go(built);
   if (e.platter) return backend.smartPage(e.id).then((pg) => player.playTracks(pg.tracks.map((t) => t.id)), () => {});
   if (e.blend) return playBlend(e.id);
   if (e.shared) return playShared(e.id);
@@ -260,7 +294,8 @@ export function openEntry(e: LibEntry) {
   }
   if (e.liked) return nav.go({ name: "liked" });
   if (e.bookmarks) return nav.go({ name: "bookmarks" });
-  if (e.stats) return nav.go({ name: "stats" });
+  const built = builtInRoute(e);
+  if (built) return nav.go(built);
   nav.go({ name: e.kind, id: e.id });
 }
 
@@ -288,6 +323,13 @@ export function entryMenu(e: LibEntry, opts: { playing: boolean; move?: { up: bo
   const play: MenuItem = { label: opts.playing ? "Pause" : "Play", onSelect: () => void playEntry(e) };
   if (e.bookmarks) return [{ label: "Open", onSelect: () => nav.go({ name: "bookmarks" }) }];
   if (e.stats) return [{ label: "Open", onSelect: () => nav.go({ name: "stats" }) }];
+  if (e.page) {
+    const page = e.page;
+    return [
+      { label: "Open", onSelect: () => openEntry(e) },
+      { label: "Unpin", onSelect: () => usePinnedPages.getState().toggle(page) },
+    ];
+  }
   if (e.platter)
     return [
       play,

@@ -37,6 +37,7 @@ import { useLikes } from "../stores/likes";
 import "./home.css";
 import { LoadError } from "../components/LoadError";
 import { openSetting } from "./SoundMapPage";
+import { HomeExplore } from "./HomeExplore";
 import { CratesLink, RecordHero, RecordShelves, hasRecords, useRecordHome, useRecordsLead } from "./RecordHome";
 
 /**
@@ -286,6 +287,7 @@ export function HomePage() {
           {data && filter === "all" && <NewToYouShelf />}
           {data && filter === "all" && <OnThisDayShelf />}
           {data && filter === "all" && <TimeTravelShelf />}
+          {data && filter === "all" && <HomeExplore />}
         </>
       )}
     </div>
