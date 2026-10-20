@@ -1,8 +1,8 @@
 //! Reading what the user picked: one file, a folder of files, or a zip (as
 //! account data downloads come), and zips inside a picked folder.
 //!
-//! Only the kinds of file an import can use are read (JSON, CSV, M3U and
-//! plain text lists). Sizes are capped so a damaged or hostile zip can't
+//! Only the kinds of file an import can use are read (JSON, CSV, M3U,
+//! plain text lists and XML library files). Sizes are capped so a damaged or hostile zip can't
 //! fill memory.
 
 use std::io::Read;
@@ -55,7 +55,7 @@ fn ext_of(name: &str) -> String {
 
 /// Kinds of file an import reads.
 pub fn wanted(name: &str) -> bool {
-    matches!(ext_of(name).as_str(), "json" | "csv" | "tsv" | "txt" | "m3u" | "m3u8")
+    matches!(ext_of(name).as_str(), "json" | "csv" | "tsv" | "txt" | "m3u" | "m3u8" | "xml")
 }
 
 struct Budget {

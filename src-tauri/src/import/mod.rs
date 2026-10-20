@@ -20,6 +20,7 @@
 //! private are dropped.
 
 pub mod account;
+pub mod bring;
 pub mod commands;
 pub mod files;
 pub mod matching;
@@ -33,6 +34,18 @@ mod tests;
 mod played_tests;
 
 use serde::Serialize;
+
+/// The name Platter suggests for a playlist made of the user's liked
+/// songs (select all in the liked list, drag onto a new playlist). A
+/// playlist with this name comes in as liked songs, not as a playlist.
+pub const LIKED_LIST_NAME: &str = "Liked Songs for Platter";
+
+/// Whether a playlist is the liked songs under [`LIKED_LIST_NAME`]
+/// (letters and digits compared, case ignored).
+pub fn is_liked_list(name: &str) -> bool {
+    let squash = |s: &str| -> String { s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect() };
+    squash(name) == squash(LIKED_LIST_NAME)
+}
 
 /// A song as an import file names it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

@@ -5,6 +5,7 @@
 //! [`Parser`]. Parsers are tolerant: fields they don't know are ignored,
 //! and they accept the other names a field has gone by.
 
+pub mod apple_library;
 pub mod streaming_export;
 pub mod table;
 
@@ -27,6 +28,7 @@ pub struct Source {
 
 static STREAMING: streaming_export::StreamingExport = streaming_export::StreamingExport;
 static TABLE: table::Table = table::Table;
+static APPLE: apple_library::AppleLibrary = apple_library::AppleLibrary;
 static ACCOUNT: Connected = Connected;
 
 /// A source read from a connected account, not from files.
@@ -49,11 +51,44 @@ pub const SOURCES: &[Source] = &[
     Source { id: "transfer", parser: &TABLE },
     // Any CSV or M3U list.
     Source { id: "lists", parser: &TABLE },
+    // The Music app's exported library file.
+    Source { id: "apple", parser: &APPLE },
 ];
 
 pub fn source(id: &str) -> Option<&'static Source> {
     SOURCES.iter().find(|s| s.id == id)
 }
+
+/// Works out what a dropped or picked file is and reads it: the Music
+/// app's library file, a streaming service's data download, or a CSV or
+/// M3U list (transfer tools make those). The source it came out as, and
+/// what was read; an error in plain words when it's none of them.
+pub fn detect(files: &[InputFile]) -> AppResult<(&'static Source, Parsed)> {
+    let has = |exts: &[&str]| files.iter().any(|f| exts.contains(&f.ext().as_str()));
+    if files.iter().any(apple_library::looks_like) {
+        return Ok((by_id("apple"), APPLE.parse(files)?));
+    }
+    if has(&["json"]) {
+        // A data download: its JSON files say what they are by their shape.
+        match STREAMING.parse(files) {
+            Ok(p) => return Ok((by_id("streaming"), p)),
+            Err(e) if !has(&["csv", "tsv", "txt", "m3u", "m3u8"]) => return Err(e),
+            Err(_) => {}
+        }
+    }
+    if has(&["csv", "tsv", "txt", "m3u", "m3u8"]) {
+        return Ok((by_id("lists"), TABLE.parse(files)?));
+    }
+    Err(crate::error::AppError::Invalid(UNKNOWN_FILE.into()))
+}
+
+fn by_id(id: &str) -> &'static Source {
+    source(id).unwrap_or(&SOURCES[0])
+}
+
+/// What to say about a file that's none of the kinds above.
+pub const UNKNOWN_FILE: &str =
+    "Platter doesn't know that file. It reads a streaming service's data download (the zip), the Music app's library file, and CSV or M3U lists.";
 
 // ------------------------------------------------------------------ times
 

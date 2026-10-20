@@ -56,7 +56,7 @@ pub async fn import_choose(app: AppHandle, folder: bool) -> AppResult<Option<Str
             let _ = tx.send(p);
         });
     } else {
-        d.add_filter("Import files", &["zip", "json", "csv", "tsv", "txt", "m3u", "m3u8"]).pick_file(move |p| {
+        d.add_filter("Import files", &["zip", "json", "csv", "tsv", "txt", "m3u", "m3u8", "xml"]).pick_file(move |p| {
             let _ = tx.send(p);
         });
     }
