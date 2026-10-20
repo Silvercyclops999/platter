@@ -27,22 +27,62 @@ export const useRemote = create<RemoteStore>()(() => ({ players: null, busy: und
 const message = (e: unknown) =>
   e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : "";
 
-export function loadPlayers(b: Backend = backend): Promise<void> {
-  return b.remotePlayers().then(
-    (players) => useRemote.setState({ players }),
-    () => {
-      if (useRemote.getState().players === null) useRemote.setState({ players: [] });
-    },
-  );
+/** The load running now, and whether another was asked for while it ran. */
+let inflight: Promise<void> | null = null;
+let again = false;
+
+/** Load the players. A load already running is joined rather than doubled;
+ * `fresh` asks for one more right after it (a setting changed meanwhile).
+ * Rows also arrive on `remote://players` as each source answers. */
+export function loadPlayers(b: Backend = backend, opts: { fresh?: boolean } = {}): Promise<void> {
+  if (inflight) {
+    if (opts.fresh) again = true;
+    return inflight;
+  }
+  const run = (): Promise<void> =>
+    b.remotePlayers().then(
+      (players) => {
+        useRemote.setState({ players });
+      },
+      () => {
+        if (useRemote.getState().players === null) useRemote.setState({ players: [] });
+      },
+    ).then(() => {
+      if (!again) return;
+      again = false;
+      return run();
+    });
+  inflight = run().finally(() => {
+    inflight = null;
+  });
+  return inflight;
 }
 
-/** Keep the list current while the picker is open. Returns a cleanup. */
+/** Whether a load is running (tests). */
+export function loadingPlayers(): boolean {
+  return inflight !== null;
+}
+
+/** Forget a load left running (tests). */
+export function resetPlayerLoads(): void {
+  inflight = null;
+  again = false;
+}
+
+/** Keep the list current while the picker is open: rows as they're found,
+ * and a refresh every few seconds that's skipped while one still runs.
+ * Returns a cleanup. */
 export function watchPlayers(b: Backend = backend): () => void {
   let alive = true;
   let un: (() => void) | null = null;
-  void loadPlayers(b);
-  const t = setInterval(() => void loadPlayers(b), REMOTE_REFRESH_MS);
-  b.listen("remote://players", (players) => useRemote.setState({ players })).then((u) => (alive ? (un = u) : u()));
+  b.listen("remote://players", (players) => useRemote.setState({ players })).then(
+    (u) => (alive ? (un = u) : u()),
+    () => {},
+  );
+  void loadPlayers(b, { fresh: true });
+  const t = setInterval(() => {
+    if (!inflight) void loadPlayers(b);
+  }, REMOTE_REFRESH_MS);
   return () => {
     alive = false;
     clearInterval(t);

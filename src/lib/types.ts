@@ -4168,6 +4168,9 @@ export interface RemotePlayer {
   /** A Platter computer Plex says is on that doesn't answer directly
    * (another network, or a firewall on that computer). */
   unreachable: boolean;
+  /** A phone running Platter seen lately that doesn't answer now (locked,
+   * or Platter in the background). Opening Platter on it wakes it. */
+  asleep?: boolean;
 }
 
 export type RemoteStatus = "connecting" | "playing" | "paused" | "buffering";

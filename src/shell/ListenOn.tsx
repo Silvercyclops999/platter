@@ -32,6 +32,7 @@ export function PlayerIcon({ kind, size = 20 }: { kind: PlayerKind; size?: numbe
 /** The grey line under a player's name. */
 export function playerSub(p: RemotePlayer): string {
   if (p.unsupported) return `${p.product} • ${p.unsupported}`;
+  if (p.asleep) return "Asleep • Open Platter on it to wake it";
   if (p.unreachable) return `${p.product} • Can't reach it on this network`;
   if (p.playing) return p.playing;
   return p.online ? p.product : `${p.product} • Not active`;
@@ -102,6 +103,7 @@ function Row({
 
 function rowLabel(p: RemotePlayer): string {
   if (p.unsupported) return `${p.name}, can't play here: ${p.unsupported}`;
+  if (p.asleep) return `Play on ${p.name} (asleep, open Platter on it to wake it)`;
   if (p.unreachable) return `Play on ${p.name} (not reachable on this network)`;
   if (p.needsPassword) return `Play on ${p.name} (asks for its password)`;
   return `Play on ${p.name}`;
