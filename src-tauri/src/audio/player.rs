@@ -106,6 +106,11 @@ const PROBLEMS_CAP: usize = 200;
 /// A shuffled mixed playlist picks each next song from this many.
 const FIT_WINDOW: usize = 5;
 
+/// Tries at the output after a reopen failed while playing.
+const OUTPUT_RETRIES: u32 = 3;
+/// The first wait before trying again; each next one waits a step longer.
+const OUTPUT_RETRY_STEP: Duration = Duration::from_secs(1);
+
 #[derive(Debug, Clone)]
 pub struct PlayerConfig {
     /// Queue/position file (e.g. `<app data>/queue.json`). `None` = don't persist.
@@ -188,6 +193,8 @@ enum Cmd {
     /// The output stream may be dead (the media services were reset):
     /// rebuild it now if playing, else before the next sound.
     OutputStale,
+    /// Try the output again after a reopen failed while playing.
+    OutputRetry,
     Next(Reply<()>),
     Previous(Reply<()>),
     Seek(u64, Reply<()>),
@@ -434,6 +441,7 @@ impl PlayerHandle {
             next_unreachable: None,
             interrupted_playing: false,
             headphones_playing: false,
+            output_retry: None,
             output_stale: false,
             writer: config.persist_path.as_ref().and_then(|_| persist::Writer::spawn()),
             sink,
@@ -998,6 +1006,9 @@ struct Actor {
     interrupted_playing: bool,
     /// Playing when the headphones left: only their coming back resumes.
     headphones_playing: bool,
+    /// Playing when the output wouldn't reopen: the tries made so far.
+    /// Play on once it opens; a pause or play by hand ends it.
+    output_retry: Option<u32>,
     /// The output stream may have been killed under us: reopened on the
     /// next Play.
     output_stale: bool,
@@ -1820,6 +1831,7 @@ impl Actor {
         ) {
             self.interrupted_playing = false;
             self.headphones_playing = false;
+            self.output_retry = None;
         }
         match cmd {
             Cmd::Wake => return,
@@ -1928,6 +1940,7 @@ impl Actor {
                 let _ = reply.send(self.do_resume());
             }
             Cmd::Interruption { began, resume, stale } => self.on_interruption(began, resume, stale),
+            Cmd::OutputRetry => self.retry_output(),
             Cmd::OutputStale => {
                 self.output_stale = true;
                 if self.is_active()
@@ -2403,6 +2416,44 @@ impl Actor {
         }
     }
 
+    /// Waits a little longer each time, then tries the output again.
+    fn schedule_output_retry(&mut self) {
+        let Some(n) = self.output_retry else { return };
+        if n >= OUTPUT_RETRIES {
+            tracing::warn!("audio output still not open; staying paused");
+            self.output_retry = None;
+            return;
+        }
+        self.output_retry = Some(n + 1);
+        let Some(tx) = self.self_tx.upgrade() else { return };
+        tokio::spawn(async move {
+            tokio::time::sleep(OUTPUT_RETRY_STEP * (n + 1)).await;
+            let _ = tx.send(Cmd::OutputRetry);
+        });
+    }
+
+    fn retry_output(&mut self) {
+        if self.output_retry.is_none() {
+            return;
+        }
+        #[cfg(target_os = "ios")]
+        crate::platform::audio_session::activate();
+        // The failed reopen left it closed: open it now, not on Play.
+        match self.engine.reopen_output() {
+            Ok(()) => {
+                tracing::info!("audio output open again; playing on");
+                self.output_stale = false;
+                self.output_retry = None;
+                let _ = self.do_resume();
+            }
+            Err(e) => {
+                tracing::info!("audio output still not open: {e}");
+                self.schedule_output_retry();
+            }
+        }
+        self.emit_output(&self.engine.output_state());
+    }
+
     /// Reopens a stream another app may have killed, keeping position. On
     /// failure it stays stale, so the next Play tries again.
     fn refresh_output(&mut self) -> AppResult<()> {
@@ -2712,7 +2763,15 @@ impl Actor {
                 tracing::info!("audio output reset: {why}");
                 if let Err(e) = self.engine.reopen_output() {
                     tracing::warn!("audio output did not reopen: {e}");
+                    let was_playing = self.is_active();
+                    self.output_stale = true;
                     self.pause_for_output();
+                    if was_playing {
+                        // A new route (the car, AirPods) can take a few
+                        // seconds to come up: try again before giving up.
+                        self.output_retry = Some(0);
+                        self.schedule_output_retry();
+                    }
                 }
                 self.emit_output(&self.engine.output_state());
             }

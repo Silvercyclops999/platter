@@ -229,6 +229,8 @@ struct CaptureShared {
     /// Exclusive opens fail with this reason (a busy device, say).
     exclusive_fails: Mutex<Option<String>>,
     exclusive: Mutex<Exclusive>,
+    /// This many opens fail before they work again (a route still settling).
+    fail_opens: AtomicUsize,
 }
 
 /// How far a paced capture may fall behind the clock before it stops
@@ -319,6 +321,19 @@ impl CaptureHandle {
     pub fn is_idle(&self) -> bool {
         self.0.idle.load(Ordering::SeqCst)
     }
+    /// The stream resets (an audio route change): the player reopens it.
+    pub fn reset_stream(&self) {
+        *self.0.pending.lock() = Some(OutputEvent::Reset("route changed".into()));
+    }
+    /// The next `n` opens fail, the way an output does while a new route
+    /// (a car, AirPods) is still coming up.
+    pub fn fail_opens(&self, n: usize) {
+        self.0.fail_opens.store(n, Ordering::SeqCst);
+    }
+    /// Failing opens not used up yet.
+    pub fn fail_opens_left(&self) -> usize {
+        self.0.fail_opens.load(Ordering::SeqCst)
+    }
     /// Makes exclusive opens fall back to shared with `reason` (None: they work).
     pub fn fail_exclusive(&self, reason: Option<&str>) {
         *self.0.exclusive_fails.lock() = reason.map(str::to_string);
@@ -353,6 +368,14 @@ impl AudioOutput for CaptureOutput {
         on_event: OutputCallback,
     ) -> AppResult<OutputFormat> {
         self.close();
+        if self
+            .shared
+            .fail_opens
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok()
+        {
+            return Err(AppError::Io("audio device did not open in time".into()));
+        }
         self.shared.stop.store(false, Ordering::SeqCst);
         *self.shared.pending.lock() = None;
         {
