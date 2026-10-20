@@ -191,6 +191,14 @@ impl MdnsSd {
     }
 
     fn start(&self) -> Option<Instant> {
+        // iOS doesn't let an app send raw multicast, so this daemon can't
+        // find anything there; worse, once iOS closes a suspended app's
+        // sockets its thread reads them in a tight loop until iOS kills the
+        // app for CPU use. The phone finds AirPlay through the system's
+        // route picker and other Platters through Bonjour instead.
+        if cfg!(target_os = "ios") {
+            return None;
+        }
         let mut g = self.browser.lock();
         if let Some(b) = g.as_ref() {
             return Some(b.started);
