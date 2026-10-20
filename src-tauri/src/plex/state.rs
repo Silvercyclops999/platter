@@ -1881,6 +1881,9 @@ mod tests {
     async fn scan_progress_from_server_events() {
         let server = pms("m1", true).await;
         let (st, _rec, _d, _tv) = connected(&server).await;
+        // Only the event counting is under test: background pings and the
+        // notification socket must not change health under it on a busy machine.
+        st.stop_background();
         st.on_plex_event(&PlexEvent::Activity {
             event: "started".into(),
             uuid: "u1".into(),
