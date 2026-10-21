@@ -1472,6 +1472,26 @@ async fn songs_transcribed_the_old_way_are_done_again_but_never_the_users_own() 
 }
 
 #[tokio::test]
+async fn songs_the_user_wrote_lyrics_for_or_gone_from_the_library_arent_done_again() {
+    let f = fx();
+    f.db.write(|c| {
+        // No words found once, then the user wrote some.
+        store::save(c, "801", "", "small", 1)?;
+        store::set_heard(c, "801", store::HEARD_OLD)?;
+        user::put(c, "801", "Words I wrote", false, 2)?;
+        // A song no longer in the library.
+        store::save(c, "999", "", "small", 1)?;
+        store::set_heard(c, "999", store::HEARD_OLD)?;
+        // Still owed.
+        store::save(c, "802", "", "small", 1)?;
+        store::set_heard(c, "802", store::HEARD_OLD)?;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(f.db.read(|c| store::redo_due(c, store::HEARD_MIX, 10)).unwrap(), vec!["802"]);
+}
+
+#[tokio::test]
 async fn with_the_voice_ready_songs_heard_from_the_mix_are_done_again() {
     let f = fx_voice();
     install(&f).await;

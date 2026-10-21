@@ -142,13 +142,14 @@ fn place(lines: &[Vec<String>], at: &[Vec<Option<(u32, u32)>>]) -> Vec<Line> {
         }
         // A run of lines with nothing heard: share the time between the
         // line before and the line after by their words.
-        let from = out.last().map_or(0, |l| l.end_ms);
+        let mut from = out.last().map_or(0, |l| l.end_ms);
         let mut k = i;
         while k < lines.len() && known[k].is_none() {
             k += 1;
         }
         let total: usize = lines[i..k].iter().map(Vec::len).sum();
         let until = known.get(k).copied().flatten().map_or(from + total as u32 * WORD_MS, |(start, _)| start);
+        from = from.min(until);
         let span = until.saturating_sub(from);
         let mut t = from;
         for ws in &lines[i..k] {
@@ -158,7 +159,30 @@ fn place(lines: &[Vec<String>], at: &[Vec<Option<(u32, u32)>>]) -> Vec<Line> {
         }
         i = k;
     }
+    in_order(&mut out);
     out
+}
+
+/// Every start at or after the one before, every end at or before the next
+/// start (a guessed word's length can run into what was heard next).
+fn in_order(lines: &mut [Line]) {
+    let mut last = 0;
+    for l in lines.iter_mut() {
+        for w in &mut l.words {
+            w.start_ms = w.start_ms.max(last);
+            last = w.start_ms;
+        }
+    }
+    let starts: Vec<u32> = lines.iter().flat_map(|l| l.words.iter().map(|w| w.start_ms)).skip(1).chain([u32::MAX]).collect();
+    let mut k = 0;
+    for l in lines.iter_mut() {
+        for w in &mut l.words {
+            w.end_ms = w.end_ms.min(starts[k]).max(w.start_ms + 1);
+            k += 1;
+        }
+        l.start_ms = l.words.first().map_or(l.start_ms, |w| w.start_ms);
+        l.end_ms = l.words.last().map_or(l.end_ms, |w| w.end_ms);
+    }
 }
 
 /// A line with some heard words: theirs as heard, the others in between
@@ -200,10 +224,11 @@ fn line_with(words: &[String], at: &[Option<(u32, u32)>], not_before: u32) -> Li
 /// A line nobody was heard singing, its words spread evenly over a span.
 fn spread(words: &[String], from: u32, to: u32) -> Line {
     let n = words.len().max(1) as u32;
-    let step = (to.saturating_sub(from) / n).max(1);
+    // No room (heard words on both sides): they share the moment.
+    let step = to.saturating_sub(from) / n;
     let words: Vec<Word> =
-        words.iter().enumerate().map(|(k, w)| Word { start_ms: from + step * k as u32, end_ms: from + step * (k as u32 + 1), text: w.clone() }).collect();
-    Line { start_ms: from, end_ms: from + step * n, words }
+        words.iter().enumerate().map(|(k, w)| Word { start_ms: from + step * k as u32, end_ms: (from + step * (k as u32 + 1)).max(from + step * k as u32 + 1), text: w.clone() }).collect();
+    Line { start_ms: from, end_ms: (from + step * n).max(from + 1), words }
 }
 
 #[cfg(test)]
@@ -282,6 +307,19 @@ mod tests {
         let lines = time_plain(&lyrics, &sung).unwrap();
         assert_eq!(lines[1].start_ms, 8_000);
         assert_eq!(lines[1].words[4].start_ms, 9_600);
+    }
+
+    #[test]
+    fn a_line_that_ends_unheard_then_a_filler_line_stay_in_order() {
+        // "softly" isn't heard, so its time is a guess; "Oh, oh" never matches.
+        let lyrics = plain(&["the words come softly", "Oh, oh", "and then the rest"]);
+        let sung = vec![heard("the words come", 1_000), heard("and then the rest", 2_300)];
+        let lines = time_plain(&lyrics, &sung).unwrap();
+        let starts: Vec<u32> = lines.iter().map(|l| l.start_ms).collect();
+        assert!(starts.windows(2).all(|p| p[0] <= p[1]), "{starts:?}");
+        assert_eq!(lines[2].start_ms, 2_300);
+        let words: Vec<(u32, u32)> = lines.iter().flat_map(|l| l.words.iter().map(|w| (w.start_ms, w.end_ms))).collect();
+        assert!(words.windows(2).all(|p| p[0].1 <= p[1].0.max(p[0].0 + 1)), "{words:?}");
     }
 
     #[test]

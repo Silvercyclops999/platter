@@ -45,13 +45,15 @@ pub fn set_heard(c: &Connection, track_id: &str, heard: i64) -> AppResult<()> {
     Ok(())
 }
 
-/// Songs this device transcribed (or found no words in) heard worse than
-/// `below`, the last played first. Lyrics the user wrote or edited aren't
-/// among them, nor transcriptions that came from another device.
+/// Songs transcribed (or found to have no words) heard worse than `below`,
+/// the last played first. Lyrics the user wrote or edited aren't among
+/// them, nor songs no longer in the library. Transcriptions from another
+/// device since the upgrade aren't either (they have no note here).
 pub fn redo_due(c: &Connection, below: i64, limit: usize) -> AppResult<Vec<String>> {
     let mut st = c.prepare(
-        "SELECT h.track_id FROM lyrics_auto_heard h LEFT JOIN tracks t ON t.id = h.track_id
+        "SELECT h.track_id FROM lyrics_auto_heard h JOIN tracks t ON t.id = h.track_id
          WHERE h.heard < ?1
+           AND NOT EXISTS (SELECT 1 FROM user_lyrics u WHERE u.track_id = h.track_id AND u.auto IS NULL)
            AND (EXISTS (SELECT 1 FROM user_lyrics u WHERE u.track_id = h.track_id AND u.auto IS NOT NULL)
                 OR EXISTS (SELECT 1 FROM lyrics_auto_empty e WHERE e.track_id = h.track_id))
          ORDER BY t.last_viewed_at IS NULL, t.last_viewed_at DESC, h.track_id LIMIT ?2",

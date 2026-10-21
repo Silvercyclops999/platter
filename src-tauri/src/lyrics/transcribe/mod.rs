@@ -559,8 +559,8 @@ impl Transcriber {
                 continue;
             }
             official_wait = official_wait.saturating_sub(1);
-            let (retime, official) = self.upkeep_due(official_wait == 0).await;
-            if !retime && !official {
+            let (retime, official, redo) = self.upkeep_due(official_wait == 0).await;
+            if !retime && !official && !redo {
                 // Nothing to do: the processor isn't read.
                 continue;
             }
@@ -575,7 +575,9 @@ impl Transcriber {
             if official && self.recheck_official().await.is_none() {
                 official_wait = 6;
             }
-            self.redo_old().await;
+            if redo {
+                self.redo_old().await;
+            }
         }
     }
 
@@ -610,19 +612,22 @@ impl Transcriber {
         ids.len()
     }
 
-    /// Whether upkeep has work: old timing to move, songs due a look.
-    async fn upkeep_due(&self, official: bool) -> (bool, bool) {
+    /// Whether upkeep has work: old timing to move, songs due a look,
+    /// songs to do again.
+    async fn upkeep_due(&self, official: bool) -> (bool, bool, bool) {
         let before = now_s() - OFFICIAL_RECHECK_S;
+        let best = if self.voice_model().is_some() { store::HEARD_VOICE } else { store::HEARD_MIX };
         self.inner
             .deps
             .db
             .read_async(move |c| {
                 let retime = !user::auto_timed_before(c, engine::TIMING_VERSION, 1)?.is_empty();
                 let due = official && !store::official_due(c, before, 1)?.is_empty();
-                Ok((retime, due))
+                let redo = !store::redo_due(c, best, 1)?.is_empty();
+                Ok((retime, due, redo))
             })
             .await
-            .unwrap_or((false, false))
+            .unwrap_or((false, false, false))
     }
 
     /// Moves transcriptions made with an older timing into place (from the
@@ -1752,7 +1757,8 @@ impl Transcriber {
                 return Outcome::Failed;
             }
         };
-        let heard = if voiced { store::HEARD_VOICE } else { store::HEARD_MIX };
+        // A song too long to separate is as good as it gets here.
+        let heard = if voiced || self.voice_model().is_some() { store::HEARD_VOICE } else { store::HEARD_MIX };
         self.finish_song(job, kind, segments, seconds, started, threads, heard, cancel).await
     }
 
