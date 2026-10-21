@@ -963,6 +963,10 @@ pub struct Settings {
     pub follow_get_singles: bool,
     /// Most new albums got a day for followed artists.
     pub auto_request_cap: u32,
+    /// An older build's "Auto-request new albums" switch, kept until its
+    /// artists have become followed ones (off: they just show).
+    #[serde(rename = "autoRequest", skip_serializing_if = "Option::is_none")]
+    pub legacy_auto_request: Option<bool>,
     /// Fingerprint songs on this computer and look them up on AcoustID
     /// (only the fingerprint and length are sent). This device only.
     pub identify_by_sound: bool,
@@ -1409,6 +1413,7 @@ impl Default for Settings {
             follow_get: true,
             follow_get_singles: false,
             auto_request_cap: crate::radar::DEFAULT_CAP,
+            legacy_auto_request: None,
             identify_by_sound: false,
             sound_id_scope: crate::soundid::Scope::Untagged,
             subsonic_check_minutes: crate::subsonic::manager::DEFAULT_POLL_MINUTES,

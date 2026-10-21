@@ -411,16 +411,17 @@ fn album(n: u32, title: &str, ago: i64) -> Value {
 async fn following_with_lidarr_ready_turns_the_radar_on() {
     let r = rig();
     r.settings(|s| s.release_radar = false);
+    let st = crate::settings::SettingsState::new(r.db.clone(), Default::default());
     // No Lidarr: following stays a follow, nothing is sent to MusicBrainz.
-    r.radar.followed().unwrap();
+    r.radar.followed(&st).await.unwrap();
     assert!(!crate::settings::load(&r.db).release_radar);
     // Just show: the radar is the user's own choice then.
     r.lidarr.ready.store(true, Ordering::Relaxed);
     r.settings(|s| s.follow_get = false);
-    r.radar.followed().unwrap();
+    r.radar.followed(&st).await.unwrap();
     assert!(!crate::settings::load(&r.db).release_radar);
     r.settings(|s| s.follow_get = true);
-    r.radar.followed().unwrap();
+    r.radar.followed(&st).await.unwrap();
     assert!(crate::settings::load(&r.db).release_radar, "the radar is what finds their new albums");
     assert!(r.events.0.lock().iter().any(|e| e == "settings://changed"));
 }
@@ -593,12 +594,58 @@ async fn new_albums_wait_for_the_switch_and_a_ready_lidarr() {
     r.settings(|s| s.follow_get = false);
     assert!(r.radar.check().await.unwrap().auto.is_empty(), "just show them, for everyone");
     r.settings(|s| s.follow_get = true);
+    r.later(CHECK_EVERY);
+    assert!(r.radar.check().await.unwrap().auto.is_empty(), "turned back on, it doesn't reach back for what only showed");
     r.lidarr.ready.store(false, Ordering::Relaxed);
     r.later(CHECK_EVERY);
+    r.mb.route("/release-group?query=", Some(answer(vec![album(20, "Paper Moon", 3), album(21, "Second Wind", 1)])));
     assert!(r.radar.check().await.unwrap().auto.is_empty(), "Lidarr not set up or its check not green");
     r.lidarr.ready.store(true, Ordering::Relaxed);
     r.later(CHECK_EVERY);
-    assert_eq!(r.radar.check().await.unwrap().auto.len(), 1, "then it goes");
+    let o = r.radar.check().await.unwrap();
+    assert_eq!(o.auto.iter().map(|x| x.title.as_str()).collect::<Vec<_>>(), vec!["Second Wind"], "then the new one goes");
+}
+
+#[tokio::test]
+async fn after_an_update_and_when_set_back_to_get_nothing_older_is_asked_for() {
+    let r = auto_rig();
+    r.radar.check().await.unwrap();
+    r.later(CHECK_EVERY);
+    r.mb.route("/release-group?query=", Some(answer(vec![album(20, "Paper Moon", 1)])));
+    // An older build found Paper Moon and only showed it: no pass then.
+    r.lidarr.ready.store(false, Ordering::Relaxed);
+    r.radar.check().await.unwrap();
+    r.db.write(|c| {
+        let mut st: serde_json::Value = serde_json::from_str(&crate::db::store::kv_get(c, STORE_KEY)?.unwrap()).unwrap();
+        st.as_object_mut().unwrap().remove("getting");
+        crate::db::store::kv_set(c, STORE_KEY, &st.to_string())
+    })
+    .unwrap();
+    r.lidarr.ready.store(true, Ordering::Relaxed);
+    r.later(CHECK_EVERY);
+    assert!(r.radar.check().await.unwrap().auto.is_empty(), "what an older build showed stays shown only");
+    // Just show for a while, then get again: only what comes out after.
+    crate::social::follows::set_just_show(r.follows.as_ref(), "ar1", true).unwrap();
+    r.later(CHECK_EVERY);
+    r.mb.route("/release-group?query=", Some(answer(vec![album(20, "Paper Moon", 3), album(21, "Second Wind", 1)])));
+    assert!(r.radar.check().await.unwrap().auto.is_empty());
+    crate::social::follows::set_just_show(r.follows.as_ref(), "ar1", false).unwrap();
+    r.later(CHECK_EVERY);
+    r.mb.route(
+        "/release-group?query=",
+        Some(answer(vec![album(20, "Paper Moon", 4), album(21, "Second Wind", 2), album(22, "Third Light", 1)])),
+    );
+    let o = r.radar.check().await.unwrap();
+    assert_eq!(o.auto.iter().map(|x| x.title.as_str()).collect::<Vec<_>>(), vec!["Third Light"]);
+}
+
+#[tokio::test]
+async fn old_auto_request_artists_just_show_when_the_old_switch_was_off() {
+    let r = rig();
+    r.settings(|s| s.legacy_auto_request = Some(false));
+    r.db.write(|c| crate::db::store::kv_set(c, LEGACY_AUTO_KEY, r#"[{"id":"ar9","name":"Cold Coast","enabledAt":40}]"#)).unwrap();
+    assert_eq!(r.radar.migrate_auto().unwrap(), 1);
+    assert!(r.follows.list().unwrap().iter().find(|f| f.id == "ar9").unwrap().just_show, "followed, never got");
 }
 
 #[test]

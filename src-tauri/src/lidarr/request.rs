@@ -81,7 +81,7 @@ pub struct RequestRecord {
     /// What Platter did along the way (monitoring it turned off...).
     #[serde(default)]
     pub notes: Vec<String>,
-    /// Made by auto-request for a new release, not by hand.
+    /// Asked for by itself for a followed artist's new release, not by hand.
     #[serde(default)]
     pub auto: bool,
     /// For a protected artist: it lands in the staging folder and waits
@@ -718,8 +718,8 @@ impl Lidarr {
         }
     }
 
-    /// An automatic request for a new release (auto-request is on for the
-    /// artist, which stands in for the typed name). The same MusicBrainz
+    /// An automatic request for a new release (the artist is followed,
+    /// which stands in for the typed name). The same MusicBrainz
     /// guards and the same full setup check run before anything is sent.
     /// A release asked for before (by hand or automatically, whatever came
     /// of it) is never asked for again. Anything refused stays in the list

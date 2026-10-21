@@ -102,7 +102,7 @@ pub struct Found {
     /// The first release date (`YYYY-MM-DD`, `YYYY-MM` or `YYYY`).
     pub date: String,
     pub found_at: i64,
-    /// Found on the artist's first look: shown, never announced or auto-requested.
+    /// Found on the artist's first look: shown, never announced or got.
     #[serde(default)]
     pub baseline: bool,
 }
@@ -116,8 +116,31 @@ struct Stored {
     items: Vec<Found>,
     /// Artists (MusicBrainz ids) looked at before.
     known: Vec<String>,
-    /// Release groups auto-request has asked for (whatever came of it).
+    /// Release groups asked for for followed artists, or passed over
+    /// (whatever came of it).
     auto_tried: Vec<String>,
+    /// What was being got at the last pass, so a change (an artist set
+    /// back to get, singles turned on, a first run after an update) only
+    /// gets what comes out from then on.
+    getting: Option<Getting>,
+}
+
+/// What new albums are got for: the settings and artists at one pass.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct Getting {
+    at: i64,
+    get: bool,
+    singles: bool,
+    /// Followed artists (folded names) not set to just show.
+    artists: Vec<String>,
+}
+
+impl Getting {
+    fn takes(&self, f: &Found) -> bool {
+        let kind = f.kind == "album" || f.kind == "ep" || (f.kind == "single" && self.singles);
+        self.get && kind && self.artists.contains(&fold_artist(&f.artist))
+    }
 }
 
 /// An artist an older build had auto-request on for (this device).
@@ -251,7 +274,7 @@ pub struct RadarDeps {
 pub struct Outcome {
     /// Releases new since the last look (not an artist's first look).
     pub new: Vec<Found>,
-    /// Auto-requests made, refused ones included.
+    /// Requests made for followed artists, refused ones included.
     pub auto: Vec<RequestRecord>,
     /// New albums left for another day by the daily cap.
     pub waiting: usize,
@@ -380,9 +403,11 @@ impl Radar {
         let old: Vec<LegacyAuto> = serde_json::from_str(&raw).unwrap_or_default();
         let mut all = self.inner.follows.list()?;
         let before = all.len();
+        // The old switch was turned off: those artists only showed.
+        let just_show = crate::settings::try_load(&self.inner.db)?.legacy_auto_request == Some(false);
         for a in old {
             if !a.id.trim().is_empty() && !all.iter().any(|f| f.id == a.id) && all.len() < crate::social::follows::MAX_FOLLOWS {
-                all.push(FollowedArtist { id: a.id, title: a.name, thumb: None, followed_at: a.enabled_at, just_show: false });
+                all.push(FollowedArtist { id: a.id, title: a.name, thumb: None, followed_at: a.enabled_at, just_show });
             }
         }
         let n = all.len() - before;
@@ -394,14 +419,16 @@ impl Radar {
     }
 
     /// Someone was just followed: with Lidarr ready and new albums got,
-    /// the radar turns on, since it's what finds them.
-    pub fn followed(&self) -> AppResult<()> {
-        let s = crate::settings::try_load(&self.inner.db)?;
+    /// the radar turns on, since it's what finds them. It goes through the
+    /// settings like any change, so it's saved under the settings lock and
+    /// reaches the user's other devices.
+    pub async fn followed(&self, settings: &crate::settings::SettingsState) -> AppResult<()> {
+        let s = settings.get().await?;
         if s.release_radar || !s.follow_get || !self.inner.lidarr.ready() {
             return Ok(());
         }
-        let s = crate::settings::Settings { release_radar: true, ..s };
-        crate::settings::save(&self.inner.db, &s)?;
+        let patch = crate::settings::SettingsPatch { release_radar: Some(true), ..Default::default() };
+        let s = settings.set(patch).await?;
         self.inner.events.emit("settings://changed", serde_json::to_value(&s).unwrap_or_default());
         self.inner.events.emit(EVENT_CHANGED, Value::Null);
         Ok(())
@@ -445,8 +472,8 @@ impl Radar {
     }
 
     /// One look: MusicBrainz for every artist, then announcements and
-    /// auto-requests. Fails when MusicBrainz can't be asked (what was found
-    /// before stays).
+    /// asks for new albums by followed artists. Fails when MusicBrainz
+    /// can't be asked (what was found before stays).
     pub async fn check(&self) -> AppResult<Outcome> {
         let _one = self.one.lock().await;
         let s = crate::settings::load(&self.inner.db);
@@ -566,16 +593,17 @@ impl Radar {
     /// wait for another day.
     async fn auto_request(&self, s: &crate::settings::Settings, st: &mut Stored, now: i64) -> AppResult<(Vec<RequestRecord>, usize)> {
         let follows: Vec<FollowedArtist> = self.inner.follows.list()?.into_iter().filter(|f| !f.just_show).collect();
+        self.pass_over_older(s, &follows, st, now)?;
         if !s.follow_get || follows.is_empty() || !self.inner.lidarr.ready() {
             return Ok((Vec::new(), 0));
         }
         let on: HashMap<String, &FollowedArtist> = follows.iter().map(|f| (fold_artist(&f.title), f)).collect();
-        let kind_ok = |k: &str| k == "album" || k == "ep" || (k == "single" && s.follow_get_singles);
+        let now_getting = st.getting.clone().unwrap_or_default();
         let tried: HashSet<String> = st.auto_tried.iter().cloned().collect();
         let mut todo: Vec<Found> = st
             .items
             .iter()
-            .filter(|f| kind_ok(&f.kind) && !f.baseline && !tried.contains(&f.release_group_id))
+            .filter(|f| now_getting.takes(f) && !f.baseline && !tried.contains(&f.release_group_id))
             .filter(|f| on.get(&fold_artist(&f.artist)).is_some_and(|a| f.found_at > a.followed_at))
             .cloned()
             .collect();
@@ -628,6 +656,32 @@ impl Radar {
             made.push(rec);
         }
         Ok((made, waiting))
+    }
+
+    /// Releases already on the radar that weren't being got at the last
+    /// pass (or found before this build got them at all) are passed over:
+    /// getting starts with what's found from now on, never reaching back.
+    fn pass_over_older(&self, s: &crate::settings::Settings, follows: &[FollowedArtist], st: &mut Stored, now: i64) -> AppResult<()> {
+        let mut artists: Vec<String> = follows.iter().map(|f| fold_artist(&f.title)).collect();
+        artists.sort();
+        artists.dedup();
+        let next = Getting { at: now, get: s.follow_get, singles: s.follow_get_singles, artists };
+        let before = st.getting.clone();
+        let tried: HashSet<String> = st.auto_tried.iter().cloned().collect();
+        let passed: Vec<String> = st
+            .items
+            .iter()
+            .filter(|f| !f.baseline && !tried.contains(&f.release_group_id) && next.takes(f))
+            .filter(|f| match &before {
+                // A first pass: anything already on the radar stays shown only.
+                None => true,
+                Some(b) => !b.takes(f) && f.found_at <= b.at,
+            })
+            .map(|f| f.release_group_id.clone())
+            .collect();
+        st.auto_tried.extend(passed);
+        st.getting = Some(next);
+        self.save(st)
     }
 
     /// Ask for new albums found earlier that are still to get (a claim
