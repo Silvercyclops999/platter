@@ -1,5 +1,5 @@
 /**
- * The visualizer's three styles, in the order a swipe or an arrow key goes
+ * The visualizer's styles (Cover is just the album art, nothing moving), in the order a swipe or an arrow key goes
  * through them, and the frame rate each place runs at.
  */
 import type { VisualizerStyle } from "../lib/types";
@@ -13,6 +13,7 @@ export const STYLES: readonly StyleChoice[] = [
   { id: "grooves", label: "Grooves" },
   { id: "blur", label: "Blur" },
   { id: "bars", label: "Bars" },
+  { id: "cover", label: "Cover" },
 ];
 
 export const DEFAULT_STYLE: VisualizerStyle = "grooves";

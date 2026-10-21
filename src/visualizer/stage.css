@@ -162,6 +162,8 @@
 }
 /* Blur: small, sharp and lifted off the colours. */
 .vis-cover--blur { box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5), 0 6px 18px rgba(0, 0, 0, 0.32), 0 0 0 0.5px rgba(255, 255, 255, 0.16) !important; }
+/* Cover: just the album art, lifted off itself blurred. */
+.vis-cover--cover { box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5), 0 6px 18px rgba(0, 0, 0, 0.32), 0 0 0 0.5px rgba(255, 255, 255, 0.16) !important; }
 /* Bars: the cover keeps its place (the bars stand in it) but isn't drawn. */
 .vis-cover--bars { opacity: 0; box-shadow: none !important; }
 
@@ -187,6 +189,7 @@
 /* Over the art the cover gives it room: the label smallest, Bars the widest. */
 .ph-np.is-art--grooves .ph-np__cover { width: min(52%, 224px); }
 .ph-np.is-art--blur .ph-np__cover { width: min(66%, 290px, max(200px, calc(100dvh - var(--ph-safe-top) - var(--ph-safe-bottom) - 470px))); }
+.ph-np.is-art--cover .ph-np__cover { width: min(100%, 400px, max(220px, calc(100dvh - var(--ph-safe-top) - var(--ph-safe-bottom) - 460px))); }
 .ph-np.is-art--bars .ph-np__cover { width: min(100%, 400px, max(220px, calc(100dvh - var(--ph-safe-top) - var(--ph-safe-bottom) - 460px))); }
 .ph-np.is-art .ph-np__art { position: relative; }
 /* The cover opens and closes the visualizer with a tap. */
@@ -241,6 +244,8 @@
 .fw--art-grooves .fw__art-slot { margin-bottom: var(--space-8); }
 .fw--art-blur .fw__now--art .fw__cover { width: 72%; }
 .fw--art-blur .fw__art-slot { margin-bottom: var(--space-4); }
+.fw--art-cover .fw__now--art .fw__cover { width: 100%; }
+.fw--art-cover .fw__art-slot { margin-bottom: var(--space-4); }
 .fw__art-meta { width: 100%; }
 .fw__now:not(.fw__now--art) .fw__cover.is-tappable { cursor: pointer; }
 /* Hidden controls fade, then leave the tab order too (the bars with them). */

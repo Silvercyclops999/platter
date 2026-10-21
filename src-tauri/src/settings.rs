@@ -75,8 +75,8 @@ impl StreamQuality {
 
 /// The visualizer's picture, remembered (not a setting row): Grooves, the
 /// record in the cover's colours; Blur, the cover's colours as soft shapes;
-/// Bars, a row of spectrum bars over the cover. Styles from before the
-/// rework read as Grooves.
+/// Bars, a row of spectrum bars over the cover; Cover, just the album art.
+/// Styles from before the rework read as Grooves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum VisualizerStyle {
@@ -85,6 +85,7 @@ pub enum VisualizerStyle {
     Grooves,
     Blur,
     Bars,
+    Cover,
 }
 
 /// Phone stream quality over mobile data. Auto keeps the original file
@@ -5209,6 +5210,8 @@ mod tests {
         assert_eq!(v["visualizerStyle"], "bars");
         assert_eq!(v["visualizerCoverTap"], false);
         assert_eq!(serde_json::to_value(VisualizerStyle::Blur).unwrap(), "blur");
+        assert_eq!(serde_json::to_value(VisualizerStyle::Cover).unwrap(), "cover");
+        assert_eq!(serde_json::from_str::<VisualizerStyle>(r#""cover""#).unwrap(), VisualizerStyle::Cover);
     }
 
     #[test]

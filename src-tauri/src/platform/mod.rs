@@ -173,6 +173,14 @@ impl EventSink for Tap {
     fn output_lost(&self, lost: &OutputLost) {
         self.inner.output_lost(lost);
     }
+    // Everything else goes straight through too: a method left out here
+    // would fall to the trait's default and never reach the UI.
+    fn signal_path(&self, path: &crate::audio::signal::SignalPath) {
+        self.inner.signal_path(path);
+    }
+    fn spectrum(&self, frame: &crate::audio::visual::Spectrum) {
+        self.inner.spectrum(frame);
+    }
 }
 
 /// Built before the player (it needs the sink), started after it.
@@ -567,6 +575,27 @@ mod tests {
         fn state(&self, _: &PlayerState) {}
         fn position(&self, _: &PositionPayload) {}
         fn error(&self, _: &ErrorPayload) {}
+    }
+
+    #[test]
+    fn tap_passes_visualizer_frames_to_the_ui() {
+        use crate::audio::visual::Spectrum;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        #[derive(Default)]
+        struct Frames(AtomicUsize);
+        impl EventSink for Frames {
+            fn state(&self, _: &PlayerState) {}
+            fn position(&self, _: &PositionPayload) {}
+            fn error(&self, _: &ErrorPayload) {}
+            fn spectrum(&self, _: &Spectrum) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        let p = Platform::new();
+        let ui = Arc::new(Frames::default());
+        let sink = p.tap(ui.clone());
+        sink.spectrum(&Spectrum { t: 0, bands: vec![-20.0; 64], rms: [-20.0; 2], peak: [-6.0; 2], scope: None });
+        assert_eq!(ui.0.load(Ordering::Relaxed), 1);
     }
 
     #[test]
