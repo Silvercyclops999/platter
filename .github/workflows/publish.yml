@@ -6,7 +6,10 @@ name: publish
 # hand for one tag:
 #
 #   gh api repos/OWNER/REPO/actions/workflows/publish.yml/dispatches \
-#     -f ref=main -f 'inputs[tag]=v0.2.35'
+#     -f ref=main -f 'inputs[tag]=v0.2.35' -F 'inputs[notes]=@notes.md'
+#
+# With notes given, they replace the draft's text first (for sessions that
+# can start workflows but can't edit releases themselves).
 #
 # It leaves the draft alone while its notes are still the build's placeholder
 # text, so a release never goes out without notes written for listeners.
@@ -19,6 +22,9 @@ on:
       tag:
         description: 'Release tag, like v0.2.35'
         required: true
+      notes:
+        description: 'Release notes to put on the draft before publishing (optional)'
+        required: false
 
 jobs:
   publish:
@@ -33,6 +39,7 @@ jobs:
       GH_TOKEN: ${{ vars.RELEASES_REPO && secrets.RELEASES_TOKEN || github.token }}
       REPO: ${{ vars.RELEASES_OWNER || github.repository_owner }}/${{ vars.RELEASES_REPO || github.event.repository.name }}
       TAG: ${{ inputs.tag || github.event.workflow_run.head_branch }}
+      NOTES: ${{ inputs.notes }}
     steps:
       - name: Check the draft and publish it
         shell: bash
@@ -56,6 +63,11 @@ jobs:
           done
           [ "$(jq -r .version latest.json)" = "${TAG#v}" ] || { echo "latest.json is for another version"; exit 1; }
 
+          if [ -n "$NOTES" ]; then
+            jq -n --arg b "$NOTES" '{body: $b}' | gh api -X PATCH "repos/$REPO/releases/$id" --input - >/dev/null
+            echo "notes written"
+            rel=$(gh api "repos/$REPO/releases/$id")
+          fi
           body=$(echo "$rel" | jq -r '.body // ""')
           case "$body" in
             ""|"The Windows installer is not code-signed yet: on SmartScreen"*)
