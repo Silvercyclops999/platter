@@ -5,10 +5,14 @@
 //! - When the sync file brings settings, [`patch_from_store`] turns the ones
 //!   that differ into a settings patch, applied like a change on the
 //!   Settings page. The values then match the store, so nothing echoes back.
+//! - A value holding a key (an address with a password, say) stays on this
+//!   device; the rest still sync.
+
+use std::sync::Mutex;
 
 use serde_json::{Map, Value};
 
-use super::store::{SETTINGS, SyncStore};
+use super::store::{SETTINGS, SyncStore, looks_secret};
 use crate::error::{AppError, AppResult};
 use crate::settings::{SYNCED_SETTINGS, Settings, SettingsPatch};
 
@@ -33,12 +37,32 @@ fn as_map(s: &Settings) -> AppResult<Map<String, Value>> {
     }
 }
 
+/// Settings already logged as kept on this device, so each is said once a run.
+static KEPT_HERE: Mutex<Vec<&str>> = Mutex::new(Vec::new());
+
+/// Whether a setting's value may go in the store. One that holds a key stays
+/// on this device, and the log names the setting (never the value) once.
+fn shareable(name: &'static str, v: &Value) -> bool {
+    if !looks_secret(v) {
+        return true;
+    }
+    let mut kept = KEPT_HERE.lock().unwrap_or_else(|e| e.into_inner());
+    if !kept.contains(&name) {
+        kept.push(name);
+        tracing::info!("setting {name} holds a key, so it stays on this device and doesn't sync");
+    }
+    false
+}
+
 /// Store synced settings that changed here.
 pub fn push(store: &SyncStore, s: &Settings) -> AppResult<()> {
     let m = as_map(s)?;
     let mut ops = Vec::new();
     for name in SYNCED_SETTINGS {
         let Some(v) = m.get(*name) else { continue };
+        if !shareable(name, v) {
+            continue;
+        }
         let key = store_key(name);
         if store.get(&SETTINGS, key)?.as_ref() != Some(v) {
             ops.push(super::store::Op::put(&SETTINGS, key, v)?);
@@ -56,6 +80,9 @@ pub fn seed(store: &SyncStore, s: &Settings) -> AppResult<()> {
     let now = store.now();
     for name in SYNCED_SETTINGS {
         let Some(v) = m.get(*name) else { continue };
+        if !shareable(name, v) {
+            continue;
+        }
         let ts = if d.get(*name) == Some(v) { 1 } else { now };
         store.seed(&SETTINGS, store_key(name), v, ts)?;
     }
@@ -108,6 +135,27 @@ mod tests {
         assert_eq!(store.get(&SETTINGS, "monthlyStatsOnProfile").unwrap(), Some(Value::Bool(false)));
         store.put(&SETTINGS, "monthlyStatsOnProfile", &Value::Bool(true)).unwrap();
         assert_eq!(patch_from_store(&store, &no_recaps).unwrap().unwrap().monthly_stats, Some(true));
+    }
+
+    #[test]
+    fn a_setting_holding_a_key_stays_here_and_the_rest_still_sync() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SyncStore::new(DbHandle::open(dir.path().join("lib.db")).unwrap(), "pc");
+        let s = Settings {
+            lidarr_away_url: "https://me:hunter2@music.example.com".into(),
+            lidarr_url: "http://lidarr.local:8686/?apikey=abc".into(),
+            report_plays: false,
+            ..Settings::default()
+        };
+        seed(&store, &s).unwrap();
+        push(&store, &s).unwrap();
+        assert_eq!(store.get(&SETTINGS, "lidarrAwayUrl").unwrap(), None);
+        assert_eq!(store.get(&SETTINGS, "lidarrUrl").unwrap(), None);
+        assert_eq!(store.get(&SETTINGS, "reportToPlex").unwrap(), Some(Value::Bool(false)));
+        // A plain address syncs again.
+        let plain = Settings { lidarr_away_url: "https://music.example.com".into(), ..s };
+        push(&store, &plain).unwrap();
+        assert_eq!(store.get(&SETTINGS, "lidarrAwayUrl").unwrap(), Some(Value::from("https://music.example.com")));
     }
 
     #[test]
