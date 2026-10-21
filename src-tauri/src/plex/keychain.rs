@@ -280,14 +280,22 @@ fn map_keyring(e: keyring::Error) -> AppError {
 impl Backend for OsKeychain {
     fn read(&self, account: &str) -> AppResult<Option<String>> {
         match self.entry(account)?.get_password() {
-            Ok(s) => Ok(Some(s)),
+            Ok(s) => {
+                // Items saved before move over on their next read.
+                #[cfg(target_os = "ios")]
+                after_first_unlock(&self.service, account);
+                Ok(Some(s))
+            }
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(map_keyring(e)),
         }
     }
 
     fn write(&self, account: &str, value: &str) -> AppResult<()> {
-        self.entry(account)?.set_password(value).map_err(map_keyring)
+        self.entry(account)?.set_password(value).map_err(map_keyring)?;
+        #[cfg(target_os = "ios")]
+        after_first_unlock(&self.service, account);
+        Ok(())
     }
 
     fn remove(&self, account: &str) -> AppResult<()> {
@@ -295,6 +303,40 @@ impl Backend for OsKeychain {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(e) => Err(map_keyring(e)),
         }
+    }
+}
+
+/// iPhone: an item stays readable from the first unlock after the phone
+/// starts, not only while it's unlocked, so Siri, the car and the lock
+/// screen can stream with the phone locked. It still goes to backups like
+/// before.
+#[cfg(target_os = "ios")]
+fn after_first_unlock(service: &str, account: &str) {
+    use objc2_foundation::{NSDictionary, NSString};
+    #[link(name = "Security", kind = "framework")]
+    unsafe extern "C" {
+        static kSecClass: &'static NSString;
+        static kSecClassGenericPassword: &'static NSString;
+        static kSecAttrService: &'static NSString;
+        static kSecAttrAccount: &'static NSString;
+        static kSecAttrAccessible: &'static NSString;
+        static kSecAttrAccessibleAfterFirstUnlock: &'static NSString;
+        fn SecItemUpdate(query: &NSDictionary<NSString, NSString>, attributes: &NSDictionary<NSString, NSString>) -> i32;
+    }
+    let service = NSString::from_str(service);
+    let account = NSString::from_str(account);
+    // SAFETY: Security's constant keys and values, and SecItemUpdate with
+    // two dictionaries of strings (toll-free bridged to CFDictionary).
+    let status = unsafe {
+        let query = NSDictionary::from_slices(
+            &[kSecClass, kSecAttrService, kSecAttrAccount],
+            &[kSecClassGenericPassword, &*service, &*account],
+        );
+        let change = NSDictionary::from_slices(&[kSecAttrAccessible], &[kSecAttrAccessibleAfterFirstUnlock]);
+        SecItemUpdate(&query, &change)
+    };
+    if status != 0 {
+        tracing::debug!(status, "keychain item stays readable only while unlocked");
     }
 }
 
