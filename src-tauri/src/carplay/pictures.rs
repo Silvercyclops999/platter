@@ -67,6 +67,21 @@ const SS: u32 = 3;
 /// Below this the sleeve keeps its name only: three names can't be read.
 const DETAIL_MIN: u32 = 160;
 
+/// What `draw` would draw at `px`: a small sleeve leaves its artists off,
+/// so two mixes with the same name draw the same there. A key for a cache.
+pub fn drawn(picture: &CarPicture, px: u32) -> CarPicture {
+    match picture {
+        CarPicture::Mix { title, .. } if px < DETAIL_MIN => CarPicture::Mix { title: title.clone(), artists: Vec::new() },
+        CarPicture::Mix { title, artists } => {
+            let sans = FontRef::try_from_slice(SANS).expect("the sans");
+            // A name the type has no letters for would print as boxes: it's left off.
+            let artists = artists.iter().filter(|a| a.chars().all(|c| c.is_whitespace() || sans.glyph_id(c).0 != 0)).cloned().collect();
+            CarPicture::Mix { title: title.clone(), artists }
+        }
+        p => p.clone(),
+    }
+}
+
 /// `picture` as a square PNG `px` wide.
 pub fn draw(picture: &CarPicture, px: u32) -> Vec<u8> {
     let px = px.max(8);
@@ -81,9 +96,10 @@ pub fn draw(picture: &CarPicture, px: u32) -> Vec<u8> {
             c.fill(PAPER);
             heart(&mut c, BRASS_ON_PAPER);
         }
-        CarPicture::Mix { title, artists } => {
+        CarPicture::Mix { .. } => {
+            let CarPicture::Mix { title, artists } = drawn(picture, px) else { unreachable!() };
             c.fill(PAPER);
-            sleeve(&mut c, title, if px >= DETAIL_MIN { artists } else { &[] });
+            sleeve(&mut c, &title, &artists);
         }
         CarPicture::Placeholder => {
             c.fill(PAPER);
@@ -257,8 +273,10 @@ fn sleeve(c: &mut Canvas, title: &str, artists: &[String]) {
     let mut lines = balanced(&serif, size, title, inner);
     if lines.len() > max_lines {
         let rest = lines.split_off(max_lines - 1).join(" ");
-        lines.push(fit(&serif, size, &rest, inner));
+        lines.push(rest);
     }
+    // A word too long for the sleeve even at the smallest size is cut, not clipped at the edge.
+    let lines: Vec<String> = lines.iter().map(|l| fit(&serif, size, l, inner)).collect();
     let ascent = serif.as_scaled(PxScale::from(size)).ascent();
     let line_h = size;
     let mut y = if detail { pad } else { n - pad - line_h * lines.len() as f32 };
