@@ -2862,7 +2862,7 @@ busy | working | done | problem`), `done` and `left` (songs, about),
 `hours` (`late | night | early | always`), `song` (the title being
 transcribed) and `problem` (words to show). Its settings are `bridgeLyrics`,
 `bridgeLyricsHours` and `bridgeLidarr` (synced). While a Bridge answering in
-the last 75 minutes says `downloading`, `waiting`, `busy`, `working` or
+the last 150 minutes says `downloading`, `waiting`, `busy`, `working` or
 `done` and `bridgeLyrics` is on, `transcribe_status.paused` is `bridge` for
 the background batch; songs asked for one at a time still run. Lyrics a
 Bridge made arrive as transcriptions with `transcribe://done`. On the

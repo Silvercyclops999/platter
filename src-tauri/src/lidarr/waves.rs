@@ -681,6 +681,14 @@ impl Waves {
             st.finished = false;
         }
         if !self.l().status().ready {
+            let here = self.l().status();
+            if !(here.url_set && here.has_key) && self.l().bridge_linked() {
+                // No Lidarr on this device, and the Bridge hasn't answered
+                // yet (the app just started): it takes the waves or is the
+                // way to Lidarr once it does. Nothing to pause.
+                self.save(&st)?;
+                return Ok(out);
+            }
             self.pause(&mut st, "Lidarr isn't set up, or its setup check hasn't passed.".into())?;
             out.paused = st.paused.clone();
             self.save(&st)?;

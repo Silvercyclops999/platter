@@ -461,7 +461,7 @@ async fn in_sync_goes_stale_and_signed_out_says_so() {
     let (la, lb) = pair(&a, &b, "http://relay");
     round(&a, &la, &b, &lb).await;
     let wire = Arc::new(Wire::new(a.links.clone(), Arc::new(Ntfy::new().unwrap()), Arc::new(|| 1)));
-    let timing = Timing { every: Duration::from_secs(60), ..Timing::default() };
+    let timing = Timing { every: Duration::from_secs(60), relay_every: Duration::from_secs(60), ..Timing::default() };
     let sync = DeviceSync::new(a.peer.clone(), wire, timing);
     assert_eq!(sync.status()[0].words, "In sync");
     // Three rounds' time with no word from it.
@@ -691,17 +691,21 @@ async fn big_entries_wait_for_the_local_network_instead_of_the_relay() {
     let sync = DeviceSync::new(a.peer.clone(), wire, Timing::default());
     let noise = |n: u32| -> String { (0..n).map(|_| char::from(b'a' + rand::random::<u8>() % 26)).collect() };
     let mut msgs = Vec::new();
+    // One too big for the relay at all, then three that fit one at a time.
+    let mut m = EntryMap::new();
+    m.entry("lyrics".into()).or_default().insert("huge".into(), Entry { value: Some(json!({"text": noise(600_000)})), ts: 1, device: "a".into() });
+    msgs.push(Msg::SyncEntries { entries: m });
     for i in 0..3 {
         let mut m = EntryMap::new();
-        m.entry("lyrics".into()).or_default().insert(format!("t{i}"), Entry { value: Some(json!({"text": noise(300_000)})), ts: 1, device: "a".into() });
+        m.entry("lyrics".into()).or_default().insert(format!("t{i}"), Entry { value: Some(json!({"text": noise(12_000)})), ts: 1, device: "a".into() });
         msgs.push(Msg::SyncEntries { entries: m });
     }
     sync.deliver(&la, msgs).await;
     let sent = ntfy.published().len();
     assert!(sent > 0);
     assert_eq!(sync.status()[0].words, "Waiting for Device b");
-    // About 300 KB went; the rest waits.
-    assert!(sent * link::PIECE < 2 * super::run::RELAY_MAX, "{sent} pieces");
+    // About 16 KB went (a few relay messages); the rest waits.
+    assert!(sent * link::PIECE <= super::run::RELAY_BULK_MAX + link::PIECE, "{sent} pieces");
 }
 
 #[test]
@@ -979,3 +983,113 @@ mod app;
 mod home;
 mod mesh;
 mod pairing;
+
+// ---------------------------------------------------------------- pacing the relay
+
+/// Lyrics entries, `n` of them of a few hundred bytes.
+fn small_entries(keys: &[&str]) -> Msg {
+    let mut m = EntryMap::new();
+    for k in keys {
+        m.entry("lyrics".into()).or_default().insert((*k).into(), Entry { value: Some(json!({"text": "la la la"})), ts: 1, device: "a".into() });
+    }
+    Msg::SyncEntries { entries: m }
+}
+
+#[tokio::test]
+async fn a_relay_that_says_no_isnt_asked_again_at_once_and_sync_says_its_busy() {
+    let ntfy = FakeNtfy::start().await;
+    let a = dev("a");
+    let b = dev("b");
+    let (la, lb) = pair(&a, &b, &ntfy.url);
+    round(&a, &la, &b, &lb).await;
+    let wire = Arc::new(Wire::new(a.links.clone(), Arc::new(Ntfy::new().unwrap()), Arc::new(crate::sync::store::system_ms)));
+    let sync = DeviceSync::new(a.peer.clone(), wire, Timing::default());
+    let posts = || ntfy.requests().iter().filter(|r| r.starts_with("POST")).count();
+    ntfy.set_limited(true);
+    sync.deliver(&la, vec![small_entries(&["t1"]), small_entries(&["t2"])]).await;
+    // Turned away once, not tried again, and the rest isn't tried either.
+    assert_eq!(posts(), 1);
+    assert_eq!(sync.status()[0].words, "The relay is busy, trying again later");
+    // It's fine again, but this device leaves it alone for a while.
+    ntfy.set_limited(false);
+    sync.deliver(&la, vec![small_entries(&["t3"])]).await;
+    assert_eq!(posts(), 1);
+    tokio::time::sleep(crate::social::listen::relay::COOL_FIRST + Duration::from_millis(50)).await;
+    sync.deliver(&la, vec![small_entries(&["t3"])]).await;
+    assert_eq!(posts(), 2);
+    assert_ne!(sync.status()[0].words, "The relay is busy, trying again later");
+}
+
+/// A relay with no allowance left for background work.
+struct NoRoom(Arc<dyn RelayFactory>);
+struct NoRoomRelay(Arc<dyn crate::social::listen::relay::Relay>);
+
+#[async_trait]
+impl crate::social::listen::relay::Relay for NoRoomRelay {
+    async fn publish(&self, topic: &str, body: &str) -> Result<(), crate::social::listen::relay::RelayError> {
+        self.0.publish(topic, body).await
+    }
+    async fn subscribe(
+        &self,
+        topics: &[String],
+        since: Option<&str>,
+    ) -> Result<tokio::sync::mpsc::Receiver<crate::social::listen::relay::RelayEvent>, crate::social::listen::relay::RelayError> {
+        self.0.subscribe(topics, since).await
+    }
+    fn room_for(&self, _messages: usize) -> bool {
+        false
+    }
+}
+
+impl RelayFactory for NoRoom {
+    fn relay(&self, base: &str) -> Arc<dyn crate::social::listen::relay::Relay> {
+        Arc::new(NoRoomRelay(self.0.relay(base)))
+    }
+}
+
+#[tokio::test]
+async fn with_the_allowance_spent_changes_wait_and_requests_still_go() {
+    let ntfy = FakeNtfy::start().await;
+    let a = dev("a");
+    let b = dev("b");
+    let (la, _lb) = pair(&a, &b, &ntfy.url);
+    let wire = Wire::new(a.links.clone(), Arc::new(NoRoom(Arc::new(Ntfy::new().unwrap()))), Arc::new(crate::sync::store::system_ms));
+    let e = wire.send(&la, &small_entries(&["t1"])).await.unwrap_err();
+    assert!(crate::homeside::peer::is_busy(&e), "{e}");
+    assert!(ntfy.published().is_empty());
+    // A request for Lidarr isn't background work.
+    wire.send(&la, &Msg::Get { id: 1, path: "/api/v1/system/status".into(), query: Vec::new() }).await.unwrap();
+    assert_eq!(ntfy.published().len(), 1);
+    for m in [small_entries(&["x"]), Msg::SyncDiff { ns: "lyrics".into(), keys: Vec::new() }] {
+        assert!(crate::homeside::peer::background(&m), "{}", m.kind());
+    }
+    for m in [Msg::Unpair, Msg::SyncBye, Msg::Get { id: 2, path: "/".into(), query: Vec::new() }] {
+        assert!(!crate::homeside::peer::background(&m), "{}", m.kind());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn rounds_through_the_relay_are_hours_apart_and_changes_still_go_at_once() {
+    let ntfy = FakeNtfy::start().await;
+    let a = real_clock("a", ACCT);
+    let b = real_clock("b", ACCT);
+    pair(&a, &b, &ntfy.url);
+    // A round every second (running), through the relay every few hours.
+    let a = running(a);
+    let b = running(b);
+    let in_sync = |r: &Running| r.sync.status().first().is_some_and(|s| s.words == "In sync");
+    until("in sync", || in_sync(&a) && in_sync(&b)).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let posts = || ntfy.requests().iter().filter(|r| r.starts_with("POST")).count();
+    let before = posts();
+    // Several of the usual rounds' time: nothing more through the relay.
+    tokio::time::sleep(Duration::from_millis(3500)).await;
+    assert_eq!(posts(), before);
+    assert!(in_sync(&a) && in_sync(&b));
+    // A change goes a moment after it's made.
+    a.dev.store.put(&HIDDEN, "track:new", &hidden("New")).unwrap();
+    until("the change on the other device", || b.dev.store.has_entry(&HIDDEN, "track:new").unwrap()).await;
+    assert!(posts() > before);
+    let _ = a.stop.send(true);
+    let _ = b.stop.send(true);
+}

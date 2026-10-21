@@ -857,9 +857,9 @@ async fn computers_leave_the_batch_to_a_bridge_only_while_it_answers_and_is_well
         desk.handle(&link, lyrics_status(Some(s))).await;
         assert!(!desk.lyrics_takes_over(), "{s:?}");
     }
-    // Gone quiet in the night (not heard from in over an hour): the computer carries on.
+    // Gone quiet in the night (not heard from in over two hours): the computer carries on.
     desk.handle(&link, lyrics_status(Some(LyricsState::Working))).await;
-    clock.fetch_add(2 * 3600 * 1000, std::sync::atomic::Ordering::SeqCst);
+    clock.fetch_add(3 * 3600 * 1000, std::sync::atomic::Ordering::SeqCst);
     assert!(!desk.lyrics_takes_over(), "offline");
     desk.handle(&link, lyrics_status(Some(LyricsState::Working))).await;
     assert!(desk.lyrics_takes_over(), "back");

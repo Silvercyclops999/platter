@@ -20,12 +20,14 @@ use super::protocol::{Copying, Paused, SyncPeer};
 use crate::homeside::link::{self, Link};
 use crate::homeside::peer::{self as relay_peer, Incoming, Wire};
 use crate::homeside::wire::{Msg, PROTO};
-use crate::social::listen::relay::RelayError;
 use crate::sync::store::SETTINGS;
 
 /// Anything bigger than this, deflated, goes over the local network only
 /// (or waits until the devices meet): the relay is for small changes.
 pub const RELAY_MAX: usize = 300 * 1024;
+/// Synced changes over the relay in one go at most (about nine relay
+/// messages); the rest waits for the local network or a later round.
+pub const RELAY_BULK_MAX: usize = 16 * 1024;
 /// Work waiting per link at most; more is dropped (the next round repairs).
 const WORK_MAX: usize = 64;
 
@@ -37,11 +39,20 @@ pub struct Timing {
     pub every: Duration,
     /// A relay that reconnects starts a round at most this often per link.
     pub reopen: Duration,
+    /// A round through the relay at least this often per link, when the
+    /// other device isn't on the local network (rounds there go every
+    /// `every`). Changes still go a moment after they're made.
+    pub relay_every: Duration,
 }
 
 impl Default for Timing {
     fn default() -> Self {
-        Self { debounce: Duration::from_secs(2), every: Duration::from_secs(5 * 60), reopen: Duration::from_secs(30) }
+        Self {
+            debounce: Duration::from_secs(2),
+            every: Duration::from_secs(5 * 60),
+            reopen: Duration::from_secs(30),
+            relay_every: Duration::from_secs(3 * 3600),
+        }
     }
 }
 
@@ -99,7 +110,10 @@ enum Work {
     /// Its relay listener (re)connected.
     Opened,
     Msg(Msg),
+    /// A round asked for (on start, Sync now, waking).
     Round,
+    /// The every few minutes round.
+    Tick,
     Push,
 }
 
@@ -132,6 +146,9 @@ pub struct DeviceSync {
     replies: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// When each link last had a round.
     rounds: Mutex<HashMap<String, tokio::time::Instant>>,
+    /// When each link last had a round through the relay, and how many in
+    /// a row went unheard.
+    relay_rounds: Mutex<HashMap<String, (tokio::time::Instant, u32)>>,
     /// A link was added, or "Sync now".
     kick: tokio::sync::Notify,
     /// Keep my devices in sync (Settings); on when not set.
@@ -174,6 +191,7 @@ impl DeviceSync {
             lan: RwLock::default(),
             replies: Mutex::default(),
             rounds: Mutex::default(),
+            relay_rounds: Mutex::default(),
             kick: tokio::sync::Notify::new(),
             switch: RwLock::default(),
             on_status: Mutex::default(),
@@ -338,7 +356,7 @@ impl DeviceSync {
             return;
         }
         let (msgs, held_for_wifi) = if self.big_waits() { hold_big(msgs) } else { (msgs, false) };
-        let mut budget = RELAY_MAX;
+        let mut budget = RELAY_BULK_MAX;
         let mut waiting = false;
         let mut sent = Vec::new();
         let mut failed = None;
@@ -361,7 +379,7 @@ impl DeviceSync {
             match self.wire.send(link, &m).await {
                 Ok(()) => sent.push(m),
                 Err(e) => {
-                    let busy = e.to_string().contains(&relay_peer::relay_error(RelayError::Limited));
+                    let busy = relay_peer::is_busy(&e);
                     tracing::info!("device sync: {e}");
                     failed = Some(if busy { PathState::RelayBusy } else { PathState::Away });
                     break;
@@ -408,12 +426,49 @@ impl DeviceSync {
 
     /// A round with one linked device.
     pub async fn round(&self, link: &Link) {
+        self.round_by(link, true).await;
+    }
+
+    /// A round, through the relay only when `relay` (else only on the
+    /// local network).
+    async fn round_by(&self, link: &Link, relay: bool) {
         self.rounds.lock().insert(link.id.clone(), tokio::time::Instant::now());
-        match self.peer.hello_to(&link.id, false).await {
-            Some(h) => self.send(link, vec![h]).await,
+        let Some(h) = self.peer.hello_to(&link.id, false).await else {
             // Signed out: nothing goes, and the device says why.
-            None => self.peer.signed_out(&link.id),
+            self.peer.signed_out(&link.id);
+            return;
+        };
+        let left = self.try_lan(link, vec![h]).await;
+        if left.is_empty() {
+            return;
         }
+        if !relay {
+            tracing::debug!("device sync: not on the local network; the next round through the relay is later");
+            return;
+        }
+        let checked = self.peer.seen(&link.id).is_some_and(|s| s.verified);
+        {
+            let mut rr = self.relay_rounds.lock();
+            let unheard = if checked { 0 } else { rr.get(&link.id).map_or(0, |r| r.1 + 1) };
+            rr.insert(link.id.clone(), (tokio::time::Instant::now(), unheard));
+        }
+        self.deliver(link, left).await;
+    }
+
+    /// The usual round: on the local network every time, through the relay
+    /// once every [`Timing::relay_every`], or sooner while the relay or
+    /// the other device was out of reach (that round is the repair). A
+    /// device whose hello hasn't been checked yet in this run (it wasn't
+    /// listening when this one's went) gets one again after a round, then
+    /// two, four and so on.
+    async fn usual_round(&self, link: &Link) {
+        let checked = self.peer.seen(&link.id).is_some_and(|s| s.verified);
+        let due = self.relay_rounds.lock().get(&link.id).is_none_or(|(t, unheard)| {
+            let wait = if checked { self.timing.relay_every } else { self.timing.every.saturating_mul(1 << (*unheard).min(16)).min(self.timing.relay_every) };
+            t.elapsed() >= wait
+        });
+        let repair = matches!(self.path(&link.id), PathState::Unknown | PathState::Away | PathState::RelayBusy);
+        self.round_by(link, due || repair).await;
     }
 
     /// A round with every linked device ("Sync now").
@@ -564,6 +619,7 @@ impl DeviceSync {
         }
         self.paths.lock().remove(link_id);
         self.rounds.lock().remove(link_id);
+        self.relay_rounds.lock().remove(link_id);
         self.replies.lock().remove(link_id);
     }
 
@@ -573,8 +629,9 @@ impl DeviceSync {
         let on = self.is_on();
         let stopped = self.stopped.load(Ordering::Relaxed);
         let now = self.peer.deps().store.now();
-        // Not heard from for two rounds and more: no longer "In sync".
-        let stale = |t: u64| now.saturating_sub(t) > 2 * self.timing.every.as_millis() as u64;
+        // Not heard from for two rounds and more (through the relay, the
+        // slower of the two): no longer "In sync".
+        let stale = |t: u64| now.saturating_sub(t) > 2 * self.timing.every.max(self.timing.relay_every).as_millis() as u64;
         self.wire
             .links
             .all()
@@ -695,10 +752,11 @@ impl DeviceSync {
                     // A relay that keeps reconnecting doesn't start a round each time.
                     let recent = self.rounds.lock().get(&id).is_some_and(|t| t.elapsed() < self.timing.reopen);
                     if !recent {
-                        self.round(&link).await;
+                        self.usual_round(&link).await;
                     }
                 }
                 Work::Round => self.round(&link).await,
+                Work::Tick => self.usual_round(&link).await,
                 Work::Push => {
                     let msgs = self.peer.push(&link).await;
                     self.send(&link, msgs).await;
@@ -737,7 +795,7 @@ impl DeviceSync {
                 },
                 _ = every.tick() => {
                     if self.is_on() {
-                        self.dispatch_all(|| Work::Round);
+                        self.dispatch_all(|| Work::Tick);
                     }
                 }
                 _ = self.kick.notified() => {

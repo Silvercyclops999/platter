@@ -42,6 +42,8 @@ pub struct Hooks {
     /// Bridge has none and checks its own account when linking).
     owner: RwLock<Option<OwnerFn>>,
     route: RwLock<Option<RouteFn>>,
+    /// On a desktop: whether a Bridge is linked at all, answering yet or not.
+    bridge_linked: RwLock<Option<OwnerFn>>,
     /// A computer at home answering over a device link (`crate::homeside::computer`).
     computer: RwLock<Option<RouteFn>>,
     /// On the Bridge: the desktops' name for this Lidarr in the shared
@@ -228,6 +230,16 @@ impl Lidarr {
     /// On a desktop: how to reach Lidarr through a paired Bridge.
     pub fn set_bridge_route(&self, f: Option<RouteFn>) {
         *self.home.route.write() = f;
+    }
+
+    /// On a desktop: how to tell whether a Bridge is linked (it may not
+    /// have answered yet, just after the app starts).
+    pub fn set_bridge_linked(&self, f: OwnerFn) {
+        *self.home.bridge_linked.write() = Some(f);
+    }
+
+    pub fn bridge_linked(&self) -> bool {
+        !self.bridge_mode() && self.home.bridge_linked.read().as_ref().is_some_and(|f| f())
     }
 
     pub(super) fn bridge_route(&self) -> Option<Arc<dyn LidarrRoute>> {

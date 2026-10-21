@@ -253,3 +253,22 @@ async fn albums_asked_for_by_hand_or_hidden_are_skipped() {
     let st = w.needs_you(&waves::key_of("Northlight", "Basement Tapes"), true).unwrap();
     assert!(!st.needs_you.iter().any(|n| n.album == "Basement Tapes"));
 }
+
+#[tokio::test]
+async fn without_lidarr_here_it_waits_for_the_bridge_instead_of_pausing() {
+    let t = setup(false, json!({})).await;
+    let mut s = crate::settings::load(&t.r.db);
+    s.lidarr_url = String::new();
+    crate::settings::save(&t.r.db, &s).unwrap();
+    assert!(!t.r.lidarr.status().url_set);
+    // A Bridge is linked but hasn't answered yet (the app just started).
+    t.r.lidarr.set_bridge_linked(Arc::new(|| true));
+    let out = t.w.pass().await.unwrap();
+    assert_eq!(out.paused, None);
+    assert!(t.r.lidarr.changes().iter().all(|c| c.what != "Paused Bring in my listening"));
+    assert!(t.r.web.writes().is_empty());
+    // With no Bridge either, it says why it can't go on.
+    t.r.lidarr.set_bridge_linked(Arc::new(|| false));
+    let out = t.w.pass().await.unwrap();
+    assert!(out.paused.as_deref().unwrap().contains("Lidarr isn't set up"));
+}

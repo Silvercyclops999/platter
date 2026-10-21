@@ -60,20 +60,32 @@ impl Wire {
         };
         let relay = self.relays.relay(&link.relay);
         let topic = link.outbox().topic;
-        for b in &bodies {
-            let mut tries = 0;
-            loop {
-                match relay.publish(&topic, b).await {
-                    Ok(()) => break,
-                    Err(e) if tries < 3 && e != RelayError::Refused(400) => {
-                        tries += 1;
-                        tokio::time::sleep(Duration::from_millis(500 * (1 << tries))).await;
+        let kind = msg.kind();
+        if background(msg) && !relay.room_for(bodies.len()) {
+            // The rest of this hour's allowance is spent: it goes later.
+            crate::social::listen::relay::note(kind, bodies.len(), crate::social::listen::relay::Counted::Held);
+            tracing::debug!(kind, pieces = bodies.len(), "relay: held back to stay under the limit");
+            return Err(AppError::Network(relay_error(RelayError::Limited)));
+        }
+        crate::social::listen::relay::as_kind(kind, async {
+            for b in &bodies {
+                let mut tries = 0;
+                loop {
+                    match relay.publish(&topic, b).await {
+                        Ok(()) => break,
+                        // Turned away: trying again soon only counts against the limit.
+                        Err(e) if tries < 3 && !matches!(e, RelayError::Refused(400) | RelayError::Limited) => {
+                            tries += 1;
+                            tokio::time::sleep(Duration::from_millis(500 * (1 << tries))).await;
+                        }
+                        Err(e) => return Err(AppError::Network(relay_error(e))),
                     }
-                    Err(e) => return Err(AppError::Network(relay_error(e))),
                 }
             }
-        }
-        tracing::debug!(kind = msg.kind(), pieces = bodies.len(), "bridge link: sent");
+            Ok(())
+        })
+        .await?;
+        tracing::debug!(kind, pieces = bodies.len(), "bridge link: sent");
         Ok(())
     }
 
@@ -143,6 +155,22 @@ impl Wire {
         }
         self.parts.lock().entry(link.id.clone()).or_default().add(frame, now)
     }
+}
+
+/// Work that can wait (synced changes, shared Lidarr state, lyrics,
+/// Bring in my listening's plan), so it takes from the relay's allowance.
+/// Requests, answers, hellos and status don't.
+pub fn background(msg: &Msg) -> bool {
+    matches!(
+        msg,
+        Msg::Entries { .. } | Msg::LyricsHave { .. } | Msg::SyncEntries { .. } | Msg::SyncDiff { .. } | Msg::WavesPlan(_) | Msg::WavesProgress(_)
+    )
+}
+
+/// The error says the relay is busy (turned away, or this device's
+/// allowance is spent for now).
+pub fn is_busy(e: &AppError) -> bool {
+    e.to_string().contains(&relay_error(RelayError::Limited))
 }
 
 /// A device's frame id on the local network: requests and answers apart.

@@ -258,9 +258,16 @@ updates, it gives that up once and asks for its own sign-in instead.
   folder, readable only by its own user (put right if that ever changes),
   and its state in `bridge.db`, which holds no keys or tokens.
 
-ntfy.sh is free and limits how many messages one address sends a day. The
-Bridge stays well under that (a heartbeat every half hour, and messages
-when something happens). If you run your own ntfy server, there's no limit.
+ntfy.sh is free and limits how many messages one address sends a day,
+about 250, and your computers, your phone on your Wi-Fi and the Bridge
+share that address. So each of them keeps background work (synced
+changes, shared Lidarr state, lyrics) to a small allowance an hour, and
+what doesn't fit waits for your home network or goes a little later.
+Requests and answers always go. The Bridge sends a heartbeat every hour,
+and devices that aren't on the same network check in through the relay
+every few hours. If the relay says no anyway, nothing more goes to it for
+a while instead of trying again at once. If you run your own ntfy server,
+only its own limits apply.
 
 ## Settings
 
@@ -315,7 +322,7 @@ step is in `docker logs`, and requests and pauses go to the Changes log.
 The card on Played a lot says "Running on your Bridge" while the Bridge has
 the waves, and shows its progress and anything that needs you. Turning Bring
 in my listening off on your computer stops the Bridge. If the Bridge stops
-answering for over an hour, your computer takes the waves back and carries
+answering for over two hours, your computer takes the waves back and carries
 on from where the Bridge got to.
 
 ## A computer at home

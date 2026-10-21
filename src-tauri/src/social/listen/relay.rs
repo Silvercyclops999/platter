@@ -12,9 +12,17 @@
 //!   "message"}`. Messages carry no publisher identity or address.
 //!
 //! Errors never include the URL (it has topic names in it).
+//!
+//! ntfy.sh lets one address publish about 250 messages a day, refilled
+//! evenly (about 10 an hour), and a home's computers, a phone on its Wi-Fi
+//! and the Bridge all share that address. So once it says no, nothing more
+//! is published there for a while ([`Cool`]), background work takes from a
+//! small allowance per device ([`Allowance`]), and the log says each hour
+//! what went out ([`note`]).
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -61,6 +69,11 @@ impl From<RelayError> for RelayHealth {
 #[async_trait]
 pub trait Relay: Send + Sync {
     async fn publish(&self, topic: &str, body: &str) -> Result<(), RelayError>;
+    /// Whether background work may publish this many messages now. Always
+    /// yes, except on ntfy.sh (see [`Allowance`]).
+    fn room_for(&self, _messages: usize) -> bool {
+        true
+    }
     /// Listen on these topics. The channel closes when the connection ends.
     async fn subscribe(&self, topics: &[String], since: Option<&str>) -> Result<mpsc::Receiver<RelayEvent>, RelayError>;
 }
@@ -100,8 +113,162 @@ pub struct NtfyRelay {
     idle: Duration,
 }
 
+impl NtfyRelay {
+    /// Only ntfy.sh is paced by an allowance: a server of the user's own
+    /// has whatever limits they gave it.
+    fn paced(&self) -> bool {
+        self.base == super::DEFAULT_RELAY
+    }
+}
+
 fn status_err(code: u16) -> RelayError {
     if code == 429 { RelayError::Limited } else { RelayError::Refused(code) }
+}
+
+/// The first wait after the relay said no, doubled each time it says no
+/// again, up to [`COOL_MAX`].
+pub const COOL_FIRST: Duration = if cfg!(test) { Duration::from_millis(300) } else { Duration::from_secs(15 * 60) };
+pub const COOL_MAX: Duration = if cfg!(test) { Duration::from_secs(1) } else { Duration::from_secs(2 * 3600) };
+
+/// After the relay turned a message away (it answers 429), nothing more is
+/// published there until the wait is over: every try counts against the
+/// limit, so trying again at once only keeps it reached.
+#[derive(Debug, Default)]
+pub struct Cool {
+    until: Option<Instant>,
+    next: Duration,
+}
+
+impl Cool {
+    pub fn waiting(&self, now: Instant) -> bool {
+        self.until.is_some_and(|u| now < u)
+    }
+
+    /// The relay said no: wait, longer each time in a row.
+    pub fn turned_away(&mut self, now: Instant) {
+        let wait = if self.next.is_zero() { COOL_FIRST } else { self.next };
+        self.until = Some(now + wait);
+        self.next = (wait * 2).min(COOL_MAX);
+    }
+
+    /// A message went: back to normal.
+    pub fn went(&mut self) {
+        *self = Self::default();
+    }
+}
+
+/// Background messages one device may publish to ntfy.sh at once, and how
+/// many come back an hour. Four devices at one home together stay near
+/// the address's ten an hour, with room left for requests and answers,
+/// which never take from it.
+pub const ALLOWANCE_MOST: f64 = 30.0;
+pub const ALLOWANCE_PER_HOUR: f64 = 4.0;
+
+/// What background work (synced changes, shared Lidarr state, lyrics) may
+/// still publish to ntfy.sh from this device. What doesn't fit waits for
+/// the home network or a later round.
+#[derive(Debug)]
+pub struct Allowance {
+    left: f64,
+    at: Option<Instant>,
+}
+
+impl Default for Allowance {
+    fn default() -> Self {
+        Self { left: ALLOWANCE_MOST, at: None }
+    }
+}
+
+impl Allowance {
+    /// Take `n` messages if there's room. A message too big for the whole
+    /// allowance goes once it's full, and the rest of it is owed.
+    pub fn take(&mut self, n: usize, now: Instant) -> bool {
+        if let Some(at) = self.at {
+            let hours = now.saturating_duration_since(at).as_secs_f64() / 3600.0;
+            self.left = (self.left + hours * ALLOWANCE_PER_HOUR).min(ALLOWANCE_MOST);
+        }
+        self.at = Some(now);
+        let n = n as f64;
+        if self.left >= n.min(ALLOWANCE_MOST) {
+            self.left -= n;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Per relay address: its wait and this device's allowance there.
+static PACE: LazyLock<parking_lot::Mutex<HashMap<String, (Cool, Allowance)>>> = LazyLock::new(Default::default);
+
+/// What this device published in the hour so far, by kind, for the log.
+struct Meter {
+    since: Instant,
+    sent: HashMap<&'static str, u32>,
+    held: u32,
+    turned_away: u32,
+}
+
+static METER: LazyLock<parking_lot::Mutex<Meter>> =
+    LazyLock::new(|| parking_lot::Mutex::new(Meter { since: Instant::now(), sent: HashMap::new(), held: 0, turned_away: 0 }));
+
+tokio::task_local! {
+    /// What's being published, for the hourly count (set with [`as_kind`]).
+    static KIND: &'static str;
+}
+
+/// Publish under a kind name, so the hourly count can say what went.
+pub async fn as_kind<F: std::future::Future>(kind: &'static str, f: F) -> F::Output {
+    KIND.scope(kind, f).await
+}
+
+fn kind_now() -> &'static str {
+    KIND.try_with(|k| *k).unwrap_or("other")
+}
+
+/// What a count is about: `n` messages of a kind went, were held back to
+/// stay under the limit, or were turned away by the relay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Counted {
+    Sent,
+    Held,
+    TurnedAway,
+}
+
+/// Count messages for the hourly line in the log ("relay: 23 messages in
+/// the last hour (syncHello 6, entries 12, other 5)").
+pub fn note(kind: &'static str, n: usize, what: Counted) {
+    let mut m = METER.lock();
+    let n = n as u32;
+    match what {
+        Counted::Sent => *m.sent.entry(kind).or_default() += n,
+        Counted::Held => m.held += n,
+        Counted::TurnedAway => m.turned_away += n,
+    }
+    if m.since.elapsed() >= Duration::from_secs(3600) {
+        let line = meter_line(&m.sent, m.held, m.turned_away);
+        tracing::info!("relay: {line}");
+        *m = Meter { since: Instant::now(), sent: HashMap::new(), held: 0, turned_away: 0 };
+    }
+}
+
+/// The hourly line: the total, then each kind, most first.
+pub fn meter_line(sent: &HashMap<&'static str, u32>, held: u32, turned_away: u32) -> String {
+    let total: u32 = sent.values().sum();
+    let mut kinds: Vec<(&&str, &u32)> = sent.iter().collect();
+    kinds.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    let parts: Vec<String> = kinds.iter().map(|(k, n)| format!("{k} {n}")).collect();
+    let mut line = format!("{total} messages in the last hour");
+    if !parts.is_empty() {
+        line.push_str(&format!(" ({})", parts.join(", ")));
+    }
+    if held > 0 {
+        line.push_str(&format!(", {held} held back to stay under the limit"));
+    }
+    if turned_away > 0 {
+        line.push_str(&format!(", {turned_away} turned away"));
+    }
+    line
 }
 
 fn ok_topic(t: &str) -> bool {
@@ -128,6 +295,10 @@ impl Relay for NtfyRelay {
         if !ok_topic(topic) {
             return Err(RelayError::Refused(400));
         }
+        if PACE.lock().get(&self.base).is_some_and(|(c, _)| c.waiting(Instant::now())) {
+            note(kind_now(), 1, Counted::Held);
+            return Err(RelayError::Limited);
+        }
         let resp = self
             .http
             .post(format!("{}/{topic}", self.base))
@@ -139,7 +310,31 @@ impl Relay for NtfyRelay {
             .await
             .map_err(|_| RelayError::Unreachable)?;
         let code = resp.status().as_u16();
-        if resp.status().is_success() { Ok(()) } else { Err(status_err(code)) }
+        let res = if resp.status().is_success() { Ok(()) } else { Err(status_err(code)) };
+        let mut pace = PACE.lock();
+        let (cool, _) = pace.entry(self.base.clone()).or_default();
+        match res {
+            Ok(()) => {
+                cool.went();
+                drop(pace);
+                note(kind_now(), 1, Counted::Sent);
+            }
+            Err(RelayError::Limited) => {
+                cool.turned_away(Instant::now());
+                drop(pace);
+                tracing::info!("relay: it's turning messages away; nothing more goes to it for a while");
+                note(kind_now(), 1, Counted::TurnedAway);
+            }
+            Err(_) => {}
+        }
+        res
+    }
+
+    fn room_for(&self, messages: usize) -> bool {
+        if !self.paced() {
+            return true;
+        }
+        PACE.lock().entry(self.base.clone()).or_default().1.take(messages, Instant::now())
     }
 
     async fn subscribe(&self, topics: &[String], since: Option<&str>) -> Result<mpsc::Receiver<RelayEvent>, RelayError> {

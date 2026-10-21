@@ -55,7 +55,7 @@ use crate::sync::store::{LIDARR, TRANSCRIPTS};
 use super::lyrics::{BridgeLyrics, Opts};
 
 /// How often the Bridge says it's alive when nothing else happened.
-pub const HEARTBEAT: Duration = Duration::from_secs(30 * 60);
+pub const HEARTBEAT: Duration = Duration::from_secs(60 * 60);
 /// How a Bridge's device id starts in the sync store.
 pub const DEVICE_PREFIX: &str = "bridge-";
 /// How often the library cache is brought up to date.

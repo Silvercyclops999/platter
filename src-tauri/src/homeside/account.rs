@@ -56,7 +56,7 @@ const KNOCK_TTL_MS: u64 = 10 * 60_000;
 pub const BACKLOG_S: i64 = 30 * 60;
 /// A code-paired Bridge not heard from in this long gives way to a Bridge
 /// linked by account that answers (it lost its half of the pairing, say).
-pub const QUIET_S: i64 = 75 * 60;
+pub const QUIET_S: i64 = 150 * 60;
 
 /// What plex.tv calls this app.
 pub const PRODUCT: &str = crate::plex::identity::PRODUCT;

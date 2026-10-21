@@ -447,6 +447,85 @@ fn ntfy_stream_lines_are_read() {
     assert_eq!(relay::parse_line("not json"), None);
 }
 
+// ---- pacing the relay ------------------------------------------------------------
+
+#[test]
+fn after_the_relay_says_no_it_waits_longer_each_time_in_a_row() {
+    let t0 = std::time::Instant::now();
+    let mut c = relay::Cool::default();
+    assert!(!c.waiting(t0));
+    c.turned_away(t0);
+    assert!(c.waiting(t0 + relay::COOL_FIRST / 2));
+    assert!(!c.waiting(t0 + relay::COOL_FIRST));
+    // Again straight after: twice as long.
+    let t1 = t0 + relay::COOL_FIRST;
+    c.turned_away(t1);
+    assert!(c.waiting(t1 + relay::COOL_FIRST * 3 / 2));
+    assert!(!c.waiting(t1 + relay::COOL_FIRST * 2));
+    // Never longer than the most.
+    for _ in 0..10 {
+        c.turned_away(t1);
+    }
+    assert!(!c.waiting(t1 + relay::COOL_MAX));
+    // A message that goes resets it.
+    c.went();
+    c.turned_away(t1);
+    assert!(!c.waiting(t1 + relay::COOL_FIRST));
+}
+
+#[test]
+fn background_work_has_a_small_allowance_that_comes_back_slowly() {
+    let t0 = std::time::Instant::now();
+    let mut a = relay::Allowance::default();
+    let most = relay::ALLOWANCE_MOST as usize;
+    assert!(a.take(most - 2, t0));
+    assert!(a.take(2, t0));
+    assert!(!a.take(1, t0), "spent");
+    // A quarter of an hour gives one back (four an hour).
+    let later = t0 + std::time::Duration::from_secs(15 * 60);
+    assert!(a.take(1, later));
+    assert!(!a.take(1, later));
+    // Never more than the most, however long it's been.
+    let much_later = later + std::time::Duration::from_secs(48 * 3600);
+    assert!(a.take(most, much_later));
+    assert!(!a.take(1, much_later));
+    // A message bigger than the whole allowance goes once it's full, and is owed.
+    let full = much_later + std::time::Duration::from_secs(48 * 3600);
+    assert!(a.take(most + 10, full));
+    assert!(!a.take(1, full + std::time::Duration::from_secs(60 * 60)));
+}
+
+#[test]
+fn the_hourly_count_says_what_went() {
+    let mut sent = std::collections::HashMap::new();
+    assert_eq!(relay::meter_line(&sent, 0, 0), "0 messages in the last hour");
+    sent.insert("syncHello", 6);
+    sent.insert("entries", 12);
+    sent.insert("other", 5);
+    assert_eq!(relay::meter_line(&sent, 4, 1), "23 messages in the last hour (entries 12, syncHello 6, other 5), 4 held back to stay under the limit, 1 turned away");
+}
+
+#[tokio::test]
+async fn a_relay_that_said_no_isnt_asked_again_until_the_wait_is_over() {
+    use crate::social::listen::relay::{RelayError, RelayFactory};
+    let fake = FakeNtfy::start().await;
+    let relay = Ntfy::new().unwrap().relay(&fake.url);
+    let posts = || fake.requests().iter().filter(|r| r.starts_with("POST")).count();
+    fake.set_limited(true);
+    assert_eq!(relay.publish("t1", "a").await, Err(RelayError::Limited));
+    assert_eq!(posts(), 1);
+    // It's fine again, but this device leaves it alone for a while.
+    fake.set_limited(false);
+    assert_eq!(relay.publish("t1", "b").await, Err(RelayError::Limited));
+    assert_eq!(posts(), 1);
+    tokio::time::sleep(relay::COOL_FIRST + std::time::Duration::from_millis(50)).await;
+    relay.publish("t1", "c").await.unwrap();
+    assert_eq!(posts(), 2);
+    assert_eq!(fake.published().iter().map(|m| m.body.as_str()).collect::<Vec<_>>(), ["c"]);
+    // A server of the user's own is never held to ntfy.sh's allowance.
+    assert!(relay.room_for(10_000));
+}
+
 // ---- invites ------------------------------------------------------------------
 
 #[test]

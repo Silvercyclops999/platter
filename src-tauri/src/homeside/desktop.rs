@@ -33,8 +33,8 @@ use crate::sync::SyncStore;
 use crate::sync::store::{LIDARR, TRANSCRIPTS};
 
 /// A Bridge heard from within this long counts as answering (it says
-/// it's alive every half hour).
-pub const ONLINE_S: i64 = 75 * 60;
+/// it's alive every hour, so one missed heartbeat is fine).
+pub const ONLINE_S: i64 = 150 * 60;
 const SETTLE: Duration = Duration::from_secs(3);
 /// How long "Add the Bridge" waits for the Bridge's answer.
 pub const JOIN_WAIT: Duration = Duration::from_secs(60);
@@ -193,6 +193,8 @@ impl Desktop {
         // Lidarr's last route: through a Bridge that's answering.
         let weak = Arc::downgrade(&me);
         me.d.lidarr.set_bridge_route(Some(Arc::new(move || weak.upgrade().and_then(|d| d.route()))));
+        let weak = Arc::downgrade(&me);
+        me.d.lidarr.set_bridge_linked(Arc::new(move || weak.upgrade().is_some_and(|d| !d.wire.links.all().is_empty())));
         me
     }
 
@@ -777,8 +779,11 @@ impl Desktop {
                             {
                                 self.send_config_to(&link, true).await;
                             }
-                            // Back in touch: the Bridge running the waves says how they went.
-                            self.send_waves_plan(true).await;
+                            // Back in touch after a while: the Bridge running the waves
+                            // says how they went. A relay that just reconnected sends
+                            // the plan only when it changed.
+                            let quiet = self.seen(&id).last_seen.is_none_or(|t| self.now_s() - t >= ONLINE_S);
+                            self.send_waves_plan(quiet).await;
                         }
                     }
                     Incoming::Msg(id, msg) => {
