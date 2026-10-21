@@ -240,6 +240,31 @@ impl TranscribeEvents for FakeEvents {
     }
 }
 
+/// "Separates" by handing back a voice of a length the test can spot.
+#[derive(Default)]
+struct FakeSeparator {
+    runs: AtomicUsize,
+    /// Stereo samples given on the last run.
+    last_len: AtomicUsize,
+    fail: AtomicBool,
+}
+
+/// The fake voice's length, so the recognizer's input shows it was heard.
+const VOICE_LEN: usize = 12_345;
+
+impl voice::Separator for FakeSeparator {
+    fn vocals(&self, weights: &Path, song: &[f32], _stop: Stop, progress: Progress) -> Result<Vec<f32>, voice::VoiceError> {
+        assert!(weights.is_file(), "the voice model is on disk");
+        self.runs.fetch_add(1, Ordering::SeqCst);
+        self.last_len.store(song.len(), Ordering::SeqCst);
+        progress(Step::Percent(50));
+        if self.fail.load(Ordering::SeqCst) {
+            return Err(voice::VoiceError::Crashed);
+        }
+        Ok(vec![0.1; VOICE_LEN])
+    }
+}
+
 // ---------------------------------------------------------------- fixture
 
 const MODEL_BYTES: usize = 5_000;
@@ -273,6 +298,8 @@ struct Fx {
     load: Arc<FakeLoad>,
     free: Arc<Mutex<Option<u64>>>,
     gpu: Arc<gpu::Gpu>,
+    sep: Arc<FakeSeparator>,
+    voice_models: ModelStore<voice::Voice>,
     dir: tempfile::TempDir,
 }
 
@@ -313,6 +340,26 @@ fn fx_build(fetch: Arc<FakeFetch>, over: Option<Arc<dyn Recognizer>>, gpu: Arc<g
 
 /// With these pacing times (upkeep waits an hour in the others).
 fn fx_timed(fetch: Arc<FakeFetch>, over: Option<Arc<dyn Recognizer>>, gpu: Arc<gpu::Gpu>, timing: pace::Timing) -> Fx {
+    fx_full(fetch, over, gpu, timing, false)
+}
+
+/// A graphics card, and the voice separated first.
+fn fx_voice() -> Fx {
+    fx_full(FakeFetch::new(model_body()), None, gpu_with(vec![card("RTX 5090", gpu::DeviceKind::Discrete)]), pace::fake::timing(), true)
+}
+
+fn voice_specs() -> Vec<ModelSpec<voice::Voice>> {
+    let body = model_body();
+    vec![ModelSpec {
+        kind: voice::Voice::Demucs,
+        file: "voice.safetensors".into(),
+        url: "https://models.invalid/voice.safetensors".into(),
+        size: body.len() as u64,
+        sha256: sha256_hex(&body),
+    }]
+}
+
+fn fx_full(fetch: Arc<FakeFetch>, over: Option<Arc<dyn Recognizer>>, gpu: Arc<gpu::Gpu>, timing: pace::Timing, voiced: bool) -> Fx {
     let dir = tempfile::tempdir().unwrap();
     let db = DbHandle::open(dir.path().join("t.db")).unwrap();
     db.write(|c| {
@@ -349,6 +396,8 @@ fn fx_timed(fetch: Arc<FakeFetch>, over: Option<Arc<dyn Recognizer>>, gpu: Arc<g
     let cond = Arc::new(FakeConditions::default());
     let events = Arc::new(FakeEvents::default());
     let load = FakeLoad::new(5.0);
+    let sep = Arc::new(FakeSeparator::default());
+    let voice_models = ModelStore::new(dir.path().join("models"), voice_specs(), Arc::new(|_: &Path| None));
     let t = Transcriber::new(Deps {
         db: db.clone(),
         models: models.clone(),
@@ -362,10 +411,11 @@ fn fx_timed(fetch: Arc<FakeFetch>, over: Option<Arc<dyn Recognizer>>, gpu: Arc<g
         pacer: pace::Pacer::with_cores(load.clone(), timing, 16),
         gpu: gpu.clone(),
         speeds: Arc::new(speed::Speeds::load(Some(dir.path().join("speeds.json")))),
+        voice: voiced.then(|| VoiceDeps { separator: sep.clone(), models: voice_models.clone() }),
     });
     t.set_options(true, Some(ModelKind::Small));
     t.spawn();
-    Fx { t, db, models, fetch, rec, songs, other, cond, events, load, free, gpu, dir }
+    Fx { t, db, models, fetch, rec, songs, other, cond, events, load, free, gpu, sep, voice_models, dir }
 }
 
 fn fx() -> Fx {
@@ -1266,6 +1316,71 @@ async fn while_a_new_model_downloads_the_installed_one_carries_on_and_its_songs_
     assert_eq!(f.db.read(|c| user::get(c, "801")).unwrap().unwrap().auto.as_deref(), Some("medium"));
 }
 
+// ---------------------------------------------------------------- the voice
+
+async fn transcribe(f: &Fx, id: &str) {
+    let before = f.events.done.lock().len();
+    f.t.transcribe_track(id).unwrap();
+    until(&f.t, "done", |s| idle(s) && f.events.done.lock().len() > before).await;
+}
+
+#[tokio::test]
+async fn on_a_graphics_card_the_voice_model_downloads_quietly_and_then_the_voice_is_heard() {
+    let f = fx_voice();
+    install(&f).await;
+    // The first song is heard as it is while the voice model downloads.
+    transcribe(&f, "801").await;
+    assert_eq!(f.sep.runs.load(Ordering::SeqCst), 0);
+    assert!(f.rec.last_len.load(Ordering::SeqCst) > 30_000, "the whole mix");
+    until_true("the voice model", || f.voice_models.installed(voice::Voice::Demucs).is_some()).await;
+    assert!(f.t.status().error.is_none(), "nothing to say about it");
+    // Then the voice alone, from the song in stereo at the voice model's rate.
+    transcribe(&f, "802").await;
+    assert_eq!(f.sep.runs.load(Ordering::SeqCst), 1);
+    assert_eq!(f.sep.last_len.load(Ordering::SeqCst), 2 * 88_200);
+    assert_eq!(f.rec.last_len.load(Ordering::SeqCst), VOICE_LEN);
+    assert_eq!(*f.events.done.lock(), vec![("801".to_string(), true), ("802".to_string(), true)]);
+}
+
+#[tokio::test]
+async fn a_separation_that_goes_wrong_hears_the_mix_and_stops_trying_this_session() {
+    let f = fx_voice();
+    install(&f).await;
+    f.voice_models.download(voice::Voice::Demucs, &*f.fetch, &AtomicBool::new(false), &|_, _| {}).await.unwrap();
+    f.sep.fail.store(true, Ordering::SeqCst);
+    transcribe(&f, "801").await;
+    assert_eq!(*f.events.done.lock(), vec![("801".to_string(), true)], "the song is still written down");
+    assert!(f.rec.last_len.load(Ordering::SeqCst) > 30_000, "from the whole mix");
+    assert!(f.gpu.active().is_some(), "the speech model keeps the card");
+    transcribe(&f, "802").await;
+    assert_eq!(f.sep.runs.load(Ordering::SeqCst), 1, "not tried again");
+}
+
+#[tokio::test]
+async fn without_a_graphics_card_the_voice_isnt_separated() {
+    let f = fx_voice();
+    install(&f).await;
+    f.voice_models.download(voice::Voice::Demucs, &*f.fetch, &AtomicBool::new(false), &|_, _| {}).await.unwrap();
+    f.t.set_gpu(gpu::GpuMode::Off);
+    transcribe(&f, "801").await;
+    assert_eq!(f.sep.runs.load(Ordering::SeqCst), 0);
+    assert!(f.rec.last_len.load(Ordering::SeqCst) > 30_000);
+}
+
+#[tokio::test]
+async fn a_failed_voice_model_download_is_quiet_and_waits_before_trying_again() {
+    let f = fx_voice();
+    install(&f).await;
+    f.fetch.refuse.store(true, Ordering::Relaxed);
+    transcribe(&f, "801").await;
+    until_true("the download gave up", || !f.t.inner.voice.fetching.load(Ordering::SeqCst)).await;
+    assert!(f.t.status().error.is_none());
+    f.fetch.refuse.store(false, Ordering::Relaxed);
+    transcribe(&f, "802").await;
+    assert!(f.voice_models.installed(voice::Voice::Demucs).is_none(), "not tried again so soon");
+    assert_eq!(*f.events.done.lock(), vec![("801".to_string(), true), ("802".to_string(), true)]);
+}
+
 // ---------------------------------------------------------------- audio
 
 #[test]
@@ -1276,6 +1391,17 @@ fn decodes_to_16k_mono() {
     let peak = pcm.iter().fold(0f32, |m, s| m.max(s.abs()));
     assert!(peak > 0.2 && peak < 0.3, "{peak}");
     assert!(matches!(audio::to_16k_mono(b"nope".to_vec(), None, &never), Err(AudioError::Unreadable(_))));
+}
+
+#[test]
+fn decodes_the_stereo_for_the_voice_too_unless_the_song_is_too_long() {
+    let never = AtomicBool::new(false);
+    let d = audio::decode(wav(), Some("wav"), &never, Some((44_100, 10))).unwrap();
+    assert_eq!(d.speech.len(), 32_000);
+    assert_eq!(d.stereo.as_ref().map(Vec::len), Some(2 * 88_200));
+    let d = audio::decode(wav(), Some("wav"), &never, Some((44_100, 1))).unwrap();
+    assert_eq!(d.speech.len(), 32_000, "the speech model still hears it all");
+    assert!(d.stereo.is_none());
 }
 
 mod read_whole {
@@ -1452,7 +1578,7 @@ impl helper::Launch for ScriptLaunch {
         let (rep_r, rep_w) = std::io::pipe()?;
         let rec: Arc<dyn Recognizer> = self.script.clone();
         std::thread::spawn(move || {
-            let _ = helper::worker::serve(Box::new(req_r), Box::new(rep_w), rec, &|_| {});
+            let _ = helper::worker::serve(Box::new(req_r), Box::new(rep_w), rec, None, &|_| {});
         });
         Ok(helper::Worker {
             input: Box::new(req_w),
@@ -1834,5 +1960,60 @@ fn real_model_timing() {
         println!("{:?}: line start errors {e:?} ms", spec.kind);
         assert!(e.iter().all(|x| x.abs() <= 300), "{:?}: {e:?}", spec.kind);
         rec.unload();
+    }
+}
+
+/// Each song heard as the whole mix and as its separated voice, side by
+/// side, for the before and after check. `PLATTER_WHISPER_MODEL`: the
+/// speech model; `PLATTER_VOICE_MODEL`: htdemucs.safetensors;
+/// `PLATTER_TEST_AUDIO`: one song, or a folder of them. Graphics card with
+/// `PLATTER_SPEECH_GPU=1`. `cargo test --release --lib --features transcribe
+/// real_voice_before_after -- --ignored --nocapture`
+#[cfg(feature = "transcribe")]
+#[test]
+#[ignore]
+fn real_voice_before_after() {
+    let (Ok(model), Ok(weights), Ok(audio_at)) =
+        (std::env::var("PLATTER_WHISPER_MODEL"), std::env::var("PLATTER_VOICE_MODEL"), std::env::var("PLATTER_TEST_AUDIO"))
+    else {
+        println!("skipped: set PLATTER_WHISPER_MODEL, PLATTER_VOICE_MODEL and PLATTER_TEST_AUDIO");
+        return;
+    };
+    gpu::allow_from_env();
+    let kind = if model.contains("turbo") { ModelKind::Turbo } else if model.contains("medium") { ModelKind::Medium } else { ModelKind::Small };
+    let at = Path::new(&audio_at);
+    let mut songs: Vec<std::path::PathBuf> =
+        if at.is_dir() { std::fs::read_dir(at).unwrap().filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.is_file()).collect() } else { vec![at.into()] };
+    songs.sort();
+    let rec = engine::in_process();
+    let sep = voice::in_process().expect("this build separates");
+    let never = AtomicBool::new(false);
+    for song in songs {
+        let title = song.file_stem().map(|s| s.to_string_lossy().into_owned());
+        let hints = Hints::for_song(kind, title.as_deref(), None);
+        let Ok(d) = audio::decode(std::fs::read(&song).unwrap(), None, &never, Some((voice::RATE, voice::MAX_SECONDS))) else {
+            println!("== {}: not decodable, skipped", song.display());
+            continue;
+        };
+        println!("== {} ({:.0} s)", song.display(), d.speech.len() as f32 / RATE as f32);
+        let started = std::time::Instant::now();
+        let vocals = d.stereo.as_deref().map(|s| sep.vocals(Path::new(&weights), s, Stop::new(), Arc::new(|_| {})));
+        let separated_in = started.elapsed();
+        let mut heard = vec![("mix", d.speech)];
+        match vocals {
+            Some(Ok(v)) => heard.push(("voice", v)),
+            Some(Err(e)) => println!("   separation failed: {e:?}"),
+            None => println!("   too long to separate"),
+        }
+        for (what, pcm) in heard {
+            let started = std::time::Instant::now();
+            let segs = rec.transcribe(Path::new(&model), kind, &pcm, 4, &hints, Stop::new(), Arc::new(|_| {})).unwrap();
+            let kept = lines::to_lines(&lines::keep_sure(segs, &hints.prompt));
+            let extra = if what == "voice" { format!(" (+{:.1} s separating)", separated_in.as_secs_f32()) } else { String::new() };
+            println!("-- {what}: {} lines in {:.1} s{extra}", kept.len(), started.elapsed().as_secs_f32());
+            for l in &kept {
+                println!("{:>7} ms  {}", l.start_ms, l.text());
+            }
+        }
     }
 }

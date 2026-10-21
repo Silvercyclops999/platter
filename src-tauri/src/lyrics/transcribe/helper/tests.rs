@@ -100,6 +100,20 @@ struct Launches {
     garbage: AtomicBool,
 }
 
+/// Each stereo frame's average for the "vocals"; 13 frames crash it.
+impl Separator for Fake {
+    fn vocals(&self, _: &Path, song: &[f32], stop: Stop, progress: Progress) -> Result<Vec<f32>, VoiceError> {
+        if song.len() == 26 {
+            panic!("the graphics card fell over");
+        }
+        if stop.is_set() {
+            return Err(VoiceError::Cancelled);
+        }
+        progress(Step::Percent(50));
+        Ok(song.chunks(2).map(|f| (f[0] + f[1]) / 2.0).collect())
+    }
+}
+
 struct ThreadLaunch {
     rec: Arc<Fake>,
     n: Arc<Launches>,
@@ -132,9 +146,10 @@ impl Launch for ThreadLaunch {
             drop(req_r);
         } else {
             let rec = self.rec.clone();
+            let sep: Arc<dyn Separator> = self.rec.clone();
             let lowest = self.n.lowest.clone();
             std::thread::spawn(move || {
-                let _ = worker::serve(Box::new(req_r), Box::new(rep_w), rec, &|l| lowest.lock().push(l));
+                let _ = worker::serve(Box::new(req_r), Box::new(rep_w), rec, Some(sep), &|l| lowest.lock().push(l));
             });
         }
         Ok(Worker { input: Box::new(req_w), output: Box::new(rep_r), process: Box::new(ThreadProcess(self.n.ended.clone(), self.rec.killed.clone())) })
@@ -345,7 +360,7 @@ fn something_that_isnt_the_helper_counts_as_a_crash() {
 fn the_helper_ends_after_a_while_without_work() {
     let f = fx(Duration::from_millis(60));
     run(&f.helper, &[1.0], never()).0.unwrap();
-    f.helper.unload();
+    Recognizer::unload(&*f.helper);
     std::thread::sleep(Duration::from_millis(20));
     assert_eq!(f.rec.unloads.load(Ordering::SeqCst), 1, "the model is freed at once");
     assert!(f.helper.running(), "the helper itself stays a moment");
@@ -367,7 +382,7 @@ fn the_helper_ends_after_a_while_without_work() {
 #[test]
 fn unload_without_a_helper_starts_nothing() {
     let f = fx(IDLE_EXIT);
-    f.helper.unload();
+    Recognizer::unload(&*f.helper);
     assert_eq!(f.n.started.load(Ordering::SeqCst), 0);
 }
 
@@ -417,4 +432,37 @@ fn without_a_card_helpers_never_get_the_graphics_card() {
     let f = fx(Duration::from_secs(60));
     assert!(run(&f.helper, &[1.0], never()).0.is_ok());
     assert_eq!(*f.n.gpu.lock(), vec![false]);
+}
+
+#[test]
+fn the_voice_is_separated_in_the_helper_and_comes_back() {
+    let f = fx(Duration::from_secs(60));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let s = seen.clone();
+    let v = f.helper.vocals(Path::new("v.safetensors"), &[1.0, 3.0, 0.5, 0.5], never(), Arc::new(move |p| s.lock().push(p))).unwrap();
+    assert_eq!(v, vec![2.0, 0.5]);
+    assert_eq!(*seen.lock(), vec![Step::Percent(50)]);
+    // The same helper transcribes next.
+    assert!(run(&f.helper, &[1.0], never()).0.is_ok());
+    assert_eq!(f.n.started.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn a_crash_while_separating_keeps_transcription_on_the_card() {
+    let rec = Arc::new(Fake::default());
+    let n = Arc::new(Launches::default());
+    let gpu = gpu_with_card();
+    let helper = Helper::new(Arc::new(ThreadLaunch { rec, n: n.clone() }), Arc::new(|| false), Duration::from_secs(60)).with_gpu(gpu.clone());
+    assert_eq!(helper.vocals(Path::new("v"), &[0.0; 26], never(), Arc::new(|_| {})), Err(VoiceError::Crashed));
+    assert!(gpu.active().is_some(), "the speech model keeps the card");
+    assert!(run(&helper, &[1.0], never()).0.is_ok());
+    assert_eq!(*n.gpu.lock(), vec![true, true]);
+}
+
+#[test]
+fn a_cancelled_separation_says_so() {
+    let f = fx(Duration::from_secs(60));
+    let stop = Stop::new();
+    stop.give_way();
+    assert_eq!(f.helper.vocals(Path::new("v"), &[1.0, 1.0], stop, Arc::new(|_| {})), Err(VoiceError::Cancelled));
 }

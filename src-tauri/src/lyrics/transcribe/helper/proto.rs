@@ -15,7 +15,7 @@ use super::super::model::ModelKind;
 
 /// Bumped when the messages change; the app and its helper are always the
 /// same binary, so a mismatch means something else answered.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 
 const MARK: u8 = 0xA7;
 const JSON: u8 = b'J';
@@ -39,6 +39,10 @@ pub enum Request {
         samples: usize,
         lowest: bool,
     },
+    /// Followed by a samples frame of `frames` stereo frames (interleaved,
+    /// 44.1 kHz): separate the singing with the voice model at `weights`.
+    #[serde(rename_all = "camelCase")]
+    Separate { weights: PathBuf, frames: usize, lowest: bool },
     /// Stop the run in progress (ignored when nothing runs).
     Cancel,
     /// Free the loaded model.
@@ -54,6 +58,9 @@ pub enum Reply {
     /// The run moved on: loading the model, or the percent listened to.
     Progress { step: Step },
     Done { segments: Vec<Segment> },
+    /// The singing, in a samples frame of `samples` floats (16 kHz mono)
+    /// right after.
+    Vocals { samples: usize },
     Failed { message: String },
     Cancelled,
 }
@@ -141,6 +148,21 @@ mod tests {
         assert_eq!(read_msg::<_, Reply>(&mut r).unwrap(), Some(Reply::Progress { step: Step::Loading }));
         assert_eq!(read_msg::<_, Reply>(&mut r).unwrap(), Some(Reply::Progress { step: Step::Percent(40) }));
         assert_eq!(read_msg::<_, Reply>(&mut r).unwrap(), None, "a clean end");
+    }
+
+    #[test]
+    fn a_separation_and_its_vocals_round_trip() {
+        let mut buf = Vec::new();
+        let req = Request::Separate { weights: PathBuf::from("models/htdemucs.safetensors"), frames: 2, lowest: false };
+        write_msg(&mut buf, &req).unwrap();
+        write_samples(&mut buf, &[0.1, 0.2, 0.3, 0.4]).unwrap();
+        write_msg(&mut buf, &Reply::Vocals { samples: 1 }).unwrap();
+        write_samples(&mut buf, &[0.5]).unwrap();
+        let mut r = &buf[..];
+        assert_eq!(read_msg::<_, Request>(&mut r).unwrap(), Some(req));
+        assert_eq!(read_samples(&mut r, 4).unwrap(), vec![0.1, 0.2, 0.3, 0.4]);
+        assert_eq!(read_msg::<_, Reply>(&mut r).unwrap(), Some(Reply::Vocals { samples: 1 }));
+        assert_eq!(read_samples(&mut r, 1).unwrap(), vec![0.5]);
     }
 
     #[test]

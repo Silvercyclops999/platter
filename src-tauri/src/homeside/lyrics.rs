@@ -340,6 +340,7 @@ impl BridgeLyrics {
             pacer: d.pacer,
             gpu: gpu::Gpu::none(),
             speeds: Arc::new(speed::Speeds::load(None)),
+            voice: None,
         });
         t.set_shared(Arc::new(crate::sync::transcripts::AppShared { store: d.store, db: d.db.clone(), on: Arc::new(AtomicBool::new(true)) }));
         t.set_options(kept.on, Some(MODEL));

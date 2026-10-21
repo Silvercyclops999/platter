@@ -43,6 +43,7 @@ use super::engine::{self, Hints, Progress, RecognizeError, Recognizer, Stop};
 use super::gpu::Gpu;
 use super::lines::Segment;
 use super::model::ModelKind;
+use super::voice::{Separator, VoiceError};
 use proto::{Reply, Request};
 
 /// The first argument that makes Platter the helper instead of the app.
@@ -167,11 +168,11 @@ impl Helper {
         self.slot.lock().live.is_some()
     }
 
-    fn crashed(&self, slot: &mut Slot, what: &str) -> RecognizeError {
+    fn crashed(&self, slot: &mut Slot, what: &str, card: bool) -> RecognizeError {
         let n = self.crashes.fetch_add(1, Ordering::SeqCst) + 1;
         tracing::warn!(crashes = n, "speech helper stopped unexpectedly: {what}");
         if let Some(live) = slot.live.take() {
-            if live.gpu {
+            if live.gpu && card {
                 self.gpu.fail();
             }
             live.process.lock().kill();
@@ -233,7 +234,7 @@ impl Helper {
             Ok(Some(Reply::Hello { version })) if version == proto::VERSION => {}
             other => {
                 live.process.lock().kill();
-                return Err(self.crashed(slot, &format!("no hello: {other:?}")));
+                return Err(self.crashed(slot, &format!("no hello: {other:?}"), true));
             }
         }
         slot.live = Some(live);
@@ -263,11 +264,39 @@ impl Helper {
         progress: Progress,
         priority: bool,
     ) -> Result<Vec<Segment>, RecognizeError> {
-        if cancel.is_set() {
-            return Err(RecognizeError::Cancelled);
-        }
         if self.only.is_some_and(|k| k != kind) {
             return Err(RecognizeError::Failed(format!("this helper runs only the {:?} model", self.only)));
+        }
+        let req = |lowest| Request::Transcribe {
+            model: model.to_path_buf(),
+            kind,
+            threads,
+            language: hints.language.clone(),
+            prompt: hints.prompt.clone(),
+            samples: pcm.len(),
+            lowest,
+        };
+        match self.exchange(req, pcm, &cancel, &progress, priority, true)? {
+            Answer::Reply(Reply::Done { segments }) => Ok(segments),
+            Answer::Reply(Reply::Failed { message }) => Err(RecognizeError::Failed(message)),
+            _ => Err(RecognizeError::Cancelled),
+        }
+    }
+
+    /// One request and its samples to the helper, and the reply that ends
+    /// it (progress goes to `progress` meanwhile). `card`: a crash here
+    /// moves transcription off the graphics card.
+    fn exchange(
+        &self,
+        req: impl FnOnce(bool) -> Request,
+        pcm: &[f32],
+        cancel: &Stop,
+        progress: &Progress,
+        priority: bool,
+        card: bool,
+    ) -> Result<Answer, RecognizeError> {
+        if cancel.is_set() {
+            return Err(RecognizeError::Cancelled);
         }
         // One run at a time. A priority run says it's waiting meanwhile.
         if priority {
@@ -284,30 +313,21 @@ impl Helper {
         let res = {
             let live = slot.live.as_mut().expect("just started");
             live.process.lock().set_lowest(lowest);
-            let req = Request::Transcribe {
-                model: model.to_path_buf(),
-                kind,
-                threads,
-                language: hints.language.clone(),
-                prompt: hints.prompt.clone(),
-                samples: pcm.len(),
-                lowest,
-            };
+            let req = req(lowest);
             let sent = {
                 let mut input = live.input.lock();
                 proto::write_msg(&mut *input, &req).and_then(|_| proto::write_samples(&mut *input, pcm))
             };
             match sent {
                 Err(e) => Err(format!("couldn't send the song: {e}")),
-                Ok(()) => Ok(run(live, &cancel, &progress)),
+                Ok(()) => Ok(run(live, cancel, progress)),
             }
         };
         slot.last_used = Some(Instant::now());
         match res {
-            Err(what) => Err(self.crashed(slot, &what)),
-            Ok(Ended::Reply(Reply::Done { segments })) => Ok(segments),
-            Ok(Ended::Reply(Reply::Failed { message })) => Err(RecognizeError::Failed(message)),
-            Ok(Ended::Reply(_)) => Err(RecognizeError::Cancelled),
+            Err(what) => Err(self.crashed(slot, &what, card)),
+            Ok(Ended::Reply(r)) => Ok(Answer::Reply(r)),
+            Ok(Ended::Vocals(v)) => Ok(Answer::Vocals(v)),
             Ok(Ended::Killed) => {
                 // Cancelled and it didn't stop in time: not a crash.
                 slot.live = None;
@@ -318,8 +338,29 @@ impl Helper {
                     slot.live = None;
                     return Err(RecognizeError::Cancelled);
                 }
-                Err(self.crashed(slot, &what))
+                Err(self.crashed(slot, &what, card))
             }
+        }
+    }
+}
+
+/// What a run ended with.
+enum Answer {
+    Reply(Reply),
+    Vocals(Vec<f32>),
+}
+
+impl Separator for Helper {
+    fn vocals(&self, weights: &Path, song: &[f32], stop: Stop, progress: Progress) -> Result<Vec<f32>, VoiceError> {
+        let req = |lowest| Request::Separate { weights: weights.to_path_buf(), frames: song.len() / 2, lowest };
+        // A crash while separating isn't the speech model's: transcription
+        // stays on the card (the queue stops separating instead).
+        match self.exchange(req, &song[..song.len() / 2 * 2], &stop, &progress, false, false) {
+            Ok(Answer::Vocals(v)) => Ok(v),
+            Ok(Answer::Reply(Reply::Failed { message })) => Err(VoiceError::Failed(message)),
+            Ok(Answer::Reply(_)) | Err(RecognizeError::Cancelled) => Err(VoiceError::Cancelled),
+            Err(RecognizeError::Crashed) => Err(VoiceError::Crashed),
+            Err(RecognizeError::Failed(m)) => Err(VoiceError::Failed(m)),
         }
     }
 }
@@ -388,6 +429,8 @@ impl Recognizer for Priority {
 enum Ended {
     /// Done, failed or cancelled.
     Reply(Reply),
+    /// The separated singing.
+    Vocals(Vec<f32>),
     /// Cancelled, and ended by force when it didn't stop.
     Killed,
     /// The helper's output ended or made no sense.
@@ -423,6 +466,10 @@ fn run(live: &mut Live, cancel: &Stop, progress: &Progress) -> Ended {
             match proto::read_msg::<_, Reply>(output) {
                 Ok(Some(Reply::Progress { step })) => progress(step),
                 Ok(Some(r @ (Reply::Done { .. } | Reply::Failed { .. } | Reply::Cancelled))) => break Ended::Reply(r),
+                Ok(Some(Reply::Vocals { samples })) => match proto::read_samples(output, samples) {
+                    Ok(v) => break Ended::Vocals(v),
+                    Err(e) => break Ended::Lost(format!("bad vocals: {e}")),
+                },
                 Ok(Some(Reply::Hello { .. })) => break Ended::Lost("a second hello".into()),
                 Ok(None) => break Ended::Lost("its output ended".into()),
                 Err(e) => break Ended::Lost(e.to_string()),

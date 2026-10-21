@@ -52,10 +52,11 @@ impl ModelKind {
     }
 }
 
-/// One downloadable model file.
+/// One downloadable model file. `K` names it: a speech model, or the
+/// voice model (see [`super::voice`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModelSpec {
-    pub kind: ModelKind,
+pub struct ModelSpec<K = ModelKind> {
+    pub kind: K,
     pub file: String,
     pub url: String,
     pub size: u64,
@@ -170,32 +171,32 @@ fn disk_full(e: &std::io::Error) -> bool {
 
 /// The model folder.
 #[derive(Clone)]
-pub struct ModelStore {
+pub struct ModelStore<K = ModelKind> {
     dir: PathBuf,
-    specs: Arc<Vec<ModelSpec>>,
+    specs: Arc<Vec<ModelSpec<K>>>,
     free: FreeSpace,
 }
 
-impl ModelStore {
-    pub fn new(dir: PathBuf, specs: Vec<ModelSpec>, free: FreeSpace) -> Self {
+impl<K: Copy + PartialEq + Send + Sync> ModelStore<K> {
+    pub fn new(dir: PathBuf, specs: Vec<ModelSpec<K>>, free: FreeSpace) -> Self {
         Self { dir, specs: Arc::new(specs), free }
     }
 
-    pub fn spec(&self, kind: ModelKind) -> Option<&ModelSpec> {
+    pub fn spec(&self, kind: K) -> Option<&ModelSpec<K>> {
         self.specs.iter().find(|s| s.kind == kind)
     }
 
-    pub fn path(&self, kind: ModelKind) -> Option<PathBuf> {
+    pub fn path(&self, kind: K) -> Option<PathBuf> {
         self.spec(kind).map(|s| self.dir.join(&s.file))
     }
 
-    fn part_path(&self, spec: &ModelSpec) -> PathBuf {
+    fn part_path(&self, spec: &ModelSpec<K>) -> PathBuf {
         self.dir.join(format!("{}.part", spec.file))
     }
 
     /// Where the note of a checked file is kept: its checksum, size and
     /// modified time when it was checked.
-    fn marker_path(&self, spec: &ModelSpec) -> PathBuf {
+    fn marker_path(&self, spec: &ModelSpec<K>) -> PathBuf {
         self.dir.join(format!("{}.verified", spec.file))
     }
 
@@ -203,7 +204,7 @@ impl ModelStore {
     /// was checked (same size and modified time), or, for a file downloaded
     /// before those notes were kept, the right size until [`Self::verify`]
     /// checks it once.
-    pub fn installed(&self, kind: ModelKind) -> Option<PathBuf> {
+    pub fn installed(&self, kind: K) -> Option<PathBuf> {
         let spec = self.spec(kind)?;
         let p = self.dir.join(&spec.file);
         std::fs::metadata(&p).ok().filter(|m| m.is_file() && m.len() == spec.size)?;
@@ -215,13 +216,13 @@ impl ModelStore {
 
     /// The file is there but was never checked here (downloaded before
     /// checks were noted).
-    pub fn needs_verify(&self, kind: ModelKind) -> bool {
+    pub fn needs_verify(&self, kind: K) -> bool {
         self.spec(kind).is_some_and(|s| self.installed(kind).is_some() && !self.marker_path(s).exists())
     }
 
     /// Check the file's checksum now (slow: reads the whole file; call off
     /// the async threads). A good file is noted; a bad one is deleted.
-    pub fn verify(&self, kind: ModelKind) -> bool {
+    pub fn verify(&self, kind: K) -> bool {
         let Some(spec) = self.spec(kind) else { return false };
         let p = self.dir.join(&spec.file);
         let ok = (|| -> std::io::Result<bool> {
@@ -243,7 +244,7 @@ impl ModelStore {
     }
 
     /// Delete the model (and any half-finished download of it).
-    pub fn delete(&self, kind: ModelKind) -> std::io::Result<()> {
+    pub fn delete(&self, kind: K) -> std::io::Result<()> {
         let Some(spec) = self.spec(kind) else { return Ok(()) };
         for p in [self.dir.join(&spec.file), self.part_path(spec), self.marker_path(spec)] {
             match std::fs::remove_file(&p) {
@@ -258,7 +259,7 @@ impl ModelStore {
     /// Download and verify a model. `progress(done, total)` follows along.
     pub async fn download(
         &self,
-        kind: ModelKind,
+        kind: K,
         fetch: &dyn ModelFetch,
         cancel: &AtomicBool,
         progress: &(dyn Fn(u64, u64) + Send + Sync),
@@ -292,7 +293,7 @@ impl ModelStore {
 
     async fn fetch_to(
         &self,
-        spec: &ModelSpec,
+        spec: &ModelSpec<K>,
         part: &Path,
         fetch: &dyn ModelFetch,
         cancel: &AtomicBool,

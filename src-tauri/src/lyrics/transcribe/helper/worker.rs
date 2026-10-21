@@ -11,6 +11,7 @@ use std::sync::mpsc;
 use parking_lot::Mutex;
 
 use super::super::engine::{self, RecognizeError, Recognizer, Step, Stop};
+use super::super::voice::{self, Separator, VoiceError};
 use super::proto::{self, Reply, Request};
 
 enum Work {
@@ -28,11 +29,13 @@ fn send(out: &Out, reply: &Reply) -> io::Result<()> {
 /// thread (the speech library's own threads are the run's thread budget,
 /// this one included); requests are read on one more thread, which only
 /// waits on the pipe, so a cancel arrives mid-run.
-/// `lower` is called before each run with whether to go lowest.
+/// `lower` is called before each run with whether to go lowest. `sep`
+/// separates the voice when this build can.
 pub fn serve(
     mut input: Box<dyn Read + Send>,
     output: Box<dyn Write + Send>,
     rec: Arc<dyn Recognizer>,
+    sep: Option<Arc<dyn Separator>>,
     lower: &dyn Fn(bool),
 ) -> io::Result<()> {
     let out: Out = Arc::new(Mutex::new(output));
@@ -58,7 +61,8 @@ pub fn serve(
                         continue;
                     }
                     Request::Unload => Work::Unload,
-                    Request::Transcribe { samples, .. } => {
+                    Request::Transcribe { samples, .. } | Request::Separate { frames: samples, .. } => {
+                        let samples = if matches!(req, Request::Separate { .. }) { samples * 2 } else { samples };
                         let pcm = match proto::read_samples(&mut input, samples) {
                             Ok(p) => p,
                             Err(e) => {
@@ -83,17 +87,6 @@ pub fn serve(
     };
     let mut result = Ok(());
     for work in rx {
-        let (model, kind, threads, hints, lowest, pcm, stop) = match work {
-            Work::Unload => {
-                rec.unload();
-                continue;
-            }
-            Work::Run { req: Request::Transcribe { model, kind, threads, language, prompt, lowest, .. }, pcm, stop } => {
-                (model, kind, threads, engine::Hints { language, prompt }, lowest, pcm, stop)
-            }
-            Work::Run { .. } => continue,
-        };
-        lower(lowest);
         let progress: engine::Progress = {
             let out = out.clone();
             let last = Arc::new(Mutex::new(None::<Step>));
@@ -105,13 +98,40 @@ pub fn serve(
                 }
             })
         };
-        let reply = match rec.transcribe(&model, kind, &pcm, threads, &hints, stop, progress) {
-            Ok(segments) => Reply::Done { segments },
-            Err(RecognizeError::Cancelled) => Reply::Cancelled,
-            Err(RecognizeError::Failed(message)) => Reply::Failed { message },
-            Err(RecognizeError::Crashed) => Reply::Failed { message: "crashed".into() },
+        let sent = match work {
+            Work::Unload => {
+                rec.unload();
+                if let Some(s) = &sep {
+                    s.unload();
+                }
+                continue;
+            }
+            Work::Run { req: Request::Transcribe { model, kind, threads, language, prompt, lowest, .. }, pcm, stop } => {
+                lower(lowest);
+                let reply = match rec.transcribe(&model, kind, &pcm, threads, &engine::Hints { language, prompt }, stop, progress) {
+                    Ok(segments) => Reply::Done { segments },
+                    Err(RecognizeError::Cancelled) => Reply::Cancelled,
+                    Err(RecognizeError::Failed(message)) => Reply::Failed { message },
+                    Err(RecognizeError::Crashed) => Reply::Failed { message: "crashed".into() },
+                };
+                send(&out, &reply)
+            }
+            Work::Run { req: Request::Separate { weights, lowest, .. }, pcm, stop } => {
+                lower(lowest);
+                let res = match &sep {
+                    Some(s) => s.vocals(&weights, &pcm, stop, progress),
+                    None => Err(VoiceError::Failed("this build doesn't separate voices".into())),
+                };
+                match res {
+                    Ok(v) => send(&out, &Reply::Vocals { samples: v.len() }).and_then(|_| proto::write_samples(&mut *out.lock(), &v)),
+                    Err(VoiceError::Cancelled) => send(&out, &Reply::Cancelled),
+                    Err(VoiceError::Failed(message)) => send(&out, &Reply::Failed { message }),
+                    Err(VoiceError::Crashed) => send(&out, &Reply::Failed { message: "crashed".into() }),
+                }
+            }
+            Work::Run { .. } => continue,
         };
-        if let Err(e) = send(&out, &reply) {
+        if let Err(e) = sent {
             result = Err(e);
             break;
         }
@@ -126,7 +146,7 @@ pub fn main() -> i32 {
     // Before the speech library starts: whether it may use the graphics card.
     super::super::gpu::allow_from_env();
     let output = protocol_stdout();
-    match serve(Box::new(io::stdin()), output, engine::in_process(), &crate::platform::cpu::lower_this_process) {
+    match serve(Box::new(io::stdin()), output, engine::in_process(), voice::in_process(), &crate::platform::cpu::lower_this_process) {
         Ok(()) => 0,
         Err(e) => {
             tracing::warn!("speech helper stopped: {e}");

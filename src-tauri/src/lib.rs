@@ -1,3 +1,7 @@
+// The graphics stack nests deeply enough to pass the default limit when
+// the compiler checks it is safe to share across threads.
+#![recursion_limit = "256"]
+
 pub mod analysis;
 pub mod archive;
 pub mod artistinfo;
@@ -1422,6 +1426,10 @@ pub fn run() {
                     pacer: pacer.clone(),
                     gpu,
                     speeds: Arc::new(tr::speed::Speeds::load(Some(data_dir.join("models").join("speeds.json")))),
+                    voice: cfg!(feature = "transcribe").then(|| tr::VoiceDeps {
+                        separator: transcription.clone(),
+                        models: tr::model::ModelStore::new(data_dir.join("models"), tr::voice::catalogue(), tr::model::os_free_space()),
+                    }),
                 });
                 // Song analysis for Automix: at idle, with the same busy check.
                 {

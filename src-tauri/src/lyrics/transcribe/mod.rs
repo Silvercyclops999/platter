@@ -29,6 +29,7 @@ pub mod model;
 pub mod pace;
 pub mod speed;
 pub mod store;
+pub mod voice;
 
 #[cfg(test)]
 mod tests;
@@ -361,7 +362,7 @@ struct State {
     pace: (Duration, u32),
     /// A background song's decoded audio, kept when a song someone asked
     /// for stopped it, so it needn't be read again.
-    held: Option<(String, Arc<Vec<f32>>)>,
+    held: Option<(String, Heard)>,
     /// The user paused the batch.
     user_paused: bool,
     /// Songs done this session with a model other than the chosen one.
@@ -372,6 +373,9 @@ struct State {
     /// user, or failed. Asking for one again clears it.
     follow_skip: std::collections::HashSet<String>,
 }
+
+/// What the speech model hears for a song, and whether it's the voice alone.
+type Heard = (Arc<Vec<f32>>, bool);
 
 /// The parts the service works with.
 pub struct Deps {
@@ -389,7 +393,21 @@ pub struct Deps {
     pub gpu: Arc<gpu::Gpu>,
     /// How fast each model has been here.
     pub speeds: Arc<speed::Speeds>,
+    /// The voice separated from the music first, on a graphics card.
+    pub voice: Option<VoiceDeps>,
 }
+
+/// What separating the voice needs: the separator (the speech helper) and
+/// its model, downloaded quietly the first time it's wanted.
+pub struct VoiceDeps {
+    pub separator: Arc<dyn voice::Separator>,
+    pub models: ModelStore<voice::Voice>,
+}
+
+/// After a failed voice model download, the next try waits this long.
+const VOICE_RETRY: Duration = Duration::from_secs(10 * 60);
+/// Of the transcribing percent, the part the voice separation takes.
+const VOICE_SHARE: u8 = 30;
 
 struct Inner {
     deps: Deps,
@@ -398,6 +416,16 @@ struct Inner {
     shared: parking_lot::RwLock<Option<Arc<dyn SharedResults>>>,
     /// A paired Bridge transcribes in the background, so the batch waits.
     defer: parking_lot::RwLock<Option<Arc<dyn Fn() -> bool + Send + Sync>>>,
+    voice: VoiceState,
+}
+
+/// The voice separation this session.
+#[derive(Default)]
+struct VoiceState {
+    /// It went wrong once: the rest of the session hears the whole mix.
+    off: AtomicBool,
+    fetching: AtomicBool,
+    failed_at: Mutex<Option<Instant>>,
 }
 
 /// The transcription queue and model manager. Cheap to clone.
@@ -421,7 +449,7 @@ fn mb(bytes: u64) -> u64 {
 impl Transcriber {
     pub fn new(deps: Deps) -> Self {
         let me = Self {
-            inner: Arc::new(Inner { deps, st: Mutex::new(State::default()), wake: Notify::new(), shared: Default::default(), defer: Default::default() }),
+            inner: Arc::new(Inner { deps, st: Mutex::new(State::default()), wake: Notify::new(), shared: Default::default(), defer: Default::default(), voice: VoiceState::default() }),
         };
         // Once the card is known (or fails), the default model and Settings follow.
         let weak = Arc::downgrade(&me.inner);
@@ -1303,11 +1331,43 @@ impl Transcriber {
     }
 
     /// The speech helper's progress, as the stage and percent.
-    fn helper_step(&self, step: Step) {
-        match step {
-            Step::Loading => self.set_stage(Stage::Loading, 0),
-            Step::Percent(p) => self.set_stage(Stage::Transcribing, p),
+    /// The helper's progress shown as `from`..`to` of the transcribing percent.
+    fn helper_steps(&self, from: u8, to: u8) -> engine::Progress {
+        let me = self.clone();
+        Arc::new(move |step| match step {
+            Step::Loading => me.set_stage(Stage::Loading, from),
+            Step::Percent(p) => me.set_stage(Stage::Transcribing, from + ((to - from) as u32 * p.min(100) as u32 / 100) as u8),
+        })
+    }
+
+    /// The voice model, when this song's voice should be separated. Starts
+    /// its download when it's missing (that song is heard as it is).
+    fn voice_model(&self) -> Option<std::path::PathBuf> {
+        let d = &self.inner.deps;
+        let v = d.voice.as_ref()?;
+        if self.inner.voice.off.load(Ordering::Relaxed) || d.gpu.active().is_none() {
+            return None;
         }
+        if let Some(p) = v.models.installed(voice::Voice::Demucs) {
+            return Some(p);
+        }
+        let recent = self.inner.voice.failed_at.lock().is_some_and(|t| t.elapsed() < VOICE_RETRY);
+        if !recent && !self.inner.voice.fetching.swap(true, Ordering::SeqCst) {
+            let (me, models, fetch) = (self.clone(), v.models.clone(), d.fetch.clone());
+            tokio::spawn(async move {
+                tracing::info!("downloading the voice model");
+                let never = AtomicBool::new(false);
+                match models.download(voice::Voice::Demucs, &*fetch, &never, &|_, _| {}).await {
+                    Ok(_) => tracing::info!("voice model ready"),
+                    Err(e) => {
+                        tracing::warn!("the voice model didn't download: {e:?}");
+                        *me.inner.voice.failed_at.lock() = Some(Instant::now());
+                    }
+                }
+                me.inner.voice.fetching.store(false, Ordering::SeqCst);
+            });
+        }
+        None
     }
 
     fn fail(&self, track_id: &str, message: &str) {
@@ -1568,10 +1628,10 @@ impl Transcriber {
             let mut st = self.inner.st.lock();
             if st.held.as_ref().is_some_and(|h| h.0 == id) { st.held.take().map(|h| h.1) } else { None }
         };
-        let pcm = match held {
+        let (pcm, voiced) = match held {
             Some(p) => p,
             None => match self.read_song(job, cancel).await {
-                Ok(p) => Arc::new(p),
+                Ok((p, voiced)) => (Arc::new(p), voiced),
                 Err(o) => return o,
             },
         };
@@ -1595,8 +1655,7 @@ impl Transcriber {
         let res = {
             let rec = d.recognizer.clone();
             let (cancel, pcm, hints) = (cancel.clone(), pcm.clone(), hints.clone());
-            let me = self.clone();
-            let progress: engine::Progress = Arc::new(move |step| me.helper_step(step));
+            let progress = self.helper_steps(if voiced { VOICE_SHARE } else { 0 }, 100);
             tokio::task::spawn_blocking(move || rec.transcribe(&model_path, kind, &pcm, threads, &hints, cancel, progress)).await
         };
         let segments = match res {
@@ -1607,7 +1666,7 @@ impl Transcriber {
             Ok(Err(RecognizeError::Cancelled)) => {
                 // Stopped for a song asked for: keep the audio for later.
                 if !job.now {
-                    self.inner.st.lock().held = Some((id.clone(), pcm));
+                    self.inner.st.lock().held = Some((id.clone(), (pcm, voiced)));
                 }
                 return Outcome::Cancelled;
             }
@@ -1629,8 +1688,9 @@ impl Transcriber {
         self.finish_song(job, kind, segments, seconds, started, threads, cancel).await
     }
 
-    /// Reads and decodes a song.
-    async fn read_song(&self, job: &Job, cancel: &Stop) -> Result<Vec<f32>, Outcome> {
+    /// Reads and decodes a song, and separates its voice when it can.
+    /// True when the speech model will hear the voice alone.
+    async fn read_song(&self, job: &Job, cancel: &Stop) -> Result<(Vec<f32>, bool), Outcome> {
         let d = &self.inner.deps;
         let id = job.track_id.clone();
         self.set_stage(Stage::Reading, 0);
@@ -1659,13 +1719,18 @@ impl Transcriber {
             }
         };
         self.set_stage(Stage::Decoding, 0);
+        let weights = self.voice_model();
         let pcm = {
             let cancel = cancel.flag().clone();
             let SongAudio { bytes, hint, .. } = song;
-            tokio::task::spawn_blocking(move || audio::to_16k_mono(bytes, hint.as_deref(), &cancel)).await
+            let stereo = weights.as_ref().map(|_| (voice::RATE, voice::MAX_SECONDS));
+            tokio::task::spawn_blocking(move || audio::decode(bytes, hint.as_deref(), &cancel, stereo)).await
         };
         match pcm {
-            Ok(Ok(p)) => Ok(p),
+            Ok(Ok(p)) => match (weights, self.inner.deps.voice.as_ref()) {
+                (Some(w), Some(v)) => self.separate(&id, &w, v.separator.clone(), p, cancel).await,
+                _ => Ok((p.speech, false)),
+            },
             Ok(Err(AudioError::Cancelled)) => Err(Outcome::Cancelled),
             Ok(Err(e)) => {
                 tracing::info!("transcription decode failed: {e:?}");
@@ -1675,6 +1740,30 @@ impl Transcriber {
             Err(e) => {
                 tracing::warn!("decode task failed: {e}");
                 self.fail(&id, "Transcription failed.");
+                Err(Outcome::Failed)
+            }
+        }
+    }
+
+    /// The song's voice, or its whole mix when that goes wrong (and the
+    /// rest of the session then skips separating).
+    async fn separate(&self, id: &str, weights: &std::path::Path, sep: Arc<dyn voice::Separator>, song: audio::Decoded, cancel: &Stop) -> Result<(Vec<f32>, bool), Outcome> {
+        self.set_stage(Stage::Transcribing, 0);
+        let progress = self.helper_steps(0, VOICE_SHARE);
+        let (weights, stop) = (weights.to_path_buf(), cancel.clone());
+        let res = tokio::task::spawn_blocking(move || voice::voice_or_mix(Some((&*sep, &weights)), song, &stop, progress)).await;
+        match res {
+            Ok(Ok((pcm, voice::Heard::Voice))) => Ok((pcm, true)),
+            Ok(Ok((pcm, voice::Heard::Mix))) => Ok((pcm, false)),
+            Ok(Ok((pcm, voice::Heard::MixAfterTrouble))) => {
+                self.inner.voice.off.store(true, Ordering::Relaxed);
+                Ok((pcm, false))
+            }
+            Ok(Err(_)) => Err(Outcome::Cancelled),
+            Err(e) => {
+                tracing::warn!("voice task failed: {e}");
+                self.inner.voice.off.store(true, Ordering::Relaxed);
+                self.fail(id, "Transcription failed.");
                 Err(Outcome::Failed)
             }
         }

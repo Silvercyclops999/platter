@@ -27,9 +27,10 @@ name = "platter"
 path = "src/main.rs"
 
 [features]
-# On-device lyrics transcription with whisper.cpp. Off in plain builds so they
-# don't need CMake; CI and release builds turn it on.
-transcribe = ["dep:whisper-rs"]
+# On-device lyrics transcription with whisper.cpp, and the voice separated
+# from the music first. Off in plain builds so they don't need CMake; CI and
+# release builds turn it on.
+transcribe = ["dep:whisper-rs", "dep:demucs-core", "dep:burn", "dep:cubecl", "dep:pollster"]
 # The headless Platter Bridge binary (docker/bridge).
 bridge = []
 
@@ -86,6 +87,12 @@ flate2 = "1.1.10"
 # from source, so it needs CMake and a C++ compiler. The raw API is for asking
 # which GPU it will use.
 whisper-rs = { version = "0.16.0", optional = true, features = ["tracing_backend", "raw-api"] }
+# The singing separated from the music before transcription: HTDemucs v4 in
+# pure Rust on the graphics card through wgpu (Apache-2.0). Pinned to a commit.
+demucs-core = { git = "https://github.com/nikhilunni/demucs-rs", rev = "805d6f72ede20282832ac78c634e8767716c0b21", optional = true, features = ["wgpu", "autotune", "fusion"] }
+burn = { version = "0.20.1", optional = true, default-features = false, features = ["std", "wgpu", "autotune", "fusion"] }
+cubecl = { version = "0.9", optional = true, default-features = false }
+pollster = { version = "0.4", optional = true }
 tauri-plugin-clipboard-manager = "2.5.0"
 # Song analysis for Automix: real FFTs (MIT or Apache-2.0; rubato uses it already).
 realfft = "3.5"
@@ -114,6 +121,7 @@ ogg = "0.9.2"
 # without one (see lyrics/transcribe/gpu.rs).
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 whisper-rs = { version = "0.16.0", optional = true, features = ["tracing_backend", "raw-api", "vulkan"] }
+burn = { version = "0.20.1", optional = true, default-features = false, features = ["vulkan"] }
 
 # Desktop only: updates, launch at login, global media keys and one running
 # copy. A phone build leaves them out (the code is behind cfg(desktop)).
@@ -158,6 +166,7 @@ objc2-core-foundation = { version = "0.3.2", default-features = false, features 
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSProcessInfo"] }
 # Transcription on the GPU with Metal (build.rs links the clang runtime it needs).
 whisper-rs = { version = "0.16.0", optional = true, features = ["tracing_backend", "raw-api", "metal"] }
+burn = { version = "0.20.1", optional = true, default-features = false, features = ["metal"] }
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 # Line tables only: full debug info grew past what the Windows linker's

@@ -75,21 +75,50 @@ pub async fn read_whole_up_to(reader: &Reader, src: &StreamSource, cancel: &Atom
 
 /// Decode a file to 16 kHz mono f32.
 pub fn to_16k_mono(bytes: Vec<u8>, hint: Option<&str>, cancel: &AtomicBool) -> Result<Vec<f32>, AudioError> {
+    decode(bytes, hint, cancel, None).map(|d| d.speech)
+}
+
+/// A decoded song: always the speech model's input, and the stereo the
+/// voice separation needs when it was asked for and the song isn't too long.
+pub struct Decoded {
+    pub speech: Vec<f32>,
+    pub stereo: Option<Vec<f32>>,
+}
+
+/// Decode a file once to 16 kHz mono and, when `stereo` (seconds at most)
+/// is given, also to interleaved stereo at `stereo_rate`.
+pub fn decode(bytes: Vec<u8>, hint: Option<&str>, cancel: &AtomicBool, stereo: Option<(u32, usize)>) -> Result<Decoded, AudioError> {
     let bad = |e: DecodeError| AudioError::Unreadable(e.to_string());
     let mut dec = TrackDecoder::open(Box::new(Cursor::new(bytes)), hint).map_err(bad)?;
     let mut conv = Converter::new(dec.rate, dec.channels, RATE, 1).map_err(AudioError::Unreadable)?;
+    let mut both = match stereo {
+        Some((rate, seconds)) => {
+            Some((Converter::new(dec.rate, dec.channels, rate, 2).map_err(AudioError::Unreadable)?, Vec::new(), seconds * rate as usize * 2))
+        }
+        None => None,
+    };
     let mut out = Vec::new();
     let cap = MAX_SECONDS * RATE as usize;
     while let Some(block) = dec.next_block().map_err(bad)? {
         conv.push(block, &mut out);
+        if let Some((c, s, most)) = both.as_mut() {
+            c.push(block, s);
+            if s.len() > *most {
+                both = None;
+            }
+        }
         if out.len() >= cap {
             out.truncate(cap);
-            return Ok(out);
+            return Ok(Decoded { speech: out, stereo: None });
         }
         if cancel.load(Ordering::Relaxed) {
             return Err(AudioError::Cancelled);
         }
     }
     conv.finish(&mut out);
-    Ok(out)
+    let stereo = both.map(|(mut c, mut s, _)| {
+        c.finish(&mut s);
+        s
+    });
+    Ok(Decoded { speech: out, stereo })
 }
