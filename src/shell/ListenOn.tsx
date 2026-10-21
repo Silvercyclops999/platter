@@ -29,10 +29,16 @@ export function PlayerIcon({ kind, size = 20 }: { kind: PlayerKind; size?: numbe
   }
 }
 
+/** Under a phone that's being waited for. */
+export const WAITING_SUB = "Waiting • Open Platter on it to play there";
+
+/** Why a phone can't be woken from here (its tooltip). */
+const ASLEEP_WHY = "Phones put Platter to sleep when it's not playing, and only opening it on the phone wakes it. Pick it here first and playback moves as soon as it's open.";
+
 /** The grey line under a player's name. */
 export function playerSub(p: RemotePlayer): string {
   if (p.unsupported) return `${p.product} • ${p.unsupported}`;
-  if (p.asleep) return "Asleep • Open Platter on it to wake it";
+  if (p.asleep) return "Asleep • Pick it, then open Platter on it";
   if (p.unreachable) return `${p.product} • Can't reach it on this network`;
   if (p.playing) return p.playing;
   return p.online ? p.product : `${p.product} • Not active`;
@@ -68,6 +74,8 @@ function Row({
   muted,
   unsupported,
   locked,
+  waiting,
+  title,
   onPick,
 }: {
   icon: React.ReactNode;
@@ -78,12 +86,14 @@ function Row({
   muted?: boolean;
   unsupported?: boolean;
   locked?: boolean;
+  waiting?: boolean;
+  title?: string;
   onPick: () => void;
 }) {
-  const cls = `output-row${muted ? " listen-row--idle" : ""}${unsupported ? " listen-row--unsupported" : ""}`;
+  const cls = `output-row${muted && !waiting ? " listen-row--idle" : ""}${unsupported ? " listen-row--unsupported" : ""}${waiting ? " listen-row--waiting" : ""}`;
   return (
     <li>
-      <button type="button" className={cls} aria-label={label} aria-busy={busy || undefined} onClick={onPick}>
+      <button type="button" className={cls} aria-label={label} aria-busy={busy || undefined} title={title} onClick={onPick}>
         <span className="output-row__icon" aria-hidden="true">
           {icon}
         </span>
@@ -91,6 +101,7 @@ function Row({
           <span className="output-row__name truncate">{name}</span>
           <span className="output-row__sub truncate">{busy ? "Connecting…" : sub}</span>
         </span>
+        {waiting && <span className="listen-row__wait" aria-hidden="true" />}
         {locked && (
           <span className="listen-row__lock" aria-hidden="true">
             <Lock size={14} />
@@ -103,7 +114,7 @@ function Row({
 
 function rowLabel(p: RemotePlayer): string {
   if (p.unsupported) return `${p.name}, can't play here: ${p.unsupported}`;
-  if (p.asleep) return `Play on ${p.name} (asleep, open Platter on it to wake it)`;
+  if (p.asleep) return `Play on ${p.name} once it wakes (open Platter on it)`;
   if (p.unreachable) return `Play on ${p.name} (not reachable on this network)`;
   if (p.needsPassword) return `Play on ${p.name} (asks for its password)`;
   return `Play on ${p.name}`;
@@ -156,6 +167,7 @@ export function ListenOn() {
   const showLocked = useSettings((s) => s.settings?.showAirplayLocked ?? false);
   const players = useRemote((s) => s.players);
   const busy = useRemote((s) => s.busy);
+  const waiting = useRemote((s) => s.waiting);
   const session = usePlayer((s) => s.remote);
 
   // Platter computers are always looked for; the settings add the rest.
@@ -185,20 +197,25 @@ export function ListenOn() {
           />
         )}
         {show &&
-          others.map((p) => (
-            <Row
-              key={p.id}
-              icon={<PlayerIcon kind={p.kind} />}
-              name={p.name}
-              sub={playerSub(p)}
-              label={rowLabel(p)}
-              muted={!p.online || p.unreachable}
-              unsupported={!!p.unsupported}
-              locked={p.needsPassword}
-              busy={busy === p.id}
-              onPick={() => void moveTo(p)}
-            />
-          ))}
+          others.map((p) => {
+            const waits = waiting?.id === p.id;
+            return (
+              <Row
+                key={p.id}
+                icon={<PlayerIcon kind={p.kind} />}
+                name={p.name}
+                sub={waits ? WAITING_SUB : playerSub(p)}
+                label={waits ? `Stop waiting for ${p.name}` : rowLabel(p)}
+                title={p.asleep ? ASLEEP_WHY : undefined}
+                muted={!p.online || p.unreachable}
+                unsupported={!!p.unsupported}
+                locked={p.needsPassword}
+                waiting={waits}
+                busy={busy === p.id}
+                onPick={() => void moveTo(p)}
+              />
+            );
+          })}
       </ul>
       {show && players === null && <Skeleton height={48} radius="card" style={{ marginTop: 4 }} />}
       {show && players !== null && others.length === 0 && (

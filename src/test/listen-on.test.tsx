@@ -8,14 +8,14 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
-import { mockPlatterDevices, mockPlayers } from "../lib/mock/remote";
+import { mockPlatterDevices, mockPlatterPhone, mockPlayers } from "../lib/mock/remote";
 import { DEFAULT_SETTINGS } from "../lib/types";
 import { SettingsPage } from "../pages/SettingsPage";
 import { AppShell } from "../shell/AppShell";
-import { playerSub } from "../shell/ListenOn";
+import { playerSub, WAITING_SUB } from "../shell/ListenOn";
 import { connectApp } from "../stores/app";
 import { connectPlayer, player, usePlayer, withRemote } from "../stores/player";
-import { useRemote } from "../stores/remote";
+import { cancelWaiting, useRemote } from "../stores/remote";
 import { useSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
 import { useUi } from "../stores/ui";
@@ -45,6 +45,7 @@ beforeEach(async () => {
   mock.remote.setPlatterDevices(mockPlatterDevices());
   await mock.settingsSet({ showPlexPlayers: true, moveStopsOldDevice: true });
   useSettings.setState({ settings: { ...DEFAULT_SETTINGS } });
+  cancelWaiting();
   useRemote.setState({ players: null, busy: undefined });
   useUi.setState({ queueOpen: false, nowPlayingOpen: false, outputOpen: true, outputReturn: null, menu: null });
   useToasts.setState({ toasts: [] });
@@ -89,7 +90,7 @@ describe("the Listen on section", () => {
     mock.remote.setPlatterDevices([]);
     act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS, showPlexPlayers: false, showCastDevices: false, showDlnaDevices: false } }));
     render(<AppShell />);
-    await within(picker()).findByRole("heading", { name: "This computer" });
+    await within(picker()).findByRole("group", { name: "This computer" });
     expect(within(picker()).queryByRole("region", { name: "Listen on" })).toBeNull();
   });
 
@@ -201,6 +202,56 @@ describe("remote mode", () => {
     expect(merged.track).toEqual(local.track);
     expect(merged.queue).toEqual(local.queue);
     expect([merged.positionMs, merged.shuffle, merged.repeat, merged.abLoop]).toEqual([5, true, "one", null]);
+  });
+});
+
+describe("a phone that's asleep", () => {
+  const asleepLabel = "Play on iPhone once it wakes (open Platter on it)";
+
+  it("waits for Platter to open on it, then moves playback there", async () => {
+    await playHere();
+    mock.remote.setPlatterDevices([...mockPlatterDevices(), mockPlatterPhone()]);
+    render(<AppShell />);
+    const row = await within(picker()).findByRole("button", { name: asleepLabel });
+    expect(row).toHaveTextContent("Asleep • Pick it, then open Platter on it");
+    // Why it can't be woken from here.
+    expect(row.getAttribute("title")).toMatch(/only opening it on the phone wakes it/);
+    fireEvent.click(row);
+    const waiting = await within(picker()).findByRole("button", { name: "Stop waiting for iPhone" });
+    expect(waiting).toHaveTextContent(WAITING_SUB);
+    expect(usePlayer.getState().remote).toBeNull();
+
+    // Platter opens on the phone.
+    act(() => mock.remote.wakePhone());
+    await waitFor(() => expect(usePlayer.getState().remote?.playerName).toBe("iPhone"));
+    expect(useRemote.getState().waiting).toBeNull();
+    expect(useToasts.getState().toasts).toHaveLength(0);
+  });
+
+  it("picking it again stops waiting", async () => {
+    await playHere();
+    mock.remote.setPlatterDevices([...mockPlatterDevices(), mockPlatterPhone()]);
+    render(<AppShell />);
+    fireEvent.click(await within(picker()).findByRole("button", { name: asleepLabel }));
+    fireEvent.click(await within(picker()).findByRole("button", { name: "Stop waiting for iPhone" }));
+    expect(useRemote.getState().waiting).toBeNull();
+    expect(await within(picker()).findByRole("button", { name: asleepLabel })).toBeInTheDocument();
+    // It waking later doesn't move anything.
+    act(() => mock.remote.wakePhone());
+    await within(picker()).findByRole("button", { name: "Play on iPhone" });
+    expect(usePlayer.getState().remote).toBeNull();
+  });
+
+  it("asks for something to play first", async () => {
+    mock.remote.setPlatterDevices([mockPlatterPhone()]);
+    const before = usePlayer.getState().state;
+    act(() => usePlayer.setState({ state: before ? { ...before, track: null } : before }));
+    render(<AppShell />);
+    fireEvent.click(await within(picker()).findByRole("button", { name: asleepLabel }));
+    expect(useRemote.getState().waiting).toBeNull();
+    expect(useToasts.getState().toasts.map((t) => t.message)).toContain("Play something first, then move it.");
+    act(() => usePlayer.setState({ state: before }));
+    cancelWaiting();
   });
 });
 

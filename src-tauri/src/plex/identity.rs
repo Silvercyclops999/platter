@@ -87,6 +87,11 @@ fn platform_name() -> &'static str {
 }
 
 fn device_name() -> String {
+    // iOS hands apps only the model name; "iPhone" reads better in other
+    // devices' lists than the product and platform.
+    if cfg!(target_os = "ios") {
+        return "iPhone".into();
+    }
     for var in ["COMPUTERNAME", "HOSTNAME"] {
         if let Ok(v) = std::env::var(var) {
             let v = v.trim();

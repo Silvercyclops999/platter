@@ -7,8 +7,10 @@
  *
  * Test/demo hooks: `stopElsewhere()` (someone stops the player there),
  * `loseRemote()` (the player stops answering), `setPlayers()`,
- * `setPlatterDevices()`. `?platter=unreachable` in the URL shows the other
- * Platter as seen through Plex but not answering (the firewall note).
+ * `setPlatterDevices()`, `wakePhone()`. `?platter=unreachable` in the URL
+ * shows the other Platter as seen through Plex but not answering (the
+ * firewall note); `?platter=phone` adds a phone running Platter that's
+ * asleep, and `?platter=phone-wakes` one that wakes after a few seconds.
  */
 import type { PlayerState, RemoteCommand, RemotePlayer, RemoteSession, RemoteState, Settings, Track } from "../types";
 
@@ -52,6 +54,26 @@ export function mockPlatterDevices(unreachable = false): RemotePlayer[] {
     },
   ];
 }
+
+/** A phone running Platter, asleep (locked, or Platter in the background). */
+export function mockPlatterPhone(): RemotePlayer {
+  return {
+    id: "mock-platter-phone",
+    name: "iPhone",
+    product: "Platter",
+    kind: "phone",
+    playing: null,
+    online: false,
+    asleep: true,
+    via: "platter",
+    needsPassword: false,
+    unsupported: null,
+    unreachable: false,
+  };
+}
+
+/** How long the `phone-wakes` demo phone stays asleep. */
+export const DEMO_WAKE_MS = 12_000;
 
 /** Cast devices, AirPlay receivers and a DLNA renderer "on the network". */
 export function mockLanDevices(): RemotePlayer[] {
@@ -104,9 +126,18 @@ export class MockRemote {
     private host: RemoteHost,
     sample: Track | undefined,
     platterUnreachable = false,
+    phone?: "asleep" | "wakes",
   ) {
     this.list = mockPlayers(sample);
     this.platterList = mockPlatterDevices(platterUnreachable);
+    if (phone) this.platterList.push(mockPlatterPhone());
+    if (phone === "wakes") host.later(DEMO_WAKE_MS, () => this.wakePhone());
+  }
+
+  /** Test/demo hook: Platter opens on the phone, so it answers. */
+  wakePhone() {
+    this.platterList = this.platterList.map((p) => (p.asleep ? { ...p, asleep: false, online: true } : p));
+    this.host.emitPlayers(this.all());
   }
 
   dispose() {

@@ -273,26 +273,23 @@ export function InviteDialog() {
 }
 
 /**
- * "Listen along" in the device picker: starts a listening session on
- * what's playing. Hidden while in one.
+ * "Listen along" at the foot of the device picker: one quiet row that
+ * starts a listening session on what's playing. Hidden while in one.
  */
 export function SessionCard() {
   const role = useSocial((s) => s.listen.role);
   if (!listenAlong.enabled || role !== "none") return null;
   return (
-    <div className="session-card" role="group" aria-labelledby="session-card-title">
-      <div className="session-card__head">
-        <div id="session-card-title" className="session-card__title">
-          Listen along
-        </div>
-      </div>
-      <p className="session-card__text">
-        Start a listening session and people can listen with you, from anywhere, from your Plex library or their own. They add songs, and can play, pause
-        and skip if you let them.
-      </p>
-      <Button size="sm" variant="primary" icon={<UsersRound size={14} />} onClick={() => void startSession()}>
-        Start a listening session
-      </Button>
+    <div className="session-row" role="group" aria-label="Listen along">
+      <button type="button" className="output-row" aria-label="Start a listening session" onClick={() => void startSession()}>
+        <span className="output-row__icon" aria-hidden="true">
+          <UsersRound size={20} />
+        </span>
+        <span className="output-row__text">
+          <span className="output-row__name truncate">Listen along</span>
+          <span className="output-row__sub truncate">Start a session so friends can listen with you</span>
+        </span>
+      </button>
     </div>
   );
 }

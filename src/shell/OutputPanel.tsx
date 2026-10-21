@@ -30,11 +30,17 @@ export function splitDeviceName(name: string): { name: string; detail?: string }
   return { name: m[1].trim(), detail: detail || undefined };
 }
 
-function CurrentDevice({ device, followsDefault }: { device: OutputDevice; followsDefault: boolean }) {
+/**
+ * The output in use on this computer. Its name wraps rather than cutting
+ * off; the hardware behind it is in the tooltip. The chevron opens the
+ * computer's other outputs right under it.
+ */
+function CurrentDevice({ device, open, onToggle }: { device: OutputDevice; open: boolean; onToggle: () => void }) {
   const track = usePlayer((s) => s.state?.track);
   const settings = useSettings((s) => s.settings);
   const connection = useApp((s) => s.health?.connection ?? s.auth?.server?.connection ?? null);
   const quality = track ? streamQuality(track, connection, settings) : null;
+  const short = splitDeviceName(device.name).name;
   return (
     <div className="output-current" aria-labelledby="output-current-label" role="group">
       <span className="output-current__icon" aria-hidden="true">
@@ -42,16 +48,25 @@ function CurrentDevice({ device, followsDefault }: { device: OutputDevice; follo
       </span>
       <div className="output-current__text">
         <div id="output-current-label" className="output-current__label">
-          {followsDefault ? "Current device, system default" : "Current device"}
+          This computer
         </div>
-        <div className="output-current__name truncate" title={device.name}>
-          {splitDeviceName(device.name).name}
+        <div className="output-current__name" title={device.name}>
+          {short}
         </div>
-        <div className="output-current__sub truncate" title={device.name}>
-          {["This computer", splitDeviceName(device.name).detail, quality].filter(Boolean).join(" • ")}
-        </div>
+        {quality && <div className="output-current__sub">{quality}</div>}
         <HifiLine />
       </div>
+      <button
+        type="button"
+        className="output-current__more"
+        aria-label={`Sound output: ${short}`}
+        title="Sound output"
+        aria-expanded={open}
+        aria-controls="output-others-list"
+        onClick={onToggle}
+      >
+        <ChevronDown size={18} aria-hidden="true" />
+      </button>
     </div>
   );
 }
@@ -74,8 +89,8 @@ function DeviceRow({ name, title, sub, onPick, busy, selected }: { name: string;
           <Speaker size={18} />
         </span>
         <span className="output-row__text">
-          <span className="output-row__name output-row__name--one truncate">{parts.name}</span>
-          {line && <span className="output-row__sub output-row__sub--one truncate">{line}</span>}
+          <span className="output-row__name truncate">{parts.name}</span>
+          {line && <span className="output-row__sub truncate">{line}</span>}
         </span>
         {selected && (
           <span className="output-row__check" aria-hidden="true">
@@ -101,7 +116,6 @@ export function OutputPanel() {
   }, []);
 
   const current = state?.current ?? null;
-  const followsDefault = state?.selected == null;
   const choices = state ? outputChoices(state) : [];
   const [outputsOpen, setOutputsOpen] = useState(false);
 
@@ -123,55 +137,38 @@ export function OutputPanel() {
             {remote ? (
               <RemoteCurrent session={remote} />
             ) : current ? (
-              <CurrentDevice device={current} followsDefault={followsDefault} />
+              <CurrentDevice device={current} open={outputsOpen} onToggle={() => setOutputsOpen((o) => !o)} />
             ) : (
               <p className="output-empty">No audio output found on this computer.</p>
             )}
+            {outputsOpen && !remote && current && (
+              <ul className="output-list output-list--outputs" id="output-others-list" aria-label="Sound output">
+                {choices.map((c) =>
+                  c.id === null ? (
+                    <DeviceRow
+                      key="system-default"
+                      name="System default"
+                      title={c.label}
+                      sub={c.defaultName ? splitDeviceName(c.defaultName).name : "Follows your computer's setting"}
+                      selected={c.selected}
+                      busy={switching === null}
+                      onPick={() => void selectOutput(null)}
+                    />
+                  ) : (
+                    <DeviceRow
+                      key={c.id}
+                      name={c.label}
+                      sub={c.isDefault ? "Your computer's default" : undefined}
+                      selected={c.selected}
+                      busy={switching === c.id}
+                      onPick={() => void selectOutput(c.id)}
+                    />
+                  ),
+                )}
+              </ul>
+            )}
             <ListenOn />
             <ResumeFrom />
-            <section className="output-section" aria-labelledby="output-others">
-              <h3 id="output-others" className="output-section__title">
-                This computer
-              </h3>
-              <button
-                type="button"
-                className="output-disclosure"
-                aria-expanded={outputsOpen}
-                aria-controls="output-others-list"
-                onClick={() => setOutputsOpen((o) => !o)}
-              >
-                <span className="truncate">
-                  Sound output: {current ? splitDeviceName(current.name).name : "none"}
-                </span>
-                <ChevronDown size={16} aria-hidden="true" className="output-disclosure__chev" />
-              </button>
-              {outputsOpen && (
-                <ul className="output-list" id="output-others-list">
-                  {choices.map((c) =>
-                    c.id === null ? (
-                      <DeviceRow
-                        key="system-default"
-                        name="System default"
-                        title={c.label}
-                        sub={c.defaultName ? splitDeviceName(c.defaultName).name : "Follows your computer's setting"}
-                        selected={c.selected}
-                        busy={switching === null}
-                        onPick={() => void selectOutput(null)}
-                      />
-                    ) : (
-                      <DeviceRow
-                        key={c.id}
-                        name={c.label}
-                        sub={c.isDefault ? "Your computer's default" : undefined}
-                        selected={c.selected}
-                        busy={switching === c.id}
-                        onPick={() => void selectOutput(c.id)}
-                      />
-                    ),
-                  )}
-                </ul>
-              )}
-            </section>
             {!remote && <SessionCard />}
           </>
         )}

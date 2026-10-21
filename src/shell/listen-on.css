@@ -51,3 +51,20 @@ button.remote-strip:active { background: var(--color-accent-pressed); }
   from { opacity: 0; transform: translateY(calc(4px * var(--motion-move))); }
   to { opacity: 1; transform: none; }
 }
+
+/* A phone picked while asleep: a slow pulse until it answers. */
+.listen-row--waiting .output-row__icon { color: var(--color-accent); }
+.listen-row__wait {
+  flex: none;
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  animation: listen-wait 1.6s var(--motion-easing-in-out) infinite;
+}
+@keyframes listen-wait {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .listen-row__wait { animation: none; } }

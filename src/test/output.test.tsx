@@ -92,8 +92,14 @@ describe("devices from the core", () => {
     fireEvent.click(await within(picker()!).findByRole("button", { name: /^Sound output/ }));
     const p = picker()!;
     expect((await within(p).findAllByTitle(SPEAKERS.name))[0]).toBeInTheDocument();
-    expect(within(p).getByText("Current device, system default")).toBeInTheDocument();
-    expect(within(p).getAllByText(/^This computer/).length).toBeGreaterThan(0);
+    // The card says which computer output plays, and nothing reads like a settings page.
+    const card = within(p).getByRole("group", { name: "This computer" });
+    expect(card).toHaveTextContent("Speakers");
+    expect(within(p).queryByRole("heading", { name: "This computer" })).toBeNull();
+    // Listen along is one row at the foot, not a card of text.
+    const along = within(p).getByRole("group", { name: "Listen along" });
+    expect(within(along).getAllByRole("button")).toHaveLength(1);
+    expect(along).not.toHaveTextContent(/pause and skip/);
     // System default first and marked, then every device, the current one included.
     const rows = within(p.querySelector("#output-others-list") as HTMLElement).getAllByRole("button");
     expect(rows.map((r) => r.getAttribute("aria-label"))).toEqual([

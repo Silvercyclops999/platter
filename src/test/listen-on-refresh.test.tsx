@@ -12,11 +12,16 @@ import { ListenOn, playerSub } from "../shell/ListenOn";
 import {
   loadPlayers,
   loadingPlayers,
+  moveTo,
   REMOTE_REFRESH_MS,
   resetPlayerLoads,
   useRemote,
+  cancelWaiting,
+  WAKE_WAIT_MS,
   watchPlayers,
 } from "../stores/remote";
+import { usePlayer } from "../stores/player";
+import { useToasts } from "../stores/toasts";
 
 const mock = backend as MockBackend;
 
@@ -56,8 +61,9 @@ function slowBackend() {
 }
 
 beforeEach(() => {
+  cancelWaiting();
   resetPlayerLoads();
-  useRemote.setState({ players: null, busy: undefined, password: null });
+  useRemote.setState({ players: null, busy: undefined, password: null, waiting: null });
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -142,13 +148,35 @@ describe("the Listen on section while searching", () => {
 
   it("lists a phone that's asleep, saying how to wake it", async () => {
     const phone = row("iph", "Adam's iPhone", { kind: "phone", online: false, asleep: true });
-    expect(playerSub(phone)).toBe("Asleep • Open Platter on it to wake it");
+    expect(playerSub(phone)).toBe("Asleep • Pick it, then open Platter on it");
     vi.spyOn(mock, "remotePlayers").mockResolvedValue([phone]);
     render(<ListenOn />);
     const section = await screen.findByRole("region", { name: "Listen on" });
-    const btn = await within(section).findByRole("button", { name: "Play on Adam's iPhone (asleep, open Platter on it to wake it)" });
+    const btn = await within(section).findByRole("button", { name: "Play on Adam's iPhone once it wakes (open Platter on it)" });
     expect(btn).toHaveTextContent("Asleep");
     // Asleep is not a firewall problem: no note about it.
     expect(within(section).queryByRole("note")).toBeNull();
+  });
+});
+
+describe("waiting for a phone to wake", () => {
+  it("gives up after a few minutes and says so", async () => {
+    vi.useFakeTimers();
+    const phone = row("iph", "Adam's iPhone", { kind: "phone", online: false, asleep: true });
+    const b = { remotePlayers: vi.fn(() => Promise.resolve([phone])), remoteMove: vi.fn() } as unknown as Backend;
+    const before = usePlayer.getState().state;
+    usePlayer.setState({ state: { ...(before ?? {}), track: mock.fx.tracks[0] } as never });
+    useToasts.setState({ toasts: [] });
+    await moveTo(phone, b);
+    expect(useRemote.getState().waiting?.id).toBe("iph");
+    await vi.advanceTimersByTimeAsync(WAKE_WAIT_MS - 10_000);
+    expect(useRemote.getState().waiting?.id).toBe("iph");
+    // It keeps looking while it waits.
+    expect((b.remotePlayers as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(10);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(useRemote.getState().waiting).toBeNull();
+    expect(b.remoteMove).not.toHaveBeenCalled();
+    expect(useToasts.getState().toasts.map((t) => t.message)).toContain("Adam's iPhone didn't wake up. Open Platter on it, then pick it again.");
+    usePlayer.setState({ state: before });
   });
 });

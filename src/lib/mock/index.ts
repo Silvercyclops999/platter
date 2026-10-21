@@ -258,6 +258,11 @@ export interface MockOptions {
   tagScan?: boolean;
   /** The other Platter computer is seen through Plex but doesn't answer. */
   platterUnreachable?: boolean;
+  /** A phone running Platter that's asleep (?platter=phone), or one that
+   * wakes a few seconds in (?platter=phone-wakes). */
+  platterPhone?: "asleep" | "wakes";
+  /** Long Windows output names, for checking nothing cuts off (?outputs=long). */
+  longOutputs?: boolean;
   /** Start with downloads in place (and the limit reached, for "full"). */
   downloads?: "demo" | "full";
   /** Start on this theme (?theme=light). */
@@ -367,6 +372,8 @@ export function optionsFromUrl(search: string): MockOptions {
     tagScan: p.get("tagScan") === "1",
     feedPortInUse: Number(p.get("feedPortInUse")) || undefined,
     platterUnreachable: p.get("platter") === "unreachable",
+    platterPhone: p.get("platter") === "phone" ? "asleep" : p.get("platter") === "phone-wakes" ? "wakes" : undefined,
+    longOutputs: p.get("outputs") === "long",
     downloads: p.get("downloads") === "demo" || p.get("downloads") === "full" ? (p.get("downloads") as "demo" | "full") : undefined,
     lidarr: isLidarrDemo(p.get("lidarr")) ? (p.get("lidarr") as LidarrDemo) : isUpgradeDemo(p.get("upgrades")) ? "ready" : undefined,
     upgrades: isUpgradeDemo(p.get("upgrades")) ? (p.get("upgrades") as UpgradeDemo) : undefined,
@@ -396,6 +403,13 @@ const SERVER: ServerInfo = {
   version: "1.42.2",
   connection: "local",
 };
+
+/** Long Windows-style names (a gaming headset's virtual devices). */
+const LONG_OUTPUTS: OutputDevice[] = [
+  { id: "mock:sonar-gaming", name: "SteelSeries Sonar - Gaming (SteelSeries Sonar Virtual Audio Device)", isDefault: true },
+  { id: "mock:sonar-media", name: "SteelSeries Sonar - Media (SteelSeries Sonar Virtual Audio Device)", isDefault: false },
+  { id: "mock:headset", name: "Headphones (Arctis Nova Pro Wireless)", isDefault: false },
+];
 
 /** Invented audio outputs; the first is the system default. */
 const MOCK_OUTPUTS: OutputDevice[] = [
@@ -576,6 +590,7 @@ export class MockBackend implements Backend {
 
   constructor(opts: Partial<MockOptions> = {}) {
     this.opts = { ...optionsFromUrl(""), ...opts };
+    if (this.opts.longOutputs) this.outputs = LONG_OUTPUTS.map((d) => ({ ...d }));
     this.fx = shapeFixtures(buildFixtures(), this.opts);
     this.pl = new MockPlaylists(
       this.fx,
@@ -888,6 +903,7 @@ export class MockBackend implements Backend {
       },
       this.fx.tracks[7],
       this.opts.platterUnreachable,
+      this.opts.platterPhone,
     );
     this.auth = this.opts.signedOut
       ? { state: "signedOut", needsServerPick: false }
