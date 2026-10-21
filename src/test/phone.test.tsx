@@ -621,7 +621,7 @@ describe("phone settings", () => {
   it("Siri has a row of things to say and a dislike choice that hides by default", async () => {
     render(<SettingsPage section="Downloads and devices" />);
     expect(await screen.findByText("Ask Siri")).toBeInTheDocument();
-    for (const said of ["on Platter", "Kanye West on shuffle", "play more like this", "I like this song", "Runaway next"]) {
+    for (const said of ["on Platter", "on shuffle", "play more like this", "I like this song", "Yesterday next"]) {
       expect(SIRI_PHRASES).toContain(said);
     }
     const row = document.querySelector('[data-setting="siriDislikeHides"]') as HTMLElement;

@@ -230,7 +230,8 @@ pub fn resolve(
         (Some(Repeat::All), Some(_)) if ask.kind == SiriKind::Song => Some(Repeat::One),
         (r, _) => r,
     };
-    p.queue = ask.queue;
+    // "Play this next" with nothing in the player: play it.
+    p.queue = if at.playing.is_none() && !at.can_resume { SiriQueue::Now } else { ask.queue };
     if let Some(kept) = &at.offline {
         let here = match &p.start_track_id {
             Some(t) => kept.tracks.contains(t),
@@ -269,7 +270,10 @@ fn pick(db: &DbHandle, ask: &SiriAsk, at: &Situation) -> AppResult<Option<Pick>>
     if ask.kind == SiriKind::Genre {
         let mut all = tags.clone();
         all.extend(name);
-        return Ok(mix_for_tags(db, &all)?.map(Pick::Play));
+        if let Some(p) = mix_for_tags(db, &all)? {
+            return Ok(Some(Pick::Play(p)));
+        }
+        // No mix for it: a playlist or album by that name, as before.
     }
     let Some(name) = name else {
         if let Some(artist) = ask.artist() {
@@ -282,7 +286,7 @@ fn pick(db: &DbHandle, ask: &SiriAsk, at: &Situation) -> AppResult<Option<Pick>>
         }
         // "Play Platter", "play something": carry on, else the first mix,
         // else everything shuffled.
-        if (ask.resume || at.can_resume) && !ask.shuffle {
+        if at.can_resume && !ask.shuffle {
             return Ok(Some(Pick::Resume));
         }
         if !ask.shuffle
@@ -396,7 +400,13 @@ fn mixes(db: &DbHandle) -> AppResult<Vec<SiriMix>> {
 
 /// The genre or mood mix for any of `tags` ("hip-hop", "chill").
 fn mix_for_tags(db: &DbHandle, tags: &[&str]) -> AppResult<Option<SiriPlay>> {
-    let wanted: HashSet<String> = tags.iter().map(|t| bare(t)).filter(|t| !t.is_empty()).collect();
+    // Siri sends compound genres ("Hip-Hop/Rap", "R&B/Soul"): each part counts.
+    let wanted: HashSet<String> = tags
+        .iter()
+        .flat_map(|t| t.split(['/', '&', ',']))
+        .map(bare)
+        .filter(|t| !t.is_empty())
+        .collect();
     if wanted.is_empty() {
         return Ok(None);
     }
@@ -473,10 +483,13 @@ fn playlist(p: &crate::model::Playlist) -> Picked {
 /// The song a like, dislike or "add this to my playlist" is about: the one
 /// Siri named, else the one playing. The id and how Siri says it.
 pub fn song_for(db: &DbHandle, ask: &SiriAsk, playing: Option<&Playing>) -> AppResult<Option<(String, String)>> {
-    let named = ask.name().filter(|_| !ask.this && matches!(ask.kind, SiriKind::Song | SiriKind::Unknown));
-    let Some(name) = named else {
+    let Some(name) = ask.name().filter(|_| !ask.this) else {
         return Ok(playing.map(|p| (p.track_id.clone(), p.title.clone())));
     };
+    // "I like the album Donda": not a song, and not the playing one either.
+    if !matches!(ask.kind, SiriKind::Song | SiriKind::Unknown) {
+        return Ok(None);
+    }
     let query = match ask.artist() {
         Some(a) => format!("{name} {a}"),
         None => name.to_string(),
@@ -494,7 +507,20 @@ pub fn playlist_named(db: &DbHandle, name: &str) -> AppResult<Option<(String, St
         return Ok(None);
     }
     let found = crate::db::search::search(db, &n, SearchFilter::Playlists, Some(5))?;
-    Ok(found.playlists.into_iter().find(|p| has_all_words(&p.title, &n)).map(|p| (p.id, p.title)))
+    // Smart playlists can't take songs.
+    Ok(found.playlists.into_iter().find(|p| !p.smart && has_all_words(&p.title, &n)).map(|p| (p.id, p.title)))
+}
+
+/// What "I don't like this song" does: hide it (with the setting on) and
+/// skip it (when it's the one playing). Nothing to do is a failure for Siri.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Dislike {
+    pub hide: bool,
+    pub skip: bool,
+}
+
+pub fn dislike(hides: bool, playing: bool) -> Option<Dislike> {
+    (hides || playing).then_some(Dislike { hide: hides, skip: playing })
 }
 
 /// What to look for among music you don't have when the library has nothing
@@ -811,7 +837,9 @@ mod tests {
         let (db, _d) = library().await;
         let paused = Situation { can_resume: true, ..Default::default() };
         assert_eq!(answer(&db, &SiriAsk::default(), &paused), Some(SiriAnswer::Resume));
-        assert_eq!(answer(&db, &SiriAsk { resume: true, ..Default::default() }, &Situation::default()), Some(SiriAnswer::Resume));
+        // Nothing to carry on with (a cold start with no saved queue): the first mix.
+        let p = played(&db, &SiriAsk { resume: true, ..Default::default() });
+        assert_eq!(p.context, context(ContextKind::Mix, "m1"));
         let p = played(&db, &SiriAsk::default());
         assert_eq!(p.context, context(ContextKind::Mix, "m1"));
         // "Shuffle some music": everything, shuffled.
@@ -827,8 +855,13 @@ mod tests {
         assert_eq!(played(&db, &ask("my daily mix 2", SiriKind::Unknown)).context, context(ContextKind::Mix, "m2"));
         // "Play hip hop" as a genre, or as genre names on an open request.
         assert_eq!(played(&db, &ask("hip hop", SiriKind::Genre)).context, context(ContextKind::Mix, "m3"));
-        let p = played(&db, &SiriAsk { genres: vec!["Hip-Hop/Rap".into(), "hiphop".into()], ..Default::default() });
+        // Siri's compound genre names.
+        let p = played(&db, &SiriAsk { genres: vec!["Hip-Hop/Rap".into()], ..Default::default() });
         assert_eq!(p.context, context(ContextKind::Mix, "m3"));
+        let p = played(&db, &SiriAsk { genres: vec!["R&B/Soul".into(), "Chill".into()], ..Default::default() });
+        assert_eq!(p.context, context(ContextKind::Mix, "m4"));
+        // A genre with no mix of its own falls back to the name search.
+        assert_eq!(played(&db, &ask("road trip", SiriKind::Genre)).context, context(ContextKind::Playlist, "40"));
         let p = played(&db, &SiriAsk { moods: vec!["chill".into()], ..Default::default() });
         assert_eq!(p.context, context(ContextKind::Mix, "m4"));
         assert_eq!(answer(&db, &ask("polka", SiriKind::Genre), &Situation::default()), None);
@@ -859,10 +892,14 @@ mod tests {
     #[tokio::test]
     async fn queue_and_repeat_come_along() {
         let (db, _d) = library().await;
-        let p = played(&db, &SiriAsk { queue: SiriQueue::Next, ..ask("Otis", SiriKind::Song) });
+        let now = playing();
+        let p = played_at(&db, &SiriAsk { queue: SiriQueue::Next, ..ask("Otis", SiriKind::Song) }, &now);
         assert_eq!((p.queue, p.start_track_id.as_deref()), (SiriQueue::Next, Some("30")));
-        let p = played(&db, &SiriAsk { queue: SiriQueue::Later, ..ask("Currents", SiriKind::Album) });
+        let p = played_at(&db, &SiriAsk { queue: SiriQueue::Later, ..ask("Currents", SiriKind::Album) }, &now);
         assert_eq!(p.queue, SiriQueue::Later);
+        // Nothing in the player: "play Otis next" plays it.
+        let p = played(&db, &SiriAsk { queue: SiriQueue::Next, ..ask("Otis", SiriKind::Song) });
+        assert_eq!(p.queue, SiriQueue::Now);
         // A song on repeat repeats that song; anything else repeats it all.
         let p = played(&db, &SiriAsk { repeat: Some(Repeat::All), ..ask("Otis", SiriKind::Song) });
         assert_eq!(p.repeat, Some(Repeat::One));
@@ -915,6 +952,14 @@ mod tests {
         assert_eq!(get_within(failed, Duration::from_secs(1)).await, Getting::Failed);
     }
 
+    #[test]
+    fn a_dislike_hides_and_skips_as_set() {
+        assert_eq!(dislike(true, true), Some(Dislike { hide: true, skip: true }));
+        assert_eq!(dislike(true, false), Some(Dislike { hide: true, skip: false }));
+        assert_eq!(dislike(false, true), Some(Dislike { hide: false, skip: true }));
+        assert_eq!(dislike(false, false), None, "just skip, and it isn't playing: nothing to do");
+    }
+
     #[tokio::test]
     async fn likes_and_playlists_find_their_song() {
         let (db, _d) = library().await;
@@ -925,6 +970,8 @@ mod tests {
         let named = song_for(&db, &ask("the less i know the better", SiriKind::Song), now.playing.as_ref()).unwrap();
         assert_eq!(named.map(|s| s.0).as_deref(), Some("33"));
         assert_eq!(song_for(&db, &ask("Bohemian Rhapsody", SiriKind::Song), now.playing.as_ref()).unwrap(), None);
+        // A named album isn't a song, and isn't the playing one.
+        assert_eq!(song_for(&db, &ask("Currents", SiriKind::Album), now.playing.as_ref()).unwrap(), None);
         assert_eq!(playlist_named(&db, "my road trip playlist").unwrap().map(|p| p.0).as_deref(), Some("40"));
         assert_eq!(playlist_named(&db, "Road Trip").unwrap().map(|p| p.0).as_deref(), Some("40"));
         assert_eq!(playlist_named(&db, "gym").unwrap(), None);

@@ -38,6 +38,9 @@ static APP: OnceLock<AppHandle<Wry>> = OnceLock::new();
 
 /// How long a request waits for the app core to start.
 const START_WAIT: Duration = Duration::from_secs(8);
+/// How long a request waits for playing to start before answering Siri
+/// (woken in the background, iOS may suspend Platter once it's answered).
+const PLAY_WAIT: Duration = Duration::from_secs(4);
 /// How long a request waits for a song you don't have to start being got.
 const GET_WAIT: Duration = Duration::from_secs(5);
 /// How long looking a song up among music you don't have may take.
@@ -66,6 +69,7 @@ const ITEM_PLAYLIST: isize = 5;
 const ITEM_STATION: isize = 17;
 const ITEM_MUSIC: isize = 18;
 /// `INMediaAffinityType`.
+const AFFINITY_LIKE: isize = 1;
 const AFFINITY_DISLIKE: isize = 2;
 /// `INMediaDestinationType`.
 const DESTINATION_PLAYLIST: isize = 2;
@@ -81,7 +85,7 @@ define_class!(
         fn resolveMediaItemsForPlayMedia(&self, intent: &AnyObject, completion: &DynBlock<dyn Fn(*mut AnyObject)>) {
             let ask = read(|| read_play(intent));
             answer_later(completion, Fallback::Unsupported { class: c"INPlayMediaMediaItemResolutionResult", array: true }, move |done| {
-                let item = ask.and_then(|ask| decide_play(ask)).map(|(_, d)| d);
+                let item = ask.and_then(decide_play).map(|(_, d)| d);
                 let result = match item {
                     Some(Decided::Play(p)) => successes(c"INPlayMediaMediaItemResolutionResult", &p.title, item_type(&p)),
                     Some(Decided::Get(t)) => successes(c"INPlayMediaMediaItemResolutionResult", &format!("{} by {}", t.title, t.artist), ITEM_SONG),
@@ -96,7 +100,7 @@ define_class!(
         fn handlePlayMedia_completion(&self, intent: &AnyObject, completion: &DynBlock<dyn Fn(*mut AnyObject)>) {
             let ask = read(|| read_play(intent));
             answer_later(completion, Fallback::Fail(PLAY), move |done| {
-                let ok = ask.and_then(|ask| decide_play(ask)).is_some_and(|(app, d)| act_play(&app, d));
+                let ok = ask.and_then(decide_play).is_some_and(|(app, d)| act_play(&app, d));
                 done.code(PLAY, ok);
             });
         }
@@ -106,7 +110,7 @@ define_class!(
             let ask = read(|| read_search_of(intent));
             let class = c"INUpdateMediaAffinityMediaItemResolutionResult";
             answer_later(completion, Fallback::Unsupported { class, array: true }, move |done| {
-                let song = ask.and_then(|ask| Some(song_for(&wait_for_app()?, &ask)?));
+                let song = ask.and_then(|ask| song_for(&wait_for_app()?, &ask));
                 done.send(match song {
                     Some((_, title)) => successes(class, &title, ITEM_SONG),
                     None => one_in_array(unsupported(class)),
@@ -124,7 +128,8 @@ define_class!(
             let asked = read(read_both);
             answer_later(completion, Fallback::Fail(AFFINITY), move |done| {
                 let ok = asked.is_some_and(|(ask, kind)| {
-                    wait_for_app().is_some_and(|app| affinity(&app, &ask, kind == AFFINITY_DISLIKE))
+                    matches!(kind, AFFINITY_LIKE | AFFINITY_DISLIKE)
+                        && wait_for_app().is_some_and(|app| affinity(&app, &ask, kind == AFFINITY_DISLIKE))
                 });
                 done.code(AFFINITY, ok);
             });
@@ -135,7 +140,7 @@ define_class!(
             let ask = read(|| read_search_of(intent));
             let class = c"INAddMediaMediaItemResolutionResult";
             answer_later(completion, Fallback::Unsupported { class, array: true }, move |done| {
-                let song = ask.and_then(|ask| Some(song_for(&wait_for_app()?, &ask)?));
+                let song = ask.and_then(|ask| song_for(&wait_for_app()?, &ask));
                 done.send(match song {
                     Some((_, title)) => successes(class, &title, ITEM_SONG),
                     None => one_in_array(unsupported(class)),
@@ -452,7 +457,7 @@ fn decide_play(ask: SiriAsk) -> Option<(AppHandle<Wry>, Decided)> {
     let app = wait_for_app()?;
     if let Some((a, at, d)) = LAST.lock().clone()
         && a == ask
-        && at.elapsed() < Duration::from_secs(30)
+        && at.elapsed() < Duration::from_secs(10)
     {
         return Some((app, d));
     }
@@ -527,35 +532,20 @@ fn act_play(app: &AppHandle<Wry>, d: Decided) -> bool {
     *LAST.lock() = None;
     let Some(player) = app.try_state::<PlayerHandle>().map(|p| p.inner().clone()) else { return false };
     match d {
-        Decided::Resume => {
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = player.resume().await {
-                    tracing::warn!("Siri resume failed: {e}");
-                }
-            });
-            true
-        }
-        Decided::Play(p) => {
-            tauri::async_runtime::spawn(async move {
-                let done = match (p.queue, p.start_track_id.clone()) {
-                    (SiriQueue::Now, start) => player.play_context_from(p.context, start, None, Some(p.shuffle)).await,
-                    (SiriQueue::Next, Some(id)) => player.queue_add(vec![id], AddAt::Next).await,
-                    (SiriQueue::Later, Some(id)) => player.queue_add(vec![id], AddAt::End).await,
-                    (SiriQueue::Next, None) => player.queue_context_at(p.context, AddAt::Next).await,
-                    (SiriQueue::Later, None) => player.queue_context_at(p.context, AddAt::End).await,
-                };
-                if let Err(e) = done {
-                    tracing::warn!("Siri play failed: {e}");
-                    return;
-                }
-                if let (Some(r), SiriQueue::Now) = (p.repeat, p.queue)
-                    && let Err(e) = player.set_repeat(r).await
-                {
-                    tracing::warn!("Siri repeat failed: {e}");
-                }
-            });
-            true
-        }
+        Decided::Resume => started(async move { player.resume().await }),
+        Decided::Play(p) => started(async move {
+            match (p.queue, p.start_track_id.clone()) {
+                (SiriQueue::Now, start) => player.play_context_from(p.context, start, None, Some(p.shuffle)).await?,
+                (SiriQueue::Next, Some(id)) => player.queue_add(vec![id], AddAt::Next).await?,
+                (SiriQueue::Later, Some(id)) => player.queue_add(vec![id], AddAt::End).await?,
+                (SiriQueue::Next, None) => player.queue_context_at(p.context, AddAt::Next).await?,
+                (SiriQueue::Later, None) => player.queue_context_at(p.context, AddAt::End).await?,
+            }
+            if let (Some(r), SiriQueue::Now) = (p.repeat, p.queue) {
+                player.set_repeat(r).await?;
+            }
+            Ok::<(), crate::error::AppError>(())
+        }),
         Decided::Get(input) => {
             let Some(taps) = app.try_state::<crate::lidarr::tap::Taps>().map(|t| t.inner().clone()) else { return false };
             let get = async move {
@@ -570,6 +560,28 @@ fn act_play(app: &AppHandle<Wry>, d: Decided) -> bool {
                 }
                 Getting::NothingFits | Getting::Failed => false,
             }
+        }
+    }
+}
+
+/// Runs a play, queue or resume and answers from how it went, waiting up to
+/// [`PLAY_WAIT`] (iOS wants audio going when Siri gets the answer). Still
+/// going after that counts as started; it carries on.
+fn started(work: impl std::future::Future<Output = crate::error::AppResult<()>> + Send + 'static) -> bool {
+    let task = tauri::async_runtime::spawn(work);
+    match tauri::async_runtime::block_on(async { tokio::time::timeout(PLAY_WAIT, task).await }) {
+        Ok(Ok(Ok(()))) => true,
+        Ok(Ok(Err(e))) => {
+            tracing::warn!("Siri play failed: {e}");
+            false
+        }
+        Ok(Err(e)) => {
+            tracing::warn!("Siri play stopped: {e}");
+            false
+        }
+        Err(_) => {
+            tracing::info!("Siri: playing is still starting");
+            true
         }
     }
 }
@@ -607,22 +619,28 @@ fn affinity(app: &AppHandle<Wry>, ask: &SiriAsk, dislike: bool) -> bool {
             .is_ok();
     }
     let Some(db) = app.try_state::<DbHandle>().map(|d| d.inner().clone()) else { return false };
-    if crate::settings::load(&db).siri_dislike_hides
-        && let Some(hidden) = app.try_state::<crate::hidden::Hidden>()
-    {
+    let player = app.try_state::<PlayerHandle>().map(|p| p.inner().clone());
+    let playing = player.as_ref().is_some_and(|p| {
+        tauri::async_runtime::block_on(p.state()).ok().and_then(|s| s.track).is_some_and(|t| t.id == id)
+    });
+    let Some(todo) = siri::dislike(crate::settings::load(&db).siri_dislike_hides, playing) else {
+        tracing::info!("Siri: dislike set to skip only, and the song isn't playing");
+        return false;
+    };
+    if todo.hide {
+        let Some(hidden) = app.try_state::<crate::hidden::Hidden>() else { return false };
         let req = crate::hidden::HideRequest { kind: crate::hidden::HiddenKind::Track, id: id.clone(), title, subtitle: None, thumb: None };
         if let Err(e) = hidden.set(req, true) {
             tracing::warn!("Siri: the song couldn't be hidden: {e}");
             return false;
         }
     }
-    let Some(player) = app.try_state::<PlayerHandle>().map(|p| p.inner().clone()) else { return true };
-    tauri::async_runtime::block_on(async move {
-        let playing = player.state().await.ok().and_then(|s| s.track).is_some_and(|t| t.id == id);
-        if playing && let Err(e) = player.next().await {
-            tracing::warn!("Siri: the song couldn't be skipped: {e}");
-        }
-    });
+    if let (true, Some(player)) = (todo.skip, player)
+        && let Err(e) = tauri::async_runtime::block_on(player.next())
+    {
+        tracing::warn!("Siri: the song couldn't be skipped: {e}");
+        return false;
+    }
     true
 }
 
@@ -691,7 +709,12 @@ extern "C-unwind" fn handler_for_intent(
 /// so it attaches nothing). A real screen connecting later is handled as
 /// for a car-first start. Main thread only; does nothing once started.
 fn start_core() {
-    if APP.get().is_some() || MainThreadMarker::new().is_none() {
+    if APP.get().is_some() {
+        return;
+    }
+    if MainThreadMarker::new().is_none() {
+        tracing::info!("Siri: asked off the main thread; starting the app core there");
+        dispatch2::DispatchQueue::main().exec_async(start_core);
         return;
     }
     static ONCE: std::sync::Once = std::sync::Once::new();
