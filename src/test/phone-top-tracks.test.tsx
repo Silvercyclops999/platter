@@ -90,6 +90,19 @@ describe("the pills on the artist page", () => {
     expect((await mock.settingsGet()).popularSource).toBe("global");
   });
 
+  it("asks for the list again only once a slow save has landed", async () => {
+    const { id, all, yours } = await artistWithTwoOrders();
+    await useSettingsOf({ infoListenbrainz: true, popularSource: "myPlays" });
+    render(<PhoneArtist id={id} />);
+    const section = await screen.findByRole("region", { name: "Top tracks" });
+    const list = section.querySelector("ul")!;
+    await waitFor(() => expect(shownTitles(list).slice(0, yours.length)).toEqual(yours));
+    const save = mock.settingsSet.bind(mock);
+    vi.spyOn(mock, "settingsSet").mockImplementation((patch) => new Promise((ok) => setTimeout(ok, 300)).then(() => save(patch)));
+    fireEvent.click(within(section).getByRole("button", { name: "All time" }));
+    await waitFor(() => expect(shownTitles(list).slice(0, all.length)).toEqual(all), { timeout: 3000 });
+  });
+
   it("All time with no source on turns ListenBrainz on", async () => {
     const { id } = await artistWithTwoOrders();
     await useSettingsOf({ popularSource: "global" });

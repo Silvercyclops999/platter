@@ -93,22 +93,29 @@ export function PhoneArtist({ id }: { id: string }) {
   const lidarrReady = useGetSpots();
   const [allTop, setAllTop] = useState(false);
   const hero = useRef<HTMLDivElement>(null);
-  const firstRank = useRef(rank);
+  // Bumped once a pill's choice is saved: the core ranks by the new setting
+  // only then, so the list and everyone's list are asked again after it.
+  const [saved, setSaved] = useState(0);
+  const asked = useRef(`${rank}:${saved}`);
   useEffect(() => {
-    if (rank === firstRank.current) return;
-    firstRank.current = rank;
+    const key = `${rank}:${saved}`;
+    if (key === asked.current) return;
+    asked.current = key;
     reload();
-  }, [rank, reload]);
+  }, [rank, saved, reload]);
   // Everyone's list comes from the artist's info; until it's here (or a
   // short wait runs out) the rows are dimmed rather than shown in the wrong order.
+  const arrived = useRef(false);
   useEffect(() => {
     if (rank !== "all") return;
     let alive = true;
+    arrived.current = false;
     setGaveUp(false);
     backend.artistInfo(id).catch(() => {});
     const timer = setTimeout(() => alive && setGaveUp(true), POPULAR_WAIT_MS);
     const done = (e: { id: string }) => {
       if (e.id !== id) return;
+      arrived.current = true;
       setGaveUp(true);
       reload();
     };
@@ -118,7 +125,15 @@ export function PhoneArtist({ id }: { id: string }) {
       clearTimeout(timer);
       un.then((f) => f());
     };
-  }, [id, rank, reload]);
+  }, [id, rank, saved, reload]);
+  // The list can land before the page's first answer, which then still waits for it.
+  useEffect(() => {
+    if (arrived.current && loaded?.popularPending) reload();
+  }, [loaded, reload]);
+  const pick = async (r: TopRank) => {
+    await updateSettings(rankPatch(r, useSettings.getState().settings));
+    setSaved((n) => n + 1);
+  };
   // The shelves come a frame after the header, so the page opens at once.
   const [rest, setRest] = useState(false);
   useEffect(() => {
@@ -196,7 +211,7 @@ export function PhoneArtist({ id }: { id: string }) {
                 </button>
               )}
             </div>
-            <Pills label="Rank top tracks by" items={RANKS} value={rank} onChange={(r) => void updateSettings(rankPatch(r, useSettings.getState().settings))} />
+            <Pills label="Rank top tracks by" items={RANKS} value={rank} onChange={(r) => void pick(r)} />
             <ul className={`ph-songs ${waiting ? "ph-songs--waiting" : ""}`} aria-busy={waiting || undefined}>
               {top.map((t, i) => (
                 <SongRow
