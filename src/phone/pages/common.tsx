@@ -39,6 +39,7 @@ export function BackBar({ title, after = 160, right }: { title?: string; after?:
       if (!frame) frame = requestAnimationFrame(check);
     };
     page.addEventListener("scroll", onScroll, { passive: true });
+    check();
     return () => {
       page.removeEventListener("scroll", onScroll);
       cancelAnimationFrame(frame);
@@ -113,7 +114,7 @@ export function SongRow({
             {playing && index === undefined && <PlayingBars />}
             {track.title}
           </span>
-          <span className="ph-row__sub">
+          <span className={`ph-row__sub ${sub === "" ? "is-marks-only" : ""}`}>
             <RowGlyphs trackId={track.id} />
             {sub ?? trackArtistLine(track)}
           </span>

@@ -11,7 +11,7 @@ import { ChevronDown, ListMusic, MicVocal, MoreHorizontal, Pause, Play, Repeat, 
 import { memo, useDeferredValue, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { Art, preloadArt, sleeveHue } from "../components/Art";
 import { contextRoute, nextInQueue } from "../shell/nowPlaying";
-import { holdLightStatusBar, mixIsDark } from "./statusBar";
+import { holdLightStatusBar, mixIsDark, STATUS_LAYER } from "./statusBar";
 import { Slider } from "../components/Slider";
 import { formatDuration, trackArtistLine } from "../lib/format";
 import type { QueueContextInfo, Track } from "../lib/types";
@@ -145,7 +145,7 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
   const darkTop = !!art || mixIsDark(vivid, NP_TOP_TINT);
   useEffect(() => {
     if (closing || document.documentElement.dataset.themeBase !== "light" || !darkTop) return;
-    const release = holdLightStatusBar();
+    const release = holdLightStatusBar(STATUS_LAYER.nowPlaying);
     // Closing, the status bar changes once the screen has gone, not under the slide.
     return () => void (usePhoneUi.getState().nowPlaying ? release() : setTimeout(release, CLOSE_MS));
   }, [darkTop, closing]);

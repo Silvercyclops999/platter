@@ -32,7 +32,7 @@ import { useWrapped, wrapped } from "../stores/wrapped";
 import { usePhoneForm } from "../phone/form";
 import { lockAxis, release as swipeOutcome, type Axis } from "../phone/gestures";
 import { EDGE_PX, edgeClaims, edgeRelease } from "../phone/motion";
-import { holdLightStatusBar } from "../phone/statusBar";
+import { holdLightStatusBar, STATUS_LAYER } from "../phone/statusBar";
 import "./wrapped.css";
 
 /** How long a card stays before the next one. */
@@ -495,7 +495,7 @@ export function WrappedView({ year, onClose }: { year: number; onClose: () => vo
   // scrolls or rubber-bands, and the page is as it was when it closes.
   useEffect(() => (onPhone && root.current ? lockUnder(root.current) : undefined), [onPhone]);
   // The stories are dark on every look: light status bar text while they show.
-  useEffect(() => (onPhone ? holdLightStatusBar() : undefined), [onPhone]);
+  useEffect(() => (onPhone ? holdLightStatusBar(STATUS_LAYER.wrapped) : undefined), [onPhone]);
 
   const onDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     // One finger at a time: a second one while the first is down is ignored.

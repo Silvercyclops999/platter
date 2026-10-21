@@ -129,6 +129,14 @@
 .ph-play--page { display: inline-flex; align-items: center; gap: 8px; width: auto; height: 44px; padding: 0 20px 0 16px; border-radius: 999px; font-size: 15px; font-weight: 600; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2); }
 .ph-pill-btn { display: inline-flex; align-items: center; gap: 8px; width: auto; height: 44px; padding: 0 16px; border-radius: 999px; font-size: 15px; font-weight: 600; color: var(--color-text-primary); box-shadow: inset 0 0 0 1px var(--color-border); }
 .ph-pill-btn.is-on { color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }
+/* A narrow phone, or a row with more beside it (an artist's Follow), keeps Shuffle to its mark. */
+.ph-actions { flex-wrap: wrap; row-gap: 8px; container-type: inline-size; }
+.ph-actions--busy .ph-pill-btn { width: 44px; padding: 0; justify-content: center; }
+.ph-actions--busy .ph-pill-btn > span { display: none; }
+@container (max-width: 330px) {
+  .ph-pill-btn { width: 44px; padding: 0; justify-content: center; }
+  .ph-pill-btn > span { display: none; }
+}
 .ph-play--small { width: 56px; height: 56px; }
 .ph-play--row { width: 40px; height: 40px; box-shadow: none; }
 
@@ -228,8 +236,8 @@
 /* The level bars before a playing song's title, on rows without a number. */
 .ph-row__title > .ph-eq { margin-right: 7px; vertical-align: 1px; }
 .ph-row__sub { display: block; font-size: 13px; line-height: 1.3; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* On an album the artist line goes when it only repeats the album's artist. */
-.ph-row__sub:empty { display: none; }
+/* On an album the artist line goes when it only repeats the album's artist (its marks, like E, stay). */
+.ph-row__sub.is-marks-only:has(> .ph-glyphs:empty) { display: none; }
 .ph-row .art, .ph-song .art, .ph-lib-row .art, .ph-queue .art { border-radius: 4px; flex: none; }
 
 /* ---------------------------------------------------------------- tabs and dock */
@@ -295,7 +303,7 @@
 .ph-mini .ph-icon-btn, .ph-mini .ph-output { color: var(--color-text-primary); }
 .ph-mini__play { width: 48px; height: 48px; }
 .ph-mini__progress { position: absolute; left: 0; right: 0; top: 0; height: 2px; background: color-mix(in srgb, var(--color-ink) 8%, transparent); overflow: hidden; }
-.ph-mini__progress-fill { position: absolute; inset: 0; background: var(--color-playing, var(--color-accent)); transform-origin: left center; transition: transform 250ms linear; }
+.ph-mini__progress-fill { position: absolute; inset: 0; background: var(--color-accent); transform-origin: left center; transition: transform 250ms linear; }
 
 .ph-output { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; min-width: 44px; justify-content: center; color: var(--color-text-secondary); font-size: 13px; font-weight: 600; }
 .ph-output.is-remote { color: var(--color-accent) !important; }

@@ -8,7 +8,7 @@ import { DEFAULT_SETTINGS } from "../lib/types";
 import { usePhoneForm } from "../phone/form";
 import { PhoneShell } from "../phone/PhoneShell";
 import { usePhoneUi } from "../phone/phoneUi";
-import { heldStatusBar, holdLightStatusBar, holdStatusBar, mixIsDark, resetStatusBarHolds } from "../phone/statusBar";
+import { heldStatusBar, holdLightStatusBar, holdStatusBar, mixIsDark, resetStatusBarHolds, STATUS_LAYER } from "../phone/statusBar";
 import { LYRICS_GROUND, LYRICS_TINT } from "../phone/LyricsScreen";
 import { LibraryChips } from "../shell/LibraryControls";
 import { useRouter } from "../stores/router";
@@ -85,8 +85,13 @@ describe("the phone", () => {
     expect(first).toHaveAccessibleName(`Play ${album.title}`);
     expect(within(first).getByText("Play")).toBeInTheDocument();
     const songs = within(page as HTMLElement).getByRole("list", { name: "Songs" });
-    const subs = [...songs.querySelectorAll(".ph-row__sub")].map((s) => s.textContent);
-    expect(subs.some((s) => s === album.artistTitle)).toBe(false);
+    const subs = [...songs.querySelectorAll(".ph-row__sub")];
+    expect(subs.some((s) => s.textContent === album.artistTitle)).toBe(false);
+    // The emptied line holds only its marks, so phone.css hides it rather than leaving a blank line.
+    const bare = subs.filter((s) => !s.textContent);
+    expect(bare.length).toBeGreaterThan(0);
+    expect(bare.every((s) => s.matches(".is-marks-only:has(> .ph-glyphs:empty)"))).toBe(true);
+    expect(phoneCss).toMatch(/\.ph-row__sub\.is-marks-only:has\(> \.ph-glyphs:empty\) \{ display: none; \}/);
   });
 
   it("the mini player is the look's own panel with the progress line on top, never the cover's colour", () => {
@@ -110,6 +115,15 @@ describe("the phone", () => {
     dark();
     expect(heldStatusBar()).toBe(true);
     light();
+    expect(heldStatusBar()).toBeNull();
+    // Lyrics sit over now playing: now playing holding again later doesn't take the clock from them.
+    const lyrics = holdStatusBar(false, STATUS_LAYER.lyrics);
+    const np = holdStatusBar(true, STATUS_LAYER.nowPlaying);
+    expect(heldStatusBar()).toBe(false);
+    lyrics.set(true);
+    expect(heldStatusBar()).toBe(true);
+    lyrics();
+    np();
     expect(heldStatusBar()).toBeNull();
     // A beige cover makes the lyrics page light; a deep red one keeps it dark.
     expect(mixIsDark("#E9DCC0", LYRICS_TINT, LYRICS_GROUND)).toBe(false);

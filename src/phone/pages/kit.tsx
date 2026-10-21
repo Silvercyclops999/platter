@@ -341,7 +341,7 @@ export function PhoneShuffleToggle({ id, kind, name }: { id: string; kind: PlayC
       onClick={() => void player.cycleContextShuffle(id, kind, smartAllowed)}
     >
       <Shuffle size={16} aria-hidden="true" />
-      <span aria-hidden="true">{mode === "smart" ? "Smart shuffle" : "Shuffle"}</span>
+      <span aria-hidden="true">Shuffle</span>
     </button>
   );
 }

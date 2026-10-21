@@ -124,7 +124,7 @@ export function PhoneArtist({ id }: { id: string }) {
       <h1 className="ph-artist__name">{artist.title}</h1>
       <div className="ph-artist__body">
         <p className="ph-artist__lib tabular">{inLibraryLine(albums.length, songs)}</p>
-        <div className="ph-actions">
+        <div className="ph-actions ph-actions--busy">
           <div className="ph-actions__left">
             <PlayPill playing={playing} label={playing ? "Pause" : `Play ${artist.title}`} onClick={() => (here ? void player.toggle() : void player.playArtist(artist.id))} />
             <PhoneShuffleToggle id={artist.id} kind="artist" name={artist.title} />
