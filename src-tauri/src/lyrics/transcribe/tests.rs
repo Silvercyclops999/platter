@@ -1430,6 +1430,82 @@ async fn a_failed_voice_model_download_is_quiet_and_waits_before_trying_again() 
     assert_eq!(*f.events.done.lock(), vec![("801".to_string(), true), ("802".to_string(), true)]);
 }
 
+// ---------------------------------------------------------------- done again
+
+fn heard_as(f: &Fx, id: &str) -> Option<i64> {
+    let id = id.to_owned();
+    f.db.read(move |c| Ok(c.query_row("SELECT heard FROM lyrics_auto_heard WHERE track_id = ?1", [&id], |r| r.get(0)).ok())).unwrap()
+}
+
+/// A transcription made the old way, as the upgrade finds it.
+fn old_transcription(f: &Fx, id: &str) {
+    let id = id.to_owned();
+    f.db.write(move |c| {
+        user::put_auto(c, &id, "[00:01.00]<00:01.00>Old <00:01.40>words\n", "small", 1)?;
+        store::set_heard(c, &id, store::HEARD_OLD)
+    })
+    .unwrap();
+}
+
+#[tokio::test]
+async fn songs_transcribed_the_old_way_are_done_again_but_never_the_users_own() {
+    let f = fx();
+    install(&f).await;
+    old_transcription(&f, "801");
+    old_transcription(&f, "802");
+    // The user edited 802 since; 803 came from another device (never heard here).
+    f.db.write(|c| {
+        user::put(c, "802", "My own words", false, 2)?;
+        user::put_auto(c, "803", "[00:01.00]<00:01.00>Shared\n", "turbo", 3)?;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(f.t.redo_old().await, 1);
+    until(&f.t, "done again", |s| idle(s) && !f.events.done.lock().is_empty()).await;
+    assert_eq!(*f.events.done.lock(), vec![("801".to_string(), true)]);
+    let own = f.db.read(|c| user::get(c, "801")).unwrap().unwrap();
+    assert!(own.text.contains("Hello"), "{}", own.text);
+    assert_eq!(heard_as(&f, "801"), Some(store::HEARD_MIX));
+    assert_eq!(f.db.read(|c| user::get(c, "802")).unwrap().unwrap().text, "My own words");
+    assert_eq!(f.rec.runs.load(Ordering::SeqCst), 1);
+    assert_eq!(f.t.redo_old().await, 0, "each is done once");
+}
+
+#[tokio::test]
+async fn with_the_voice_ready_songs_heard_from_the_mix_are_done_again() {
+    let f = fx_voice();
+    install(&f).await;
+    f.voice_models.download(voice::Voice::Demucs, &*f.fetch, &AtomicBool::new(false), &|_, _| {}).await.unwrap();
+    old_transcription(&f, "801");
+    f.db.write(|c| store::set_heard(c, "801", store::HEARD_MIX)).unwrap();
+    assert_eq!(f.t.redo_old().await, 1);
+    until(&f.t, "done again", |s| idle(s) && !f.events.done.lock().is_empty()).await;
+    assert_eq!(f.sep.runs.load(Ordering::SeqCst), 1);
+    assert_eq!(heard_as(&f, "801"), Some(store::HEARD_VOICE));
+}
+
+#[tokio::test]
+async fn a_song_done_again_that_now_has_official_lyrics_isnt_queued_again() {
+    let f = fx();
+    install(&f).await;
+    old_transcription(&f, "801");
+    f.other.1.lock().push(("801".into(), Official::Matched));
+    assert_eq!(f.t.redo_old().await, 1);
+    until_true("noted", || heard_as(&f, "801") == Some(store::HEARD_VOICE)).await;
+    until(&f.t, "idle", idle).await;
+    assert_eq!(f.rec.runs.load(Ordering::SeqCst), 0);
+    assert_eq!(f.t.redo_old().await, 0);
+}
+
+#[tokio::test]
+async fn nothing_is_done_again_while_transcription_is_off() {
+    let f = fx();
+    install(&f).await;
+    old_transcription(&f, "801");
+    f.t.set_options(false, Some(ModelKind::Small));
+    assert_eq!(f.t.redo_old().await, 0);
+}
+
 // ---------------------------------------------------------------- audio
 
 #[test]

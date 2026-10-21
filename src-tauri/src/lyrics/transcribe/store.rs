@@ -29,6 +29,37 @@ pub fn save_timed(c: &Connection, track_id: &str, body: &str, model: &str, now: 
     user::put_auto_timed(c, track_id, body, model, now, timing)
 }
 
+/// How a transcription was heard: the whole mix with nothing to go on, the
+/// mix with the title hint and unsure lines left out, or the voice alone.
+pub const HEARD_OLD: i64 = 1;
+pub const HEARD_MIX: i64 = 2;
+pub const HEARD_VOICE: i64 = 3;
+
+/// Note how the song's transcription (or its "no words found") was heard.
+pub fn set_heard(c: &Connection, track_id: &str, heard: i64) -> AppResult<()> {
+    c.execute(
+        "INSERT INTO lyrics_auto_heard (track_id, heard) VALUES (?1, ?2)
+         ON CONFLICT (track_id) DO UPDATE SET heard = excluded.heard",
+        params![track_id, heard],
+    )?;
+    Ok(())
+}
+
+/// Songs this device transcribed (or found no words in) heard worse than
+/// `below`, the last played first. Lyrics the user wrote or edited aren't
+/// among them, nor transcriptions that came from another device.
+pub fn redo_due(c: &Connection, below: i64, limit: usize) -> AppResult<Vec<String>> {
+    let mut st = c.prepare(
+        "SELECT h.track_id FROM lyrics_auto_heard h LEFT JOIN tracks t ON t.id = h.track_id
+         WHERE h.heard < ?1
+           AND (EXISTS (SELECT 1 FROM user_lyrics u WHERE u.track_id = h.track_id AND u.auto IS NOT NULL)
+                OR EXISTS (SELECT 1 FROM lyrics_auto_empty e WHERE e.track_id = h.track_id))
+         ORDER BY t.last_viewed_at IS NULL, t.last_viewed_at DESC, h.track_id LIMIT ?2",
+    )?;
+    let rows = st.query_map(params![below, limit as i64], |r| r.get(0))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 /// Whether the song needs no transcribing: it has lyrics in the app
 /// (written, edited or transcribed) or was transcribed with no words found.
 pub fn done(c: &Connection, track_id: &str) -> AppResult<bool> {

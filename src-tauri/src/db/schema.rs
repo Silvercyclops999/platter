@@ -1399,6 +1399,18 @@ CREATE TABLE IF NOT EXISTS import_bring_albums (
     reason           TEXT
 );
 "#,
+    // v49: how each transcription was heard (lyrics::transcribe::store
+    // HEARD_*), so ones made before the title hint, the sure check and the
+    // separated voice are done again in the background. Those already here
+    // were made the old way.
+    r#"
+CREATE TABLE IF NOT EXISTS lyrics_auto_heard (
+    track_id TEXT PRIMARY KEY,
+    heard    INTEGER NOT NULL
+) WITHOUT ROWID;
+INSERT OR IGNORE INTO lyrics_auto_heard (track_id, heard) SELECT track_id, 1 FROM user_lyrics WHERE auto IS NOT NULL;
+INSERT OR IGNORE INTO lyrics_auto_heard (track_id, heard) SELECT track_id, 1 FROM lyrics_auto_empty;
+"#,
 ];
 
 #[cfg(test)]

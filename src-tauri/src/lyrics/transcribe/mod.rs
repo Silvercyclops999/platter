@@ -414,6 +414,8 @@ pub struct VoiceDeps {
     pub models: ModelStore<voice::Voice>,
 }
 
+/// Songs transcribed the old way queued again per upkeep round.
+const REDO_BATCH: usize = 25;
 /// After a failed voice model download, the next try waits this long.
 const VOICE_RETRY: Duration = Duration::from_secs(10 * 60);
 /// Of the transcribing percent, the part the voice separation takes.
@@ -544,8 +546,9 @@ impl Transcriber {
 
     /// Idle upkeep, every little while once nothing is queued and the
     /// computer is calm: transcriptions stored with an older timing are
-    /// moved into place, and transcribed songs not looked at for a week are
-    /// looked at for official synced lyrics again.
+    /// moved into place, transcribed songs not looked at for a week are
+    /// looked at for official synced lyrics again, and songs transcribed
+    /// the old way are done again a few at a time.
     async fn upkeep(self) {
         let pacer = self.inner.deps.pacer.clone();
         // Rounds to skip the official look after it couldn't run.
@@ -572,7 +575,39 @@ impl Transcriber {
             if official && self.recheck_official().await.is_none() {
                 official_wait = 6;
             }
+            self.redo_old().await;
         }
+    }
+
+    /// Queues songs transcribed worse than this computer can now (the old
+    /// way, or without the voice where it can be separated) to be done
+    /// again in the background, the last played first, a few each round.
+    /// Not while transcription is off, broken, or left to the Bridge.
+    /// Returns how many were queued.
+    pub async fn redo_old(&self) -> usize {
+        let rec = &self.inner.deps.recognizer;
+        if !self.inner.st.lock().enabled || rec.unavailable().is_some() || rec.crashed_too_often() || self.deferring() || self.working() {
+            return 0;
+        }
+        let best = if self.voice_model().is_some() { store::HEARD_VOICE } else { store::HEARD_MIX };
+        let ids = self.inner.deps.db.read_async(move |c| store::redo_due(c, best, REDO_BATCH)).await.unwrap_or_else(|e| {
+            tracing::warn!("old transcriptions couldn't be listed: {e}");
+            Vec::new()
+        });
+        if ids.is_empty() {
+            return 0;
+        }
+        tracing::info!(songs = ids.len(), "transcribing songs again with the better pipeline");
+        {
+            let mut st = self.inner.st.lock();
+            for id in &ids {
+                st.queue.push_back(Job { track_id: id.clone(), background: true, check_other: false, now: false, redo: true, batch: true, follow: false });
+            }
+            st.batch.total += ids.len();
+        }
+        self.inner.wake.notify_one();
+        self.emit(true);
+        ids.len()
     }
 
     /// Whether upkeep has work: old timing to move, songs due a look.
@@ -1451,6 +1486,13 @@ impl Transcriber {
                 st.error = Some(Failure { kind: FailureKind::Transcribe, message: STOPPED.into(), track_id: None });
             }
         }
+        // Done again or not, a song isn't queued again and again.
+        if job.redo && matches!(outcome, Outcome::Skipped | Outcome::Failed) {
+            let id = job.track_id.clone();
+            if let Err(e) = self.inner.deps.db.write_async(move |c| store::set_heard(c, &id, store::HEARD_VOICE)).await {
+                tracing::warn!("a song done again wasn't noted: {e}");
+            }
+        }
         self.emit(true);
     }
 
@@ -1564,8 +1606,10 @@ impl Transcriber {
         if done_before && !job.redo {
             return Outcome::Skipped;
         }
-        // Transcribed on another of the user's devices for this file.
-        if let Some(s) = self.shared()
+        // Transcribed on another of the user's devices for this file (a
+        // song done again is heard here: what's shared is the old one).
+        if !job.redo
+            && let Some(s) = self.shared()
             && let Some(found) = s.take(&id).await
         {
             d.events.done(&id, found);
@@ -1708,7 +1752,8 @@ impl Transcriber {
                 return Outcome::Failed;
             }
         };
-        self.finish_song(job, kind, segments, seconds, started, threads, cancel).await
+        let heard = if voiced { store::HEARD_VOICE } else { store::HEARD_MIX };
+        self.finish_song(job, kind, segments, seconds, started, threads, heard, cancel).await
     }
 
     /// Reads and decodes a song (in stereo too when its voice will be separated).
@@ -1813,6 +1858,7 @@ impl Transcriber {
         seconds: usize,
         started: Instant,
         threads: usize,
+        heard: i64,
         cancel: &Stop,
     ) -> Outcome {
         let d = &self.inner.deps;
@@ -1833,7 +1879,14 @@ impl Transcriber {
         );
         let saved = {
             let (id, body, model, now) = (id.clone(), body.clone(), model_name(kind), now_s());
-            d.db.write_async(move |c| store::save(c, &id, &body, model, now)).await
+            d.db.write_async(move |c| {
+                let saved = store::save(c, &id, &body, model, now)?;
+                if saved {
+                    store::set_heard(c, &id, heard)?;
+                }
+                Ok(saved)
+            })
+            .await
         };
         match saved {
             Ok(true) => {
