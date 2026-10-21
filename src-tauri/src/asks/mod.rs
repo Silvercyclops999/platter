@@ -213,6 +213,10 @@ pub struct Incoming {
     /// It went through without a yes (Straight away, or already coming).
     #[serde(default)]
     pub by_itself: bool,
+    /// Only listed here (taken while catching up, or without Lidarr): this
+    /// device hasn't answered it, nor told the owner.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub quiet: bool,
 }
 
 /// What the owner's Platter last said this device may do.
@@ -852,8 +856,21 @@ impl Asks {
         // Seen before (sent again, or from the relay's memory): say where it stands.
         let known = self.inner.incoming.lock().iter().find(|a| a.id == id).cloned();
         if let Some(a) = known {
-            if a.person_id == user {
+            if a.person_id != user {
+                return;
+            }
+            if !a.quiet {
                 self.tell_status(&a).await;
+                return;
+            }
+            // Only listed so far. Sent again now and still waiting means no
+            // other device took it, so this one does, if it can get music.
+            if !stale && a.state == AskState::Requested && self.inner.host.lidarr_usable() {
+                if let Some(x) = self.inner.incoming.lock().iter_mut().find(|x| x.id == id) {
+                    x.quiet = false;
+                }
+                self.save_incoming();
+                self.take(user, name, &id).await;
             }
             return;
         }
@@ -874,6 +891,7 @@ impl Asks {
             created_at: now,
             updated_at: now,
             by_itself: false,
+            quiet: false,
         };
         let refuse = |a: &mut Incoming, note: &str| {
             a.state = AskState::Refused;
@@ -911,17 +929,25 @@ impl Asks {
             }
             return;
         }
-        let waiting = a.state == AskState::Requested;
-        self.inner.incoming.lock().push(a.clone());
+        a.quiet = quiet;
+        self.inner.incoming.lock().push(a);
         self.prune();
         self.save_incoming();
-        if quiet {
-            return;
+        if !quiet {
+            self.take(user, name, &id).await;
         }
-        if waiting && rule == Rule::Straight {
+    }
+
+    /// Answer a request listed here: straight through when the person's rule
+    /// allows, then tell them where it stands, and the owner if it waits.
+    async fn take(&self, user: &str, name: &str, id: &str) {
+        let Some(a) = self.inner.incoming.lock().iter().find(|x| x.id == id).cloned() else { return };
+        let settings = self.inner.host.settings();
+        let now = self.now();
+        if a.state == AskState::Requested && settings.rule(user) == Rule::Straight {
             let used = self.inner.sent.lock().iter().filter(|(u, at)| u == user && now.saturating_sub(*at) < WEEK_MS).count();
             if used < settings.weekly_limit as usize {
-                match self.approve(&id, true).await {
+                match self.approve(id, true).await {
                     Ok(done) if matches!(done.incoming.state, AskState::Getting | AskState::Ready | AskState::NotFound) => {
                         self.inner.sent.lock().push((user.to_string(), now));
                         self.save_sent();
@@ -932,7 +958,7 @@ impl Asks {
                     Err(e) => tracing::info!(kind = e.kind(), "requests: a straight-away request waits for a yes"),
                 }
             } else {
-                self.set_note(&id, OVER_LIMIT_NOTE);
+                self.set_note(id, OVER_LIMIT_NOTE);
             }
         }
         let a = self.inner.incoming.lock().iter().find(|x| x.id == id).cloned().unwrap_or(a);

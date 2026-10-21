@@ -438,6 +438,46 @@ async fn a_device_catching_up_never_answers_or_gets_what_another_device_handled(
 }
 
 #[tokio::test]
+async fn a_request_caught_up_on_is_taken_when_its_sent_again_and_nobody_answered() {
+    let ntfy = FakeNtfy::start().await;
+    let o = owner(&ntfy);
+    o.asks.inner.stale_ms.store(0, Ordering::SeqCst);
+    let p = Pair::new(&sam().token, SERVER);
+    let old = now_ms() - 3_600_000;
+    // Sent while this (the only) owner device was off; the relay replays them.
+    ntfy.inject(&p.up.topic, &wire::seal_up(&p, &Up::Ask { id: "waits".into(), item: item("Reedbeds"), at: old }).unwrap());
+    ntfy.inject(&p.up.topic, &wire::seal_up(&p, &Up::Ask { id: "goes".into(), item: item("Saltmarsh"), at: old }).unwrap());
+    start(&o);
+    until("both listed", || incoming_state(&o, "waits").is_some() && incoming_state(&o, "goes").is_some()).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    // The ids of requests this device has told Sam about.
+    let statuses = || -> Vec<String> {
+        let said = ntfy.published().into_iter().filter(|m| m.topic == p.down.topic).filter_map(|m| wire::open_down(&p, &m.body).ok());
+        said.filter_map(|m| match m {
+            wire::Down::Status { id, .. } => Some(id),
+            _ => None,
+        })
+        .collect()
+    };
+    assert!(statuses().is_empty() && o.host.notices().is_empty(), "caught up on: only listed");
+    // The person's Platter hasn't heard back, so it sends them again: nobody
+    // else took them, so this device does. Sam may ask first for one...
+    ntfy.inject(&p.up.topic, &wire::seal_up(&p, &Up::Ask { id: "waits".into(), item: item("Reedbeds"), at: now_ms() }).unwrap());
+    until("the owner told", || !o.host.notices().is_empty()).await;
+    until("sam told", || statuses().contains(&"waits".to_string())).await;
+    assert_eq!(incoming_state(&o, "waits"), Some(AskState::Requested));
+    // ...and goes straight through for the other.
+    o.host.rule(&sam().user_id, Rule::Straight);
+    ntfy.inject(&p.up.topic, &wire::seal_up(&p, &Up::Ask { id: "goes".into(), item: item("Saltmarsh"), at: now_ms() }).unwrap());
+    until("it to go", || incoming_state(&o, "goes") == Some(AskState::Getting)).await;
+    assert_eq!(o.host.gets().len(), 1);
+    // Sent once more, it's only told where it stands.
+    ntfy.inject(&p.up.topic, &wire::seal_up(&p, &Up::Ask { id: "goes".into(), item: item("Saltmarsh"), at: now_ms() }).unwrap());
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(o.host.gets().len(), 1, "no second Get");
+}
+
+#[tokio::test]
 async fn a_refused_request_isnt_kept_and_people_are_limited_per_hour() {
     let ntfy = FakeNtfy::start().await;
     let (o, g) = pair(&ntfy, &sam()).await;
