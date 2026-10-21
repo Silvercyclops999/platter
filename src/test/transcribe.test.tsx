@@ -106,7 +106,7 @@ describe("Settings", () => {
     );
     await userEvent.click(await screen.findByRole("button", { name: "Write down the words" }));
     // Said plainly in the lyrics view and on the setting.
-    await waitFor(() => expect(screen.getAllByRole("alert").filter((a) => text.test(a.textContent ?? "")).length).toBe(2), { timeout: 3000 });
+    await waitFor(() => expect(screen.queryAllByRole("alert").filter((a) => text.test(a.textContent ?? "")).length).toBe(2), { timeout: 3000 });
     expect(useTranscribe.getState().status?.models[0].installed).toBe(false);
     // Trying again works.
     const view = document.querySelector<HTMLElement>(".lyrics-page__empty-wrap")!;
