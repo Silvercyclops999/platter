@@ -241,7 +241,7 @@ pub fn find_song(at: &Path, title: &str) -> Option<PathBuf> {
     if want.is_empty() {
         return None;
     }
-    let stem = |p: &PathBuf| fold(&p.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string());
+    let stem = |p: &PathBuf| fold(p.file_stem().and_then(|s| s.to_str()).unwrap_or_default());
     // The name with its track number off ("01 - Dawn"), then a name with it in.
     let exact = files.iter().find(|p| stem(p).trim_start_matches(|c: char| c.is_ascii_digit()) == want);
     if let Some(p) = exact {
@@ -671,6 +671,38 @@ impl Taps {
                 self.follow().await;
             }
             tokio::time::sleep(TAP_EVERY).await;
+        }
+    }
+}
+
+#[cfg(test)]
+pub mod tests_support {
+    use super::*;
+
+    /// A tap as the app would see one, for tests outside this module.
+    pub fn tap(id: &str, title: &str, artist: &str, album: &str) -> Tap {
+        Tap {
+            id: id.into(),
+            title: title.into(),
+            artist: artist.into(),
+            album: album.into(),
+            release_group_id: String::new(),
+            thumb: None,
+            duration_ms: Some(201_000),
+            phase: TapPhase::Downloading,
+            progress: None,
+            message: None,
+            request_id: String::new(),
+            timings: TapTimings::default(),
+            wanted: true,
+            from_download: false,
+            file: None,
+            track: None,
+            started: None,
+            scanned: false,
+            imported_at: None,
+            moved_at: None,
+            flagged: false,
         }
     }
 }
