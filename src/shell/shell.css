@@ -136,16 +136,10 @@
 .lib-head__title:focus-visible .lib-head__icon { width: 26px; opacity: 1; }
 .lib-head__text { white-space: nowrap; }
 
-/* Filter chips: one row that scrolls sideways if it ever overflows. */
-.lib-chips {
-  display: flex;
-  gap: var(--space-2);
-  padding: var(--space-1) 0 var(--space-2);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.lib-chips::-webkit-scrollbar { display: none; }
-.lib-chips .chip { flex: none; }
+/* Filter chips: one row that scrolls sideways if it ever overflows, with a
+   fade and an arrow at the edge that has more. */
+.lib-chips { padding: var(--space-1) 0 var(--space-2); }
+.lib-chips .chips { gap: var(--space-2); }
 .chip--sm { height: 32px; }
 
 /* More than one server: All servers or one (Settings, Library). */

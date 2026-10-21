@@ -2,7 +2,7 @@
 import { AlignJustify, Grid3x3, LayoutGrid, LibraryBig, List, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { IconButton } from "../components/Button";
-import { useRovingRow } from "../components/roving";
+import { ChipRow } from "../components/Tabs";
 import { openContextMenu } from "../components/ContextMenu";
 import {
   KIND_LABEL,
@@ -37,10 +37,10 @@ export function LibraryChips({
   shelf?: boolean;
 }) {
   const chips = chipRowWithDownloads(filter, sub, kinds, downloaded, shelf);
-  const roving = useRovingRow();
   if (chips.length === 0) return null;
   return (
-    <div role="group" aria-label="Show in library" className="lib-chips" {...roving}>
+    // One line that scrolls sideways, fading at an edge with more.
+    <ChipRow label="Show in library" className="lib-chips" scroll>
       {chips.map((c) => {
         const press = () => {
           const lib = useLibraryView.getState();
@@ -68,7 +68,7 @@ export function LibraryChips({
           </button>
         );
       })}
-    </div>
+    </ChipRow>
   );
 }
 

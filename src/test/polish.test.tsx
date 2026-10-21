@@ -134,4 +134,22 @@ describe("settings text", () => {
     expect(pagesCss).toMatch(/\.setting-row__title \{ font-size: var\(--font-size-lg\)/);
     expect(pagesCss).toMatch(/\.setting-row__desc \{[^}]*font-size: var\(--font-size-md\)/);
   });
+
+  it("narrow: the section dropdown sits in the header band, above what scrolls under it", () => {
+    const narrow = pagesCss.slice(pagesCss.indexOf("@container main (max-width: 900px) {\n  .settings__layout"));
+    expect(narrow).toMatch(/\.settings__nav \{ top: calc\(\(var\(--main-header-h, 64px\) - 40px\) \/ 2\); z-index: 11;/);
+    // Frames without a header keep it on a panel at the top edge.
+    expect(narrow).toMatch(/\.app\.frame \.settings__nav \{ top: 0;[^}]*background: var\(--color-bg-raised\)/);
+  });
+});
+
+describe("library chips", () => {
+  it("scroll sideways with a fade and an arrow at the edge that has more", async () => {
+    const { LibraryChips } = await import("../shell/LibraryControls");
+    render(<LibraryChips filter="all" sub={null} kinds={["playlist", "album", "artist"]} downloaded={{ available: true, on: false }} />);
+    const group = screen.getByRole("group", { name: "Show in library" });
+    expect(group).toHaveClass("chips--scroll");
+    expect(group.parentElement).toHaveClass("chips-scroll", "lib-chips");
+    expect(within(group).getByRole("button", { name: "Downloaded" })).toBeInTheDocument();
+  });
 });
