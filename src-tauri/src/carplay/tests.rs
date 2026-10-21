@@ -16,9 +16,14 @@ async fn synced(artists: usize, albums_per: usize) -> (DbHandle, tempfile::TempD
 #[tokio::test]
 async fn library_lists_play_what_they_show_and_stay_short() {
     let (db, _dir) = synced(30, 5).await;
-    let albums = db.read(|c| list(c, &CarList::Albums, 10.0)).unwrap();
-    assert_eq!(albums.len(), LIST_MAX, "150 albums are cut to the car's limit");
-    for a in &albums {
+    let all = db.read(|c| page(c, &CarList::Albums, 10.0, 0, 500)).unwrap();
+    assert!(all.len() <= LIST_MAX, "150 albums never make a list longer than our limit");
+    let CarAction::Turn { page: first, .. } = all[0].action else { panic!("150 albums open on their letters") };
+    let albums = db.read(|c| page(c, &CarList::Albums, 10.0, first, 500)).unwrap();
+    assert_eq!(albums[0].title, "All letters");
+    let albums: Vec<_> = albums.iter().filter(|a| !matches!(a.action, CarAction::Turn { .. })).collect();
+    assert!(!albums.is_empty());
+    for a in albums {
         assert!(!a.title.is_empty());
         assert!(a.subtitle.as_deref().is_some_and(|s| !s.is_empty()), "albums say who made them");
         assert!(matches!(&a.action, CarAction::Open(CarList::Songs { kind: ContextKind::Album, .. })), "an album opens to its songs");
@@ -26,6 +31,10 @@ async fn library_lists_play_what_they_show_and_stay_short() {
     let artists = db.read(|c| list(c, &CarList::Artists, 10.0)).unwrap();
     assert_eq!(artists.len(), 30);
     assert!(artists.iter().all(|a| matches!(&a.action, CarAction::Open(CarList::Artist { id, name }) if !id.is_empty() && *name == a.title)));
+    let names: Vec<&str> = artists.iter().map(|a| a.title.as_str()).collect();
+    let mut sorted = names.clone();
+    sorted.sort_by_key(|n| n.to_lowercase());
+    assert_eq!(names, sorted, "artists A to Z");
     let added = db.read(|c| list(c, &CarList::RecentlyAdded, 10.0)).unwrap();
     assert_eq!(added.len(), LIST_MAX);
 }
@@ -102,7 +111,7 @@ async fn downloaded_is_empty_with_nothing_kept() {
 }
 
 #[tokio::test]
-async fn an_artist_opens_popular_then_their_albums() {
+async fn an_artist_opens_popular_then_their_albums_newest_first() {
     let (db, _dir) = synced(3, 4).await;
     let artists = db.read(|c| list(c, &CarList::Artists, 10.0)).unwrap();
     let CarAction::Open(which) = &artists[0].action else { panic!("artists open a list") };
@@ -112,24 +121,257 @@ async fn an_artist_opens_popular_then_their_albums() {
     assert_eq!(rows.len(), 5, "Popular and four albums");
     assert_eq!(rows[0].title, "Popular");
     assert!(matches!(&rows[0].action, CarAction::Play(p) if p.kind == ContextKind::Artist && p.id.as_ref() == Some(id)));
-    let own = db.read(|c| queries::artist_albums(c, id, LIST_MAX)).unwrap();
+    let mut own = db.read(|c| queries::artist_albums(c, id, LIST_MAX)).unwrap();
+    own.sort_by_key(|a| std::cmp::Reverse(a.year));
     for (row, album) in rows[1..].iter().zip(&own) {
         assert_eq!(row.title, album.title);
         assert!(opens(&row.action, ContextKind::Album, &album.id));
     }
 }
 
+/// Every page of an artist's list for a car showing `room` rows, turning
+/// with the Older releases rows from the first.
+fn artist_pages(db: &crate::db::DbHandle, which: &CarList, room: usize) -> Vec<Vec<CarItem>> {
+    let mut pages = vec![db.read(|c| page(c, which, 10.0, 0, room)).unwrap()];
+    while let Some(CarAction::Turn { list, page: next }) = pages.last().unwrap().last().map(|r| r.action.clone()) {
+        assert_eq!(&list, which, "a page turns to the same artist");
+        assert_eq!(next, pages.len(), "Older releases turns to the next page");
+        pages.push(db.read(|c| page(c, which, 10.0, next, room)).unwrap());
+        assert!(pages.len() < 100, "the pages end");
+    }
+    pages
+}
+
+fn first_artist(db: &crate::db::DbHandle) -> CarList {
+    let artists = db.read(|c| list(c, &CarList::Artists, 10.0)).unwrap();
+    let CarAction::Open(which) = artists[0].action.clone() else { panic!("artists open a list") };
+    which
+}
+
 #[tokio::test]
-async fn an_artist_list_stays_short_and_an_unknown_artist_is_just_popular() {
+async fn a_car_that_shows_twelve_rows_pages_through_every_release_once() {
+    let (db, _dir) = synced(1, 40).await;
+    let which = first_artist(&db);
+    let CarList::Artist { id, .. } = &which else { panic!("an artist's list") };
+    let pages = artist_pages(&db, &which, LIST_SHORT);
+    assert_eq!(pages.len(), 4, "10 on the first page, then 10, 10 and 10");
+    let mut seen = Vec::new();
+    for (n, rows) in pages.iter().enumerate() {
+        assert!(rows.len() <= LIST_SHORT, "page {n} fits the car: {}", rows.len());
+        if n == 0 {
+            assert_eq!(rows[0].title, "Popular");
+        } else {
+            assert_eq!(rows[0].title, "Newer releases");
+            assert!(matches!(&rows[0].action, CarAction::Turn { page, .. } if *page == n - 1), "Newer turns back a page");
+        }
+        let last = n + 1 == pages.len();
+        let albums = if last { &rows[1..] } else { &rows[1..rows.len() - 1] };
+        if !last {
+            let older = rows.last().unwrap();
+            assert_eq!(older.title, "Older releases");
+            assert_eq!(older.subtitle.as_deref(), Some(format!("{} more", 40 - 10 * (n + 1)).as_str()));
+        }
+        for r in albums {
+            let CarAction::Open(CarList::Songs { kind: ContextKind::Album, id, .. }) = &r.action else { panic!("{} opens its songs", r.title) };
+            seen.push(id.clone());
+        }
+    }
+    let mut own: Vec<_> = db.read(|c| queries::artist_albums(c, id, LIST_MAX)).unwrap();
+    own.sort_by_key(|a| std::cmp::Reverse(a.year));
+    let own: Vec<String> = own.into_iter().map(|a| a.id).collect();
+    assert_eq!(seen, own, "every release once, newest first, across the pages");
+}
+
+#[tokio::test]
+async fn an_artist_list_fills_a_roomy_car_and_turns_the_page_past_it() {
     let (db, _dir) = synced(1, 150).await;
-    let id = db.read(|c| list(c, &CarList::Artists, 10.0)).unwrap().into_iter().find_map(|a| match a.action {
-        CarAction::Open(CarList::Artist { id, .. }) => Some(id),
-        _ => None,
-    });
-    let rows = db.read(|c| list(c, &CarList::Artist { id: id.unwrap(), name: "A".into() }, 10.0)).unwrap();
-    assert_eq!(rows.len(), LIST_MAX, "Popular plus albums up to the car's limit");
+    let which = first_artist(&db);
+    let rows = db.read(|c| list(c, &which, 10.0)).unwrap();
+    assert_eq!(rows.len(), LIST_MAX, "Popular, 98 releases and Older releases");
+    assert_eq!(rows.last().unwrap().subtitle.as_deref(), Some("52 more"));
+    let pages = artist_pages(&db, &which, LIST_MAX);
+    assert_eq!(pages.len(), 2);
+    assert_eq!(pages[1].len(), 53, "Newer releases and the last 52");
     let none = db.read(|c| list(c, &CarList::Artist { id: "nobody".into(), name: "Nobody".into() }, 10.0)).unwrap();
-    assert_eq!(none.len(), 1);
+    assert_eq!(none.len(), 1, "an artist with nothing here is just Popular");
+    assert_eq!(none[0].title, "Popular");
+}
+
+#[tokio::test]
+async fn one_page_when_it_fits_and_two_when_one_more_does_not() {
+    let (db, _dir) = synced(1, 11).await;
+    let pages = artist_pages(&db, &first_artist(&db), LIST_SHORT);
+    assert_eq!(pages.len(), 1, "Popular and 11 releases fill 12 rows");
+    assert_eq!(pages[0].len(), 12);
+    assert!(pages[0].iter().all(|r| !matches!(r.action, CarAction::Turn { .. })));
+    let (db, _dir) = synced(1, 12).await;
+    let pages = artist_pages(&db, &first_artist(&db), LIST_SHORT);
+    assert_eq!(pages.len(), 2);
+    assert_eq!(pages[0].len(), 12, "Popular, 10 releases, Older releases");
+    assert_eq!(pages[1].len(), 3, "Newer releases and the last 2");
+}
+
+#[tokio::test]
+async fn a_car_reporting_odd_room_still_gets_a_usable_list() {
+    let (db, _dir) = synced(1, 300).await;
+    let which = first_artist(&db);
+    // A car that says it has no room, or one row, gets the fewest any car shows.
+    for room in [0, 1, 2] {
+        let rows = db.read(|c| page(c, &which, 10.0, 0, room)).unwrap();
+        assert_eq!(rows.len(), LIST_SHORT, "room {room}");
+        assert_eq!(rows.last().unwrap().title, "Older releases");
+    }
+    // A car with room for 500 still gets no more than our own limit.
+    let rows = db.read(|c| page(c, &which, 10.0, 0, 500)).unwrap();
+    assert_eq!(rows.len(), LIST_MAX);
+}
+
+#[tokio::test]
+async fn a_page_past_the_end_shows_the_last_page() {
+    // The library shrank, or the car gave more room, between two turns.
+    let (db, _dir) = synced(1, 15).await;
+    let which = first_artist(&db);
+    let rows = db.read(|c| page(c, &which, 10.0, 7, LIST_SHORT)).unwrap();
+    assert_eq!(rows[0].title, "Newer releases");
+    assert!(matches!(&rows[0].action, CarAction::Turn { page: 0, .. }));
+    assert_eq!(rows.len(), 6, "Newer releases and the last 5");
+    let roomy = db.read(|c| page(c, &which, 10.0, 1, LIST_MAX)).unwrap();
+    assert_eq!(roomy[0].title, "Popular", "with room for everything there's one page");
+    assert_eq!(roomy.len(), 16);
+}
+
+#[test]
+fn releases_sort_newest_first_with_unreleased_and_undated_last() {
+    use crate::db::fake::{album, artist};
+    use crate::model::ReleaseSection;
+    let ar = artist("1", "A");
+    let mut demo = album("d", "Demo", &ar, 2024, Some("album"), &["Demo"]);
+    demo.section = ReleaseSection::Demos;
+    let mut leak = album("u", "Leak", &ar, 2025, Some("album"), &[]);
+    leak.section = ReleaseSection::Unreleased;
+    let mut undated = album("n", "Undated", &ar, 2000, Some("album"), &[]);
+    undated.year = None;
+    let mut albums = vec![
+        album("o", "Old", &ar, 1999, Some("album"), &[]),
+        demo,
+        undated,
+        album("s", "Single", &ar, 2021, Some("single"), &[]),
+        leak,
+        album("a", "Album", &ar, 2019, Some("album"), &[]),
+    ];
+    sort_newest_first(&mut albums);
+    let order: Vec<&str> = albums.iter().map(|a| a.title.as_str()).collect();
+    assert_eq!(order, ["Single", "Album", "Old", "Undated", "Leak", "Demo"]);
+}
+
+#[test]
+fn names_file_under_their_first_letter_without_accents() {
+    assert_eq!(letter("Abba"), 'A');
+    assert_eq!(letter("élan"), 'E');
+    assert_eq!(letter("\u{201c}Heroes\u{201d}"), 'H', "quotes are skipped");
+    assert_eq!(letter("2Pac"), '#');
+    assert_eq!(letter("坂本龍一"), '#');
+    assert_eq!(letter(""), '#', "a blank name still files somewhere");
+}
+
+fn rows_titled(names: &[&str]) -> Vec<(char, CarItem)> {
+    names.iter().map(|n| (letter(n), info(n, None))).collect()
+}
+
+#[test]
+fn a_short_a_to_z_list_is_one_list() {
+    let rows = a_to_z(&CarList::Albums, rows_titled(&["b", "1999", "a", "c"]), ("album", "albums"), 0, LIST_SHORT);
+    let titles: Vec<&str> = rows.iter().map(|r| r.title.as_str()).collect();
+    assert_eq!(titles, ["a", "b", "c", "1999"], "A to Z, then # last");
+}
+
+/// A fake library of `per` names under each of `letters`.
+fn names(letters: &str, per: usize) -> Vec<String> {
+    letters.chars().flat_map(|l| (0..per).map(move |i| format!("{l}{i:03}"))).collect()
+}
+
+#[test]
+fn a_long_a_to_z_list_opens_on_its_letters_and_reaches_every_name_once() {
+    let all = names("ABCDEFGHIJKLMNOPQRSTUVWXYZ1", 9);
+    let refs: Vec<&str> = all.iter().map(String::as_str).collect();
+    let page_of = |p| a_to_z(&CarList::Artists, rows_titled(&refs), ("artist", "artists"), p, LIST_SHORT);
+    let index = page_of(0);
+    assert!(index.len() <= LIST_SHORT, "letters fit the car: {}", index.len());
+    assert_eq!(index[0].title, "A to C");
+    assert_eq!(index[0].subtitle.as_deref(), Some("27 artists"));
+    assert!(index.last().unwrap().title.ends_with("and #"), "{}", index.last().unwrap().title);
+    let mut seen = Vec::new();
+    for row in &index {
+        let CarAction::Turn { page: mut p, .. } = row.action else { panic!("a run of letters turns the page") };
+        loop {
+            let rows = page_of(p);
+            assert!(rows.len() <= LIST_SHORT);
+            assert_eq!(rows[0].title, "All letters");
+            assert!(matches!(rows[0].action, CarAction::Turn { page: 0, .. }));
+            match &rows.last().unwrap().action {
+                CarAction::Turn { page: next, .. } if rows.last().unwrap().title == "More" => {
+                    seen.extend(rows[1..rows.len() - 1].iter().map(|r| r.title.clone()));
+                    assert_eq!(*next, p + 1);
+                    p = *next;
+                }
+                _ => {
+                    seen.extend(rows[1..].iter().map(|r| r.title.clone()));
+                    break;
+                }
+            }
+        }
+    }
+    assert_eq!(seen, all, "every name once, A to Z then #");
+}
+
+#[test]
+fn every_letter_gets_its_own_row_when_there_is_room() {
+    let all = names("ABC", 50);
+    let refs: Vec<&str> = all.iter().map(String::as_str).collect();
+    let index = a_to_z(&CarList::Albums, rows_titled(&refs), ("album", "albums"), 0, LIST_MAX);
+    let titles: Vec<&str> = index.iter().map(|r| r.title.as_str()).collect();
+    assert_eq!(titles, ["A", "B", "C"]);
+    let a = a_to_z(&CarList::Albums, rows_titled(&refs), ("album", "albums"), 1, LIST_MAX);
+    assert_eq!(a.len(), 51, "All letters and the 50 under A");
+    let more = a_to_z(&CarList::Albums, rows_titled(&refs), ("album", "albums"), 1, LIST_SHORT);
+    assert_eq!(more.last().unwrap().subtitle.as_deref(), Some("40 more albums in A"));
+}
+
+#[test]
+fn a_page_past_the_letters_goes_back_to_them() {
+    // The library shrank, or the car gave more room, between two turns.
+    let all = names("ABCDEFGHIJKLMN", 3);
+    let refs: Vec<&str> = all.iter().map(String::as_str).collect();
+    let lost = a_to_z(&CarList::Albums, rows_titled(&refs), ("album", "albums"), 99, LIST_SHORT);
+    assert_eq!(lost, a_to_z(&CarList::Albums, rows_titled(&refs), ("album", "albums"), 0, LIST_SHORT));
+}
+
+#[tokio::test]
+async fn now_playings_album_button_opens_the_playing_songs_album() {
+    let (db, _dir) = synced(1, 2).await;
+    let album = db.read(|c| queries::albums(c, AlbumSort::Name, 0, 1, None)).unwrap().items.remove(0);
+    let now = NowKey { album_id: Some(album.id.clone()), ..Default::default() };
+    let list = db.read(|c| now_album(c, &now)).unwrap();
+    assert_eq!(list, Some(CarList::Songs { kind: ContextKind::Album, id: album.id.clone(), title: album.title.clone() }));
+    let rows = db.read(|c| super::list(c, list.as_ref().unwrap(), 10.0)).unwrap();
+    assert_eq!(rows[0].title, "Play", "the album opens to Play, Shuffle and its songs");
+    // Nothing playing, or a song whose album the library no longer has.
+    assert_eq!(db.read(|c| now_album(c, &NowKey::default())).unwrap(), None);
+    let gone = NowKey { album_id: Some("gone".into()), ..Default::default() };
+    assert_eq!(db.read(|c| now_album(c, &gone)).unwrap(), None);
+}
+
+#[test]
+fn page_turns_stay_when_offline() {
+    let turn = CarItem {
+        title: "Older releases".into(),
+        subtitle: Some("3 more".into()),
+        thumb: None,
+        action: CarAction::Turn { list: CarList::Artist { id: "1".into(), name: "A".into() }, page: 1 },
+    };
+    let kept = Kept::default();
+    assert_eq!(offline_rows(vec![turn.clone()], &kept, true), vec![turn.clone()], "turning a page needs no signal");
+    assert_eq!(offline_rows(vec![turn.clone()], &kept, false), vec![turn]);
 }
 
 fn health(status: crate::plex::types::HealthStatus, cached_only: bool) -> crate::plex::types::Health {
