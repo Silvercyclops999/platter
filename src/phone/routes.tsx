@@ -72,6 +72,8 @@ export const PHONE_PAGES: Pages = {
   album: (r) => <PhoneAlbum id={r.id} />,
   playlist: (r) => <PhonePlaylist id={r.id} />,
   liked: () => <PhoneLiked />,
+  // The songs table is a computer page; a link to it opens the library here.
+  songs: () => <PhoneLibrary />,
   settings: (r) => (
     <div className="ph-page ph-settings">
       <BackBar />

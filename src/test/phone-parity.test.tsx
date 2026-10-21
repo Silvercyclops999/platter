@@ -74,6 +74,7 @@ const SAMPLES: { [N in Route["name"]]: Extract<Route, { name: N }> } = {
   home: { name: "home" },
   search: { name: "search" },
   library: { name: "library" },
+  songs: { name: "songs" },
   artist: { name: "artist", id: "100" },
   discography: { name: "discography", id: "100" },
   lineage: { name: "lineage", id: "10000" },

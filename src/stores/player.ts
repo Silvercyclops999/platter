@@ -306,6 +306,9 @@ export const player = {
   setSmoothTransitions: (on: boolean) => backend.setSmoothTransitions(on).catch(report),
   playTracks: (trackIds: string[], startTrackId?: string, kind: "tracks" | "search" = "tracks") =>
     play({ context: { kind, trackIds }, startTrackId }).catch(report),
+  /** Your Library > Songs: these songs, in the table's order, as one list. */
+  playSongs: (trackIds: string[], startTrackId?: string) =>
+    play({ context: { kind: "tracks", id: "songs", trackIds }, startTrackId, shuffle: false }).catch(report),
   /** Shuffle albums: whole albums in a random order, each start to finish (every album when `albumIds` is empty). */
   shuffleAlbums: (albumIds: string[] = []) =>
     backend

@@ -30,6 +30,7 @@ const NAV_COMMANDS: Cmd[] = [
   { id: "go-search", label: "Go to Search", hint: `${modKey}+L`, icon: <Search size={16} />, group: "Navigation", run: () => useUi.getState().focusSearch() },
   { id: "go-albums", label: "Library: Albums", icon: <LibraryBig size={16} />, group: "Navigation", run: () => nav.go({ name: "library", tab: "albums" }) },
   { id: "go-artists", label: "Library: Artists", icon: <LibraryBig size={16} />, group: "Navigation", run: () => nav.go({ name: "library", tab: "artists" }) },
+  { id: "go-songs", label: "Library: Songs", icon: <ListMusic size={16} />, group: "Navigation", run: () => nav.go({ name: "songs" }) },
   { id: "go-playlists", label: "Library: Playlists", icon: <LibraryBig size={16} />, group: "Navigation", run: () => nav.go({ name: "library", tab: "playlists" }) },
   { id: "go-recents", label: "Go to Recents", icon: <History size={16} />, group: "Navigation", run: () => nav.go({ name: "recents" }) },
   { id: "go-playing", label: "Go to the playing song", hint: shortcutLabel("goToPlaying"), icon: <AudioWaveform size={16} />, group: "Navigation", run: goToPlaying },
