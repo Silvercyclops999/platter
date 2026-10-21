@@ -6,7 +6,7 @@
  * computer; otherwise the whole line lights.
  */
 import { ChevronDown, Maximize2, Pause, PenLine, Play, RotateCw } from "lucide-react";
-import { memo, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { backend } from "../lib/backend";
 import { trackArtistLine } from "../lib/format";
 import type { Lyrics, LyricLine, LyricWord, Track } from "../lib/types";
@@ -14,6 +14,7 @@ import { useArtColours } from "../lib/useTint";
 import { currentLineIndex, lyricsChanged, timedLines, useLyrics } from "../shell/lyrics";
 import { LyricWords, usePlayhead } from "../shell/lyricWords";
 import { openLyricsEditor } from "../stores/lyricsEditor";
+import { useTheme } from "../stores/theme";
 import { toast } from "../stores/toasts";
 import "./pages/parity.css";
 import { player, usePlayer } from "../stores/player";
@@ -24,9 +25,14 @@ import { PhoneSeek } from "./NowPlaying";
 import { holdStatusBar, mixIsDark, STATUS_LAYER, type StatusBarHold } from "./statusBar";
 
 
-/** The full-screen lyrics' background: this share of the cover's colour over this near black (phone.css .ph-lyrics). */
-export const LYRICS_TINT = 0.62;
-export const LYRICS_GROUND = "#121010";
+/** The full-screen lyrics' background at the top: this share of the cover's colour over the look's page colour (parity.css .phone .ph-lyrics). */
+export const LYRICS_TINT = 0.34;
+
+/** The look's page colour, which the lyrics' background is mixed over. */
+export function lyricsGround(): string {
+  if (typeof document === "undefined") return "#1a1816";
+  return getComputedStyle(document.documentElement).getPropertyValue("--color-bg-base").trim() || "#1a1816";
+}
 
 /** Lines the card shows around the current one. */
 export const CARD_LINES = 4;
@@ -97,7 +103,10 @@ function LyricsFull({ track }: { track: Track }) {
   // The status bar's text suits the lyrics' own background: light over a dark
   // cover colour, dark over a pale one (a beige cover gives a light page).
   // One hold for the whole time they show (above now playing's), changed in place.
-  const lightText = mixIsDark(colours?.vivid ?? null, LYRICS_TINT, LYRICS_GROUND) || !colours;
+  // Read again when the look changes (light by day, dark at night).
+  const look = useTheme((t) => t.resolved.id);
+  const ground = useMemo(() => lyricsGround(), [look]); // eslint-disable-line react-hooks/exhaustive-deps
+  const lightText = colours ? mixIsDark(colours.vivid, LYRICS_TINT, ground) : mixIsDark(ground, 1);
   const hold = useRef<StatusBarHold | null>(null);
   useEffect(() => {
     const h = holdStatusBar(true, STATUS_LAYER.lyrics);

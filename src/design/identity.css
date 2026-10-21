@@ -136,6 +136,12 @@
 :root[data-reduced-motion="true"] .record-disc { animation: none; }
 :root[data-identity] .detail-header__art--record { --sleeve: 232px; position: relative; padding-right: calc(var(--sleeve) * 0.4); }
 :root[data-identity] .detail-header--compact .detail-header__art--record { --sleeve: 130px; }
+/* The banner and minimal headers keep their cover small; the record follows it. */
+:root[data-identity][data-look-header-style="banner"] .detail-header__art--record { --sleeve: 120px; }
+:root[data-identity][data-look-header-style="minimal"] .detail-header__art--record { --sleeve: 96px; }
+/* A round cover is a record already. */
+:root[data-identity]:is([data-look-cover-shape="circle"], [data-look-cover-shape="vinyl"]) .detail-header__art--record { padding-right: 0; }
+:root[data-identity]:is([data-look-cover-shape="circle"], [data-look-cover-shape="vinyl"]) .detail-header__record { display: none; }
 :root[data-identity] .detail-header__art--record > :not(.record-disc) { position: relative; z-index: 1; }
 :root[data-identity] .detail-header__record {
   top: calc(var(--sleeve) * 0.03);

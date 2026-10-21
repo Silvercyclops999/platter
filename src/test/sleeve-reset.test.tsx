@@ -9,7 +9,8 @@ import { usePhoneForm } from "../phone/form";
 import { PhoneShell } from "../phone/PhoneShell";
 import { usePhoneUi } from "../phone/phoneUi";
 import { heldStatusBar, holdLightStatusBar, holdStatusBar, mixIsDark, resetStatusBarHolds, STATUS_LAYER } from "../phone/statusBar";
-import { LYRICS_GROUND, LYRICS_TINT } from "../phone/LyricsScreen";
+import { LYRICS_TINT, lyricsGround } from "../phone/LyricsScreen";
+import parityCss from "../phone/pages/parity.css?raw";
 import { LibraryChips } from "../shell/LibraryControls";
 import { useRouter } from "../stores/router";
 import { loadSettings } from "../stores/settings";
@@ -125,9 +126,22 @@ describe("the phone", () => {
     lyrics();
     np();
     expect(heldStatusBar()).toBeNull();
-    // A beige cover makes the lyrics page light; a deep red one keeps it dark.
-    expect(mixIsDark("#E9DCC0", LYRICS_TINT, LYRICS_GROUND)).toBe(false);
-    expect(mixIsDark("#7A1F2B", LYRICS_TINT, LYRICS_GROUND)).toBe(true);
+    // The lyrics page is the look's page colour washed with the cover's: the model matches the CSS.
+    expect(parityCss).toMatch(new RegExp(`\\.phone \\.ph-lyrics \\{[^}]*color-mix\\(in srgb, var\\(--ph-tint\\) ${Math.round(LYRICS_TINT * 100)}%, var\\(--color-bg-base\\)\\) 0`));
+    // On Studio's graphite even a beige cover stays dark; on Sleeve's paper a deep red one stays light.
+    expect(mixIsDark("#E9DCC0", LYRICS_TINT, "#1A1816")).toBe(true);
+    expect(mixIsDark("#7A1F2B", LYRICS_TINT, "#F4F0E8")).toBe(false);
+    expect(lyricsGround()).toMatch(/^#|^rgb/);
+  });
+
+  it("a hold let go after the holds were reset leaves the newer ones alone", () => {
+    const stale = holdStatusBar(true, STATUS_LAYER.lyrics);
+    resetStatusBarHolds();
+    const fresh = holdStatusBar(false, STATUS_LAYER.nowPlaying);
+    stale();
+    expect(heldStatusBar()).toBe(false);
+    fresh();
+    expect(heldStatusBar()).toBeNull();
   });
 });
 
@@ -144,5 +158,13 @@ describe("chip rows", () => {
       if (sw) Object.defineProperty(HTMLElement.prototype, "scrollWidth", sw);
       if (cw) Object.defineProperty(HTMLElement.prototype, "clientWidth", cw);
     }
+  });
+});
+
+describe("the record beside the sleeve", () => {
+  it("follows the cover's size in the banner and minimal headers, and leaves round covers alone", () => {
+    expect(identityCss).toMatch(/\[data-look-header-style="banner"\] \.detail-header__art--record \{ --sleeve: 120px; \}/);
+    expect(identityCss).toMatch(/\[data-look-header-style="minimal"\] \.detail-header__art--record \{ --sleeve: 96px; \}/);
+    expect(identityCss).toMatch(/\[data-look-cover-shape="vinyl"\]\) \.detail-header__record \{ display: none; \}/);
   });
 });

@@ -39,7 +39,9 @@ export function holdStatusBar(light: boolean, layer = 0): StatusBarHold {
   const release = () => {
     if (released) return;
     released = true;
-    holds.splice(holds.indexOf(hold), 1);
+    // Gone already if the holds were reset in between.
+    const i = holds.indexOf(hold);
+    if (i >= 0) holds.splice(i, 1);
     listeners.forEach((l) => l());
   };
   return Object.assign(release, {
