@@ -55,11 +55,15 @@ export function useLyricExtras(texts: string[]): Extras {
     };
   }, [show, key]);
 
-  // New lyrics, another language or no service: the translation goes.
-  useEffect(() => {
+  // New lyrics, another language or no service: the translation goes. Done
+  // while rendering, not in an effect, so a Translate pressed right as the
+  // lyrics appear isn't undone by the mount's reset landing after it.
+  const [seen, setSeen] = useState(transKey);
+  if (seen !== transKey) {
+    setSeen(transKey);
     setTrans(null);
     setOn(false);
-  }, [key, service, target]);
+  }
 
   useEffect(() => {
     if (!on || trans || !service) return;
