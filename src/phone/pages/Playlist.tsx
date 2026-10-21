@@ -9,7 +9,7 @@ import { MoreHorizontal, Shuffle } from "lucide-react";
 import { Art } from "../../components/Art";
 import { LikedCover } from "../../components/LikedCover";
 import { phone } from "../phoneUi";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PhoneDownload } from "../PhoneDownload";
 import { backend } from "../../lib/backend";
 import { formatLongDuration } from "../../lib/format";
@@ -98,6 +98,16 @@ export function useSongsHere(ids: string[]): { here: boolean; playing: boolean }
   return { here, playing };
 }
 
+/** Loads again when `version` moves, keeping the list on screen meanwhile. */
+function useReloadOn(version: number, reload: () => void) {
+  const seen = useRef(version);
+  useEffect(() => {
+    if (seen.current === version) return;
+    seen.current = version;
+    reload();
+  }, [version, reload]);
+}
+
 /** Shuffle for a list played as plain songs: plays it once in a new order. */
 function ShuffleOnce({ ids, play }: { ids: string[]; play: (ids: string[]) => void }) {
   return (
@@ -129,20 +139,19 @@ export function shuffled<T>(ids: T[], random: () => number = Math.random): T[] {
 
 /** A smart playlist made on this device: the songs its rules find, kept fresh when they change. */
 function PhoneSmartPlaylist({ id }: { id: string }) {
-  const [version, setVersion] = useState(0);
-  const { data, error, retry } = useLoad(() => backend.smartPage(id), [id, version]);
+  const { data, error, retry } = useLoad(() => backend.smartPage(id), [id]);
   useEffect(() => {
     let un: (() => void) | undefined;
     let alive = true;
     void backend
-      .listen("smart://changed", () => setVersion((v) => v + 1))
+      .listen("smart://changed", retry)
       .then((u) => (alive ? (un = u) : u()))
       .catch(() => undefined);
     return () => {
       alive = false;
       un?.();
     };
-  }, []);
+  }, [retry]);
   const ids = useMemo(() => data?.tracks.map((t) => t.id) ?? [], [data]);
   const { here, playing } = useSongsHere(ids);
   if (error && !data) return <PageFailed what="this smart playlist" retry={retry} framed />;
@@ -157,7 +166,7 @@ function PhoneSmartPlaylist({ id }: { id: string }) {
       tracks={data.tracks}
       here={here}
       playing={playing}
-      shuffle={<ShuffleOnce ids={ids} play={(order) => void player.playTracks(order)} />}
+      shuffle="once"
       play={(start, _shuffle, only) => void player.playTracks(only ?? ids, start)}
       empty="No songs match these rules right now."
     />
@@ -166,8 +175,8 @@ function PhoneSmartPlaylist({ id }: { id: string }) {
 
 /** A playlist someone shared with you: the songs you have, and a line for the ones you don't. */
 function PhoneSharedPlaylist({ id }: { id: string }) {
-  const version = useCircle((s) => s.version);
-  const { data, error, retry } = useLoad(() => backend.collabPage(id), [id, version]);
+  const { data, error, retry } = useLoad(() => backend.collabPage(id), [id]);
+  useReloadOn(useCircle((s) => s.version), retry);
   const tracks = useMemo(() => data?.rows.flatMap((r) => (r.track ? [r.track] : [])) ?? [], [data]);
   const ids = useMemo(() => tracks.map((t) => t.id), [tracks]);
   const { here, playing } = useSongsHere(ids);
@@ -185,7 +194,7 @@ function PhoneSharedPlaylist({ id }: { id: string }) {
       tracks={tracks}
       here={here}
       playing={playing}
-      shuffle={<ShuffleOnce ids={ids} play={(order) => void player.playTracks(order)} />}
+      shuffle="once"
       play={(start, _shuffle, only) => void (only ? player.playTracks(only, start) : playShared(id, start))}
       note={missing > 0 ? `${countLine(missing, "song")} ${missing === 1 ? "isn't" : "aren't"} in your library.` : undefined}
       empty={s.gone ? "This playlist isn't shared with you any more." : "No songs here yet."}
@@ -195,8 +204,8 @@ function PhoneSharedPlaylist({ id }: { id: string }) {
 
 /** A Blend: everyone's taste taking turns, made again each day. */
 function PhoneBlend({ id }: { id: string }) {
-  const version = useCircle((s) => s.version);
-  const { data, error, retry } = useLoad(() => backend.blendPage(id), [id, version]);
+  const { data, error, retry } = useLoad(() => backend.blendPage(id), [id]);
+  useReloadOn(useCircle((s) => s.version), retry);
   const live = useCircle((s) => s.view.blends.find((b) => b.id === id) ?? null);
   const tracks = useMemo(() => data?.rows.map((r) => r.track) ?? [], [data]);
   const ids = useMemo(() => tracks.map((t) => t.id), [tracks]);
@@ -213,7 +222,7 @@ function PhoneBlend({ id }: { id: string }) {
       tracks={tracks}
       here={here}
       playing={playing}
-      shuffle={<ShuffleOnce ids={ids} play={(order) => void player.playTracks(order)} />}
+      shuffle="once"
       play={(start, _shuffle, only) => void (only ? player.playTracks(only, start) : playBlend(id, start))}
       empty="Nothing in this Blend yet. It fills in as everyone listens."
     />
@@ -245,7 +254,8 @@ function SongList({
   /** This list is what's playing. */
   here: boolean;
   playing: boolean;
-  shuffle: ReactNode;
+  /** The shuffle control, or "once" for a list played as plain songs. */
+  shuffle: ReactNode | "once";
   download?: ReactNode;
   play: (startTrackId: string | undefined, shuffle: boolean | undefined, trackIds?: string[]) => void;
   inPlaylist?: (index: number) => import("../phoneUi").InPlaylist;
@@ -278,7 +288,7 @@ function SongList({
             disabled={!tracks.length}
             onClick={() => (here && !genre ? void player.toggle() : play(undefined, undefined, ids))}
           />
-          {shuffle}
+          {shuffle === "once" ? <ShuffleOnce ids={rows.map((r) => r.t.id)} play={(order) => play(order[0], undefined, order)} /> : shuffle}
         </div>
         <div className="ph-actions__right">
           {download}

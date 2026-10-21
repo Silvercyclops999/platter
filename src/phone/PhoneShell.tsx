@@ -62,7 +62,7 @@ export function HealthStrip() {
   if (!line) return null;
   return (
     <>
-      <p className={`ph-offline-strip is-${line.kind}`} role="status" data-testid="phone-offline-strip">
+      <p className="ph-offline-strip" role="status" data-testid="phone-offline-strip">
         {line.message}
         {line.action && (
           <button type="button" className="ph-offline-strip__action" onClick={() => runBannerAction(line.action!, () => setGuide(true))}>

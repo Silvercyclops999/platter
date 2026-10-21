@@ -59,7 +59,7 @@ import { isLiked, setLiked } from "../stores/likes";
 import { player, usePlayer } from "../stores/player";
 import { askDelete, createPlaylist, editDetails, removeRows } from "../stores/playlists";
 import { useToasts } from "../stores/toasts";
-import { newSmartPlaylist } from "../stores/curate";
+import { deleteSmartPlaylist, newSmartPlaylist } from "../stores/curate";
 import { SheetFrame, SheetLeaving, tap } from "./bits";
 import { FADE_MS, reduced } from "./motion";
 import { DeviceSheet } from "./DeviceSheet";
@@ -821,6 +821,22 @@ function AlbumSheet({ album }: { album: Album }) {
   );
 }
 
+/** The songs you can play in any kind of playlist, for Add to queue. */
+export async function songsOfList(id: string): Promise<Track[]> {
+  if (id.startsWith("smart:")) return (await backend.smartPage(id)).tracks;
+  if (id.startsWith("shared:")) return (await backend.collabPage(id)).rows.flatMap((r) => (r.track ? [r.track] : []));
+  if (id.startsWith("blend:")) return (await backend.blendPage(id)).rows.map((r) => r.track);
+  return (await backend.playlistPage(id)).tracks;
+}
+
+async function queueList(p: Playlist) {
+  try {
+    await player.addToQueue(await songsOfList(p.id), p.thumb);
+  } catch {
+    useToasts.getState().push({ kind: "error", message: `Couldn't add ${p.title} to the queue` }, 4000);
+  }
+}
+
 function PlaylistSheet({ playlist }: { playlist: Playlist }) {
   const act = (f: () => unknown) => () => {
     tap("selection");
@@ -837,12 +853,16 @@ function PlaylistSheet({ playlist }: { playlist: Playlist }) {
     </div>
   );
   const own = !/^(blend|shared):/.test(playlist.id);
+  // Smart playlists made here, shared ones and Blends aren't Plex playlists:
+  // no download or share card, and a smart one is deleted as a smart one.
+  const plex = !/^(blend|shared|smart):/.test(playlist.id);
   const dl = useDownloadItem("playlist", playlist.id);
   const items: Action[] = [
-    ...(/^(blend|shared|smart):/.test(playlist.id) ? [] : [downloadAction(dl, { kind: "playlist", id: playlist.id, title: playlist.title }, act)]),
+    ...(plex ? [downloadAction(dl, { kind: "playlist", id: playlist.id, title: playlist.title }, act)] : []),
+    { label: "Add to queue", icon: ListEnd, run: act(() => queueList(playlist)) },
     ...(own && !playlist.smart ? [{ label: "Edit name and description", icon: Pencil, run: act(() => editDetails(playlist)) }] : []),
-    { label: "Share", icon: Share, run: act(() => openShareCard({ kind: "playlist", id: playlist.id, title: playlist.title, thumb: playlist.thumb })) },
-    ...(own ? [{ label: "Delete playlist", icon: Trash2, danger: true, run: act(() => askDelete(playlist)) }] : []),
+    ...(plex ? [{ label: "Share", icon: Share, run: act(() => openShareCard({ kind: "playlist", id: playlist.id, title: playlist.title, thumb: playlist.thumb })) }] : []),
+    ...(own ? [{ label: "Delete playlist", icon: Trash2, danger: true, run: act(() => (plex ? askDelete(playlist) : deleteSmartPlaylist(playlist.id))) }] : []),
   ];
   return (
     <SheetFrame title={playlist.title} onClose={phone.pop} head={head}>
