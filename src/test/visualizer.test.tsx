@@ -188,8 +188,8 @@ afterEach(() => {
 // ------------------------------------------------------------ styles and scales
 
 describe("styles", () => {
-  it("has Grooves, Blur and Bars, Grooves first and the default; anything older reads as Grooves", () => {
-    expect(STYLES.map((s) => s.label)).toEqual(["Grooves", "Blur", "Bars"]);
+  it("has Grooves, Blur, Bars and Cover, Grooves first and the default; anything older reads as Grooves", () => {
+    expect(STYLES.map((s) => s.label)).toEqual(["Grooves", "Blur", "Bars", "Cover"]);
     expect(DEFAULT_STYLE).toBe("grooves");
     expect(DEFAULT_SETTINGS.visualizerStyle).toBe("grooves");
     expect(DEFAULT_SETTINGS.visualizerCoverTap).toBe(true);
@@ -200,8 +200,9 @@ describe("styles", () => {
   it("steps through the styles both ways, wrapping round", () => {
     expect(stepStyle("grooves", 1)).toBe("blur");
     expect(stepStyle("blur", 1)).toBe("bars");
-    expect(stepStyle("bars", 1)).toBe("grooves");
-    expect(stepStyle("grooves", -1)).toBe("bars");
+    expect(stepStyle("bars", 1)).toBe("cover");
+    expect(stepStyle("cover", 1)).toBe("grooves");
+    expect(stepStyle("grooves", -1)).toBe("cover");
     expect(stepStyle("sleeve", 1)).toBe("blur");
   });
 
@@ -577,6 +578,20 @@ describe("the stage", () => {
     expect(s).toHaveTextContent("Holding still while Reduce motion is on.");
   });
 
+  it("shows Cover as just the album art: nothing drawn, nothing asked of the core", async () => {
+    const run = frames();
+    gl = fakeGl();
+    stage({ style: "cover" });
+    const s = screen.getByTestId("vis-stage");
+    expect(s).toHaveAttribute("data-style", "cover");
+    expect(s.querySelector(".vis-stage__backdrop")).not.toBeNull();
+    expect(s.querySelector("canvas")).toBeNull();
+    run(5);
+    expect(coverEl()!.style.getPropertyValue("--vis-breath")).toBe("");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mock.visualizer.calls).toEqual([]);
+  });
+
   it("holds still with one line for music playing on another device", async () => {
     act(() => usePlayer.setState({ remote: { id: "tv", name: "Living room" } as never }));
     stage();
@@ -610,6 +625,10 @@ describe("the stage", () => {
     unmount();
     expect(cover.style.getPropertyValue("--vis-breath")).toBe("");
     expect(cover.style.getPropertyValue("--vis-spin")).toBe("");
+    // At rest at once, not turned back by the cover's own transition; its transition comes back after.
+    expect(cover.style.transition).toBe("none");
+    run(2);
+    expect(cover.style.transition).toBe("");
   });
 
   it("draws with WebGL2 under StrictMode's second mount, on a canvas of its own", async () => {
@@ -738,11 +757,11 @@ describe("the phone", () => {
     expect(screen.getByTestId("np-deck").style.transform).toBe("");
     await act(async () => swipe(art, 160));
     await act(async () => swipe(art, 160));
-    await waitFor(() => expect(useSettings.getState().settings?.visualizerStyle).toBe("bars"));
+    await waitFor(() => expect(useSettings.getState().settings?.visualizerStyle).toBe("cover"));
     expect(next).not.toHaveBeenCalled();
     expect(previous).not.toHaveBeenCalled();
     // Remembered (a synced setting).
-    await waitFor(async () => expect((await mock.settingsGet()).visualizerStyle).toBe("bars"));
+    await waitFor(async () => expect((await mock.settingsGet()).visualizerStyle).toBe("cover"));
   });
 
   it("still skips on a sideways swipe over the cover when the visualizer is closed", async () => {
@@ -876,9 +895,9 @@ describe("the expanded view", () => {
     await waitFor(() => expect(useSettings.getState().settings?.visualizerStyle).toBe("blur"));
     act(() => void fireEvent.keyDown(window, { key: "ArrowLeft" }));
     act(() => void fireEvent.keyDown(window, { key: "ArrowLeft" }));
-    await waitFor(() => expect(useSettings.getState().settings?.visualizerStyle).toBe("bars"));
+    await waitFor(() => expect(useSettings.getState().settings?.visualizerStyle).toBe("cover"));
     expect(seek).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog", { name: "Expanded now playing" })).toHaveClass("fw--art-bars");
+    expect(screen.getByRole("dialog", { name: "Expanded now playing" })).toHaveClass("fw--art-cover");
     // Escape closes the visualizer first, then the view.
     act(() => void fireEvent.keyDown(window, { key: "Escape" }));
     expect(useFullWindow.getState().mode).toBe("artwork");

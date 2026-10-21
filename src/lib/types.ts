@@ -858,7 +858,7 @@ export type PopularSource = "global" | "myPlays";
  * Blur (the cover's colours as soft shapes) or Bars (spectrum bars over the
  * cover).
  */
-export type VisualizerStyle = "grooves" | "blur" | "bars";
+export type VisualizerStyle = "grooves" | "blur" | "bars" | "cover";
 export type ReduceMotion = "system" | "on" | "off";
 
 /** The Theme setting: a built-in theme, or follow the computer's light or dark mode. */

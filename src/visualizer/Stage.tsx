@@ -48,7 +48,7 @@ const PALETTE_ART = 96;
 /** The style's name shows this long after opening or a change. */
 export const NAME_MS = 1_600;
 /** The softer shapes need fewer pixels than the record's fine grooves. */
-const DETAIL: Record<VisualizerStyle, number> = { grooves: 1, blur: 0.5, bars: 1 };
+const DETAIL: Record<VisualizerStyle, number> = { grooves: 1, blur: 0.5, bars: 1, cover: 0.5 };
 
 /** The drawing buffer's scale against CSS pixels for a style on this screen. */
 export function renderScale(style: VisualizerStyle, dpr: number, phone: boolean, cssW: number, cssH: number): number {
@@ -94,7 +94,26 @@ interface Box {
   rect: { x: number; y: number; w: number; h: number };
 }
 
-export function Stage({ style, phone = false, cover }: StageProps) {
+export function Stage(props: StageProps) {
+  const { style } = props;
+  return style === "cover" ? <CoverStage /> : <MovingStage {...props} style={style} />;
+}
+
+/** Cover: just the album art, big and sharp over itself blurred. Nothing moves, so nothing is asked of the core. */
+function CoverStage() {
+  const thumb = usePlayer((s) => s.state?.track?.thumb ?? null);
+  return (
+    <div className="vis-stage vis-stage--cover" data-testid="vis-stage" data-style="cover" aria-hidden="true">
+      <div className="vis-stage__backdrop" style={{ opacity: thumb ? undefined : 0 } as CSSProperties}>
+        {thumb && <Art path={thumb} fluid requestSize={160} />}
+      </div>
+      <div className="vis-stage__scrim vis-stage__scrim--top" />
+      <div className="vis-stage__scrim vis-stage__scrim--bottom" />
+    </div>
+  );
+}
+
+function MovingStage({ style, phone = false, cover }: StageProps & { style: Exclude<VisualizerStyle, "cover"> }) {
   const thumb = usePlayer((s) => s.state?.track?.thumb ?? null);
   const playing = usePlayer((s) => s.state?.status === "playing" || s.state?.status === "buffering" || s.state?.status === "loading");
   const local = usePlayer((s) => s.remote === null && !!s.state?.track);
@@ -295,7 +314,8 @@ export function Stage({ style, phone = false, cover }: StageProps) {
   // The cover's breath and turn are the stage's while it shows; it gives them back when it goes
   // (or when another cover takes its place, as after a skip).
   const touched = useRef<HTMLElement | null>(null);
-  useEffect(() => {
+  // A layout effect, so the cover is at rest in the same frame its visualizer class goes.
+  useLayoutEffect(() => {
     return () => {
       giveBack(touched.current);
       touched.current = null;
@@ -437,7 +457,13 @@ const COVER_PROPS = ["--vis-breath", "--vis-spin"];
 
 /** Takes the stage's custom properties off a cover. */
 function giveBack(el: HTMLElement | null) {
-  if (el) for (const k of COVER_PROPS) el.style.removeProperty(k);
+  if (!el) return;
+  // Straight back to rest: the cover's own transition would otherwise turn the record back the long way.
+  el.style.transition = "none";
+  for (const k of COVER_PROPS) el.style.removeProperty(k);
+  const done = () => el.style.removeProperty("transition");
+  if (typeof requestAnimationFrame === "undefined") done();
+  else requestAnimationFrame(() => requestAnimationFrame(done));
 }
 
 /** The CSS layers' colour fields: the Blur shader's paths, as transforms. */
