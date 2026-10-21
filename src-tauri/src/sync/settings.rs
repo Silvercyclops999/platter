@@ -90,13 +90,14 @@ pub fn seed(store: &SyncStore, s: &Settings) -> AppResult<()> {
 }
 
 /// The synced settings the store has that differ from `s`, as a patch.
-/// A value this build can't take (a newer build's option) is skipped.
+/// A value this build can't take (a newer build's option) is skipped, and so
+/// is one kept on this device because it holds a key.
 pub fn patch_from_store(store: &SyncStore, s: &Settings) -> AppResult<Option<SettingsPatch>> {
     let m = as_map(s)?;
     let mut ok = Map::new();
     for name in SYNCED_SETTINGS {
         let Some(v) = store.get(&SETTINGS, store_key(name))? else { continue };
-        if m.get(*name) == Some(&v) {
+        if m.get(*name) == Some(&v) || m.get(*name).is_some_and(looks_secret) {
             continue;
         }
         let one = Value::Object(Map::from_iter([(name.to_string(), v.clone())]));
@@ -152,6 +153,9 @@ mod tests {
         assert_eq!(store.get(&SETTINGS, "lidarrAwayUrl").unwrap(), None);
         assert_eq!(store.get(&SETTINGS, "lidarrUrl").unwrap(), None);
         assert_eq!(store.get(&SETTINGS, "reportToPlex").unwrap(), Some(Value::Bool(false)));
+        // The plain value another device stored never replaces the one kept here.
+        store.put(&SETTINGS, "lidarrAwayUrl", &Value::from("https://old.example.com")).unwrap();
+        assert!(patch_from_store(&store, &s).unwrap().is_none_or(|p| p.lidarr_away_url.is_none()));
         // A plain address syncs again.
         let plain = Settings { lidarr_away_url: "https://music.example.com".into(), ..s };
         push(&store, &plain).unwrap();

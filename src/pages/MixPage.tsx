@@ -163,7 +163,7 @@ export function MixPage({ id, seed }: { id?: string; seed?: string }) {
   const { header, column, step, compact } = useTitleStep(mix?.title);
 
   if (error && !page) {
-    return <PageMissing what="mix" error={error} missing="This mix isn't here any more. Mixes are made again each day." onRetry={retry} />;
+    return <PageMissing what="mix" error={error} missing="This mix isn't here any more" reason="Mixes are made again each day." onRetry={retry} />;
   }
 
   const saveAsPlaylist = async () => {

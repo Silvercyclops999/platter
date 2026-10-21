@@ -378,10 +378,10 @@
    it and no cut-off line below. Frames with no header keep it on a panel. */
 @container main (max-width: 900px) {
   .settings__layout { grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
-  .settings__nav { top: calc((var(--main-header-h, 64px) - 40px) / 2); z-index: 11; margin: 0; padding: 0 var(--space-3); }
+  .settings__nav { top: calc((var(--main-header-h, 64px) - 32px) / 2); z-index: 11; margin: 0; padding: 0 var(--space-3); }
   .app.frame .settings__nav { top: 0; z-index: 2; padding: var(--space-2) var(--space-3); background: var(--color-bg-raised); }
   .settings__nav-list { display: none; }
-  .settings__jump { display: block; }
+  .settings__jump { display: flex; }
 }
 .settings__group { margin: 0 var(--space-3) var(--space-8); scroll-margin-top: calc(var(--main-header-h, 64px) + var(--space-2)); }
 .settings__head { display: flex; align-items: center; gap: var(--space-2); }

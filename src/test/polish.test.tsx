@@ -137,7 +137,7 @@ describe("settings text", () => {
 
   it("narrow: the section dropdown sits in the header band, above what scrolls under it", () => {
     const narrow = pagesCss.slice(pagesCss.indexOf("@container main (max-width: 900px) {\n  .settings__layout"));
-    expect(narrow).toMatch(/\.settings__nav \{ top: calc\(\(var\(--main-header-h, 64px\) - 40px\) \/ 2\); z-index: 11;/);
+    expect(narrow).toMatch(/\.settings__nav \{ top: calc\(\(var\(--main-header-h, 64px\) - 32px\) \/ 2\); z-index: 11;/);
     // Frames without a header keep it on a panel at the top edge.
     expect(narrow).toMatch(/\.app\.frame \.settings__nav \{ top: 0;[^}]*background: var\(--color-bg-raised\)/);
   });

@@ -181,7 +181,7 @@ function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof use
           ))}
         </ul>
       )}
-      {!model.loading && model.filter === "all" && !model.downloaded.on && <DoctorRow />}
+      {!model.loading && rows.length > 0 && model.filter === "all" && !model.downloaded.on && <DoctorRow />}
       {!model.loading && rows.length === 0 && (
         <div className="ph-empty">
           <p className="ph-empty__title">{model.downloaded.on ? "Nothing downloaded yet" : "Nothing here yet"}</p>

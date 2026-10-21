@@ -16,9 +16,9 @@ Open Stats from the app menu, the Stats row in Your Library, or Your profile. Ev
 
 ## Picking a range
 
-The chips at the top pick the days to count: 4 weeks, 6 months, This year, A year, A month, All time or Custom. A year and A month add a picker, and Custom lets you choose two dates.
+The tabs at the top are Overview, Recaps, Wrapped, Diary and Compare. Wrapped shows while Wrapped is on and Diary while you keep a listening diary. Arrow keys move between them.
 
-Under the range are the tabs: Overview, Recaps, Wrapped, Diary and Compare. Wrapped shows while Wrapped is on and Diary while you keep a listening diary. Arrow keys move between them.
+Under the tabs, the range picks the days to count: 4 weeks, 6 months, Year, Month, All time or Custom. Year and Month add a picker (Year starts on this year), and Custom lets you choose two dates.
 
 Overview starts by summing up the range: minutes listened, plays, songs, artists, albums and days, the share your top artist took, your longest streak and how many new artists you found. Your top song and artist lead the top lists just below.
 
@@ -46,9 +46,9 @@ Recaps shows a card for each month in the range (up to 12, newest first). Wrappe
 
 ## A whole year
 
-To look back on a year, pick This year or A year. The page then shows the whole year, and Moments start with your first song of that year.
+To look back on a year, pick Year, then this year or an older one. The page then shows the whole year, and Moments start with your first song of that year.
 
-<!-- TODO: no separate yearly recap or Wrapped-style story was found in the code (only the This year and A year ranges and monthly recaps). Describe it here if one is added. -->
+<!-- TODO: no separate yearly recap or Wrapped-style story was found in the code (only the Year range and monthly recaps). Describe it here if one is added. -->
 
 ## Stats on other pages
 
