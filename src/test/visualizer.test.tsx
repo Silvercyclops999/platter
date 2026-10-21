@@ -266,6 +266,8 @@ describe("styles", () => {
     expect(stillLine(true, false)).toBeNull();
     expect(stillLine(false, false)).toMatch(/playing on this device/);
     expect(stillLine(true, true)).toMatch(/Reduce motion/);
+    expect(stillLine(true, false, true, true)).toMatch(/Low Power Mode/);
+    expect(stillLine(true, false, true, false)).toMatch(/on battery power/);
   });
 });
 
@@ -583,6 +585,19 @@ describe("the stage", () => {
     expect(s).toHaveTextContent("The visualizer moves with music playing on this device.");
     await new Promise((r) => setTimeout(r, 20));
     expect(mock.visualizer.calls).toEqual([]);
+  });
+
+  it("holds still with one line while the core rests on battery, and keeps asking so it moves again", async () => {
+    const watch = vi.spyOn(backend, "visualizerWatch").mockResolvedValue(false);
+    stage();
+    const s = screen.getByTestId("vis-stage");
+    await waitFor(() => expect(s).toHaveAttribute("data-still", "true"));
+    expect(s).toHaveTextContent("Resting while on battery power.");
+    const asked = watch.mock.calls.length;
+    watch.mockResolvedValue(true);
+    await waitFor(() => expect(s).not.toHaveAttribute("data-still"), { timeout: 2_500 });
+    expect(watch.mock.calls.length).toBeGreaterThan(asked);
+    expect(s).not.toHaveTextContent("Resting");
   });
 
   it("gives the cover back as it was when it goes", async () => {

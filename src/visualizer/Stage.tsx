@@ -26,7 +26,7 @@ import { usePlayer } from "../stores/player";
 import { useSettings } from "../stores/settings";
 import { ArtGL, type ArtFrame } from "./art/ArtGL";
 import { useFrameLoop, useReducedMotion } from "./draw";
-import { latestFrame, useSpectrumFeed } from "./feed";
+import { latestFrame, useFeed, useSpectrumFeed } from "./feed";
 import { paletteFromColour, paletteFromImage, type ArtPalette } from "./palette";
 import { BarLevels, current } from "./scale";
 import { MOTION, MusicSignals } from "./signals";
@@ -68,9 +68,10 @@ export function barColours(lead: RGB): { top: string; bottom: string } {
 }
 
 /** Why the art holds still, if it does. */
-export function stillLine(local: boolean, reduced: boolean): string | null {
+export function stillLine(local: boolean, reduced: boolean, resting = false, phone = false): string | null {
   if (!local) return "The visualizer moves with music playing on this device.";
   if (reduced) return "Holding still while Reduce motion is on.";
+  if (resting) return phone ? "Resting while the phone is in Low Power Mode." : "Resting while on battery power.";
   return null;
 }
 
@@ -101,9 +102,12 @@ export function Stage({ style, phone = false, cover }: StageProps) {
   const vivid = useCoverColors(colourOn ? thumb : null)?.vivid ?? null;
   const reduced = useReducedMotion();
   const fps = phone ? PHONE_FPS : DESKTOP_FPS;
-  const still = reduced || !local;
   // Nothing to move with under reduced motion, or for music playing elsewhere, so nothing is asked of the core.
-  useSpectrumFeed(still ? null : { fps, scope: false });
+  useSpectrumFeed(reduced || !local ? null : { fps, scope: false });
+  // On battery (a phone in Low Power Mode) the core rests: the art holds still too, and the
+  // watch is still renewed so it moves again once the power comes back.
+  const resting = useFeed((s) => s.resting);
+  const still = reduced || !local || resting;
 
   const root = useRef<HTMLDivElement>(null);
   const glHost = useRef<HTMLDivElement>(null);
@@ -197,15 +201,24 @@ export function Stage({ style, phone = false, cover }: StageProps) {
 
   // The palette: from the cover itself once it has been read, else from now playing's own colour.
   const read = useRef<{ url: string; palette: ArtPalette | null } | null>(null);
+  const fallback = () => paletteFromColour(vivid ? parseColour(vivid) : null);
+  // Only this song's cover counts: a song with none (or one that won't load) never keeps the last one's colours.
+  const coverPalette = () => {
+    const url = thumb ? artUrl(thumb, PALETTE_ART) : null;
+    return colourOn && url && read.current?.url === url ? read.current.palette : null;
+  };
   useEffect(() => {
-    const fromCover = colourOn ? read.current?.palette : null;
-    applyPalette(fromCover ?? paletteFromColour(vivid ? parseColour(vivid) : null));
+    applyPalette(coverPalette() ?? fallback());
   }, [vivid, colourOn]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const url = thumb ? artUrl(thumb, PALETTE_ART) : undefined;
-    if (!url || typeof Image === "undefined" || !colourOn) return;
+    if (!url || typeof Image === "undefined" || !colourOn) {
+      read.current = null;
+      applyPalette(fallback());
+      return;
+    }
     if (read.current?.url === url) {
-      if (read.current.palette) applyPalette(read.current.palette);
+      applyPalette(read.current.palette ?? fallback());
       return;
     }
     let alive = true;
@@ -216,7 +229,12 @@ export function Stage({ style, phone = false, cover }: StageProps) {
       if (!alive) return;
       const p = paletteFromImage(img);
       read.current = { url, palette: p };
-      if (p) applyPalette(p);
+      applyPalette(p ?? fallback());
+    };
+    img.onerror = () => {
+      if (!alive) return;
+      read.current = { url, palette: null };
+      applyPalette(fallback());
     };
     img.src = url;
     return () => {
@@ -242,11 +260,11 @@ export function Stage({ style, phone = false, cover }: StageProps) {
       const target = coverFn.current();
       let rect = { x: r.width * 0.15, y: r.height * 0.2, w: r.width * 0.7, h: r.width * 0.7 };
       if (target) {
+        // The centre from the box on screen (turning and breathing keep it), the size from the
+        // layout box, which neither the record's turn nor the breath changes.
         const t = target.getBoundingClientRect();
-        // The breath scales the cover; its resting size is what counts.
-        const breath = parseFloat(target.style.getPropertyValue("--vis-breath")) || 1;
-        const cw = t.width / breath;
-        const ch = t.height / breath;
+        const cw = target.offsetWidth || t.width;
+        const ch = target.offsetHeight || t.height;
         rect = { x: t.left + t.width / 2 - cw / 2 - r.left, y: t.top + t.height / 2 - ch / 2 - r.top, w: cw, h: ch };
       }
       const anchor: Box["anchor"] = [(rect.x + rect.w / 2) * scale, (rect.y + rect.h / 2) * scale, (Math.min(rect.w, rect.h) / 2) * scale];
@@ -353,7 +371,7 @@ export function Stage({ style, phone = false, cover }: StageProps) {
     renderer !== null && (!still || awake),
   );
 
-  const line = stillLine(local, reduced);
+  const line = stillLine(local, reduced, resting, phone);
   const cssArt = renderer === "css" && style !== "bars";
   return (
     <div
