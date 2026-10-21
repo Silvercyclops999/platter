@@ -861,9 +861,9 @@ export const ADDED_NOTE_MS = 1500;
 export async function addQuietly(p: Pick<Playlist, "id" | "title">, track: Track): Promise<boolean> {
   // Someone else's playlist: the song goes to its owner, who may be away.
   if (isShared(p.id)) {
-    await addToShared(p, [track.id]);
-    tap("success");
-    return true;
+    const ok = await addToShared(p, [track.id]);
+    if (ok) tap("success");
+    return ok;
   }
   try {
     const done = await backend.playlistAdd(p.id, [track.id]);

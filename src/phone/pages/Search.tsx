@@ -98,8 +98,9 @@ export function PhoneSearch() {
   const cat = useCatalogueSearch(q, "all");
   const all = res ? phoneResults(res) : [];
   const kinds = SEARCH_KINDS.filter((k) => k.id === "all" || all.some((h) => hitInfo(h)?.kind === k.id));
-  // A pill picked for an earlier search that has none of its kind now: All.
-  const shown: SearchKind = !res || kinds.some((k) => k.id === kind) ? kind : "all";
+  // A pill picked for an earlier search that has none of its kind now, or
+  // whose pills are hidden: All.
+  const shown: SearchKind = !res || (kinds.length > 2 && kinds.some((k) => k.id === kind)) ? kind : "all";
   const hits = ofKind(all, shown);
   return (
     <div className="ph-page ph-search">

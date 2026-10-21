@@ -499,6 +499,10 @@ describe("adding to a playlist", () => {
     await addQuietly({ id: "shared:abc", title: "Their mix" }, mock.fx.tracks[0]);
     expect(collab).toHaveBeenCalledWith("shared:abc", [mock.fx.tracks[0].id]);
     expect(own).not.toHaveBeenCalled();
+    collab.mockRejectedValueOnce({ kind: "network", message: "offline" });
+    const haptic = vi.spyOn(backend, "haptic");
+    expect(await addQuietly({ id: "shared:abc", title: "Their mix" }, mock.fx.tracks[0])).toBe(false);
+    expect(haptic).not.toHaveBeenCalledWith("success");
   });
 });
 

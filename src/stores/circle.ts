@@ -195,15 +195,17 @@ export async function setInLibrary(id: string, on: boolean, b: Backend = backend
   }
 }
 
-/** Add songs to a playlist shared with you (they go to its owner). */
-export async function addToShared(p: Pick<Playlist, "id" | "title">, trackIds: string[], b: Backend = backend): Promise<void> {
+/** Add songs to a playlist shared with you (they go to its owner). False when it failed (and said so). */
+export async function addToShared(p: Pick<Playlist, "id" | "title">, trackIds: string[], b: Backend = backend): Promise<boolean> {
   try {
     await b.collabAdd(p.id, trackIds);
     const s = sharedNow(p.id);
     const n = trackIds.length;
     toast.info(s?.ownerUnreachable ? `Added to ${p.title}. It goes to ${s.owner.name} when they're back online` : n === 1 ? `Added to ${p.title}` : `Added ${n} songs to ${p.title}`);
+    return true;
   } catch (e) {
     toast.error(failText(`Couldn't add to ${p.title}`, e));
+    return false;
   }
 }
 

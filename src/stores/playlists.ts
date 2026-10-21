@@ -81,7 +81,10 @@ export async function createPlaylist(opts: { trackIds?: string[]; title?: string
 export async function addToPlaylist(playlist: Playlist, trackIds: string[]): Promise<void> {
   if (!trackIds.length) return;
   // Someone else's playlist: the songs go to its owner.
-  if (isShared(playlist.id)) return addToShared(playlist, trackIds);
+  if (isShared(playlist.id)) {
+    await addToShared(playlist, trackIds);
+    return;
+  }
   const ask = useSettings.getState().settings?.playlistAskDuplicates ?? true;
   if (ask) {
     try {

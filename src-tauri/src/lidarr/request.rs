@@ -1211,14 +1211,18 @@ impl Lidarr {
                 if green {
                     match writer.search(vec![album.id]).await {
                         Ok(()) => searched = true,
-                        Err(e) => tracing::warn!(album = album.id, error = %e, "lidarr request: couldn't search again; tries on the next look"),
+                        Err(e) => {
+                            held = true;
+                            tracing::warn!(album = album.id, error = %e, "lidarr request: couldn't search again; tries again in a few minutes");
+                        }
                     }
                 }
             }
             let r = &mut list[i];
             if held {
-                // The setup check didn't run or didn't pass. It reads every
-                // file Plex has, so it isn't run again on every look.
+                // The setup check didn't run or pass, or the search didn't go
+                // out. The check reads every file Plex has, so it isn't run
+                // again on every look.
                 r.next_search_at = Some(now + RETRY_EVERY.as_secs() as i64);
             }
             if searched {

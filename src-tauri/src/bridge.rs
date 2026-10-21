@@ -467,17 +467,18 @@ struct Slots {
 /// every restart of the app (a phone's app is ended often). Each device
 /// instead takes turns with [`TRANSCODE_SLOTS`] fixed names: the slot's old
 /// transcode (two songs back, or from before a restart) is stopped first, and
-/// the first one this run stops them all. A song that already holds a slot
-/// (its first transcode was refused and it's asked again) takes that slot
-/// back, so the song playing beside it keeps its own.
-async fn transcode_session(client: &crate::plex::client::PlexClient, track_id: &str) -> String {
+/// the first one this run stops them all. A song asked `again` (its first
+/// transcode was refused) takes back the slot it holds, so the song playing
+/// beside it keeps its own.
+async fn transcode_session(client: &crate::plex::client::PlexClient, track_id: &str, again: bool) -> String {
     let id = &client.identity().client_id;
     let name = |slot: usize| format!("platter-{id}-{slot}");
     let (slot, stale): (usize, Vec<String>) = {
         let mut slots = SLOTS.lock();
         match slots.get_mut(id.as_str()) {
             Some(s) => {
-                let slot = match s.held.iter().position(|t| t.as_deref() == Some(track_id)) {
+                let mine = if again { s.held.iter().position(|t| t.as_deref() == Some(track_id)) } else { None };
+                let slot = match mine {
                     Some(mine) => mine,
                     None => {
                         let slot = s.next % TRANSCODE_SLOTS;
@@ -533,7 +534,7 @@ impl TrackResolver for PlexStreams {
         let client = self.0.client_for_when_ready(&track.id, STARTUP_WAIT).await?;
         let prefs = &self.1;
         if let Some(kbps) = stream_cap_kbps(client.connection(), track.bitrate, prefs.home(), prefs.away()) {
-            let session = transcode_session(&client, &track.id).await;
+            let session = transcode_session(&client, &track.id, false).await;
             let req = client.transcode_request(&track.id, kbps, &session)?;
             return Ok(source_of(req, Some("mp3".into())));
         }
@@ -543,7 +544,7 @@ impl TrackResolver for PlexStreams {
 
     async fn transcode(&self, track: &Track) -> AppResult<StreamSource> {
         let client = self.0.client_for(&track.id).await?;
-        let session = transcode_session(&client, &track.id).await;
+        let session = transcode_session(&client, &track.id, true).await;
         let req = client.transcode_request(&track.id, 320, &session)?;
         Ok(source_of(req, Some("mp3".into())))
     }
@@ -1195,7 +1196,7 @@ mod transcode_tests {
         .unwrap();
         let mut names = Vec::new();
         for t in ["1", "2", "3"] {
-            names.push(transcode_session(&c, t).await);
+            names.push(transcode_session(&c, t, false).await);
         }
         assert_eq!(names, ["platter-dev-0", "platter-dev-1", "platter-dev-0"]);
     }
@@ -1213,9 +1214,11 @@ mod transcode_tests {
         .unwrap();
         // A plays from slot 0, B is loaded into slot 1, then B's transcode
         // is refused and asked for again.
-        assert_eq!(transcode_session(&c, "A").await, "platter-again-0");
-        assert_eq!(transcode_session(&c, "B").await, "platter-again-1");
-        assert_eq!(transcode_session(&c, "B").await, "platter-again-1", "A keeps playing");
-        assert_eq!(transcode_session(&c, "C").await, "platter-again-0", "turns go on");
+        assert_eq!(transcode_session(&c, "A", false).await, "platter-again-0");
+        assert_eq!(transcode_session(&c, "B", false).await, "platter-again-1");
+        assert_eq!(transcode_session(&c, "B", true).await, "platter-again-1", "A keeps playing");
+        assert_eq!(transcode_session(&c, "C", false).await, "platter-again-0", "turns go on");
+        // The playing song loaded again (repeat one) takes the other slot.
+        assert_eq!(transcode_session(&c, "C", false).await, "platter-again-1");
     }
 }

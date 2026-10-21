@@ -117,11 +117,9 @@ impl Feeds {
         Ok(n)
     }
 
-    /// Apply what other devices brought, for the namespaces that changed
-    /// (blocking).
-    /// Apply other devices' changes in `namespaces`. Each part goes on its
-    /// own: what one applied is reported even when another failed, and the
-    /// namespaces that failed come back to be tried again.
+    /// Apply other devices' changes in `namespaces` (blocking). Each part
+    /// goes on its own: what one applied is reported even when another
+    /// failed, and the namespaces that failed come back to be tried again.
     pub fn apply(&self, namespaces: &[String]) -> (Applied, Vec<String>) {
         let g = (self.groups)();
         let has = |ns: &str| namespaces.iter().any(|n| n == ns);
@@ -181,6 +179,9 @@ impl Feeds {
         every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut pending: Vec<String> = Vec::new();
         let mut due: Option<tokio::time::Instant> = None;
+        // How long until a part that failed to apply is tried again: longer
+        // each time it fails, back to the start once everything applies.
+        let mut retry = self.timing.every;
         loop {
             tokio::select! {
                 _ = every.tick() => {
@@ -213,13 +214,16 @@ impl Feeds {
                         }
                         // Tried again on the next check, not lost until
                         // another device changes the same thing.
-                        if !failed.is_empty() {
+                        if failed.is_empty() {
+                            retry = self.timing.every;
+                        } else {
                             for n in failed {
                                 if !pending.contains(&n) {
                                     pending.push(n);
                                 }
                             }
-                            due = Some(tokio::time::Instant::now() + self.timing.every);
+                            due = Some(tokio::time::Instant::now() + retry);
+                            retry = (retry * 2).min(self.timing.every * 32);
                         }
                         self.blocking(|f| f.publish()).await;
                     }

@@ -285,8 +285,9 @@ pub struct ArtResolver {
     /// Albums whose upload failed this session (not tried again until restart
     /// or a new key).
     failed: Mutex<HashSet<String>>,
-    /// Hosts that were down or answered with a server error lately, with
-    /// when: tried after the others until [`HOST_REST`] has passed.
+    /// Keyless hosts that were down, answered with a server error or gave
+    /// no image lately, with when: tried after the others until
+    /// [`HOST_REST`] has passed. The user's own Imgur keeps its place.
     resting: Mutex<std::collections::HashMap<Host, std::time::Instant>>,
 }
 
@@ -509,7 +510,7 @@ impl ArtResolver {
         {
             let mut resting = self.resting.lock();
             resting.retain(|_, at| at.elapsed() < HOST_REST);
-            hosts.sort_by_key(|h| resting.contains_key(h));
+            hosts.sort_by_key(|h| *h != Host::Imgur && resting.contains_key(h));
         }
         if hosts.is_empty() {
             if imgur_key.is_some() && exclude.is_empty() {
@@ -551,12 +552,13 @@ impl ArtResolver {
                     continue;
                 }
             };
-            self.resting.lock().remove(&host);
             if !self.warm(&url).await {
                 tracing::info!("{} doesn't serve the cover as an image; trying the next host", host.label());
+                self.resting.lock().insert(host, std::time::Instant::now());
                 last = format!("{} gave no direct image link", host.label());
                 continue;
             }
+            self.resting.lock().remove(&host);
             let link_expires_at = host.adapter().and_then(|a| a.keeps(bytes.len())).map(|t| now + t);
             let (id, u) = (req.album_id.clone(), url.clone());
             if let Err(e) = self.db.write_async(move |c| put_upload(c, &id, &u, host, now, link_expires_at)).await {
