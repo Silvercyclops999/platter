@@ -1,7 +1,8 @@
 /**
- * The phone's own settings rows (Downloads and devices, "On this phone" and
- * "CarPlay").
- * They show only when Platter runs as a phone; every one is this device only.
+ * The phone's own settings rows (Downloads and devices, "On this phone",
+ * "CarPlay" and "Siri").
+ * They show only when Platter runs as a phone; all but Siri's are this
+ * device only.
  */
 import { Select, type SelectOption } from "../components/Select";
 import { Skeleton } from "../components/Skeleton";
@@ -36,6 +37,20 @@ function sw(s: Settings | null, key: PhoneSwitch, ids: Ids) {
 
 const GROUP = "On this phone";
 const CARPLAY = "CarPlay";
+const SIRI = "Siri";
+
+export const SIRI_DISLIKE: SelectOption<string>[] = [
+  { value: "hide", label: "Hide it and skip" },
+  { value: "skip", label: "Just skip" },
+];
+
+/** What to say, for the "Ask Siri" row. */
+export const SIRI_PHRASES =
+  'End with "on Platter". "Play Kanye West on shuffle", "play the album Donda", "play my Road Trip playlist", ' +
+  '"play Daily Mix 2", "play hip-hop", "play the new Drake album", "play something", "play Runaway next", ' +
+  '"add Donda to the queue", "play more like this", "I like this song", "I don\'t like this song", ' +
+  '"add this to my Road Trip playlist". Pause, skip and "turn on shuffle" work too. Songs you don\'t have are ' +
+  "got through Lidarr when it's set up.";
 
 /** The phone's one look choice: follow the phone's light or dark, or one look. */
 export type PhoneLook = "device" | "studio" | "studioBlack" | "sleeve" | "other";
@@ -144,6 +159,35 @@ export function phoneRows(s: Settings | null): RowDef[] {
       description: "With no signal, CarPlay lists only what's downloaded. This device only.",
       more: "Off: everything stays listed, and what needs a connection says so. This device only.",
       control: (ids) => sw(s, "carplayOfflineDownloads", ids),
+    },
+    {
+      key: "siriPhrases",
+      section: "Downloads and devices",
+      group: SIRI,
+      title: "Ask Siri",
+      description: 'Say "Hey Siri, play Donda on Platter". Tap ? for everything you can say.',
+      more: SIRI_PHRASES,
+      control: () => null,
+    },
+    {
+      key: "siriDislikeHides",
+      section: "Downloads and devices",
+      group: SIRI,
+      title: "When you tell Siri you don't like a song",
+      description: "Hidden songs aren't picked for mixes, radio or shuffle. Synced.",
+      more: "Hide it and skip: the song is skipped and kept out of what Platter picks for you (Settings lists hidden songs). Just skip: it's only skipped. Synced.",
+      control: (ids) =>
+        s ? (
+          <Select
+            value={s.siriDislikeHides ? "hide" : "skip"}
+            options={SIRI_DISLIKE}
+            onChange={(v) => updateSettings({ siriDislikeHides: v === "hide" })}
+            labelledBy={ids.title}
+            describedBy={ids.desc}
+          />
+        ) : (
+          wait
+        ),
     },
   ];
 }

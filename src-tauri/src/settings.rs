@@ -697,6 +697,9 @@ pub struct Settings {
     pub carplay_resume: bool,
     /// CarPlay: with no signal, lists show only what's downloaded (this device only).
     pub carplay_offline_downloads: bool,
+    /// Telling Siri "I don't like this song" hides it as well as skipping
+    /// it; off only skips (synced).
+    pub siri_dislike_hides: bool,
     /// A tap or click on the cover in now playing opens the visualizer (synced).
     pub visualizer_cover_tap: bool,
     /// The visualizer's last style, remembered (synced).
@@ -1307,6 +1310,7 @@ impl Default for Settings {
             phone_haptics: true,
             carplay_resume: true,
             carplay_offline_downloads: true,
+            siri_dislike_hides: true,
             visualizer_cover_tap: true,
             visualizer_style: VisualizerStyle::Grooves,
             device_format: crate::devices::DeviceFormat::Original,
@@ -1516,6 +1520,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "showFormatBadge",
     "signalPathBadge",
     "visualizerCoverTap",
+    "siriDislikeHides",
     "visualizerStyle",
     "resumeContexts",
     "popularSource",
@@ -1974,6 +1979,7 @@ pub struct SettingsPatch {
     pub phone_haptics: Option<bool>,
     pub carplay_resume: Option<bool>,
     pub carplay_offline_downloads: Option<bool>,
+    pub siri_dislike_hides: Option<bool>,
     pub visualizer_cover_tap: Option<bool>,
     pub visualizer_style: Option<VisualizerStyle>,
     pub device_format: Option<crate::devices::DeviceFormat>,
@@ -2363,6 +2369,7 @@ impl Settings {
         set(&mut self.phone_haptics, p.phone_haptics);
         set(&mut self.carplay_resume, p.carplay_resume);
         set(&mut self.carplay_offline_downloads, p.carplay_offline_downloads);
+        set(&mut self.siri_dislike_hides, p.siri_dislike_hides);
         set(&mut self.visualizer_cover_tap, p.visualizer_cover_tap);
         set(&mut self.visualizer_style, p.visualizer_style);
         if let Some(n) = p.phone_keep_recent {
@@ -5842,6 +5849,18 @@ mod tests {
         assert!(!s.carplay_resume && !s.carplay_offline_downloads);
         let old: Settings = serde_json::from_str("{}").unwrap();
         assert!(old.carplay_resume && old.carplay_offline_downloads, "saved settings from before CarPlay keep the defaults");
+    }
+
+    #[test]
+    fn siri_dislike_hides_by_default_and_is_synced() {
+        assert!(Settings::default().siri_dislike_hides);
+        assert!(SYNCED_SETTINGS.contains(&"siriDislikeHides") && !DEVICE_SETTINGS.contains(&"siriDislikeHides"));
+        let mut s = Settings::default();
+        let p: SettingsPatch = serde_json::from_str(r#"{"siriDislikeHides":false}"#).unwrap();
+        s.apply(&p).unwrap();
+        assert!(!s.siri_dislike_hides);
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(old.siri_dislike_hides, "saved settings from before keep the default");
     }
 
     #[test]
