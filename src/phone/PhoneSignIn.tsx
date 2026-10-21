@@ -144,7 +144,7 @@ export function PhoneSignIn({ onBack }: { onBack?: () => void } = {}) {
             )}
             {!onBack && others && (
               <>
-                <button type="button" className="ph-big-btn" onClick={() => setOther("jellyfin")}>
+                <button type="button" className="ph-big-btn" onClick={() => setOther("jellyfin")} autoFocus>
                   Use a Jellyfin server
                 </button>
                 <button type="button" className="ph-big-btn" onClick={() => setOther("subsonic")}>
