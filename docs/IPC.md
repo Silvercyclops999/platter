@@ -766,7 +766,10 @@ same edition, version and release status), `albumArtist` (files with no album ar
 credit several artists, or whose name is also under another artist),
 `lowQuality` (a lossy copy next to a lossless one of the same recording on
 another album, or a low bitrate well under another lossy copy) and
-`unmatched` (Plex couldn't match it and the MusicBrainz check found it) and
+`unmatched` (Plex couldn't match it and the MusicBrainz check found it),
+`notInPlex` (a song got with a tap that Lidarr imported but Plex still
+hasn't shown after the wait; it goes away when the library has it, and is
+kept only while the app runs; `artistId` and `albumId` are empty) and
 `soundsLike` (identify by sound matched the file to another recording than
 its title, artist or recording id say; files whose names already agree are
 left alone). Unreleased songs never match anything, so they are never
@@ -776,8 +779,9 @@ never `unmatched`.
 `fix` names the app's own flow: `cover` (Change cover), `match` (Fix match),
 `mergeAlbums` (`plex_edit_merge_albums` after a confirm), `openAlbum` or
 `tags` (each song's tags in `table`, and the values in `set` written to
-every song through the tag editor once the user confirms) or
-`suggestedTags` (the file's tags next to the ones in `suggest`). Low
+every song through the tag editor once the user confirms) ,
+`suggestedTags` (the file's tags next to the ones in `suggest`) or
+`lookAgain` (a library sync, `sync_now`). Low
 quality findings also offer a Lidarr request when Lidarr is ready. The
 doctor commands never write to Plex or to files themselves; a saved tag fix
 asks for a new check.
@@ -4157,7 +4161,7 @@ The rest of the fields, with their defaults:
 | `translationService` | string, "" | A LibreTranslate-compatible address for `lyrics_translate`; empty means no translation. This device only. |
 | `translateTo` | string, "en" | The language code lyrics are translated into. |
 | `libraryDoctor` | bool, true | The library doctor checks the library in the background and shows a count under Your Library. |
-| `doctorChecks` | `{ duplicates, covers, albumTags, splitAlbums, albumArtist, lowQuality, unmatched, soundsLike }`, all true | Which library doctor checks run. |
+| `doctorChecks` | `{ duplicates, covers, albumTags, splitAlbums, albumArtist, lowQuality, unmatched, soundsLike, notInPlex }`, all true | Which library doctor checks run. |
 | `doctorCoverPx` | 300, 500, 600 (default), 800, 1000 or 1400 | Covers smaller than this on their longest side count as small. |
 | `releaseRadar` | bool, false | The release radar looks for new releases about once a day and shows them on Home and its page. Synced. |
 | `radarNotify` | bool, true | A notification when the release radar finds something new (not in a private session). Synced. |

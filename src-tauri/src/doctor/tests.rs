@@ -662,3 +662,17 @@ fn kinds_round_trip_their_keys() {
     }
     assert_eq!(Kind::from_key("nope"), None);
 }
+
+#[test]
+fn a_tapped_song_plex_hasnt_shown_is_listed_once_until_it_arrives() {
+    let t = crate::lidarr::tap::tests_support::tap("t1", "Dawn", "Northlight", "Second Wind");
+    super::arrivals::reset();
+    assert!(super::arrivals::flag(&t));
+    assert!(!super::arrivals::flag(&t), "listed once");
+    let f = &super::arrivals::findings()[0];
+    assert_eq!((f.kind, f.fix, f.title.as_str()), (super::Kind::NotInPlex, super::Fix::LookAgain, "Dawn isn't in your library yet"));
+    assert_eq!(super::Kind::from_key("notInPlex"), Some(super::Kind::NotInPlex));
+    assert!(super::arrivals::clear(&t));
+    assert!(super::arrivals::findings().is_empty());
+    assert!(!super::arrivals::clear(&t));
+}

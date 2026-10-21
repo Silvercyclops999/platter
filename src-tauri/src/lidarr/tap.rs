@@ -190,6 +190,8 @@ pub trait TapHost: Send + Sync {
     fn refresh_library(&self);
     /// Plex never showed it (for Library doctor).
     fn flag_missing(&self, _tap: &Tap) {}
+    /// The library has a song that was flagged.
+    fn found(&self, _tap: &Tap) {}
 }
 
 /// Taps on this device, followed until they play.
@@ -656,6 +658,9 @@ impl Taps {
         }
         tracing::info!(title = %t.title, found = ?t.timings.found_ms, downloaded = ?t.timings.downloaded_ms, playing = ?t.timings.playing_ms, "lidarr tap: in the library");
         self.lidarr.save_last_get(&LastGet { title: t.title.clone(), at: (self.lidarr.inner.clock)(), timings: t.timings.clone() });
+        if t.flagged {
+            self.host.found(&t);
+        }
         t.track = Some(track);
         t.phase = TapPhase::Ready;
         t.from_download = false;

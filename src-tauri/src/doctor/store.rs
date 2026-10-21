@@ -154,6 +154,9 @@ pub fn all(c: &Connection, o: &Options) -> AppResult<Vec<Finding>> {
     if o.checks.sounds_like {
         out.extend(super::sounds::findings(c)?);
     }
+    if o.checks.not_in_plex {
+        out.extend(super::arrivals::findings());
+    }
     out.sort_by(|a, b| {
         a.kind
             .cmp(&b.kind)

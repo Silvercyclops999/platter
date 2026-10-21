@@ -446,7 +446,7 @@ describe("where it opens from", () => {
     expect(run).toBeChecked();
     const checks = screen.getByRole("list", { name: "Library doctor checks" });
     const switches = within(checks).getAllByRole("switch");
-    expect(switches).toHaveLength(8);
+    expect(switches).toHaveLength(9);
     for (const s of switches) expect(s).toBeChecked();
     await user.click(within(checks).getByRole("switch", { name: "Missing or small covers" }));
     await waitFor(() => expect(useSettings.getState().settings?.doctorChecks.covers).toBe(false));
