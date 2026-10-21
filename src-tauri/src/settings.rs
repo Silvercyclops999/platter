@@ -2891,14 +2891,16 @@ fn lyrics_on_once(db: &DbHandle, s: &mut Settings, had_saved: bool) {
         Ok(Some(_)) => return,
         Err(e) => return tracing::warn!("lyrics default not checked: {e}"),
     }
+    // Marked first: if the mark can't be kept, the setting is left as it is,
+    // so someone who turns it off later is never overridden.
+    if let Err(e) = db.write(|c| kv_set(c, LYRICS_ON_KEY, "1")) {
+        return tracing::warn!("lyrics default not marked: {e}");
+    }
     if had_saved && !s.transcribe_lyrics {
         s.transcribe_lyrics = true;
         if let Err(e) = save(db, s) {
-            return tracing::warn!("lyrics default not saved: {e}");
+            tracing::warn!("lyrics default not saved: {e}");
         }
-    }
-    if let Err(e) = db.write(|c| kv_set(c, LYRICS_ON_KEY, "1")) {
-        tracing::warn!("lyrics default not marked: {e}");
     }
 }
 

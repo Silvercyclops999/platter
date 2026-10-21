@@ -173,7 +173,7 @@ function TimingStepper({ lyrics, track, held }: { lyrics: Lyrics; track: Track; 
   );
 }
 
-/** The - and + keys nudge synced lyrics' timing (not while typing, in a dialog or while the check may move it). */
+/** While the timing bar is open, the - and + keys nudge the timing (not while typing, in a dialog or menu, or while the check may move it). */
 function useNudgeKeys(trackId: string, fetched: number, on: boolean) {
   const pickerOpen = useWrongLyrics((s) => !!s.track);
   useEffect(() => {
@@ -181,7 +181,7 @@ function useNudgeKeys(trackId: string, fetched: number, on: boolean) {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || pickerOpen) return;
       const t = e.target as HTMLElement | null;
-      if (t?.closest?.("input, textarea, select, [contenteditable=true], .dialog")) return;
+      if (t?.closest?.("input, textarea, select, [contenteditable=true], .dialog, [role=menu]")) return;
       const step = e.key === "-" || e.key === "_" ? -NUDGE_MS : e.key === "+" || e.key === "=" ? NUDGE_MS : 0;
       if (!step) return;
       e.preventDefault();
@@ -238,7 +238,7 @@ export function LyricsFooter({ lyrics, track, synced, texts, extras }: FooterPro
   const own = useLyricsEditor((s) => s.ownIds.has(track.id));
   const picking = useLyricPick((s) => s.picking && s.trackId === track.id);
   const share = useShareTranscription(lyrics, track);
-  useNudgeKeys(track.id, fetched, synced && !held);
+  useNudgeKeys(track.id, fetched, timing && synced && !held);
   // A new song closes the timing bar and ends tapping.
   useEffect(
     () => () => {
@@ -247,6 +247,10 @@ export function LyricsFooter({ lyrics, track, synced, texts, extras }: FooterPro
     },
     [track.id],
   );
+  // Lyrics without timing close the bar, so it doesn't come back by itself.
+  useEffect(() => {
+    if (!synced) setTiming(false);
+  }, [synced]);
   // The check started meanwhile: tapping waits with the stepper.
   useEffect(() => {
     if (held && useWrongLyrics.getState().tapping === track.id) setTapping(null);
@@ -308,7 +312,7 @@ export function LyricsFooter({ lyrics, track, synced, texts, extras }: FooterPro
       ) : (
         <div className="lyrics-trust__bar">
           <span className="lyrics-trust__from">{label}</span>
-          <button type="button" className="lyrics-trust__btn lyrics-trust__more" aria-label={OPTIONS_LABEL} title="More" onClick={menu}>
+          <button type="button" className="lyrics-trust__btn lyrics-trust__more" aria-label={OPTIONS_LABEL} aria-haspopup="menu" title={OPTIONS_LABEL} onClick={menu}>
             <MoreHorizontal size={18} aria-hidden="true" />
           </button>
         </div>

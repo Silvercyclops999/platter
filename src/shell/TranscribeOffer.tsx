@@ -52,13 +52,17 @@ export function NoLyrics({ track }: { track: Track }) {
   }, [on, track.id]);
 
   const current = on && status.current?.trackId === track.id ? status.current : undefined;
-  const queued = on && !current && status.upNext === track.id;
+  // Next in line counts as being written down only while the work isn't
+  // held up (paused, on battery, off hours) or stopped by a failure.
+  const queued = on && !current && status.upNext === track.id && !status.paused && !status.userPaused && !status.error;
   if (status && (current || queued)) {
     const first = current?.stage === "waitingForModel";
     const text = first ? FIRST_TIME_TEXT : WRITING_TEXT;
     return (
-      <div className="lyrics-page__empty-wrap lyrics-page__empty-wrap--writing" role="status">
-        <p className="lyrics-page__writing">{text}</p>
+      <div className="lyrics-page__empty-wrap lyrics-page__empty-wrap--writing">
+        <p className="lyrics-page__writing" role="status">
+          {text}
+        </p>
         <ProgressLine percent={current ? writingPercent(current, status) : null} label={text} />
       </div>
     );
