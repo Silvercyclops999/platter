@@ -173,17 +173,18 @@ impl Links {
         format!("{}.apart", self.list_key)
     }
 
-    /// Devices the user unpaired: never linked again by account.
+    /// Account links the user unpaired: not made again. A link's id comes
+    /// from both ends' sign-ins, so signing in again on either links anew.
     pub fn apart(&self) -> Vec<String> {
         self.db.read(|c| kv_get(c, &self.apart_key())).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
     }
 
-    /// Keep this device apart from now on (it was unpaired by account).
-    pub fn keep_apart(&self, device: &str) -> AppResult<()> {
+    /// Keep this account link from coming back (it was unpaired).
+    pub fn keep_apart(&self, id: &str) -> AppResult<()> {
         let _one = self.lock.lock();
         let mut l = self.apart();
-        if !l.iter().any(|d| d == device) {
-            l.push(device.to_string());
+        if !l.iter().any(|d| d == id) {
+            l.push(id.to_string());
             l.truncate(500);
             let json = serde_json::to_string(&l).map_err(|e| AppError::Internal(e.to_string()))?;
             self.db.write(|c| kv_set(c, &self.apart_key(), &json))?;
@@ -191,11 +192,10 @@ impl Links {
         Ok(())
     }
 
-    /// The user unpaired this link: an account link's device stays apart.
+    /// The user unpaired this link: an account link stays apart.
     pub fn unpaired(&self, id: &str) {
-        if let Some(p) = self.get(id).filter(|p| p.auto)
-            && let Some(d) = p.device
-            && let Err(e) = self.keep_apart(&d)
+        if self.get(id).is_some_and(|p| p.auto)
+            && let Err(e) = self.keep_apart(id)
         {
             tracing::warn!("couldn't keep an unpaired device apart: {e}");
         }

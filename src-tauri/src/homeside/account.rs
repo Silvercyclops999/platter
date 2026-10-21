@@ -194,6 +194,23 @@ pub struct Plan {
 /// couldn't work out the same links. A device reached by a code-paired link
 /// that `works` isn't linked again.
 pub fn plan(kind: Kind, me: &Me, list: &[AccountDevice], have: &[Paired], apart: &[String], relay: &str, works: impl Fn(&Paired) -> bool) -> Option<Plan> {
+    plan_heard(kind, me, list, have, apart, relay, works, |_| false)
+}
+
+/// [`plan`], where `heard` says an account link was ever heard from. A
+/// device listed with more than one sign-in answers only on its current
+/// one, so once a link to it was heard from, its other links go.
+#[allow(clippy::too_many_arguments)]
+pub fn plan_heard(
+    kind: Kind,
+    me: &Me,
+    list: &[AccountDevice],
+    have: &[Paired],
+    apart: &[String],
+    relay: &str,
+    works: impl Fn(&Paired) -> bool,
+    heard: impl Fn(&Paired) -> bool,
+) -> Option<Plan> {
     if !list.iter().any(|d| d.id == me.id && d.keys.contains(&me.key)) {
         return None;
     }
@@ -210,12 +227,20 @@ pub fn plan(kind: Kind, me: &Me, list: &[AccountDevice], have: &[Paired], apart:
             Kind::Bridge => d.is_bridge(),
             Kind::Device => !d.is_bridge(),
         };
-        if !fits || apart.iter().any(|a| a == &d.id) || reached.contains(d.id.as_str()) {
+        if !fits || reached.contains(d.id.as_str()) {
             continue;
         }
-        for key in &d.keys {
-            let link = account_link(kind, me, &d.id, key, relay);
-            wanted.push(Wanted { link, device: d.id.clone(), name: d.name.clone(), key: key.clone() });
+        let mine: Vec<Wanted> = d
+            .keys
+            .iter()
+            .map(|key| Wanted { link: account_link(kind, me, &d.id, key, relay), device: d.id.clone(), name: d.name.clone(), key: key.clone() })
+            .filter(|w| !apart.contains(&w.link.id))
+            .collect();
+        let answered: HashSet<&str> = have.iter().filter(|p| p.auto && heard(p)).map(|p| p.id.as_str()).collect();
+        if mine.iter().any(|w| answered.contains(w.link.id.as_str())) {
+            wanted.extend(mine.into_iter().filter(|w| answered.contains(w.link.id.as_str())));
+        } else {
+            wanted.extend(mine);
         }
     }
     let had: HashSet<&str> = have.iter().map(|p| p.id.as_str()).collect();
@@ -413,19 +438,20 @@ async fn listen_knocks(relays: Arc<dyn RelayFactory>, relay: String, key: PeerKe
 }
 
 /// A code-paired Bridge that went quiet, whose place an account-linked
-/// Bridge has taken: the same device, or one of the same name. That's the
-/// pairing it lost (its keys file was lost, or only one end saved it).
-/// Gives the code-paired links to forget.
+/// Bridge has taken. That's the pairing it lost (its keys file was lost, or
+/// only one end saved it). One that was heard from must be the same device;
+/// one never heard from (it never said which device it is) goes when it's
+/// older than [`QUIET_S`] and has the live one's name. Gives the
+/// code-paired links to forget.
 pub fn replaced(have: &[Paired], last_seen: impl Fn(&str) -> Option<i64>, now_s: i64) -> Vec<String> {
     let live: Vec<&Paired> = have.iter().filter(|p| p.auto && last_seen(&p.id).is_some_and(|t| now_s - t < QUIET_S)).collect();
     have.iter()
         .filter(|p| !p.auto)
         .filter(|p| match last_seen(&p.id) {
             // Never heard from: the other end never kept its half.
-            None => true,
-            Some(t) => now_s - t >= QUIET_S,
+            None => now_s - p.paired_at >= QUIET_S && live.iter().any(|a| a.name == p.name || (p.device.is_some() && a.device == p.device)),
+            Some(t) => now_s - t >= QUIET_S && p.device.is_some() && live.iter().any(|a| a.device == p.device),
         })
-        .filter(|p| live.iter().any(|a| a.name == p.name || (p.device.is_some() && a.device == p.device)))
         .map(|p| p.id.clone())
         .collect()
 }
@@ -454,7 +480,10 @@ impl AccountSide for AppAccount {
 
     async fn apply(&self, me: &Me, list: &[AccountDevice]) -> Vec<PeerKey> {
         // Only the server's owner links to Bridges (they reach Lidarr).
-        let mut keys = if self.plex.owns_current_server().await {
+        // Until a server is connected (at start), Bridges stay as they are.
+        let mut keys = if self.plex.machine_id().await.is_none() {
+            Vec::new()
+        } else if self.plex.owns_current_server().await {
             self.bridges.account_links(me, list)
         } else {
             self.bridges.account_links(me, &without_bridges(list))
@@ -651,10 +680,35 @@ mod tests {
     }
 
     #[test]
-    fn a_device_the_user_unpaired_stays_apart() {
+    fn a_device_the_user_unpaired_stays_apart_until_it_signs_in_again() {
         let mac = me("mac", "mac-token", false);
-        let p = plan(Kind::Device, &mac, &list(), &[], &["phone".to_string()], "r", |_| true).unwrap();
+        let first = plan(Kind::Device, &mac, &list(), &[], &[], "r", |_| true).unwrap();
+        let phone = first.add.iter().find(|w| w.device == "phone").unwrap().link.id.clone();
+        let p = plan(Kind::Device, &mac, &list(), &[], std::slice::from_ref(&phone), "r", |_| true).unwrap();
         assert_eq!(ids(&p), ["pc"]);
+        // The phone signs in to Plex again: a new link, which is made.
+        let mut l = list();
+        l[1].keys = vec![key("phone-token-2")];
+        let p = plan(Kind::Device, &mac, &l, &[], std::slice::from_ref(&phone), "r", |_| true).unwrap();
+        assert_eq!(ids(&p), ["pc", "phone"]);
+    }
+
+    #[test]
+    fn a_device_signed_in_twice_keeps_only_the_link_that_answers() {
+        let mac = me("mac", "mac-token", false);
+        let mut l = list();
+        l[1].keys = vec![key("phone-old"), key("phone-new")];
+        let first = plan(Kind::Device, &mac, &l, &[], &[], "r", |_| true).unwrap();
+        let phone: Vec<&Wanted> = first.add.iter().filter(|w| w.device == "phone").collect();
+        assert_eq!(phone.len(), 2, "both, until one answers");
+        let have: Vec<Paired> = first.add.iter().map(|w| paired(&w.link.id, Some(&w.device), true)).collect();
+        let answered = phone[1].link.id.clone();
+        let p = plan_heard(Kind::Device, &mac, &l, &have, &[], "r", |_| true, |p| p.id == answered).unwrap();
+        assert!(p.add.is_empty());
+        assert_eq!(p.drop, vec![phone[0].link.id.clone()]);
+        // Nothing heard yet: both stay.
+        let p = plan_heard(Kind::Device, &mac, &l, &have, &[], "r", |_| true, |_| false).unwrap();
+        assert!(p.add.is_empty() && p.drop.is_empty());
     }
 
     #[test]
@@ -670,12 +724,19 @@ mod tests {
         fine.name = "Unraid Bridge".into();
         let mut other = paired("other", None, false);
         other.name = "Garage Bridge".into();
+        // A second Bridge with the same name, quiet for a while: not this one.
+        let mut twin = paired("twin", Some("garage"), false);
+        twin.name = "Unraid Bridge".into();
+        // Paired with a code a moment ago and not heard from yet.
+        let mut fresh = paired("fresh", None, false);
+        fresh.name = "Unraid Bridge".into();
+        fresh.paired_at = now - 60;
         let seen = |id: &str| match id {
             "auto" | "fine" => Some(now - 60),
-            "quiet" | "other" => Some(now - QUIET_S - 1),
+            "quiet" | "other" | "twin" => Some(now - QUIET_S - 1),
             _ => None,
         };
-        let mut gone = replaced(&[auto.clone(), never, quiet, fine, other], seen, now);
+        let mut gone = replaced(&[auto.clone(), never, quiet, fine, other, twin, fresh], seen, now);
         gone.sort();
         assert_eq!(gone, ["never", "quiet"]);
         // Until the account link answers, nothing goes.
@@ -712,6 +773,6 @@ mod tests {
         assert_eq!(links.get(&w.link.id).unwrap().guard.last.get("brdg"), Some(&77));
         // Unpaired by the user: kept apart.
         links.unpaired(&w.link.id);
-        assert_eq!(links.apart(), vec!["bridge".to_string()]);
+        assert_eq!(links.apart(), vec![w.link.id.clone()]);
     }
 }

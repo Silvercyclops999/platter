@@ -428,13 +428,13 @@ fn desktop_plugins(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> 
     b
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Links by Plex account, kept for the life of the app.
 struct AccountLinks {
     _looker: Arc<homeside::account::Looker>,
     _keep: tokio::sync::watch::Sender<bool>,
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // `platter --next` and the rest talk to the running app and exit.
     if let Some(code) = feed::deck::cli::main(&std::env::args().collect::<Vec<_>>()) {
@@ -890,10 +890,11 @@ pub fn run() {
             });
             {
                 // Only the Plex server's owner gets music through Lidarr.
-                // Without a Plex sign-in (another kind of server), Lidarr
-                // is whoever set it up here.
-                let plex = plex.clone();
-                lidarr_service.set_owner_check(Arc::new(move || plex.owns_current_server_now().unwrap_or(true)));
+                // Signed out of Plex (or its sign-in expired) is nobody's;
+                // with only other kinds of server, Lidarr is whoever set it
+                // up here.
+                let (plex, backends) = (plex.clone(), backends.clone());
+                lidarr_service.set_owner_check(Arc::new(move || plex.owns_current_server_now().unwrap_or_else(|| !backends.plex_set_up())));
             }
             tauri::async_runtime::spawn(lidarr::request::watch(lidarr_service.clone()));
             // Bring in my listening: albums from Played a lot, a few a day.

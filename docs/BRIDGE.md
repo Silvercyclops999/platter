@@ -200,7 +200,7 @@ else signs in on it, its Bridge link goes, it stops answering for your
 other devices, and it doesn't use Lidarr even with your key saved there.
 
 If something breaks a link (the Bridge loses its data folder, say), the two
-link again by themselves the next time they look, which is every few
+link again by themselves the next time they look, which is every 10
 minutes and right away when a device signs in.
 
 A Bridge without a Plex sign-in of its own (one that only has `PLEX_TOKEN`)
@@ -216,8 +216,8 @@ so a changed key reaches it too. Whatever is set on the Bridge itself
 Settings > Bridge says which of those the Bridge has of its own.
 
 To unpair, use **Unpair** in Settings > Bridge. The Bridge hears it and
-forgets that device, and the two don't link again by themselves. Then remove
-the container if you like.
+forgets that device, and the two don't link again by themselves until one
+of them signs in to Plex again. Then remove the container if you like.
 
 ## Plex
 

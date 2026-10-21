@@ -519,7 +519,8 @@ impl DeviceSync {
     pub fn account_links(&self, me: &crate::homeside::account::Me, list: &[crate::homeside::account::AccountDevice]) -> Vec<crate::remote::peer::auth::PeerKey> {
         use crate::homeside::account::{self, Kind};
         let links = &self.wire.links;
-        let Some(plan) = account::plan(Kind::Device, me, list, &links.all(), &links.apart(), crate::homeside::DEFAULT_RELAY, |_| true) else { return Vec::new() };
+        let heard = |p: &crate::homeside::links::Paired| self.peer.seen(&p.id).is_some_and(|s| s.heard_ms.is_some());
+        let Some(plan) = account::plan_heard(Kind::Device, me, list, &links.all(), &links.apart(), crate::homeside::DEFAULT_RELAY, |_| true, heard) else { return Vec::new() };
         let mut changed = false;
         for id in &plan.drop {
             tracing::info!("device sync: a device left the Plex account; its link is gone");

@@ -3292,7 +3292,8 @@ changes, `device-sync://pair` → `PairState`, and `device-sync://copy` →
 
 Devices and Bridges signed in to the same Plex account link by themselves
 (docs/BRIDGE.md, Linking), so the codes below are only for older builds.
-A device unpaired by hand isn't linked by itself again.
+A device unpaired by hand isn't linked by itself again until either end
+signs in to Plex again.
 
 `device_pair_start` shows two codes for 10 minutes. The 6-digit one is for
 a device on the same network: `device_pair_join` there finds the device

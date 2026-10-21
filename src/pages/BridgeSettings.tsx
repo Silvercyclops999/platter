@@ -398,7 +398,7 @@ export function BridgeSettings() {
         setOv(o);
         toast.info(
           b.auto
-            ? `${b.name} was unpaired. It won't link to this device again. Remove its container if you don't need it any more`
+            ? `${b.name} was unpaired. It won't link to this device again until one of them signs in to Plex again. Remove its container if you don't need it any more`
             : `${b.name} was unpaired. Remove its container if you don't need it any more`,
         );
       },

@@ -970,6 +970,39 @@ async fn lidarr_from_anywhere_off_stops_the_bridges_lidarr_work_and_the_route() 
     assert!(desk.route().is_none());
 }
 
+#[tokio::test]
+async fn only_a_device_with_lidarr_set_up_changes_the_bridges_lidarr() {
+    let tmp = tempfile::tempdir().unwrap();
+    let b = side(tmp.path(), "bridge");
+    let bridge = bridge_from(&b, Env { name: "Shed Bridge".into(), ..Default::default() }, Arc::new(Ntfy::new().unwrap()));
+    let desk = super::wire::BridgeConfig { desktop: "Desk".into(), lidarr_url: "http://10.20.30.40:8686".into(), lidarr: Some(false), ..Default::default() };
+    bridge.apply_config(&desk).await.unwrap();
+    assert!(!bridge.lidarr_on());
+    // A phone (or someone else signed in on a computer) sends no Lidarr:
+    // the switch and the address stay as the desk set them.
+    let phone = super::wire::BridgeConfig { desktop: "Phone".into(), lidarr: Some(true), ..Default::default() };
+    bridge.apply_config(&phone).await.unwrap();
+    assert!(!bridge.lidarr_on());
+    assert_eq!(crate::settings::load(&b.db).lidarr_url, "http://10.20.30.40:8686");
+}
+
+#[tokio::test]
+async fn someone_who_doesnt_own_the_server_hands_the_bridge_no_lidarr() {
+    let tmp = tempfile::tempdir().unwrap();
+    let d = side(tmp.path(), "desk");
+    let mut s = crate::settings::load(&d.db);
+    s.lidarr_url = "http://10.20.30.40:8686".into();
+    crate::settings::save(&d.db, &s).unwrap();
+    d.lidarr.set_key(Some("abc123")).unwrap();
+    let desk = desktop_at(&d, Arc::new(std::sync::atomic::AtomicU64::new(NOW)));
+    let cfg = desk.config().await;
+    assert_eq!(cfg.lidarr_url, "http://10.20.30.40:8686");
+    assert_eq!(cfg.lidarr_key.as_deref(), Some("abc123"));
+    d.lidarr.set_owner(false);
+    let cfg = desk.config().await;
+    assert!(cfg.lidarr_url.is_empty() && cfg.lidarr_key.is_none(), "{:?}", cfg.lidarr_url);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_bridges_lyrics_travel_to_a_paired_device_sealed() {
     use crate::sync::store::TRANSCRIPTS;

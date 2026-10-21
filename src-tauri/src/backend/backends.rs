@@ -244,7 +244,7 @@ impl Backends {
 
     /// Whether a Plex account is part of the setup: no servers saved yet
     /// (Plex is how most start), or a Plex one among them.
-    fn plex_set_up(&self) -> bool {
+    pub fn plex_set_up(&self) -> bool {
         let g = self.inner.records.lock();
         match g.as_ref() {
             Some((_, f)) => f.servers.is_empty() || f.servers.iter().any(|r| r.kind == BackendKind::Plex),

@@ -218,7 +218,8 @@ impl Desktop {
         // A code-paired Bridge counts only while it answers: one that lost
         // its half of the pairing is linked again by account.
         let answers = |p: &super::links::Paired| now - p.paired_at < ONLINE_S || self.seen(&p.id).last_seen.is_some_and(|t| now - t < ONLINE_S);
-        let Some(plan) = account::plan(Kind::Bridge, me, list, &links.all(), &links.apart(), super::DEFAULT_RELAY, answers) else { return Vec::new() };
+        let heard = |p: &super::links::Paired| self.seen(&p.id).last_seen.is_some();
+        let Some(plan) = account::plan_heard(Kind::Bridge, me, list, &links.all(), &links.apart(), super::DEFAULT_RELAY, answers, heard) else { return Vec::new() };
         let mut changed = false;
         for id in &plan.drop {
             tracing::info!("A Bridge left the Plex account; its link is gone.");
@@ -268,7 +269,7 @@ impl Desktop {
         });
         let Some(link) = link else { return };
         let name = self.wire.links.all().into_iter().find(|p| p.id == link.id).map(|p| p.name).unwrap_or_default();
-        let plan = match w.bridge_plan(&link.id, &name).await {
+        let mut plan = match w.bridge_plan(&link.id, &name).await {
             Ok(Some(p)) => p,
             Ok(None) => return,
             Err(e) => {
@@ -276,6 +277,14 @@ impl Desktop {
                 return;
             }
         };
+        if !self.d.lidarr.is_owner() {
+            // Someone else is signed in here: the Bridge stops, and gets
+            // nothing from their listening.
+            plan.run = false;
+            plan.albums.clear();
+            plan.requested.clear();
+            plan.edits.clear();
+        }
         let Ok(json) = serde_json::to_string(&plan) else { return };
         if !always && self.sent_plan.lock().get(&link.id) == Some(&json) {
             return;
@@ -555,7 +564,15 @@ impl Desktop {
     /// What the Bridge needs, read now: never stored on the relay unsealed.
     pub async fn config(&self) -> BridgeConfig {
         let s = crate::settings::load(&self.d.db);
-        let url = if s.lidarr_url.trim().is_empty() { s.lidarr_away_url.clone() } else { s.lidarr_url.clone() };
+        // Only the server's owner hands the Bridge Lidarr.
+        let owner = self.d.lidarr.is_owner();
+        let url = if !owner {
+            String::new()
+        } else if s.lidarr_url.trim().is_empty() {
+            s.lidarr_away_url.clone()
+        } else {
+            s.lidarr_url.clone()
+        };
         let plex_server = match &self.d.plex {
             Some(p) => p.machine_id().await,
             None => None,
@@ -572,7 +589,7 @@ impl Desktop {
             lidarr_url: url.clone(),
             // Only for an address the key was entered for on this computer
             // (not one that came from another device).
-            lidarr_key: crate::keyhost::trusted(&self.d.db, crate::lidarr::KEY_ACCOUNT, &url, &[&s.lidarr_url, &s.lidarr_away_url])
+            lidarr_key: (owner && crate::keyhost::trusted(&self.d.db, crate::lidarr::KEY_ACCOUNT, &url, &[&s.lidarr_url, &s.lidarr_away_url]))
                 .then(|| self.d.keys.get(crate::lidarr::KEY_ACCOUNT).ok().flatten().map(|t| t.expose().to_string()))
                 .flatten(),
             plex_token: None,
@@ -613,6 +630,9 @@ impl Desktop {
     }
 
     pub async fn flush_entries(&self) {
+        if !self.d.lidarr.is_owner() {
+            return;
+        }
         for link in self.wire.links.links() {
             let ob = Outbox::new(&self.d.db, &link.id);
             let Ok(batches) = ob.pending(&self.d.store, &[LIDARR.name()]) else { continue };

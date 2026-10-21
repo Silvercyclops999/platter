@@ -699,7 +699,8 @@ impl Bridge {
             self.p.lidarr.set_server_key(Some(server));
         }
         // A computer before the switches sends neither: Lidarr stays on, lyrics stay as they are.
-        let lidarr_on = cfg.lidarr.unwrap_or(true);
+        // Lidarr's switch comes only from a device with Lidarr set up.
+        let lidarr_on = if has_lidarr { cfg.lidarr.unwrap_or(true) } else { self.lidarr_on.load(Ordering::SeqCst) };
         if self.lidarr_on.swap(lidarr_on, Ordering::SeqCst) != lidarr_on {
             tracing::info!("Lidarr from anywhere: {}.", if lidarr_on { "on" } else { "off" });
             self.p.db.write(|c| kv_set(c, LIDARR_ON_KEY, if lidarr_on { "1" } else { "0" }))?;

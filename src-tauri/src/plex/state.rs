@@ -119,7 +119,7 @@ struct Inner {
     /// server tag, with when their connection was picked.
     others: Mutex<std::collections::HashMap<String, (PlexClient, std::time::Instant)>>,
     /// The last answer to whether the account owns the connected server:
-    /// 0 not signed in, 1 no, 2 yes.
+    /// 0 not signed in, 1 no (also before the first answer), 2 yes.
     owner: std::sync::atomic::AtomicU8,
 }
 
@@ -200,7 +200,7 @@ impl PlexState {
                 account_read: watch::channel(true).0,
                 offline: Arc::default(),
                 others: Mutex::new(std::collections::HashMap::new()),
-                owner: std::sync::atomic::AtomicU8::new(0),
+                owner: std::sync::atomic::AtomicU8::new(1),
             }),
         })
     }
