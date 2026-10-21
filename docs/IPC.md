@@ -3505,7 +3505,7 @@ the span keep it.
 Events:
 - `player://state` → `PlayerState` (on any state/track/queue change)
 - `player://position` → `{ positionMs, durationMs, bufferedMs }` (4×/s while playing)
-- `player://error` → `{ trackId?, kind, message }` (e.g. "Skipped: file unavailable")
+- `player://error` → `{ trackId?, kind, message }` (e.g. "Skipped: file unavailable"). After five songs in a row fail, playback pauses on the last one and the message starts with "Stopped" instead.
 
 ## Mixes and radio
 Made on this computer from the cache and the listen log; nothing is stored

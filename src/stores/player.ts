@@ -119,9 +119,21 @@ export function connectPlayer(b: Backend = backend): () => void {
       if (!s.health?.cachedOnly) offlineSkipShown = false;
     }),
   );
+  // Several songs failing in a row end in one "Stopped" message, shown in
+  // place of the "Skipped" one before it.
+  let skipToast: number | undefined;
   b.listen("player://error", (e) => {
+    if (e.message.startsWith("Stopped")) {
+      useToasts.getState().push({ kind: "error", message: e.message }, 6000, skipToast);
+      skipToast = undefined;
+      return;
+    }
     // A pause because the server can't be reached is said as it is.
-    if (!useApp.getState().health?.cachedOnly || !e.message.startsWith("Skipped")) return toast.error(e.message);
+    if (!useApp.getState().health?.cachedOnly || !e.message.startsWith("Skipped")) {
+      const id = toast.error(e.message);
+      if (e.message.startsWith("Skipped")) skipToast = id;
+      return;
+    }
     if (offlineSkipShown) return;
     offlineSkipShown = true;
     // A notice, not an error: the songs play again once the server is back.
