@@ -897,6 +897,7 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 .ph-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 48px 0; }
 .ph-empty__title { margin: 0; font-family: var(--ph-title-font); font-size: 20px; font-weight: 600; }
 .ph-empty__text { margin: 0; font-size: 14px; line-height: 1.5; color: var(--color-text-secondary); }
+.ph-empty__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .ph-loading { display: flex; flex-direction: column; gap: 12px; padding: calc(var(--ph-safe-top) + 56px) var(--ph-gutter); }
 .ph-loading__block { height: 64px; border-radius: 8px; background: var(--ph-faint); }
 .ph-loading__block--hero { height: 200px; width: 56%; align-self: center; }

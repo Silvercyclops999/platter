@@ -24,6 +24,7 @@ import { nav } from "../../stores/router";
 import { phone } from "../phoneUi";
 import { Carousel, PageFailed, PageLoading, ShelfCard, countLine, itemInfo } from "./common";
 import { HomeExplore, HomeMixes } from "./HomeExtras";
+import { Empty, GoPill } from "./kit";
 
 /** Places in Spun this week: two rows of three. */
 export const SPUN_TILES = 6;
@@ -77,8 +78,11 @@ export function PhoneHome() {
   const playingCtx = usePlayer((s) => s.state?.queue.context ?? null);
   const likedCount = useLikes((s) => s.ids.size);
   const showGrid = useSettings((s) => s.settings?.homeShortcuts !== false);
+  const cachedOnly = useApp((s) => !!s.health?.cachedOnly);
   if (error && !data) return <PageFailed what="Home" retry={retry} framed />;
   if (!data) return <PageLoading />;
+  // Nothing in the library at all: say so, rather than mixes and Explore made of nothing.
+  const libraryEmpty = data.shortcuts.length === 0 && visibleShelves(data, "all").length === 0 && likedCount === 0 && !records?.resume;
   // Liked Songs leads, as on the computer, and takes one of the places.
   const liked = showsLikedTile("all", likedCount, showGrid);
   const room = SPUN_TILES - (liked ? 1 : 0);
@@ -95,59 +99,81 @@ export function PhoneHome() {
           {avatar ? <Art path={avatar} size={32} round kind="artist" /> : <UserRound size={20} aria-hidden="true" />}
         </button>
       </div>
-      {records?.resume && <OnThePlatter p={records.resume} />}
-      {(tiles.length > 0 || liked) && (
-        <section className="ph-spun" aria-labelledby="ph-spun-title">
-          <h2 className="ph-spun__title" id="ph-spun-title">
-            {tilesTitle}
-          </h2>
-          <ul className="ph-spun__grid" aria-label={tilesTitle}>
-            {liked && (
-              <li key="liked">
-                <button type="button" className={`ph-spun__tile ${playingCtx?.kind === "liked" ? "is-playing" : ""}`} onClick={() => nav.go({ name: "liked" })}>
-                  <LikedCover fluid />
-                  <span className="ph-spun__name">Liked Songs</span>
-                  <span className="ph-spun__sub">{countLine(likedCount, "song")}</span>
+      {libraryEmpty ? (
+        cachedOnly ? (
+          <Empty title="Nothing on this phone yet" text="Platter can't reach your server right now. Songs you play are kept on this phone, so next time they can play here too." />
+        ) : (
+          <Empty
+            title="No music yet"
+            text="Your library is empty or still syncing. Albums you add and play show up here."
+            action={
+              <span className="ph-empty__actions">
+                <button type="button" className="ph-pill is-primary" onClick={retry}>
+                  Try again
                 </button>
-              </li>
-            )}
-            {tiles.map((i) => {
-              const info = itemInfo(i);
-              const id = info.route.name === "album" || info.route.name === "artist" || info.route.name === "playlist" ? info.route.id : "";
-              // What's playing is marked on its song's row; the tile only takes the accent.
-              const live = playingCtx?.id === id && playingCtx?.kind === info.kind;
-              return (
-                <li key={info.key}>
-                  <button type="button" className={`ph-spun__tile ${live ? "is-playing" : ""} ${info.round ? "is-round" : ""}`} onClick={() => nav.go(info.route)}>
-                    <Art path={info.thumb} fluid requestSize={240} round={info.round} kind={info.kind} tint={info.tint} sleeve={info.kind === "album" ? { title: info.title, artist: info.sub } : undefined} />
-                    <span className="ph-spun__name">{info.title}</span>
-                    {info.sub && <span className="ph-spun__sub">{info.sub}</span>}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      )}
-      <HomeMixes />
-      {shelves.map((s) => (
-        <Carousel key={s.id} title={s.title} onAll={() => nav.go(s.id === "recentlyPlayed" ? { name: "recents" } : { name: "homeShelf", shelf: s.id })}>
-          {s.items.slice(0, 12).map((i) => {
-            const info = itemInfo(i);
-            return <ShelfCard key={info.key} title={info.title} sub={info.sub} thumb={info.thumb} round={info.round} kind={info.kind} onOpen={() => nav.go(info.route)} />;
-          })}
-        </Carousel>
-      ))}
-      <HomeExplore />
-      {!tiles.length && !liked && !shelves.length && !records?.resume && (
-        <div className="ph-empty">
-          <p className="ph-empty__title">Nothing played yet</p>
-          <p className="ph-empty__text">Play a record from your library and it shows up here.</p>
-          <button type="button" className="ph-pill" onClick={() => phone.tab("library")}>
-            Open your library
-          </button>
-        </div>
+                <GoPill route={{ name: "settings", row: "servers" }}>Check the server</GoPill>
+              </span>
+            }
+          />
+        )
+      ) : (
+        <>
+          {records?.resume && <OnThePlatter p={records.resume} />}
+          {(tiles.length > 0 || liked) && (
+            <section className="ph-spun" aria-labelledby="ph-spun-title">
+              <h2 className="ph-spun__title" id="ph-spun-title">
+                {tilesTitle}
+              </h2>
+              <ul className="ph-spun__grid" aria-label={tilesTitle}>
+                {liked && (
+                  <li key="liked">
+                    <button type="button" className={`ph-spun__tile ${playingCtx?.kind === "liked" ? "is-playing" : ""}`} onClick={() => nav.go({ name: "liked" })}>
+                      <LikedCover fluid />
+                      <span className="ph-spun__name">Liked Songs</span>
+                      <span className="ph-spun__sub">{countLine(likedCount, "song")}</span>
+                    </button>
+                  </li>
+                )}
+                {tiles.map((i) => {
+                  const info = itemInfo(i);
+                  const id = info.route.name === "album" || info.route.name === "artist" || info.route.name === "playlist" ? info.route.id : "";
+                  // What's playing is marked on its song's row; the tile only takes the accent.
+                  const live = playingCtx?.id === id && playingCtx?.kind === info.kind;
+                  return (
+                    <li key={info.key}>
+                      <button type="button" className={`ph-spun__tile ${live ? "is-playing" : ""} ${info.round ? "is-round" : ""}`} onClick={() => nav.go(info.route)}>
+                        <Art path={info.thumb} fluid requestSize={240} round={info.round} kind={info.kind} tint={info.tint} sleeve={info.kind === "album" ? { title: info.title, artist: info.sub } : undefined} />
+                        <span className="ph-spun__name">{info.title}</span>
+                        {info.sub && <span className="ph-spun__sub">{info.sub}</span>}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          )}
+          <HomeMixes />
+          {shelves.map((s) => (
+            <Carousel key={s.id} title={s.title} onAll={() => nav.go(s.id === "recentlyPlayed" ? { name: "recents" } : { name: "homeShelf", shelf: s.id })}>
+              {s.items.slice(0, 12).map((i) => {
+                const info = itemInfo(i);
+                return <ShelfCard key={info.key} title={info.title} sub={info.sub} thumb={info.thumb} round={info.round} kind={info.kind} onOpen={() => nav.go(info.route)} />;
+              })}
+            </Carousel>
+          ))}
+          <HomeExplore />
+          {!tiles.length && !liked && !shelves.length && !records?.resume && (
+            <div className="ph-empty">
+              <p className="ph-empty__title">Nothing played yet</p>
+              <p className="ph-empty__text">Play a record from your library and it shows up here.</p>
+              <button type="button" className="ph-pill" onClick={() => phone.tab("library")}>
+                Open your library
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
 }
+
