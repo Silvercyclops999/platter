@@ -21,7 +21,7 @@ use super::engine::{EndedEarly, Engine, EngineConfig, EngineDeps, EngineEvent, u
 use super::gate::TransferGate;
 use super::events::{
     AbLoop, ErrorPayload, EventSink, OutputLost, PlayerState, PlayerStatus, PositionPayload, Problem,
-    SKIPPED_MESSAGE, TrackingEvent, UNREACHABLE_MESSAGE, perceptual_gain,
+    SKIPPED_MESSAGE, STOPPED_MESSAGE, TrackingEvent, UNREACHABLE_MESSAGE, perceptual_gain,
 };
 use super::output::{AudioOutput, OutputState};
 use super::persist::{self, PersistedRef};
@@ -103,6 +103,10 @@ const SMART_SEEDS: usize = 30;
 /// Songs at the end of a context that "similar music" is like.
 const SIMILAR_SEEDS: usize = 10;
 const PROBLEMS_CAP: usize = 200;
+/// Songs in a row that fail to play before playback stops and says so once,
+/// instead of skipping through the whole queue (or forever, with autoplay
+/// refilling it).
+pub const FAILURES_BEFORE_STOP: usize = 5;
 /// A shuffled mixed playlist picks each next song from this many.
 const FIT_WINDOW: usize = 5;
 
@@ -2606,6 +2610,24 @@ impl Actor {
         self.mark_dirty();
     }
 
+    /// [`FAILURES_BEFORE_STOP`] songs in a row failed: pause on the last one
+    /// with nothing loaded, so Play tries it (and the ones after it) again.
+    fn stop_after_failures(&mut self) {
+        tracing::info!("stopped: {} songs in a row wouldn't play", self.failures_in_row);
+        self.cancel_output_retry();
+        self.next_on_refill = false;
+        self.ab = None;
+        self.engine.stop();
+        self.cur_key = None;
+        self.next_key = None;
+        self.cur_ended = true;
+        self.restore_pos = 0;
+        self.skip_ids.clear();
+        self.failures_in_row = 0;
+        self.status = if self.queue.current().is_some() { PlayerStatus::Paused } else { PlayerStatus::Idle };
+        self.mark_dirty();
+    }
+
     fn end_of_queue(&mut self) {
         self.next_on_refill = false;
         self.ab = None;
@@ -2721,17 +2743,19 @@ impl Actor {
                 ..
             } => {
                 self.record_problem(&tag, &track_id, &error);
+                self.failures_in_row += 1;
+                let stop = Some(key) == self.cur_key && self.failures_in_row >= FAILURES_BEFORE_STOP;
                 self.sink.error(&ErrorPayload {
                     track_id: Some(track_id),
                     kind: error.kind().into(),
-                    message: SKIPPED_MESSAGE.into(),
+                    message: if stop { STOPPED_MESSAGE } else { SKIPPED_MESSAGE }.into(),
                 });
                 self.skip_ids.insert(tag.clone());
-                self.failures_in_row += 1;
-                let limit = self.queue.upcoming_len() + 1;
                 if Some(key) == self.cur_key {
-                    if self.failures_in_row > limit {
-                        self.end_of_queue();
+                    // A song that failed isn't picked again (`skip_ids`), so
+                    // the search below ends, also with repeat on.
+                    if stop {
+                        self.stop_after_failures();
                     } else {
                         // Skip the broken current entry (even with repeat-one).
                         self.cur_ended = true;

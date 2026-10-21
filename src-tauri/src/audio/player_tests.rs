@@ -11,11 +11,11 @@ use tokio::sync::broadcast;
 use super::engine::EngineConfig;
 use super::events::{
     AbLoop, ErrorPayload, EventSink, OutputLost, PlayerState, PlayerStatus, PositionPayload,
-    SKIPPED_MESSAGE, TrackingEvent, UNREACHABLE_MESSAGE,
+    SKIPPED_MESSAGE, STOPPED_MESSAGE, TrackingEvent, UNREACHABLE_MESSAGE,
 };
 use super::http::HttpConfig;
 use super::output::{CaptureHandle, CaptureOutput, OutputDevice, OutputFormat, OutputState};
-use super::player::{PlayerConfig, PlayerHandle};
+use super::player::{FAILURES_BEFORE_STOP, PlayerConfig, PlayerHandle};
 use super::queue::{AddAt, Repeat};
 use super::source::{ContextKind, PlayContext};
 use super::testutil::*;
@@ -350,6 +350,93 @@ async fn missing_file_is_skipped_with_error_and_problem_logged() {
     // a then c, back to back.
     let want = concat(&r, &["a", "c"]);
     assert_eq!(settled_samples(&r.cap, want.len()).await, want);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn songs_failing_in_a_row_stop_with_one_message() {
+    // The server refuses every song (a transcode it won't do): playback
+    // stops after a few instead of running through the whole queue.
+    let ids = ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8"];
+    let mut r = rig(&ids, 0.3, false, PlayerConfig::default()).await;
+    for id in ids {
+        r.server.add(&format!("/t/{id}"), Route { status: Some(400), ..Default::default() });
+        r.server.add(&format!("/x/{id}"), Route { status: Some(400), ..Default::default() });
+    }
+    r.player.play_context(ctx(&ids), None, Some(false)).await.unwrap();
+    let s = wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    assert_eq!(tid(&s.track), ids[FAILURES_BEFORE_STOP - 1], "paused on the last one tried");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let errs = r.sink.errors.lock().clone();
+    assert_eq!(errs.len(), FAILURES_BEFORE_STOP, "{errs:?}");
+    assert!(errs[..FAILURES_BEFORE_STOP - 1].iter().all(|e| e.message == SKIPPED_MESSAGE), "{errs:?}");
+    assert_eq!(errs.last().unwrap().message, STOPPED_MESSAGE);
+    for id in &ids[FAILURES_BEFORE_STOP..] {
+        assert!(r.server.state.ranges_for(&format!("/t/{id}")).is_empty(), "{id} was tried");
+    }
+    // Play tries the song it stopped on again.
+    let id = ids[FAILURES_BEFORE_STOP - 1];
+    let body = r.bodies.iter().find(|(i, _)| i == id).unwrap().1.clone();
+    r.server.add(&format!("/t/{id}"), Route { body, ..Default::default() });
+    r.player.resume().await.unwrap();
+    match next_tracking(&mut r.tracking, |e| matches!(e, TrackingEvent::TrackStarted { .. })).await {
+        TrackingEvent::TrackStarted { track, .. } => assert_eq!(track.id, id),
+        _ => unreachable!(),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn radio_refilling_with_songs_that_fail_still_stops() {
+    // Endless radio keeps adding songs: none of them playing must not loop
+    // forever.
+    let ids = ["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9"];
+    let r = rig(&ids, 0.3, false, PlayerConfig::default()).await;
+    for id in ids {
+        r.server.add(&format!("/t/{id}"), Route { status: Some(400), ..Default::default() });
+        r.server.add(&format!("/x/{id}"), Route { status: Some(400), ..Default::default() });
+    }
+    *r.resolver.more_batches.lock() = vec![vec!["r3".into(), "r4".into()], vec!["r5".into(), "r6".into()], vec!["r7".into(), "r8".into()], vec!["r9".into()]];
+    r.player.play_context(radio(&["r1", "r2"]), None, Some(false)).await.unwrap();
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let errs = r.sink.errors.lock().clone();
+    assert_eq!(errs.len(), FAILURES_BEFORE_STOP, "{errs:?}");
+    assert_eq!(errs.last().unwrap().message, STOPPED_MESSAGE);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn repeat_with_every_song_failing_ends_after_one_pass() {
+    let ids = ["p1", "p2", "p3"];
+    let r = rig(&ids, 0.3, false, PlayerConfig::default()).await;
+    for id in ids {
+        r.server.state.routes.lock().remove(&format!("/t/{id}"));
+    }
+    r.player.set_repeat(Repeat::All).await.unwrap();
+    r.player.play_context(ctx(&ids), None, Some(false)).await.unwrap();
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let errs = r.sink.errors.lock().clone();
+    assert_eq!(errs.len(), 3, "{errs:?}");
+    assert!(ids.iter().all(|id| r.server.state.ranges_for(&format!("/t/{id}")).len() == 1));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_song_that_plays_resets_the_failure_count() {
+    // Missing files spread through a queue are each skipped; only failures
+    // in a row stop playback.
+    let ids = ["g1", "g2", "g3", "g4", "g5", "g6", "g7", "g8", "g9"];
+    let r = rig(&ids, 0.3, false, PlayerConfig::default()).await;
+    for id in ["g1", "g2", "g3", "g5", "g6", "g7", "g8"] {
+        r.server.state.routes.lock().remove(&format!("/t/{id}"));
+    }
+    r.player.play_context(ctx(&ids), None, Some(false)).await.unwrap();
+    // Played to the end of the queue: the last song was fetched.
+    // Played to the end of the queue: the last song was fetched, though
+    // the four before it failed with only a song or two left.
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused && !r.server.state.ranges_for("/t/g9").is_empty()).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let errs = r.sink.errors.lock().clone();
+    assert_eq!(errs.len(), 7, "{errs:?}");
+    assert!(errs.iter().all(|e| e.message == SKIPPED_MESSAGE), "{errs:?}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

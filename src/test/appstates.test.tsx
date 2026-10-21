@@ -272,6 +272,17 @@ describe("wired to the core", () => {
     await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.message)).toContain("Skipped: file unavailable"));
   });
 
+  it("songs failing in a row end in one 'Stopped' message in place of 'Skipped'", async () => {
+    for (const id of ["x", "y", "z", "w"])
+      act(() => mock.emit("player://error", { trackId: id, kind: "server", message: "Skipped: file unavailable" }));
+    act(() =>
+      mock.emit("player://error", { trackId: "v", kind: "server", message: "Stopped: the last few songs wouldn't play. Press play to try again." }),
+    );
+    await waitFor(() =>
+      expect(useToasts.getState().toasts.map((t) => t.message)).toEqual(["Stopped: the last few songs wouldn't play. Press play to try again."]),
+    );
+  });
+
   it("offline: songs failing one after another are told once, in plain words", async () => {
     act(() => mock.setHealth("offline"));
     for (const id of ["x", "y", "z"])

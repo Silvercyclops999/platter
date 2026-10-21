@@ -26,6 +26,8 @@ pub struct OutputLost {
 pub const SKIPPED_MESSAGE: &str = "Skipped: file unavailable";
 /// Playback paused on a song because the server couldn't be reached.
 pub const UNREACHABLE_MESSAGE: &str = "Paused: can't reach your server. Press play to try again.";
+/// Playback stopped because song after song wouldn't play.
+pub const STOPPED_MESSAGE: &str = "Stopped: the last few songs wouldn't play. Press play to try again.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
