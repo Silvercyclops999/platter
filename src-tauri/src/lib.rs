@@ -52,6 +52,7 @@ pub mod stats;
 pub mod sync;
 pub mod tagedit;
 pub mod tags;
+pub mod tapplay;
 pub mod themes;
 pub mod tracking;
 #[cfg(desktop)]
@@ -671,15 +672,21 @@ pub fn run() {
             let os = platform::Platform::new();
 
             let net_route = audio::netsink::NetRoute::default();
+            // A tapped song can play from its finished download (lidarr::tap).
+            let arriving = tapplay::Arriving::default();
+            let player_files = audio::source::LocalFiles(Arc::new(tapplay::ArrivingFiles { inner: local_files.0.clone(), arriving: arriving.clone() }));
             let player = PlayerHandle::spawn(
                 tauri::async_runtime::handle().inner().clone(),
                 Arc::new(backend::routed::RoutedStreams(backends.clone())),
-                Arc::new(bridge::CacheLookup(
-                    db.clone(),
-                    Some(backends.clone()),
-                    bridge::OfflinePlay::new(audio_dir.clone()).with_downloads(local_files.clone()),
-                    Some(mix_service.clone()),
-                )),
+                Arc::new(tapplay::ArrivingLookup {
+                    inner: Arc::new(bridge::CacheLookup(
+                        db.clone(),
+                        Some(backends.clone()),
+                        bridge::OfflinePlay::new(audio_dir.clone()).with_downloads(local_files.clone()),
+                        Some(mix_service.clone()),
+                    )),
+                    arriving: arriving.clone(),
+                }),
                 {
                     use audio::output::AudioOutput;
                     let mut out = audio::output::CpalOutput::new();
@@ -696,7 +703,7 @@ pub fn run() {
                     resume_contexts: initial.resume_contexts,
                     precache_count: initial.precache_count as usize,
                     dsp: initial.dsp(),
-                    local_files: Some(local_files.clone()),
+                    local_files: Some(player_files),
                     autoplay: initial.queue_end == settings::QueueEnd::KeepPlaying,
                     smart_shuffle: initial.smart_shuffle,
                     automix: initial.automix_options(),
@@ -897,6 +904,19 @@ pub fn run() {
                 lidarr_service.set_owner_check(Arc::new(move || plex.owns_current_server_now().unwrap_or_else(|| !backends.plex_set_up())));
             }
             tauri::async_runtime::spawn(lidarr::request::watch(lidarr_service.clone()));
+            // Tap a song the library doesn't have: it's got and played.
+            let taps = lidarr::tap::Taps::new(
+                lidarr_service.clone(),
+                Arc::new(tapplay::AppTapHost {
+                    app: app.handle().clone(),
+                    player: player.clone(),
+                    arriving: arriving.clone(),
+                    db: db.clone(),
+                    last_refresh: Default::default(),
+                }),
+            );
+            tauri::async_runtime::spawn(taps.clone().run());
+            app.manage(taps);
             // Bring in my listening: albums from Played a lot, a few a day.
             let bring_in = {
                 let (day_db, offset_db, hidden_store) = (db.clone(), db.clone(), sync_store.clone());
@@ -2068,6 +2088,9 @@ pub fn run() {
             lidarr::commands::lidarr_request_preview,
             lidarr::commands::lidarr_request,
             lidarr::commands::lidarr_get,
+            lidarr::commands::lidarr_tap,
+            lidarr::commands::lidarr_taps,
+            lidarr::commands::lidarr_last_get,
             lidarr::commands::lidarr_search_again,
             lidarr::commands::get_albums_unqueue,
             lidarr::commands::lidarr_request_batch,

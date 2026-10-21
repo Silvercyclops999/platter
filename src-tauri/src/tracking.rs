@@ -332,6 +332,18 @@ impl Tracker {
     }
 
     async fn handle(&self, cur: &mut Current, ev: &TrackingEvent) {
+        // A tapped song playing from its download isn't the server's yet:
+        // the library's copy it moves to is reported instead.
+        let id = match ev {
+            TrackingEvent::TrackStarted { track, .. } | TrackingEvent::TrackEnded { track, .. } => track.id.as_str(),
+            TrackingEvent::Progress { track_id, .. }
+            | TrackingEvent::Paused { track_id, .. }
+            | TrackingEvent::Resumed { track_id, .. }
+            | TrackingEvent::Seeked { track_id, .. } => track_id.as_str(),
+        };
+        if crate::tapplay::is_arriving(id) {
+            return;
+        }
         for Report::Timeline(r) in reports_for(cur, ev) {
             self.send_timeline(r).await;
         }

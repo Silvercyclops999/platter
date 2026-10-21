@@ -392,6 +392,25 @@ pub async fn lidarr_get(lidarr: State<'_, Lidarr>, input: RequestInput) -> AppRe
     lidarr.get(input).await
 }
 
+/// Tap a song the library doesn't have: it's got the quick way and plays
+/// as soon as it's here (`lidarr::tap`), or why it needs the user.
+#[tauri::command]
+pub async fn lidarr_tap(taps: State<'_, super::tap::Taps>, input: super::tap::TapInput) -> AppResult<super::tap::TapOutcome> {
+    taps.tap(input).await
+}
+
+/// Taps on this device, newest first.
+#[tauri::command]
+pub async fn lidarr_taps(taps: State<'_, super::tap::Taps>) -> AppResult<Vec<super::tap::Tap>> {
+    Ok(taps.list())
+}
+
+/// How long the last get took, step by step.
+#[tauri::command]
+pub async fn lidarr_last_get(lidarr: State<'_, Lidarr>) -> AppResult<Option<super::tap::LastGet>> {
+    Ok(lidarr.last_get())
+}
+
 /// "Search again" for an album nothing turned up for: one AlbumSearch for
 /// it now, and the searches again start over.
 #[tauri::command]
