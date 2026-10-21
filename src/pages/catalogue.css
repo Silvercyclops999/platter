@@ -61,6 +61,17 @@
 .sr-catalogue__open { align-self: flex-start; }
 .sr-row__action { display: flex; flex: none; align-items: center; }
 .sr-row__action:empty { display: none; }
+/* A song a tap gets and plays: Get where a library song shows its length. */
+.sr-get-mark {
+  flex: none;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill, 999px);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
 /* A library result the catalogue had too. */
 .sr-owned {
   flex: none;

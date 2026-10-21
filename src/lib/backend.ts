@@ -35,6 +35,10 @@ import type {
   CataloguePhoto,
   GetAlbumsPlan,
   LidarrGetOutcome,
+  LastGet,
+  Tap,
+  TapInput,
+  TapOutcome,
   MissingAlbum,
   NewToYou,
   WantedAlbum,
@@ -1089,6 +1093,12 @@ export interface Backend {
   lidarrRequest(input: LidarrRequestInput): Promise<LidarrRequest>;
   /** One-click Get: the request with every check, or why it needs the user (first request ever, or a check said no). */
   lidarrGet(input: LidarrRequestInput): Promise<LidarrGetOutcome>;
+  /** Tap a song you don't have: Lidarr gets it the quick way and it plays when it's here (`lidarr://tap` follows it). */
+  lidarrTap(input: TapInput): Promise<TapOutcome>;
+  /** Taps on this device, newest first. */
+  lidarrTaps(): Promise<Tap[]>;
+  /** How long the last get took, step by step. */
+  lidarrLastGet(): Promise<LastGet | null>;
   /** "Search again" for an album nothing turned up for (one AlbumSearch; the schedule starts over). */
   lidarrSearchAgain(id: string): Promise<LidarrRequest>;
   /** Take albums off the "Get albums" queue (all of them when the list is empty). */
@@ -1864,6 +1874,9 @@ export function createTauriBackend(): Backend {
     lidarrRequestPreview: (input) => call("lidarr_request_preview", { input }),
     lidarrRequest: (input) => call("lidarr_request", { input }),
     lidarrGet: (input) => call("lidarr_get", { input }),
+    lidarrTap: (input) => call("lidarr_tap", { input }),
+    lidarrTaps: () => call("lidarr_taps"),
+    lidarrLastGet: () => call("lidarr_last_get"),
     lidarrSearchAgain: (id) => call("lidarr_search_again", { id }),
     getAlbumsUnqueue: (releaseGroupIds) => call("get_albums_unqueue", { releaseGroupIds }),
     lidarrRequests: (refresh) => call("lidarr_requests", { refresh }),

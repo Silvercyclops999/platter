@@ -19,6 +19,8 @@ import type { MenuItem } from "../stores/ui";
 import { nav } from "../stores/router";
 import { useRequestFor } from "../stores/requests";
 import { useSettings } from "../stores/settings";
+import { tapToPlay } from "../stores/taps";
+import { toast } from "../stores/toasts";
 import { addToMissing, catalogueKind, dismissArtist, useOnline } from "./catalogue";
 import { GetButton } from "./GetButton";
 import "./catalogue.css";
@@ -58,6 +60,12 @@ const PARTS_FOR: Record<SearchFilter, CataloguePartKind[]> = {
   songs: ["songs"],
   playlists: [],
 };
+
+/** Whether a tap on a song you don't have gets and plays it (Lidarr set up and the setting on). */
+export function useTapPlays(lidarrReady: boolean): boolean {
+  const on = useSettings((s) => s.settings?.lidarrTapToGet !== false);
+  return on && lidarrReady;
+}
 
 /** Whether search shows music you don't have right now. */
 export function useCatalogueOn(): boolean {
@@ -164,6 +172,8 @@ interface Row {
   artist?: CatArtist;
   album?: CatAlbum;
   song?: CatSong;
+  /** A song a tap gets and plays. */
+  tapPlays?: boolean;
 }
 
 function artistRow(a: CatArtist): Row {
@@ -203,19 +213,46 @@ function albumRow(a: CatAlbum): Row {
   };
 }
 
-function songRow(s: CatSong): Row {
-  const open = () => (s.releaseGroupId ? nav.go({ name: "catalogueAlbum", id: s.releaseGroupId }) : s.artistMbid && nav.go({ name: "catalogueArtist", mbid: s.artistMbid }));
+/**
+ * Tap a song you don't have: it's got through Lidarr and plays when it's
+ * here. The very first request ever is confirmed on its album's page.
+ */
+export async function playCatalogueSong(s: CatSong) {
+  const out = await tapToPlay({
+    title: s.title,
+    artist: s.artist,
+    artistMbid: s.artistMbid,
+    album: s.album,
+    releaseGroupId: s.releaseGroupId,
+    durationMs: s.durationMs,
+    thumb: s.thumb,
+  });
+  if (!out?.needs) return;
+  if (out.needs.kind === "firstTime" && s.releaseGroupId) {
+    toast.info("Your first request is confirmed by typing the album's name, once. Get it here, then a tap is all it takes");
+    nav.go({ name: "catalogueAlbum", id: s.releaseGroupId });
+  } else {
+    toast.info(out.needs.reason);
+  }
+}
+
+function songRow(s: CatSong, tap: boolean): Row {
+  const page = () => (s.releaseGroupId ? nav.go({ name: "catalogueAlbum", id: s.releaseGroupId }) : s.artistMbid && nav.go({ name: "catalogueArtist", mbid: s.artistMbid }));
+  const open = tap ? () => void playCatalogueSong(s) : page;
   return {
     key: `so-${s.recordingId}`,
     title: s.title,
-    byline: [s.artist, s.album, s.durationMs ? formatDuration(s.durationMs) : null].filter(Boolean).join(" · "),
+    // A tap plays it, so the row says Get where a library song has its length.
+    byline: [s.artist, s.album, !tap && s.durationMs ? formatDuration(s.durationMs) : null].filter(Boolean).join(" · "),
     type: "Song",
     thumb: s.thumb,
     round: false,
     open,
     song: s,
+    tapPlays: tap,
     menu: [
-      { label: s.releaseGroupId ? "Go to album" : "Open", onSelect: open },
+      ...(tap ? [{ label: "Play", onSelect: open }] : []),
+      { label: s.releaseGroupId ? "Go to album" : "Open", onSelect: page },
       ...(s.artistMbid ? [{ label: "Go to artist", onSelect: () => nav.go({ name: "catalogueArtist", mbid: s.artistMbid! }) }] : []),
     ],
   };
@@ -241,6 +278,13 @@ function RowGet({ row, lidarrReady }: { row: Row; lidarrReady: boolean }) {
       />
     );
   }
+  if (row.tapPlays) {
+    return (
+      <span className="sr-get-mark" aria-hidden="true">
+        Get
+      </span>
+    );
+  }
   if (row.song?.releaseGroupId && row.song.album) {
     const s = row.song;
     return (
@@ -263,7 +307,7 @@ export function CatalogueRow({ row, lidarrReady }: { row: Row; lidarrReady: bool
   };
   const rec = useRequestFor(row.album?.releaseGroupId ?? row.song?.releaseGroupId);
   const inLibrary = !!row.album?.libraryAlbumId || rec?.state === "imported";
-  const where = inLibrary ? (row.song ? "its album is in your library" : "in your library") : "not in your library";
+  const where = row.tapPlays ? "not in your library, a tap gets it and plays it" : inLibrary ? (row.song ? "its album is in your library" : "in your library") : "not in your library";
   return (
     <li ref={box} className="sr-row sr-row--catalogue" aria-label={`${row.title}, ${row.type}${row.byline ? `, ${row.byline}` : ""}, ${where}`} onContextMenu={(e) => menu(e)} onDoubleClick={row.open}>
       <span className="sr-row__art">
@@ -311,10 +355,10 @@ export function CatalogueTopResult({ artist }: { artist: CatArtist }) {
 }
 
 /** Rows for a filter, catalogue kinds in order. */
-export function catalogueRows(c: CatalogueResults, filter: SearchFilter, skipArtist?: string): Row[] {
+export function catalogueRows(c: CatalogueResults, filter: SearchFilter, skipArtist?: string, tap = false): Row[] {
   const artists = filter === "all" || filter === "artists" ? c.artists.filter((a) => a.mbid !== skipArtist).map(artistRow) : [];
   const albums = filter === "all" || filter === "albums" ? c.albums.map(albumRow) : [];
-  const songs = filter === "all" || filter === "songs" ? c.songs.map(songRow) : [];
+  const songs = filter === "all" || filter === "songs" ? c.songs.map((s) => songRow(s, tap)) : [];
   return [...artists, ...albums, ...songs];
 }
 
@@ -337,7 +381,8 @@ export function CatalogueSkeleton() {
 
 /** Catalogue rows as their own list (the Songs chip, and searches the library found nothing for). */
 export function CatalogueList({ c, filter, lidarrReady, skipArtist, label = "Music you don't have" }: { c: CatalogueResults; filter: SearchFilter; lidarrReady: boolean; skipArtist?: string; label?: string }) {
-  const rows = catalogueRows(c, filter, skipArtist);
+  const tap = useTapPlays(lidarrReady);
+  const rows = catalogueRows(c, filter, skipArtist, tap);
   return (
     <>
       {rows.length > 0 && (

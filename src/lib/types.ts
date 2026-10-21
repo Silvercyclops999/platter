@@ -1405,6 +1405,12 @@ export interface Settings {
   catalogueSource: "lidarr" | "musicbrainz";
   /** Get opens the request dialog every time. */
   askBeforeGet: boolean;
+  /** Tapping a song you don't have gets it through Lidarr and plays it when it's here. */
+  lidarrTapToGet: boolean;
+  /** A tapped song's copy is the fastest good one (usenet first, well seeded torrents next). */
+  lidarrPreferFastest: boolean;
+  /** A tapped song plays from the finished download, before Lidarr moves it in, when this device can open it. */
+  lidarrPlayArriving: boolean;
   /** The kinds "Get albums" offers ticked. */
   getAlbumsKinds: string[];
   /** The discography chip an artist page opens on: the last one picked (this device). */
@@ -1957,6 +1963,9 @@ export const DEFAULT_SETTINGS: Settings = {
   dismissedArtists: [],
   catalogueSource: "lidarr",
   askBeforeGet: false,
+  lidarrTapToGet: true,
+  lidarrPreferFastest: true,
+  lidarrPlayArriving: true,
   getAlbumsKinds: ["studio"],
   discographyChip: "popular",
   discographySort: "date",
@@ -3056,6 +3065,63 @@ export interface LidarrGetOutcome {
   record: LidarrRequest | null;
   /** `firstTime`: the first request ever is confirmed by typing the album's name; `refused`: a check said no. */
   needs: { kind: "firstTime" | "refused"; reason: string } | null;
+}
+
+/** What a tapped song shows in place of the seek bar while it comes. */
+export type TapPhase = "searching" | "downloading" | "waiting" | "importing" | "playing" | "ready" | "failed";
+
+/** Milliseconds after the tap that each step was reached. */
+export interface TapTimings {
+  foundMs: number | null;
+  downloadedMs: number | null;
+  playingMs: number | null;
+  inLibraryMs: number | null;
+}
+
+/** A song tapped that the library didn't have (docs/IPC.md `lidarr_tap`). */
+export interface Tap {
+  id: string;
+  title: string;
+  artist: string;
+  album: string;
+  releaseGroupId: string;
+  thumb: string | null;
+  durationMs: number | null;
+  phase: TapPhase;
+  progress: number | null;
+  /** Why it's waiting, stalled or failed. */
+  message: string | null;
+  requestId: string;
+  timings: TapTimings;
+  /** The latest tap: the one that plays when it lands. */
+  wanted: boolean;
+  /** Playing from the finished download until the library has it. */
+  fromDownload: boolean;
+}
+
+export interface TapInput {
+  title: string;
+  artist: string;
+  artistId?: string | null;
+  artistMbid?: string | null;
+  album?: string | null;
+  releaseGroupId?: string | null;
+  isrc?: string | null;
+  durationMs?: number | null;
+  thumb?: string | null;
+  typed?: string | null;
+}
+
+export interface TapOutcome {
+  tap: Tap | null;
+  needs: { kind: "firstTime" | "refused"; reason: string } | null;
+}
+
+/** How long the last get took (Settings > Lidarr > More). */
+export interface LastGet {
+  title: string;
+  at: number;
+  timings: TapTimings;
 }
 
 /** What a request needs: the release group and what it's called. */
@@ -4441,6 +4507,8 @@ export interface EventMap {
   /** How far preparing Compare is: one version's file, 0 to 1. */
   "compare://progress": { side: CompareSide; fraction: number };
   "library://changed": null;
+  /** A tapped song moved on (lidarr_tap). */
+  "lidarr://tap": Tap;
   /** Listening diary entries changed on this device. */
   "diary://changed": null;
   /** One artist's page data changed outside a sync (similar artists fetched). */
