@@ -7,7 +7,7 @@
  * never played.
  */
 import { Play } from "lucide-react";
-import { type CSSProperties, type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Art } from "../components/Art";
 import { Button } from "../components/Button";
 import { CardSkeleton } from "../components/Card";
@@ -21,14 +21,6 @@ import { useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import "./mixes.css";
 import "./history-shelves.css";
-
-const HUES = ["#f2a65a", "#e57a9a", "#8fc1f0", "#9dd47a", "#c79bf2", "#f5d27a", "#7fd6d0", "#f29b8f"];
-
-/** A colour per year, or per decade for a decade, the same every time. */
-export function historyColour(year: number, decade = false): string {
-  // Years start further along the list, so a year rarely matches its decade's colour.
-  return HUES[Math.abs(decade ? Math.floor(year / 10) : year + 3) % HUES.length];
-}
 
 /** "1990s". */
 export const decadeLabel = (year: number) => `${year}s`;
@@ -118,18 +110,11 @@ export function useTimeTravel(): TimeTravel | null {
   return useHistory("timeTravel", on);
 }
 
-/** The collage with a coloured strip naming the card. */
-function HistoryArt({ covers, label, colour }: { covers: string[]; label: string; colour: string }) {
+/** A printed sleeve naming the card, like the mixes'. */
+function HistoryArt({ label }: { label: string }) {
   return (
-    <span className="mix-art history-art" style={{ "--mix-color": colour } as CSSProperties} aria-hidden="true">
-      <span className="mix-art__collage">
-        {Array.from({ length: 4 }, (_, i) => (
-          <Art key={i} path={covers[i % Math.max(1, covers.length)] ?? null} fluid requestSize={100} kind="album" />
-        ))}
-      </span>
-      <span className="mix-art__strip">
-        <span className="mix-art__name">{label}</span>
-      </span>
+    <span className="mix-art mix-art--sleeve history-art" aria-hidden="true">
+      <span className="mix-art__title">{label}</span>
     </span>
   );
 }
@@ -197,7 +182,7 @@ export function OnThisDayShelf() {
         <ShelfItem key={y.year}>
           <HistoryCard
             testId={`on-this-day-${y.year}`}
-            art={<HistoryArt covers={y.covers} label={String(y.year)} colour={historyColour(y.year)} />}
+            art={<HistoryArt label={String(y.year)} />}
             title={yearsAgo(y.year, data.date)}
             subtitle={yearSummary(y)}
             onPlay={() => void playIds(y.trackIds)}
@@ -225,11 +210,7 @@ export function TimeTravelShelf() {
             <HistoryCard
               testId={`time-travel-${m.id}`}
               art={
-                <HistoryArt
-                  covers={m.covers}
-                  label={m.kind === "year" ? `Your year ${m.year}` : decadeLabel(m.year)}
-                  colour={historyColour(m.year, m.kind === "decade")}
-                />
+<HistoryArt label={m.kind === "year" ? `Your year ${m.year}` : decadeLabel(m.year)} />
               }
               title={title}
               subtitle={m.kind === "year" ? "Your most played from the year you listened most." : `Your most played from the ${decadeLabel(m.year)}.`}

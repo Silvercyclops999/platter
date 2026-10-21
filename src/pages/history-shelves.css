@@ -1,8 +1,5 @@
-/* On this day and Time travel: the cards share the mix art; the strip holds a year. */
-.history-art .mix-art__name {
-  font-size: clamp(13px, 11cqi, 22px);
-  letter-spacing: 0.01em;
-}
+/* On this day and Time travel: printed sleeves like the mixes', the year as the name. */
+.history-art { justify-content: flex-end; }
 
 /* The On this day page: one section per year, a plain numbered list. */
 .otd-page__sub { margin-top: calc(-1 * var(--space-2)); margin-bottom: var(--space-6); font-size: var(--font-size-md); color: var(--color-text-secondary); }

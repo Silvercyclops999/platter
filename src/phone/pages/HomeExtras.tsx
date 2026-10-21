@@ -21,13 +21,9 @@ export function HomeMixes() {
   return (
     <Carousel title="Made for you" onAll={() => nav.go({ name: "mixes" })}>
       {list.slice(0, 12).map((m) => (
-        <button key={m.id} type="button" className="ph-card-tile ph-mix-tile" onClick={() => openMix(m)}>
-          <span className="ph-mix-tile__art">
-            {/* The name is printed once, under the cover. */}
-            <MixArt mix={m} size={272} named={false} />
-          </span>
-          <span className="ph-card-tile__title">{m.kind === "daylist" ? "daylist" : m.title}</span>
-          <span className="ph-card-tile__sub">{m.kind === "daylist" ? "Your day in a playlist" : m.description}</span>
+        <button key={m.id} type="button" className="ph-card-tile ph-mix-tile" aria-label={m.kind === "daylist" ? "daylist" : m.title} onClick={() => openMix(m)}>
+          {/* The sleeve is the name: printed once, on the paper. */}
+          <MixArt mix={m} />
         </button>
       ))}
     </Carousel>

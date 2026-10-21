@@ -74,7 +74,7 @@ export function PhoneMix({ id, seed }: { id?: string; seed?: string }) {
   };
   return (
     <PageFrame name={radio ? "radio" : "mix"} title={mix.title} kicker={radio ? "Radio" : mix.kind === "genre" || mix.kind === "mood" ? "Mix" : "Made for you"} className="ph-mix" lede={mix.description || undefined}>
-      <Hero art={mix.kind === "daylist" ? <MixSleeve mix={mix} size={240} /> : <MixArt mix={mix} size={480} />}>
+      <Hero art={mix.kind === "daylist" ? <MixSleeve mix={mix} size={240} /> : <MixArt mix={mix} />}>
         <p className="ph-x__meta tabular">
           {plural(mix.trackCount, "song")}, {formatLongDuration(mix.durationMs)}
         </p>

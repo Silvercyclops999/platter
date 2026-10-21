@@ -238,22 +238,6 @@
 
 /* Hi-fi plates, the readout glass and cover light are in instruments.css. */
 
-/* ---------------------------------------------------------------- Mix covers */
-/* The mix's name on a small printed label rather than a coloured band. */
-:root[data-identity] .mix-art__strip {
-  left: 10px;
-  right: auto;
-  top: 10px;
-  bottom: auto;
-  max-width: calc(100% - 20px);
-  min-height: 0;
-  padding: 5px 9px 5px 11px;
-  border-radius: 2px;
-  background: #efe7d6;
-  box-shadow: inset 3px 0 0 var(--mix-color), 0 2px 6px rgba(0, 0, 0, 0.3);
-}
-:root[data-identity] .mix-art__name { color: #1c1712; font-size: clamp(11px, 8cqi, 15px); font-weight: var(--font-weight-semibold); }
-
 /* ---------------------------------------------------------------- Home */
 /* The hover wash stays, but quieter: a hint of the cover, not a band. */
 :root[data-identity] .home__wash {

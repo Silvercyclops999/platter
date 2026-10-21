@@ -38,7 +38,7 @@ export function mixesSentence(data: MixShelves): string {
 
 /** A mix's sleeve in the list: the mix's own art, or for the daylist its covers (a printed sleeve with none). */
 export function MixSleeve({ mix, size }: { mix: MixSummary; size: number }) {
-  if (mix.kind !== "daylist") return <MixArt mix={mix} size={size * 2} named={false} />;
+  if (mix.kind !== "daylist") return <MixArt mix={mix} named={false} />;
   if (!mix.covers.length) return <Art path={null} fluid sleeve={{ title: "daylist" }} />;
   return (
     <span className="mix-art" aria-hidden="true">
