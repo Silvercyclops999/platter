@@ -151,6 +151,8 @@ export function SyncStep({ firstRun, onClose }: { firstRun: boolean; onClose: ()
     const off = backend.listen("device-sync://status", (devices) => {
       if (devices.length > 0) void check();
     });
+    // Look once more when listening starts: one that linked in between doesn't wait for the next look.
+    void off.then(() => check());
     const t = window.setInterval(() => void check(), LOOK_MS);
     return () => {
       done = true;

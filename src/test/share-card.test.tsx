@@ -259,6 +259,8 @@ describe("lyric cards", () => {
     render(<LyricsPane />);
     await chooseLyricsOption("Share lyrics");
     const view = screen.getByLabelText("Lyrics", { selector: ".lyrics__scroll" });
+    // The lines show picking before they're clicked (a click before that seeks).
+    await waitFor(() => expect(view.querySelector("button.lyrics__line[aria-pressed]")).not.toBeNull());
     const lines = [...view.querySelectorAll<HTMLButtonElement>("button.lyrics__line:not(.lyrics__line--gap)")];
     for (const l of lines.slice(0, 5)) fireEvent.click(l);
     expect(seek).not.toHaveBeenCalled();

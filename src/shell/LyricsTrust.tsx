@@ -8,7 +8,7 @@
  * it only shows by moving the timing or swapping lyrics that don't match.
  */
 import { AlertTriangle, AudioLines, Clock, Globe, Image as ImageIcon, Languages, Minus, MoreHorizontal, PenLine, Plus, X } from "lucide-react";
-import { useCallback, useEffect, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState, type MouseEvent } from "react";
 import { openContextMenu } from "../components/ContextMenu";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
@@ -176,7 +176,8 @@ function TimingStepper({ lyrics, track, held }: { lyrics: Lyrics; track: Track; 
 /** While the timing bar is open, the - and + keys nudge the timing (not while typing, in a dialog or menu, or while the check may move it). */
 function useNudgeKeys(trackId: string, fetched: number, on: boolean) {
   const pickerOpen = useWrongLyrics((s) => !!s.track);
-  useEffect(() => {
+  // Listening from the moment the stepper shows enabled, so a press right then isn't lost.
+  useLayoutEffect(() => {
     if (!on) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || pickerOpen) return;
