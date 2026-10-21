@@ -1517,7 +1517,14 @@ back with `borrowedTiming: true` and, while `lyricsLiveTiming` is off,
 `synced: false` and no `timed`. A transcription of the song (shown at all)
 goes ahead of them then. `file`, `user` and `auto` lyrics keep their timing.
 
-`Lyrics = { synced, lines: string[], timed?: LyricLine[], credit?, source: "plex"|"file"|"user"|"lrclib", borrowedTiming? }`.
+Lyrics found without timing (or shown unsynced for another version's
+timing) are lined up to the song when it has a transcription: each word the
+transcription heard in order takes its time, the rest are spread between.
+They come back `synced` with `timedHere: true` and their own `source`. When
+too few words line up they stay unsynced. Songs whose only lyrics are
+unsynced are transcribed like songs without lyrics, so this can happen.
+
+`Lyrics = { synced, lines: string[], timed?: LyricLine[], credit?, source: "plex"|"file"|"user"|"lrclib", borrowedTiming?, timedHere? }`.
 `source` is `file` when the Plex stream is a file next to the song (the
 stream names Plex's local media agent, or no agent), `plex` when an agent
 such as LyricFind supplied it, `user` for lyrics written in the app.

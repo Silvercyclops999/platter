@@ -66,7 +66,7 @@ use crate::artistinfo::limit::Limiter;
 use crate::db::DbHandle;
 use crate::db::queries::now_s;
 use crate::error::{AppError, AppResult};
-use crate::plex::details::{Lyrics, LyricsSource, parse_lyrics_text};
+use crate::plex::details::{LyricLine, LyricWord, Lyrics, LyricsSource, parse_lyrics_text};
 use crate::share::matching::exact_key;
 use candidates::{Candidate, Decision, Note, Notice, Origin, SongFacts, Stored};
 use check::Verdict;
@@ -208,6 +208,9 @@ pub struct Shown {
     /// Other lyrics found for the song say something quite different.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub disagree: bool,
+    /// Found without timing and lined up to this recording here.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub timed_here: bool,
 }
 
 impl Shown {
@@ -333,6 +336,45 @@ struct Resolved {
     failed: bool,
     /// LRCLIB says the song is an instrumental.
     instrumental: bool,
+    /// This recording's transcription, shown or not: lyrics found without
+    /// timing are lined up to it.
+    heard: Option<Lyrics>,
+}
+
+/// `plain` lined up to the words of a transcription of the recording.
+fn timed_to(plain: &Lyrics, heard: &Lyrics) -> Option<Lyrics> {
+    use transcribe::lines::{Segment, Word};
+    let segments: Vec<Segment> = heard
+        .timed
+        .iter()
+        .map(|line| {
+            let words = line
+                .words
+                .iter()
+                .enumerate()
+                .map(|(i, w)| {
+                    let end = line.words.get(i + 1).map_or(w.start_ms + 300, |n| n.start_ms.max(w.start_ms + 1));
+                    Word { start_ms: w.start_ms, end_ms: end, text: w.text.clone() }
+                })
+                .collect();
+            Segment { words, sure: None }
+        })
+        .collect();
+    let lines = transcribe::align::time_plain(&plain.lines, &segments)?;
+    let timed = lines
+        .iter()
+        .map(|line| {
+            let n = line.words.len();
+            let words = line
+                .words
+                .iter()
+                .enumerate()
+                .map(|(i, w)| LyricWord { start_ms: w.start_ms, text: if i + 1 < n { format!("{} ", w.text) } else { w.text.clone() } })
+                .collect();
+            LyricLine { start_ms: line.start_ms, text: line.text(), words }
+        })
+        .collect();
+    Some(Lyrics { synced: true, lines: plain.lines.clone(), timed, credit: plain.credit.clone(), source: plain.source })
 }
 
 fn verdict_in<'a>(v: &'a [(String, String, Stored)], c: &Candidate) -> Option<&'a Stored> {
@@ -489,6 +531,7 @@ impl LyricsService {
             shown: None,
             failed: false,
             instrumental: false,
+            heard: None,
         };
         if out.choice.pick.as_deref() == Some(choice::NONE) && !full {
             out.shown = Some(Shown::notice(Notice::ChosenNone, None));
@@ -503,6 +546,7 @@ impl LyricsService {
 
         // The user's own, the server's, and a transcription (kept for last).
         let own = self.own(track_id).await?;
+        out.heard = own.as_ref().filter(|o| o.auto.is_some()).and_then(|o| o.lyrics()).filter(|l| l.synced);
         let auto = own
             .as_ref()
             .filter(|o| o.auto.is_some() && on(&sw.show_auto))
@@ -722,6 +766,16 @@ impl LyricsService {
                 }
             }
         }
+        // Found without timing (or with another version's): the real words
+        // lined up to what was heard in this recording.
+        if !l.synced
+            && c.origin != Origin::Auto
+            && let Some(t) = r.heard.as_ref().and_then(|h| timed_to(&l, h))
+        {
+            l = t;
+            s.borrowed_timing = false;
+            s.timed_here = true;
+        }
         if l.synced && r.choice.offset_ms != 0 {
             check::retime(&mut l, &[], r.choice.offset_ms);
             s.offset_ms = r.choice.offset_ms;
@@ -736,8 +790,10 @@ impl LyricsService {
         if let Ok(Some(o)) = self.own(track_id).await {
             return o.auto.is_none();
         }
-        // No row of its own, so whatever get finds is the server's or LRCLIB's.
-        matches!(self.get(track_id).await, Ok(Some(_)))
+        // No row of its own, so whatever get finds is the server's or
+        // LRCLIB's. Found without timing, the song is still written down,
+        // so they can be lined up to it.
+        matches!(self.get(track_id).await, Ok(Some(l)) if l.synced)
     }
 
     /// Official synced lyrics for a song about to be transcribed (or

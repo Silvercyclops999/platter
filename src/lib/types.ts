@@ -548,6 +548,8 @@ export interface Lyrics {
    * another version's. Unsynced unless lyricsLiveTiming is on.
    */
   borrowedTiming?: boolean;
+  /** Found without timing and lined up to this recording's transcription. */
+  timedHere?: boolean;
   /** What the check against the recording said about the lyrics shown. */
   check?: LyricsCheck;
   /** Nothing is shown, and why (lines and timed are empty). */

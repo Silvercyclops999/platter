@@ -362,6 +362,28 @@ fn export_names_are_safe_file_names() {
 const AUTO: &str = "[00:01.00]<00:01.00>Heard <00:01.40>words\n";
 
 #[tokio::test]
+async fn lyrics_found_without_timing_are_lined_up_to_the_transcription() {
+    let f = fx();
+    let plain = Lyrics { lines: vec!["Hello darkness, my old friend".into(), "".into(), "I've come to talk with you again".into()], ..Default::default() };
+    f.plex.set("501", Ok(Some(plain)));
+    assert!(!f.svc.has_other("501").await, "words without timing still get written down");
+    let l = f.svc.get("501").await.unwrap().unwrap();
+    assert!(!l.synced, "nothing heard yet");
+    let heard = "[00:10.00]<00:10.00>Hello <00:10.40>darkness <00:10.80>my <00:11.20>oh <00:11.60>friend\n\
+                 [00:15.00]<00:15.00>I've <00:15.40>come <00:15.80>to <00:16.20>talk <00:16.60>with <00:17.00>you <00:17.40>again\n";
+    let now = crate::db::queries::now_s();
+    assert!(f.db.write(|c| user::put_auto(c, "501", heard, "turbo", now)).unwrap());
+    let s = f.svc.shown("501").await.unwrap().unwrap();
+    assert!(s.timed_here);
+    let l = s.lyrics;
+    assert!(l.synced);
+    assert_eq!(l.source, LyricsSource::Plex, "the server's words");
+    let starts: Vec<(u32, &str)> = l.timed.iter().map(|t| (t.start_ms, t.text.as_str())).collect();
+    assert_eq!(starts, vec![(10_000, "Hello darkness, my old friend"), (15_000, "I've come to talk with you again")]);
+    assert_eq!(l.timed[0].words.iter().map(|w| w.text.as_str()).collect::<String>(), "Hello darkness, my old friend");
+}
+
+#[tokio::test]
 async fn transcriptions_show_after_plex_and_never_replace_the_users_own() {
     let f = fx();
     f.on.store(false, Ordering::Relaxed);
