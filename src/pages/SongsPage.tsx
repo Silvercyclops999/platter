@@ -22,6 +22,7 @@ import type { SongRow, SongSort, SongsQuery } from "../lib/types";
 import { endSongDrag, startSongDrag, tracksDrag } from "../stores/drag";
 import { player, usePlayer } from "../stores/player";
 import { useSettings } from "../stores/settings";
+import { usePageFind, usePageReveal } from "../shell/pageFind";
 import { usePageBar } from "./detail";
 import "./songs.css";
 
@@ -227,6 +228,10 @@ export function SongsPage() {
     return () => clearTimeout(t);
   }, [find]);
   const q = useMemo<SongsQuery>(() => ({ sort, desc, find: found }), [sort, desc, found]);
+  const findRef = useRef<HTMLInputElement>(null);
+  // Ctrl+F on this page goes to its own find field.
+  const openFind = useCallback(() => findRef.current?.focus(), []);
+  usePageFind(openFind);
   const { total, totalMs, pages, error, want, retry } = useSongRows(q);
   const nowId = usePlayer((s) => s.state?.track?.id);
   const status = usePlayer((s) => s.state?.status);
@@ -289,6 +294,19 @@ export function SongsPage() {
   useEffect(() => {
     for (const it of items) want(Math.floor(it.index / PAGE));
   });
+
+  // "Back to the playing song": scroll to its row when its page is here, or clear a find that hides it.
+  const revealState = useRef({ pages, find: found, scrollTo: (_i: number) => {} });
+  revealState.current = { pages, find: found, scrollTo: (i: number) => v.scrollToIndex(i, { align: "center" }) };
+  const reveal = useCallback((trackId: string) => {
+    const { pages: loaded, find: words, scrollTo } = revealState.current;
+    for (const [n, rows] of loaded) {
+      const k = rows.findIndex((r) => r.track.id === trackId);
+      if (k >= 0) return scrollTo(n * PAGE + k);
+    }
+    if (words) setFind("");
+  }, []);
+  usePageReveal(reveal);
 
   const template = ["minmax(200px, 3fr)", ...columns.map((c) => WIDTH[c])].join(" ");
 
@@ -492,7 +510,16 @@ export function SongsPage() {
         <h1 className="songs__name">Songs</h1>
         <label className="songs__find">
           <Search size={16} aria-hidden="true" />
-          <input type="search" placeholder="Find a song" aria-label="Find a song" value={find} spellCheck={false} autoComplete="off" onChange={(e) => setFind(e.target.value)} />
+          <input
+            ref={findRef}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && find) {
+                e.stopPropagation();
+                setFind("");
+              }
+            }}
+            type="search"
+            placeholder="Find a song" aria-label="Find a song" value={find} spellCheck={false} autoComplete="off" onChange={(e) => setFind(e.target.value)} />
         </label>
       </header>
       {!!error && total !== null && (

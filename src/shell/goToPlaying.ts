@@ -40,7 +40,9 @@ export function revealRow(trackId: string): void {
   const started = Date.now();
   const router = useRouter.getState();
   const entry = router.entries[router.index];
-  const sel = `.main__scroll .track-row[data-track-id="${CSS.escape(trackId)}"]`;
+  const id = CSS.escape(trackId);
+  // Song rows, and the Songs table's rows.
+  const sel = `.main__scroll .track-row[data-track-id="${id}"], .main__scroll .songs__row[data-track-id="${id}"]`;
   const tryNow = () => {
     const r = useRouter.getState();
     if (r.entries[r.index] !== entry) return stop();

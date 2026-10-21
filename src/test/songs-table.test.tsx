@@ -11,6 +11,8 @@ import { ContextMenuHost } from "../components/ContextMenu";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import type { SongRow, SongsQuery } from "../lib/types";
+import { contextRoute } from "../shell/nowPlaying";
+import { openPageFind } from "../shell/pageFind";
 import { DEFAULT_COLUMNS, SongsPage, clickSort, loadTablePrefs, totalsLine, useSongsTable } from "../pages/SongsPage";
 
 const mock = backend as MockBackend;
@@ -223,5 +225,19 @@ describe("the table", () => {
     await user.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(grid().querySelector('[data-track-id="s999"]')).not.toBeNull());
     expect(screen.queryByText(/Some songs didn't load/)).toBeNull();
+  });
+
+  it("Ctrl+F goes to its find field, Esc clears it, and playing from it leads back here", async () => {
+    const user = userEvent.setup();
+    page();
+    await waitFor(() => expect(shownTitles().length).toBeGreaterThan(5));
+    const box = screen.getByRole("searchbox", { name: "Find a song" });
+    expect(openPageFind()).toBe(true);
+    expect(box).toHaveFocus();
+    await user.type(box, "zzzz");
+    await user.keyboard("{Escape}");
+    expect(box).toHaveValue("");
+    expect(contextRoute({ kind: "tracks", id: "songs", title: "Your songs" })).toEqual({ name: "songs" });
+    expect(contextRoute({ kind: "tracks", id: "albums" })).toBeNull();
   });
 });
