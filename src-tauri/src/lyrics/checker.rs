@@ -338,16 +338,17 @@ impl Checker {
         let tick = (stuck / 6).max(Duration::from_millis(5));
         loop {
             tokio::time::sleep(tick).await;
-            let late: Vec<String> = {
+            let late: Vec<(String, CheckState)> = {
                 let mut all = self.inner.statuses.lock();
                 all.retain(|_, (s, at)| s.state.ongoing() || at.elapsed() < KEEP_FINISHED);
                 all.iter()
                     .filter(|(_, (s, at))| s.state.ongoing() && at.elapsed() >= stuck)
-                    .map(|(id, _)| id.clone())
+                    .map(|(id, (s, _))| (id.clone(), s.state))
                     .collect()
             };
-            for id in late {
-                tracing::info!("lyrics check made no progress for a while");
+            for (id, state) in late {
+                // Where it stalled: waiting its turn behind a slow check, or in its own.
+                tracing::info!(?state, "lyrics check made no progress for a while");
                 self.set(&id, CheckState::Failed, Some(CheckReason::Stuck));
             }
         }
