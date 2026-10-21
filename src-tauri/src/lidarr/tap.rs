@@ -35,6 +35,14 @@ pub const STALLED_AFTER: Duration = Duration::from_secs(120);
 /// How long after the import Plex may take to show the song before it's
 /// flagged (the download's copy keeps playing meanwhile).
 pub const PLEX_WAIT: Duration = Duration::from_secs(10 * 60);
+/// Once flagged, a tap is looked at this often (Plex may still show it).
+pub const LATE_EVERY: Duration = Duration::from_secs(60);
+/// How long after the import a tap is followed at all; then it stops, and
+/// Library doctor keeps listing the song.
+pub const PLEX_GIVE_UP: Duration = Duration::from_secs(60 * 60);
+/// A request still waiting to reach Lidarr is sent again at most this often
+/// while a tap waits on it.
+pub const TAP_RETRY_EVERY: Duration = Duration::from_secs(30);
 /// Taps kept in the list (the newest).
 const KEEP_TAPS: usize = 20;
 const LAST_GET_KEY: &str = "lidarr.lastGet";
@@ -42,6 +50,7 @@ const LAST_GET_KEY: &str = "lidarr.lastGet";
 pub const STALLED_NOTE: &str = "The download has stalled. Platter keeps waiting and plays it as soon as it's here.";
 pub const AWAY_NOTE: &str = "Platter can't reach Lidarr from here right now. It keeps trying.";
 pub const PLEX_LATE_NOTE: &str = "Plex hasn't shown this song yet, so it's playing from the download. Library doctor lists it.";
+pub const PLEX_GAVE_UP_NOTE: &str = "Plex still hasn't shown this song. Library doctor lists it.";
 
 /// What the user sees in place of the seek bar while a tapped song comes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,6 +134,11 @@ pub struct Tap {
     moved_at: Option<tokio::time::Instant>,
     #[serde(skip)]
     flagged: bool,
+    #[serde(skip)]
+    looked_at: Option<tokio::time::Instant>,
+    /// Stopped following: Plex never showed it.
+    #[serde(skip)]
+    gave_up: bool,
 }
 
 impl Tap {
@@ -205,6 +219,8 @@ pub struct Taps {
     /// Where a tap goes when this device isn't the server owner's: a
     /// request to the owner.
     requests: Arc<Mutex<Option<crate::asks::Asks>>>,
+    /// When a waiting request was last sent again for a tap.
+    retried_at: Arc<Mutex<Option<tokio::time::Instant>>>,
 }
 
 /// What a tap says when it became a request to the server's owner.
@@ -249,9 +265,15 @@ pub fn find_song(at: &Path, title: &str) -> Option<PathBuf> {
     if want.is_empty() {
         return None;
     }
-    let stem = |p: &PathBuf| fold(p.file_stem().and_then(|s| s.to_str()).unwrap_or_default());
-    // The name with its track number off ("01 - Dawn"), then a name with it in.
-    let exact = files.iter().find(|p| stem(p).trim_start_matches(|c: char| c.is_ascii_digit()) == want);
+    let raw = |p: &PathBuf| p.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
+    // The name as it is, then with its track number off ("01 - Dawn",
+    // "1-02 Dawn"), so a title that is a number ("1999") still matches.
+    let exact = files.iter().find(|p| {
+        let r = raw(p);
+        let once = without_number(&r);
+        let digits_off = fold(&r).trim_start_matches(|c: char| c.is_ascii_digit()).to_string();
+        [fold(&r), fold(once), fold(without_number(once)), digits_off].iter().any(|n| *n == want)
+    });
     if let Some(p) = exact {
         return Some(p.clone());
     }
@@ -260,7 +282,31 @@ pub fn find_song(at: &Path, title: &str) -> Option<PathBuf> {
         use lofty::prelude::Accessor;
         lofty::read_from_path(p).ok().and_then(|f| f.primary_tag().and_then(|t| t.title().map(|s| fold(&s)))).is_some_and(|t| t == want)
     });
-    tagged.or_else(|| files.iter().find(|p| stem(p).contains(&want))).cloned()
+    // A longer name ("Dawn (Remastered)", "1999 (Live)"), never counting the track number.
+    let numeric = want.chars().all(|c| c.is_ascii_digit());
+    let longer = |p: &&PathBuf| {
+        let r = raw(p);
+        let name = without_number(&r);
+        if numeric { name.split(|c: char| !c.is_ascii_digit()).next() == Some(want.as_str()) } else { fold(name).contains(&want) }
+    };
+    tagged.or_else(|| files.iter().find(longer)).cloned()
+}
+
+/// A file name without its leading number: "01 - Dawn" is "Dawn". A name
+/// that is only a number ("1999") or runs on from one ("2Dawn") stays. The
+/// caller also compares the name as it is, for titles like "99 Problems".
+fn without_number(stem: &str) -> &str {
+    let s = stem.trim_start();
+    let end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    if end == 0 || end == s.len() {
+        return s;
+    }
+    let rest = &s[end..];
+    if rest.starts_with(|c: char| c.is_alphanumeric()) {
+        return s;
+    }
+    let rest = rest.trim_start_matches(|c: char| !c.is_alphanumeric());
+    if rest.is_empty() { s } else { rest }
 }
 
 /// Where this device opens a path Lidarr names: through the music share
@@ -378,7 +424,19 @@ fn song_folder(imported: &[String], title: &str) -> Option<String> {
 
 impl Taps {
     pub fn new(lidarr: Lidarr, host: Arc<dyn TapHost>) -> Self {
-        Self { lidarr, host, list: Default::default(), following: Default::default(), requests: Default::default() }
+        Self { lidarr, host, list: Default::default(), following: Default::default(), requests: Default::default(), retried_at: Default::default() }
+    }
+
+    /// Whether a tap is the latest now (another may have come meanwhile).
+    fn wanted_now(&self, t: &Tap) -> bool {
+        self.list.lock().iter().find(|x| x.id == t.id).map_or(t.wanted, |x| x.wanted)
+    }
+
+    /// Make one tap the latest.
+    fn want_only(&self, id: &str) {
+        for t in self.list.lock().iter_mut() {
+            t.wanted = t.id == id;
+        }
     }
 
     /// Taps by someone who doesn't own the server become requests.
@@ -396,6 +454,9 @@ impl Taps {
 
     /// A song was tapped.
     pub async fn tap(&self, input: TapInput) -> AppResult<TapOutcome> {
+        if !self.settings().lidarr_tap_to_get {
+            return Err(AppError::Invalid("Getting songs with a tap is off. Turn it on in Settings > Lidarr > More.".into()));
+        }
         if !self.lidarr.is_owner() {
             // Only the owner reaches Lidarr; anyone else's tap asks the owner.
             let Some(asks) = self.requests.lock().clone() else {
@@ -414,9 +475,6 @@ impl Taps {
             asks.request(item).await?;
             return Ok(TapOutcome { tap: None, needs: Some(GetNeeds { kind: "requested".into(), reason: REQUESTED_NOTE.into() }) });
         }
-        if !self.settings().lidarr_tap_to_get {
-            return Err(AppError::Invalid("Getting songs with a tap is off. Turn it on in Settings > Lidarr > More.".into()));
-        }
         if !self.lidarr.status().usable() {
             return Err(AppError::Invalid("Set up Lidarr in Settings to get songs you don't have.".into()));
         }
@@ -434,20 +492,23 @@ impl Taps {
                 }
             }
         };
-        // Coming already: the same tap, no second grab.
+        // Coming already (or here): the same tap, no second grab.
         let fold_title = fold(&input.title);
-        if let Some(t) = {
-            let mut l = self.list.lock();
-            for t in l.iter_mut() {
-                t.wanted = false;
+        let hit = self.list.lock().iter().find(|t| t.phase != TapPhase::Failed && t.release_group_id == rgid && fold(&t.title) == fold_title).map(|t| t.id.clone());
+        if let Some(id) = hit {
+            self.want_only(&id);
+            let Some(t) = self.list.lock().iter().find(|t| t.id == id).cloned() else {
+                return Err(AppError::Invalid("That song's tap went away. Tap it again.".into()));
+            };
+            if t.phase == TapPhase::Ready
+                && let Some(track) = t.track.clone()
+            {
+                // In the library since: play it from there.
+                tracing::info!(title = %t.title, "lidarr tap: in the library already");
+                self.host.play_library(&t, &track, false).await?;
+            } else {
+                tracing::info!(title = %t.title, "lidarr tap: already coming");
             }
-            let hit = l.iter_mut().find(|t| t.phase != TapPhase::Failed && t.release_group_id == rgid && fold(&t.title) == fold_title);
-            hit.map(|t| {
-                t.wanted = true;
-                t.clone()
-            })
-        } {
-            tracing::info!(title = %t.title, "lidarr tap: already coming");
             self.host.changed(&t);
             return Ok(TapOutcome { tap: Some(t), needs: None });
         }
@@ -494,6 +555,8 @@ impl Taps {
             imported_at: None,
             moved_at: Some(started),
             flagged: false,
+            looked_at: None,
+            gave_up: false,
         };
         if rec.state == RequestState::Downloading {
             t.timings.found_ms = t.since();
@@ -502,7 +565,11 @@ impl Taps {
             t.message = Some(AWAY_NOTE.into());
         }
         {
+            // The new tap is the latest; only now, so a refusal leaves the last one playing.
             let mut l = self.list.lock();
+            for x in l.iter_mut() {
+                x.wanted = false;
+            }
             l.insert(0, t.clone());
             l.truncate(KEEP_TAPS);
         }
@@ -513,15 +580,17 @@ impl Taps {
     /// Follow every live tap once.
     pub async fn follow(&self) {
         let _one = self.following.lock().await;
-        let live: Vec<Tap> = self.list.lock().iter().filter(|t| t.phase.live()).cloned().collect();
+        // A tap Plex is late with is looked at once a minute, not every couple of seconds.
+        let due = |t: &Tap| t.phase.live() && !(t.flagged && t.looked_at.is_some_and(|l| l.elapsed() < LATE_EVERY));
+        let live: Vec<Tap> = self.list.lock().iter().filter(|t| due(t)).cloned().collect();
         for t in live {
             let next = self.step(t).await;
             let changed = {
                 let mut l = self.list.lock();
                 match l.iter_mut().find(|x| x.id == next.id) {
                     Some(x) => {
-                        // A tap that happened meanwhile owns `wanted`.
-                        let wanted = x.wanted;
+                        // A tap that happened meanwhile owns `wanted`; one given up on lets go.
+                        let wanted = x.wanted && !next.gave_up;
                         let changed = *x != Tap { wanted, ..next.clone() };
                         *x = Tap { wanted, ..next };
                         changed.then(|| x.clone())
@@ -536,7 +605,8 @@ impl Taps {
     }
 
     /// One look at one tap.
-    async fn step(&self, mut t: Tap) -> Tap {
+    pub(super) async fn step(&self, mut t: Tap) -> Tap {
+        t.looked_at = Some(tokio::time::Instant::now());
         let Some(rec) = self.lidarr.requests().into_iter().find(|r| r.id == t.request_id) else {
             t.phase = TapPhase::Failed;
             t.message = Some("The request for this song isn't on this device any more.".into());
@@ -547,7 +617,17 @@ impl Taps {
             t.phase = if rec.state == RequestState::Failed { TapPhase::Failed } else { TapPhase::Searching };
             t.message = if rec.state == RequestState::Failed { rec.message.clone() } else { Some(AWAY_NOTE.into()) };
             if rec.state != RequestState::Failed {
-                self.lidarr.retry_queued().await.ok();
+                let due = {
+                    let mut at = self.retried_at.lock();
+                    let due = at.is_none_or(|a| a.elapsed() >= TAP_RETRY_EVERY);
+                    if due {
+                        *at = Some(tokio::time::Instant::now());
+                    }
+                    due
+                };
+                if due {
+                    self.lidarr.retry_queued().await.ok();
+                }
             }
             return t;
         };
@@ -627,9 +707,9 @@ impl Taps {
                 t.file = local_path(&share, path).and_then(|p| find_song(&p, &t.title));
             }
             if let Some(file) = t.file.clone()
-                && t.wanted
                 && !t.from_download
                 && t.phase != TapPhase::Playing
+                && self.wanted_now(&t)
             {
                 match self.host.play_file(&t, &file).await {
                     Ok(()) => {
@@ -669,6 +749,13 @@ impl Taps {
                     t.message = Some(PLEX_LATE_NOTE.into());
                 }
             }
+            if t.flagged && t.imported_at.is_some_and(|i| i.elapsed() >= PLEX_GIVE_UP) {
+                tracing::info!(title = %t.title, "lidarr tap: Plex never showed it; stops following");
+                t.phase = TapPhase::Failed;
+                t.gave_up = true;
+                t.from_download = false;
+                t.message = Some(PLEX_GAVE_UP_NOTE.into());
+            }
         }
         t
     }
@@ -681,7 +768,7 @@ impl Taps {
         if t.timings.downloaded_ms.is_none() {
             t.timings.downloaded_ms = t.timings.in_library_ms;
         }
-        let played = if t.wanted || t.from_download { self.host.play_library(&t, &track, t.from_download).await.unwrap_or(false) } else { false };
+        let played = if t.from_download || self.wanted_now(&t) { self.host.play_library(&t, &track, t.from_download).await.unwrap_or(false) } else { false };
         if played && t.timings.playing_ms.is_none() {
             t.timings.playing_ms = t.since();
         }
@@ -737,6 +824,8 @@ pub mod tests_support {
             imported_at: None,
             moved_at: None,
             flagged: false,
+            looked_at: None,
+            gave_up: false,
         }
     }
 }
@@ -768,6 +857,25 @@ mod tests {
         assert_eq!(find_song(&single, "Whatever It's Called").unwrap(), single.join("track.mp3"), "the only song there");
         assert_eq!(find_song(&single.join("track.mp3"), "x").unwrap(), single.join("track.mp3"));
         assert!(find_song(&album.join("cover.jpg"), "x").is_none());
+    }
+
+    #[test]
+    fn a_song_named_with_a_number_is_found_by_its_whole_name() {
+        let d = tempfile::tempdir().unwrap();
+        for f in ["01 - 1999.flac", "02 - 7.flac", "03 - 99 Problems.flac", "04 - Rise (Remastered).flac", "1-05 Dawn.flac", "06 - 2000.flac"] {
+            std::fs::write(d.path().join(f), b"x").unwrap();
+        }
+        assert_eq!(find_song(d.path(), "1999").unwrap(), d.path().join("01 - 1999.flac"));
+        assert_eq!(find_song(d.path(), "7").unwrap(), d.path().join("02 - 7.flac"), "not 07 or any name with a 7 in its number");
+        assert_eq!(find_song(d.path(), "99 Problems").unwrap(), d.path().join("03 - 99 Problems.flac"));
+        assert_eq!(find_song(d.path(), "Rise").unwrap(), d.path().join("04 - Rise (Remastered).flac"));
+        assert_eq!(find_song(d.path(), "Dawn").unwrap(), d.path().join("1-05 Dawn.flac"), "disc and track number");
+        assert!(find_song(d.path(), "5").is_none(), "a track number is never the title");
+        std::fs::write(d.path().join("07 - 1984 (Live).flac"), b"x").unwrap();
+        assert_eq!(find_song(d.path(), "1984").unwrap(), d.path().join("07 - 1984 (Live).flac"));
+        assert_eq!(without_number("01 - Dawn"), "Dawn");
+        assert_eq!(without_number("1999"), "1999");
+        assert_eq!(without_number("2Dawn"), "2Dawn");
     }
 
     #[test]

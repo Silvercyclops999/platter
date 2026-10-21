@@ -4110,20 +4110,25 @@ export class MockBackend implements Backend {
   taps: Tap[] = [];
   lastGet: LastGet | null = null;
   private tapTimers: ReturnType<typeof setTimeout>[] = [];
+  /** Bumped by resetTaps, so a tap still on its way from an earlier test never lands. */
+  private tapRound = 0;
   /** Test hook: forget every tap and stop the ones still coming. */
   resetTaps() {
+    this.tapRound++;
     this.tapTimers.forEach(clearTimeout);
     this.tapTimers = [];
     this.taps.length = 0;
   }
   lidarrTap(input: TapInput) {
+    const round = this.tapRound;
     return this.delay((): TapOutcome => {
+      if (round !== this.tapRound) return { tap: null, needs: null };
+      if (!this.settings.lidarrTapToGet) throw { kind: "invalid", message: "Getting songs with a tap is off. Turn it on in Settings > Lidarr > More." };
       if (this.asks.mode === "guest") {
         const thumb = input.thumb?.startsWith("/ext/https://") ? input.thumb : null;
         this.asks.request({ releaseGroupId: input.releaseGroupId ?? null, title: input.title, artist: input.artist, artistMbid: input.artistMbid ?? null, album: input.album ?? null, song: true, thumb });
         return { tap: null, needs: { kind: "requested", reason: "Requested. You'll hear when it's here." } };
       }
-      if (!this.settings.lidarrTapToGet) throw { kind: "invalid", message: "Getting songs with a tap is off. Turn it on in Settings > Lidarr > More." };
       const same = this.taps.find((t) => t.phase !== "failed" && t.releaseGroupId === (input.releaseGroupId ?? "") && t.title === input.title);
       this.taps.forEach((t) => (t.wanted = t === same));
       if (same) return { tap: { ...same }, needs: null };

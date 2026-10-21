@@ -14,7 +14,10 @@ use serde_json::{Value, json};
 use super::mbpick::tests::RG_SECOND;
 use super::quick::NO_COPY;
 use super::request_tests::{FakeLidarr, Rig, rig};
-use super::tap::{AWAY_NOTE, LibraryTrack, PLEX_LATE_NOTE, PLEX_WAIT, STALLED_AFTER, STALLED_NOTE, Tap, TapHost, TapInput, TapPhase, Taps};
+use super::tap::{
+    AWAY_NOTE, LATE_EVERY, LibraryTrack, PLEX_GAVE_UP_NOTE, PLEX_GIVE_UP, PLEX_LATE_NOTE, PLEX_WAIT, STALLED_AFTER, STALLED_NOTE, TAP_RETRY_EVERY, Tap, TapHost, TapInput,
+    TapPhase, Taps,
+};
 use crate::error::AppResult;
 use crate::web::Method;
 
@@ -311,6 +314,52 @@ async fn only_the_latest_tap_plays_when_it_lands() {
     assert_eq!(files, [t.dl.path().join("Second Wind").join("01 - Rise.flac")], "only the newest tap plays");
 }
 
+#[tokio::test]
+async fn a_tap_that_needs_you_leaves_the_last_one_playing_when_it_lands() {
+    let t = setup().await;
+    t.taps.tap(tap_in()).await.unwrap();
+    // A song MusicBrainz doesn't know: refused, nothing sent.
+    let other = TapInput { title: "Nowhere".into(), release_group_id: Some("00000000-0000-4000-8000-000000000000".into()), album: Some("Nowhere".into()), ..tap_in() };
+    let out = t.taps.tap(other).await.unwrap();
+    assert!(out.tap.is_none());
+    assert_eq!(out.needs.map(|n| n.kind).as_deref(), Some("refused"));
+    assert!(t.tap0().wanted, "the last tap still plays when it lands");
+    t.finished();
+    t.taps.follow().await;
+    assert_eq!(t.host.files.lock().as_slice(), [t.dl.path().join("Second Wind").join("02 - Dawn.flac")]);
+}
+
+#[tokio::test]
+async fn a_tap_meanwhile_stops_an_older_one_playing_mid_look() {
+    let t = setup().await;
+    t.taps.tap(tap_in()).await.unwrap();
+    // A look starts with Dawn still the latest...
+    let looked = t.tap0();
+    assert!(looked.wanted);
+    // ...and another song is tapped before it gets to playing.
+    t.taps.tap(TapInput { title: "Rise".into(), ..tap_in() }).await.unwrap();
+    t.finished();
+    let after = t.taps.step(looked).await;
+    assert!(t.host.files.lock().is_empty(), "Dawn doesn't take over from the newer tap");
+    assert_ne!(after.phase, TapPhase::Playing);
+}
+
+#[tokio::test]
+async fn tapping_a_song_that_landed_since_plays_it_from_the_library() {
+    let t = setup().await;
+    t.taps.tap(tap_in()).await.unwrap();
+    t.imported();
+    t.in_library();
+    t.taps.follow().await;
+    assert_eq!(t.tap0().phase, TapPhase::Ready);
+    assert_eq!(t.host.library.lock().len(), 1);
+    let again = t.taps.tap(tap_in()).await.unwrap().tap.unwrap();
+    assert_eq!(again.phase, TapPhase::Ready);
+    assert_eq!(t.host.library.lock().as_slice(), [("t92".to_string(), false), ("t92".to_string(), false)], "plays again");
+    assert_eq!(t.taps.list().len(), 1, "the same tap, not a second one");
+    assert_eq!(t.r.web.st.lock().grabbed.len(), 1, "no second grab");
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_stalled_download_is_shown_and_followed_on() {
     let t = setup().await;
@@ -343,16 +392,50 @@ async fn plex_never_finding_it_keeps_the_download_playing_and_flags_it() {
     assert!(tap.from_download);
     assert_eq!(tap.message.as_deref(), Some(PLEX_LATE_NOTE));
     assert_eq!(t.host.flagged.lock().as_slice(), ["Dawn"]);
+    // Flagged: looked at once a minute from now on, not every couple of seconds.
+    let reads = t.r.web.log.lock().len();
     t.taps.follow().await;
+    assert_eq!(t.r.web.log.lock().len(), reads, "not looked at again yet");
+    tokio::time::advance(LATE_EVERY).await;
+    t.taps.follow().await;
+    assert!(t.r.web.log.lock().len() > reads);
     assert_eq!(t.host.flagged.lock().len(), 1, "flagged once");
     assert!(t.host.found.lock().is_empty());
     // Plex shows it after all: the flag clears.
     t.in_library();
+    tokio::time::advance(LATE_EVERY).await;
     t.taps.follow().await;
     assert_eq!(t.host.found.lock().as_slice(), ["Dawn"]);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
+async fn a_tap_plex_never_shows_stops_being_followed() {
+    let t = setup().await;
+    t.taps.tap(tap_in()).await.unwrap();
+    t.finished();
+    t.taps.follow().await;
+    t.imported();
+    t.taps.follow().await;
+    tokio::time::advance(PLEX_WAIT + Duration::from_secs(1)).await;
+    t.taps.follow().await;
+    assert_eq!(t.host.flagged.lock().as_slice(), ["Dawn"]);
+    tokio::time::advance(PLEX_GIVE_UP).await;
+    t.taps.follow().await;
+    let tap = t.tap0();
+    assert_eq!(tap.phase, TapPhase::Failed);
+    assert_eq!(tap.message.as_deref(), Some(PLEX_GAVE_UP_NOTE));
+    assert!(!tap.wanted, "it lets go of the player");
+    assert!(!tap.from_download);
+    let reads = t.r.web.log.lock().len();
+    for _ in 0..3 {
+        tokio::time::advance(LATE_EVERY).await;
+        t.taps.follow().await;
+    }
+    assert_eq!(t.r.web.log.lock().len(), reads, "no more looks at Lidarr");
+    assert_eq!(t.host.flagged.lock().len(), 1, "Library doctor still lists it");
+}
+
+#[tokio::test(start_paused = true)]
 async fn lidarr_out_of_reach_keeps_the_tap_waiting_and_says_so() {
     let t = setup().await;
     t.r.web.st.lock().down = true;
@@ -361,10 +444,21 @@ async fn lidarr_out_of_reach_keeps_the_tap_waiting_and_says_so() {
     assert_eq!(tap.message.as_deref(), Some(AWAY_NOTE));
     t.taps.follow().await;
     assert_eq!(t.tap0().message.as_deref(), Some(AWAY_NOTE));
-    // Back: the waiting request goes out (full check first) and the tap follows it.
+    // Back: the waiting request isn't sent again on every look, only every so often.
     t.r.web.st.lock().down = false;
     t.taps.follow().await;
-    assert!(t.r.web.writes().iter().any(|(m, p, _)| *m == Method::Post && (p == "/api/v1/album" || p == "/api/v1/artist")));
+    t.taps.follow().await;
+    assert!(t.r.web.writes().is_empty(), "not sent again every couple of seconds");
+    tokio::time::advance(TAP_RETRY_EVERY).await;
+    t.taps.follow().await;
+    // It goes out the quick way, as the tap did: only the album, the fastest copy grabbed, no search by Lidarr.
+    assert_eq!(
+        writes(&t.r.web),
+        vec![(Method::Post, "/api/v1/album".into()), (Method::Put, "/api/v1/album/monitor".into()), (Method::Post, "/api/v1/release".into())]
+    );
+    assert_eq!(t.r.web.st.lock().grabbed, ["nzb-1"]);
+    let rec = t.r.lidarr.requests().into_iter().find(|r| r.release_group_id == RG_SECOND).unwrap();
+    assert!(rec.quick);
 }
 
 #[tokio::test]
@@ -429,6 +523,23 @@ async fn someone_who_doesnt_own_the_server_cant_get_a_song() {
     assert_eq!(e.to_string(), format!("invalid: {}", crate::lidarr::NOT_OWNER));
     assert!(t.taps.list().is_empty(), "no tap is followed");
     assert!(t.r.web.writes().is_empty(), "nothing goes to Lidarr");
+}
+
+#[tokio::test]
+async fn the_setting_off_stops_a_request_from_someone_who_doesnt_own_the_server_too() {
+    let t = setup().await;
+    t.r.lidarr.set_owner(false);
+    let mut s = crate::settings::load(&t.r.db);
+    s.lidarr_tap_to_get = false;
+    crate::settings::save(&t.r.db, &s).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let db = crate::db::DbHandle::open(dir.path().join("a.db")).unwrap();
+    let relays = Arc::new(crate::social::listen::relay::Ntfy::new().unwrap());
+    let asks = crate::asks::Asks::new(Arc::new(Guest), db, relays, Arc::new(parking_lot::RwLock::new(String::new())), "http://127.0.0.1:9".into());
+    t.taps.set_requests(asks.clone());
+    let e = t.taps.tap(tap_in()).await.unwrap_err();
+    assert!(e.message().contains("Settings > Lidarr > More"), "{e}");
+    assert!(asks.view().await.mine.is_empty(), "nothing asked of the owner");
 }
 
 /// The asking side of requests, for someone the server is shared with.

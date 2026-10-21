@@ -135,6 +135,7 @@ impl RadarLidarr for FakeLidarr {
             searches: 0,
             next_search_at: None,
             attempts: 0,
+            quick: false,
         };
         self.list.lock().push(r.clone());
         Ok(r)
@@ -524,6 +525,7 @@ fn summary_texts() {
         searches: 0,
         next_search_at: None,
         attempts: 0,
+        quick: false,
     };
     assert_eq!(summary(&[], 0, 3), None);
     assert_eq!(summary(&[], 2, 3).unwrap().1, "2 more wait for tomorrow (up to 3 a day).");

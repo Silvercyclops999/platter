@@ -103,6 +103,9 @@ pub struct RequestRecord {
     /// Tries of a waiting request that went wrong for a passing reason.
     #[serde(default)]
     pub attempts: u32,
+    /// Sent for a tapped song: a try again goes the quick way too.
+    #[serde(default)]
+    pub quick: bool,
 }
 
 /// A request that left the list, remembered so it's never asked for again.
@@ -640,7 +643,7 @@ impl Lidarr {
         if let Some(r) = self.records().into_iter().find(|r| r.release_group_id == rgid && r.state != RequestState::Failed) {
             return Ok(r);
         }
-        let rec = self.new_record(&input, rgid, false);
+        let rec = RequestRecord { quick: speed == Speed::Quick, ..self.new_record(&input, rgid, false) };
         let out = match self.send_to(rec.clone(), &Dest::Library, speed).await {
             Ok(r) => r,
             Err(e) if e.kind() == "network" => {
@@ -696,6 +699,7 @@ impl Lidarr {
             searches: 0,
             next_search_at: None,
             attempts: 0,
+            quick: false,
         }
     }
 
@@ -1118,7 +1122,8 @@ impl Lidarr {
         for id in waiting {
             let _one = self.lock.lock().await;
             let Some(rec) = self.records().into_iter().find(|r| r.id == id && r.state == RequestState::Queued) else { continue };
-            let next = match self.send(rec.clone()).await {
+            let speed = if rec.quick { Speed::Quick } else { Speed::Usual };
+            let next = match self.send_to(rec.clone(), &Dest::Library, speed).await {
                 Ok(r) if r.state == RequestState::Queued => {
                     let why = r.message.clone().unwrap_or_default();
                     self.another_try(r, why)
