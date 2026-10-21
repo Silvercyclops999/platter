@@ -5,7 +5,7 @@
  * (Lidarr). The same core calls as the computer's import pages.
  */
 import { Heart, ListMusic, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Art } from "../../components/Art";
 import { Switch } from "../../components/Switch";
 import { backend } from "../../lib/backend";
@@ -422,10 +422,12 @@ function MissingPhone({ played }: { played: boolean }) {
 
 // ---------------------------------------------------------------- page
 
-export function PhoneImport({ view }: { view?: string }) {
+/** `bring` is Bring music over, the page shown until something is imported. */
+export function PhoneImport({ view, bring }: { view?: string; bring?: ReactNode }) {
   const s = useSettings((x) => x.settings);
   const on = (s?.importSources ?? []).length > 0;
   if (view === "missing" || view === "played") return <MissingPhone played={view === "played"} />;
+  if (s && !on && bring && !view?.startsWith("list:")) return <>{bring}</>;
   if (view?.startsWith("list:"))
     return (
       <Borrowed name="import">
@@ -436,7 +438,7 @@ export function PhoneImport({ view }: { view?: string }) {
     <PageFrame name="import" title="Library import" lede="How much of what you imported is in your library.">
       <BringInPhone />
       {s && !on ? (
-        <Empty title="Library import is off" text="Turn on a service in Settings, under Library import." action={<GoPill route={{ name: "settings", page: "libraryImport" }}>Open Settings</GoPill>} />
+        <Empty title="Nothing imported yet" text="Bring your playlists and likes over from another app." action={<GoPill route={{ name: "bring" }}>Bring music over</GoPill>} />
       ) : (
         <ImportHome />
       )}

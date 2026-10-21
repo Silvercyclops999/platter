@@ -18,6 +18,7 @@ import type { AppError, RadarItem } from "../lib/types";
 import { useApp } from "../stores/app";
 import { useRadar } from "../stores/radar";
 import { nav } from "../stores/router";
+import { updateSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import { STATE_LABEL } from "./lidarrShared";
 import "./home.css";
@@ -176,9 +177,9 @@ export function ReleaseRadarPage() {
         <div className="empty-state" role="status">
           <RadarIcon size={40} strokeWidth={1.5} aria-hidden="true" />
           <h2 className="empty-state__title">Release radar is off</h2>
-          <p className="empty-state__text">Turn it on in Settings to see new releases from artists you follow and play most.</p>
-          <Button variant="secondary" size="sm" onClick={() => nav.go({ name: "settings" })}>
-            Open Settings
+          <p className="empty-state__text">Turn it on to see new releases from the artists you follow and play most. Platter looks them up on MusicBrainz about once a day.</p>
+          <Button variant="primary" size="sm" onClick={() => void updateSettings({ releaseRadar: true }).then(reload)}>
+            Turn on
           </Button>
         </div>
       ) : page.items.length === 0 ? (

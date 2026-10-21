@@ -15,7 +15,8 @@ import { useRadar } from "../../stores/radar";
 import { nav } from "../../stores/router";
 import { toast } from "../../stores/toasts";
 import { errText } from "../../pages/catalogue";
-import { Empty, GhostRows, GoPill, PageFrame, Pills, Row } from "./kit";
+import { updateSettings } from "../../stores/settings";
+import { Empty, GhostRows, PageFrame, Pills, Row } from "./kit";
 
 function open(item: RadarItem) {
   if (item.libraryAlbumId) nav.go({ name: "album", id: item.libraryAlbumId });
@@ -55,7 +56,15 @@ export function PhoneReleaseRadar() {
       {!page ? (
         <GhostRows />
       ) : !page.shown ? (
-        <Empty title="Release radar is off" text="Turn it on in Settings to see new releases from artists you follow and play most." action={<GoPill route={{ name: "settings", row: "releaseRadar" }}>Open Settings</GoPill>} />
+        <Empty
+          title="Release radar is off"
+          text="Turn it on to see new releases from the artists you follow and play most. Platter looks them up on MusicBrainz about once a day."
+          action={
+            <button type="button" className="ph-pill is-primary" onClick={() => void updateSettings({ releaseRadar: true }).then(reload)}>
+              Turn on
+            </button>
+          }
+        />
       ) : page.items.length === 0 ? (
         <Empty
           title={page.checkedAt ? "Nothing new lately" : "No releases yet"}

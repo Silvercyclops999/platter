@@ -122,9 +122,10 @@ describe("Settings > Library import", () => {
 });
 
 describe("Import page", () => {
-  it("is hidden while no source is on", async () => {
+  it("is Bring music over while nothing is imported", async () => {
     render(<ImportPage />);
-    expect(await screen.findByText("Library import is off.")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: /Bring music over/ })).toBeInTheDocument();
+    expect(screen.queryByText("Library import is off.")).toBeNull();
     expect(screen.queryByText(/songs found/)).toBeNull();
     render(<ImportPage view="missing" />);
     expect(screen.queryByRole("heading", { name: "Missing songs" })).toBeNull();

@@ -160,6 +160,10 @@ describe("the page", () => {
     await setUp("ready", { releaseRadar: false });
     const { unmount } = render(<ReleaseRadarPage />);
     expect(await screen.findByText("Release radar is off")).toBeInTheDocument();
+    // Turn on, right there: the page fills in.
+    await userEvent.click(screen.getByRole("button", { name: "Turn on" }));
+    await waitFor(() => expect(useSettings.getState().settings?.releaseRadar).toBe(true));
+    expect(await screen.findByRole("button", { name: "Check now" })).toBeInTheDocument();
     unmount();
     await setUp("ready");
     mock.radar.reset(true);

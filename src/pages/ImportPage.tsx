@@ -6,8 +6,7 @@
  */
 import { Heart, ListMusic } from "lucide-react";
 import { HelpButton } from "../help/HelpButton";
-import { GuideButton } from "../guides/GuideButton";
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { Button } from "../components/Button";
 import { Skeleton, SkeletonLines } from "../components/Skeleton";
 import { backend } from "../lib/backend";
@@ -25,6 +24,8 @@ import { MissingPage } from "./ImportMissing";
 import "./library-import.css";
 import { ACCOUNT_SOURCE, AccountCard } from "./AccountConnect";
 import { failText } from "../lib/errorText";
+
+const BringPage = lazy(() => import("./BringPage").then((m) => ({ default: m.BringPage })));
 
 const n = (v: number) => v.toLocaleString();
 
@@ -228,23 +229,20 @@ function Home() {
 export function ImportPage({ view }: { view?: string }) {
   const s = useSettings((x) => x.settings);
   const on = (s?.importSources ?? []).length > 0;
+  // Until something is brought over there's no report: the page is Bring
+  // music over, the one place to start an import.
+  if (s && !on && view !== "missing" && view !== "played") {
+    return (
+      <Suspense fallback={null}>
+        <BringPage />
+      </Suspense>
+    );
+  }
   return (
     <div className="page-pad import-page" data-testid="import-page">
       {view === "missing" || view === "played" ? (
         // Albums added by hand live here too, so Missing opens with library import off (albums only).
         <MissingPage songs={!(s && !on)} played={view === "played"} />
-      ) : s && !on ? (
-        <>
-          <h1 className="page-title">Library import</h1>
-          <div className="import-empty" role="status">
-            <p>Library import is off.</p>
-            <p>Turn on a service in Settings, under Library import, or let the guide walk you through it.</p>
-            <GuideButton id="import" variant="primary" />
-            <Button className="import-empty__go" onClick={() => nav.go({ name: "settings", page: "libraryImport" })}>
-              Open Settings
-            </Button>
-          </div>
-        </>
       ) : view?.startsWith("list:") ? (
         <ListView id={view.slice(5)} />
       ) : (
