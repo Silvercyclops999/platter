@@ -312,8 +312,8 @@
 /* ---------------------------------------------------------------- now playing */
 /* The room the record plays in: lit by the cover's own colour from the top,
    with one soft pool of it behind the sleeve (the desktop's cover light),
-   settling into the page colour toward the controls. The top keeps 46% of
-   the colour (NP_TOP_TINT), which the status bar reads. */
+   settling into the page colour toward the controls. The top keeps 20% of
+   the colour at most (NP_TOP_TINT), which the status bar reads. */
 .ph-np {
   --np-side: clamp(24px, 6.8vw, 34px);
   --np-peek: 0px;
@@ -321,8 +321,8 @@
   inset: 0;
   z-index: 40;
   background:
-    radial-gradient(ellipse 90% 42% at 50% 30%, color-mix(in srgb, var(--ph-tint) 30%, transparent), transparent 74%),
-    linear-gradient(180deg, color-mix(in srgb, var(--ph-tint) 46%, var(--color-bg-base)) 0, color-mix(in srgb, var(--ph-tint) 22%, var(--color-bg-base)) 46%, color-mix(in srgb, var(--ph-tint) 6%, var(--color-bg-base)) 78%, var(--color-bg-base) 100%);
+    radial-gradient(ellipse 90% 42% at 50% 30%, color-mix(in srgb, var(--ph-tint) 12%, transparent), transparent 74%),
+    linear-gradient(180deg, color-mix(in srgb, var(--ph-tint) 20%, var(--color-bg-base)) 0, color-mix(in srgb, var(--ph-tint) 10%, var(--color-bg-base)) 46%, color-mix(in srgb, var(--ph-tint) 3%, var(--color-bg-base)) 78%, var(--color-bg-base) 100%);
   background-color: var(--color-bg-base);
   transition: transform var(--ph-slide) var(--ph-ease);
   animation: ph-rise var(--ph-np-open) var(--ph-ease);
@@ -359,9 +359,9 @@
   box-shadow: 0 1px 0 color-mix(in srgb, #000 22%, transparent);
 }
 .ph-np__top .ph-icon-btn { color: var(--color-text-primary); }
-.ph-np__from { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; min-width: 0; min-height: 44px; text-align: center; }
-.ph-np__from-label { font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; color: color-mix(in srgb, var(--color-text-primary) 62%, transparent); }
-.ph-np__from-name { max-width: 100%; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ph-np__from { display: block; min-width: 0; min-height: 44px; padding-block: 12px; text-align: center; font-size: 14px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ph-np__from-label { font-weight: 500; color: color-mix(in srgb, var(--color-text-primary) 62%, transparent); }
+.ph-np__from-name { font-weight: 600; }
 /* The cover is the hero: inside real margins (less when the screen is
    short), square, with the shadow of a sleeve lifted off the table and a
    hairline edge. Paused, it settles back a little. It sits in a row with
@@ -1176,11 +1176,14 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 .ph-search__bar .ph-field { flex: 1; margin-bottom: 0; }
 .ph-search__cancel { min-height: 44px; padding: 0 4px; font-size: 16px; font-weight: 600; color: var(--color-text-primary) !important; }
 /* Browse tiles under an empty search: a genre, its count, a tilted sleeve. */
-.ph-browse { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.ph-browse__tile { position: relative; display: flex; flex-direction: column; justify-content: space-between; width: 100%; height: 88px; padding: 12px 14px !important; border-radius: 10px; overflow: hidden; background: color-mix(in srgb, var(--color-ink) 7%, var(--color-bg-raised)) !important; box-shadow: var(--panel-highlight, none); }
-.ph-browse__name { position: relative; z-index: 1; max-width: 70%; font-size: 15px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
-.ph-browse__count { position: relative; z-index: 1; font-family: var(--font-family); font-variant-numeric: tabular-nums; font-size: 12px; color: var(--color-text-muted); }
-.ph-browse__art { position: absolute; right: -12px; bottom: -10px; transform: rotate(14deg); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); border-radius: 3px; overflow: hidden; }
+.ph-browse { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 12px; }
+/* A crate divider: a tab with the genre, and the spines of the records behind it. */
+.ph-divider { display: flex; flex-direction: column; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; }
+.ph-divider__tab { align-self: flex-start; max-width: 100%; padding: 6px 12px 4px; border-radius: 6px 6px 0 0; background: var(--color-bg-raised2); box-shadow: inset 0 1px 0 rgba(255, 243, 224, 0.07); font-family: var(--font-headings, var(--font-family)); font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ph-divider__body { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; height: 70px; padding: 10px 12px; border-radius: 0 6px 6px 6px; background: var(--color-bg-raised2); }
+.ph-divider__count { font-size: 12px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ph-divider__spines { display: flex; align-items: flex-end; gap: 3px; flex: none; }
+.ph-divider__spines > span { width: 9px; border-radius: 1px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12); }
 .ph-search .ph-pills--scroll { margin-top: 12px; }
 .ph-hit.is-top .ph-row { padding: 10px 12px; margin: 4px 0; border-radius: 12px; background: color-mix(in srgb, var(--color-ink) 6%, var(--color-bg-raised)); }
 /* A playlist's cover over its name, smaller than an album's so the songs start sooner. */
@@ -1235,7 +1238,7 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
   transition: opacity 220ms var(--ph-ease), transform 260ms var(--ph-ease), background-color 220ms var(--ph-ease);
 }
 .phone .is-pressed { opacity: 0.6; transition-duration: 90ms; }
-.phone :is(.ph-card-tile, .ph-shortcut, .ph-spun__tile, .ph-platter__sleeve, .ph-platter__resume, .ph-browse__tile, .ph-pill, .ph-chip, .ph-play, .ph-big-btn, .ph-server, .ph-crate, .ph-avatar, .ph-select, .ph-seg__tab, .btn).is-pressed { opacity: 1; transform: scale(0.96); }
+.phone :is(.ph-card-tile, .ph-shortcut, .ph-spun__tile, .ph-platter__sleeve, .ph-platter__resume, .ph-pill, .ph-chip, .ph-play, .ph-big-btn, .ph-server, .ph-crate, .ph-avatar, .ph-divider, .ph-select, .ph-seg__tab, .btn).is-pressed { opacity: 1; transform: scale(0.96); }
 .phone :is(.ph-icon-btn, .ph-text-btn, .ph-output).is-pressed { opacity: 0.7; transform: scale(0.92); }
 .phone .ph-play.is-pressed { transform: scale(0.94); }
 .phone .ph-tab.is-pressed { opacity: 0.7; }

@@ -95,6 +95,7 @@ html:root[data-look-now-playing="left"] .app.fw-beside .resize-handle--right { r
 .fw__modes { display: flex; align-items: center; gap: var(--space-1); }
 .fw__divider { width: 1px; height: 20px; margin: 0 var(--space-1); background: rgba(255, 255, 255, 0.25); }
 .fw__context a, .fw__context button { color: inherit; }
+.fw__context-label { font-weight: 500; opacity: 0.72; }
 .fw .icon-btn--plain,
 .fw__actions .icon-btn { color: var(--color-text-primary); }
 .fw__actions .icon-btn.is-active { color: var(--color-accent); }

@@ -216,24 +216,24 @@
 }
 :root[data-identity] .fw .lyrics { --lyrics-bg: color-mix(in srgb, var(--fw-tint, #2a2520) 58%, #171513); }
 
-/* With the record player, the room is graphite with a quiet pool of the
-   cover's colour under the platter; no blurred art behind it. */
-:root[data-identity] .fw--artwork:has(.turntable) {
+/* Now playing is graphite with a quiet pool of the cover's colour, 20% at
+   most, under the cover or the platter; no blurred art behind it. */
+:root[data-identity] .fw--artwork {
   background:
-    radial-gradient(ellipse 60% 55% at 50% 42%, color-mix(in srgb, var(--fw-tint, #3a3128) 38%, transparent), transparent 75%),
+    radial-gradient(ellipse 60% 55% at 50% 42%, color-mix(in srgb, var(--fw-tint, #3a3128) 20%, transparent), transparent 75%),
     #171513;
 }
-:root[data-identity="studio"][data-theme="studioBlack"] .fw--artwork:has(.turntable) {
+:root[data-identity="studio"][data-theme="studioBlack"] .fw--artwork {
   background:
-    radial-gradient(ellipse 60% 55% at 50% 42%, color-mix(in srgb, var(--fw-tint, #3a3128) 30%, transparent), transparent 75%),
+    radial-gradient(ellipse 60% 55% at 50% 42%, color-mix(in srgb, var(--fw-tint, #3a3128) 16%, transparent), transparent 75%),
     #000;
 }
-:root[data-identity] .fw--artwork:has(.turntable) :is(.fw__bg, .fw__shade) { display: none; }
+:root[data-identity] .fw--artwork :is(.fw__bg, .fw__shade) { display: none; }
 :root[data-identity] .fw__now--turntable .fw__title { font-family: var(--font-headings, var(--font-family)); font-weight: 600; }
 
-/* The miniplayer: graphite with a hint of the cover, and the progress line
+/* The miniplayer: graphite, never the cover's colour, and the progress line
    in brass, the playing colour. */
-:root[data-identity] .mini.is-tinted { background-color: color-mix(in srgb, var(--mini-tint) 24%, #171513); }
+:root[data-identity] .mini.is-tinted { background-color: #171513; }
 :root[data-identity] .mini__edge-fill { background: var(--color-playing); }
 
 /* Hi-fi plates, the readout glass and cover light are in instruments.css. */
