@@ -5,7 +5,7 @@
  * for pinned and downloaded. Downloads also leads to managing them. While
  * the library doctor has something to fix, a quiet row at the end leads to it.
  */
-import { ArrowUpDown, ChevronRight, LayoutGrid, List, Plus, X } from "lucide-react";
+import { ArrowUpDown, ChevronRight, Disc3, LayoutGrid, List, Plus, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { Art } from "../../components/Art";
 import { LikedCover } from "../../components/LikedCover";
@@ -20,6 +20,7 @@ import { letterOf, phoneRows, phoneSubtitle } from "../libraryRows";
 import "./parity.css";
 import { phone, usePhoneUi } from "../phoneUi";
 import { nav } from "../../stores/router";
+import { player } from "../../stores/player";
 import { CratesBody } from "./Crates";
 
 type PhoneLibView = "list" | "grid";
@@ -120,9 +121,21 @@ function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof use
           <ArrowUpDown size={16} aria-hidden="true" />
           {SORT_LABEL[model.sort]}
         </button>
-        <button type="button" className="ph-icon-btn" aria-label={view === "list" ? "Show as a grid" : "Show as a list"} onClick={toggleView}>
-          {view === "list" ? <LayoutGrid size={20} aria-hidden="true" /> : <List size={20} aria-hidden="true" />}
-        </button>
+        <span className="ph-library__end">
+          {model.filter === "album" && !model.loading && model.shown.length > 1 && (
+            <button
+              type="button"
+              className="ph-text-btn ph-library__shuffle"
+              onClick={() => (tap(), void player.shuffleAlbums(model.shown.filter((e) => e.kind === "album").map((e) => e.id)))}
+            >
+              <Disc3 size={16} aria-hidden="true" />
+              Shuffle albums
+            </button>
+          )}
+          <button type="button" className="ph-icon-btn" aria-label={view === "list" ? "Show as a grid" : "Show as a list"} onClick={toggleView}>
+            {view === "list" ? <LayoutGrid size={20} aria-hidden="true" /> : <List size={20} aria-hidden="true" />}
+          </button>
+        </span>
       </div>
       {model.downloaded.on && (
         <ul className="ph-set-list ph-library__manage" aria-label="Downloads">

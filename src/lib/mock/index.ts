@@ -2287,7 +2287,8 @@ export class MockBackend implements Backend {
       }
       default: {
         const tracks = (c.trackIds ?? []).map((i) => this.trackById(i)!).filter(Boolean);
-        return { tracks, info: { kind: c.kind, id: c.id ?? null, title: c.kind === "search" ? "Search results" : "Tracks" } };
+        const title = c.kind === "search" ? "Search results" : c.id === "albums" ? "Albums on shuffle" : "Tracks";
+        return { tracks, info: { kind: c.kind, id: c.id ?? null, title } };
       }
     }
   }
@@ -3317,6 +3318,27 @@ export class MockBackend implements Backend {
   }
   albumCrates(id: string) {
     return this.delay(() => this.crateIndex.shelves(id));
+  }
+  /** Like the core: whole albums in a random order, 50 at most, hidden songs and artists left out. */
+  albumShuffleTracks(albumIds: string[]) {
+    return this.delay(() => {
+      const ids = albumIds.length ? [...new Set(albumIds)] : this.fx.albums.map((a) => a.id);
+      for (let i = ids.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [ids[i], ids[j]] = [ids[j], ids[i]];
+      }
+      const out: string[] = [];
+      let albums = 0;
+      for (const id of ids) {
+        if (albums === 50) break;
+        const songs = (this.fx.tracksByAlbum.get(id) ?? []).filter((t) => !this.hidden.hides(t));
+        if (!songs.length) continue;
+        albums++;
+        out.push(...songs.map((t) => t.id));
+      }
+      if (!out.length) throw { kind: "invalid", message: "There are no albums to play here." };
+      return out;
+    });
   }
   albumSides(id: string) {
     return this.delay(() => {

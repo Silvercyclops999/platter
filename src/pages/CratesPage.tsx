@@ -5,7 +5,7 @@
  * of it, with Play all and Shuffle. The core groups the albums (`crates`,
  * `crate_page`) from tags, Plex and cached sleeve notes.
  */
-import { AudioLines, ChevronLeft, ChevronRight, Play, Shuffle } from "lucide-react";
+import { AudioLines, ChevronLeft, ChevronRight, Disc3, Play, Shuffle } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Button, IconButton } from "../components/Button";
 import { LoadError } from "../components/LoadError";
@@ -283,6 +283,11 @@ export function CratePage({ kind, crateKey }: { kind: CrateKind; crateKey: strin
               >
                 Shuffle
               </Button>
+              {albums.length > 1 && (
+                <Button variant="ghost" icon={<Disc3 size={16} />} onClick={() => void player.shuffleAlbums(albums.map((a) => a.album.id))}>
+                  Shuffle albums
+                </Button>
+              )}
               {kind === "producer" && (
                 <Button variant="ghost" onClick={() => nav.go({ name: "credits", person: data.name })}>
                   Everything {data.name} is credited on

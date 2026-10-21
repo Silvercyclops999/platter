@@ -384,6 +384,7 @@
 .library-wide__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); }
 .library-wide__title { font-size: var(--font-size-2xl); font-weight: var(--font-weight-bold); letter-spacing: -0.01em; }
 .lib-tools--wide { margin-bottom: var(--space-4); }
+.lib-tools__end { display: flex; align-items: center; gap: var(--space-2); }
 .sidebar__status {
   border-top: 1px solid color-mix(in srgb, var(--color-ink) 7%, transparent);
   margin: var(--space-1) calc(-1 * var(--space-3)) 0;

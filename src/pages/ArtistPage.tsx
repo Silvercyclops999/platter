@@ -375,6 +375,7 @@ function ActionRow({
               ...autoItem,
               { label: "Add popular songs to queue", onSelect: () => void player.addToQueue(data!.popular, artist.thumb) },
               { label: "Go to artist radio", onSelect: () => nav.go({ name: "radio", seed: `artist:${artist.id}` }) },
+              ...shuffleAlbumsItem(data!),
               dontPlayArtistItem({ id: artist.id, title: artist.title, thumb: artist.thumb }),
               bookmarkPageItem("artist", artist.id, artist.title, { thumb: artist.thumb }),
               yourStatsItem("artist", artist.id, artist.title),
@@ -390,6 +391,12 @@ function ActionRow({
       />
     </div>
   );
+}
+
+/** "Shuffle albums" for an artist with two albums or more. */
+function shuffleAlbumsItem(data: ArtistPageData) {
+  const ids = [...new Set(data.sections.flatMap((s) => s.albums.map((a) => a.id)))];
+  return ids.length > 1 ? [{ label: "Shuffle albums", onSelect: () => void player.shuffleAlbums(ids) }] : [];
 }
 
 // ---------------------------------------------------------------- eras
