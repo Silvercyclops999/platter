@@ -23,6 +23,10 @@ pub const START_GRACE_MS: i64 = 120_000;
 pub const WAKE_GRACE_MS: i64 = 20_000;
 /// How soon a check that failed in the wake window is tried again.
 pub const WAKE_RETRY: Duration = Duration::from_secs(3);
+/// Over remote or relay while the server has a home address: how long
+/// between tries of the home addresses, one step further after each miss.
+/// Waking or a network change starts over at once.
+pub const LOCAL_RETRY_MS: [i64; 4] = [30_000, 60_000, 120_000, 300_000];
 
 /// Result of one ping of the current connection.
 #[derive(Debug, Clone, PartialEq)]
@@ -111,6 +115,10 @@ pub struct HealthMachine {
     /// When the computer woke or the app came back to the front, until the
     /// server next answers (see [`WAKE_GRACE_MS`]).
     woke_at: Option<i64>,
+    /// Over remote or relay: when to try the home addresses next, and how
+    /// many tries have missed (see [`LOCAL_RETRY_MS`]).
+    local_try_at: i64,
+    local_misses: usize,
 }
 
 /// What the macOS Local Network banner says.
@@ -143,6 +151,8 @@ impl HealthMachine {
             local_network_blocked: false,
             offline_by_choice: false,
             woke_at: None,
+            local_try_at: 0,
+            local_misses: 0,
         }
     }
 
@@ -150,6 +160,10 @@ impl HealthMachine {
     /// changed: the next few failures may be the network still coming up.
     pub fn on_woke(&mut self, now_ms: i64) {
         self.woke_at = Some(now_ms);
+        // Back home after a sleep or a network change: the home address may
+        // work now even though the remote one still answers.
+        self.local_try_at = 0;
+        self.local_misses = 0;
     }
 
     /// Within [`WAKE_GRACE_MS`] of [`Self::on_woke`], with the server not
@@ -188,6 +202,21 @@ impl HealthMachine {
     pub fn retry_local(&self) -> bool {
         self.local_network_blocked
             && matches!(self.status, HealthStatus::Remote | HealthStatus::Relay)
+    }
+
+    /// Over remote or relay and time to see if the home address answers
+    /// again. `has_local` is whether the server lists one. After waking the
+    /// local network can be slower to come up than the remote route, so the
+    /// race picks remote and the ping keeps it; this moves back home.
+    pub fn local_try_due(&self, now_ms: i64, has_local: bool) -> bool {
+        has_local && matches!(self.status, HealthStatus::Remote | HealthStatus::Relay) && now_ms >= self.local_try_at
+    }
+
+    /// A try of the home addresses found none answering.
+    pub fn on_local_missed(&mut self, now_ms: i64) {
+        let step = self.local_misses.min(LOCAL_RETRY_MS.len() - 1);
+        self.local_try_at = now_ms + LOCAL_RETRY_MS[step];
+        self.local_misses += 1;
     }
 
     pub fn status(&self) -> HealthStatus {
@@ -252,6 +281,8 @@ impl HealthMachine {
                 self.internet = true;
                 if connection == ConnectionKind::Local {
                     self.local_network_blocked = false;
+                    self.local_try_at = 0;
+                    self.local_misses = 0;
                 }
                 HealthAction::None
             }
@@ -935,6 +966,34 @@ mod tests {
         m.set_local_network_blocked(false);
         assert_eq!(m.snapshot(T0).banner.unwrap().kind, "relay");
         assert!(!m.retry_local());
+    }
+
+    #[test]
+    fn stuck_on_remote_tries_home_again_less_often_and_at_once_after_waking() {
+        let mut m = signed_in();
+        m.on_probe(ok(ConnectionKind::Remote), T0);
+        assert!(m.local_try_due(T0, true));
+        assert!(!m.local_try_due(T0, false), "no home address listed");
+        let mut at = T0;
+        for wait in LOCAL_RETRY_MS.iter().chain([&LOCAL_RETRY_MS[3], &LOCAL_RETRY_MS[3]]) {
+            m.on_local_missed(at);
+            assert!(!m.local_try_due(at + wait - 1, true));
+            at += wait;
+            assert!(m.local_try_due(at, true));
+        }
+        // Waking (or a new network) tries at once, from the first step.
+        m.on_local_missed(at);
+        m.on_woke(at + 1);
+        m.on_probe(ok(ConnectionKind::Remote), at + 2);
+        assert!(m.local_try_due(at + 2, true));
+        m.on_local_missed(at + 2);
+        assert!(m.local_try_due(at + 2 + LOCAL_RETRY_MS[0], true));
+        // Home again: nothing more to try.
+        m.on_probe(ok(ConnectionKind::Local), at + 3);
+        assert!(!m.local_try_due(at + 3, true));
+        // Relay counts too.
+        m.on_probe(ok(ConnectionKind::Relay), at + 4);
+        assert!(m.local_try_due(at + 4, true));
     }
 
     #[test]

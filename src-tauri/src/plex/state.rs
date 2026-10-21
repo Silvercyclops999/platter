@@ -986,9 +986,17 @@ impl PlexState {
             Some(c) => vec![c],
             None => server.connections.clone(),
         };
+        self.race_among(server, &connections, true).await
+    }
+
+    /// [`Self::race_server`] over only these of the server's connections.
+    /// `judge_blocked`: whether the outcome may say the home network is
+    /// blocked (not for the home-only tries while away, where a missing
+    /// home network fails just as fast).
+    async fn race_among(&self, server: &DiscoveredServer, connections: &[Connection], judge_blocked: bool) -> Option<Probe> {
         let out = discovery::race_detailed(
             &self.inner.probe_http,
-            &connections,
+            connections,
             Some(&server.machine_id),
             self.inner.race_cfg,
         )
@@ -1002,7 +1010,9 @@ impl PlexState {
                 "the system refused every local address: Local Network access is likely off"
             );
         }
-        self.inner.health.lock().set_local_network_blocked(blocked);
+        if judge_blocked {
+            self.inner.health.lock().set_local_network_blocked(blocked);
+        }
         out.best
     }
 
@@ -1281,6 +1291,10 @@ impl PlexState {
             // network: race again each tick, so turning access on in System
             // Settings moves back to the local connection by itself.
             HealthAction::None if self.inner.health.lock().retry_local() => self.rediscover(current).await,
+            // Over remote or relay with a home address on file (after a wake
+            // the remote route can win the race before the home network is
+            // up): try home now and then, and move back when it answers.
+            HealthAction::None if self.local_try_due(&current) => self.try_local(current).await,
             HealthAction::None => {}
             HealthAction::SignInRequired => {
                 self.expire_session().await;
@@ -1289,6 +1303,32 @@ impl PlexState {
             HealthAction::Rediscover => self.rediscover(current).await,
         }
         self.emit_health();
+    }
+
+    fn local_try_due(&self, current: &Current) -> bool {
+        let has_local = discovery::dev_override().is_none()
+            && current.server.connections.iter().any(|c| c.kind == ConnectionKind::Local);
+        self.inner.health.lock().local_try_due(now_ms(), has_local)
+    }
+
+    /// Race only the home addresses, and switch to the one that answers.
+    /// The remote connection in use is kept when none does.
+    async fn try_local(&self, current: Current) {
+        let locals: Vec<Connection> = current
+            .server
+            .connections
+            .iter()
+            .filter(|c| c.kind == ConnectionKind::Local)
+            .cloned()
+            .collect();
+        match self.race_among(&current.server, &locals, false).await {
+            Some(p) if p.kind == ConnectionKind::Local => {
+                tracing::info!("server check: the home address answers again; moving back to it");
+                let server = current.server.clone();
+                self.adopt(&current, &server, p).await;
+            }
+            _ => self.inner.health.lock().on_local_missed(now_ms()),
+        }
     }
 
     /// Re-fetch the server's addresses from plex.tv (falling back to the
@@ -1338,43 +1378,7 @@ impl PlexState {
             }
         }
         match self.race_server(&server).await {
-            Some(p) => {
-                let client = match PlexClient::new(
-                    &p.uri,
-                    current.token.clone(),
-                    self.inner.identity.clone(),
-                    Some(p.kind),
-                ) {
-                    Ok(c) => c.with_server(&server.machine_id).on_answer(self.answer_hook()),
-                    Err(_) => return,
-                };
-                let changed = current
-                    .client
-                    .as_ref()
-                    .map(|c| c.base_url().as_str().to_string())
-                    != Some(client.base_url().as_str().to_string());
-                {
-                    let mut s = self.inner.session.write().await;
-                    if let Some(cur) = &mut s.current {
-                        cur.server.connections = server.connections.clone();
-                        cur.client = Some(client.clone());
-                    }
-                    s.cache.record_winner(&server.machine_id, &p);
-                    let _ = s.cache.save(&self.inner.data_dir);
-                }
-                self.inner.health.lock().on_probe(
-                    ProbeOutcome::Ok {
-                        connection: p.kind,
-                        latency_ms: p.latency.as_millis().min(u32::MAX as u128) as u32,
-                        version: p.version.clone(),
-                    },
-                    now_ms(),
-                );
-                if changed {
-                    self.start_notifications(client);
-                    self.emit_auth().await;
-                }
-            }
+            Some(p) => self.adopt(&current, &server, p).await,
             None if self.inner.health.lock().in_wake_grace(now_ms()) => {
                 // Just woke: keep the connection and the state, try again soon.
                 tracing::info!(plex_tv = internet, "server check: no answer yet after waking; trying again in a few seconds");
@@ -1401,6 +1405,44 @@ impl PlexState {
                     .lock()
                     .on_rediscover_failed(now_ms(), internet);
             }
+        }
+    }
+
+    /// Use the connection a race picked from now on.
+    async fn adopt(&self, current: &Current, server: &DiscoveredServer, p: Probe) {
+        let client = match PlexClient::new(&p.uri, current.token.clone(), self.inner.identity.clone(), Some(p.kind)) {
+            Ok(c) => c.with_server(&server.machine_id).on_answer(self.answer_hook()),
+            Err(_) => return,
+        };
+        let changed = current
+            .client
+            .as_ref()
+            .map(|c| c.base_url().as_str().to_string())
+            != Some(client.base_url().as_str().to_string());
+        {
+            let mut s = self.inner.session.write().await;
+            // Signed out or switched servers while the race ran: not ours.
+            match &mut s.current {
+                Some(cur) if cur.server.machine_id == server.machine_id => {
+                    cur.server.connections = server.connections.clone();
+                    cur.client = Some(client.clone());
+                }
+                _ => return,
+            }
+            s.cache.record_winner(&server.machine_id, &p);
+            let _ = s.cache.save(&self.inner.data_dir);
+        }
+        self.inner.health.lock().on_probe(
+            ProbeOutcome::Ok {
+                connection: p.kind,
+                latency_ms: p.latency.as_millis().min(u32::MAX as u128) as u32,
+                version: p.version.clone(),
+            },
+            now_ms(),
+        );
+        if changed {
+            self.start_notifications(client);
+            self.emit_auth().await;
         }
     }
 }
@@ -1451,7 +1493,11 @@ mod tests {
 
     async fn pms(machine: &str, respect_tags: bool) -> MockServer {
         // Not pooled: dropping it really stops the listener.
-        let s = MockServer::builder().start().await;
+        pms_on(MockServer::builder().start().await, machine, respect_tags).await
+    }
+
+    /// [`pms`] on a server already started (on a chosen port).
+    async fn pms_on(s: MockServer, machine: &str, respect_tags: bool) -> MockServer {
         Mock::given(method("GET"))
             .and(path("/identity"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -2225,6 +2271,45 @@ mod tests {
         let h = st.health();
         assert_eq!(h.status, HealthStatus::Local);
         assert!(h.banner.is_none());
+        st.sign_out().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn woken_on_remote_moves_back_to_the_home_address() {
+        // After a sleep the home network came up after the remote route had
+        // already won the race. Remote keeps answering, so the ping alone
+        // would stay on it for good.
+        let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let home_uri = format!("http://{}", free.local_addr().unwrap());
+        drop(free); // nothing listens at home yet
+        let away = pms("m1", true).await;
+        let mut r = resource("m1", &home_uri);
+        r["connections"] = serde_json::json!([
+            {"protocol": "http", "uri": home_uri, "local": true, "relay": false},
+            {"protocol": "http", "uri": away.uri(), "local": false, "relay": false},
+        ]);
+        let tv = plex_tv(serde_json::json!([r])).await;
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::new());
+        store.set(ACCOUNT_TOKEN, &Token::new(ACCT).unwrap()).unwrap();
+        let (st, _rec) = state(dir.path(), &tv.uri(), store);
+        st.restore().await.unwrap();
+        st.stop_background();
+        assert_eq!(st.health().status, HealthStatus::Remote);
+        // Home still down: the try misses and the remote connection stays.
+        st.health_tick().await;
+        assert_eq!(st.health().status, HealthStatus::Remote);
+        assert_eq!(st.client().await.unwrap().base_url().as_str().trim_end_matches('/'), away.uri());
+        // Home comes up. The next try is a while off, but waking tries now.
+        let listener = std::net::TcpListener::bind(home_uri.trim_start_matches("http://")).unwrap();
+        let _home = pms_on(MockServer::builder().listener(listener).start().await, "m1", true).await;
+        st.health_tick().await;
+        assert_eq!(st.health().status, HealthStatus::Remote, "not tried again this soon");
+        st.reconnect().await;
+        st.stop_background();
+        st.health_tick().await;
+        assert_eq!(st.health().status, HealthStatus::Local);
+        assert_eq!(st.client().await.unwrap().base_url().as_str().trim_end_matches('/'), home_uri);
         st.sign_out().await.unwrap();
     }
 
