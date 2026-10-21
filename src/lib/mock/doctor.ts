@@ -15,9 +15,10 @@ const CHECK_OF: Record<DoctorKind, keyof Settings["doctorChecks"]> = {
   lowQuality: "lowQuality",
   unmatched: "unmatched",
   soundsLike: "soundsLike",
+  notInPlex: "notInPlex",
 };
 
-const ORDER: DoctorKind[] = ["duplicate", "cover", "albumTags", "splitAlbum", "albumArtist", "lowQuality", "unmatched", "soundsLike"];
+const ORDER: DoctorKind[] = ["duplicate", "cover", "albumTags", "splitAlbum", "albumArtist", "lowQuality", "unmatched", "soundsLike", "notInPlex"];
 
 const q = (s: string) => `“${s}”`;
 
@@ -260,7 +261,7 @@ export class MockDoctor {
   all(): DoctorFinding[] {
     const s = this.settings();
     if (s.libraryDoctor === false) return [];
-    const checks = s.doctorChecks ?? { duplicates: true, covers: true, albumTags: true, splitAlbums: true, albumArtist: true, lowQuality: true, unmatched: true, soundsLike: true };
+    const checks = s.doctorChecks ?? { duplicates: true, covers: true, albumTags: true, splitAlbums: true, albumArtist: true, lowQuality: true, unmatched: true, soundsLike: true, notInPlex: true };
     const px = s.doctorCoverPx ?? 600;
     return this.build()
       .filter((b) => checks[CHECK_OF[b.finding.kind]] !== false)

@@ -205,6 +205,17 @@ impl TapHost for AppTapHost {
 
     fn flag_missing(&self, tap: &Tap) {
         tracing::warn!(title = %tap.title, album = %tap.album, "Plex hasn't shown a song Lidarr imported");
+        if crate::doctor::arrivals::flag(tap) {
+            let app = self.app.clone();
+            tauri::async_runtime::spawn(async move { crate::doctor::commands::emit_changed(&app).await });
+        }
+    }
+
+    fn found(&self, tap: &Tap) {
+        if crate::doctor::arrivals::clear(tap) {
+            let app = self.app.clone();
+            tauri::async_runtime::spawn(async move { crate::doctor::commands::emit_changed(&app).await });
+        }
     }
 }
 

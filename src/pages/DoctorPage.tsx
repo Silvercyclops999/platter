@@ -37,9 +37,10 @@ export const KIND_LABEL: Record<DoctorKind, string> = {
   lowQuality: "Low-quality copies",
   unmatched: "Albums that weren't matched",
   soundsLike: "Songs that sound like another recording",
+  notInPlex: "Songs not in your library yet",
 };
 
-export const KIND_ORDER: DoctorKind[] = ["duplicate", "cover", "albumTags", "splitAlbum", "albumArtist", "lowQuality", "unmatched", "soundsLike"];
+export const KIND_ORDER: DoctorKind[] = ["duplicate", "cover", "albumTags", "splitAlbum", "albumArtist", "lowQuality", "unmatched", "soundsLike", "notInPlex"];
 
 const n = (v: number) => v.toLocaleString();
 
@@ -64,6 +65,8 @@ export function fixLabel(f: DoctorFinding): { label: string; edit: boolean } {
       return { label: "See suggested tags", edit: false };
     case "openAlbum":
       return { label: f.kind === "lowQuality" ? "Open the better copy" : "Open album", edit: false };
+    case "lookAgain":
+      return { label: "Look again", edit: false };
   }
 }
 
@@ -405,6 +408,11 @@ function FindingRow({
         return setWhy(true);
       case "openAlbum":
         return nav.go({ name: "album", id: f.kind === "lowQuality" && f.others[0] ? f.others[0].id : f.albumId });
+      case "lookAgain":
+        return backend.syncNow(false).then(
+          () => toast.info("Looking again. It shows up here until your server has it."),
+          (e) => toast.error(errText(e) || "Couldn't look again. Try again in a moment"),
+        );
     }
   };
 
@@ -414,13 +422,21 @@ function FindingRow({
       <div className="doctor-item__body">
         <h3 className="doctor-item__title">{f.title}</h3>
         <p className="doctor-item__meta">
-          <button type="button" className="link doctor-item__link" data-tap-inline onClick={() => nav.go({ name: "album", id: f.albumId })}>
-            {f.album}
-          </button>
+          {f.albumId ? (
+            <button type="button" className="link doctor-item__link" data-tap-inline onClick={() => nav.go({ name: "album", id: f.albumId })}>
+              {f.album}
+            </button>
+          ) : (
+            f.album
+          )}
           <span aria-hidden="true"> · </span>
-          <button type="button" className="link doctor-item__link" data-tap-inline onClick={() => nav.go({ name: "artist", id: f.artistId })}>
-            {f.artist}
-          </button>
+          {f.artistId ? (
+            <button type="button" className="link doctor-item__link" data-tap-inline onClick={() => nav.go({ name: "artist", id: f.artistId })}>
+              {f.artist}
+            </button>
+          ) : (
+            f.artist
+          )}
         </p>
         <p className="doctor-item__text">{f.text}</p>
         {onComputer && <p className="doctor-item__elsewhere">Fix the tags from Library doctor on your computer. It writes them into your music folder.</p>}

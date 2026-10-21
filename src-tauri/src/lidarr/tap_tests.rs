@@ -24,6 +24,7 @@ struct Host {
     library: Mutex<Vec<(String, bool)>>,
     refreshed: Mutex<usize>,
     flagged: Mutex<Vec<String>>,
+    found: Mutex<Vec<String>>,
     seen: Mutex<Vec<(TapPhase, Option<u8>)>>,
 }
 
@@ -45,6 +46,9 @@ impl TapHost for Host {
     }
     fn flag_missing(&self, tap: &Tap) {
         self.flagged.lock().push(tap.title.clone());
+    }
+    fn found(&self, tap: &Tap) {
+        self.found.lock().push(tap.title.clone());
     }
 }
 
@@ -341,6 +345,11 @@ async fn plex_never_finding_it_keeps_the_download_playing_and_flags_it() {
     assert_eq!(t.host.flagged.lock().as_slice(), ["Dawn"]);
     t.taps.follow().await;
     assert_eq!(t.host.flagged.lock().len(), 1, "flagged once");
+    assert!(t.host.found.lock().is_empty());
+    // Plex shows it after all: the flag clears.
+    t.in_library();
+    t.taps.follow().await;
+    assert_eq!(t.host.found.lock().as_slice(), ["Dawn"]);
 }
 
 #[tokio::test]

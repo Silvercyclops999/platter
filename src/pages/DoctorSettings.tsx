@@ -22,6 +22,7 @@ export const DOCTOR_CHECKS: { key: keyof DoctorChecks; label: string; hint: stri
   { key: "lowQuality", label: "Low-quality copies", hint: "A song you also have in better quality on another album." },
   { key: "unmatched", label: "Albums that weren't matched", hint: "Albums MusicBrainz knows but your server couldn't match. Unreleased albums are never listed." },
   { key: "soundsLike", label: "Songs that sound like another recording", hint: "Untagged or mislabelled files that identify by sound matched to another song. Needs Identify songs by sound. Unreleased songs are never listed." },
+  { key: "notInPlex", label: "Songs not in your library yet", hint: "Songs you got with a tap that Lidarr downloaded but your server hasn't shown." },
 ];
 
 export const COVER_PX_OPTIONS = [

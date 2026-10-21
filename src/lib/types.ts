@@ -1949,6 +1949,7 @@ export const DEFAULT_SETTINGS: Settings = {
     lowQuality: true,
     unmatched: true,
     soundsLike: true,
+    notInPlex: true,
   },
   doctorCoverPx: 600,
   releaseRadar: false,
@@ -3751,10 +3752,10 @@ export interface Evidence {
 // ---------------------------------------------------------------- library doctor
 
 /** What a library doctor finding is about. */
-export type DoctorKind = "duplicate" | "cover" | "albumTags" | "splitAlbum" | "albumArtist" | "lowQuality" | "unmatched" | "soundsLike";
+export type DoctorKind = "duplicate" | "cover" | "albumTags" | "splitAlbum" | "albumArtist" | "lowQuality" | "unmatched" | "soundsLike" | "notInPlex";
 
 /** The app flow a finding's fix opens. */
-export type DoctorFix = "cover" | "match" | "mergeAlbums" | "openAlbum" | "tags" | "suggestedTags";
+export type DoctorFix = "cover" | "match" | "mergeAlbums" | "openAlbum" | "tags" | "suggestedTags" | "lookAgain";
 
 /** Which library doctor checks run (Settings). */
 export interface DoctorChecks {
@@ -3766,6 +3767,8 @@ export interface DoctorChecks {
   lowQuality: boolean;
   /** Songs identified by sound as another recording than their tags say. */
   soundsLike?: boolean;
+  /** Songs got with a tap that the server hasn't shown yet. */
+  notInPlex?: boolean;
   unmatched: boolean;
 }
 

@@ -9,6 +9,7 @@
 //! - [`covers`]   each album cover's size, read from the image's first bytes
 //! - [`sounds`]   songs whose sound was identified as another recording
 //!   than their tags say (`soundid::`), with the tags it suggests
+//! - [`arrivals`] songs got with a tap that Plex hasn't shown yet
 //! - [`store`]    findings kept per artist, and the list the page shows
 //! - [`commands`] the Tauri commands
 //!
@@ -18,6 +19,7 @@
 //! artists whose albums haven't changed since their last check. Ignored
 //! findings live in the sync store so they follow the user.
 
+pub mod arrivals;
 pub mod checks;
 pub mod commands;
 pub mod covers;
@@ -67,10 +69,12 @@ pub enum Kind {
     Unmatched,
     /// An untagged or mislabelled file: its sound matched another recording.
     SoundsLike,
+    /// A song got with a tap: Lidarr imported it, Plex hasn't shown it.
+    NotInPlex,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 8] = [
+    pub const ALL: [Kind; 9] = [
         Kind::Duplicate,
         Kind::Cover,
         Kind::AlbumTags,
@@ -79,6 +83,7 @@ impl Kind {
         Kind::LowQuality,
         Kind::Unmatched,
         Kind::SoundsLike,
+        Kind::NotInPlex,
     ];
 
     /// Stable string stored in SQLite.
@@ -92,6 +97,7 @@ impl Kind {
             Kind::LowQuality => "lowQuality",
             Kind::Unmatched => "unmatched",
             Kind::SoundsLike => "soundsLike",
+            Kind::NotInPlex => "notInPlex",
         }
     }
 
@@ -118,6 +124,8 @@ pub enum Fix {
     Tags,
     /// Show the tags its sound suggests next to its own (nothing is written).
     SuggestedTags,
+    /// Ask the server to catch up (a library sync).
+    LookAgain,
 }
 
 /// Another album a finding names: the other half of a split album, or the
@@ -238,6 +246,8 @@ pub struct Checks {
     pub unmatched: bool,
     /// Songs identified by sound as another recording than their tags say.
     pub sounds_like: bool,
+    /// Songs got with a tap that Plex hasn't shown.
+    pub not_in_plex: bool,
 }
 
 impl Default for Checks {
@@ -251,6 +261,7 @@ impl Default for Checks {
             low_quality: true,
             unmatched: true,
             sounds_like: true,
+            not_in_plex: true,
         }
     }
 }
@@ -266,6 +277,7 @@ impl Checks {
             Kind::LowQuality => self.low_quality,
             Kind::Unmatched => self.unmatched,
             Kind::SoundsLike => self.sounds_like,
+            Kind::NotInPlex => self.not_in_plex,
         }
     }
 }

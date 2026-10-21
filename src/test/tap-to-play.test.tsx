@@ -11,8 +11,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { MockCatalogue } from "../lib/mock/catalogue";
-import { DEFAULT_SETTINGS, type Tap } from "../lib/types";
+import { DEFAULT_SETTINGS, type DoctorFinding, type Tap } from "../lib/types";
 import { ArtistPage, popularItems } from "../pages/ArtistPage";
+import { DoctorPage } from "../pages/DoctorPage";
 import { lastGetText } from "../pages/LidarrSettings";
 import { SearchPage } from "../pages/SearchPage";
 import { resetCatalogueCache } from "../pages/SearchCatalogue";
@@ -228,5 +229,34 @@ describe("an artist's Popular", () => {
     render(<ArtistPage id={artist.id} />);
     await waitFor(() => expect(screen.getAllByRole("row", { name: new RegExp(` by ${artist.title}`) }).length).toBeGreaterThan(0), SLOW);
     expect(screen.queryByRole("row", { name: /Night Drive/ })).toBeNull();
+  });
+});
+
+describe("Library doctor", () => {
+  it("lists a tapped song the server hasn't shown, as plain text, and Look again asks the server to catch up", async () => {
+    const late: DoctorFinding = {
+      id: "notInPlex:rg:dawn",
+      kind: "notInPlex",
+      artistId: "",
+      artist: "Northlight",
+      albumId: "",
+      album: "Second Wind",
+      thumb: null,
+      title: "Dawn isn't in your library yet",
+      text: "Lidarr downloaded Dawn by Northlight, but your server hasn't shown it. Look again asks your server to catch up.",
+      evidence: ["Lidarr imported Second Wind into its album folder."],
+      fix: "lookAgain",
+      tracks: [],
+      others: [],
+      table: [],
+    };
+    vi.spyOn(mock, "doctorReport").mockResolvedValue({ on: true, findings: [late], ignored: [], count: 1, running: false, checkedAt: null, tagsRead: 0, tagsTotal: 0 });
+    const sync = vi.spyOn(mock, "syncNow").mockResolvedValue(undefined);
+    render(<DoctorPage />);
+    expect(await screen.findByRole("heading", { name: "Dawn isn't in your library yet" }, SLOW)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Second Wind" })).toBeNull();
+    expect(screen.getAllByText(/Songs not in your library yet/).length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole("button", { name: "Look again" }));
+    expect(sync).toHaveBeenCalledWith(false);
   });
 });
