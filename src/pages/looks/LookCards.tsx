@@ -6,7 +6,7 @@ import { Check } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "../../components/Button";
 import { Dialog } from "../../components/Dialog";
-import { readyLooks } from "../../design/looks/readymade";
+import { readyLooks, type ReadyLook } from "../../design/looks/readymade";
 import { CLASSIC_LAYOUT, type Frame } from "../../design/themes";
 import { applyReadyLook, isReadyLookInUse, looks, skipPatch, useLooks } from "../../stores/looks";
 import { updateSettings, useSettings } from "../../stores/settings";
@@ -15,26 +15,41 @@ import { FrameCards } from "./LayoutCards";
 import { PreviewFrame } from "./LookPreview";
 import "./looks-ui.css";
 
+/** Platter's look three ways; every other ready-made look waits behind More looks. */
+const FRONT_LOOKS: readonly string[] = ["studio", "studioBlack", "sleeve"];
+
 export function LookCards({ labelledBy }: { labelledBy?: string }) {
   const s = useSettings((st) => st.settings);
   const layout = s?.layout ?? CLASSIC_LAYOUT;
-  const list = useMemo(() => readyLooks(), []);
+  const all = useMemo(() => readyLooks(), []);
+  const front = useMemo(() => FRONT_LOOKS.map((id) => all.find((r) => r.id === id)).filter((r): r is ReadyLook => !!r), [all]);
+  // A look in use that isn't one of the three keeps its card showing.
+  const inUseElsewhere = all.some((r) => !FRONT_LOOKS.includes(r.id) && isReadyLookInUse(r, s));
+  const [more, setMore] = useState(false);
+  const list = more || inUseElsewhere ? [...front, ...all.filter((r) => !FRONT_LOOKS.includes(r.id))] : front;
   return (
-    <div className="look-cards" role="radiogroup" aria-label={labelledBy ? undefined : "Ready-made looks"} aria-labelledby={labelledBy}>
-      {list.map((r) => {
-        const on = isReadyLookInUse(r, s);
-        const own = r.source.kind === "file" ? r.source.look.layout : undefined;
-        return (
-          <button key={r.id} type="button" role="radio" aria-checked={on} aria-label={r.name} className={`look-card ${on ? "is-on" : ""}`} onClick={() => void applyReadyLook(r)}>
-            <PreviewFrame card base={r.base} tokens={r.tokens} parts={{ style: r.style, fonts: r.fonts, layout: own ?? layout }} label={`${r.name} preview`} />
-            <span className="look-card__name">
-              {r.name}
-              {on && <Check size={14} aria-hidden="true" />}
-            </span>
-          </button>
-        );
-      })}
-    </div>
+    <>
+      <div className="look-cards" role="radiogroup" aria-label={labelledBy ? undefined : "Ready-made looks"} aria-labelledby={labelledBy}>
+        {list.map((r) => {
+          const on = isReadyLookInUse(r, s);
+          const own = r.source.kind === "file" ? r.source.look.layout : undefined;
+          return (
+            <button key={r.id} type="button" role="radio" aria-checked={on} aria-label={r.name} className={`look-card ${on ? "is-on" : ""}`} onClick={() => void applyReadyLook(r)}>
+              <PreviewFrame card base={r.base} tokens={r.tokens} parts={{ style: r.style, fonts: r.fonts, layout: own ?? layout }} label={`${r.name} preview`} />
+              <span className="look-card__name">
+                {r.name}
+                {on && <Check size={14} aria-hidden="true" />}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {list.length < all.length && (
+        <Button size="sm" variant="secondary" className="look-cards__more" onClick={() => setMore(true)}>
+          More looks
+        </Button>
+      )}
+    </>
   );
 }
 

@@ -19,16 +19,17 @@ import { failText } from "../lib/errorText";
 type Ids = { title: string; desc: string };
 
 
+/** Platter's look three ways up front; the older themes sit under More looks and still work. */
 export const THEMES: SelectOption<ThemeSetting>[] = [
   { value: "studio", label: "Studio" },
   { value: "studioBlack", label: "Studio Black" },
   { value: "sleeve", label: "Sleeve" },
-  { value: "dark", label: "Classic" },
-  { value: "light", label: "Classic light" },
-  { value: "system", label: "Classic, match system" },
-  { value: "midnight", label: "Midnight" },
-  { value: "forest", label: "Forest" },
-  { value: "sand", label: "Sand" },
+  { value: "dark", label: "Classic", group: "More looks" },
+  { value: "light", label: "Classic light", group: "More looks" },
+  { value: "system", label: "Classic, match system", group: "More looks" },
+  { value: "midnight", label: "Midnight", group: "More looks" },
+  { value: "forest", label: "Forest", group: "More looks" },
+  { value: "sand", label: "Sand", group: "More looks" },
 ];
 
 export function ThemeSelect({ s, ids }: { s: Settings; ids: Ids }) {

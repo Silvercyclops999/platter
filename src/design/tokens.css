@@ -182,6 +182,30 @@
   color: var(--color-text-primary);
 }
 
+/* On Sleeve those views take Studio's values instead, so the brass accent and
+   the warm graphite stay one look with the rest of the app. */
+:root[data-identity="sleeve"] :is(.fw, .np-about__heading.on-photo, .mix-header--photo, .pl-cover__hint, .mini),
+:root[data-identity="sleeve"].fw-open :is(.topbar, .player-bar) {
+  --color-ink: #FFF3E0;
+  --color-text-primary: #F2EDE4;
+  --color-text-secondary: #BDB4A7;
+  --color-text-muted: #A39A8D;
+  --color-text-on-accent: #1A1610;
+  --color-accent: #CDAE6E;
+  --color-accent-hover: #DCC28A;
+  --color-accent-pressed: #B4955A;
+  --color-focus-ring: #E2CB95;
+  --color-state-hover: rgba(255, 243, 224, 0.06);
+  --color-state-pressed: rgba(255, 243, 224, 0.10);
+  --color-state-selected: rgba(255, 243, 224, 0.12);
+  --color-playing: #CDAE6E;
+  --color-bg-base: #1A1816;
+  --color-bg-raised: #211F1C;
+  --color-bg-raised2: #2A2724;
+  --color-bg-overlay: #33302C;
+  --color-border: #3A3632;
+}
+
 /* Reduced motion (OS setting, mirrored onto data-reduced-motion by
    src/design/motion.ts): movement goes, fades and colour changes stay.
    --motion-move zeroes the distances and scales that rules multiply by it,

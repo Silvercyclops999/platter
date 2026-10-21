@@ -1,6 +1,7 @@
 /* Ready-made look cards and the "Pick a look" step. */
 
 .look-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: var(--space-3); width: 100%; }
+.look-cards__more { margin-top: var(--space-3); }
 .look-card {
   display: flex;
   flex-direction: column;

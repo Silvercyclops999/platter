@@ -376,10 +376,13 @@ describe("look builder", () => {
 });
 
 describe("ready-made looks and first run", () => {
-  it("shows the built-in themes and the data looks as cards; one click applies", async () => {
+  it("shows Platter's three looks, the rest under More looks; one click applies", async () => {
     const user = userEvent.setup();
     await act(() => updateSettings({ theme: "studio", followSystem: false }));
     render(<LookCards />);
+    expect(screen.getAllByRole("radio").map((c) => c.getAttribute("aria-label"))).toEqual(["Studio", "Studio Black", "Sleeve"]);
+    await user.click(screen.getByRole("button", { name: "More looks" }));
+    expect(screen.queryByRole("button", { name: "More looks" })).toBeNull();
     const cards = screen.getAllByRole("radio");
     expect(cards.map((c) => c.getAttribute("aria-label"))).toEqual([
       "Studio",
@@ -401,6 +404,13 @@ describe("ready-made looks and first run", () => {
     expect(screen.getByRole("radio", { name: "High contrast" })).toHaveAttribute("aria-checked", "true");
     // The layout the listener has stays.
     expect(useSettings.getState().settings?.layout).toEqual(CLASSIC_LAYOUT);
+  });
+
+  it("a look in use from under More looks keeps every card showing", async () => {
+    await act(() => updateSettings({ theme: "midnight", followSystem: false, themeFile: null }));
+    render(<LookCards />);
+    expect(screen.getByRole("radio", { name: "Midnight" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByRole("button", { name: "More looks" })).toBeNull();
   });
 
   it("a new ready-made look is only a data file; one that fails the checks is skipped", () => {

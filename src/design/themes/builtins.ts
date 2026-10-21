@@ -139,17 +139,17 @@ const STUDIO_BLACK: Record<string, string> = {
   "color-error-surface": "#2E1514",
 };
 
-/** Sleeve: cream paper and ink, with a darker brass that reads on paper. */
+/** Sleeve: a clean warm paper and ink, with a darker brass that reads on paper. The phone and the computer share it. */
 const SLEEVE: Record<string, string> = {
-  "color-bg-base": "#EEE7D8",
-  "color-bg-raised": "#F6F1E6",
-  "color-bg-raised2": "#E7DFCD",
-  "color-bg-overlay": "#FBF8F1",
-  "color-border": "#D6CBB4",
+  "color-bg-base": "#F4F0E8",
+  "color-bg-raised": "#FBF9F4",
+  "color-bg-raised2": "#ECE6DA",
+  "color-bg-overlay": "#FDFCF8",
+  "color-border": "#DCD3C2",
   "color-ink": "#2B2117",
   "color-text-primary": "#1C1712",
   "color-text-secondary": "#4B4237",
-  "color-text-muted": "#5C5346",
+  "color-text-muted": "#5E5546",
   "color-accent": "#7A5A1C",
   "color-accent-hover": "#664A15",
   "color-accent-pressed": "#563F12",
