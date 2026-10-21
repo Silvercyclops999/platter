@@ -453,10 +453,13 @@ fn a_crash_while_separating_keeps_transcription_on_the_card() {
     let n = Arc::new(Launches::default());
     let gpu = gpu_with_card();
     let helper = Helper::new(Arc::new(ThreadLaunch { rec, n: n.clone() }), Arc::new(|| false), Duration::from_secs(60)).with_gpu(gpu.clone());
-    assert_eq!(helper.vocals(Path::new("v"), &[0.0; 26], never(), Arc::new(|_| {})), Err(VoiceError::Crashed));
+    for _ in 0..CRASH_LIMIT {
+        assert_eq!(helper.vocals(Path::new("v"), &[0.0; 26], never(), Arc::new(|_| {})), Err(VoiceError::Crashed));
+    }
     assert!(gpu.active().is_some(), "the speech model keeps the card");
+    assert!(!helper.crashed_too_often(), "and isn't blamed for it");
     assert!(run(&helper, &[1.0], never()).0.is_ok());
-    assert_eq!(*n.gpu.lock(), vec![true, true]);
+    assert_eq!(n.gpu.lock().last(), Some(&true));
 }
 
 #[test]

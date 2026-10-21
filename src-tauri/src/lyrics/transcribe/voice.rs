@@ -17,9 +17,10 @@ use super::model::ModelSpec;
 
 /// The separation model's sample rate.
 pub const RATE: u32 = 44_100;
-/// Longest song separated: twenty minutes (a longer one is heard as it is,
-/// and isn't decoded to stereo at all).
-pub const MAX_SECONDS: usize = 20 * 60;
+/// Longest song separated: ten minutes (a longer one is heard as it is,
+/// and isn't decoded to stereo at all). Separating holds several copies of
+/// the song in memory at once.
+pub const MAX_SECONDS: usize = 10 * 60;
 
 /// The voice model (there is one).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -69,26 +70,19 @@ pub enum Heard {
 }
 
 /// The speech model's input for a song: its singing when it can be
-/// separated, else the whole mix. Only a cancel is an error.
-pub fn voice_or_mix(
-    sep: Option<(&dyn Separator, &Path)>,
-    song: Decoded,
-    stop: &Stop,
-    progress: Progress,
-) -> Result<(Vec<f32>, Heard), VoiceError> {
+/// separated, else the whole mix. A cancel hands the song back, so it
+/// needn't be read and decoded again.
+pub fn voice_or_mix(sep: Option<(&dyn Separator, &Path)>, song: Decoded, stop: &Stop, progress: Progress) -> Result<(Vec<f32>, Heard), Decoded> {
     let mut heard = Heard::Mix;
     if let (Some((sep, weights)), Some(stereo)) = (sep, song.stereo.as_deref()) {
         match sep.vocals(weights, stereo, stop.clone(), progress) {
             Ok(v) => return Ok((v, Heard::Voice)),
-            Err(VoiceError::Cancelled) => return Err(VoiceError::Cancelled),
+            Err(VoiceError::Cancelled) => return Err(song),
             Err(e) => {
                 tracing::warn!("the voice wasn't separated, transcribing the whole mix: {e:?}");
                 heard = Heard::MixAfterTrouble;
             }
         }
-    }
-    if stop.is_set() {
-        return Err(VoiceError::Cancelled);
     }
     Ok((song.speech, heard))
 }
@@ -119,7 +113,7 @@ pub mod demucs {
 
     type B = burn::backend::wgpu::Wgpu;
 
-    /// HTDemucs on the graphics card, keeping the model loaded between songs.
+    /// HTDemucs on the graphics card, loaded for each song and freed after.
     #[derive(Default)]
     pub struct Demucs {
         loaded: Mutex<Option<(PathBuf, demucs_core::Demucs<B>)>>,
@@ -166,7 +160,7 @@ pub mod demucs {
         fn run(&self, weights: &Path, song: &[f32], stop: Stop, progress: Progress) -> Result<Vec<f32>, VoiceError> {
             progress(Step::Loading);
             self.load(weights)?;
-            let (left, right): (Vec<f32>, Vec<f32>) = song.chunks_exact(2).map(|f| (f[0], f[1])).unzip();
+            let (left, right): (Vec<f32>, Vec<f32>) = song.as_chunks::<2>().0.iter().map(|[l, r]| (*l, *r)).unzip();
             tracing::info!(chunks = num_chunks(left.len()), "separating the voice");
             progress(Step::Percent(0));
             let slot = self.loaded.lock();
@@ -180,17 +174,18 @@ pub mod demucs {
             let stems = stems.map_err(|e| VoiceError::Failed(e.to_string()))?;
             let vocals = stems.into_iter().find(|s| s.id == StemId::Vocals).ok_or_else(|| VoiceError::Failed("no vocals stem".into()))?;
             tracing::info!(audio_s = left.len() / RATE as usize, took_ms = started.elapsed().as_millis() as u64, "voice separated");
-            let stereo: Vec<f32> = vocals.left.iter().zip(&vocals.right).flat_map(|(l, r)| [*l, *r]).collect();
-            Ok(to_speech(&stereo))
+            let mono: Vec<f32> = vocals.left.iter().zip(&vocals.right).map(|(l, r)| (l + r) / 2.0).collect();
+            drop(vocals);
+            Ok(to_speech(&mono))
         }
     }
 
-    /// Interleaved stereo at [`RATE`] to 16 kHz mono.
-    pub fn to_speech(stereo: &[f32]) -> Vec<f32> {
+    /// Mono at [`RATE`] to 16 kHz mono.
+    pub fn to_speech(mono: &[f32]) -> Vec<f32> {
         use crate::audio::convert::Converter;
-        let Ok(mut conv) = Converter::new(RATE, 2, super::super::audio::RATE, 1) else { return Vec::new() };
-        let mut out = Vec::with_capacity(stereo.len() / 2 * super::super::audio::RATE as usize / RATE as usize + 1);
-        for block in stereo.chunks(2 * 4096) {
+        let Ok(mut conv) = Converter::new(RATE, 1, super::super::audio::RATE, 1) else { return Vec::new() };
+        let mut out = Vec::with_capacity(mono.len() * super::super::audio::RATE as usize / RATE as usize + 1);
+        for block in mono.chunks(4096) {
             conv.push(block, &mut out);
         }
         conv.finish(&mut out);
@@ -201,13 +196,10 @@ pub mod demucs {
         fn vocals(&self, weights: &Path, song: &[f32], stop: Stop, progress: Progress) -> Result<Vec<f32>, VoiceError> {
             // The graphics library panics rather than failing on some
             // drivers: that's a failed separation, not a lost helper.
-            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.run(weights, song, stop, progress))) {
-                Ok(r) => r,
-                Err(_) => {
-                    *self.loaded.lock() = None;
-                    Err(VoiceError::Failed("the graphics card stopped while separating the voice".into()))
-                }
-            }
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.run(weights, song, stop, progress)));
+            // Off the card again, so the speech model has it all.
+            *self.loaded.lock() = None;
+            r.unwrap_or_else(|_| Err(VoiceError::Failed("the graphics card stopped while separating the voice".into())))
         }
 
         fn unload(&self) {
@@ -274,12 +266,10 @@ mod tests {
     }
 
     #[test]
-    fn a_cancel_stops_it() {
+    fn a_cancel_hands_the_song_back() {
         let f = Fake { result: Err(VoiceError::Cancelled), runs: AtomicUsize::new(0) };
-        assert_eq!(voice_or_mix(Some((&f, Path::new("v"))), song(1), &Stop::new(), none()).unwrap_err(), VoiceError::Cancelled);
-        let stop = Stop::new();
-        stop.now();
-        assert_eq!(voice_or_mix(None, song(1), &stop, none()).unwrap_err(), VoiceError::Cancelled);
+        let back = voice_or_mix(Some((&f, Path::new("v"))), song(1), &Stop::new(), none()).unwrap_err();
+        assert_eq!((back.speech.len(), back.stereo.map(|s| s.len())), (16_000, Some(2 * RATE as usize)), "the song comes back");
     }
 
     #[test]

@@ -169,7 +169,8 @@ impl Helper {
     }
 
     fn crashed(&self, slot: &mut Slot, what: &str, card: bool) -> RecognizeError {
-        let n = self.crashes.fetch_add(1, Ordering::SeqCst) + 1;
+        // Only the speech model's own crashes count toward turning it off.
+        let n = if card { self.crashes.fetch_add(1, Ordering::SeqCst) + 1 } else { self.crashes.load(Ordering::SeqCst) };
         tracing::warn!(crashes = n, "speech helper stopped unexpectedly: {what}");
         if let Some(live) = slot.live.take() {
             if live.gpu && card {

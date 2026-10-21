@@ -362,7 +362,7 @@ struct State {
     pace: (Duration, u32),
     /// A background song's decoded audio, kept when a song someone asked
     /// for stopped it, so it needn't be read again.
-    held: Option<(String, Heard)>,
+    held: Option<(String, Held)>,
     /// The user paused the batch.
     user_paused: bool,
     /// Songs done this session with a model other than the chosen one.
@@ -374,8 +374,13 @@ struct State {
     follow_skip: std::collections::HashSet<String>,
 }
 
-/// What the speech model hears for a song, and whether it's the voice alone.
-type Heard = (Arc<Vec<f32>>, bool);
+/// A song's audio kept for later.
+enum Held {
+    /// Decoded, its voice not separated yet.
+    Song(audio::Decoded),
+    /// What the speech model hears, and whether it's the voice alone.
+    Heard(Arc<Vec<f32>>, bool),
+}
 
 /// The parts the service works with.
 pub struct Deps {
@@ -1355,16 +1360,23 @@ impl Transcriber {
         if !recent && !self.inner.voice.fetching.swap(true, Ordering::SeqCst) {
             let (me, models, fetch) = (self.clone(), v.models.clone(), d.fetch.clone());
             tokio::spawn(async move {
+                /// Clears `fetching` however the download ends.
+                struct Done(Transcriber);
+                impl Drop for Done {
+                    fn drop(&mut self) {
+                        self.0.inner.voice.fetching.store(false, Ordering::SeqCst);
+                    }
+                }
+                let me = Done(me);
                 tracing::info!("downloading the voice model");
                 let never = AtomicBool::new(false);
                 match models.download(voice::Voice::Demucs, &*fetch, &never, &|_, _| {}).await {
                     Ok(_) => tracing::info!("voice model ready"),
                     Err(e) => {
                         tracing::warn!("the voice model didn't download: {e:?}");
-                        *me.inner.voice.failed_at.lock() = Some(Instant::now());
+                        *me.0.inner.voice.failed_at.lock() = Some(Instant::now());
                     }
                 }
-                me.inner.voice.fetching.store(false, Ordering::SeqCst);
             });
         }
         None
@@ -1452,7 +1464,6 @@ impl Transcriber {
                 st.user_paused || st.queue.front().is_some_and(|j| j.now) || held_back && st.queue.iter().any(|j| !j.batch)
             };
             if asked_for {
-
                 self.inner.st.lock().paused = None;
                 return Waited::GiveWay;
             }
@@ -1628,12 +1639,17 @@ impl Transcriber {
             let mut st = self.inner.st.lock();
             if st.held.as_ref().is_some_and(|h| h.0 == id) { st.held.take().map(|h| h.1) } else { None }
         };
-        let (pcm, voiced) = match held {
-            Some(p) => p,
+        let song = match held {
+            Some(Held::Heard(p, voiced)) => Ok((p, voiced)),
+            Some(Held::Song(d)) => self.hear(job, d, cancel).await,
             None => match self.read_song(job, cancel).await {
-                Ok((p, voiced)) => (Arc::new(p), voiced),
-                Err(o) => return o,
+                Ok(d) => self.hear(job, d, cancel).await,
+                Err(o) => Err(o),
             },
+        };
+        let (pcm, voiced) = match song {
+            Ok(p) => p,
+            Err(o) => return o,
         };
         self.set_stage(Stage::Transcribing, 0);
         // More threads because nobody's at the computer: back to fewer the
@@ -1666,7 +1682,7 @@ impl Transcriber {
             Ok(Err(RecognizeError::Cancelled)) => {
                 // Stopped for a song asked for: keep the audio for later.
                 if !job.now {
-                    self.inner.st.lock().held = Some((id.clone(), (pcm, voiced)));
+                    self.inner.st.lock().held = Some((id.clone(), Held::Heard(pcm, voiced)));
                 }
                 return Outcome::Cancelled;
             }
@@ -1688,9 +1704,8 @@ impl Transcriber {
         self.finish_song(job, kind, segments, seconds, started, threads, cancel).await
     }
 
-    /// Reads and decodes a song, and separates its voice when it can.
-    /// True when the speech model will hear the voice alone.
-    async fn read_song(&self, job: &Job, cancel: &Stop) -> Result<(Vec<f32>, bool), Outcome> {
+    /// Reads and decodes a song (in stereo too when its voice will be separated).
+    async fn read_song(&self, job: &Job, cancel: &Stop) -> Result<audio::Decoded, Outcome> {
         let d = &self.inner.deps;
         let id = job.track_id.clone();
         self.set_stage(Stage::Reading, 0);
@@ -1719,18 +1734,14 @@ impl Transcriber {
             }
         };
         self.set_stage(Stage::Decoding, 0);
-        let weights = self.voice_model();
         let pcm = {
             let cancel = cancel.flag().clone();
             let SongAudio { bytes, hint, .. } = song;
-            let stereo = weights.as_ref().map(|_| (voice::RATE, voice::MAX_SECONDS));
+            let stereo = self.voice_model().map(|_| (voice::RATE, voice::MAX_SECONDS));
             tokio::task::spawn_blocking(move || audio::decode(bytes, hint.as_deref(), &cancel, stereo)).await
         };
         match pcm {
-            Ok(Ok(p)) => match (weights, self.inner.deps.voice.as_ref()) {
-                (Some(w), Some(v)) => self.separate(&id, &w, v.separator.clone(), p, cancel).await,
-                _ => Ok((p.speech, false)),
-            },
+            Ok(Ok(p)) => Ok(p),
             Ok(Err(AudioError::Cancelled)) => Err(Outcome::Cancelled),
             Ok(Err(e)) => {
                 tracing::info!("transcription decode failed: {e:?}");
@@ -1745,25 +1756,36 @@ impl Transcriber {
         }
     }
 
-    /// The song's voice, or its whole mix when that goes wrong (and the
-    /// rest of the session then skips separating).
-    async fn separate(&self, id: &str, weights: &std::path::Path, sep: Arc<dyn voice::Separator>, song: audio::Decoded, cancel: &Stop) -> Result<(Vec<f32>, bool), Outcome> {
+    /// What the speech model hears: the song's voice when it was decoded
+    /// for that and can still be separated, else its whole mix. Trouble
+    /// separating means the mix (and the rest of the session skips it); a
+    /// cancel keeps the decoded song for later.
+    async fn hear(&self, job: &Job, song: audio::Decoded, cancel: &Stop) -> Result<(Arc<Vec<f32>>, bool), Outcome> {
+        let sep = self.inner.deps.voice.as_ref().map(|v| v.separator.clone());
+        let (Some(sep), Some(weights), true) = (sep, self.voice_model(), song.stereo.is_some()) else {
+            return Ok((Arc::new(song.speech), false));
+        };
         self.set_stage(Stage::Transcribing, 0);
         let progress = self.helper_steps(0, VOICE_SHARE);
-        let (weights, stop) = (weights.to_path_buf(), cancel.clone());
+        let stop = cancel.clone();
         let res = tokio::task::spawn_blocking(move || voice::voice_or_mix(Some((&*sep, &weights)), song, &stop, progress)).await;
         match res {
-            Ok(Ok((pcm, voice::Heard::Voice))) => Ok((pcm, true)),
-            Ok(Ok((pcm, voice::Heard::Mix))) => Ok((pcm, false)),
-            Ok(Ok((pcm, voice::Heard::MixAfterTrouble))) => {
-                self.inner.voice.off.store(true, Ordering::Relaxed);
-                Ok((pcm, false))
+            Ok(Ok((pcm, heard))) => {
+                if heard == voice::Heard::MixAfterTrouble {
+                    self.inner.voice.off.store(true, Ordering::Relaxed);
+                }
+                Ok((Arc::new(pcm), heard == voice::Heard::Voice))
             }
-            Ok(Err(_)) => Err(Outcome::Cancelled),
+            Ok(Err(song)) => {
+                if !job.now {
+                    self.inner.st.lock().held = Some((job.track_id.clone(), Held::Song(song)));
+                }
+                Err(Outcome::Cancelled)
+            }
             Err(e) => {
                 tracing::warn!("voice task failed: {e}");
                 self.inner.voice.off.store(true, Ordering::Relaxed);
-                self.fail(id, "Transcription failed.");
+                self.fail(&job.track_id, "Transcription failed.");
                 Err(Outcome::Failed)
             }
         }

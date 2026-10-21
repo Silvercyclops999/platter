@@ -80,6 +80,7 @@ pub fn to_16k_mono(bytes: Vec<u8>, hint: Option<&str>, cancel: &AtomicBool) -> R
 
 /// A decoded song: always the speech model's input, and the stereo the
 /// voice separation needs when it was asked for and the song isn't too long.
+#[derive(Debug)]
 pub struct Decoded {
     pub speech: Vec<f32>,
     pub stereo: Option<Vec<f32>>,

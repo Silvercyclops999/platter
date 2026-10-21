@@ -175,14 +175,16 @@ struct FakeSongs {
     unreachable: AtomicBool,
     unreadable: AtomicBool,
     reads: AtomicUsize,
+    read_ids: Mutex<Vec<String>>,
     /// Reads wait while this is set (playback has the connection).
     hold: AtomicBool,
 }
 
 #[async_trait]
 impl SongReader for FakeSongs {
-    async fn read(&self, _track_id: &str, _cancel: &AtomicBool) -> Result<SongAudio, AudioError> {
+    async fn read(&self, track_id: &str, _cancel: &AtomicBool) -> Result<SongAudio, AudioError> {
         self.reads.fetch_add(1, Ordering::SeqCst);
+        self.read_ids.lock().push(track_id.to_owned());
         while self.hold.load(Ordering::SeqCst) {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
@@ -247,16 +249,24 @@ struct FakeSeparator {
     /// Stereo samples given on the last run.
     last_len: AtomicUsize,
     fail: AtomicBool,
+    /// The next run waits until it's stopped.
+    block_once: AtomicBool,
 }
 
 /// The fake voice's length, so the recognizer's input shows it was heard.
 const VOICE_LEN: usize = 12_345;
 
 impl voice::Separator for FakeSeparator {
-    fn vocals(&self, weights: &Path, song: &[f32], _stop: Stop, progress: Progress) -> Result<Vec<f32>, voice::VoiceError> {
+    fn vocals(&self, weights: &Path, song: &[f32], stop: Stop, progress: Progress) -> Result<Vec<f32>, voice::VoiceError> {
         assert!(weights.is_file(), "the voice model is on disk");
         self.runs.fetch_add(1, Ordering::SeqCst);
         self.last_len.store(song.len(), Ordering::SeqCst);
+        if self.block_once.swap(false, Ordering::SeqCst) {
+            while !stop.is_set() {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            return Err(voice::VoiceError::Cancelled);
+        }
         progress(Step::Percent(50));
         if self.fail.load(Ordering::SeqCst) {
             return Err(voice::VoiceError::Crashed);
@@ -390,6 +400,7 @@ fn fx_full(fetch: Arc<FakeFetch>, over: Option<Arc<dyn Recognizer>>, gpu: Arc<gp
         unreachable: AtomicBool::new(false),
         unreadable: AtomicBool::new(false),
         reads: AtomicUsize::new(0),
+        read_ids: Mutex::new(Vec::new()),
         hold: AtomicBool::new(false),
     });
     let other = Arc::new(FakeOther::default());
@@ -1354,6 +1365,27 @@ async fn a_separation_that_goes_wrong_hears_the_mix_and_stops_trying_this_sessio
     assert!(f.gpu.active().is_some(), "the speech model keeps the card");
     transcribe(&f, "802").await;
     assert_eq!(f.sep.runs.load(Ordering::SeqCst), 1, "not tried again");
+}
+
+#[tokio::test]
+async fn a_batch_song_that_gives_way_while_separating_keeps_its_audio() {
+    let f = fx_voice();
+    install(&f).await;
+    f.voice_models.download(voice::Voice::Demucs, &*f.fetch, &AtomicBool::new(false), &|_, _| {}).await.unwrap();
+    f.sep.block_once.store(true, Ordering::SeqCst);
+    f.t.transcribe_album("80").await.unwrap();
+    until_true("801 separating", || f.sep.runs.load(Ordering::SeqCst) == 1).await;
+    f.t.transcribe_track("501").unwrap();
+    until(&f.t, "501 and 801 done", |_| {
+        let done = f.events.done.lock();
+        ["501", "801"].iter().all(|id| done.iter().any(|d| d.0 == *id))
+    })
+    .await;
+    f.t.cancel(None);
+    until(&f.t, "stopped", idle).await;
+    assert_eq!(f.songs.read_ids.lock().iter().filter(|id| *id == "801").count(), 1, "801 was read once, before it gave way");
+    assert!(!f.t.inner.voice.off.load(Ordering::SeqCst), "a give-way isn't trouble");
+    assert!(f.sep.runs.load(Ordering::SeqCst) >= 3, "801 was separated again after 501");
 }
 
 #[tokio::test]
