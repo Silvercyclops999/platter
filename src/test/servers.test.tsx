@@ -147,6 +147,8 @@ describe("first run", () => {
     useApp.setState({ servers: null });
     render(<App />);
     expect(await screen.findByRole("button", { name: "Sign in with Plex" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use a Jellyfin server" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Use another server" }));
     await user.click(screen.getByRole("button", { name: "Use a Jellyfin server" }));
     mock.jellyfin.failure = "quickConnectOff";
     await user.type(screen.getByLabelText("Jellyfin server address"), "jellyfin.local:8096");

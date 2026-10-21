@@ -148,10 +148,10 @@ describe("every route has a phone page", () => {
     expect(route()).toEqual({ name: "home" });
   });
 
-  it("devices is the one page that stays on the computer, and it says why", async () => {
+  it("devices on the phone is about your other devices and downloads, never drives", async () => {
     render(<PhonePage route={{ name: "devices" }} />);
-    expect(await screen.findByText(/A phone can't see those drives/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Downloads on this phone" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Downloads on this phone" })).toBeInTheDocument();
+    expect(screen.queryByText(/USB drive|SD card/)).toBeNull();
   });
 });
 

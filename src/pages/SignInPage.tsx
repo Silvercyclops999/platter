@@ -14,6 +14,8 @@ import { AddServerFlow, type AddressKind } from "./AddServer";
 export function SignInPage({ onBack }: { onBack?: () => void } = {}) {
   const auth = useApp((s) => s.auth);
   const [other, setOther] = useState<AddressKind | null>(null);
+  // Jellyfin and Navidrome sit behind one quiet button, under Plex.
+  const [others, setOthers] = useState(false);
   const [pin, setPin] = useState<PinInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -69,17 +71,22 @@ export function SignInPage({ onBack }: { onBack?: () => void } = {}) {
                 ? "Plex asked you to sign in again. Music saved on this computer keeps playing in the meantime."
                 : onBack
                   ? "Add your Plex music next to the servers you already have."
-                  : "Your music library, beautifully played. Sign in with Plex, or add your Jellyfin, Navidrome or other Subsonic server to start listening."}
+                  : "Your music library, beautifully played. Sign in with Plex and it's all here."}
             </p>
             <Button variant="primary" size="lg" onClick={start} disabled={busy} autoFocus>
               Sign in with Plex
             </Button>
-            {!onBack && (
-              <Button variant="secondary" size="lg" onClick={() => setOther("jellyfin")}>
+            {!onBack && !others && (
+              <Button variant="ghost" onClick={() => setOthers(true)}>
+                Use another server
+              </Button>
+            )}
+            {!onBack && others && (
+              <Button variant="secondary" size="lg" onClick={() => setOther("jellyfin")} autoFocus>
                 Use a Jellyfin server
               </Button>
             )}
-            {!onBack && (
+            {!onBack && others && (
               <Button variant="secondary" size="lg" onClick={() => setOther("subsonic")}>
                 Use Navidrome or another Subsonic server
               </Button>
@@ -93,24 +100,21 @@ export function SignInPage({ onBack }: { onBack?: () => void } = {}) {
           </>
         ) : (
           <>
-            {/* Secure PINs are long and already in the sign-in link; only
-                short codes are meant to be typed at plex.tv/link. */}
-            {pin && pin.code.length > 8 ? (
-              <p className="welcome__lead">
-                We opened plex.tv in your browser. Sign in there and approve Platter.
-              </p>
-            ) : (
-              <>
-                <p className="welcome__lead">We opened plex.tv in your browser. If it asks for a code, enter:</p>
-                <div className="welcome__code" aria-label={pin ? `Code ${pin.code.split("").join(" ")}` : "Code loading"}>
-                  {pin ? pin.code : <Skeleton width={180} height={48} />}
-                </div>
-              </>
-            )}
+            <p className="welcome__lead">We opened plex.tv in your browser. Sign in there and approve Platter.</p>
             <p className="welcome__waiting" role="status">
               <span className="welcome__pulse" aria-hidden="true" />
               Waiting for you to approve Platter on plex.tv…
             </p>
+            {/* Secure PINs are long and already in the sign-in link; only a
+                short code is ever typed, and only if plex.tv asks for it. */}
+            {(!pin || pin.code.length <= 8) && (
+              <p className="welcome__fine">
+                If plex.tv asks for a code, it's{" "}
+                <span className="welcome__code-inline" aria-label={pin ? `Code ${pin.code.split("").join(" ")}` : "Code loading"}>
+                  {pin ? pin.code : <Skeleton width={64} height={18} />}
+                </span>
+              </p>
+            )}
             <div className="welcome__actions">
               {pin && (
                 <Button variant="ghost" onClick={() => navigator.clipboard?.writeText(pin.authUrl)}>

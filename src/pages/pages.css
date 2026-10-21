@@ -591,6 +591,15 @@
   font-variant-numeric: tabular-nums;
   user-select: text;
 }
+/* The plex.tv code at sign-in, only for when plex.tv asks for it: a quiet readout in the fine print. */
+.welcome__code-inline {
+  font-family: var(--font-readout, var(--font-family));
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.12em;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+  user-select: text;
+}
 .welcome__waiting { display: flex; align-items: center; gap: var(--space-2); color: var(--color-text-secondary); }
 .welcome__pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--color-accent); animation: pulse 1.4s ease-in-out infinite; }
 .welcome__actions { display: flex; gap: var(--space-2); }

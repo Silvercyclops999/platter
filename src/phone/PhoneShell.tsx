@@ -41,7 +41,6 @@ import { TABS, phone, tabOf, usePhoneUi, type PhoneTab } from "./phoneUi";
 import { PageStack } from "./PageStack";
 import { PhoneRoutePage } from "./routes";
 import { SheetHost } from "./Sheets";
-import { SyncStepHost, useSyncStep } from "./SyncSetup";
 import "./phone.css";
 
 
@@ -79,8 +78,6 @@ export function PhoneShell() {
   const entry = useCurrentEntry();
   const tab = usePhoneUi((s) => s.tab);
   const playerOpen = usePhoneUi((s) => s.nowPlaying);
-  // Now playing, or Copy from my computer, covers the page and the tabs.
-  const stepOpen = useSyncStep((s) => s.open);
   // The pages stay inert until now playing has slid off them: lifting it restyles every page, which mustn't land in the slide.
   const [stillCovered, setStillCovered] = useState(playerOpen);
   useEffect(() => {
@@ -88,7 +85,7 @@ export function PhoneShell() {
     const t = setTimeout(() => setStillCovered(false), CLOSE_MS);
     return () => clearTimeout(t);
   }, [playerOpen]);
-  const covered = playerOpen || stepOpen;
+  const covered = playerOpen;
   const inertUnder = covered || stillCovered;
   const hasTrack = usePlayer((s) => !!s.state?.track);
   const root = useRef<HTMLDivElement>(null);
@@ -140,7 +137,6 @@ export function PhoneShell() {
       <LyricsScreen />
       <SheetHost />
       <ShellHosts />
-      <SyncStepHost />
     </div>
   );
 }
