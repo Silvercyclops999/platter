@@ -109,7 +109,7 @@ The app menu also has your Profile, Stats, Devices, Help, Private session and Si
 
 ## Getting help
 
-These help pages are built into Platter and work offline. Choose **Help** in the app menu to see them all, or search for anything and press the **Help** chip. Busier screens have a small **?** that opens the right page beside them, and many settings have **Learn more**. Settings, App, Show "?" help buttons hides the **?** buttons.
+These help pages are built into Platter and work offline. Choose **Help** in the app menu to see them all, or search for anything: the best few help pages show under the results, and the search box at the top of Help finds the rest. Busier screens have a small **?** that opens the right page beside them, and many settings have **Learn more**. Settings, App, Show "?" help buttons hides the **?** buttons.
 
 Settings, App, Setup guides has short guides for getting started, Lidarr, library import, inviting a friend and Stream Deck. Each one picks up where you left it.
 

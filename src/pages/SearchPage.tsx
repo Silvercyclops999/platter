@@ -32,8 +32,8 @@ export { MAX_QUERY };
 /** Results asked for per kind. */
 const LIMIT = 30;
 
-/** The chips: what the library search returns, and Help (the bundled help pages, searched here). */
-export type SearchChip = SearchFilter | "help";
+/** The chips: what the library search returns. A few help pages show under All; Help searches the rest. */
+export type SearchChip = SearchFilter;
 
 export const FILTERS: { id: SearchChip; label: string }[] = [
   { id: "all", label: "All" },
@@ -41,7 +41,6 @@ export const FILTERS: { id: SearchChip; label: string }[] = [
   { id: "albums", label: "Albums" },
   { id: "artists", label: "Artists" },
   { id: "playlists", label: "Playlists" },
-  { id: "help", label: "Help" },
 ];
 
 /** Help pages and sections matching a search. The pages load on first use, not at startup. */
@@ -313,14 +312,14 @@ export function SearchPage({ query }: { query: string }) {
   const helpHits = useHelpHits(q);
   const topSongs = useTopSongsFound(q);
   // Music you don't have, in with the library's results as it arrives.
-  const cat = useCatalogueSearch(q, filter === "help" ? "playlists" : filter);
+  const cat = useCatalogueSearch(q, filter);
   const lidarrReady = useLidarrReady();
 
   // Each request gets a sequence number and only the newest one may update
   // the screen, so a slow answer to an older query never replaces a newer one.
   useEffect(() => {
     const mine = ++seq.current;
-    if (!q || filter === "help") {
+    if (!q) {
       setShown(null);
       setFailed(false);
       return;
@@ -360,22 +359,6 @@ export function SearchPage({ query }: { query: string }) {
           <h1 className="section-title">Search your library</h1>
           <p>Find artists, albums, songs and playlists on your server. Use the search box at the top, or press {modKey}+L.</p>
         </div>
-      </div>
-    );
-
-  if (filter === "help")
-    return (
-      <div className="page-pad sr">
-        <h1 className="sr-only">Help for “{q}”</h1>
-        <FilterChips label="Filter results" items={FILTERS} value={filter} onChange={setFilter} className="sr-chips" scroll />
-        {!helpHits || helpHits.length ? (
-          <HelpResults hits={helpHits} />
-        ) : (
-          <div className="sr-empty" role="status">
-            <h2 className="section-title">No help for “{q.length > 60 ? `${q.slice(0, 60)}…` : q}”</h2>
-            <p>Try another word, or open Help from your profile menu to see every page.</p>
-          </div>
-        )}
       </div>
     );
 

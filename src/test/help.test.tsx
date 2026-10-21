@@ -1,6 +1,6 @@
 /**
  * Built-in help: the pages in docs/help render in the app with no network,
- * search finds them (Help chip), "?" buttons open them, the docs site built
+ * search finds them (a few under All), "?" buttons open them, the docs site built
  * from the same Markdown has no broken links, and the writing follows the
  * house rules.
  */
@@ -110,13 +110,12 @@ describe("search", () => {
     expect(searchHelp("same server").some((h) => h.slug === "connecting" && h.anchor === "jellyfin-and-subsonic-servers")).toBe(true);
   });
 
-  it("the main search has a Help chip, and a few help results under All", async () => {
+  it("the main search shows a few help results under All, with no Help chip", async () => {
     const user = userEvent.setup();
     render(<SearchPage query="practice mode" />);
-    const helpRegion = await screen.findByRole("region", { name: "Help" });
-    expect(within(helpRegion).getAllByRole("button").length).toBeLessThanOrEqual(3);
-    await user.click(screen.getByRole("button", { name: "Help" }));
     const results = await screen.findByRole("region", { name: "Help" });
+    expect(within(results).getAllByRole("button").length).toBeLessThanOrEqual(3);
+    expect(within(screen.getByRole("group", { name: "Filter results" })).queryByRole("button", { name: "Help" })).toBeNull();
     await user.click(within(results).getByRole("button", { name: /^Lidarr: Practice mode/ }));
     expect(useUi.getState().helpOpen).toBe(true);
     expect(useHelp.getState()).toMatchObject({ slug: "lidarr", anchor: "practice-mode" });
