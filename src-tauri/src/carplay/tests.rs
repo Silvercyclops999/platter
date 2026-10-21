@@ -686,3 +686,126 @@ async fn a_long_list_says_how_many_it_leaves_out() {
     assert_eq!(last.action, CarAction::Info);
 }
 
+
+mod pictures {
+    use super::super::pictures::{draw, mix_artists, picture_for, CarPicture};
+    use super::*;
+
+    fn decoded(png: &[u8]) -> image::RgbImage {
+        image::load_from_memory(png).expect("a PNG").to_rgb8()
+    }
+
+    /// How many of the picture's pixels differ from its corner (the ground).
+    fn marked(img: &image::RgbImage) -> usize {
+        let ground = *img.get_pixel(img.width() - 1, img.height() - 1);
+        img.pixels().filter(|p| p.0.iter().zip(ground.0).any(|(a, b)| a.abs_diff(b) > 24)).count()
+    }
+
+    fn mix_item(title: &str, description: &str) -> CarItem {
+        CarItem {
+            title: title.into(),
+            subtitle: Some(description.into()),
+            thumb: None,
+            action: songs(ContextKind::Mix, "daily-1", title),
+        }
+    }
+
+    #[test]
+    fn each_row_kind_gets_its_own_picture() {
+        assert_eq!(picture_for(&shuffle_library()), Some(CarPicture::Shuffle));
+        assert_eq!(picture_for(&liked_item()), Some(CarPicture::Liked));
+        assert_eq!(picture_for(&library()[0]), Some(CarPicture::Liked), "Liked songs on the Library tab too");
+        assert_eq!(
+            picture_for(&mix_item("Daily Mix 1", "Motte, Saltglass, Odessa Wren, Kesto Marrow and more")),
+            Some(CarPicture::Mix { title: "Daily Mix 1".into(), artists: vec!["Motte".into(), "Saltglass".into(), "Odessa Wren".into()] })
+        );
+        // Lists to open and covers draw nothing of their own.
+        assert_eq!(picture_for(&open(CarList::Albums)), None);
+        let album = CarItem { title: "A".into(), subtitle: None, thumb: Some("/t".into()), action: play(ContextKind::Album, "a1") };
+        assert_eq!(picture_for(&album), None);
+    }
+
+    #[test]
+    fn mix_lines_give_their_artists() {
+        assert_eq!(mix_artists("with Motte, Saltglass and more"), vec!["Motte", "Saltglass"]);
+        assert_eq!(mix_artists("Motte and more"), vec!["Motte"]);
+        assert!(mix_artists("Songs you haven't played in a while").is_empty());
+        assert!(mix_artists("").is_empty());
+    }
+
+    #[test]
+    fn every_picture_renders_at_each_size_the_car_asks_for() {
+        let all = [
+            CarPicture::Shuffle,
+            CarPicture::Liked,
+            CarPicture::Mix { title: "Daily Mix 1".into(), artists: vec!["Motte".into(), "Saltglass".into()] },
+            CarPicture::Mix { title: "Discover".into(), artists: vec![] },
+            CarPicture::Placeholder,
+        ];
+        for px in [120, 240] {
+            for p in &all {
+                let img = decoded(&draw(p, px));
+                assert_eq!((img.width(), img.height()), (px, px), "{p:?} at {px}");
+                let share = marked(&img) as f32 / (px * px) as f32;
+                assert!(share > 0.02 && share < 0.6, "{p:?} at {px} draws something, not a flood: {share}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_sleeves_are_paper_and_shuffle_is_graphite() {
+        let corner = |p: &CarPicture| *decoded(&draw(p, 120)).get_pixel(2, 117);
+        for p in [CarPicture::Liked, CarPicture::Placeholder, CarPicture::Mix { title: "M".into(), artists: vec![] }] {
+            let c = corner(&p);
+            assert!(c.0.iter().all(|&v| v > 200), "{p:?} on paper: {c:?}");
+        }
+        let g = corner(&CarPicture::Shuffle);
+        assert!(g.0.iter().all(|&v| v < 60), "Shuffle on graphite: {g:?}");
+    }
+
+    #[test]
+    fn a_bigger_sleeve_lists_the_artists_and_a_small_one_keeps_its_name() {
+        let with = CarPicture::Mix { title: "Daily Mix 1".into(), artists: vec!["Motte".into(), "Saltglass".into(), "Odessa Wren".into()] };
+        let without = CarPicture::Mix { title: "Daily Mix 1".into(), artists: vec![] };
+        // At 240 the names under the rule add ink; at 120 they're left off.
+        assert!(marked(&decoded(&draw(&with, 240))) > marked(&decoded(&draw(&without, 240))));
+        assert_eq!(draw(&with, 120), draw(&without, 120));
+    }
+
+    #[test]
+    fn long_names_and_odd_letters_still_draw() {
+        let p = CarPicture::Mix {
+            title: "Supercalifragilisticexpialidocious Radio and a very long name indeed".into(),
+            artists: vec!["Sigur Rós".into(), "Łona".into(), "日本".into()],
+        };
+        let img = decoded(&draw(&p, 240));
+        assert!(marked(&img) > 0);
+    }
+
+    #[test]
+    fn mixes_on_home_show_their_sleeve_not_a_photo() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (db, _dir) = rt.block_on(synced(2, 2));
+        db.write(|c| {
+            let ids: Vec<String> = c.prepare("SELECT id FROM tracks LIMIT 10")?.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
+            let mix = crate::mixes::store::Stored {
+                id: "daily-1".into(),
+                kind: crate::mixes::MixKind::Daily,
+                title: "Daily Mix 1".into(),
+                description: "Motte, Saltglass and more".into(),
+                color: "#334455".into(),
+                artist_ids: vec![],
+                tag: None,
+                tracks: ids.into_iter().map(|id| (id, false)).collect(),
+            };
+            crate::mixes::store::save_one(c, &mix, 0, "2026-10-20", 0)?;
+            Ok(())
+        })
+        .unwrap();
+        let sections = db.read(home_sections).unwrap();
+        let made = sections.iter().find(|s| s.header.as_deref() == Some("Made for you")).expect("mixes");
+        let CarRow::Item(m) = &made.rows[0] else { panic!("a mix row") };
+        assert_eq!(m.thumb, None);
+        assert!(matches!(picture_for(m), Some(CarPicture::Mix { ref artists, .. }) if artists == &["Motte", "Saltglass"]));
+    }
+}

@@ -27,6 +27,7 @@ use objc2_foundation::{NSArray, NSData, NSObject, NSObjectProtocol, NSString};
 use objc2_ui_kit::{UIScene, UISceneConnectionOptions, UISceneDelegate, UISceneSession};
 use tauri::{AppHandle, Listener, Manager, Wry};
 
+use super::pictures::{self, CarPicture};
 use super::{CarAction, CarItem, CarList, CarRow, CarSection, Connect, Kept, NowKey, OnConnect, Reach, Tab};
 use crate::audio::player::PlayerHandle;
 use crate::audio::queue::Repeat;
@@ -662,6 +663,23 @@ fn symbol_image(name: &str) -> Option<Retained<objc2_ui_kit::UIImage>> {
     objc2_ui_kit::UIImage::systemImageNamed(&ns(name))
 }
 
+thread_local! {
+    /// Pictures already drawn, by picture and size (main thread only).
+    static PICTURES: RefCell<std::collections::HashMap<(String, u32), Retained<objc2_ui_kit::UIImage>>> =
+        RefCell::new(std::collections::HashMap::new());
+}
+
+/// One of Platter's own pictures (pictures.rs), drawn once per size.
+fn picture_image(p: &CarPicture, px: u32) -> Option<Retained<objc2_ui_kit::UIImage>> {
+    let key = (format!("{p:?}"), px);
+    if let Some(img) = PICTURES.with(|m| m.borrow().get(&key).cloned()) {
+        return Some(img);
+    }
+    let img = objc2_ui_kit::UIImage::imageWithData(&NSData::with_bytes(&pictures::draw(p, px)))?;
+    PICTURES.with(|m| m.borrow_mut().insert(key, img.clone()));
+    Some(img)
+}
+
 fn list_template(mtm: MainThreadMarker, title: &str, items: &[CarItem], loading: bool) -> Retained<CPListTemplate> {
     let section = CarSection { header: None, rows: items.iter().cloned().map(CarRow::Item).collect() };
     sections_template(mtm, title, &[section], loading)
@@ -718,13 +736,16 @@ fn sections_template(mtm: MainThreadMarker, title: &str, sections: &[CarSection]
 }
 
 /// A row of covers under a title; tapping a cover plays it. Each cover
-/// starts as a note and is swapped in as it loads. iOS 26 and later take
+/// starts as the paper sleeve and is swapped in as it loads (and stays paper
+/// when it doesn't come). iOS 26 and later take
 /// one element per cover (each updated on its own); older ones a list of
 /// images, replaced whole.
 fn covers_row(mtm: MainThreadMarker, title: &str, items: &[CarItem]) -> Retained<CPListImageRowItem> {
     let items: Vec<CarItem> = items.iter().take(super::COVERS_MAX).cloned().collect();
-    let placeholder = symbol_image("music.note");
-    let images: Vec<Retained<objc2_ui_kit::UIImage>> = items.iter().filter_map(|_| placeholder.clone()).collect();
+    let images: Vec<Retained<objc2_ui_kit::UIImage>> = items
+        .iter()
+        .filter_map(|i| picture_image(&pictures::picture_for(i).unwrap_or(CarPicture::Placeholder), COVER_PX))
+        .collect();
     let titles: Vec<Retained<NSString>> = items.iter().map(|i| ns(&i.title)).collect();
     let elements_api = AnyClass::get(c"CPListImageRowItemRowElement").is_some() && images.len() == items.len();
     let (r, elements) = if elements_api {
@@ -853,6 +874,12 @@ fn text_row(mtm: MainThreadMarker, text: &str, detail: Option<&str>) -> Retained
 
 fn row(mtm: MainThreadMarker, item: &CarItem) -> Retained<CPListItem> {
     let r = text_row(mtm, &item.title, item.subtitle.as_deref());
+    // Its own picture (Shuffle, Liked songs, a mix's sleeve), or paper until the cover comes.
+    let own = pictures::picture_for(item).or_else(|| item.thumb.is_some().then_some(CarPicture::Placeholder));
+    if let Some(img) = own.and_then(|p| picture_image(&p, ART_PX)) {
+        // SAFETY: a setter on our own row, on the main thread.
+        unsafe { r.setImage(Some(&img)) };
+    }
     if let (Some(thumb), Some(app)) = (&item.thumb, APP.get()) {
         load_art(app, thumb.clone(), OnMain(r.clone()));
     }

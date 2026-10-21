@@ -200,13 +200,14 @@ pub fn shuffle_library_context(c: &Connection) -> AppResult<PlayContext> {
 }
 
 /// The made-for-you mixes (Daily Mixes, the daylist, Discover...), in their
-/// shelf order, each played in one tap.
+/// shelf order, each played in one tap. Each shows its printed sleeve, as on
+/// the phone, not a photo.
 fn mixes(c: &Connection) -> AppResult<Vec<CarItem>> {
     Ok(crate::mixes::store::all(c)?
         .into_iter()
         .take(MIXES_MAX)
         .map(|(m, _, _)| CarItem {
-            thumb: m.art.clone().or_else(|| m.covers.first().cloned()),
+            thumb: None,
             subtitle: (!m.description.is_empty()).then(|| m.description.clone()),
             action: songs(ContextKind::Mix, &m.id, &m.title),
             title: m.title,
@@ -750,6 +751,8 @@ pub fn shuffle_downloads_context(c: &Connection) -> AppResult<PlayContext> {
     Ok(PlayContext { kind: ContextKind::Tracks, id: None, track_ids: Some(ids) })
 }
 
+#[cfg(any(test, target_os = "ios"))]
+pub mod pictures;
 pub mod siri;
 
 #[cfg(target_os = "ios")]
