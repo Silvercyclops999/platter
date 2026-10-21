@@ -310,7 +310,11 @@ export const player = {
   shuffleAlbums: (albumIds: string[] = []) =>
     backend
       .albumShuffleTracks(albumIds)
-      .then((ids) => play({ context: { kind: "tracks", id: "albums", trackIds: ids }, startTrackId: ids[0], shuffle: false }))
+      // Playing on another device takes the list's own shuffle choice, so turn it off first.
+      .then(async (ids) => {
+        if (isRemote()) await backend.setContextShuffle("albums", false);
+        return play({ context: { kind: "tracks", id: "albums", trackIds: ids }, startTrackId: ids[0], shuffle: false });
+      })
       .catch(report),
   queueAdd: (trackIds: string[], at: QueueAt) =>
     // Listening along: the queue here is the host's, so add there.

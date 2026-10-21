@@ -33,7 +33,7 @@ export function PhoneEra({ artistId, name }: { artistId: string; name: string })
   }, [artistId, name, reload]);
   const nowId = usePlayer((s) => s.state?.track?.id);
   const ids = data ? data.groups.flatMap((g) => g.tracks.map((t) => t.id)) : [];
-  const playingHere = usePlayer((s) => s.state?.queue.context?.kind === "tracks" && !!nowId && ids.includes(nowId) && s.state?.status === "playing");
+  const playingHere = usePlayer((s) => s.state?.queue.context?.kind === "tracks" && s.state.queue.context.id !== "albums" && !!nowId && ids.includes(nowId) && s.state?.status === "playing");
   if (error && !data) return <PageFailed what="this era" retry={retry} framed />;
   if (!data) return <PageLoading />;
   const era = data.era;
