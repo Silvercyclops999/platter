@@ -1,50 +1,40 @@
 /**
- * The art styles' WebGL2 drawing: one program per style (built when first
- * asked for), one quad with no buffers, two cover textures crossfading on a
- * song change, and a handful of uniforms set per frame. Nothing here touches
- * React; the stage owns one of these and calls `draw` from its frame loop.
- * A lost context is reported once and the stage falls back; a restored one
- * builds everything again.
+ * Grooves and Blur on the GPU: one WebGL2 program each, one quad with no
+ * buffers, and a handful of uniforms set per frame. No textures: the colours
+ * come from the cover's palette, and the cover itself is the page's own
+ * image on top. Nothing here touches React. A context that can't build the
+ * programs gives itself back and the view draws with CSS layers instead.
  */
 import type { RGB } from "../../lib/color";
-import type { ArtStyle } from "../styles";
-import { FRAGMENTS, VERTEX } from "./shaders";
+import { BLUR, GROOVES, VERTEX } from "./shaders";
 
-const UNIFORMS = ["uCover", "uPrev", "uMix", "uRes", "uTime", "uSpin", "uSig", "uPhase", "uPal", "uBase", "uAnchor", "uMotion", "uBeatAt", "uBeatK"] as const;
+const UNIFORMS = ["uRes", "uTime", "uSpin", "uSig", "uDrift", "uFlow", "uPal", "uBase", "uLabel", "uBeatAt", "uBeatK"] as const;
 type Uniform = (typeof UNIFORMS)[number];
 
-interface Program {
-  prog: WebGLProgram;
-  loc: Record<Uniform, WebGLUniformLocation | null>;
-}
+/** The styles drawn here. */
+export type GLStyle = "grooves" | "blur";
+const SOURCES: Record<GLStyle, string> = { grooves: GROOVES, blur: BLUR };
 
 /** What a frame draws with. */
 export interface ArtFrame {
-  style: ArtStyle;
   time: number;
-  /** The record's turn, radians (Grooves). */
+  /** The record's turn, radians. */
   spin: number;
   low: number;
   mid: number;
   high: number;
   pulse: number;
-  flow: number;
   drift: number;
-  /** The sharp cover: centre x, y and half size in canvas pixels (y down, as on the page), and 0 square or 1 round. */
-  anchor: [number, number, number, number];
-  motion: number;
+  flow: number;
+  /** The cover: centre x, y (y down, as on the page) and half its side, in canvas pixels. */
+  label: [number, number, number];
   beatAt: Float32Array;
   beatStrength: Float32Array;
 }
 
-/** The cover a texture is made from: drawn into a square first, so every source uploads the same way. */
-export const TEXTURE_SIZE = 512;
-
 export class ArtGL {
   private gl: WebGL2RenderingContext;
-  private programs = new Map<ArtStyle, Program | null>();
-  private cover: WebGLTexture | null = null;
-  private prev: WebGLTexture | null = null;
+  private progs: Partial<Record<GLStyle, { prog: WebGLProgram; loc: Record<Uniform, WebGLUniformLocation | null> }>> = {};
   private vao: WebGLVertexArrayObject | null = null;
   private palette = new Float32Array(12);
   private paletteFrom = new Float32Array(12);
@@ -52,13 +42,8 @@ export class ArtGL {
   private base = new Float32Array([0.04, 0.035, 0.03]);
   private baseFrom = new Float32Array(3);
   private baseTo = new Float32Array([0.04, 0.035, 0.03]);
-  /** Crossfade: 0 shows the previous cover, 1 the current one. */
-  private mix = 1;
-  private coverStart = -Infinity;
-  private fadeMs = 0;
   private paletteStart = -Infinity;
   private paletteMs = 0;
-  private lastSource: TexImageSource | null = null;
   lost = false;
 
   private constructor(gl: WebGL2RenderingContext) {
@@ -84,66 +69,30 @@ export class ArtGL {
     }
     if (!gl || gl.isContextLost?.()) return null;
     const r = new ArtGL(gl);
-    // A style that doesn't build means this GPU can't draw the art: fall back, freeing what was made.
     if (r.ready()) return r;
     r.dispose();
     return null;
   }
 
-  /** Whether the art can draw: the base style builds on this GPU. */
+  /** Whether it can draw: the program built and the context is here. */
   ready(): boolean {
-    return !this.gl.isContextLost() && !!this.program("sleeve");
+    return !this.gl.isContextLost() && !!this.progs.grooves && !!this.progs.blur;
   }
 
   private setup() {
     const gl = this.gl;
     this.vao = gl.createVertexArray();
-    this.cover = this.texture();
-    this.prev = this.texture();
-    this.programs.clear();
-    // Back after a lost context: the cover that showed, at once, without a fade.
-    if (this.lastSource) {
-      try {
-        this.upload(this.cover, this.lastSource);
-      } catch {
-        this.lastSource = null;
-      }
+    this.progs = {};
+    for (const style of Object.keys(SOURCES) as GLStyle[]) {
+      const built = this.build(SOURCES[style]);
+      if (built) this.progs[style] = built;
     }
-    this.fadeMs = 0;
   }
 
   /** Builds everything again after the context comes back. */
   restore() {
     this.lost = false;
     this.setup();
-  }
-
-  private texture(): WebGLTexture | null {
-    const gl = this.gl;
-    const t = gl.createTexture();
-    this.blank(t);
-    return t;
-  }
-
-  /** A texture made one plain dark pixel: what shows with no cover. */
-  private blank(t: WebGLTexture | null) {
-    const gl = this.gl;
-    gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([24, 20, 18, 255]));
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.MIRRORED_REPEAT);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.MIRRORED_REPEAT);
-    gl.generateMipmap(gl.TEXTURE_2D);
-  }
-
-  private upload(t: WebGLTexture | null, src: TexImageSource) {
-    const gl = this.gl;
-    gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.generateMipmap(gl.TEXTURE_2D);
   }
 
   private compile(type: number, src: string): WebGLShader | null {
@@ -153,19 +102,18 @@ export class ArtGL {
     gl.shaderSource(s, src);
     gl.compileShader(s);
     if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-      if (import.meta.env?.DEV) console.warn("art shader", gl.getShaderInfoLog(s));
+      if (import.meta.env?.DEV) console.warn("visualizer shader", gl.getShaderInfoLog(s));
       gl.deleteShader(s);
       return null;
     }
     return s;
   }
 
-  private program(style: ArtStyle): Program | null {
-    if (this.programs.has(style)) return this.programs.get(style)!;
+  private build(fragment: string): { prog: WebGLProgram; loc: Record<Uniform, WebGLUniformLocation | null> } | null {
     const gl = this.gl;
     const vs = this.compile(gl.VERTEX_SHADER, VERTEX);
-    const fs = this.compile(gl.FRAGMENT_SHADER, FRAGMENTS[style]);
-    let out: Program | null = null;
+    const fs = this.compile(gl.FRAGMENT_SHADER, fragment);
+    let out: { prog: WebGLProgram; loc: Record<Uniform, WebGLUniformLocation | null> } | null = null;
     if (vs && fs) {
       const prog = gl.createProgram();
       if (prog) {
@@ -173,44 +121,20 @@ export class ArtGL {
         gl.attachShader(prog, fs);
         gl.linkProgram(prog);
         if (gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-          const loc = {} as Program["loc"];
+          const loc = {} as Record<Uniform, WebGLUniformLocation | null>;
           for (const u of UNIFORMS) loc[u] = gl.getUniformLocation(prog, u);
           out = { prog, loc };
-        }
+        } else gl.deleteProgram(prog);
       }
     }
     if (vs) gl.deleteShader(vs);
     if (fs) gl.deleteShader(fs);
-    this.programs.set(style, out);
     return out;
-  }
-
-  /**
-   * A new cover (null: none, a plain dark texture): the old one fades out
-   * under it over `fadeMs`. Uploaded before anything changes, so a cover that
-   * can't be a texture leaves what shows as it was (and throws). A cover that
-   * comes while the last one is still mostly fading in takes its place in the
-   * same fade, so a quick second skip never jumps.
-   */
-  setCover(src: TexImageSource | null, nowMs: number, fadeMs: number) {
-    this.ease(nowMs);
-    const midFade = this.fadeMs > 0 && this.mix < 0.5;
-    const target = midFade ? this.cover : this.prev;
-    if (src) this.upload(target, src);
-    else this.blank(target);
-    this.lastSource = src;
-    if (midFade) {
-      // The same fade carries on toward the newer cover, from where it is.
-      return;
-    }
-    this.prev = this.cover;
-    this.cover = target;
-    this.fadeMs = fadeMs;
-    this.coverStart = fadeMs > 0 ? nowMs : -Infinity;
   }
 
   /** The palette to ease toward (four colours and the base, 0..1). */
   setPalette(colours: readonly RGB[], base: RGB, nowMs: number, fadeMs = 900) {
+    this.ease(nowMs);
     this.paletteFrom.set(this.palette);
     this.baseFrom.set(this.base);
     for (let i = 0; i < 4; i++) for (let c = 0; c < 3; c++) this.paletteTo[i * 3 + c] = colours[i]?.[c] ?? 0.4;
@@ -220,59 +144,43 @@ export class ArtGL {
   }
 
   private ease(nowMs: number) {
-    const smooth = (k: number) => {
-      const x = Math.min(1, Math.max(0, k));
-      return x * x * (3 - 2 * x);
-    };
-    this.mix = this.fadeMs > 0 ? smooth((nowMs - this.coverStart) / this.fadeMs) : 1;
-    const e = this.paletteMs > 0 ? smooth((nowMs - this.paletteStart) / this.paletteMs) : 1;
+    const x = this.paletteMs > 0 ? Math.min(1, Math.max(0, (nowMs - this.paletteStart) / this.paletteMs)) : 1;
+    const e = x * x * (3 - 2 * x);
     for (let i = 0; i < 12; i++) this.palette[i] = this.paletteFrom[i] + (this.paletteTo[i] - this.paletteFrom[i]) * e;
     for (let i = 0; i < 3; i++) this.base[i] = this.baseFrom[i] + (this.baseTo[i] - this.baseFrom[i]) * e;
   }
 
-  draw(f: ArtFrame, nowMs: number, width: number, height: number) {
+  draw(style: GLStyle, f: ArtFrame, nowMs: number, width: number, height: number) {
     const gl = this.gl;
-    if (this.lost || gl.isContextLost()) return;
-    const p = this.program(f.style) ?? this.program("sleeve");
-    if (!p) return;
+    const p = this.progs[style];
+    if (this.lost || gl.isContextLost() || !p) return;
     this.ease(nowMs);
     gl.viewport(0, 0, width, height);
     gl.useProgram(p.prog);
     gl.bindVertexArray(this.vao);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.cover);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.prev);
     const l = p.loc;
-    gl.uniform1i(l.uCover, 0);
-    gl.uniform1i(l.uPrev, 1);
-    gl.uniform1f(l.uMix, this.mix);
     gl.uniform2f(l.uRes, width, height);
     gl.uniform1f(l.uTime, f.time);
     gl.uniform1f(l.uSpin, f.spin);
     gl.uniform4f(l.uSig, f.low, f.mid, f.high, f.pulse);
-    gl.uniform2f(l.uPhase, f.flow, f.drift);
+    gl.uniform1f(l.uDrift, f.drift);
+    gl.uniform1f(l.uFlow, f.flow);
     gl.uniform3fv(l.uPal, this.palette);
     gl.uniform3fv(l.uBase, this.base);
     // The page's y runs down, the GPU's up.
-    gl.uniform4f(l.uAnchor, f.anchor[0], height - f.anchor[1], f.anchor[2], f.anchor[3]);
-    gl.uniform1f(l.uMotion, f.motion);
+    gl.uniform3f(l.uLabel, f.label[0], height - f.label[1], f.label[2]);
     gl.uniform4fv(l.uBeatAt, f.beatAt);
     gl.uniform4fv(l.uBeatK, f.beatStrength);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
-  /** Frees everything and gives the GPU context back (the stage makes a new canvas when it mounts again). */
+  /** Frees everything and gives the GPU context back. */
   dispose() {
     const gl = this.gl;
-    for (const p of this.programs.values()) if (p) gl.deleteProgram(p.prog);
-    this.programs.clear();
-    gl.deleteTexture(this.cover);
-    gl.deleteTexture(this.prev);
+    for (const p of Object.values(this.progs)) if (p) gl.deleteProgram(p.prog);
+    this.progs = {};
     gl.deleteVertexArray(this.vao);
-    this.cover = this.prev = null;
     this.vao = null;
-    this.lastSource = null;
     this.lost = true;
     try {
       gl.getExtension("WEBGL_lose_context")?.loseContext();

@@ -38,6 +38,7 @@ afterEach(() => {
 const NOT_A_ROW: Record<string, string> = {
   requestRules: "sharePeople",
   volume: "the player bar",
+  visualizerStyle: "remembered from now playing: a swipe or an arrow key changes it",
   lyricsShowAdd: "decided by the app: Write your own is always there",
   transcribeModel: "decided by the app from the graphics card",
   transcribeGpu: "decided by the app from the graphics card",

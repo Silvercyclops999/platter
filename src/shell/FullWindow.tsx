@@ -20,10 +20,9 @@ import { useDeckLyrics } from "./deckLyrics";
 import { useFlipPause } from "./useFlipPause";
 import { openSignal } from "../stores/signalPath";
 import { VOLUME_KEY_STEP } from "./useShortcuts";
-import { StylePicker, VisualizerView, useShownStyle } from "../visualizer/VisualizerView";
-import { ArtStage } from "../visualizer/ArtStage";
-import { useReducedMotion } from "../visualizer/draw";
-import { isArtStyle, visFps, type ArtStyle } from "../visualizer/styles";
+import { Stage, VisName } from "../visualizer/Stage";
+import { stepVisStyle, useCoverTap, useVisStyle } from "../visualizer/useVis";
+import type { VisualizerStyle } from "../lib/types";
 import "./full-window.css";
 
 /**
@@ -98,14 +97,18 @@ function onFullWindowKey(e: KeyboardEvent) {
   // In a panel beside the view, keys are the panel's own (Esc still leaves the view).
   if (key !== "Escape" && e.target instanceof Element && e.target.closest(".app__body")) return;
   let handled = true;
-  if (key === "Escape") void fullWindow.escape();
+  const vis = useFullWindow.getState().mode === "visualizer";
+  // Over the visualizer, Escape closes it first and the side arrows change its style.
+  if (key === "Escape" && vis && !useFullWindow.getState().osFullscreen) fullWindow.setMode("artwork");
+  else if (key === "Escape") void fullWindow.escape();
+  else if ((key === "ArrowLeft" || key === "ArrowRight") && vis && !modified(e) && !inSlider(e.target)) stepVisStyle(key === "ArrowRight" ? 1 : -1);
   else if (key === " " && !e.repeat && !inButton(e.target)) player.toggle();
   else if ((key === "ArrowLeft" || key === "ArrowRight") && !modified(e) && !inSlider(e.target))
     void player.seekBy(key === "ArrowRight" ? SEEK_KEY_STEP : -SEEK_KEY_STEP);
   else if ((key === "ArrowUp" || key === "ArrowDown") && !modified(e) && !inSlider(e.target) && !(e.target as Element | null)?.closest?.(".lyrics__scroll"))
     player.nudgeVolume(key === "ArrowUp" ? VOLUME_KEY_STEP : -VOLUME_KEY_STEP);
   else if (key.toLowerCase() === "l" && !modified(e) && !editable(e.target)) fullWindow.toggleLyrics();
-  else if (key.toLowerCase() === "v" && !modified(e) && !editable(e.target) && useSettings.getState().settings?.visualizerButton !== false) fullWindow.toggleVisualizer();
+  else if (key.toLowerCase() === "v" && !modified(e) && !editable(e.target)) fullWindow.toggleVisualizer();
   else if (key.toLowerCase() === "f" && !modified(e) && !editable(e.target)) void fullWindow.toggleOsFullscreen();
   else handled = false;
   if (handled) {
@@ -178,11 +181,11 @@ function FullWindowView() {
   const playing = usePlayer((s) => s.state?.status === "playing");
   const osFull = useFullWindow((s) => s.osFullscreen);
   const hideControls = useSettings((s) => s.settings?.fullWindowHideControls ?? true);
-  const visButton = useSettings((s) => s.settings?.visualizerButton !== false);
+  const coverTap = useCoverTap();
   const idle = useIdle(hideControls, CONTROLS_HIDE_MS);
   // Over the art, a click hides the controls and another brings them back.
   const [bare, setBare] = useState(false);
-  const visStyle = useShownStyle();
+  const visStyle = useVisStyle();
   const tint = useLyricsBackground(track?.thumb);
   const root = useRef<HTMLDivElement>(null);
 
@@ -212,9 +215,8 @@ function FullWindowView() {
   const signalItem = signalOn && !remote ? [{ label: "Signal path", icon: AudioLines, separator: true, onSelect: () => openSignal() }] : [];
   const artistPhoto = details?.artist ? details.artist.art || details.artist.thumb : null;
   // A song whose artist has no image shows its artwork; the mode stays for the next song.
-  // The visualizer with its button turned off shows the artwork too.
-  const shown: FullWindowMode = (mode === "artist" && !artistPhoto) || (mode === "visualizer" && !visButton) ? "artwork" : mode;
-  const art: ArtStyle | null = shown === "visualizer" && track && isArtStyle(visStyle) ? visStyle : null;
+  const shown: FullWindowMode = mode === "artist" && !artistPhoto ? "artwork" : mode;
+  const art: VisualizerStyle | null = shown === "visualizer" && track ? visStyle : null;
   if (bare && !art) setBare(false);
   useRootClasses(idle || bare);
   // Hidden controls are out of reach of Tab too; a key brings them back, and focus never rests on them.
@@ -236,10 +238,15 @@ function FullWindowView() {
   const { flip, play: flipOver } = useFlipPause(turntable && shown === "artwork");
 
   const onClick = (e: MouseEvent) => {
-    if (!art) return;
     const t = e.target as Element;
-    if (t.closest("button, a, input, select, textarea, [role=slider], [role=switch], .fw__top, .vis__picker")) return;
-    setBare((b) => !b);
+    if (t.closest("button, a, input, select, textarea, [role=slider], [role=switch], .fw__top")) return;
+    // A click on the cover opens the visualizer, and closes it again.
+    if (coverTap && shown !== "lyrics" && t.closest(".fw__cover.is-tappable")) {
+      if (art) fullWindow.setMode("artwork");
+      else fullWindow.open("visualizer");
+      return;
+    }
+    if (art) setBare((b) => !b);
   };
 
   const onDoubleClick = (e: MouseEvent) => {
@@ -268,29 +275,17 @@ function FullWindowView() {
     stage = (
       <>
         <div className="fw__now fw__now--art" key="art">
-          <div ref={artCover} className={`fw__cover art-cover art-cover--${art}`}>
-            <Art path={track.thumb} fluid requestSize={COVER_ART} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} />
+          <div className="fw__art-slot">
+            <div ref={artCover} className={`fw__cover vis-cover vis-cover--${art} ${coverTap ? "is-tappable" : ""}`} title={coverTap ? "Close the visualizer" : undefined}>
+              <Art path={track.thumb} fluid requestSize={COVER_ART} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} />
+            </div>
+            <VisName style={art} />
           </div>
           <div className="fw__chrome fw__art-meta" inert={bare || undefined}>
             <Meta track={track} />
           </div>
         </div>
-        <div className="fw__chrome" inert={bare || undefined}>
-          <StylePicker className="fw__styles" />
-        </div>
       </>
-    );
-  else if (shown === "visualizer")
-    stage = (
-      <div className="fw__vis-mode" key="visualizer">
-        <div className="fw__now fw__now--row fw__chrome">
-          <div className="fw__cover">
-            <Art path={track.thumb} fluid requestSize={COVER_ART} />
-          </div>
-          <Meta track={track} />
-        </div>
-        <VisualizerView />
-      </div>
     );
   else if (shown === "artist" && artistPhoto)
     stage = (
@@ -326,7 +321,7 @@ function FullWindowView() {
             )}
           </Turntable>
         ) : (
-          <div className="fw__cover">
+          <div className={`fw__cover ${coverTap ? "is-tappable" : ""}`} title={coverTap ? "Open the visualizer (V)" : undefined}>
             <Art path={track.thumb} fluid requestSize={COVER_ART} />
           </div>
         )}
@@ -358,7 +353,7 @@ function FullWindowView() {
             <ModeToggle mode="artwork" current={mode} label="Artwork" icon={<Disc3 size={18} />} />
             <ModeToggle mode="artist" current={mode} label="Artist image" off={!artistPhoto} offTip="No artist image" icon={<UserRound size={18} />} />
             <ModeToggle mode="lyrics" current={mode} label="Lyrics" off={noLyrics || !track} offTip="No lyrics for this song" icon={<MicVocal size={18} />} />
-            {visButton && <ModeToggle mode="visualizer" current={shown} label="Visualizer" icon={<AudioLines size={18} />} />}
+            <ModeToggle mode="visualizer" current={shown} label="Visualizer" icon={<AudioLines size={18} />} />
           </div>
           <span className="fw__divider" aria-hidden="true" />
           {track && (
@@ -392,13 +387,10 @@ function FullWindowView() {
   );
 }
 
-/** The art behind the expanded view, round its cover. */
-function FullWindowArt({ art, cover }: { art: ArtStyle; cover: RefObject<HTMLDivElement | null> }) {
-  const reduced = useReducedMotion();
-  const fps = visFps(useSettings((s) => s.settings?.visualizerFps), false, reduced);
-  const intensity = useSettings((s) => s.settings?.visualizerIntensity ?? "calm");
+/** The visualizer behind the expanded view, round its cover. */
+function FullWindowArt({ art, cover }: { art: VisualizerStyle; cover: RefObject<HTMLDivElement | null> }) {
   const [find] = useState(() => () => cover.current);
-  return <ArtStage style={art} fps={fps} reduced={reduced} intensity={intensity} cover={find} />;
+  return <Stage style={art} cover={find} />;
 }
 
 /**

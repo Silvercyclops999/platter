@@ -145,7 +145,10 @@ describe("panel content", () => {
     const r = useRouter.getState();
     expect(r.entries[r.index].route).toEqual({ name: "album", id: solo.albumId });
     expect(within(p).getByRole("link", { name: solo.title })).toBeInTheDocument();
-    expect(within(p).getByRole("button", { name: `Go to album ${solo.albumTitle}` })).toBeInTheDocument();
+    // The cover opens the visualizer in the expanded view.
+    fireEvent.click(within(p).getByRole("button", { name: "Open the visualizer" }));
+    expect(useFullWindow.getState()).toMatchObject({ open: true, mode: "visualizer" });
+    act(() => useFullWindow.setState({ open: false, mode: "artwork" }));
     expect(within(p).getByRole("button", { name: `More options for ${solo.title}` })).toBeInTheDocument();
     // The like control follows the title.
     expect(within(p).getByRole("button", { name: `Add ${solo.title} to Liked Songs` })).toBeInTheDocument();

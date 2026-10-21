@@ -27,7 +27,7 @@ import {
   useNowPlayingDetails,
 } from "./nowPlaying";
 import { timedLines, useLyrics } from "./lyrics";
-import { PanelStrip } from "../visualizer/places";
+import { useCoverTap } from "../visualizer/useVis";
 
 /** Requested art size for the panel's cover: the widest panel minus its padding. */
 const PANEL_ART = 388;
@@ -211,6 +211,7 @@ function SubView({ title, onBack, children }: { title: string; onBack: () => voi
 function PanelBody({ track, view, setView }: { track: Track; view: View; setView: (v: View) => void }) {
   const { details } = useNowPlayingDetails(track.id);
   const lyricsOn = useUi((s) => s.nowPlayingPrefs.lyricsCard);
+  const coverTap = useCoverTap();
   const colors = useCoverColors(track.thumb);
   // The same lyrics the lyrics view shows (your pick, LRCLIB, your own, a
   // transcription), and no card when it has none to show.
@@ -237,10 +238,15 @@ function PanelBody({ track, view, setView }: { track: Track; view: View; setView
 
   return (
     <div className="np-content" key={track.id}>
-      <button type="button" className={`np-art ${spinning ? "is-spinning" : ""}`} aria-label={`Go to album ${track.albumTitle}`} onClick={() => nav.go({ name: "album", id: track.albumId })}>
+      {/* The cover opens the visualizer (the title goes to the album); with that off it goes to the album. */}
+      <button
+        type="button"
+        className={`np-art ${spinning ? "is-spinning" : ""}`}
+        aria-label={coverTap ? "Open the visualizer" : `Go to album ${track.albumTitle}`}
+        onClick={() => (coverTap ? fullWindow.open("visualizer") : nav.go({ name: "album", id: track.albumId }))}
+      >
         <Art path={track.thumb} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} fluid requestSize={PANEL_ART} />
       </button>
-      <PanelStrip />
       <TrackTitle track={track} />
       {/* Show lyrics opens the lyrics view itself: synced, with its tools. */}
       {lyrics && <LyricsCard lines={lyrics.lines} tint={colors?.shade ?? null} onOpen={() => fullWindow.open("lyrics")} />}
