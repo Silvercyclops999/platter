@@ -777,8 +777,9 @@ async fn following_waits_while_paused_and_skipping_past_stops_the_song() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(f.rec.runs.load(Ordering::SeqCst), 0, "nothing runs while paused");
     assert_eq!(f.t.status().queued, 2);
-    f.t.resume();
+    // Blocked before resuming, so 601 can't finish before the skip.
     *f.rec.behaviour.lock() = Behaviour::Block;
+    f.t.resume();
     until(&f.t, "601 running", |s| s.current.as_ref().is_some_and(|c| c.track_id == "601" && c.stage == Stage::Transcribing)).await;
     *f.rec.behaviour.lock() = words;
     // The listener skipped ahead: 601 stops and 602 leaves the queue.
