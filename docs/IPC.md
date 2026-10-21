@@ -2349,7 +2349,7 @@ holds three requests at once and closes after three shares that fail.
 | `smart_delete` | `{ id }` (a `smart:` id) | – |
 | `smart_plex_rules` | `{ id }` (a Plex smart playlist) | `SmartRules`, or `invalid` when its rules don't map to the editor |
 | `smart_prompt` | `{ prompt }` | `{ title, rules: SmartRules, picks: Track[] }` |
-| `smart_describe` | `{ text, tzOffsetMin? }` | `{ title, rules: SmartRules, unknown: string[], choices: { text, index, others: SmartRule[] }[], notes: string[] }` |
+| `smart_describe` | `{ text, tzOffsetMin? }` | `{ title, rules: SmartRules, unknown: string[], choices: { text, index, group?, others: SmartRule[] }[], notes: string[] }` |
 | `ai_status` | – | `{ provider: "none"\|"anthropic", model, hasKey, ready }` |
 | `ai_key_set` | `{ key: string \| null }` | the same, after saving or removing the key |
 | `hidden_list` | – | `HiddenItem[]`, newest first |
@@ -2365,15 +2365,23 @@ holds three requests at once and closes after three shares that fail.
 | `lastfm_sign_out` | – | `ScrobbleStatus` |
 | `listenbrainz_check` | – | `ScrobbleStatus` (asks ListenBrainz whose token it is) |
 
-`SmartRules = { matchAll, rules: { field, op, value, plexField? }[], limit?: { unit: "songs"|"hours", value }, sort, update: "live"|"daily"|"weekly", extra?: [string, string][] }`.
-Fields: `genre`, `style`, `mood` (is, isNot), `artist`, `album`, `version`
-(is, isNot, contains, notContains), `year`, `playCount`, `rating` (stars),
-`duration` (minutes) (is, isNot, gt, lt), `decade` (is, isNot, a year like
-1990), `addedAt`, `lastPlayed`, `playedHere`, `played` (inLast, notInLast,
-with `30d`, `2w`, `6m` or `1y`; or between, with two local days like
-`2026-06-01..2026-08-31`), `liked`, `explicit`, `unreleased`, `lossless`,
-`finished` (is, `"true"` or `"false"`), `era` (like `artist`), `skips` (like
-`playCount`) and `releaseType` (is, isNot, a release section key). `played`
+`SmartRules = { matchAll, rules: SmartRule[], groups?: { matchAll, rules: SmartRule[] }[], limit?: { unit: "songs"|"hours", value }, sort, update: "live"|"daily"|"weekly", extra?: [string, string][] }`
+with `SmartRule = { field, op, value, plexField? }`. Each group counts as one
+more rule and matches when all (or any) of its own rules do; groups go one
+level deep, up to 10, and 30 rules in all.
+Fields: `genre`, `style`, `mood` (is, isNot), `title`, `artist`, `album`,
+`version` (is, isNot, contains, notContains, beginsWith, endsWith), `year`,
+`playCount`, `rating` (stars), `duration` (minutes), `trackNumber`,
+`sampleRate` (kHz), `bitDepth` (is, isNot, gt, lt; or between, with two
+numbers like `1990..1999`, both included), `decade` (is, isNot, a year like
+1990), `addedAt`, `lastPlayed`, `lastSkipped`, `playedHere`, `played`
+(inLast, notInLast, with `30d`, `2w`, `6m` or `1y`; or between, with two
+local days like `2026-06-01..2026-08-31`), `liked`, `explicit`, `unreleased`,
+`lossless`, `finished` (is, `"true"` or `"false"`), `era` (like `artist`),
+`skips` (like `playCount`), `playlist` (is, isNot: the song is on the
+playlist with that name) and `releaseType` (is, isNot, a release section
+key). A song with no number for a field (no year, no file details) matches
+only isNot. `played`
 is any play in the listen history, `skips` counts skips there, and `finished`
 means every song on the album has been played. `tzOffsetMin` (minutes east of
 UTC) is the time zone between ranges are read in. Sorts: `none`, `random`,
@@ -2381,10 +2389,11 @@ UTC) is the time zone between ranges are read in. Sorts: `none`, `random`,
 `extra` keeps Plex options the editor doesn't show (one copy per song, other
 sorts) so saving a Plex playlist back doesn't lose them.
 
-`SmartPreview = { count, durationMs, tracks: Track[] (the first 50), plexGaps: string[] }`.
+`SmartPreview = { count, durationMs, tracks: Track[] (the first 50), plexGaps: string[], notes: string[] }`.
 The count is worked out on this computer from the library cache, with the
 picks first. `plexGaps` says why the rules need a Platter smart playlist;
-empty means Plex can hold them.
+empty means Plex can hold them. `notes` names rules that can't match as
+meant, such as a playlist rule naming a playlist that isn't there.
 
 `SmartSaveRequest = { id?, title, summary?, rules, picks?: string[], prompt?, platter?: bool }`
 and `SmartSaved = { id, platter, note? }`. A new rule set Plex can express is
@@ -2392,7 +2401,9 @@ created as a Plex smart playlist (see docs/PLEX-API.md "Smart playlists") and
 read back into the cache, so it shows with the other playlists. Rules Plex
 can't express (`playedHere`, `played`, `duration`, `releaseType`,
 `explicit`, `version`, `era`, `unreleased`, `lossless`, `skips`, `finished`,
-a between range, a limit in hours, a daily or weekly update), prompt picks, or
+`trackNumber`, `playlist`, `sampleRate`, `bitDepth`, a range of days, a
+number range that isn't whole numbers, a limit in hours, a daily or weekly
+update), prompt picks, or
 `platter: true` make a Platter smart playlist with a `smart:` id. When Plex
 refuses a rule set it's saved as a Platter one and `note` says so. Offline, a
 Plex one can't be made and the answer is a `network` error. Editing a Plex
@@ -2420,9 +2431,11 @@ artist, album, era and version names (case, accents and hyphens folded),
 then against fixed phrases for dates ("2016", "the 90s", "last summer"),
 plays ("haven't played lately", "never skipped"), length ("under 3
 minutes"), quality, release type and released or unreleased. Words that
-match nothing come back in `unknown`. When words could mean more than one
-rule, `choices` gives the other readings for the rule at `index`. The editor
-shows the rules before anything is saved.
+match nothing come back in `unknown`. Two of one field with "or" next to
+other rules ("rock or jazz, lossless") become a group that matches either.
+When words could mean more than one rule, `choices` gives the other readings
+for the rule at `index` (in `rules.groups[group]` when `group` is set). The
+editor shows the rules before anything is saved.
 
 `HiddenItem = { kind, id, title, subtitle?, thumb?, hiddenAt (unix s) }`.
 Hidden songs and artists (an artist hides every song whose album artist it

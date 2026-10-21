@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::error::{AppError, AppResult};
 
 pub const MAX_RULES: usize = 30;
+/// Groups a rule set can hold (one level deep).
+pub const MAX_GROUPS: usize = 10;
 pub const MAX_LIMIT_SONGS: u32 = 10_000;
 pub const MAX_LIMIT_HOURS: u32 = 500;
 
@@ -50,6 +52,18 @@ pub enum Field {
     Finished,
     /// Any play in the listen history (not just the newest).
     Played,
+    /// The song's own title.
+    Title,
+    /// Its number on the album.
+    TrackNumber,
+    /// The newest skip in the listen history.
+    LastSkipped,
+    /// On one of your playlists, by name.
+    Playlist,
+    /// kHz, from the file details.
+    SampleRate,
+    /// Bits, from the file details.
+    BitDepth,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -63,8 +77,11 @@ pub enum Op {
     Lt,
     InLast,
     NotInLast,
-    /// Between two local calendar days, both included ("2026-06-01..2026-08-31").
+    /// Between two local calendar days, both included ("2026-06-01..2026-08-31"),
+    /// or two numbers, both included ("1990..1999").
     Between,
+    BeginsWith,
+    EndsWith,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,18 +93,28 @@ pub enum Kind {
     Date,
     Bool,
     Choice,
+    /// A playlist's name.
+    List,
 }
 
 impl Field {
     pub fn kind(self) -> Kind {
         match self {
             Field::Genre | Field::Style | Field::Mood => Kind::Tag,
-            Field::Artist | Field::Album | Field::Version | Field::Era => Kind::Text,
-            Field::Year | Field::PlayCount | Field::Rating | Field::Duration | Field::Skips => Kind::Number,
+            Field::Artist | Field::Album | Field::Version | Field::Era | Field::Title => Kind::Text,
+            Field::Year
+            | Field::PlayCount
+            | Field::Rating
+            | Field::Duration
+            | Field::Skips
+            | Field::TrackNumber
+            | Field::SampleRate
+            | Field::BitDepth => Kind::Number,
             Field::Decade => Kind::Decade,
-            Field::AddedAt | Field::LastPlayed | Field::PlayedHere | Field::Played => Kind::Date,
+            Field::AddedAt | Field::LastPlayed | Field::PlayedHere | Field::Played | Field::LastSkipped => Kind::Date,
             Field::Liked | Field::Explicit | Field::Unreleased | Field::Lossless | Field::Finished => Kind::Bool,
             Field::ReleaseType => Kind::Choice,
+            Field::Playlist => Kind::List,
         }
     }
 
@@ -116,6 +143,12 @@ impl Field {
             Field::Skips => "Skips",
             Field::Finished => "Album finished",
             Field::Played => "Played",
+            Field::Title => "Title",
+            Field::TrackNumber => "Track number",
+            Field::LastSkipped => "Last skipped",
+            Field::Playlist => "Playlist",
+            Field::SampleRate => "Sample rate",
+            Field::BitDepth => "Bit depth",
         }
     }
 }
@@ -136,6 +169,10 @@ impl Field {
                 | Field::Skips
                 | Field::Finished
                 | Field::Played
+                | Field::TrackNumber
+                | Field::Playlist
+                | Field::SampleRate
+                | Field::BitDepth
         )
     }
 }
@@ -143,9 +180,9 @@ impl Field {
 impl Kind {
     pub fn ops(self) -> &'static [Op] {
         match self {
-            Kind::Tag | Kind::Decade | Kind::Choice => &[Op::Is, Op::IsNot],
-            Kind::Text => &[Op::Is, Op::IsNot, Op::Contains, Op::NotContains],
-            Kind::Number => &[Op::Is, Op::IsNot, Op::Gt, Op::Lt],
+            Kind::Tag | Kind::Decade | Kind::Choice | Kind::List => &[Op::Is, Op::IsNot],
+            Kind::Text => &[Op::Is, Op::IsNot, Op::Contains, Op::NotContains, Op::BeginsWith, Op::EndsWith],
+            Kind::Number => &[Op::Is, Op::IsNot, Op::Gt, Op::Lt, Op::Between],
             Kind::Date => &[Op::InLast, Op::NotInLast, Op::Between],
             Kind::Bool => &[Op::Is],
         }
@@ -162,6 +199,14 @@ pub struct Rule {
     /// change what it means (`track.genre` stays `track.genre`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plex_field: Option<String>,
+}
+
+/// Rules that count as one: all or any of them ("any of these moods").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleGroup {
+    pub match_all: bool,
+    pub rules: Vec<Rule>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -219,6 +264,9 @@ pub struct SmartRules {
     /// Every rule must match (otherwise any one).
     pub match_all: bool,
     pub rules: Vec<Rule>,
+    /// Groups, each counting as one more rule (one level deep).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<RuleGroup>,
     #[serde(default)]
     pub limit: Option<Limit>,
     #[serde(default)]
@@ -233,7 +281,15 @@ pub struct SmartRules {
 
 impl Default for SmartRules {
     fn default() -> Self {
-        Self { match_all: true, rules: Vec::new(), limit: None, sort: SortBy::None, update: Update::Live, extra: Vec::new() }
+        Self {
+            match_all: true,
+            rules: Vec::new(),
+            groups: Vec::new(),
+            limit: None,
+            sort: SortBy::None,
+            update: Update::Live,
+            extra: Vec::new(),
+        }
     }
 }
 
@@ -269,6 +325,13 @@ pub fn parse_range(v: &str) -> Option<(Day, Day)> {
     (a <= b).then_some((a, b))
 }
 
+/// "1990..1999": two numbers, the first not more than the second.
+pub fn parse_number_range(v: &str) -> Option<(f64, f64)> {
+    let (a, b) = v.trim().split_once("..")?;
+    let (a, b) = (a.trim().parse::<f64>().ok()?, b.trim().parse::<f64>().ok()?);
+    (a.is_finite() && b.is_finite() && a >= 0.0 && a <= b).then_some((a, b))
+}
+
 /// The range value for two days.
 pub fn range_value(a: Day, b: Day) -> String {
     format!("{:04}-{:02}-{:02}..{:04}-{:02}-{:02}", a.0, a.1, a.2, b.0, b.1, b.2)
@@ -291,7 +354,10 @@ impl Rule {
             return Err(bad("Rule values can be up to 200 characters."));
         }
         let ok = match kind {
-            Kind::Tag | Kind::Text => !v.is_empty(),
+            Kind::Tag | Kind::Text | Kind::List => !v.is_empty(),
+            Kind::Number if self.op == Op::Between => {
+                parse_number_range(v).is_some_and(|(_, b)| self.field != Field::Rating || b <= 5.0)
+            }
             Kind::Number => v.parse::<f64>().is_ok_and(|n| n >= 0.0 && (self.field != Field::Rating || n <= 5.0)),
             Kind::Decade => v.parse::<i32>().is_ok_and(|y| y % 10 == 0 && (1000..=2990).contains(&y)),
             Kind::Date if self.op == Op::Between => parse_range(v).is_some(),
@@ -307,11 +373,22 @@ impl Rule {
 }
 
 impl SmartRules {
+    /// Every rule, those in groups too.
+    pub fn all_rules(&self) -> impl Iterator<Item = &Rule> {
+        self.rules.iter().chain(self.groups.iter().flat_map(|g| g.rules.iter()))
+    }
+
     pub fn check(&self) -> AppResult<()> {
-        if self.rules.len() > MAX_RULES {
+        if self.all_rules().count() > MAX_RULES {
             return Err(bad(format!("A smart playlist can have up to {MAX_RULES} rules.")));
         }
-        for r in &self.rules {
+        if self.groups.len() > MAX_GROUPS {
+            return Err(bad(format!("A smart playlist can have up to {MAX_GROUPS} groups.")));
+        }
+        if self.groups.iter().any(|g| g.rules.is_empty()) {
+            return Err(bad("A group needs at least one rule."));
+        }
+        for r in self.all_rules() {
             r.check()?;
         }
         if let Some(l) = self.limit {
@@ -334,11 +411,13 @@ impl SmartRules {
                 out.push(s);
             }
         };
-        for r in &self.rules {
+        for r in self.all_rules() {
             if r.field.local_only() {
                 add(format!("{} isn't something Plex can filter on", r.field.label()));
-            } else if r.op == Op::Between {
+            } else if r.op == Op::Between && r.field.kind() == Kind::Date {
                 add("Plex can't filter between two dates".into());
+            } else if r.op == Op::Between && !super::plexuri::whole_range(r) {
+                add(format!("Plex filters {} between whole numbers only", r.field.label().to_lowercase()));
             }
         }
         if matches!(self.limit, Some(Limit { unit: LimitUnit::Hours, .. })) {

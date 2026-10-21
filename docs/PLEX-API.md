@@ -700,6 +700,11 @@ Not checked against the server, because they write: creating with
 and changing the rules with `PUT /playlists/{id}/items?uri=<the same>`, as
 other Plex clients do, and "match any" as `push=1&<a>&or=1&<b>&pop=1`. The
 app tests these with a fake server only. `limit=<n>` caps the songs.
+Groups of rules nest the same way, each its own `push=1 ... pop=1` joined by
+`and=1` or `or=1`, and a number range is a group of `>>=` one below the low
+end and `<<=` one above the high end (Plex leaves both ends out). Not yet
+checked against a server either. `track.title` takes the string operators
+and `track.lastSkippedAt` the date ones.
 
 ### 2026-10-14: can Plex carry listen along between accounts?
 

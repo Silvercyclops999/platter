@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::eval::Row;
-use super::rules::{Field, Limit, LimitUnit, Op, Rule, SmartRules, SortBy, Update};
+use super::rules::{Field, Limit, LimitUnit, Op, Rule, SmartRules, SortBy};
 use crate::error::{AppError, AppResult};
 use crate::plex::keychain::TokenStore;
 use crate::web::{Web, WebRequest};
@@ -251,7 +251,7 @@ fn to_rules(a: AiRules) -> (String, SmartRules) {
         .collect();
     let limit = (a.limit_songs > 0).then(|| Limit { unit: LimitUnit::Songs, value: (a.limit_songs as u32).min(super::rules::MAX_LIMIT_SONGS) });
     let title: String = a.title.trim().trim_matches('"').chars().take(100).collect();
-    (title, SmartRules { match_all: a.match_all, rules, limit, sort: sort_of(&a.sort), update: Update::Live, extra: Vec::new() })
+    (title, SmartRules { match_all: a.match_all, rules, limit, sort: sort_of(&a.sort), ..SmartRules::default() })
 }
 
 /// Turn a description into rules and picks.

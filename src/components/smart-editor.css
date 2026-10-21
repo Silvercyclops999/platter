@@ -40,6 +40,18 @@
 .smart-ed__rule .select, .smart-ed__rule .select__input { width: 100%; }
 .smart-ed__value { height: 36px; font-size: var(--font-size-sm); }
 .smart-ed__add { align-self: flex-start; }
+.smart-ed__adds { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+/* A group of rules: indented, with its own all or any. */
+.smart-ed__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-left: var(--space-4);
+  padding: var(--space-2) 0 var(--space-2) var(--space-4);
+  border-left: 2px solid var(--color-border);
+}
+.smart-ed__group > .smart-ed__match { justify-content: space-between; }
+.smart-ed__warn { color: var(--color-text-primary); }
 
 .smart-ed__options { display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: center; padding-top: var(--space-2); }
 .smart-ed__option { display: inline-flex; align-items: center; gap: var(--space-2); }

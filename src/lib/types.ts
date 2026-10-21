@@ -2716,9 +2716,16 @@ export type SmartField =
   | "lossless"
   | "skips"
   | "finished"
-  | "played";
-/** `between` takes two local days: "2026-06-01..2026-08-31". */
-export type SmartOp = "is" | "isNot" | "contains" | "notContains" | "gt" | "lt" | "inLast" | "notInLast" | "between";
+  | "played"
+  | "title"
+  | "trackNumber"
+  | "lastSkipped"
+  | "playlist"
+  /** kHz. */
+  | "sampleRate"
+  | "bitDepth";
+/** `between` takes two local days ("2026-06-01..2026-08-31") or two numbers ("1990..1999"). */
+export type SmartOp = "is" | "isNot" | "contains" | "notContains" | "beginsWith" | "endsWith" | "gt" | "lt" | "inLast" | "notInLast" | "between";
 
 export interface SmartRule {
   field: SmartField;
@@ -2731,9 +2738,17 @@ export interface SmartRule {
 export type SmartSort = "none" | "random" | "mostPlayed" | "leastPlayed" | "recentlyAdded" | "recentlyPlayed" | "rating";
 export type SmartUpdate = "live" | "daily" | "weekly";
 
+/** Rules that count as one: all or any of them. */
+export interface SmartRuleGroup {
+  matchAll: boolean;
+  rules: SmartRule[];
+}
+
 export interface SmartRules {
   matchAll: boolean;
   rules: SmartRule[];
+  /** Groups, each one more rule (one level deep). */
+  groups?: SmartRuleGroup[];
   limit?: { unit: "songs" | "hours"; value: number } | null;
   sort: SmartSort;
   update: SmartUpdate;
@@ -2768,6 +2783,8 @@ export interface SmartPreview {
   tracks: Track[];
   /** Why these rules make a Platter smart playlist (empty: Plex can hold them). */
   plexGaps: string[];
+  /** Rules that can't match as meant ("No playlist is called ..."). */
+  notes?: string[];
 }
 
 export interface SmartSaveRequest {
@@ -2801,7 +2818,8 @@ export interface Described {
   /** Words that matched nothing, as typed. */
   unknown: string[];
   /** Other readings for the rule at `index`. */
-  choices: { text: string; index: number; others: SmartRule[] }[];
+  /** `index` is into `rules.rules`, or into `rules.groups[group].rules` when `group` is set. */
+  choices: { text: string; index: number; group?: number; others: SmartRule[] }[];
   notes: string[];
 }
 
