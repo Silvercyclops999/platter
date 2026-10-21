@@ -508,6 +508,38 @@ async fn the_feeds_carry_looks_downloads_and_plays_between_devices() {
     let _ = stop.send(true);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_part_that_fails_to_apply_is_tried_again_and_the_rest_still_counts() {
+    let (a, b) = (dev("pc"), dev("phone"));
+    let (la, lb) = pair(&a, &b, "http://relay");
+    let ta = a._dir.path().join("themes");
+    crate::themes::import_text(&ta, LOOK).unwrap();
+    let play = crate::db::listens::ImportedPlay {
+        source: crate::db::listens::ImportSource::Lastfm,
+        source_id: "lf1".into(),
+        played_at: 1_700_000_000_000,
+        ms_played: None,
+        title: "Lullaby".into(),
+        artist: None,
+        album: None,
+        rating_key: None,
+    };
+    a.db.write(|c| crate::db::listens::insert_imported(c, &[play], 1)).unwrap();
+    feeds(&a, &ta, Vec::new(), a.groups.clone()).publish().unwrap();
+    round(&a, &la, &b, &lb).await;
+    // The phone's looks folder can't be made: a file is in the way.
+    let tb = b._dir.path().join("themes");
+    std::fs::write(&tb, b"not a folder").unwrap();
+    let fb = feeds(&b, &tb, Vec::new(), b.groups.clone());
+    let all = [store::LOOKS.name().to_string(), store::IMPORTED_PLAYS.name().to_string()];
+    let (applied, failed) = fb.apply(&all);
+    assert_eq!((applied.looks, applied.plays), (0, 1), "the plays still came in");
+    assert_eq!(failed, vec![store::LOOKS.name().to_string()]);
+    std::fs::remove_file(&tb).unwrap();
+    let (applied, failed) = fb.apply(&failed);
+    assert_eq!((applied.looks, failed.len()), (1, 0), "the look comes on the next try");
+}
+
 #[tokio::test]
 async fn a_feed_whose_group_is_off_neither_stores_nor_applies() {
     let a = dev("pc");
@@ -526,6 +558,6 @@ async fn a_feed_whose_group_is_off_neither_stores_nor_applies() {
     let e = b.store.entries(&[store::LOOKS.name()]).unwrap();
     a.store.merge(&e, &[store::LOOKS.name()]).unwrap();
     std::fs::remove_dir_all(&themes).unwrap();
-    assert_eq!(f.apply(&[store::LOOKS.name().to_string()]).unwrap(), Applied::default());
+    assert_eq!(f.apply(&[store::LOOKS.name().to_string()]), (Applied::default(), Vec::new()));
     assert!(!themes.exists());
 }

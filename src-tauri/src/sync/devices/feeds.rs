@@ -119,25 +119,43 @@ impl Feeds {
 
     /// Apply what other devices brought, for the namespaces that changed
     /// (blocking).
-    pub fn apply(&self, namespaces: &[String]) -> AppResult<Applied> {
+    /// Apply other devices' changes in `namespaces`. Each part goes on its
+    /// own: what one applied is reported even when another failed, and the
+    /// namespaces that failed come back to be tried again.
+    pub fn apply(&self, namespaces: &[String]) -> (Applied, Vec<String>) {
         let g = (self.groups)();
         let has = |ns: &str| namespaces.iter().any(|n| n == ns);
         let mut out = Applied::default();
+        let mut failed = Vec::new();
         if g.looks
             && has(LOOKS.name())
             && let Some(dir) = &self.themes
         {
-            out.looks = looks::apply(&self.store, dir)?;
+            match looks::apply(&self.store, dir) {
+                Ok(n) => out.looks = n,
+                Err(e) => {
+                    tracing::warn!("device sync: looks: {e}");
+                    failed.push(LOOKS.name().to_string());
+                }
+            }
         }
         if g.plays && has(IMPORTED_PLAYS.name()) {
-            out.plays = imported_plays::apply(&self.store, self.store.now() as i64)?;
-            // Share the union back, so a history split across devices ends
-            // whole everywhere.
-            self.marks.lock().plays = None;
+            match imported_plays::apply(&self.store, self.store.now() as i64) {
+                Ok(n) => {
+                    out.plays = n;
+                    // Share the union back, so a history split across devices
+                    // ends whole everywhere.
+                    self.marks.lock().plays = None;
+                }
+                Err(e) => {
+                    tracing::warn!("device sync: plays: {e}");
+                    failed.push(IMPORTED_PLAYS.name().to_string());
+                }
+            }
         }
         // Download intents are only read (as suggestions), never applied.
         let _ = has(DOWNLOAD_INTENT.name());
-        Ok(out)
+        (out, failed)
     }
 
     async fn blocking<R: Send + 'static>(self: &Arc<Self>, f: impl FnOnce(&Feeds) -> AppResult<R> + Send + 'static) -> Option<R> {
@@ -187,11 +205,21 @@ impl Feeds {
                 _ = async { if let Some(t) = due { tokio::time::sleep_until(t).await } else { std::future::pending::<()>().await } } => {
                     due = None;
                     let ns = std::mem::take(&mut pending);
-                    if let Some(applied) = self.blocking(move |f| f.apply(&ns)).await {
+                    if let Some((applied, failed)) = self.blocking(move |f| Ok(f.apply(&ns))).await {
                         if applied != Applied::default()
                             && let Some(cb) = self.on_applied.lock().clone()
                         {
                             cb(&applied);
+                        }
+                        // Tried again on the next check, not lost until
+                        // another device changes the same thing.
+                        if !failed.is_empty() {
+                            for n in failed {
+                                if !pending.contains(&n) {
+                                    pending.push(n);
+                                }
+                            }
+                            due = Some(tokio::time::Instant::now() + self.timing.every);
                         }
                         self.blocking(|f| f.publish()).await;
                     }
