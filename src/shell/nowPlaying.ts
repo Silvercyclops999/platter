@@ -156,6 +156,9 @@ export function contextRoute(ctx: QueueContextInfo | null | undefined): Route | 
       return { name: "artist", id: ctx.id };
     case "liked":
       return { name: "liked" };
+    case "tracks":
+      // Played from Your Library > Songs.
+      return ctx.id === "songs" ? { name: "songs" } : null;
     default:
       return null;
   }
