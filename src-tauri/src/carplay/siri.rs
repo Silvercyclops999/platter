@@ -211,6 +211,42 @@ fn playlist(p: &crate::model::Playlist, shuffle: bool) -> Picked {
     }
 }
 
+/// What to look for among music you don't have when the library has nothing
+/// for a song Siri asked for ("play Middle Child on Platter"): the name,
+/// and the artist when Siri heard one. None for albums, artists, playlists
+/// and the library's own names.
+pub fn catalogue_query(ask: &SiriAsk) -> Option<String> {
+    if !matches!(ask.kind, SiriKind::Song | SiriKind::Unknown) {
+        return None;
+    }
+    let name = ask.name.as_deref().map(str::trim).filter(|n| !n.is_empty())?;
+    if is_liked(name) || is_everything(name) {
+        return None;
+    }
+    Some(match ask.artist.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+        Some(a) => format!("{name} {a}"),
+        None => name.to_string(),
+    })
+}
+
+/// The first catalogue song that is the one asked for (it shares a word
+/// with the name, and is by the artist when Siri heard one), as a tap.
+pub fn tap_for(ask: &SiriAsk, songs: &[crate::discover::CatSong]) -> Option<crate::lidarr::tap::TapInput> {
+    let name = ask.name.as_deref()?;
+    let by = ask.artist.as_deref().map(words).filter(|a| !a.is_empty());
+    let s = songs.iter().find(|s| shares_a_word(&s.title, name) && by.as_ref().is_none_or(|a| words(&s.artist).contains(a.as_str())))?;
+    Some(crate::lidarr::tap::TapInput {
+        title: s.title.clone(),
+        artist: s.artist.clone(),
+        artist_mbid: s.artist_mbid.clone(),
+        album: s.album.clone(),
+        release_group_id: s.release_group_id.clone(),
+        duration_ms: s.duration_ms,
+        thumb: s.thumb.clone(),
+        ..Default::default()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -218,6 +254,38 @@ mod tests {
     use super::*;
     use crate::db::fake::{self, FakeLibrary, FakeSource};
     use crate::db::source::LibrarySource;
+
+    fn asked(name: &str, artist: Option<&str>, kind: SiriKind) -> SiriAsk {
+        SiriAsk { name: Some(name.into()), artist: artist.map(Into::into), kind, ..Default::default() }
+    }
+
+    fn cat(title: &str, artist: &str) -> crate::discover::CatSong {
+        crate::discover::CatSong {
+            recording_id: format!("r-{title}"),
+            title: title.into(),
+            artist: artist.into(),
+            artist_mbid: None,
+            album: Some(format!("{title} album")),
+            release_group_id: Some(format!("rg-{title}")),
+            duration_ms: Some(200_000),
+            thumb: None,
+        }
+    }
+
+    #[test]
+    fn a_song_the_library_lacks_is_looked_for_and_tapped() {
+        assert_eq!(catalogue_query(&asked("Middle Child", None, SiriKind::Song)).as_deref(), Some("Middle Child"));
+        assert_eq!(catalogue_query(&asked("Middle Child", Some("J. Cole"), SiriKind::Unknown)).as_deref(), Some("Middle Child J. Cole"));
+        assert_eq!(catalogue_query(&asked("Revenge", None, SiriKind::Album)), None, "albums open their page instead");
+        assert_eq!(catalogue_query(&asked("my liked songs", None, SiriKind::Song)), None);
+        let songs = [cat("Childhood", "Someone Else"), cat("Middle Child", "J. Cole")];
+        let t = tap_for(&asked("Middle Child", Some("J. Cole"), SiriKind::Song), &songs).unwrap();
+        assert_eq!((t.title.as_str(), t.artist.as_str(), t.release_group_id.as_deref()), ("Middle Child", "J. Cole", Some("rg-Middle Child")));
+        // Without an artist the first match wins; a wrong artist or name finds nothing.
+        assert_eq!(tap_for(&asked("Middle Child", None, SiriKind::Song), &songs[1..]).unwrap().artist, "J. Cole");
+        assert!(tap_for(&asked("Middle Child", Some("Drake"), SiriKind::Song), &songs).is_none());
+        assert!(tap_for(&asked("Wet Dreamz", None, SiriKind::Song), &songs).is_none());
+    }
 
     async fn library() -> (DbHandle, tempfile::TempDir) {
         let mut lib = FakeLibrary { sections: fake::generated(0, 0, 0).sections, ..Default::default() };

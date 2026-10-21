@@ -135,6 +135,10 @@ fn play(app: &AppHandle<Wry>, ask: SiriAsk) -> bool {
     let p = match super::siri::resolve(&db, &ask, || db.read(super::shuffle_library_context)) {
         Ok(Some(p)) => p,
         Ok(None) => {
+            // A song you don't have: got through Lidarr and played when it's here.
+            if let Some(q) = super::siri::catalogue_query(&ask) {
+                return tap_catalogue(app, &ask, &q);
+            }
             tracing::info!("Siri: nothing in the library fits");
             return false;
         }
@@ -149,6 +153,42 @@ fn play(app: &AppHandle<Wry>, ask: SiriAsk) -> bool {
         }
     });
     true
+}
+
+/// Looks the song up among music you don't have and taps it (Lidarr gets it
+/// and it plays when it's here). False when nothing fits or a tap can't run.
+fn tap_catalogue(app: &AppHandle<Wry>, ask: &SiriAsk, query: &str) -> bool {
+    let (Some(discover), Some(taps)) = (app.try_state::<crate::discover::Discover>(), app.try_state::<crate::lidarr::tap::Taps>()) else {
+        return false;
+    };
+    let (discover, taps) = (discover.inner().clone(), taps.inner().clone());
+    let ask = ask.clone();
+    let query = query.to_string();
+    // Siri waits a few seconds for an answer.
+    let run = async move {
+        let part = discover.search_part(&query, "songs").await?;
+        let Some(input) = super::siri::tap_for(&ask, &part.songs) else { return Ok(false) };
+        let out = taps.tap(input).await?;
+        Ok::<bool, crate::error::AppError>(out.tap.is_some())
+    };
+    match tauri::async_runtime::block_on(async { tokio::time::timeout(std::time::Duration::from_secs(8), run).await }) {
+        Ok(Ok(true)) => {
+            tracing::info!("Siri: getting a song you don't have");
+            true
+        }
+        Ok(Ok(false)) => {
+            tracing::info!("Siri: nothing in the library or the catalogue fits");
+            false
+        }
+        Ok(Err(e)) => {
+            tracing::warn!("Siri: the song couldn't be got: {e}");
+            false
+        }
+        Err(_) => {
+            tracing::warn!("Siri: looking the song up took too long");
+            false
+        }
+    }
 }
 
 /// The handler object, made once.

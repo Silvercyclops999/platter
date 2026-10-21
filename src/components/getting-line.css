@@ -1,0 +1,21 @@
+/* A tapped song on its way: a thin line in place of the seek bar that fills
+   as it comes, with the step in words beside it. */
+.getting-line { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 20px; font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.getting-line__label { flex: none; min-width: 120px; text-align: right; font-variant-numeric: tabular-nums; }
+.getting-line__track { position: relative; flex: 1; height: 2px; border-radius: 1px; background: var(--color-border); overflow: hidden; }
+.getting-line__fill { position: absolute; inset: 0; background: var(--color-accent); transform-origin: left center; transition: transform var(--motion-long) var(--motion-easing); }
+.getting-line:not(.getting-line--stuck) .getting-line__fill { animation: getting-breathe 1.6s ease-in-out infinite; }
+.getting-line--stuck .getting-line__fill { background: var(--color-text-muted); }
+.getting-line__why { flex: 0 1 auto; max-width: 40%; color: var(--color-text-muted); }
+.getting-line__close { flex: none; padding: 0 var(--space-2); border-radius: var(--radius-pill); color: var(--color-text-primary); font-size: var(--font-size-xs); }
+.getting-line__close:hover { background: var(--color-state-hover); }
+@keyframes getting-breathe { 50% { opacity: 0.6; } }
+@media (prefers-reduced-motion: reduce) {
+  .getting-line__fill { animation: none !important; }
+}
+/* On the phone: under the mini player and in place of now playing's seek bar. */
+.ph-mini .getting-line { position: absolute; left: var(--space-3); right: var(--space-3); bottom: 2px; min-height: 0; }
+.ph-mini .getting-line__label, .ph-mini .getting-line__why, .ph-mini .getting-line__close { display: none; }
+.ph-np .getting-line__label { min-width: 0; text-align: left; }
+.ph-np__getting { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-3); }
+.ph-np__getting-title { font-size: var(--font-size-sm); color: var(--color-text-primary); }

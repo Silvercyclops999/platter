@@ -51,7 +51,8 @@ import { HifiMark } from "./HifiMark";
 import { SignalBadge, SignalPanel } from "./SignalPath";
 import { openSignal } from "../stores/signalPath";
 import { AudioLines } from "lucide-react";
-import { dismissTap, followTaps, getting, gettingFill, gettingLabel, useTaps } from "../stores/taps";
+import { followTaps, getting, useTaps } from "../stores/taps";
+import { GettingLine } from "../components/GettingLine";
 import type { Tap } from "../lib/types";
 
 /** Seek bar keys: arrows move 5 s, Page Up/Down 25 s. */
@@ -435,26 +436,6 @@ export function SuggestionButtons() {
  * that fills (Searching, Downloading 62%, Ready in a moment), and why when
  * it's waiting or didn't come.
  */
-export function GettingLine({ tap }: { tap: Tap }) {
-  const label = gettingLabel(tap.phase, tap.progress);
-  const fill = gettingFill(tap.phase, tap.progress);
-  const stuck = tap.phase === "waiting" || tap.phase === "failed";
-  return (
-    <div className={`getting-line ${stuck ? "getting-line--stuck" : ""}`} role="status" aria-live="polite" aria-label={`Getting ${tap.title}: ${label}`}>
-      <span className="getting-line__label">{label}</span>
-      <span className="getting-line__track" aria-hidden="true">
-        <span className="getting-line__fill" style={{ transform: `scaleX(${fill})` }} />
-      </span>
-      {tap.message && <span className="getting-line__why truncate" title={tap.message}>{tap.message}</span>}
-      {stuck && (
-        <button type="button" className="getting-line__close" onClick={dismissTap}>
-          OK
-        </button>
-      )}
-    </div>
-  );
-}
-
 /** The tapped song in the bar while it comes; what's still playing meanwhile under it. */
 function GettingNow({ tap, playing }: { tap: Tap; playing: string | null }) {
   return (
