@@ -46,7 +46,7 @@ function OnThePlatter({ p }: { p: RecordProgress }) {
         <span className="ph-platter__eyebrow">{isContext ? "Now spinning" : "On the platter"}</span>
         <h2 className="ph-platter__title" id="ph-platter-title">
           <button type="button" onClick={open}>
-            {p.album.title}
+            <span className="ph-platter__name">{p.album.title}</span>
           </button>
         </h2>
         <span className="ph-platter__artist">
