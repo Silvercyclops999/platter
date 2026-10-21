@@ -29,7 +29,8 @@ export function useMissingReleases(artistId: string, artist: string | undefined)
   const away = useSettings((s) => s.settings?.lidarrAwayUrl);
   const [missing, setMissing] = useState<LidarrMissing | null>(null);
   const load = useCallback(() => {
-    if (!artist || !on || !(home || away)) {
+    // The core says whether it's shown (Lidarr reachable directly or through the home side).
+    if (!artist || !on) {
       setMissing(null);
       return () => {};
     }
@@ -47,18 +48,21 @@ export function useMissingReleases(artistId: string, artist: string | undefined)
 }
 
 /**
- * True when Request should show: Lidarr is set up with a key and its last
- * setup check passed. Every request still runs the check again first.
+ * True when Request should show: Lidarr is reachable (its own addresses
+ * with a key, or through a home-side computer or the Bridge) and its last
+ * setup check passed. The core decides; every request still runs the check
+ * again first. Asked again when an address changes or a Bridge comes or goes.
  */
 export function useLidarrReady(): boolean {
   const home = useSettings((s) => s.settings?.lidarrUrl);
   const away = useSettings((s) => s.settings?.lidarrAwayUrl);
   const [ready, setReady] = useState(false);
+  const [version, setVersion] = useState(0);
   useEffect(() => {
-    if (!(home || away)) {
-      setReady(false);
-      return;
-    }
+    const un = backend.listen("bridge://changed", () => setVersion((v) => v + 1));
+    return () => void un.then((f) => f());
+  }, []);
+  useEffect(() => {
     let alive = true;
     backend.lidarrStatus().then(
       (s) => alive && setReady(s.ready),
@@ -67,6 +71,6 @@ export function useLidarrReady(): boolean {
     return () => {
       alive = false;
     };
-  }, [home, away]);
+  }, [home, away, version]);
   return ready;
 }

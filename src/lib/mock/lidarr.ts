@@ -159,6 +159,7 @@ export class MockLidarr {
     this.hasKey = demo === "ready" || demo === "offline";
     this.lastPassed = this.hasKey;
     this.typedOnce = false;
+    this.homeSide = false;
     this.moved = null;
     this.headers = [];
     this.confirmed.clear();
@@ -170,8 +171,11 @@ export class MockLidarr {
     this.typedOnce = v;
   }
 
+  /** Test hook: a computer at home or a Bridge answers Lidarr for this device. */
+  homeSide = false;
+
   private setUp(s: Settings) {
-    return (!!s.lidarrUrl.trim() || !!s.lidarrAwayUrl.trim()) && this.hasKey;
+    return ((!!s.lidarrUrl.trim() || !!s.lidarrAwayUrl.trim()) && this.hasKey) || this.homeSide;
   }
 
   missing(s: Settings, _artistId: string): LidarrMissing {
@@ -323,6 +327,7 @@ export class MockLidarr {
       headerNames: this.headers.map(([n]) => n),
       unencrypted: [s.lidarrUrl, s.lidarrAwayUrl].filter((u) => u && unencrypted(u)),
       ready: this.setUp(s) && this.lastPassed && !this.moved,
+      homeSide: this.homeSide,
       moved: this.hasKey ? this.moved : null,
     };
   }

@@ -98,6 +98,8 @@ pub struct LibraryAlbum {
     /// Other names it goes by (its ARCHIVE_* group), checked as well.
     pub also: Vec<String>,
     pub unreleased: bool,
+    /// The MusicBrainz release group Plex matched it to, when it did.
+    pub mbid: Option<String>,
 }
 
 /// Why a release group can't be requested.
@@ -274,15 +276,30 @@ fn title_forms(t: &str) -> [String; 3] {
     [fold_album(t), title_key(t), base_title(t)]
 }
 
+/// The title after a "Presents ...:" style lead-in (the part after the last
+/// colon), folded; empty when there's no colon or nothing after it.
+fn colon_tail(t: &str) -> String {
+    match t.rsplit_once(':') {
+        Some((head, tail)) if !head.trim().is_empty() => fold_album(tail),
+        _ => String::new(),
+    }
+}
+
 /// The library album a title clashes with.
 pub fn clash<'a>(title: &str, library: &'a [LibraryAlbum]) -> Option<&'a LibraryAlbum> {
     let want = title_forms(title);
     if want.iter().all(String::is_empty) {
         return None;
     }
+    let want_tail = colon_tail(title);
     let hit = |t: &str| {
         let have = title_forms(t);
-        want.iter().zip(have.iter()).any(|(a, b)| !a.is_empty() && a == b)
+        if want.iter().zip(have.iter()).any(|(a, b)| !a.is_empty() && a == b) {
+            return true;
+        }
+        // "Kanye West Presents Good Music: Cruel Summer" is "Cruel Summer".
+        let have_tail = colon_tail(t);
+        (!want_tail.is_empty() && (want_tail == have[0] || want_tail == have_tail)) || (!have_tail.is_empty() && have_tail == want[0])
     };
     // An unreleased match is the one worth naming.
     let mut found: Option<&LibraryAlbum> = None;
@@ -320,6 +337,10 @@ pub fn vet(g: &Group, want: &Want, library: &[LibraryAlbum], allow_secondary: bo
     }
     if !allow_secondary && !g.secondary.is_empty() {
         return Err(Refusal::Secondary { types: g.secondary.clone() });
+    }
+    // The same release group Plex matched an album to is that album, whatever it's called.
+    if let Some(a) = library.iter().find(|a| a.mbid.as_deref().is_some_and(|m| m.eq_ignore_ascii_case(&g.id))) {
+        return Err(Refusal::TitleClash { title: a.title.clone(), unreleased: a.unreleased });
     }
     if let Some(a) = clash(&g.title, library) {
         return Err(Refusal::TitleClash { title: a.title.clone(), unreleased: a.unreleased });
@@ -462,7 +483,7 @@ pub fn library_albums(c: &Connection, artist_id: Option<&str>, artist_name: &str
     use crate::db::release::{album_unreleased, track_unreleased};
     let want = fold_artist(artist_name);
     let mut st = c.prepare(
-        "SELECT al.id, al.title, al.artist_id, al.artist_title, al.format, al.subformats, at.version, at.grp, al.matched, al.studio, mc.found
+        "SELECT al.id, al.title, al.artist_id, al.artist_title, al.format, al.subformats, at.version, at.grp, al.matched, al.studio, mc.found, al.mbid
          FROM albums al
          LEFT JOIN album_tags at ON at.album_id = al.id
          LEFT JOIN album_mb_check mc ON mc.album_id = al.id",
@@ -477,12 +498,13 @@ pub fn library_albums(c: &Connection, artist_id: Option<&str>, artist_name: &str
             r.get::<_, Option<bool>>(8)?,
             r.get::<_, Option<String>>(9)?,
             r.get::<_, Option<bool>>(10)?,
+            r.get::<_, Option<String>>(11)?,
         ))
     })?;
     let mut songs = c.prepare_cached("SELECT t.id, ft.version FROM tracks t LEFT JOIN file_tags ft ON ft.part_key = t.part_key WHERE t.album_id = ?1")?;
     let mut out = Vec::new();
     for row in rows {
-        let ((id, title, aid, artist), format, subs, version, grp, matched, studio, mb) = row?;
+        let ((id, title, aid, artist), format, subs, version, grp, matched, studio, mb, mbid) = row?;
         let ours = artist_id.is_some_and(|a| a == aid) || (!want.is_empty() && fold_artist(&artist) == want);
         if !ours {
             continue;
@@ -501,7 +523,8 @@ pub fn library_albums(c: &Connection, artist_id: Option<&str>, artist_name: &str
                 }
             }
         }
-        out.push(LibraryAlbum { id, title, also: grp.into_iter().filter(|g| !g.trim().is_empty()).collect(), unreleased });
+        let mbid = mbid.map(|m| m.trim().to_ascii_lowercase()).filter(|m| is_mbid(m));
+        out.push(LibraryAlbum { id, title, also: grp.into_iter().filter(|g| !g.trim().is_empty()).collect(), unreleased, mbid });
     }
     Ok(out)
 }

@@ -337,7 +337,7 @@ function ReleaseBlock({ album, line, headed }: { album: Album; line: string; hea
               {album.title}
             </button>
           </ReleaseTitle>
-          <p className="disco-release__meta">{line}</p>
+          <p className="disco-release__meta">{!album.trackCount && tracks?.length ? releaseLine({ album: { ...album, trackCount: tracks.length } } as DiscoEntry) : line}</p>
           <div className="disco-release__actions">
             <IconButton
               label={a.playing ? `Pause ${album.title}` : `Play ${album.title}`}
