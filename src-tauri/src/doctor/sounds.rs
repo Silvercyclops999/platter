@@ -82,6 +82,8 @@ pub fn findings(c: &Connection) -> AppResult<Vec<Finding>> {
                 recording_mbid: rec.recording_mbid.clone(),
                 score: rec.score,
             }),
+            set: None,
+            album_note: None,
         });
     }
     Ok(out)

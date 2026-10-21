@@ -745,7 +745,9 @@ playing carries on as the same play. Now-playing outputs that follow
 
 `DoctorReport = { on, findings: DoctorFinding[], ignored: DoctorFinding[], count, running, checkedAt?, tagsRead, tagsTotal }`
 
-`DoctorFinding = { id, kind, artistId, artist, albumId, album, thumb?, title, text, evidence: string[], fix, tracks: string[], others: { id, title, thumb? }[], table: { trackId, title, album?, albumArtist?, year? }[], suggest? }`
+`DoctorFinding = { id, kind, artistId, artist, albumId, album, thumb?, title, text, evidence: string[], fix, tracks: string[], others: { id, title, thumb?, note? }[], table: { trackId, title, album?, albumArtist?, year? }[], suggest?, set?, albumNote? }`
+
+`DoctorTagFix = { album?, albumArtist?, year? }`: the album tags the fix sets on every song. Only the fields that need it are set. The page shows each file's change, lets the user change the values and untick files, and saves through `tagedit_save`, so the write is logged and can be undone like any tag edit. `note` on a split album's parts and `albumNote` on the finding say how many songs each part has and its first song.
 
 `DoctorSuggestedTags = { trackId, title, artist, album, newTitle, newArtist, newAlbum?, recordingMbid, score }` (score 0 to 100)
 
@@ -769,10 +771,12 @@ never `unmatched`.
 
 `fix` names the app's own flow: `cover` (Change cover), `match` (Fix match),
 `mergeAlbums` (`plex_edit_merge_albums` after a confirm), `openAlbum` or
-`tags` (each song's tags in `table`; they are changed in a tagger) or
+`tags` (each song's tags in `table`, and the values in `set` written to
+every song through the tag editor once the user confirms) or
 `suggestedTags` (the file's tags next to the ones in `suggest`). Low
-quality findings also offer a Lidarr request when Lidarr is ready. Nothing
-here writes to Plex or to files.
+quality findings also offer a Lidarr request when Lidarr is ready. The
+doctor commands never write to Plex or to files themselves; a saved tag fix
+asks for a new check.
 
 The check runs in the background after a sync, after file tags are read and
 after marks change, once the library has been quiet for a short while. It
@@ -3076,7 +3080,7 @@ The library filed like record crates: by label, producer, studio, era (decade), 
 `CratePage = { kind, key, name, artists, fromYear?, toYear?, albums: { album: Album, onMap }[], years: number[], trackIds: string[] }`.
 `AlbumShelf = { kind, key, name, count, albums: Album[] }`.
 
-Where albums go. Label: the label the album's sleeve notes last put together (kept in `album_facts`), else the label most of its files' `LABEL` tags name, else Plex's label; "A / B" and "A; B" name two labels, and "[no label]" or "self-released" none. Producer: everyone credited as producer in the files' credit tags (`tag_credits`) or by sleeve notes (`sleeve_credits`), counted once per album however many songs credit them. Studio: the studios sleeve notes found (MusicBrainz places), kept in `album_facts`. Era and year: the album year (`key` is the decade's first year, "1990", named "1990s"). Genre: Plex's album genres. Nothing is looked up for crates; online facts count once a sleeve notes lookup cached them, and albums with a cached MusicBrainz or Discogs release get their label and studios kept the first time crates are asked for (200 a call).
+Where albums go. Label: the label the album's sleeve notes last put together (kept in `album_facts`), else the label most of its files' `LABEL` tags name, else Plex's label; "A / B" and "A; B" name two labels, and "[no label]" or "self-released" none. Producer: everyone credited as producer in the files' credit tags (`tag_credits`) or by sleeve notes (`sleeve_credits`), counted once per album however many songs credit them. Studio: the studios sleeve notes found (MusicBrainz places), kept in `album_facts`. Era and year: the album year (`key` is the decade's first year, "1990", named "1990s"). Genre: Plex's album genres, with names that differ only by case, spaces, hyphens or dots ("Hip-Hop", "Hip Hop") as one crate. Nothing is looked up for crates; online facts count once a sleeve notes lookup cached them, and albums with a cached MusicBrainz or Discogs release get their label and studios kept the first time crates are asked for (200 a call).
 
 Names fold so spellings share a crate: case, spacing and punctuation don't count, nor a leading "The", nor endings such as "Records", "Recordings", "Music", "Ltd" (labels) or "Studios", "Recording" (studios). `key` is the folded name, the person's folded name for producers. A crate shows the spelling used most; on a tie, one not all in capitals, then the shortest. A crate holds two albums or more, so crates of one never show. Hidden editions and other servers' copies leave crates, as they leave the library.
 

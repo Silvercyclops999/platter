@@ -5,7 +5,7 @@
  * Ignore, and "Why?" with what it's based on.
  */
 import { RefreshCw, Stethoscope } from "lucide-react";
-import { Suspense, lazy, useCallback, useEffect, useId, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Art } from "../components/Art";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
@@ -22,6 +22,7 @@ import { toast } from "../stores/toasts";
 import { useLidarrReady } from "./lidarrShared";
 import "./doctor.css";
 
+const DoctorTagFix = lazy(() => import("./DoctorTagFix").then((m) => ({ default: m.DoctorTagFix })));
 const LidarrRequestDialog = lazy(() => import("./LidarrRequest").then((m) => ({ default: m.LidarrRequestDialog })));
 
 /** Section headings, in page order. */
@@ -56,7 +57,7 @@ export function fixLabel(f: DoctorFinding): { label: string; edit: boolean } {
     case "mergeAlbums":
       return { label: f.others.length > 1 ? "Merge albums" : "Merge into one", edit: true };
     case "tags":
-      return { label: "See the tags", edit: false };
+      return { label: "Fix the tags", edit: false };
     case "suggestedTags":
       return { label: "See suggested tags", edit: false };
     case "openAlbum":
@@ -94,6 +95,7 @@ export function DoctorPage() {
   const [kind, setKind] = useState<DoctorKind | null>(null);
   const [showIgnored, setShowIgnored] = useState(false);
   const [merging, setMerging] = useState<DoctorFinding | null>(null);
+  const [tagging, setTagging] = useState<DoctorFinding | null>(null);
   const [asking, setAsking] = useState<LidarrRequestInput | null>(null);
   const lidarr = useLidarrReady();
 
@@ -105,11 +107,18 @@ export function DoctorPage() {
   // A filter for a kind that has nothing left shows everything again.
   const active = kind && counts.get(kind) ? kind : null;
 
+  // Just ignored on this visit: a slim line with Undo stays where each was,
+  // so the next finding doesn't slide under the pointer or a toast.
+  const [gone, setGone] = useState<Gone[]>([]);
+
   const ignore = async (f: DoctorFinding, on: boolean) => {
+    const list = shownRef.current.filter((x) => x.kind === f.kind);
+    const at = list.findIndex((x) => x.id === f.id);
     try {
       await backend.doctorIgnore(f.id, f.kind, f.title, on);
+      if (on) setGone((g) => [...g.filter((x) => x.f.id !== f.id), { f, after: at > 0 ? list[at - 1].id : null }]);
+      else setGone((g) => g.filter((x) => x.f.id !== f.id));
       reload();
-      if (on) toast.info("Ignored. It stays out of the count on every device");
     } catch (e) {
       toast.error(errText(e) || (on ? `Couldn't ignore ${f.title}. Try again` : `Couldn't bring back ${f.title}. Try again`));
     }
@@ -139,6 +148,9 @@ export function DoctorPage() {
 
   const findings = report?.findings ?? [];
   const shown = active ? findings.filter((f) => f.kind === active) : findings;
+  const shownRef = useRef(shown);
+  shownRef.current = shown;
+  const kinds = KIND_ORDER.filter((k) => shown.some((f) => f.kind === k) || gone.some((g) => g.f.kind === k && (!active || active === k)));
 
   return (
     <div className="page-pad doctor" data-testid="doctor-page">
@@ -196,13 +208,13 @@ export function DoctorPage() {
               ))}
             </ChipRow>
           )}
-          {findings.length === 0 && (
+          {findings.length === 0 && gone.length === 0 && (
             <p className="doctor__empty" role="status">
               Nothing to fix. The library doctor checks again after each sync and when new tags are read.
             </p>
           )}
-          {KIND_ORDER.filter((k) => shown.some((f) => f.kind === k)).map((k) => (
-            <KindSection key={k} kind={k} items={shown.filter((f) => f.kind === k)} lidarr={lidarr} onIgnore={ignore} onMerge={setMerging} onBetterCopy={betterCopy} />
+          {kinds.map((k) => (
+            <KindSection key={k} kind={k} items={withGone(shown.filter((f) => f.kind === k), gone.filter((g) => g.f.kind === k))} lidarr={lidarr} onIgnore={ignore} onMerge={setMerging} onTags={setTagging} onBetterCopy={betterCopy} />
           ))}
           {report.ignored.length > 0 && (
             <section className="doctor__ignored" aria-label="Ignored">
@@ -233,6 +245,11 @@ export function DoctorPage() {
       )}
 
       {merging && <MergeDialog finding={merging} onClose={() => setMerging(null)} />}
+      {tagging && (
+        <Suspense fallback={null}>
+          <DoctorTagFix finding={tagging} onClose={() => setTagging(null)} />
+        </Suspense>
+      )}
       {asking && (
         <Suspense fallback={null}>
           <LidarrRequestDialog open input={asking} onClose={() => setAsking(null)} onDone={() => setAsking(null)} />
@@ -242,33 +259,76 @@ export function DoctorPage() {
   );
 }
 
+/** A finding ignored on this visit, and the one it came after. */
+interface Gone {
+  f: DoctorFinding;
+  after: string | null;
+}
+
+type Row = { f: DoctorFinding; gone: boolean };
+
+/** The findings with the ones just ignored back in their places. */
+export function withGone(items: DoctorFinding[], gone: Gone[]): Row[] {
+  const rows: Row[] = items.map((f) => ({ f, gone: false }));
+  for (const g of gone) {
+    if (items.some((f) => f.id === g.f.id)) continue;
+    const i = g.after === null ? -1 : rows.findIndex((r) => r.f.id === g.after);
+    rows.splice(g.after === null ? 0 : i < 0 ? rows.length : i + 1, 0, { f: g.f, gone: true });
+  }
+  return rows;
+}
+
 function KindSection({
   kind,
   items,
   lidarr,
   onIgnore,
   onMerge,
+  onTags,
   onBetterCopy,
 }: {
   kind: DoctorKind;
-  items: DoctorFinding[];
+  items: Row[];
   lidarr: boolean;
   onIgnore: (f: DoctorFinding, on: boolean) => void;
   onMerge: (f: DoctorFinding) => void;
+  onTags: (f: DoctorFinding) => void;
   onBetterCopy: (f: DoctorFinding) => void;
 }) {
   const id = useId();
   return (
     <section className="doctor__section" aria-labelledby={id}>
       <h2 id={id} className="doctor__section-title">
-        {KIND_LABEL[kind]} <span className="doctor__section-count">{n(items.length)}</span>
+        {KIND_LABEL[kind]} <span className="doctor__section-count">{n(items.filter((r) => !r.gone).length)}</span>
       </h2>
       <ul className="doctor__list">
-        {items.map((f) => (
-          <FindingRow key={f.id} f={f} lidarr={lidarr} onIgnore={onIgnore} onMerge={onMerge} onBetterCopy={onBetterCopy} />
-        ))}
+        {items.map(({ f, gone }) =>
+          gone ? (
+            <IgnoredLine key={f.id} f={f} onUndo={() => onIgnore(f, false)} />
+          ) : (
+            <FindingRow key={f.id} f={f} lidarr={lidarr} onIgnore={onIgnore} onMerge={onMerge} onTags={onTags} onBetterCopy={onBetterCopy} />
+          ),
+        )}
       </ul>
     </section>
+  );
+}
+
+/** Where an ignored finding was: what happened, and Undo (focused, so the keyboard stays put). */
+function IgnoredLine({ f, onUndo }: { f: DoctorFinding; onUndo: () => void }) {
+  const undo = useRef<HTMLButtonElement>(null);
+  useEffect(() => undo.current?.focus({ preventScroll: true }), []);
+  return (
+    <li className="doctor-item doctor-item--gone">
+      <p className="doctor-item__gone-text truncate" role="status">
+        Ignored {"\u201c"}
+        {f.title}
+        {"\u201d"} on every device.
+      </p>
+      <Button ref={undo} variant="ghost" size="sm" onClick={onUndo}>
+        Undo
+      </Button>
+    </li>
   );
 }
 
@@ -281,12 +341,14 @@ function FindingRow({
   lidarr,
   onIgnore,
   onMerge,
+  onTags,
   onBetterCopy,
 }: {
   f: DoctorFinding;
   lidarr: boolean;
   onIgnore: (f: DoctorFinding, on: boolean) => void;
   onMerge: (f: DoctorFinding) => void;
+  onTags: (f: DoctorFinding) => void;
   onBetterCopy: (f: DoctorFinding) => void;
 }) {
   const [why, setWhy] = useState(false);
@@ -308,6 +370,7 @@ function FindingRow({
       case "mergeAlbums":
         return onMerge(f);
       case "tags":
+        return onTags(f);
       case "suggestedTags":
         return setWhy(true);
       case "openAlbum":
@@ -363,19 +426,30 @@ function FindingRow({
   );
 }
 
-/** Each song's own tags; a value that differs from most songs stands out. */
-function TagTable({ f }: { f: DoctorFinding }) {
+/** Each song's own tags; songs with a value that differs from most come first, marked. */
+export function TagTable({ f }: { f: DoctorFinding }) {
   const most = (vals: (string | number | null)[]) => {
     const c = new Map<string, number>();
     for (const v of vals) c.set(String(v ?? ""), (c.get(String(v ?? "")) ?? 0) + 1);
     return [...c.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
   };
-  const albumMost = most(f.table.map((r) => r.album));
-  const artistMost = most(f.table.map((r) => r.albumArtist));
-  const yearMost = most(f.table.map((r) => r.year));
-  const cell = (v: string | number | null, usual: string) => {
-    const s = v === null || v === "" ? "" : String(v);
-    return <td className={s !== usual ? "doctor-tags__odd" : undefined}>{s || <span className="doctor-tags__none">None</span>}</td>;
+  const usual = {
+    album: most(f.table.map((r) => r.album)),
+    albumArtist: most(f.table.map((r) => r.albumArtist)),
+    year: most(f.table.map((r) => r.year)),
+  };
+  const text = (v: string | number | null) => (v === null || v === "" ? "" : String(v));
+  const odd = (r: DoctorFinding["table"][number]) => text(r.album) !== usual.album || text(r.albumArtist) !== usual.albumArtist || text(r.year) !== usual.year;
+  // Stable: the odd songs first, each group in album order.
+  const rows = [...f.table.filter(odd), ...f.table.filter((r) => !odd(r))];
+  const cell = (v: string | number | null, u: string) => {
+    const s = text(v);
+    return (
+      <td className={s !== u ? "doctor-tags__odd" : undefined}>
+        {s || <span className="doctor-tags__none">None</span>}
+        {s !== u && <span className="sr-only"> (differs)</span>}
+      </td>
+    );
   };
   return (
     <table className="doctor-tags">
@@ -389,14 +463,14 @@ function TagTable({ f }: { f: DoctorFinding }) {
         </tr>
       </thead>
       <tbody>
-        {f.table.map((r) => (
-          <tr key={r.trackId}>
+        {rows.map((r) => (
+          <tr key={r.trackId} className={odd(r) ? "doctor-tags__row--odd" : undefined}>
             <th scope="row" className="truncate">
               {r.title}
             </th>
-            {cell(r.album, albumMost)}
-            {cell(r.albumArtist, artistMost)}
-            {cell(r.year, yearMost)}
+            {cell(r.album, usual.album)}
+            {cell(r.albumArtist, usual.albumArtist)}
+            {cell(r.year, usual.year)}
           </tr>
         ))}
       </tbody>
@@ -463,10 +537,11 @@ function MergeDialog({ finding, onClose }: { finding: DoctorFinding; onClose: ()
         Their songs become one album, {finding.album} by {finding.artist}. You can undo this from the message that follows, or split the album again from Edit.
       </p>
       <div className="doctor-merge">
-        {[{ id: finding.albumId, title: finding.album, thumb: finding.thumb }, ...finding.others].map((a) => (
+        {[{ id: finding.albumId, title: finding.album, thumb: finding.thumb, note: finding.albumNote }, ...finding.others].map((a) => (
           <div key={a.id} className="doctor-merge__part">
             <Art path={a.thumb} size={64} />
-            <span className="truncate">{a.title}</span>
+            <span className="doctor-merge__title truncate">{a.title}</span>
+            {a.note && <span className="doctor-merge__note">{a.note}</span>}
           </div>
         ))}
       </div>

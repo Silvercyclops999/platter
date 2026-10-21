@@ -622,6 +622,7 @@ export class MockBackend implements Backend {
       () => this.later(0, () => this.emit("tags://changed", null)),
     );
     this.doctor = new MockDoctor(this.fx, () => this.settings);
+    this.tagEdit.seed = (id) => this.doctor.tagsOf(id);
     this.physical = new MockPhysical(this.fx, () => this.settings, () => this.later(0, () => this.emit("physical://changed", {})));
     this.sleeve = new MockSleeve(this.fx, () => this.settings, () => this.physical.status().saved);
     this.sides = new MockSides(this.fx);
@@ -1583,7 +1584,16 @@ export class MockBackend implements Backend {
     return this.delay(() => this.tagEdit.open(albumId, trackIds));
   }
   tagEditSave(request: TagSaveRequest) {
-    return this.delay(() => this.tagEdit.save(request));
+    return this.delay(() => {
+      const r = this.tagEdit.save(request);
+      if (r.saved > 0) {
+        const albums = new Set(request.files.map((f) => this.fx.tracks.find((t) => t.id === f.trackId)?.albumId).filter((x): x is string => !!x));
+        let any = false;
+        for (const id of albums) any = this.doctor.resolveTags(id, this.tagEdit.open(id, []).files) || any;
+        if (any) this.emitDoctor();
+      }
+      return r;
+    });
   }
   tagEditUndo(id: string) {
     return this.delay(() => this.tagEdit.undo(id));

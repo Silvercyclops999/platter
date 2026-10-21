@@ -11,7 +11,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::checks::{self, ArtistData};
-use super::{Checks, Finding, Fix, Ignored, Kind, Options, commands, covers, store};
+use super::{Checks, Finding, Fix, Ignored, Kind, Options, TagFix, commands, covers, store};
 use crate::audio::StreamSource;
 use crate::audio::gate::TransferGate;
 use crate::db::{DbHandle, schema};
@@ -127,6 +127,22 @@ fn album_tags_that_differ_between_files_are_found() {
     assert!(f.evidence.iter().any(|e| e.contains("2017")));
     assert_eq!(f.table.len(), 3);
     assert_eq!(f.table[2].album.as_deref(), Some("Night Drive (Deluxe)"));
+    // The fix sets what most songs say, and only the fields that differ.
+    assert_eq!(f.set, Some(TagFix { album: Some("Night Drive".into()), album_artist: None, year: Some(2016) }));
+}
+
+#[test]
+fn a_tie_between_tag_values_goes_to_the_earliest_song() {
+    let (_d, c) = db();
+    album(&c, "a1", "Ana", "Night Drive", Some(2016));
+    song(&c, "t1", "a1", "Ana", "One", 1, 200_000, "flac", 900);
+    song(&c, "t2", "a1", "Ana", "Two", 2, 200_000, "flac", 900);
+    file(&c, "t1", Some("Night Drive"), Some("Ana"), None);
+    file(&c, "t2", Some("Night Drive"), Some("Ana feat. Bo"), None);
+    let found = check(&c, "Ana");
+    let f = of(&found, Kind::AlbumTags);
+    assert_eq!(f.len(), 1, "{found:#?}");
+    assert_eq!(f[0].set.as_ref().and_then(|s| s.album_artist.clone()).as_deref(), Some("Ana"));
 }
 
 #[test]
@@ -159,10 +175,55 @@ fn a_missing_album_artist_on_a_multi_artist_album_is_found() {
     assert_eq!(f.len(), 1, "{found:#?}");
     assert_eq!(f[0].title, "No album artist on any song");
     assert!(f[0].evidence.iter().any(|e| e.contains("credit Ana and Bo")), "{:?}", f[0].evidence);
+    assert_eq!(f[0].fix, Fix::Tags);
+    assert_eq!(f[0].set.as_ref().and_then(|s| s.album_artist.clone()).as_deref(), Some("Ana"), "Ana leads half the songs");
     // With the album artist set on every file, nothing to say.
     file(&c, "t1", Some("Friends"), Some("Ana"), None);
     file(&c, "t2", Some("Friends"), Some("Ana"), None);
     assert!(of(&check(&c, "Ana"), Kind::AlbumArtist).is_empty());
+}
+
+#[test]
+fn album_artist_evidence_names_each_artist_once() {
+    let (_d, c) = db();
+    album(&c, "a1", "Ana", "Friends", Some(2020));
+    c.execute("INSERT INTO artists (id, title, sort_title) VALUES ('ar:mm', 'Moth & Meridian', 'Moth & Meridian')", []).unwrap();
+    let lines = ["Ana", "Ana, Bo", "Ana & Cy", "Bo feat. Ana", "Ana (feat. Dee)", "Moth & Meridian, Ana", "Eve"];
+    for (i, line) in lines.iter().enumerate() {
+        let id = format!("t{i}");
+        song(&c, &id, "a1", "Ana", &format!("Song {i}"), i as i64 + 1, 200_000, "flac", 900);
+        credit(&c, &id, line);
+        file(&c, &id, Some("Friends"), None, None);
+    }
+    file(&c, "t0", Some("Friends"), Some("Ana"), None);
+    let found = check(&c, "Ana");
+    let f = of(&found, Kind::AlbumArtist);
+    assert_eq!(f.len(), 1, "{found:#?}");
+    let credit = f[0].evidence.iter().find(|e| e.starts_with("The songs credit")).expect("a credit line");
+    assert_eq!(credit, "The songs credit Ana, Bo, Cy, Dee and 2 other artists.", "Moth & Meridian stays whole");
+    assert!(f[0].evidence.iter().any(|e| e == "6 of the 7 files read have no album artist tag."), "{:?}", f[0].evidence);
+    assert_eq!(f[0].set.as_ref().and_then(|s| s.album_artist.clone()).as_deref(), Some("Ana"), "the one song tagged says Ana");
+    // One file without it: "has".
+    for i in 1..6 {
+        file(&c, &format!("t{i}"), Some("Friends"), Some("Ana"), None);
+    }
+    let found = check(&c, "Ana");
+    assert!(of(&found, Kind::AlbumArtist)[0].evidence.iter().any(|e| e == "1 of the 7 files read has no album artist tag."));
+}
+
+#[test]
+fn a_compilation_with_no_lead_artist_suggests_various_artists() {
+    let (_d, c) = db();
+    album(&c, "a1", "Ana", "Mixtape", None);
+    for (i, who) in ["Ana", "Bo", "Cy", "Dee"].iter().enumerate() {
+        let id = format!("t{i}");
+        song(&c, &id, "a1", "Ana", &format!("Song {i}"), i as i64 + 1, 200_000, "flac", 900);
+        credit(&c, &id, who);
+        file(&c, &id, Some("Mixtape"), None, None);
+    }
+    let found = check(&c, "Ana");
+    let f = of(&found, Kind::AlbumArtist);
+    assert_eq!(f[0].set.as_ref().and_then(|s| s.album_artist.clone()).as_deref(), Some("Various Artists"));
 }
 
 #[test]
@@ -203,6 +264,9 @@ fn an_album_in_two_halves_is_split() {
     assert_eq!(f.others[0].id, "a2");
     assert_eq!(f.fix, Fix::MergeAlbums);
     assert!(f.evidence.iter().any(|e| e.contains("songs 1 to 4")) && f.evidence.iter().any(|e| e.contains("songs 5 to 6")));
+    // The merge dialog tells the parts apart.
+    assert_eq!(f.album_note.as_deref(), Some("4 songs, from \u{201c}Song 1\u{201d}"));
+    assert_eq!(f.others[0].note.as_deref(), Some("2 songs, from \u{201c}Song 5\u{201d}"));
 }
 
 /// Where a song's file is, on the server.
@@ -455,6 +519,8 @@ fn ignored_findings_move_to_their_own_list() {
         others: Vec::new(),
         table: Vec::new(),
         suggest: None,
+        set: None,
+        album_note: None,
     };
     let mut ig = HashMap::new();
     ig.insert("cover:2".to_string(), Ignored { kind: Kind::Cover, title: "t".into(), at: 1 });

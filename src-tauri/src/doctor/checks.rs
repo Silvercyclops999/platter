@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use rusqlite::{Connection, OptionalExtension};
 
-use super::{Finding, Fix, Kind, OtherAlbum, TagRow};
+use super::{Finding, Fix, Kind, OtherAlbum, TagFix, TagRow};
 use crate::archive::status;
 use crate::db::release::{self, Evidence, ReleaseStatus};
 use crate::error::AppResult;
@@ -19,7 +19,7 @@ use crate::identity::{Context, MatchKind, SongKey, Tier, compare};
 use crate::tags::CACHE_VERSION;
 
 /// Raised when the checks change, so every artist is checked again.
-pub const CHECKS_VERSION: u32 = 2;
+pub const CHECKS_VERSION: u32 = 3;
 
 /// A lossy copy at most this bitrate (kbps), and this much below the other
 /// copy, counts as low quality next to another lossy copy.
@@ -87,6 +87,14 @@ pub struct ArtistData {
     pub songs: Vec<SongRow>,
     /// By album id: albums of the same name by other artists.
     pub elsewhere: HashMap<String, Vec<Elsewhere>>,
+    /// Artist lines that credit several artists ("Ana, Bo"), split into
+    /// single names with the library's artists kept whole.
+    pub credits: HashMap<String, Vec<String>>,
+}
+
+/// The artist line a song credits: its own artist, else its album's.
+fn credit_line(s: &SongRow) -> &str {
+    s.track_artist.as_deref().filter(|t| !t.trim().is_empty()).unwrap_or(&s.artist_title)
 }
 
 /// Load one album artist's albums and songs.
@@ -190,7 +198,14 @@ pub fn load(c: &Connection, artist_id: &str) -> AppResult<ArtistData> {
             }
         }
     }
-    Ok(ArtistData { albums, songs, elsewhere })
+    let mut credits: HashMap<String, Vec<String>> = HashMap::new();
+    for s in &songs {
+        let line = credit_line(s);
+        if !credits.contains_key(line) && crate::db::credits::has_separator(line) {
+            credits.insert(line.to_string(), crate::db::popular::line_credits(c, line)?);
+        }
+    }
+    Ok(ArtistData { albums, songs, elsewhere, credits })
 }
 
 /// A short, stable signature of what the checks look at.
@@ -417,6 +432,8 @@ fn base(kind: Kind, id: String, artist_id: &str, a: &AlbumRow, title: String, te
         others: Vec::new(),
         table: Vec::new(),
         suggest: None,
+        set: None,
+        album_note: None,
     }
 }
 
@@ -558,18 +575,22 @@ pub fn album_tags(artist_id: &str, d: &ArtistData, by_album: &HashMap<&str, Vec<
         }
         let mut evidence = Vec::new();
         let mut fields = Vec::new();
+        let mut set = TagFix::default();
         if let Some(v) = differing(read.iter().filter_map(|s| s.tag_album.clone())) {
             evidence.push(format!("Album name: {}.", spread(&v)));
             fields.push("album name");
+            set.album = most_common(&v);
         }
         if let Some(v) = differing(read.iter().filter_map(|s| s.tag_album_artist.clone())) {
             evidence.push(format!("Album artist: {}.", spread(&v)));
             fields.push("album artist");
+            set.album_artist = most_common(&v);
         }
         let years: Vec<i32> = read.iter().filter_map(|s| s.tag_year).collect();
         if years.iter().collect::<HashSet<_>>().len() > 1 {
             evidence.push(format!("Year: {}.", spread(&years)));
             fields.push("year");
+            set.year = most_common_year(&years);
         }
         if fields.is_empty() {
             continue;
@@ -586,7 +607,7 @@ pub fn album_tags(artist_id: &str, d: &ArtistData, by_album: &HashMap<&str, Vec<
             a,
             format!("The songs don't agree on the {what}"),
             format!(
-                "The files on this album have different {}s, which can make Plex show the album wrong or split it. The tags below show which songs differ; change them in your tagger so they match.",
+                "The files on this album have different {}s, which can make Plex show the album wrong or split it. Fix the tags gives every song the same {what}, and shows each change before it's saved.",
                 if fields.len() == 1 { fields[0] } else { "tag" }
             ),
             Fix::Tags,
@@ -594,9 +615,40 @@ pub fn album_tags(artist_id: &str, d: &ArtistData, by_album: &HashMap<&str, Vec<
         f.evidence = evidence;
         f.evidence.push(format!("Read from {} of the album's {} files.", read.len(), songs.len()));
         f.table = table(songs);
+        f.set = Some(set);
         out.push(f);
     }
     out
+}
+
+/// The value most songs have, case and spacing aside, as most of them
+/// spell it. A tie goes to the one the earliest song has.
+fn most_common(values: &[String]) -> Option<String> {
+    let mut groups: Vec<(String, Vec<&String>)> = Vec::new();
+    for v in values.iter().filter(|v| !v.trim().is_empty()) {
+        let k = norm(v);
+        match groups.iter_mut().find(|(g, _)| *g == k) {
+            Some((_, list)) => list.push(v),
+            None => groups.push((k, vec![v])),
+        }
+    }
+    // Stable sort: equal counts keep the order the songs come in.
+    groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    let (_, list) = groups.into_iter().next()?;
+    let mut spellings: Vec<(&String, usize)> = Vec::new();
+    for v in list {
+        match spellings.iter_mut().find(|(s, _)| *s == v) {
+            Some((_, n)) => *n += 1,
+            None => spellings.push((v, 1)),
+        }
+    }
+    spellings.sort_by(|a, b| b.1.cmp(&a.1));
+    spellings.first().map(|(s, _)| s.trim().to_string())
+}
+
+fn most_common_year(years: &[i32]) -> Option<i32> {
+    let as_text: Vec<String> = years.iter().map(i32::to_string).collect();
+    most_common(&as_text)?.parse().ok()
 }
 
 // ------------------------------------------------------------------ album artist
@@ -612,13 +664,29 @@ pub fn album_artist(artist_id: &str, d: &ArtistData, by_album: &HashMap<&str, Ve
         if read.is_empty() || lacking == 0 {
             continue;
         }
+        // Each artist once, however many songs or credit lines name them.
         let mut credits: Vec<String> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
+        // How many songs each artist leads.
+        let mut leads: Vec<(String, usize)> = Vec::new();
         for s in songs {
-            let name = s.track_artist.as_deref().filter(|t| !t.trim().is_empty()).unwrap_or(&s.artist_title);
-            let k = fold_artist(name);
-            if !k.is_empty() && seen.insert(k) {
-                credits.push(name.to_string());
+            let line = credit_line(s);
+            let one = [line.trim().to_string()];
+            let names = d.credits.get(line).map(Vec::as_slice).unwrap_or(&one);
+            for (i, name) in names.iter().enumerate() {
+                let k = fold_artist(name);
+                if k.is_empty() {
+                    continue;
+                }
+                if i == 0 {
+                    match leads.iter_mut().find(|(n, _)| fold_artist(n) == k) {
+                        Some((_, c)) => *c += 1,
+                        None => leads.push((name.to_string(), 1)),
+                    }
+                }
+                if seen.insert(k) {
+                    credits.push(name.to_string());
+                }
             }
         }
         let filed_under_none = fold_artist(&a.artist).is_empty();
@@ -637,15 +705,20 @@ pub fn album_artist(artist_id: &str, d: &ArtistData, by_album: &HashMap<&str, Ve
             artist_id,
             a,
             title,
-            "Without an album artist, Plex files each song under its own artist and can break the album up. Set the album artist on every song in your tagger, then Plex puts them back together.".into(),
+            "Without an album artist, Plex files each song under its own artist and can break the album up. Fix the tags sets one album artist on every song, and shows each change before it's saved.".into(),
             Fix::Tags,
         );
-        f.evidence.push(format!("{} of the {} files read have no album artist tag.", lacking, read.len()));
+        f.evidence.push(format!(
+            "{} of the {} files read {} no album artist tag.",
+            lacking,
+            read.len(),
+            if lacking == 1 { "has" } else { "have" }
+        ));
         if credits.len() >= 2 {
             let shown: Vec<&str> = credits.iter().take(4).map(String::as_str).collect();
             let more = credits.len().saturating_sub(shown.len());
             f.evidence.push(if more > 0 {
-                format!("The songs credit {} and {} more.", shown.join(", "), more)
+                format!("The songs credit {} and {}.", shown.join(", "), plural(more, "other artist", "other artists"))
             } else {
                 format!("The songs credit {}.", join_and(&shown))
             });
@@ -655,12 +728,39 @@ pub fn album_artist(artist_id: &str, d: &ArtistData, by_album: &HashMap<&str, Ve
         }
         for e in &elsewhere {
             f.evidence.push(format!("An album called \u{201c}{}\u{201d} is also under {}.", e.album, e.artist));
-            f.others.push(OtherAlbum { id: e.album_id.clone(), title: format!("{} ({})", e.album, e.artist), thumb: e.thumb.clone() });
+            f.others.push(OtherAlbum {
+                id: e.album_id.clone(),
+                title: format!("{} ({})", e.album, e.artist),
+                thumb: e.thumb.clone(),
+                note: None,
+            });
         }
         f.table = table(songs);
+        f.set = Some(TagFix { album_artist: suggest_album_artist(a, &read, &leads, songs.len()), ..TagFix::default() });
         out.push(f);
     }
     out
+}
+
+/// The album artist to suggest: what the songs that have one say; else the
+/// artist who leads at least half the songs; else "Various Artists" when
+/// several do. The user can change it before anything is written.
+fn suggest_album_artist(a: &AlbumRow, read: &[&SongRow], leads: &[(String, usize)], songs: usize) -> Option<String> {
+    let tagged: Vec<String> = read.iter().filter_map(|s| s.tag_album_artist.clone()).filter(|v| !v.trim().is_empty()).collect();
+    if let Some(v) = most_common(&tagged) {
+        return Some(v);
+    }
+    let mut leads = leads.to_vec();
+    leads.sort_by(|x, y| y.1.cmp(&x.1));
+    if let Some((name, n)) = leads.first()
+        && n * 2 >= songs
+    {
+        return Some(name.clone());
+    }
+    if leads.len() >= 2 {
+        return Some("Various Artists".into());
+    }
+    Some(a.artist.trim().to_string()).filter(|n| !n.is_empty())
 }
 
 fn join_and(items: &[&str]) -> String {
@@ -707,6 +807,15 @@ fn halves(a: &AlbumRow, b: &AlbumRow, sa: &[&SongRow], sb: &[&SongRow]) -> bool 
     }
     let titles = |s: &[&SongRow]| -> HashSet<String> { s.iter().map(|x| fold_title(&x.title).title).filter(|t| !t.is_empty()).collect() };
     titles(sa).is_disjoint(&titles(sb))
+}
+
+/// What tells one part of a split album apart: "4 songs, from “Intro”".
+fn part_note(songs: &[&SongRow]) -> String {
+    let first = songs.iter().min_by_key(|s| (s.disc, s.number));
+    match first {
+        Some(s) if !s.title.trim().is_empty() => format!("{}, from \u{201c}{}\u{201d}", plural(songs.len(), "song", "songs"), s.title.trim()),
+        _ => plural(songs.len(), "song", "songs"),
+    }
 }
 
 fn range_text(songs: &[&SongRow]) -> String {
@@ -849,7 +958,11 @@ pub fn split_albums(artist_id: &str, d: &ArtistData, by_album: &HashMap<&str, Ve
                 Some(folder) => f.evidence.push(format!("Their files are all in one folder ({folder}), so they're one album on disk.")),
                 None => f.evidence.push("They share no songs, and none is tagged as another edition or version.".into()),
             }
-            f.others = parts[1..].iter().map(|p| OtherAlbum { id: p.id.clone(), title: p.title.clone(), thumb: p.thumb.clone() }).collect();
+            f.album_note = Some(part_note(songs_of(&main.id)));
+            f.others = parts[1..]
+                .iter()
+                .map(|p| OtherAlbum { id: p.id.clone(), title: p.title.clone(), thumb: p.thumb.clone(), note: Some(part_note(songs_of(&p.id))) })
+                .collect();
             out.push(f);
         }
     }
@@ -922,7 +1035,7 @@ pub fn low_quality(artist_id: &str, d: &ArtistData) -> Vec<Finding> {
             f.evidence.push(format!("And {} more.", songs.len() - 12));
         }
         f.tracks = songs.iter().map(|(w, _)| w.id.clone()).collect();
-        f.others = vec![OtherAlbum { id: ba.id.clone(), title: ba.title.clone(), thumb: ba.thumb.clone() }];
+        f.others = vec![OtherAlbum { id: ba.id.clone(), title: ba.title.clone(), thumb: ba.thumb.clone(), note: None }];
         out.push(f);
     }
     out

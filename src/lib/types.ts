@@ -3708,12 +3708,23 @@ export interface DoctorFinding {
   evidence: string[];
   fix: DoctorFix;
   tracks: string[];
-  /** The other half of a split album, or the album with the better copy. */
-  others: { id: string; title: string; thumb: string | null }[];
+  /** The other half of a split album, or the album with the better copy. `note` tells split halves apart. */
+  others: { id: string; title: string; thumb: string | null; note?: string | null }[];
   /** Each song's own tags (album tag and album artist findings). */
   table: { trackId: string; title: string; album: string | null; albumArtist: string | null; year: number | null }[];
   /** The tags its sound suggests next to its own (sounds-like findings). Nothing is written. */
   suggest?: DoctorSuggestedTags | null;
+  /** The album tags the fix sets on every song (album tag and album artist findings). */
+  set?: DoctorTagFix | null;
+  /** What tells this album apart from the others it names (split albums). */
+  albumNote?: string | null;
+}
+
+/** The album tags a doctor fix sets on every song; only the fields that need it. */
+export interface DoctorTagFix {
+  album: string | null;
+  albumArtist: string | null;
+  year: number | null;
 }
 
 /** What a song's sound suggests, next to what its file says. */

@@ -3,7 +3,7 @@
  * of each kind made from the fixture library, the checks and cover size
  * from Settings, ignores, and findings that go away once their fix runs.
  */
-import type { Album, DoctorFinding, DoctorKind, DoctorReport, Settings, Track } from "../types";
+import type { Album, DoctorFinding, DoctorKind, DoctorReport, Settings, TagEditFile, TagValues, Track } from "../types";
 import { ARCHIVE_ARTIST_ID, mockPlexMissed, type Fixtures } from "./fixtures";
 
 const CHECK_OF: Record<DoctorKind, keyof Settings["doctorChecks"]> = {
@@ -144,7 +144,9 @@ export class MockDoctor {
         `albumTags:${a.id}`,
         a,
         i === 0 ? "The songs don't agree on the album name and year" : "The songs don't agree on the album artist",
-        "The files on this album have different tags, which can make Plex show the album wrong or split it. The tags below show which songs differ; change them in your tagger so they match.",
+        i === 0
+          ? "The files on this album have different tags, which can make Plex show the album wrong or split it. Fix the tags gives every song the same album name and year, and shows each change before it's saved."
+          : "The files on this album have different album artists, which can make Plex show the album wrong or split it. Fix the tags gives every song the same album artist, and shows each change before it's saved.",
         "tags",
       );
       const odd = t.length - 1;
@@ -155,6 +157,7 @@ export class MockDoctor {
         albumArtist: i === 1 && n === odd ? `${a.artistTitle} & Friends` : a.artistTitle,
         year: i === 0 && n === odd ? (a.year ?? 2016) + 1 : a.year,
       }));
+      f.set = i === 0 ? { album: a.title, albumArtist: null, year: a.year ?? 2016 } : { album: null, albumArtist: a.artistTitle, year: null };
       f.evidence =
         i === 0
           ? [
@@ -178,7 +181,9 @@ export class MockDoctor {
       );
       const na = this.tracksOf(a).length;
       f.evidence = [`2 albums are called ${q(a.title)} by ${a.artistTitle}.`, `One has songs 1 to ${na}.`, `One has songs ${na + 1} to ${na + this.tracksOf(b).length}.`, "They share no songs, and none is tagged as another edition or version."];
-      f.others = [{ id: b.id, title: a.title, thumb: b.thumb }];
+      const first = (x: Album) => this.tracksOf(x)[0]?.title ?? "";
+      f.albumNote = `${na} songs, from ${q(first(a))}`;
+      f.others = [{ id: b.id, title: a.title, thumb: b.thumb, note: `${this.tracksOf(b).length} songs, from ${q(first(b))}` }];
       out.push({ finding: f });
     }
 
@@ -189,11 +194,12 @@ export class MockDoctor {
         `albumArtist:${a.id}`,
         a,
         `No album artist on ${t.length - 1} of ${t.length} songs`,
-        "Without an album artist, Plex files each song under its own artist and can break the album up. Set the album artist on every song in your tagger, then Plex puts them back together.",
+        "Without an album artist, Plex files each song under its own artist and can break the album up. Fix the tags sets one album artist on every song, and shows each change before it's saved.",
         "tags",
       );
       f.table = t.map((s, n) => ({ trackId: s.id, title: s.title, album: a.title, albumArtist: n === 0 ? a.artistTitle : null, year: a.year }));
-      f.evidence = [`${t.length - 1} of the ${t.length} files read have no album artist tag.`, `The songs credit ${a.artistTitle} and Guest Voice.`];
+      f.evidence = [`${t.length - 1} of the ${t.length} files read ${t.length - 1 === 1 ? "has" : "have"} no album artist tag.`, `The songs credit ${a.artistTitle} and Guest Voice.`];
+      f.set = { album: null, albumArtist: a.artistTitle, year: null };
       out.push({ finding: f });
     }
 
@@ -298,6 +304,34 @@ export class MockDoctor {
     for (const { finding } of this.build()) {
       const hit = finding.albumId === albumId || finding.others.some((o) => o.id === albumId);
       if (hit && finding.fix === fix && !this.fixed.has(finding.id)) {
+        this.fixed.add(finding.id);
+        any = true;
+      }
+    }
+    return any;
+  }
+
+  /** The tags a song's file starts with, so tag findings show in the editor too. */
+  tagsOf(trackId: string): TagValues | undefined {
+    for (const { finding } of this.build()) {
+      const r = finding.table.find((x) => x.trackId === trackId);
+      if (r) return { album: r.album ?? "", albumArtist: r.albumArtist ?? "", year: r.year === null ? "" : String(r.year) };
+    }
+    return undefined;
+  }
+
+  /** Tags were saved on an album: its tag findings whose values every file now has go away. */
+  resolveTags(albumId: string, files: TagEditFile[]): boolean {
+    let any = false;
+    for (const { finding } of this.build()) {
+      if (finding.albumId !== albumId || finding.fix !== "tags" || !finding.set || this.fixed.has(finding.id)) continue;
+      const s = finding.set;
+      const want: [keyof TagValues, string | null][] = [
+        ["album", s.album],
+        ["albumArtist", s.albumArtist],
+        ["year", s.year === null ? null : String(s.year)],
+      ];
+      if (files.every((f) => want.every(([k, v]) => v === null || (f.values[k] ?? "") === v))) {
         this.fixed.add(finding.id);
         any = true;
       }

@@ -56,6 +56,8 @@ export class MockTagEdit {
   lookupDown = false;
   /** The music folder's share is disconnected. */
   folderGone = false;
+  /** Tags a file starts with beyond its track's ("" leaves the tag out): the library doctor's odd files. */
+  seed: ((trackId: string) => TagValues | undefined) | null = null;
 
   constructor(
     private fx: Fixtures,
@@ -82,11 +84,18 @@ export class MockTagEdit {
         archiveVersion: album?.format ? "released" : undefined,
       };
       if (album?.year) values.year = String(album.year);
-      for (const k of Object.keys(values) as TagField[]) if (values[k] === undefined) delete values[k];
+      Object.assign(values, this.seed?.(t.id));
+      for (const k of Object.keys(values) as TagField[]) if (values[k] === undefined || values[k] === "") delete values[k];
       f = { values, stamp: 1 };
       this.disk.set(t.id, f);
     }
     return f;
+  }
+
+  /** Every file back to its first tags (test hook). */
+  resetDisk() {
+    this.disk.clear();
+    this.log = [];
   }
 
   /** Another program retags a file (test hook). */

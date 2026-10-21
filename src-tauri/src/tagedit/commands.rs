@@ -37,6 +37,8 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> AppResult<T> + Send + '
 fn changed(app: &AppHandle, r: &SaveResult) {
     if r.saved > 0 {
         let _ = app.emit(crate::tags::commands::EV_CHANGED, ());
+        // A fix from the library doctor (album tags): check again.
+        crate::doctor::poke();
     }
 }
 

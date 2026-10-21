@@ -113,7 +113,8 @@ pub enum Fix {
     MergeAlbums,
     /// Open the album (the copy to keep, or the songs to look at).
     OpenAlbum,
-    /// Show each song's tags (they're changed in a tagger for now).
+    /// Set the album tags in [`Finding::set`] on every song, through the
+    /// tag editor: each change is shown first and can be undone.
     Tags,
     /// Show the tags its sound suggests next to its own (nothing is written).
     SuggestedTags,
@@ -127,6 +128,20 @@ pub struct OtherAlbum {
     pub id: String,
     pub title: String,
     pub thumb: Option<String>,
+    /// What tells it apart: "4 songs, from “Intro”" (split albums).
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// The album tags a fix sets on every song of the album (IPC
+/// `DoctorTagFix`). Only the fields that need it are set; the user sees
+/// each change, and can change the values, before anything is written.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagFix {
+    pub album: Option<String>,
+    pub album_artist: Option<String>,
+    pub year: Option<i32>,
 }
 
 /// One song's own tags, for the album tag findings.
@@ -186,6 +201,12 @@ pub struct Finding {
     /// Each song's tags (album tag and album artist findings).
     #[serde(default)]
     pub table: Vec<TagRow>,
+    /// The tags the fix sets (album tag and album artist findings).
+    #[serde(default)]
+    pub set: Option<TagFix>,
+    /// What tells this album apart from the others it names (split albums).
+    #[serde(default)]
+    pub album_note: Option<String>,
     /// The tags its sound suggests (sounds-like findings).
     #[serde(default)]
     pub suggest: Option<SuggestedTags>,

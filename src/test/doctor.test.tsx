@@ -20,6 +20,7 @@ import { useApp } from "../stores/app";
 import { badgeText } from "../stores/doctor";
 import { reloadEditAccess, usePlexEdit } from "../stores/plexEdit";
 import { useRouter } from "../stores/router";
+import { useTagEdit } from "../stores/tagEdit";
 import { loadSettings, useSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
 
@@ -33,6 +34,8 @@ async function settings(patch: Record<string, unknown> = {}) {
 
 beforeEach(async () => {
   mock.doctor.reset();
+  mock.tagEdit.resetDisk();
+  mock.tagEdit.failNext = null;
   mock.plexEdit.shared = false;
   usePlexEdit.setState({ dialog: null });
   await reloadEditAccess();
@@ -97,7 +100,7 @@ describe("the library doctor page", () => {
     expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(7);
   });
 
-  it("Why? shows the evidence, and See the tags shows each song's tags with the odd one out marked", async () => {
+  it("Why? shows the evidence, and each song's tags with the odd song first and marked", async () => {
     const user = userEvent.setup();
     render(<DoctorPage />);
     await screen.findByText("15 things to fix");
@@ -109,12 +112,118 @@ describe("the library doctor page", () => {
     expect(within(dupe).getByText(/twice with the same ISRC/)).toBeInTheDocument();
 
     const tags = findingTitled("The songs don't agree on the album name and year");
-    await user.click(within(tags).getByRole("button", { name: "See the tags" }));
+    await user.click(within(tags).getByRole("button", { name: "Why?" }));
     const table = within(tags).getByRole("table");
-    expect(within(table).getAllByRole("row").length).toBeGreaterThan(2);
+    const rows = within(table).getAllByRole("row");
+    expect(rows.length).toBeGreaterThan(2);
     const odd = table.querySelectorAll(".doctor-tags__odd");
     expect(odd.length).toBe(2);
-    expect(odd[0].textContent).toMatch(/\(Deluxe\)$/);
+    expect(odd[0].textContent).toMatch(/\(Deluxe\) \(differs\)$/);
+    // The odd song comes first, under the header, and is marked.
+    expect(rows[1]).toHaveClass("doctor-tags__row--odd");
+    expect(rows[1].querySelector(".doctor-tags__odd")).not.toBeNull();
+    expect(rows[2]).not.toHaveClass("doctor-tags__row--odd");
+  });
+
+  it("Fix the tags shows each file's change, saves only what's ticked, and the finding goes", async () => {
+    await settings({ musicFolder: "/Volumes/Music", musicFolderServer: "/data/music" });
+    const user = userEvent.setup();
+    const save = vi.spyOn(backend, "tagEditSave");
+    render(<DoctorPage />);
+    await screen.findByText("15 things to fix");
+    const f = mock.doctor.report().findings.find((x) => x.title === "The songs don't agree on the album name and year")!;
+    await user.click(within(findingTitled(f.title)).getByRole("button", { name: "Fix the tags" }));
+    const dialog = await screen.findByRole("dialog", { name: "Make the tags match" });
+    expect(await within(dialog).findByLabelText("Album")).toHaveValue(f.album);
+    expect(within(dialog).getByLabelText("Year")).toHaveValue(String(f.set!.year));
+    expect(within(dialog).queryByLabelText("Album artist")).not.toBeInTheDocument();
+    // Only the odd song changes: its album name and its year.
+    const changes = await within(dialog).findAllByRole("checkbox");
+    expect(changes).toHaveLength(2);
+    expect(within(dialog).getByText(`${f.album} (Deluxe)`)).toBeInTheDocument();
+    expect(save).not.toHaveBeenCalled();
+    // Untick the year: only the album name is written.
+    await user.click(within(dialog).getByRole("checkbox", { name: /Change Year/ }));
+    await user.click(within(dialog).getByRole("button", { name: "Change 1 file" }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    const req = save.mock.calls[0][0];
+    expect(req.label).toMatch(/^Library doctor: /);
+    expect(req.files).toHaveLength(1);
+    expect(req.files[0].edits).toEqual({ album: f.album });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(useToasts.getState().toasts.some((t) => t.message === "Saved 1 file" && t.action?.label === "Undo")).toBe(true));
+    // The year still differs, so the finding stays; fixing that too clears it.
+    expect(mock.doctor.report().findings.some((x) => x.id === f.id)).toBe(true);
+    await user.click(within(findingTitled(f.title)).getByRole("button", { name: "Fix the tags" }));
+    const again = await screen.findByRole("dialog", { name: "Make the tags match" });
+    expect(await within(again).findAllByRole("checkbox")).toHaveLength(1);
+    await user.click(within(again).getByRole("button", { name: "Change 1 file" }));
+    expect(await screen.findByText("14 things to fix")).toBeInTheDocument();
+    save.mockRestore();
+  });
+
+  it("a missing album artist is filled in on every song without one, with the value the user picks", async () => {
+    await settings({ musicFolder: "/Volumes/Music", musicFolderServer: "/data/music" });
+    const user = userEvent.setup();
+    const save = vi.spyOn(backend, "tagEditSave");
+    render(<DoctorPage />);
+    await screen.findByText("15 things to fix");
+    const f = mock.doctor.report().findings.find((x) => x.kind === "albumArtist")!;
+    await user.click(within(findingTitled(f.title)).getByRole("button", { name: "Fix the tags" }));
+    const dialog = await screen.findByRole("dialog", { name: "Set the album artist" });
+    const input = await within(dialog).findByLabelText("Album artist");
+    expect(input).toHaveValue(f.artist);
+    const n = f.table.filter((r) => !r.albumArtist).length;
+    expect(await within(dialog).findAllByRole("checkbox")).toHaveLength(n);
+    await user.clear(input);
+    await user.type(input, "Various Artists");
+    // Now every song changes, the one that had an album artist too.
+    expect(within(dialog).getAllByRole("checkbox")).toHaveLength(f.table.length);
+    await user.click(within(dialog).getByRole("button", { name: `Change ${f.table.length} files` }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0][0].files.every((x) => x.edits.albumArtist === "Various Artists")).toBe(true);
+    save.mockRestore();
+  });
+
+  it("without a music folder, Fix the tags says so and goes to set it up", async () => {
+    const user = userEvent.setup();
+    render(<DoctorPage />);
+    await screen.findByText("15 things to fix");
+    const f = mock.doctor.report().findings.find((x) => x.kind === "albumArtist")!;
+    await user.click(within(findingTitled(f.title)).getByRole("button", { name: "Fix the tags" }));
+    const dialog = await screen.findByRole("dialog", { name: "Set the album artist" });
+    expect(await within(dialog).findByRole("status")).toHaveTextContent(/music folder/i);
+    expect(within(dialog).queryAllByRole("checkbox")).toHaveLength(0);
+    await user.click(within(dialog).getByRole("button", { name: "Set up music folder" }));
+    expect(lastRoute()).toEqual({ name: "settings", page: "tags" });
+  });
+
+  it("Edit all tags opens the full tag editor on the album, at the field", async () => {
+    await settings({ musicFolder: "/Volumes/Music", musicFolderServer: "/data/music" });
+    const user = userEvent.setup();
+    render(<DoctorPage />);
+    await screen.findByText("15 things to fix");
+    const f = mock.doctor.report().findings.find((x) => x.kind === "albumArtist")!;
+    await user.click(within(findingTitled(f.title)).getByRole("button", { name: "Fix the tags" }));
+    const dialog = await screen.findByRole("dialog", { name: "Set the album artist" });
+    await user.click(within(dialog).getByRole("button", { name: "Edit all tags" }));
+    expect(useTagEdit.getState().editor).toEqual({ albumId: f.albumId, trackIds: [], focus: "albumArtist" });
+    useTagEdit.setState({ editor: null });
+  });
+
+  it("a save the file refuses keeps the dialog open with why", async () => {
+    await settings({ musicFolder: "/Volumes/Music", musicFolderServer: "/data/music" });
+    const user = userEvent.setup();
+    render(<DoctorPage />);
+    await screen.findByText("15 things to fix");
+    const f = mock.doctor.report().findings.find((x) => x.kind === "albumArtist")!;
+    await user.click(within(findingTitled(f.title)).getByRole("button", { name: "Fix the tags" }));
+    const dialog = await screen.findByRole("dialog", { name: "Set the album artist" });
+    await within(dialog).findAllByRole("checkbox");
+    mock.tagEdit.failNext = "locked";
+    await user.click(within(dialog).getByRole("button", { name: /^Change \d+ files?$/ }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(/open in another program/);
+    expect(mock.doctor.report().findings.some((x) => x.id === f.id)).toBe(true);
   });
 
   it("Ignore takes a finding out of the count, and Show again brings it back", async () => {
@@ -126,6 +235,11 @@ describe("the library doctor page", () => {
     await user.click(within(first).getByRole("button", { name: "Ignore" }));
     expect(await screen.findByText("14 things to fix")).toBeInTheDocument();
     expect([...mock.doctor.ignored.values()].map((i) => i.title)).toEqual([title]);
+    // A slim line stays where it was, with Undo focused, and no toast covers the next finding.
+    const line = within(section(/^Covers/)).getAllByRole("listitem")[0];
+    expect(line).toHaveTextContent(`Ignored “${title}” on every device.`);
+    expect(within(line).getByRole("button", { name: "Undo" })).toHaveFocus();
+    expect(useToasts.getState().toasts).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "Show ignored (1)" }));
     const ignored = screen.getByRole("region", { name: "Ignored" });
     expect(within(ignored).getByText(title)).toBeInTheDocument();
@@ -236,6 +350,9 @@ describe("the library doctor page", () => {
     await user.click(within(split).getByRole("button", { name: "Merge into one" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("heading", { name: `Merge the two parts of ${f.album}?` })).toBeInTheDocument();
+    // Each part says how many songs it has and where it starts.
+    expect(within(dialog).getByText(f.albumNote!)).toBeInTheDocument();
+    expect(within(dialog).getByText(f.others[0].note!)).toBeInTheDocument();
     expect(merge).not.toHaveBeenCalled();
     await user.click(within(dialog).getByRole("button", { name: "Merge" }));
     expect(merge).toHaveBeenCalledWith(f.albumId, [f.others[0].id]);

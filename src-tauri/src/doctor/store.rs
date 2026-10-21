@@ -137,6 +137,8 @@ pub fn cover_findings(c: &Connection, px: u32) -> AppResult<Vec<Finding>> {
             others: Vec::new(),
             table: Vec::new(),
             suggest: None,
+            set: None,
+            album_note: None,
         });
     }
     Ok(out)

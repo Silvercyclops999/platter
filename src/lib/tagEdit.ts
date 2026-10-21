@@ -105,3 +105,35 @@ export function fixRequest(label: string, changes: TagFixChange[]): TagSaveReque
 export function asksFirst(files: number, setting: boolean | undefined): boolean {
   return setting !== false && files > MANY_FILES;
 }
+
+/** The album fields a library doctor fix can set. */
+export type DoctorField = "albumArtist" | "album" | "year";
+
+/**
+ * What setting these album values on every file changes: one row per file
+ * and field that differs. A year counts as the same when the file's date
+ * starts with it ("2019-05-31" for 2019). Files that couldn't be read are
+ * kept as they are, with why.
+ */
+export function doctorChanges(
+  files: TagEditFile[],
+  want: Partial<Record<DoctorField, string>>,
+): { changes: TagFixChange[]; kept: { trackId: string; fileName: string; reason: string }[] } {
+  const changes: TagFixChange[] = [];
+  const kept: { trackId: string; fileName: string; reason: string }[] = [];
+  for (const f of files) {
+    if (!f.stamp) {
+      kept.push({ trackId: f.trackId, fileName: f.fileName, reason: f.error ?? "This file couldn't be read." });
+      continue;
+    }
+    for (const [field, raw] of Object.entries(want) as [DoctorField, string][]) {
+      const after = (raw ?? "").trim();
+      if (!after) continue;
+      const before = (f.values[field] ?? "").trim();
+      const same = field === "year" ? before.slice(0, 4) === after : before === after;
+      if (same) continue;
+      changes.push({ trackId: f.trackId, fileName: f.fileName, stamp: f.stamp, field, before: before || null, after, note: null });
+    }
+  }
+  return { changes, kept };
+}

@@ -51,6 +51,8 @@
 .doctor-item__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-3); }
 .doctor-item__why { margin-left: var(--space-2); font-size: var(--font-size-md); color: var(--color-text-secondary); }
 .doctor-item__why[aria-expanded="true"] { color: var(--color-text-primary); }
+.doctor-item--gone { align-items: center; padding: var(--space-2) 0; }
+.doctor-item__gone-text { flex: 1; min-width: 0; margin: 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
 .doctor-item--ignored { align-items: center; padding: var(--space-3) 0; }
 .doctor-item--ignored .doctor-item__title { font-size: var(--font-size-md); }
 .doctor-item--ignored .doctor-item__meta { font-size: var(--font-size-sm); color: var(--color-text-muted); }
@@ -76,13 +78,23 @@
 .doctor-tags th:last-child { width: 64px; }
 .doctor-tags__odd { color: var(--color-warning-text); font-weight: var(--font-weight-bold); }
 .doctor-tags__none { color: var(--color-text-muted); font-style: italic; }
+/* A song whose tags differ from most: a bar down its edge and a faint wash. */
+.doctor-tags__row--odd > * { background: color-mix(in srgb, var(--color-warning) 10%, transparent); }
+.doctor-tags__row--odd > th { box-shadow: inset 3px 0 0 var(--color-warning); }
 /* Suggested tags: three columns that wrap, so long titles and ids read in full. */
 .doctor-suggest th, .doctor-suggest td { white-space: normal; overflow-wrap: anywhere; }
 .doctor-suggest th:first-child { width: 28%; }
 .doctor-suggest th:last-child { width: auto; }
 
 .doctor-merge { display: flex; gap: var(--space-4); margin-top: var(--space-4); }
-.doctor-merge__part { display: flex; flex-direction: column; gap: var(--space-2); width: 96px; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.doctor-merge__part { display: flex; flex-direction: column; gap: var(--space-1); width: 128px; min-width: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.doctor-merge__part > .art { margin-bottom: var(--space-1); }
+.doctor-merge__title { color: var(--color-text-primary); }
+.doctor-merge__note { color: var(--color-text-muted); font-size: var(--font-size-xs); line-height: 1.35; }
+
+/* The tag fix: the values to set, the files below; Edit all tags sits apart, on the left. */
+.doctor-fix .pe-form__row { margin: var(--space-3) 0 var(--space-4); }
+.doctor-fix .confirm__actions .doctor-fix__all { margin-right: auto; }
 
 @container main (max-width: 640px) {
   .doctor__head { flex-direction: column; align-items: flex-start; }
