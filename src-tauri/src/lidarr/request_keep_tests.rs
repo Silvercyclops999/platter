@@ -70,6 +70,32 @@ async fn after_five_days_away_only_a_few_searches_go_out_and_the_next_comes_afte
 }
 
 #[tokio::test]
+async fn a_setup_check_that_doesnt_pass_isnt_run_again_on_every_look() {
+    let r = rig();
+    r.lidarr.check().await.unwrap();
+    searching(&r, 1);
+    // Plex out of reach: the check can't compare folders.
+    r.web.st.lock().plex_down = true;
+    *r.now.lock() = T0 + DAY;
+    let checks = |web: &FakeLidarr| web.log.lock().iter().filter(|(m, p, _)| *m == Method::Get && p.ends_with("/rootfolder")).count();
+    let before = checks(&r.web);
+    r.lidarr.refresh_statuses().await.unwrap();
+    assert_eq!(checks(&r.web), before + 1, "checked before searching again");
+    assert_eq!(searches(&r.web), 0, "a check that didn't run sends no search");
+    let next = r.lidarr.requests()[0].next_search_at.unwrap();
+    assert_eq!(next, T0 + DAY + super::request::RETRY_EVERY.as_secs() as i64);
+    // The next quick looks don't read the whole setup again.
+    r.lidarr.refresh_statuses().await.unwrap();
+    r.lidarr.refresh_statuses().await.unwrap();
+    assert_eq!(checks(&r.web), before + 1);
+    // Plex is back, and the slow look comes round: it goes.
+    r.web.st.lock().plex_down = false;
+    *r.now.lock() = next;
+    r.lidarr.refresh_statuses().await.unwrap();
+    assert_eq!(searches(&r.web), 1);
+}
+
+#[tokio::test]
 async fn an_album_lidarr_cant_answer_for_doesnt_resend_the_others() {
     let r = rig();
     r.lidarr.check().await.unwrap();

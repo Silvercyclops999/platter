@@ -48,11 +48,15 @@ impl ArtistMbid for Mbid {
     }
 }
 
-struct Plex;
+/// Plex's files, out of reach while the faked Lidarr's `plex_down` is set.
+struct Plex(Arc<FakeLidarr>);
 
 #[async_trait]
 impl PlexMusic for Plex {
     async fn music_files(&self) -> AppResult<PlexFiles> {
+        if self.0.st.lock().plex_down {
+            return Err(crate::error::AppError::Network("Platter can't reach your Plex server".into()));
+        }
         Ok(PlexFiles {
             locations: vec!["/data/media/music".into()],
             files: vec![PlexFile { path: "/data/media/music/Northlight/First Light/01 Dawn.flac".into(), size: Some(31_000_111) }],
@@ -79,6 +83,8 @@ pub(super) struct State {
     pub(super) history: Vec<Value>,
     /// The root folder is the Plex music folder.
     pub(super) red: bool,
+    /// Plex doesn't answer when the setup check reads its files.
+    pub(super) plex_down: bool,
     pub(super) down: bool,
     /// Album list reads that come back empty after an add.
     pub(super) albums_delay: usize,
@@ -361,7 +367,7 @@ impl Rig {
             web: self.web.clone(),
             keys: keys.clone(),
             db: db.clone(),
-            plex: Arc::new(Plex),
+            plex: Arc::new(Plex(self.web.clone())),
             clock: Arc::new(move || *n.lock()),
             mb: self.mb.clone(),
             artist_mbid: Arc::new(Mbid),
@@ -381,7 +387,7 @@ fn lidarr_on(db: &DbHandle, web: &Arc<FakeLidarr>, mb: &Arc<FakeMb>, keys: &Arc<
         web: web.clone(),
         keys: keys.clone(),
         db: db.clone(),
-        plex: Arc::new(Plex),
+        plex: Arc::new(Plex(web.clone())),
         clock: Arc::new(move || *n.lock()),
         mb: mb.clone(),
         artist_mbid: Arc::new(Mbid),

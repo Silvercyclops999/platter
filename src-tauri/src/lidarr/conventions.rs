@@ -278,7 +278,8 @@ pub struct PlannedAlbum {
 
 /// Split "Artist feat. Other" into ("Artist", Some("Other")).
 fn split_feat(a: &str) -> (String, Option<String>) {
-    let l = a.to_lowercase();
+    // ASCII lowercasing keeps every byte where it was, so `i` cuts `a`.
+    let l = a.to_ascii_lowercase();
     for pat in [" feat. ", " ft. ", " featuring "] {
         if let Some(i) = l.find(pat) {
             return (a[..i].trim().to_string(), Some(a[i + pat.len()..].trim().to_string()));
@@ -352,6 +353,13 @@ pub fn apply(c: &Conventions, album: &str, year: Option<i32>, files: &[NewFile],
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn feat_splits_names_whose_case_changes_length() {
+        assert_eq!(split_feat("İİ feat. 王"), ("İİ".to_string(), Some("王".to_string())));
+        assert_eq!(split_feat("İlkay FEAT. Mira"), ("İlkay".to_string(), Some("Mira".to_string())));
+        assert_eq!(split_feat("Solo"), ("Solo".to_string(), None));
+    }
 
     fn file(name: &str, disc: u32, track: u32, tags: &[(&str, &str)]) -> FileSample {
         FileSample { name: name.into(), disc, track, tags: tags.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(), embedded_cover: Some(120_000) }

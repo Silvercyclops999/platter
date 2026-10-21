@@ -1194,6 +1194,7 @@ impl Lidarr {
                 && ready
                 && list[i].next_search_at.is_some_and(|at| now >= at);
             let mut searched = false;
+            let mut held = false;
             if due && sent_again < MAX_RESEARCH_PER_LOOK {
                 if check.is_none() {
                     // A recent green check, not the one saved some time ago.
@@ -1206,6 +1207,7 @@ impl Lidarr {
                     });
                 }
                 let green = check.as_ref().and_then(|c| c.as_ref()).is_some_and(|c| gate(c, list[i].protected).is_ok());
+                held = !green;
                 if green {
                     match writer.search(vec![album.id]).await {
                         Ok(()) => searched = true,
@@ -1214,6 +1216,11 @@ impl Lidarr {
                 }
             }
             let r = &mut list[i];
+            if held {
+                // The setup check didn't run or didn't pass. It reads every
+                // file Plex has, so it isn't run again on every look.
+                r.next_search_at = Some(now + RETRY_EVERY.as_secs() as i64);
+            }
             if searched {
                 sent_again += 1;
                 r.searches += 1;
