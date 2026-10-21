@@ -332,6 +332,8 @@ struct Download {
 /// The song being worked on.
 struct Running {
     job: CurrentJob,
+    /// Queued because it was playing or next, not asked for.
+    follow: bool,
     cancel: Stop,
     /// When the stage or percent last moved.
     moved: Instant,
@@ -366,6 +368,9 @@ struct State {
     other_model: Vec<(String, ModelKind)>,
     /// The paused batch as last kept in the database.
     pause_kept: Option<String>,
+    /// Songs following playback leaves alone this session: cancelled by the
+    /// user, or failed. Asking for one again clears it.
+    follow_skip: std::collections::HashSet<String>,
 }
 
 /// The parts the service works with.
@@ -985,18 +990,28 @@ impl Transcriber {
             let mut added = 0;
             let mut fronts = Vec::new();
             for id in ids {
-                if st.current.as_ref().is_some_and(|r| r.job.track_id == id) {
+                if !follow {
+                    st.follow_skip.remove(&id);
+                }
+                if let Some(r) = st.current.as_mut().filter(|r| r.job.track_id == id) {
+                    // Asked for while it runs for playback: it's the user's now.
+                    r.follow &= follow;
                     continue;
                 }
                 if let Some(pos) = st.queue.iter().position(|j| j.track_id == id) {
-                    if background || !st.queue[pos].background {
+                    let queued = &st.queue[pos];
+                    // Asked for while queued for playback: it becomes the user's.
+                    let claimed = queued.follow && !follow;
+                    if (background || !queued.background) && !claimed {
                         continue;
                     }
                     // Asked for now: lift it out of the batch.
                     st.queue.remove(pos);
                     st.batch.total = st.batch.total.saturating_sub(1);
                 }
-                let job = Job { track_id: id, background, check_other, now: front, redo: false, batch, follow };
+                // A song followed for playback goes first but waits like
+                // background work (the pause, a busy computer).
+                let job = Job { track_id: id, background, check_other, now: front && !follow, redo: false, batch, follow };
                 if front {
                     fronts.push(job);
                 } else if background {
@@ -1011,7 +1026,10 @@ impl Transcriber {
                 st.queue.push_front(job);
             }
             st.batch.total += added;
-            st.error = None;
+            // Following playback keeps a failure on screen until someone acts.
+            if !follow {
+                st.error = None;
+            }
             added
         };
         self.inner.wake.notify_one();
@@ -1061,6 +1079,11 @@ impl Transcriber {
             st.queue.retain(|j| !j.follow || wanted.contains(&j.track_id));
             let dropped = before - st.queue.len();
             st.batch.total = st.batch.total.saturating_sub(dropped);
+            // Skipped past: a song being done only for playback stops.
+            if let Some(r) = st.current.as_ref().filter(|r| r.follow && !wanted.contains(&r.job.track_id)) {
+                r.cancel.now();
+            }
+            wanted.retain(|id| !st.follow_skip.contains(id));
         }
         let d = &self.inner.deps;
         let mut need = Vec::new();
@@ -1079,7 +1102,7 @@ impl Transcriber {
             // Coming up before, playing now: it goes to the front.
             {
                 let mut st = self.inner.st.lock();
-                if let Some(pos) = st.queue.iter().position(|j| j.follow && j.track_id == id && !j.now) {
+                if let Some(pos) = st.queue.iter().position(|j| j.follow && j.track_id == id) {
                     st.queue.remove(pos);
                     st.batch.total = st.batch.total.saturating_sub(1);
                 }
@@ -1133,8 +1156,19 @@ impl Transcriber {
         {
             let mut st = self.inner.st.lock();
             match track_id {
-                None => Self::stop_all(&mut st),
+                None => {
+                    let followed: Vec<String> = st
+                        .queue
+                        .iter()
+                        .filter(|j| j.follow)
+                        .map(|j| j.track_id.clone())
+                        .chain(st.current.as_ref().filter(|r| r.follow).map(|r| r.job.track_id.clone()))
+                        .collect();
+                    st.follow_skip.extend(followed);
+                    Self::stop_all(&mut st)
+                }
                 Some(id) => {
+                    st.follow_skip.insert(id.to_owned());
                     let before = st.queue.len();
                     st.queue.retain(|j| j.track_id != id);
                     let removed = before - st.queue.len();
@@ -1174,7 +1208,7 @@ impl Transcriber {
             let rest = {
                 let st = self.inner.st.lock();
                 match (st.enabled, st.queue.front(), st.rest_until) {
-                    (true, Some(j), Some(until)) if !j.now => until.checked_duration_since(Instant::now()),
+                    (true, Some(j), Some(until)) if !j.now && !j.follow => until.checked_duration_since(Instant::now()),
                     _ => None,
                 }
             };
@@ -1295,7 +1329,7 @@ impl Transcriber {
                 waiting_for_playback: false,
                 model: self.model(&st),
             };
-            st.current = Some(Running { job: current, cancel: cancel.clone(), moved: Instant::now() });
+            st.current = Some(Running { job: current, follow: job.follow, cancel: cancel.clone(), moved: Instant::now() });
         }
         self.emit(true);
         let started = Instant::now();
@@ -1326,6 +1360,9 @@ impl Transcriber {
                 }
                 Outcome::Done | Outcome::Skipped | Outcome::Failed => {
                     st.batch.done = (st.batch.done + 1).min(st.batch.total);
+                    if matches!(outcome, Outcome::Failed) && job.follow {
+                        st.follow_skip.insert(job.track_id.clone());
+                    }
                 }
             }
             if matches!(outcome, Outcome::Failed) && self.inner.deps.recognizer.crashed_too_often() {

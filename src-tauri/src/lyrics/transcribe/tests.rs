@@ -729,21 +729,68 @@ async fn the_playing_song_and_the_next_without_lyrics_are_written_down_model_fir
 }
 
 #[tokio::test]
-async fn skipping_on_drops_songs_no_longer_coming_up() {
+async fn following_waits_while_paused_and_skipping_past_stops_the_song() {
+    let f = fx();
+    install(&f).await;
+    let words = f.rec.behaviour.lock().clone();
+    // Paused: songs followed for playback wait like background work.
+    f.t.pause();
+    f.t.follow(Some("601".into()), vec!["602".into()]).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(f.rec.runs.load(Ordering::SeqCst), 0, "nothing runs while paused");
+    assert_eq!(f.t.status().queued, 2);
+    f.t.resume();
+    *f.rec.behaviour.lock() = Behaviour::Block;
+    until(&f.t, "601 running", |s| s.current.as_ref().is_some_and(|c| c.track_id == "601" && c.stage == Stage::Transcribing)).await;
+    *f.rec.behaviour.lock() = words;
+    // The listener skipped ahead: 601 stops and 602 leaves the queue.
+    f.t.follow(Some("701".into()), vec![]).await;
+    until(&f.t, "701 done", |s| idle(s) && f.events.done.lock().iter().any(|d| d.0 == "701")).await;
+    assert!(!f.events.done.lock().iter().any(|d| d.0 == "601" || d.0 == "602"));
+}
+
+#[tokio::test]
+async fn asking_for_a_followed_song_makes_it_the_users() {
     let f = fx();
     install(&f).await;
     f.t.pause();
-    // Paused: songs asked for one at a time still run, so only the playing
-    // one goes; the next ones wait in the queue.
-    f.t.follow(Some("601".into()), vec!["602".into(), "603".into()]).await;
-    until(&f.t, "601 done", |_| f.events.done.lock().iter().any(|d| d.0 == "601")).await;
-    assert_eq!(f.t.status().queued, 2);
-    // The listener skipped ahead: 602 and 603 aren't coming up any more.
+    f.t.follow(Some("601".into()), vec!["602".into()]).await;
+    // Asked for while it waits as an upcoming song: it runs now and isn't
+    // dropped when playback moves on.
+    f.t.transcribe_track("602").unwrap();
     f.t.follow(Some("701".into()), vec![]).await;
-    until(&f.t, "701 done", |_| f.events.done.lock().iter().any(|d| d.0 == "701")).await;
-    let s = until(&f.t, "queue empty", idle).await;
-    assert_eq!(s.queued, 0);
-    assert!(!f.events.done.lock().iter().any(|d| d.0 == "602" || d.0 == "603"));
+    until(&f.t, "602 done", |_| f.events.done.lock().iter().any(|d| d.0 == "602")).await;
+}
+
+#[tokio::test]
+async fn a_cancelled_or_failed_song_isnt_followed_again() {
+    let f = fx();
+    install(&f).await;
+    let words = f.rec.behaviour.lock().clone();
+    *f.rec.behaviour.lock() = Behaviour::Fail;
+    f.t.follow(Some("601".into()), vec![]).await;
+    let s = until(&f.t, "601 failed", |s| idle(s) && s.error.is_some()).await;
+    assert_eq!(s.error.as_ref().and_then(|e| e.track_id.as_deref()), Some("601"));
+    *f.rec.behaviour.lock() = words.clone();
+    // Playing it again neither retries it nor clears the failure.
+    f.t.follow(Some("601".into()), vec![]).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let s = f.t.status();
+    assert!(idle(&s) && s.error.is_some());
+    assert_eq!(f.rec.runs.load(Ordering::SeqCst), 1);
+    // Cancelled by the user: the same.
+    *f.rec.behaviour.lock() = Behaviour::Block;
+    f.t.follow(Some("602".into()), vec![]).await;
+    until(&f.t, "602 running", |s| s.current.as_ref().is_some_and(|c| c.track_id == "602" && c.stage == Stage::Transcribing)).await;
+    f.t.cancel(Some("602"));
+    *f.rec.behaviour.lock() = words;
+    until(&f.t, "stopped", idle).await;
+    f.t.follow(Some("602".into()), vec![]).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(idle(&f.t.status()));
+    // Asking for it again clears that.
+    f.t.transcribe_track("602").unwrap();
+    until(&f.t, "602 done", |_| f.events.done.lock().iter().any(|d| d.0 == "602")).await;
 }
 
 #[tokio::test]

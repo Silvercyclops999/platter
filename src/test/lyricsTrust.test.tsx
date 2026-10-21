@@ -254,6 +254,17 @@ describe("timing", () => {
     expect(screen.queryByRole("button", { name: /Timing moved/ })).toBeNull();
   });
 
+  it("leaves the timing alone on - and + while the timing bar is closed", async () => {
+    at(lines, 0);
+    render(<LyricsPane />);
+    await screen.findByLabelText("Lyrics", { selector: ".lyrics__scroll" });
+    fireEvent.keyDown(window, { key: "+" });
+    fireEvent.keyDown(window, { key: "-" });
+    fireEvent.keyDown(window, { key: "-" });
+    await act(() => new Promise((r) => setTimeout(r, 50)));
+    expect(mock.lyricsChoices.has(lines.id)).toBe(false);
+  });
+
   it("keeps the lines on screen while the song's lyrics are asked for again", async () => {
     at(lines, 0);
     render(<LyricsPane />);
@@ -394,7 +405,7 @@ describe("timing", () => {
     expect(labels).not.toContain(TIMING_ITEM);
   });
 
-  it("closes the timing bar with Done, and the - and + keys work without it", async () => {
+  it("closes the timing bar with Done, and the - and + keys stop with it", async () => {
     at(lines, 0);
     render(<LyricsPane />);
     await option(TIMING_ITEM);
@@ -403,7 +414,8 @@ describe("timing", () => {
     fireEvent.click(within(bar).getByRole("button", { name: "Done" }));
     expect(screen.queryByRole("toolbar", { name: "Lyrics timing tools" })).toBeNull();
     fireEvent.keyDown(window, { key: "+" });
-    await waitFor(() => expect(mock.lyricsChoices.get(lines.id)?.offsetMs).toBe(500));
+    await act(() => new Promise((r) => setTimeout(r, 50)));
+    expect(mock.lyricsChoices.has(lines.id)).toBe(false);
   });
 });
 
