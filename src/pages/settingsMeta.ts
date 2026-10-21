@@ -125,12 +125,12 @@ export const COMMON: ReadonlySet<string> = new Set([
   "statsPage",
   "releaseRadar",
   "explicitContent",
-  // Downloads and devices: the basics, and going offline.
+  // Downloads and devices: the basics, and going offline. Which kinds of
+  // speakers Listen on looks for sits under More.
   "downloadQuality",
   "downloadsStorage",
   "downloadLiked",
   "goOffline",
-  "showDevices",
   // Appearance: look, layout and colour.
   "layout",
   "theme",

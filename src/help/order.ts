@@ -21,3 +21,6 @@ export const HELP_ORDER = [
 ] as const;
 
 export type HelpSlug = (typeof HELP_ORDER)[number];
+
+/** Pages about things only the computer has. The phone's help leaves them out. */
+export const COMPUTER_ONLY_HELP: readonly HelpSlug[] = ["layouts", "tag-editor", "stream-deck", "automation"];

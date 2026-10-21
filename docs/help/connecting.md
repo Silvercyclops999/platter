@@ -1,6 +1,6 @@
 # Connecting to your server
 
-How Platter reaches your music server at home and away from home, what the relay is, and how to switch between servers.
+How Platter reaches your music at home and away from home, and how to switch between servers.
 
 ## How Platter finds your server
 

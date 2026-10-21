@@ -2698,7 +2698,8 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       description: "Ten bands, presets, and a profile for each output. This device only.",
       more: "Shape the sound with ten bands from 31 Hz to 16 kHz. Drag the points, or focus one and use the arrow keys (Shift for bigger steps). Pick a preset, save your own, and give an output device its own profile. This device only.",
       control: (ids) => toggle(s, "eqEnabled", ids),
-      block: () => <EqEditor />,
+      // The curve shows once the equalizer is on; off, the row is just its switch.
+      block: () => (s?.eqEnabled ? <EqEditor /> : null),
     },
     ...hifiRows(),
     // Sharing and friends
@@ -4445,7 +4446,6 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
     const g = page ? undefined : (sectionProp ?? routeSection);
     // phoneScrollKey is read by the effect above, which keeps each list's place.
     phoneScrollKey.current = page ? `page:${page.id}` : (g ?? "");
-    const offline = usable.filter((r) => r.key === "goOffline");
     let body: ReactNode;
     if (page) body = pageView(page);
     else if (g) {
@@ -4516,11 +4516,6 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
             </>
           ) : (
             <>
-              {offline.length > 0 && (
-                <div className="ph-set-card">
-                  <RowList rows={offline} />
-                </div>
-              )}
               <ul className="ph-set-list" aria-label="Settings sections">
                 {GROUPS.filter((x) => usable.some((r) => r.section === x) || groupPages(x).length > 0).map((x) => (
                   <li key={x}>
