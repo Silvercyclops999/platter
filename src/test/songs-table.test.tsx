@@ -63,7 +63,7 @@ describe("the table", () => {
     const titles = shownTitles();
     expect([...titles].sort((a, b) => a!.localeCompare(b!, undefined, { sensitivity: "base" }))).toEqual(titles);
     const all = await mock.songsPage({ sort: "title", desc: false, find: "" }, 0, 1);
-    expect(screen.getByText(totalsLine(all.total, all.totalMs))).toBeInTheDocument();
+    expect(screen.getByText(totalsLine(all.total!, all.totalMs!))).toBeInTheDocument();
   });
 
   it("sorts by a column and flips it", async () => {
@@ -162,12 +162,66 @@ describe("the table", () => {
     expect(screen.getByText("100,000 songs, 208 days 8 hr")).toBeInTheDocument();
   });
 
-  it("starts over when the library changes", async () => {
+  it("asks again when the library changes, keeping the rows and the selection on screen meanwhile", async () => {
     const ask = vi.spyOn(backend, "songsPage");
     page();
     await waitFor(() => expect(shownTitles().length).toBeGreaterThan(5));
+    const rows = () => within(grid()).getAllByRole("row").filter((r) => r.hasAttribute("data-track-id"));
+    const id = rows()[2].getAttribute("data-track-id");
+    fireEvent.click(rows()[2]);
+    const before = shownTitles();
     const n = ask.mock.calls.length;
+    let answer!: () => void;
+    ask.mockImplementationOnce((q, offset, limit) => new Promise((ok) => (answer = () => ok(mock.songsPage(q, offset, limit)))));
     act(() => mock.emit("library://changed", null));
     await waitFor(() => expect(ask.mock.calls.length).toBeGreaterThan(n));
+    // No skeletons while the new rows come.
+    expect(shownTitles()).toEqual(before);
+    expect(grid().querySelector(".songs__row--wait")).toBeNull();
+    await act(async () => answer());
+    await waitFor(() => expect(grid().querySelector(`[data-track-id="${id}"]`)).toHaveAttribute("aria-selected", "true"));
+  });
+
+  it("a later page that fails says so once and isn't asked for again until Try again", async () => {
+    const user = userEvent.setup();
+    const one = mock.fx.tracks[0];
+    let failing = true;
+    const ask = vi.spyOn(backend, "songsPage").mockImplementation(async (_q, offset, limit) => {
+      if (offset > 0 && failing) throw { kind: "internal", message: "database is locked" };
+      return {
+        rows: Array.from({ length: limit }, (_, i): SongRow => ({ track: { ...one, id: `s${offset + i}`, title: `Song ${offset + i}` }, year: 2000, addedAt: 0 })),
+        total: offset > 0 ? null : 1_000,
+        totalMs: offset > 0 ? null : 1_000 * 180_000,
+      };
+    });
+    page();
+    await waitFor(() => expect(shownTitles().length).toBeGreaterThan(5));
+    // End: lands on a row that is still loading, and keeps the keyboard there.
+    const first = within(grid()).getAllByRole("row").find((r) => r.getAttribute("data-row") === "0")!;
+    first.focus();
+    // jsdom doesn't scroll: give the scroller a height and make scrollTo move it, so far-off rows render.
+    const had = HTMLElement.prototype.scrollTo;
+    const tall = Object.getOwnPropertyDescriptor(Element.prototype, "scrollHeight");
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get: () => 100_000 });
+    HTMLElement.prototype.scrollTo = function (this: HTMLElement, a?: ScrollToOptions | number) {
+      Object.defineProperty(this, "scrollTop", { configurable: true, writable: true, value: typeof a === "object" ? (a.top ?? 0) : 0 });
+      this.dispatchEvent(new Event("scroll"));
+    } as typeof had;
+    try {
+      fireEvent.keyDown(first, { key: "End" });
+      await waitFor(() => expect(document.activeElement).toHaveAttribute("data-row", "999"));
+    } finally {
+      HTMLElement.prototype.scrollTo = had;
+      delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight;
+      if (tall) Object.defineProperty(Element.prototype, "scrollHeight", tall);
+    }
+    expect(await screen.findByText(/Some songs didn't load/)).toBeInTheDocument();
+    const calls = ask.mock.calls.length;
+    await new Promise((r) => setTimeout(r, 300));
+    expect(ask.mock.calls.length).toBe(calls);
+    failing = false;
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(grid().querySelector('[data-track-id="s999"]')).not.toBeNull());
+    expect(screen.queryByText(/Some songs didn't load/)).toBeNull();
   });
 });

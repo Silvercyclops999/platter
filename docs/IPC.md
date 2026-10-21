@@ -3200,9 +3200,9 @@ Settings: `showCrates` (on) shows the Crates page, its tile in Explore on Home a
 | `songs_page` | `{ query: SongsQuery, offset?: number, limit?: number }` | `SongsPage` |
 | `songs_play_ids` | `{ query: SongsQuery, startTrackId?: string }` | `{ trackIds: string[] }` |
 
-`SongsQuery = { sort: SongSort, desc: boolean, find: string }` with `SongSort` one of `"title"|"artist"|"album"|"year"|"time"|"plays"|"added"|"lastPlayed"|"rating"|"trackNumber"|"format"`. `SongsPage = { rows: { track: Track, year: number | null, addedAt: number }[], total, totalMs }`.
+`SongsQuery = { sort: SongSort, desc: boolean, find: string }` with `SongSort` one of `"title"|"artist"|"album"|"year"|"time"|"plays"|"added"|"lastPlayed"|"rating"|"trackNumber"|"format"`. `SongsPage = { rows: { track: Track, year: number | null, addedAt: number }[], total: number | null, totalMs: number | null }`.
 
-`songs_page` is Your Library > Songs: every song in the library, `limit` rows (200 by default, 500 at most) from `offset`, in the column's order. Songs with nothing in that column go last either way; ties go by album, disc and track (or title). `find` keeps songs where every word is in the title, artist, track artist or album. Albums the server or tag view hides, fan and AI edits (unless shown), hidden songs and songs by hidden artists are left out. `total` and `totalMs` count everything in view, not just the page. Year and Added come from the album.
+`songs_page` is Your Library > Songs: every song in the library, `limit` rows (200 by default, 500 at most) from `offset`, in the column's order. Songs with nothing in that column go last either way; ties go by album, disc and track (or title). `find` keeps songs where every word is in the title, artist, track artist or album. Albums the server or tag view hides, fan and AI edits (unless shown), hidden songs and songs by hidden artists are left out. `total` and `totalMs` count everything in view, not just the page; they come with the page at offset 0 and are null on later pages. Year and Added come from the album.
 
 `songs_play_ids` gives what plays from a row: the table's order with up to 500 songs before `startTrackId` and 2,000 in all (from the top when it isn't in view). The window plays them as a `tracks` context with id `songs` and shuffle off; the queue calls it "Your songs".
 
