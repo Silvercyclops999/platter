@@ -13,7 +13,7 @@ import { backend } from "../lib/backend";
 import { metaLine, PROFILE_AUDIENCE, profileFriends, profileSections, thisMonth } from "../lib/profile";
 import { importSettings, migrateSettingNames } from "../lib/settingsFile";
 import { formatPlays, monthName } from "../lib/stats";
-import { monthStory } from "../lib/statsStory";
+import { monthLine } from "../pages/MonthStory";
 import { DEFAULT_SETTINGS } from "../lib/types";
 import { ProfilePage } from "../pages/ProfilePage";
 import { StatsPage } from "../pages/StatsPage";
@@ -78,12 +78,11 @@ describe("Profile page", () => {
     );
     expect(await screen.findByRole("heading", { level: 1, name: "listener" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("profile-meta")).toHaveTextContent(metaLine(playlists.length, o.totals.plays)));
-    const story = monthStory(o);
-    await waitFor(() => expect(screen.getByTestId("profile-month")).toHaveTextContent(`You listened for ${story.time} this month`));
+    // One plain line: the month's time and who took most of it, not a sentence about the numbers.
+    await waitFor(() => expect(screen.getByTestId("profile-month")).toHaveTextContent(monthLine(o)));
     const told = screen.getByTestId("profile-month");
     expect(told).toHaveTextContent(o.topArtists[0].name);
-    expect(told).toHaveTextContent(`That's ${story.plays} over ${story.days}`);
-    // A sentence, not a row of labelled boxes.
+    expect(told).toHaveTextContent(/^\d[\d,]* (min|hrs?) this month/);
     expect(within(told).queryByRole("term")).toBeNull();
     await user.click(screen.getByRole("button", { name: "More options for your profile" }));
     expect(await screen.findByRole("menuitem", { name: /See all your stats/ })).toBeInTheDocument();

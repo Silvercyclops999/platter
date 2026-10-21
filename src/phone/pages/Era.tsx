@@ -57,7 +57,7 @@ export function PhoneEra({ artistId, name }: { artistId: string; name: string })
           </button>
         }
       />
-      <EraStory data={data} className="ph-era__story" gap={0.6} />
+      <EraStory data={data} className="ph-era__story" />
       {data.groups.map((g) => (
         <section key={g.album.id} className="ph-x__section" aria-label={g.album.title}>
           <button type="button" className="ph-row ph-era__group" onClick={() => nav.go({ name: "album", id: g.album.id })}>

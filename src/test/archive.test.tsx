@@ -13,7 +13,7 @@ import { AlbumPage } from "../pages/AlbumPage";
 import { cleanKeyword, cleanStatusTag, foldStatusValue, withStatusValue } from "../pages/ArchiveSettings";
 import { ArtistPage } from "../pages/ArtistPage";
 import { EraPage } from "../pages/EraPage";
-import { eraMarks, eraSentence, monthIndex } from "../pages/EraStory";
+import { eraLine } from "../pages/EraStory";
 import { eraRange, filterByEra, formatArchiveDate, otherVersionsText, showEraCards, showVersionLink, versionLinkText } from "../pages/era";
 import { releaseLabel, strengthLine } from "../pages/ReleaseStatusLabel";
 import { SearchPage } from "../pages/SearchPage";
@@ -327,36 +327,21 @@ describe("artist page sections and eras", () => {
     expect(screen.getByRole("button", { name: "Play Glass Season" })).toBeInTheDocument();
   });
 
-  it("the era page says the era in a sentence and puts its releases on a timeline", async () => {
+  it("the era page gives one line of facts, with no sentence or timeline", async () => {
     render(<EraPage artistId={ARCHIVE_ARTIST_ID} name="Glass Season" />);
-    const story = await screen.findByTestId("era-story");
-    expect(story).toHaveTextContent(/^Glass Season ran from \w+ \d{4} to \w+ \d{4}: \d+ songs over 3 releases/);
-    expect(within(story).getByRole("img", { name: /^Releases from / })).toBeInTheDocument();
+    const line = await screen.findByTestId("era-story");
+    expect(line).toHaveTextContent(/^\w+ \d{4} to \w+ \d{4}, 3 releases/);
+    expect(screen.queryByRole("img", { name: /^Releases from / })).toBeNull();
   });
 
-  it("the era timeline spans only dated releases, marks the newest, and keeps close labels apart", () => {
-    const g = (id: string, date: string | null, year: number | null = null) => ({ album: { id, title: id, year } as never, date, tracks: [] });
-    expect(monthIndex("2019-02-11")! - monthIndex("2019")!).toBeCloseTo(1 + 10 / 31);
-    expect(monthIndex("someday")).toBeNull();
-    expect(eraMarks([g("a", "2019"), g("b", null)])).toEqual([]);
-    const marks = eraMarks([g("new", "2019-12"), g("mid", "2019-02"), g("old", "2019-01")]);
-    expect(marks.map((m) => [m.id, m.newest, m.row])).toEqual([
-      ["old", false, 0],
-      ["mid", false, 1],
-      ["new", true, 0],
-    ]);
-    expect(marks[2].at).toBe(1);
+  it("the era line reads plainly for a span, one month, or no songs", () => {
     const t = (s: string) => ({ songStatus: s }) as never;
     const page = { era: { name: "Glass Season", start: "2018-09", end: "2019-02", trackCount: 3, albumCount: 2 }, groups: [{ tracks: [t("released"), t("unreleased"), t("probablyAlternate")] }] } as never;
-    expect(eraSentence(page)).toEqual({ lead: "Glass Season", rest: " ran from Sep 2018 to Feb 2019: 3 songs over 2 releases, 2 of them unreleased." });
-    // One month, or no songs at all, read plainly.
+    expect(eraLine(page)).toBe("Sep 2018 to Feb 2019, 2 releases, 2 songs unreleased.");
     const one = { era: { name: "Kite", start: "2019-02-01", end: "2019-02-20", trackCount: 1, albumCount: 1 }, groups: [{ tracks: [t("released")] }] } as never;
-    expect(eraSentence(one).rest).toBe(" is from Feb 2019: 1 song over 1 release.");
+    expect(eraLine(one)).toBe("Feb 2019, 1 release.");
     const none = { era: { name: "Kite", start: "2019", end: null, trackCount: 0, albumCount: 0 }, groups: [] } as never;
-    expect(eraSentence(none).rest).toBe(" has no songs here yet.");
-    // One album in two groups (two editions) still gets a mark each, with its own key.
-    const twice = eraMarks([g("same", "2019-01"), g("same", "2019-06"), g("other", "2019-12")]);
-    expect(new Set(twice.map((m) => m.key)).size).toBe(3);
+    expect(eraLine(none)).toBe("No songs here yet.");
   });
 
   it("an unreleased build gets its era banner", async () => {

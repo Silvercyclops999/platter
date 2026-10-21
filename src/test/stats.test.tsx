@@ -17,11 +17,12 @@ import { layoutRecapCard, recapContent } from "../lib/recapCard";
 import type { Measure } from "../lib/shareCard";
 import { addDays, addMonths, barFractions, change, formatMinutes, hourLabel, localDay, parseDay, playedFromLabel, rangeLabel, sparkPath, toRange } from "../lib/stats";
 import { shareOfTop } from "../lib/statsCharts";
-import { activeSlice, activeWeeks, axisTicks, bestPoint, calendarMonths, daySentence, daysSentence, duration, heroSentence, hourOrder, longDuration, monthStory, isMostlyEmpty, minuteScale, minutesSentence, peakHours, standoutWeekday } from "../lib/statsStory";
+import { activeSlice, activeWeeks, axisTicks, bestPoint, calendarMonths, daySentence, daysSentence, duration, heroSentence, hourOrder, longDuration, isMostlyEmpty, minuteScale, minutesSentence, peakHours, standoutWeekday } from "../lib/statsStory";
 import type { MonthRecap, StatsOverview, StatsPoint, TopSong } from "../lib/statsTypes";
 import { DEFAULT_SETTINGS } from "../lib/types";
 import { BarChart, DayCharts, ListeningCalendar } from "../pages/StatsCharts";
 import { momentCards, momentDate } from "../pages/StatsMoments";
+import { monthLine, shortListen } from "../pages/MonthStory";
 import { StatsPage } from "../pages/StatsPage";
 import { recapChange } from "../pages/StatsRecaps";
 import { AppMenu } from "../shell/TopBar";
@@ -540,17 +541,18 @@ describe("stats stories", () => {
     expect(heroSentence({ ...o, topArtists: [] }).artist).toBeNull();
   });
 
-  it("this month in words: hours spelled out, mostly to whom, then plays, days and the longest run", () => {
-    expect([longDuration(45 * 60_000), longDuration(60 * 60_000), longDuration(200 * 60_000), longDuration(2461 * 60_000)]).toEqual(["45 minutes", "1 hour", "3 hours and 20 minutes", "41 hours"]);
+  it("this month in one line: its time, and who took most of it", () => {
+    expect(longDuration(200 * 60_000)).toBe("3 hours and 20 minutes");
+    expect([shortListen(40 * 60_000), shortListen(60 * 60_000), shortListen(2461 * 60_000)]).toEqual(["40 min", "1 hr", "41 hrs"]);
     const o = {
       totals: { ms: 2461 * 60_000, plays: 191, songs: 120, artists: 9, albums: 30, days: 20 },
       topArtists: [{ name: "Copperline Choir", ms: 900 * 60_000 }],
       streak: { days: 16, from: "2026-10-04", to: "2026-10-19" },
     } as unknown as StatsOverview;
-    expect(monthStory(o)).toEqual({ time: "41 hours", artist: "Copperline Choir", lead: "mostly to", plays: "191 plays", days: "20 days", streak: "16 days in a row" });
-    expect(monthStory({ ...o, topArtists: [{ name: "Copperline Choir", ms: 300 * 60_000 }] } as unknown as StatsOverview).lead).toBe("more to");
-    expect(monthStory({ ...o, streak: { days: 1, from: "2026-10-04", to: "2026-10-04" } }).streak).toBeNull();
-    expect(monthStory({ ...o, topArtists: [] }).lead).toBeNull();
+    expect(monthLine(o)).toBe("41 hrs this month, mostly Copperline Choir.");
+    expect(monthLine({ ...o, topArtists: [{ name: "Copperline Choir", ms: 300 * 60_000 }] } as unknown as StatsOverview)).toBe("41 hrs this month, Copperline Choir most of all.");
+    expect(monthLine({ ...o, topArtists: [] })).toBe("41 hrs this month.");
+    expect(monthLine({ ...o, totals: { ...o.totals, plays: 0 } })).toBe("Nothing played yet this month.");
   });
 
   it("charts start at the first play, not the empty days before it", () => {

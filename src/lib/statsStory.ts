@@ -384,28 +384,3 @@ export function longDuration(ms: number): string {
   return h >= 10 || rest === 0 ? hrs : `${hrs} and ${mins(rest)}`;
 }
 
-export interface MonthStoryParts {
-  time: string;
-  /** The artist who took the most of it, and how that reads ("mostly to", "more to"). */
-  artist: string | null;
-  lead: "mostly to" | "more to" | null;
-  plays: string;
-  days: string;
-  /** Days in a row, from two up. */
-  streak: string | null;
-}
-
-/** What the month sentence says: how long, to whom, then plays, days and the longest run. */
-export function monthStory(o: StatsOverview): MonthStoryParts {
-  const t = o.totals;
-  const a = o.topArtists[0];
-  const share = a && t.ms > 0 ? a.ms / t.ms : 0;
-  return {
-    time: longDuration(t.ms),
-    artist: a?.name ?? null,
-    lead: !a ? null : share >= 0.25 ? "mostly to" : "more to",
-    plays: `${t.plays.toLocaleString()} ${t.plays === 1 ? "play" : "plays"}`,
-    days: `${t.days.toLocaleString()} ${t.days === 1 ? "day" : "days"}`,
-    streak: o.streak && o.streak.days > 1 ? `${o.streak.days.toLocaleString()} days in a row` : null,
-  };
-}
