@@ -22,6 +22,7 @@ pub mod error;
 pub mod feed;
 pub mod hidden;
 pub mod homeside;
+pub mod explicit;
 pub mod identity;
 pub mod import;
 pub mod jellyfin;
@@ -672,6 +673,14 @@ pub fn run() {
             tauri::async_runtime::spawn(artist_info.clone().watch_prefetch());
             // Albums Plex couldn't match: ask MusicBrainz whether Plex just missed them.
             tauri::async_runtime::spawn(artistinfo::releasecheck::watch(artist_info.clone()));
+            // Songs whose files don't say: ask Deezer which are explicit.
+            tauri::async_runtime::spawn(explicit::watch(db.clone(), artist_info.http(), {
+                let h = app.handle().clone();
+                Arc::new(move || {
+                    use tauri::Emitter;
+                    let _ = h.emit(tags::commands::EV_CHANGED, ());
+                })
+            }));
             // The window opens hidden and is shown once the page has drawn
             // (launched at login: kept in the tray or minimised).
             let args: Vec<String> = std::env::args().collect();
@@ -797,7 +806,7 @@ pub fn run() {
                 player.clone(),
                 app_settings.clone(),
             ));
-            os.start(app.handle(), player.clone(), art.clone(), cache_dir.join("now-playing"), live.platform.clone());
+            os.start(app.handle(), player.clone(), art.clone(), cache_dir.join("now-playing"), live.platform.clone(), db.clone());
             // The listening diary: albums played start to finish, kept here
             // (and in the sync file only when its own setting is on).
             // Where an entry was heard: the name set for this computer, or its

@@ -24,7 +24,7 @@ reading it: the forum thread that first documented the field is gone.
 | MusicBrainz IDs | MUSICBRAINZ_ALBUMID, MUSICBRAINZ_TRACKID, … | MusicBrainz TXXX fields | Used for matching, Lidarr, library import |
 | Cover art | Embedded or `cover.jpg` in album folder | Same | Artist photo: `artist-poster.jpg` in artist folder |
 | Lyrics | Sidecar `.lrc` (synced) or `.txt`, same filename as track | Same | |
-| Explicit | ITUNESADVISORY (1 explicit, 2 clean); EXPLICIT=1 also accepted | TXXX:ITUNESADVISORY (Mp3tag ITUNESADVISORY); M4A uses the `rtng` atom | Plex ignores it. Platter reads it from the file itself and shows an E badge |
+| Explicit | ITUNESADVISORY (1 explicit, 2 clean); EXPLICIT=1 also accepted | TXXX:ITUNESADVISORY (Mp3tag ITUNESADVISORY); M4A uses the `rtng` atom | Plex ignores it. Platter reads it from the file itself and shows an E badge. When the file doesn't say, Platter asks Deezer and keeps the answer in its own data |
 
 ## Archive tags (ignored by Plex)
 

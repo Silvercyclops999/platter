@@ -393,7 +393,8 @@ fn rating(explicit_tag: Option<bool>, version_fold: &str) -> Option<bool> {
 /// plays: explicit unless it's filtered. Same album first.
 pub fn rated_copy(c: &Connection, track_id: &str, explicit_ok: bool) -> AppResult<String> {
     let mut st = c.prepare_cached(
-        "SELECT b.track_id, b.version_fold, b.album_fold, b.duration_ms, f.explicit, b.track_id = a.track_id
+        "SELECT b.track_id, b.version_fold, b.album_fold, b.duration_ms,
+                coalesce(f.explicit, (SELECT x.explicit FROM explicit_found x WHERE x.track_id = b.track_id)), b.track_id = a.track_id
          FROM song_index a JOIN song_index b ON b.artist_fold = a.artist_fold AND b.title_fold = a.title_fold AND b.unreleased = 0
          LEFT JOIN tracks t ON t.id = b.track_id LEFT JOIN file_tags f ON f.part_key = t.part_key AND f.status = 'ok'
          WHERE a.track_id = ?1",

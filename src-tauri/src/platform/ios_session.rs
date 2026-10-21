@@ -14,7 +14,7 @@ use objc2_foundation::NSObjectProtocol;
 use objc2_foundation::{NSDictionary, NSNumber, NSString};
 use objc2_media_player::{
     MPChangePlaybackPositionCommandEvent, MPMediaItemPropertyAlbumTitle, MPMediaItemPropertyArtist,
-    MPMediaItemPropertyArtwork, MPMediaItemPropertyPlaybackDuration, MPMediaItemPropertyTitle,
+    MPMediaItemPropertyArtwork, MPMediaItemPropertyIsExplicit, MPMediaItemPropertyPlaybackDuration, MPMediaItemPropertyTitle,
     MPNowPlayingInfoCenter, MPNowPlayingInfoPropertyElapsedPlaybackTime, MPNowPlayingInfoPropertyPlaybackRate,
     MPRemoteCommand, MPRemoteCommandCenter, MPRemoteCommandEvent, MPRemoteCommandHandlerStatus,
 };
@@ -127,7 +127,8 @@ impl IosSession {
             Playback::Playing(p) => (p, 1.0),
         };
         // SAFETY: the keys are the framework's own constants and every value
-        // is an NSString, NSNumber or MPMediaItemArtwork, as the API expects.
+        // is an NSString, NSNumber or MPMediaItemArtwork, as the API expects
+        // (the explicit flag is a boolean NSNumber; CarPlay shows an E).
         unsafe {
             let mut keys: Vec<&NSString> = vec![
                 MPMediaItemPropertyTitle,
@@ -143,7 +144,9 @@ impl IosSession {
             let duration = NSNumber::new_f64(self.now.duration_ms as f64 / 1000.0);
             let elapsed = NSNumber::new_f64(position as f64 / 1000.0);
             let rate = NSNumber::new_f64(rate);
-            let mut values: Vec<&AnyObject> = vec![&title, &artist, &album, &duration, &elapsed, &rate];
+            let explicit = NSNumber::new_bool(self.now.explicit);
+            keys.push(MPMediaItemPropertyIsExplicit);
+            let mut values: Vec<&AnyObject> = vec![&title, &artist, &album, &duration, &elapsed, &rate, &explicit];
             if let Some(art) = &self.artwork {
                 keys.push(MPMediaItemPropertyArtwork);
                 values.push(art);

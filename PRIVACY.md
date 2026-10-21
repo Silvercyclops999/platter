@@ -57,6 +57,13 @@ and your own Plex server.
   An album you own through a Discogs import is looked up by its release id
   alone. Answers are kept on your computer. Unreleased albums are never
   looked up. Song credits Plex keeps come from your own server.
+- Deezer's public catalogue (api.deezer.com, no account), to find which songs
+  are explicit when their files don't say. In the background, for each album
+  with such songs, a search carries the album artist and album title, and then
+  Deezer's own album id to list its songs. Nothing else goes: no song titles,
+  account, server or file details. Unreleased albums are never looked up. The
+  answers are kept on that device only, and your files are never changed. You
+  can turn it off with "Find explicit songs online" (Settings > Library).
 - AcoustID, only if you turn on "Identify songs by sound" in Settings (it is
   off by default). Platter makes an audio fingerprint of a song on your
   computer and sends the fingerprint and the song's length in seconds,

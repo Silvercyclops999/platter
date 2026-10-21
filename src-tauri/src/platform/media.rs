@@ -22,6 +22,8 @@ pub struct NowPlaying {
     pub duration_ms: u64,
     /// A local file from the art cache. Never a server URL.
     pub cover: Option<PathBuf>,
+    /// The song is explicit (the iPhone's lock screen and CarPlay show an E).
+    pub explicit: bool,
 }
 
 /// Playback state for the session, with the position in ms.
@@ -94,6 +96,7 @@ pub fn now_playing_for(state: &PlayerState) -> Option<NowPlaying> {
         album: t.album_title.clone(),
         duration_ms: if state.duration_ms > 0 { state.duration_ms } else { t.duration_ms },
         cover: None,
+        explicit: false,
     })
 }
 
@@ -259,6 +262,20 @@ impl Controller {
         }
         if let Some(now) = self.now.as_mut() {
             now.cover = Some(cover);
+            let now = now.clone();
+            self.with_session(|s| s.set_metadata(&now));
+        }
+    }
+
+    /// Whether `track_id` is explicit, once looked up.
+    pub fn on_explicit(&mut self, track_id: &str, explicit: bool) {
+        if self.track_id.as_deref() != Some(track_id) {
+            return;
+        }
+        if let Some(now) = self.now.as_mut()
+            && now.explicit != explicit
+        {
+            now.explicit = explicit;
             let now = now.clone();
             self.with_session(|s| s.set_metadata(&now));
         }
@@ -448,6 +465,23 @@ pub(crate) mod tests {
         assert!(log.meta.lock().iter().all(|m| m.cover.is_none()));
         c.on_cover("1", PathBuf::from("cover.jpg"));
         assert_eq!(log.meta.lock().last().unwrap().cover, Some(PathBuf::from("cover.jpg")));
+    }
+
+    #[test]
+    fn explicit_flag_reaches_the_lock_screen_for_the_current_track() {
+        let log = Arc::new(Log::default());
+        let (mut c, _) = controller(&log, false);
+        c.set_enabled(true);
+        c.on_state(&state(Some(track("1")), PlayerStatus::Playing, 0), Instant::now());
+        let sent = log.meta.lock().len();
+        c.on_explicit("old", true);
+        c.on_explicit("1", false);
+        assert_eq!(log.meta.lock().len(), sent, "nothing new to say");
+        c.on_explicit("1", true);
+        assert!(log.meta.lock().last().unwrap().explicit);
+        // A new track starts clean until it's looked up.
+        c.on_state(&state(Some(track("2")), PlayerStatus::Playing, 0), Instant::now());
+        assert!(!log.meta.lock().last().unwrap().explicit);
     }
 
     #[test]

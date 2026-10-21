@@ -1411,6 +1411,23 @@ CREATE TABLE IF NOT EXISTS lyrics_auto_heard (
 INSERT OR IGNORE INTO lyrics_auto_heard (track_id, heard) SELECT track_id, 1 FROM user_lyrics WHERE auto IS NOT NULL;
 INSERT OR IGNORE INTO lyrics_auto_heard (track_id, heard) SELECT track_id, 1 FROM lyrics_auto_empty;
 "#,
+    // v50: explicit marks from Deezer for songs whose files don't say
+    // (crate::explicit). `explicit_found` has a row per song Deezer answered
+    // for, `explicit_check` one per album asked, with when to ask again.
+    r#"
+CREATE TABLE IF NOT EXISTS explicit_found (
+    track_id TEXT PRIMARY KEY,
+    album_id TEXT NOT NULL,
+    explicit INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS explicit_found_album ON explicit_found (album_id);
+CREATE TABLE IF NOT EXISTS explicit_check (
+    album_id   TEXT PRIMARY KEY,
+    found      INTEGER NOT NULL,
+    checked_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+) WITHOUT ROWID;
+"#,
 ];
 
 #[cfg(test)]

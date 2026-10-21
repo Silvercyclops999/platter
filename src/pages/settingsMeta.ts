@@ -264,6 +264,7 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "readFileTags",
   "countUnmatchedUnreleased",
   "checkUnmatchedMusicbrainz",
+  "explicitLookup",
   "archiveFolderKeywords",
   "releaseStatusTag",
   "releaseStatusValues",

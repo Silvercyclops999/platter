@@ -1065,6 +1065,8 @@ export interface Settings {
   countUnmatchedUnreleased: boolean;
   /** Look albums Plex couldn't match up on MusicBrainz (needs MusicBrainz on). */
   checkUnmatchedMusicbrainz: boolean;
+  /** Ask Deezer which songs are explicit when their files don't say. */
+  explicitLookup: boolean;
   /** Albums sharing a group tag show as one card with an edition picker. */
   groupEditions: boolean;
   /** Edit in Plex (covers, matches, details, merge) on servers this account owns. */
@@ -1780,6 +1782,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showFanEdits: false,
   countUnmatchedUnreleased: true,
   checkUnmatchedMusicbrainz: false,
+  explicitLookup: true,
   groupEditions: true,
   plexEditShow: true,
   plexEditLock: true,
