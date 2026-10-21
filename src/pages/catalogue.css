@@ -94,3 +94,7 @@
 .dismissed-list__item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) var(--space-4); border-radius: var(--radius-card); background: var(--color-bg-raised); }
 .dismissed-list__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sr-owned--top { margin-left: var(--space-2); vertical-align: middle; }
+/* Popular: a top song you don't have. Its title is the button a tap plays. */
+.track-row--get .track-row__get-title { padding: 0; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
+.track-row--get .track-row__get-title:hover { text-decoration: underline; }
+.track-row--get .track-row__art { opacity: 0.7; }

@@ -12,6 +12,7 @@ import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { MockCatalogue } from "../lib/mock/catalogue";
 import { DEFAULT_SETTINGS, type Tap } from "../lib/types";
+import { ArtistPage, popularItems } from "../pages/ArtistPage";
 import { lastGetText } from "../pages/LidarrSettings";
 import { SearchPage } from "../pages/SearchPage";
 import { resetCatalogueCache } from "../pages/SearchCatalogue";
@@ -188,5 +189,37 @@ describe("settings", () => {
       "Last get: found 4 s, downloaded 31 s, playing at 38 s.",
     );
     expect(lastGetText({ title: "x", at: 1, timings: { foundMs: 900, downloadedMs: null, playingMs: null, inLibraryMs: 60_000 } })).toBe("Last get: found 1 s.");
+  });
+});
+
+describe("an artist's Popular", () => {
+  it("places the top songs you don't have where they rank, only when a tap can get them", () => {
+    const own = [{ id: "a" }, { id: "b" }, { id: "c" }] as never[];
+    const more = [
+      { title: "X", release: null, after: 0 },
+      { title: "Y", release: "Z", after: 2 },
+      { title: "W", release: null, after: 9 },
+    ];
+    const keys = (tap: boolean) => popularItems(own, more, tap).map((i) => ("get" in i ? i.get.title : (i.own as { id: string }).id));
+    expect(keys(true)).toEqual(["X", "a", "b", "Y", "c", "W"]);
+    expect(keys(false)).toEqual(["a", "b", "c"]);
+  });
+
+  it("offers them with Get, and a tap gets and plays the song", async () => {
+    const sent = vi.spyOn(mock, "lidarrTap");
+    const artist = mock.fx.artists[0];
+    render(<ArtistPage id={artist.id} />);
+    const row = await screen.findByRole("row", { name: /^Night Drive by .*a tap gets it and plays it$/ }, SLOW);
+    expect(within(row).getByText("Get")).toBeInTheDocument();
+    await userEvent.click(within(row).getByRole("button", { name: "Night Drive" }));
+    await waitFor(() => expect(sent).toHaveBeenCalledWith(expect.objectContaining({ title: "Night Drive", artist: artist.title, album: `${artist.title} Live` })));
+  });
+
+  it("leaves them out without Lidarr", async () => {
+    await setUp({ lidarrUrl: "" });
+    const artist = mock.fx.artists[0];
+    render(<ArtistPage id={artist.id} />);
+    await waitFor(() => expect(screen.getAllByRole("row", { name: new RegExp(` by ${artist.title}`) }).length).toBeGreaterThan(0), SLOW);
+    expect(screen.queryByRole("row", { name: /Night Drive/ })).toBeNull();
   });
 });

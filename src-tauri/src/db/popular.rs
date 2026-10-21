@@ -361,6 +361,39 @@ fn lossless(t: &Track) -> bool {
     matches!(c.as_str(), "flac" | "alac" | "wav" | "pcm" | "aiff" | "ape" | "wavpack" | "wv" | "tta")
 }
 
+/// A song on the artist's global top list that the library doesn't have.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PopularElsewhere {
+    pub title: String,
+    /// The release it's best known from, when the list says.
+    pub release: Option<String>,
+    /// How many of the page's Popular songs rank above it: it shows after them.
+    pub after: usize,
+}
+
+/// The global list's songs the library has no copy of, in rank order, each
+/// placed among `shown` (the page's ranked Popular). `owned` is every track
+/// the artist has, hidden ones too, so a hidden song isn't offered again.
+pub fn elsewhere(global: Option<&GlobalTop>, owned: &[Track], shown: &[Track], n: usize) -> Vec<PopularElsewhere> {
+    let Some(global) = global else { return Vec::new() };
+    let have: HashSet<String> = owned.iter().map(|t| loose_title(&t.title)).collect();
+    let ranks = global.ranks();
+    let shown_ranks: Vec<usize> = shown.iter().filter_map(|t| ranks.get(&normalize_title(&t.title)).copied()).collect();
+    global
+        .songs
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| !have.contains(&loose_title(&s.title)))
+        .take(n)
+        .map(|(i, s)| PopularElsewhere {
+            title: s.title.clone(),
+            release: s.releases.first().cloned(),
+            after: shown_ranks.iter().filter(|r| **r < i).count(),
+        })
+        .collect()
+}
+
 /// Rank candidates for Popular without album info (plain tests and callers
 /// that have none). See [`rank_with`].
 pub fn rank(cands: Vec<Track>, global: Option<&GlobalTop>, n: usize) -> Vec<Track> {
@@ -609,6 +642,28 @@ mod tests {
             .into_iter()
             .map(|t| t.id)
             .collect()
+    }
+
+    #[test]
+    fn top_songs_the_library_lacks_are_offered_where_they_rank() {
+        let g = GlobalTop::from_entries(
+            "listenbrainz",
+            [
+                ("Middle Child".to_string(), 90, Some("Revenge of the Dreamers III".to_string())),
+                ("Owned One".to_string(), 80, None),
+                ("No Role Modelz".to_string(), 70, Some("2014 Forest Hills Drive".to_string())),
+                ("Hidden Song".to_string(), 60, None),
+                ("Owned Two (Remastered)".to_string(), 50, None),
+            ],
+        );
+        let owned = vec![tr("1", "Owned One", 0, None, None), tr("2", "Owned Two", 0, None, None), tr("3", "Hidden Song", 0, None, None)];
+        // The hidden song isn't on the page, and isn't offered either.
+        let shown = rank(owned[..2].to_vec(), Some(&g), POPULAR_N);
+        let out = elsewhere(Some(&g), &owned, &shown, POPULAR_N);
+        let got: Vec<(&str, Option<&str>, usize)> = out.iter().map(|e| (e.title.as_str(), e.release.as_deref(), e.after)).collect();
+        assert_eq!(got, [("Middle Child", Some("Revenge of the Dreamers III"), 0), ("No Role Modelz", Some("2014 Forest Hills Drive"), 1)]);
+        assert!(elsewhere(None, &owned, &shown, POPULAR_N).is_empty(), "nothing without the global list");
+        assert_eq!(elsewhere(Some(&g), &[], &[], 1).len(), 1, "cut to n");
     }
 
     #[test]

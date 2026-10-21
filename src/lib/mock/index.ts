@@ -1468,7 +1468,15 @@ export class MockBackend implements Backend {
       const appearsOn = this.albumsOf(this.fx.tracks.filter((t) => t.artistId !== id && credits(t, artist.title, lookup)));
       // In the browser a first open waits for the global list, like the core.
       const popularPending = !!this.opts.timelines && this.popularSource() === "global" && !this.popularFetched.has(id);
-      return { artist, popular, sections, plays, about, similar, appearsOn, popularPending, eras };
+      // A few of the artist's top songs the library doesn't have, placed among its own.
+      const popularElsewhere =
+        this.popularSource() === "global"
+          ? [
+              { title: "Night Drive", release: `${artist.title} Live`, after: 1 },
+              { title: "Paper Lanterns", release: null, after: 3 },
+            ]
+          : [];
+      return { artist, popular, sections, plays, about, similar, appearsOn, popularPending, popularElsewhere, eras };
     });
   }
   /** Featured names with no library artist, for search (while "Link featured artists" is on). */

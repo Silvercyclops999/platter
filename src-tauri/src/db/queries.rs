@@ -535,8 +535,10 @@ pub fn artist_page_with(c: &Connection, id: &str, source: PopularSource, hidden:
     let credited = popular::credited_tracks(c, &artist.title, Some(id))?;
     let appears_on = appears_on(c, &credited)?;
     let global = global_for(c, id, source)?;
-    let cands = unhidden(own.into_iter().chain(credited).collect(), id, hidden);
+    let every: Vec<Track> = own.into_iter().chain(credited).collect();
+    let cands = unhidden(every.clone(), id, hidden);
     let popular = popular::rank_with(cands, global.as_ref(), POPULAR_N, |t| popular::copy_info(c, t))?;
+    let popular_elsewhere = popular::elsewhere(global.as_ref(), &every, &popular, POPULAR_N);
     let all = {
         let mut st = c.prepare_cached(&format!(
             "SELECT {ALBUM_COLS} FROM albums al WHERE al.artist_id = ?1
@@ -558,7 +560,7 @@ pub fn artist_page_with(c: &Connection, id: &str, source: PopularSource, hidden:
     let about = about.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let similar = similar_artists(c, id, &similar_names)?;
     let popular_pending = popular_pending(c, id, source)?;
-    Ok(ArtistPage { artist, popular, sections, plays: plays.max(0) as u64, about, similar, appears_on, popular_pending, eras: Vec::new() })
+    Ok(ArtistPage { artist, popular, sections, plays: plays.max(0) as u64, about, similar, appears_on, popular_pending, popular_elsewhere, eras: Vec::new() })
 }
 
 /// Popular ranks by the global list and none was ever stored for `id` (a
@@ -611,7 +613,8 @@ pub fn credited_page(
     let plays: u64 = tracks.iter().map(|t| t.view_count as u64).sum();
     let appears_on = appears_on(c, &tracks)?;
     let global = global_for(c, id, source)?;
-    let popular = popular::rank_with(unhidden(tracks, id, hidden), global.as_ref(), POPULAR_N, |t| popular::copy_info(c, t))?;
+    let popular = popular::rank_with(unhidden(tracks.clone(), id, hidden), global.as_ref(), POPULAR_N, |t| popular::copy_info(c, t))?;
+    let popular_elsewhere = popular::elsewhere(global.as_ref(), &tracks, &popular, POPULAR_N);
     let artist = Artist {
         id: id.to_string(),
         sort_title: title.clone(),
@@ -623,7 +626,7 @@ pub fn credited_page(
         mbid: None,
     };
     let popular_pending = popular_pending(c, id, source)?;
-    Ok(ArtistPage { artist, popular, sections: Vec::new(), plays, about: None, similar: Vec::new(), appears_on, popular_pending, eras: Vec::new() })
+    Ok(ArtistPage { artist, popular, sections: Vec::new(), plays, about: None, similar: Vec::new(), appears_on, popular_pending, popular_elsewhere, eras: Vec::new() })
 }
 
 /// The tracks a credited artist's play context adds after its Popular list.
