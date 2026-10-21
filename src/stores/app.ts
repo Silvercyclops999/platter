@@ -148,10 +148,24 @@ export function connectApp(b: Backend = backend): () => void {
       useToasts.getState().push(
         {
           kind: "info",
-          message: `Platter ${u.version} is ready. Restart to install it.`,
+          message: u.onQuit
+            ? `Platter ${u.version} is ready. It installs when you quit, or restart now.`
+            : `Platter ${u.version} is ready. Restart to install it.`,
           action: { label: "Restart", run: () => void b.updateInstallOnRestart() },
         },
         0,
+      ),
+    ),
+  );
+  keep(
+    b.listen("update://installing", (u) =>
+      useToasts.getState().push(
+        {
+          kind: "info",
+          message: `Updating to Platter ${u.version}. Back in a moment.`,
+          action: { label: "Not now", run: () => void b.updatePutOff() },
+        },
+        u.seconds * 1000,
       ),
     ),
   );

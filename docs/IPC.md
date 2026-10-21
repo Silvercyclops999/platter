@@ -4049,6 +4049,7 @@ The rest of the fields, with their defaults:
 | `mediaKeys` | bool, true | Hardware media keys control Platter in the background. While `mediaSession` is on the OS sends the keys to that session; with it off, Platter registers the keys itself. |
 | `closeToTray` | bool, false | Shows a tray icon (menu bar item on macOS). Closing the window hides it instead of quitting. Turning it off brings a hidden window back. The tray menu has the track, Play or Pause, Next, Previous, a Go offline check (sent as the `goOffline` menu action), Show Platter and Quit. |
 | `launchAtLogin` | bool, false | Starts Platter at sign-in, hidden in the tray when `closeToTray` is on, otherwise minimised. |
+| `updateByItself` | bool, true | An update downloaded within 3 minutes of launch installs and restarts the app when nothing is playing, after an 8 second `update://installing` note that `update_put_off` cancels. Any other downloaded update installs when the app quits (not on a restart). This device only. |
 | `abLoopHandles` | bool, true | Right-click or Alt+click on the seek bar sets A-B loop points. Turning it off clears a loop that's set. |
 | `upNextLine` | bool, true | In the last 15 s of a track (last 30 % under 50 s) the player bar's artist line shows what's next. |
 | `volumePercent` | bool, true | Shows the volume percentage above the slider while it changes. |
@@ -4339,7 +4340,8 @@ Events:
 | --- | --- |
 | `update_check` | `{ available: bool, version?, notes? }` |
 | `update_install_on_restart` | – |
+| `update_put_off` | – (the update waits for quit) |
 | `app_info` | – → `{ version, licence, repoUrl }` |
 | `open_project_page` | – (opens the project page in the default browser) |
 
-Event `update://ready` → `{ version }`.
+Events: `update://ready` → `{ version, onQuit }` (`onQuit`: it installs when the app quits), `update://installing` → `{ version, seconds }` (restarting into it after that many seconds).

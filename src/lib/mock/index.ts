@@ -3209,6 +3209,9 @@ export class MockBackend implements Backend {
   updateInstallOnRestart() {
     return this.delay(() => undefined);
   }
+  updatePutOff() {
+    return this.delay(() => undefined);
+  }
 
   // ---------------------------------------------------------------- artist info
 

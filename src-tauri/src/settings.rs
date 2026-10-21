@@ -452,6 +452,9 @@ pub struct Settings {
     pub close_to_tray: bool,
     /// Start Platter when you sign in to the computer.
     pub launch_at_login: bool,
+    /// New versions install by themselves: just after launch when nothing
+    /// plays, otherwise when Platter quits.
+    pub update_by_itself: bool,
     /// Right-click or Alt+click on the seek bar sets A-B loop points.
     pub ab_loop_handles: bool,
     /// Near a track's end the player bar shows what plays next.
@@ -1186,6 +1189,7 @@ impl Default for Settings {
             media_session: true,
             close_to_tray: false,
             launch_at_login: false,
+            update_by_itself: true,
             ab_loop_handles: true,
             up_next_line: true,
             volume_percent: true,
@@ -1718,6 +1722,7 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "mediaSession",
     "closeToTray",
     "launchAtLogin",
+    "updateByItself",
     "notifyTrackChange",
     "actAsPlexPlayer",
     "preampDb",
@@ -1850,6 +1855,7 @@ pub struct SettingsPatch {
     pub media_session: Option<bool>,
     pub close_to_tray: Option<bool>,
     pub launch_at_login: Option<bool>,
+    pub update_by_itself: Option<bool>,
     pub ab_loop_handles: Option<bool>,
     pub up_next_line: Option<bool>,
     pub volume_percent: Option<bool>,
@@ -2235,6 +2241,7 @@ impl Settings {
         set(&mut self.media_session, p.media_session);
         set(&mut self.close_to_tray, p.close_to_tray);
         set(&mut self.launch_at_login, p.launch_at_login);
+        set(&mut self.update_by_itself, p.update_by_itself);
         set(&mut self.ab_loop_handles, p.ab_loop_handles);
         set(&mut self.up_next_line, p.up_next_line);
         set(&mut self.volume_percent, p.volume_percent);
@@ -3071,6 +3078,8 @@ pub struct Live {
     pub platform: Switches,
     /// Desktop notification on track change.
     pub notify_track_change: Arc<AtomicBool>,
+    /// Update by itself (the updater reads it).
+    pub auto_update: Arc<AtomicBool>,
     /// Which artist info sources are on.
     pub artist_info: crate::artistinfo::Switches,
     /// Listen on: players in the picker, Platter as a player, stop on move.
@@ -3191,6 +3200,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     });
     live.streams.set(s.quality_home.kbps(), s.quality_away.kbps());
     live.notify_track_change.store(s.notify_track_change, Ordering::Relaxed);
+    live.auto_update.store(s.update_by_itself, Ordering::Relaxed);
     live.share_public_links.store(s.share_public_links && on, Ordering::Relaxed);
     live.lyrics_lrclib.store(s.lyrics_lrclib && on, Ordering::Relaxed);
     live.sleeve.show.store(s.show_sleeve_notes, Ordering::Relaxed);

@@ -358,6 +358,29 @@ describe("wired to the core", () => {
     });
   });
 
+  it("update that installs on quit says so and still offers a restart", async () => {
+    act(() => mock.emit("update://ready", { version: "0.2.1", onQuit: true }));
+    await waitFor(() => {
+      const t = useToasts.getState().toasts.find((x) => x.message.includes("0.2.1"));
+      expect(t?.message).toBe("Platter 0.2.1 is ready. It installs when you quit, or restart now.");
+      expect(t?.action?.label).toBe("Restart");
+    });
+  });
+
+  it("update installing just after launch can be put off", async () => {
+    const putOff = vi.spyOn(backend, "updatePutOff").mockResolvedValue();
+    act(() => mock.emit("update://installing", { version: "0.2.2", seconds: 8 }));
+    let t: ReturnType<typeof useToasts.getState>["toasts"][number] | undefined;
+    await waitFor(() => {
+      t = useToasts.getState().toasts.find((x) => x.message.includes("0.2.2"));
+      expect(t?.message).toBe("Updating to Platter 0.2.2. Back in a moment.");
+      expect(t?.action?.label).toBe("Not now");
+    });
+    t!.action!.run();
+    expect(putOff).toHaveBeenCalled();
+    putOff.mockRestore();
+  });
+
   it("library replaced toast comes through", async () => {
     act(() => mock.emit("toast", { kind: "info", message: "This library changed." }));
     await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.message)).toContain("This library changed."));

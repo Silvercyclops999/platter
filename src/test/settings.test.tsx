@@ -138,6 +138,8 @@ describe("settings page", () => {
     const keys = screen.getByRole("switch", { name: "Media keys" });
     const tray = screen.getByRole("switch", { name: /^Close to the (tray|menu bar)$/ });
     const login = screen.getByRole("switch", { name: "Open Platter when you sign in" });
+    const updates = screen.getByRole("switch", { name: "Update by itself" });
+    expect(updates).toHaveAttribute("aria-checked", "true");
     expect(session).toHaveAttribute("aria-checked", "true");
     expect(keys).toHaveAttribute("aria-checked", "true");
     expect(tray).toHaveAttribute("aria-checked", "false");
@@ -153,6 +155,8 @@ describe("settings page", () => {
     expect(set).toHaveBeenCalledWith({ closeToTray: true });
     await user.click(login);
     expect(set).toHaveBeenCalledWith({ launchAtLogin: true });
+    await user.click(updates);
+    expect(set).toHaveBeenCalledWith({ updateByItself: false });
 
     useSettings.setState({ settings: null });
     await loadSettings();
@@ -161,6 +165,7 @@ describe("settings page", () => {
       mediaKeys: false,
       closeToTray: true,
       launchAtLogin: true,
+      updateByItself: false,
     });
   });
 

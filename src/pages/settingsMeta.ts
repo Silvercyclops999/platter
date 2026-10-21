@@ -543,6 +543,7 @@ export const DESKTOP_ONLY: ReadonlySet<string> = new Set([
   // App: the tray, start-up, keys and the desktop updater.
   "closeToTray",
   "launchAtLogin",
+  "updateByItself",
   "keyboardShortcuts",
   "mediaKeys",
   "powerKeys",

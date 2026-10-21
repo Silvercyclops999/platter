@@ -612,6 +612,8 @@ pub fn run() {
             jellyfin.restore();
             app.manage(jellyfin);
             let live = settings::Live {
+                #[cfg(desktop)]
+                auto_update: app.state::<updates::Updates>().auto.clone(),
                 art: Some(art.clone()),
                 plex: Some(plex.clone()),
                 backends: Some(backends.clone()),
@@ -1976,6 +1978,8 @@ pub fn run() {
             updates::update_check,
             #[cfg(desktop)]
             updates::update_install_on_restart,
+            #[cfg(desktop)]
+            updates::update_put_off,
             share::commands::share_info,
             share::commands::share_public_link,
             share::commands::deep_link_take,
@@ -2249,7 +2253,7 @@ pub fn run() {
             {
                 d.sync.kick();
             }
-            if let tauri::RunEvent::ExitRequested { .. } = event {
+            if let tauri::RunEvent::ExitRequested { code, .. } = event {
                 // So a log that ends shows whether the app closed or stopped.
                 tracing::info!("Platter is closing");
                 platform::reveal::save(app);
@@ -2262,6 +2266,11 @@ pub fn run() {
                         let _ = tokio::time::timeout(std::time::Duration::from_secs(3), listen.stop()).await;
                     });
                 }
+                // Last: on Windows the installer takes over and the process ends here.
+                #[cfg(desktop)]
+                updates::quitting(app, code);
+                #[cfg(mobile)]
+                let _ = code;
             }
         });
 }

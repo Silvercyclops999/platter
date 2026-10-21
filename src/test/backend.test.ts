@@ -102,6 +102,7 @@ const CALLS: [string, (b: ReturnType<typeof createTauriBackend>) => Promise<unkn
   ["open_project_page", (b) => b.openProjectPage(), undefined],
   ["update_check", (b) => b.updateCheck(), undefined],
   ["update_install_on_restart", (b) => b.updateInstallOnRestart(), undefined],
+  ["update_put_off", (b) => b.updatePutOff(), undefined],
   ["eq_profile_save", (b) => b.eqProfileSave("Desk"), { name: "Desk" }],
   ["eq_profile_rename", (b) => b.eqProfileRename("Desk", "Studio"), { from: "Desk", to: "Studio" }],
   ["eq_profile_delete", (b) => b.eqProfileDelete("Studio"), { name: "Studio" }],

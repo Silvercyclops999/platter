@@ -663,6 +663,8 @@ export interface Backend {
   // Updates
   updateCheck(): Promise<UpdateInfo>;
   updateInstallOnRestart(): Promise<void>;
+  /** Not now: the update waits until Platter quits. */
+  updatePutOff(): Promise<void>;
 
   // Artist info (outside sources)
   /** Outside info for an artist; `artistinfo://changed` fires when more arrives. */
@@ -1592,6 +1594,7 @@ export function createTauriBackend(): Backend {
     openProjectPage: () => call("open_project_page"),
     updateCheck: () => call("update_check"),
     updateInstallOnRestart: () => call("update_install_on_restart"),
+    updatePutOff: () => call("update_put_off"),
     artistInfo: (id) => call("artist_info", { id }),
     albumCredits: (id) => call("album_credits", { id }),
     sleeveNotes: (id) => call("sleeve_notes", { id }),

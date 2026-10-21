@@ -925,6 +925,8 @@ export interface Settings {
   closeToTray: boolean;
   /** Start Platter when you sign in to the computer. This device only. */
   launchAtLogin: boolean;
+  /** New versions install by themselves: just after launch when nothing plays, otherwise on quit. This device only. */
+  updateByItself: boolean;
   /** Right-click or Alt+click on the seek bar sets A-B loop points. */
   abLoopHandles: boolean;
   /** Near a track's end the player bar shows what plays next. */
@@ -1708,6 +1710,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mediaSession: true,
   closeToTray: false,
   launchAtLogin: false,
+  updateByItself: true,
   abLoopHandles: true,
   upNextLine: true,
   volumePercent: true,
@@ -4635,7 +4638,10 @@ export interface EventMap {
   "audio://route": AudioRoute | null;
   "health://changed": Health;
   toast: ToastEvent;
-  "update://ready": { version: string };
+  /** An update is downloaded. `onQuit`: it installs when Platter quits. */
+  "update://ready": { version: string; onQuit?: boolean };
+  /** Platter restarts into this update in `seconds` unless put off. */
+  "update://installing": { version: string; seconds: number };
   /** The core changed settings itself (the EQ followed an output device). */
   "settings://changed": Settings;
   /** These songs were liked or unliked (here, rolled back, or from Plex). */

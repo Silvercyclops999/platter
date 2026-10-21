@@ -2155,6 +2155,14 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       control: (ids) => toggle(s, "closeToTray", ids),
     },
     {
+      key: "updateByItself",
+      section: "App",
+      title: "Update by itself",
+      description: "New versions install when Platter opens or when you quit. Never while music plays.",
+      more: "Platter checks a few seconds after it opens and every few hours. An update found right after opening installs straight away if nothing is playing, with a moment to say Not now. Otherwise it waits and installs when you quit. Off, you choose when to restart.",
+      control: (ids) => toggle(s, "updateByItself", ids),
+    },
+    {
       key: "launchAtLogin",
       section: "App",
       title: "Open Platter when you sign in",
