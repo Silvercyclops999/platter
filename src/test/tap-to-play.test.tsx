@@ -102,6 +102,13 @@ describe("search rows for songs you don't have", () => {
     expect(route(), "stays where it was").toEqual(before);
   });
 
+  it("show Get on a device that reaches Lidarr only through the Bridge or a computer at home", async () => {
+    await setUp({ lidarrUrl: "" });
+    mock.lidarr.homeSide = true;
+    const row = await songRow();
+    expect(await within(row).findByText("Get", {}, SLOW)).toBeInTheDocument();
+  });
+
   it("open the album's page as before when the setting is off", async () => {
     await setUp({ lidarrTapToGet: false });
     const sent = vi.spyOn(mock, "lidarrTap");

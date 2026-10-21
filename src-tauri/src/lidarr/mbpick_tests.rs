@@ -170,7 +170,7 @@ pub fn want() -> Want {
 }
 
 fn lib(title: &str, unreleased: bool) -> LibraryAlbum {
-    LibraryAlbum { id: format!("lib-{title}"), title: title.into(), also: vec![], unreleased }
+    LibraryAlbum { id: format!("lib-{title}"), title: title.into(), also: vec![], unreleased, mbid: None }
 }
 
 /// What the library has by Northlight: a released album, an edition and
@@ -219,7 +219,7 @@ fn title_clash_with_an_unreleased_build_is_refused() {
 fn title_clash_with_an_edition_is_refused() {
     assert_eq!(vet(&group(RG_TIDES), &want(), &library(), true), Err(Refusal::TitleClash { title: "Tides (Deluxe Edition)".into(), unreleased: false }));
     // An ARCHIVE_* group name counts as a title too.
-    let tagged = vec![LibraryAlbum { id: "u4".into(), title: "Untitled 4".into(), also: vec!["Second Wind".into()], unreleased: true }];
+    let tagged = vec![LibraryAlbum { id: "u4".into(), title: "Untitled 4".into(), also: vec!["Second Wind".into()], unreleased: true, mbid: None }];
     assert!(matches!(vet(&group(RG_SECOND), &want(), &tagged, true), Err(Refusal::TitleClash { unreleased: true, .. })));
 }
 
@@ -250,7 +250,7 @@ fn titles_clash_by_their_base_whatever_the_edition_or_version_suffix() {
 
 #[test]
 fn an_upgrade_skips_the_title_clash_but_keeps_every_other_rule() {
-    let mine = LibraryAlbum { id: "a1".into(), title: "First Light".into(), also: vec!["first-light".into()], unreleased: false };
+    let mine = LibraryAlbum { id: "a1".into(), title: "First Light".into(), also: vec!["first-light".into()], unreleased: false, mbid: None };
     // Same-titled builds and leaks don't block it: the user confirmed which release it is.
     let lib2 = vec![mine.clone(), lib("First Light [Leak]", true), lib("First Light (Deluxe)", false)];
     assert_eq!(vet_upgrade(&group(RG_FIRST), &want(), &lib2, "a1"), Ok(()));
@@ -497,4 +497,19 @@ fn any_bracketed_or_dashed_note_still_clashes() {
     }
     assert!(clash("Quiet", &[lib("Quiet Sketches", true)]).is_none());
     assert!(clash("Quiet Sketches II", &[lib("Quiet Sketches", true)]).is_none());
+}
+
+#[test]
+fn an_album_you_have_isnt_offered_under_a_longer_name_or_another_title() {
+    let have = vec![lib("Cruel Summer", false)];
+    assert!(clash("Kanye West Presents Good Music: Cruel Summer", &have).is_some());
+    assert!(clash("Cruel Summer", &[lib("GOOD Music: Cruel Summer", false)]).is_some());
+    assert!(clash("Cruel Summer: The Remixes", &have).is_none(), "only the part after the colon counts");
+    assert!(clash("Summer", &have).is_none());
+    // Plex matched the album to this release group: that's the album, whatever it's called.
+    let mut g = group(RG_SECOND);
+    g.title = "Some Other Name".into();
+    let mut matched = lib("Second Wind (Deluxe)", false);
+    matched.mbid = Some(RG_SECOND.to_ascii_lowercase());
+    assert!(matches!(vet(&g, &want(), &[matched], true), Err(Refusal::TitleClash { unreleased: false, .. })));
 }

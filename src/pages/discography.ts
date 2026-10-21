@@ -71,7 +71,8 @@ export function discographyGroups(entries: DiscoEntry[], type: DiscographyType, 
 export function releaseLine(e: DiscoEntry): string {
   if (e.album) {
     const a = e.album;
-    return [releaseTypeLabel(a), a.year ? String(a.year) : null, plural(a.trackCount, "song")].filter(Boolean).join(" · ");
+    // A server that sent no count says nothing rather than "0 songs".
+    return [releaseTypeLabel(a), a.year ? String(a.year) : null, a.trackCount > 0 ? plural(a.trackCount, "song") : null].filter(Boolean).join(" · ");
   }
   return [e.cat ? catalogueKind(e.cat) : e.sectionLabel, e.year ? String(e.year) : null].filter(Boolean).join(" · ");
 }

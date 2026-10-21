@@ -16,6 +16,7 @@ import { Shelf, ShelfItem } from "../components/Shelf";
 import { Skeleton } from "../components/Skeleton";
 import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
 import { artUrl, backend } from "../lib/backend";
+import { toast } from "../stores/toasts";
 import { isCreditId } from "../lib/credits";
 import { useLoad, useReload } from "../lib/useLoad";
 import { useArtTint } from "../lib/useTint";
@@ -317,8 +318,18 @@ function ActionRow({
     else setAskAuto(true);
   };
   const autoItem = radarOn && lidarrReady ? [{ label: "Auto-request new albums", checked: autoOn, onSelect: toggleAuto }] : [];
+  // Get albums: the artist's MusicBrainz id is looked up when it's picked.
+  const [getMbid, setGetMbid] = useState<string | null>(null);
+  const getAlbums = async () => {
+    if (!artist) return;
+    const f = await backend.featuredArtist(id, artist.title).catch(() => null);
+    if (f?.mbid) setGetMbid(f.mbid);
+    else toast.info(`Couldn't find ${artist.title} on MusicBrainz to get their albums`);
+  };
+  const getItem = lidarrReady ? [{ label: "Get albums", onSelect: () => void getAlbums() }] : [];
   return (
     <div className="action-row">
+      {artist && getMbid && <GetAlbumsDialog mbid={getMbid} name={artist.title} open onClose={() => setGetMbid(null)} />}
       {artist && askAuto && <AutoRequestDialog id={id} name={artist.title} open onClose={() => setAskAuto(false)} />}
       <IconButton
         label={playing ? `Pause ${name}` : `Play ${name}`}
@@ -367,6 +378,7 @@ function ActionRow({
             `Options for ${artist.title}`,
             [
               { label: following ? "Unfollow" : "Follow", onSelect: toggleFollow },
+              ...getItem,
               ...autoItem,
               { label: "Add popular songs to queue", onSelect: () => void player.addToQueue(data!.popular, artist.thumb) },
               { label: "Go to artist radio", onSelect: () => nav.go({ name: "radio", seed: `artist:${artist.id}` }) },
