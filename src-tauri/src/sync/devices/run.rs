@@ -149,6 +149,9 @@ pub struct DeviceSync {
     /// When each link last had a round through the relay, and how many in
     /// a row went unheard.
     relay_rounds: Mutex<HashMap<String, (tokio::time::Instant, u32)>>,
+    /// The relay turning messages away was logged: once until it takes
+    /// one again, not once per link and queued round.
+    said_busy: AtomicBool,
     /// A link was added, or "Sync now".
     kick: tokio::sync::Notify,
     /// Keep my devices in sync (Settings); on when not set.
@@ -192,6 +195,7 @@ impl DeviceSync {
             replies: Mutex::default(),
             rounds: Mutex::default(),
             relay_rounds: Mutex::default(),
+            said_busy: Default::default(),
             kick: tokio::sync::Notify::new(),
             switch: RwLock::default(),
             on_status: Mutex::default(),
@@ -377,10 +381,17 @@ impl DeviceSync {
             }
             budget = budget.saturating_sub(size);
             match self.wire.send(link, &m).await {
-                Ok(()) => sent.push(m),
+                Ok(()) => {
+                    self.said_busy.store(false, Ordering::Relaxed);
+                    sent.push(m);
+                }
                 Err(e) => {
                     let busy = relay_peer::is_busy(&e);
-                    tracing::info!("device sync: {e}");
+                    if busy && self.said_busy.swap(true, Ordering::Relaxed) {
+                        tracing::debug!("device sync: {e}");
+                    } else {
+                        tracing::info!("device sync: {e}");
+                    }
                     failed = Some(if busy { PathState::RelayBusy } else { PathState::Away });
                     break;
                 }

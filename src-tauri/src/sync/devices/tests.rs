@@ -1020,6 +1020,58 @@ async fn a_relay_that_says_no_isnt_asked_again_at_once_and_sync_says_its_busy() 
     assert_ne!(sync.status()[0].words, "The relay is busy, trying again later");
 }
 
+/// What was logged at info and above, while `f` runs on this thread.
+#[derive(Clone, Default)]
+struct Logged(Arc<parking_lot::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Logged {
+    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().extend_from_slice(b);
+        Ok(b.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Logged {
+    fn lines_with(&self, what: &str) -> usize {
+        String::from_utf8_lossy(&self.0.lock()).lines().filter(|l| l.contains(what)).count()
+    }
+}
+
+#[tokio::test]
+async fn the_relay_turning_messages_away_is_logged_once_not_for_every_round() {
+    let log = Logged::default();
+    let l2 = log.clone();
+    let sub = tracing_subscriber::fmt().with_max_level(tracing::Level::INFO).with_ansi(false).with_writer(move || l2.clone()).finish();
+    let _guard = tracing::subscriber::set_default(sub);
+    let ntfy = FakeNtfy::start().await;
+    let a = dev("a");
+    let b = dev("b");
+    let (la, lb) = pair(&a, &b, &ntfy.url);
+    round(&a, &la, &b, &lb).await;
+    let wire = Arc::new(Wire::new(a.links.clone(), Arc::new(Ntfy::new().unwrap()), Arc::new(crate::sync::store::system_ms)));
+    let sync = DeviceSync::new(a.peer.clone(), wire, Timing::default());
+    let busy = "too many today";
+    ntfy.set_limited(true);
+    // Many queued rounds while the relay says no: one line.
+    for i in 0..27 {
+        sync.deliver(&la, vec![small_entries(&[&format!("t{i}")])]).await;
+    }
+    assert_eq!(log.lines_with(busy), 1);
+    // It takes messages again, then says no again later: one more.
+    ntfy.set_limited(false);
+    tokio::time::sleep(crate::social::listen::relay::COOL_FIRST + Duration::from_millis(50)).await;
+    sync.deliver(&la, vec![small_entries(&["ok"])]).await;
+    assert_ne!(sync.status()[0].words, "The relay is busy, trying again later");
+    ntfy.set_limited(true);
+    for i in 0..5 {
+        sync.deliver(&la, vec![small_entries(&[&format!("u{i}")])]).await;
+    }
+    assert_eq!(log.lines_with(busy), 2);
+}
+
 /// A relay with no allowance left for background work.
 struct NoRoom(Arc<dyn RelayFactory>);
 struct NoRoomRelay(Arc<dyn crate::social::listen::relay::Relay>);
