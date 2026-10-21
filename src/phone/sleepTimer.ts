@@ -44,6 +44,8 @@ export const useSleep = create<SleepStore>()(() => ({ timer: null, fading: false
 
 let clock: ReturnType<typeof setInterval> | null = null;
 let fade: ReturnType<typeof setInterval> | null = null;
+/** The level a fade started from, put back if the timer is turned off mid-fade. */
+let fadeFrom: number | null = null;
 
 function stopClock() {
   if (clock) clearInterval(clock);
@@ -71,6 +73,7 @@ function fadeOut() {
   stopClock();
   if (!s || s.status !== "playing") return finish(null);
   const from = s.volume;
+  fadeFrom = from;
   const start = Date.now();
   useSleep.setState({ fading: true });
   fade = setInterval(() => {
@@ -83,6 +86,7 @@ function fadeOut() {
 function finish(restore: number | null) {
   if (fade) clearInterval(fade);
   fade = null;
+  fadeFrom = null;
   useSleep.setState({ timer: null, fading: false });
   void Promise.resolve(player.pause()).then(() => (restore === null ? undefined : player.setVolume(restore)));
 }
@@ -106,6 +110,9 @@ export function cancelSleep() {
   stopClock();
   if (fade) clearInterval(fade);
   fade = null;
+  // Turned off mid-fade: the music keeps playing at its own level.
+  if (fadeFrom !== null) void player.setVolume(fadeFrom);
+  fadeFrom = null;
   useSleep.setState({ timer: null, fading: false });
 }
 

@@ -273,6 +273,9 @@ export function SheetFrame({
     if (leaving) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        // Every open sheet listens: only the one on top closes.
+        const open = document.querySelectorAll(".ph-sheet-layer:not(.is-closing)");
+        if (open.length && open[open.length - 1] !== layer.current) return;
         e.stopPropagation();
         closeAfterFirstFrame(onClose);
       }

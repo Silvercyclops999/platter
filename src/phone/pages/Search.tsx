@@ -97,8 +97,10 @@ export function PhoneSearch() {
   };
   const cat = useCatalogueSearch(q, "all");
   const all = res ? phoneResults(res) : [];
-  const hits = ofKind(all, kind);
   const kinds = SEARCH_KINDS.filter((k) => k.id === "all" || all.some((h) => hitInfo(h)?.kind === k.id));
+  // A pill picked for an earlier search that has none of its kind now: All.
+  const shown: SearchKind = !res || kinds.some((k) => k.id === kind) ? kind : "all";
+  const hits = ofKind(all, shown);
   return (
     <div className="ph-page ph-search">
       <h1 className="ph-title">Search</h1>
@@ -158,7 +160,7 @@ export function PhoneSearch() {
       {q && kinds.length > 2 && (
         <div className="ph-pills ph-pills--scroll" role="group" aria-label="Show">
           {kinds.map((k) => (
-            <button key={k.id} type="button" className={`ph-chip ${kind === k.id ? "is-on" : ""}`} aria-pressed={kind === k.id} onClick={() => (tap("selection"), setKind(k.id))}>
+            <button key={k.id} type="button" className={`ph-chip ${shown === k.id ? "is-on" : ""}`} aria-pressed={shown === k.id} onClick={() => (tap("selection"), setKind(k.id))}>
               {k.label}
             </button>
           ))}
@@ -187,7 +189,7 @@ export function PhoneSearch() {
                 <HitRow
                   key={hitInfo(h)?.key}
                   hit={h}
-                  typed={kind !== "all"}
+                  typed={shown !== "all"}
                   onOpen={() => open(h)}
                   onMore={h.track ? () => phone.push({ kind: "track", track: h.track! }) : h.album ? () => phone.push({ kind: "album", album: h.album! }) : undefined}
                   versions={h.track ? versionsCount(h.track, res) : 0}
@@ -197,7 +199,7 @@ export function PhoneSearch() {
           ) : (
             <p className="ph-rows__note">Nothing in your library matches "{q}".</p>
           )}
-          <PhoneCatalogue c={cat} kind={kind} />
+          <PhoneCatalogue c={cat} kind={shown} />
         </section>
       )}
     </div>

@@ -44,7 +44,7 @@ import { useLoad } from "../lib/useLoad";
 import { openShareCard } from "../stores/shareCard";
 import { bookmarkPage, bookmarkTrack } from "../stores/curate";
 import { useApp } from "../stores/app";
-import { useCircle } from "../stores/circle";
+import { addToShared, isShared, useCircle } from "../stores/circle";
 import { collaboratorPlaylists, editablePlaylists } from "../components/PlaylistPicker";
 import { versionLabel } from "../components/FileTagBadges";
 import { formatArchiveDate, SONG_STATUS_LABEL } from "../pages/era";
@@ -859,6 +859,12 @@ export const ADDED_NOTE_MS = 1500;
  * the playlist's name, no cover or icon. A failure says so plainly.
  */
 export async function addQuietly(p: Pick<Playlist, "id" | "title">, track: Track): Promise<boolean> {
+  // Someone else's playlist: the song goes to its owner, who may be away.
+  if (isShared(p.id)) {
+    await addToShared(p, [track.id]);
+    tap("success");
+    return true;
+  }
   try {
     const done = await backend.playlistAdd(p.id, [track.id]);
     useLibraryView.getState().touch("playlist", done.id);

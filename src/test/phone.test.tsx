@@ -99,6 +99,17 @@ describe("tabs", () => {
     expect(useRouter.getState().entries).toHaveLength(1);
   });
 
+  it("a search pill from an earlier search with none of its kind now shows everything", async () => {
+    render(<PhoneShell />);
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Tabs" })).getByRole("button", { name: "Search" }));
+    const box = await screen.findByRole("searchbox", { name: "Search your library" });
+    fireEvent.change(box, { target: { value: "Copperline Choir" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Artists" }));
+    fireEvent.change(box, { target: { value: "Late Night Drive" } });
+    expect(await screen.findByText("Late Night Drive")).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing in your library matches/)).not.toBeInTheDocument();
+  });
+
   it("a page opened from a tab keeps that tab lit, and the tab again goes back to its top", async () => {
     render(<PhoneShell />);
     const tabs = screen.getByRole("navigation", { name: "Tabs" });
@@ -407,6 +418,20 @@ describe("queue and sleep timer", () => {
     expect(usePhoneUi.getState().sheets.map((s) => s.kind)).toEqual(["queue"]);
   });
 
+  it("Escape closes only the sheet on top", async () => {
+    play(tracks()[0]);
+    render(<PhoneShell />);
+    act(() => {
+      phone.push({ kind: "queue" });
+      phone.push({ kind: "sleep" });
+    });
+    await screen.findByRole("dialog", { name: "Sleep timer" });
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(usePhoneUi.getState().sheets.map((s) => s.kind)).toEqual(["queue"]));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(usePhoneUi.getState().sheets.map((s) => s.kind)).toEqual(["queue"]);
+  });
+
   it("edit mode moves picked songs up and removes them", async () => {
     play(tracks()[0]);
     const move = vi.spyOn(player, "queueMove").mockImplementation(() => Promise.resolve());
@@ -465,6 +490,26 @@ describe("queue and sleep timer", () => {
     expect(pause).toHaveBeenCalledTimes(1);
     expect(vol.mock.calls.slice(-1)[0]?.[0]).toBe(0.5);
     expect(useSleep.getState().timer).toBeNull();
+  });
+
+  it("turned off mid-fade, the music plays on at its own level", async () => {
+    vi.useFakeTimers();
+    play(tracks()[0], { status: "playing" });
+    const pause = vi.spyOn(player, "pause").mockImplementation(() => Promise.resolve());
+    const vol = vi.spyOn(player, "setVolume").mockImplementation(() => Promise.resolve());
+    startSleep({ kind: "minutes", minutes: 5 }, Date.now());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5 * 60_000 - 3000);
+    });
+    expect(useSleep.getState().fading).toBe(true);
+    expect(vol.mock.calls.slice(-1)[0]?.[0]).toBeLessThan(0.5);
+    act(() => cancelSleep());
+    expect(vol.mock.calls.slice(-1)[0]?.[0]).toBe(0.5);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(pause).not.toHaveBeenCalled();
+    expect(vol.mock.calls.slice(-1)[0]?.[0]).toBe(0.5);
   });
 });
 

@@ -492,6 +492,14 @@ describe("adding to a playlist", () => {
     expect(spy).toHaveBeenCalledWith("success");
     expect(push).toHaveBeenCalledWith({ kind: "info", message: `Added to ${list.title}` }, ADDED_NOTE_MS);
   });
+
+  it("sends a song for a playlist shared with you to its owner", async () => {
+    const collab = vi.spyOn(backend, "collabAdd");
+    const own = vi.spyOn(backend, "playlistAdd");
+    await addQuietly({ id: "shared:abc", title: "Their mix" }, mock.fx.tracks[0]);
+    expect(collab).toHaveBeenCalledWith("shared:abc", [mock.fx.tracks[0].id]);
+    expect(own).not.toHaveBeenCalled();
+  });
 });
 
 describe("the status bar", () => {

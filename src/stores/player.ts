@@ -407,7 +407,12 @@ export const player = {
     pendingVolume = null;
     if (!s) return;
     try {
-      if (v <= 0) {
+      if (v <= 0 && isRemote()) {
+        // Players have no mute: silence is volume 0, and the level from
+        // before the drag comes back on unmute.
+        if (from > 0) remoteUnmuteTo = from;
+        await out.setVolume(0);
+      } else if (v <= 0) {
         // Mute first so restoring the old level is never audible.
         await out.setMuted(true);
         await out.setVolume(from > 0 ? from : UNMUTE_FALLBACK);
