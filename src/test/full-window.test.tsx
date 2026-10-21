@@ -312,7 +312,7 @@ describe("modes", () => {
     expect(document.querySelector(".lyrics__line.is-current, [aria-current]")).toBeNull();
   });
 
-  it("a song without lyrics: the toggle is off, and lyrics mode offers Add lyrics", async () => {
+  it("a song without lyrics: the toggle is off, and lyrics mode offers Write your own", async () => {
     play(none);
     render(<FullWindow />);
     act(() => fullWindow.open());
@@ -320,7 +320,7 @@ describe("modes", () => {
     expect(screen.getByText(none.title)).toBeInTheDocument();
     act(() => fullWindow.setMode("lyrics"));
     expect(await screen.findByText("No lyrics for this song")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add lyrics" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Write your own" })).toBeInTheDocument();
     // Live while lyrics show, so it isn't a dead end.
     expect(toggle("Lyrics")).not.toHaveAttribute("aria-disabled");
   });

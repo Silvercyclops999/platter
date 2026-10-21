@@ -1,23 +1,27 @@
 /**
- * Lyrics you can trust, in the lyrics view: whether the lyrics were checked
- * against the song, the timing nudge (−/+ 0.5 s, the - and + keys, "Tap to
- * sync"), "Wrong lyrics?" and its picker, what the view says when nothing is
- * shown (released lyrics held back, checking, nothing matched, none
- * chosen), and the offer to download the speech model.
+ * The quiet parts of the lyrics view: the line under the lyrics (where they
+ * came from, and one "Lyrics options" menu holding the timing nudge, "Wrong
+ * lyrics?", editing, translating and sharing), the timing bar (−/+ 0.5 s,
+ * the - and + keys, "Tap to sync"), the "Wrong lyrics?" picker, and what the
+ * view says when nothing is shown (released lyrics held back, nothing
+ * matched, none chosen). The check against the song runs without a word:
+ * it only shows by moving the timing or swapping lyrics that don't match.
  */
-import { AlertTriangle, AudioLines, Check, CircleHelp, Clock, Globe, Hand, Loader2, Minus, MoreHorizontal, PenLine, Plus, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { AlertTriangle, AudioLines, Clock, Globe, Image as ImageIcon, Languages, Minus, MoreHorizontal, PenLine, Plus, X } from "lucide-react";
+import { useCallback, useEffect, useState, type MouseEvent } from "react";
 import { openContextMenu } from "../components/ContextMenu";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { backend } from "../lib/backend";
 import { formatDuration, trackArtistLine } from "../lib/format";
-import type { LyricLine, Lyrics, LyricsCandidate, LyricsCandidates, LyricsCheck, LyricsCheckStatus, LyricsVerdict, Track } from "../lib/types";
-import { openLyricsEditor } from "../stores/lyricsEditor";
+import { LYRIC_LINES_MAX } from "../lib/shareCard";
+import type { LyricLine, Lyrics, LyricsCandidate, LyricsCandidates, LyricsCheck, LyricsVerdict, Track } from "../lib/types";
+import { openLyricsEditor, useLyricsEditor } from "../stores/lyricsEditor";
+import { openShareCard, useLyricPick } from "../stores/shareCard";
 import { useSettings, updateSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import type { MenuItem } from "../stores/ui";
-import { modelSize, transcribe, useTranscribe } from "../stores/transcribe";
+import { transcribe } from "../stores/transcribe";
 import {
   chooseLyrics,
   closeWrongLyrics,
@@ -29,26 +33,10 @@ import {
   setTapping,
   useWrongLyrics,
 } from "../stores/wrongLyrics";
-import { currentPositionMs, loadCheckStatus, lyricsChanged, retryCheck, useLyricsTrust } from "./lyrics";
-import { ShareTranscription } from "./ShareTranscription";
+import type { Extras } from "./lyricExtras";
+import { currentPositionMs, lyricsChanged, retryCheck, useLyricsTrust } from "./lyrics";
+import { SHARE_LABEL, useShareTranscription } from "./ShareTranscription";
 import "./lyrics-trust.css";
-
-/** The small note on what the check said. */
-export const CHECK_TEXT = {
-  checked: "Checked",
-  notChecked: "Not checked",
-  checking: "Checking against the song…",
-  waiting: "Waiting to check",
-  stuck: "Couldn't check yet",
-} as const;
-
-export const CHECK_TITLE = {
-  checked: "These lyrics were compared with the song on this computer and match it.",
-  notChecked: "These lyrics weren't compared with the song, so they may be for another version or another song.",
-  checking: "Comparing these lyrics with the song on this computer.",
-  waiting: "The check hasn't finished yet. It runs when the computer gets to it.",
-  stuck: "The check hasn't finished. Try again to ask for it again.",
-} as const;
 
 /** How long the spinner shows before the note says the check is waiting. */
 export const CHECK_WAIT_MS = 30_000;
@@ -100,7 +88,7 @@ export function useCheckPhase(trackId: string, check: LyricsCheck | undefined): 
 
 export const NOTICE_TEXT = {
   versionHeld: "Lyrics from the released version, may not match",
-  checking: "Checking lyrics against the song…",
+  checking: "Getting the lyrics…",
   noneMatched: "None of the lyrics found match this song",
   chosenNone: "You turned lyrics off for this song",
   unavailable: "Couldn't get lyrics right now",
@@ -109,34 +97,6 @@ export const NOTICE_TEXT = {
 
 /** Under "Couldn't get lyrics right now". */
 export const UNAVAILABLE_NOTE = "A lyrics source couldn't be reached. Platter asks again when you're back online.";
-
-/** What a check in progress is doing, in words; `stuck` when it couldn't run and Try again helps. */
-export function checkProgress(s: LyricsCheckStatus | undefined): { text: string; spin: boolean; retry: boolean } | null {
-  if (!s || s.state === "done") return null;
-  switch (s.state) {
-    case "queued":
-      return { text: "Waiting to check against the song…", spin: true, retry: false };
-    case "reading":
-      return { text: "Reading the song to check the lyrics…", spin: true, retry: false };
-    case "listening":
-      return { text: "Checking against the song…", spin: true, retry: false };
-    case "waiting":
-      return { text: "Waiting: your computer is busy", spin: false, retry: false };
-    case "failed":
-      return s.reason === "noModel"
-        ? { text: "Can't check without the speech model", spin: false, retry: false }
-        : { text: "Couldn't check yet", spin: false, retry: true };
-  }
-}
-
-/** The song's check status while its lyrics say checking. */
-function useCheckProgress(trackId: string, checking: boolean) {
-  const s = useLyricsTrust((st) => st.checks[trackId]);
-  useEffect(() => {
-    if (checking) void loadCheckStatus(trackId);
-  }, [checking, trackId]);
-  return checking ? checkProgress(s) : null;
-}
 
 /** "+1.5 s", "−0.5 s". */
 export function offsetText(ms: number): string {
@@ -150,120 +110,6 @@ export function tapOffset(line: Pick<LyricLine, "startMs">, positionMs: number, 
 }
 
 // ---------------------------------------------------------------- the toolbar
-
-/** The speech model can be downloaded so lyrics can be checked. */
-function useModelOffer(): { show: boolean; size: string; download: () => void } {
-  const check = useSettings((s) => s.settings?.lyricsCheckAudio ?? true);
-  const status = useTranscribe((s) => s.status);
-  const model = status?.models.find((m) => m.kind === status.model) ?? status?.models[0];
-  const installed = !!status?.models.some((m) => m.installed);
-  const show = check && !!status?.available && !installed && !!model && !model.downloading;
-  return { show, size: model ? modelSize(model.sizeBytes) : "", download: () => model && void transcribe.download(model.kind) };
-}
-
-const OFFER_KEY = "platter.lyricsModelOfferHidden";
-
-function readHidden(): boolean {
-  try {
-    return localStorage.getItem(OFFER_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-/** "Download the speech model (about N MB) so Platter can check lyrics". */
-export function CheckModelOffer({ compact = false }: { compact?: boolean }) {
-  const offer = useModelOffer();
-  const [hidden, setHidden] = useState(readHidden);
-  if (!offer.show || (hidden && compact)) return null;
-  const hide = () => {
-    setHidden(true);
-    try {
-      localStorage.setItem(OFFER_KEY, "1");
-    } catch {
-      // Hidden for now only.
-    }
-  };
-  return (
-    <div className="lyrics-trust__offer" role="note">
-      <p>
-        Download the speech model (about {offer.size}) so Platter can check lyrics against the song. It runs on this computer;
-        the song never leaves it.
-      </p>
-      <div className="lyrics-trust__offer-actions">
-        <Button size="sm" variant="primary" icon={<AudioLines size={14} />} onClick={offer.download}>
-          Download the speech model
-        </Button>
-        {compact && (
-          <Button size="sm" variant="ghost" onClick={hide}>
-            Not now
-          </Button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/** The quiet note on what the check said, with a small icon. */
-function CheckStatus({ lyrics, track }: { lyrics: Lyrics; track: Track }) {
-  const { phase: c, retry } = useCheckPhase(track.id, lyrics.check);
-  const p = useCheckProgress(track.id, lyrics.check === "checking");
-  if (p) {
-    // Where the core says the check is; the spinner stops after CHECK_WAIT_MS.
-    const spin = p.spin && c === "checking";
-    return (
-      <span className="lyrics-trust__status">
-        <span className={`lyrics-trust__check is-${p.retry ? "stuck" : spin ? "checking" : "waiting"}`} role="status">
-          {spin ? (
-            <Loader2 size={14} aria-hidden="true" className="lyrics-trust__spin" />
-          ) : p.retry ? (
-            <CircleHelp size={14} aria-hidden="true" />
-          ) : (
-            <Clock size={14} aria-hidden="true" />
-          )}
-          <span className="lyrics-trust__check-text">{p.text}</span>
-        </span>
-        {p.retry && (
-          <button type="button" className="lyrics-trust__retry" onClick={retry}>
-            Try again
-          </button>
-        )}
-        {lyrics.chosen && <span className="lyrics-trust__pick">Your pick</span>}
-      </span>
-    );
-  }
-  if (!c && !lyrics.chosen) return null;
-  const icon =
-    c === "checked" ? (
-      <Check size={14} aria-hidden="true" />
-    ) : c === "checking" ? (
-      <Loader2 size={14} aria-hidden="true" className="lyrics-trust__spin" />
-    ) : c === "waiting" ? (
-      <Clock size={14} aria-hidden="true" />
-    ) : (
-      <CircleHelp size={14} aria-hidden="true" />
-    );
-  const extra = c === "checked" && (lyrics.retimed || lyrics.autoOffsetMs) ? ", timing fixed" : "";
-  return (
-    <span className="lyrics-trust__status">
-      {c && (
-        <span className={`lyrics-trust__check is-${c}`} title={CHECK_TITLE[c]} role="status">
-          {icon}
-          <span className="lyrics-trust__check-text">
-            {CHECK_TEXT[c]}
-            {extra}
-          </span>
-        </span>
-      )}
-      {c === "stuck" && (
-        <button type="button" className="lyrics-trust__retry" onClick={retry}>
-          Try again
-        </button>
-      )}
-      {lyrics.chosen && <span className="lyrics-trust__pick">Your pick</span>}
-    </span>
-  );
-}
 
 /** Said on the timing controls while the check may still move the timing itself. */
 export const TIMING_HELD = "Timing can be moved once the check against the song finishes";
@@ -285,24 +131,6 @@ function TimingStepper({ lyrics, track, held }: { lyrics: Lyrics; track: Track; 
   // A press shows at once, before the lyrics come back with it.
   const offset = useWrongLyrics((s) => s.offsets[track.id] ?? fetched);
   useEffect(() => offsetArrived(track.id, fetched), [track.id, fetched]);
-  const pickerOpen = useWrongLyrics((s) => !!s.track);
-  useEffect(() => {
-    if (held) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || pickerOpen) return;
-      const t = e.target as HTMLElement | null;
-      if (t?.closest?.("input, textarea, select, [contenteditable=true], .dialog")) return;
-      const step = e.key === "-" || e.key === "_" ? -NUDGE_MS : e.key === "+" || e.key === "=" ? NUDGE_MS : 0;
-      if (!step) return;
-      e.preventDefault();
-      // From what shows now, so a held key or quick presses all count.
-      void nudgeLyricsOffset(track.id, fetched, step);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [track.id, fetched, pickerOpen, held]);
-  // A new song ends tapping.
-  useEffect(() => () => setTapping(null), [track.id]);
   return (
     <span className="lyrics-trust__stepper" role="group" aria-label="Lyrics timing" title={held ? TIMING_HELD : undefined}>
       <button
@@ -345,89 +173,185 @@ function TimingStepper({ lyrics, track, held }: { lyrics: Lyrics; track: Track; 
   );
 }
 
-/** Hidden by the toolbar's width (collapsed into "More lyrics tools"). */
-function collapsed(el: HTMLElement | null): boolean {
-  return !!el && el.offsetParent === null;
+/** The - and + keys nudge synced lyrics' timing (not while typing, in a dialog or while the check may move it). */
+function useNudgeKeys(trackId: string, fetched: number, on: boolean) {
+  const pickerOpen = useWrongLyrics((s) => !!s.track);
+  useEffect(() => {
+    if (!on) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || pickerOpen) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.("input, textarea, select, [contenteditable=true], .dialog")) return;
+      const step = e.key === "-" || e.key === "_" ? -NUDGE_MS : e.key === "+" || e.key === "=" ? NUDGE_MS : 0;
+      if (!step) return;
+      e.preventDefault();
+      // From what shows now, so a held key or quick presses all count.
+      void nudgeLyricsOffset(trackId, fetched, step);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [trackId, fetched, pickerOpen, on]);
+}
+
+/** Where lyrics came from, in a few words (null: the credit line says it). */
+export function lyricsFrom(l: Lyrics): string | null {
+  switch (l.source) {
+    case "user":
+      return "Your lyrics";
+    case "auto":
+      return "Written down by Platter";
+    case "file":
+      return "From the lyrics file next to this song";
+    case "lrclib":
+      return l.credit ? null : "From LRCLIB";
+    default:
+      return l.credit ? null : "From your server";
+  }
+}
+
+/** The menu button's name. */
+export const OPTIONS_LABEL = "Lyrics options";
+/** The menu item that opens the timing bar. */
+export const TIMING_ITEM = "Timing is off";
+
+export interface FooterProps {
+  lyrics: Lyrics;
+  track: Track;
+  synced: boolean;
+  /** The shown lines' text, for Share lyrics. */
+  texts: string[];
+  extras: Extras;
 }
 
 /**
- * Under the lyrics, in its own row: the check note, the timing stepper
- * (synced lyrics), "Tap to sync", "Wrong lyrics?" (made plain when other
- * lyrics found disagree) and sharing a transcription. When the row gets
- * narrow, sharing, then "Tap to sync", then "Wrong lyrics?" move into a
- * "More lyrics tools" menu instead of wrapping.
+ * One quiet row under the lyrics: where they came from on the left, and on
+ * the right one "Lyrics options" button whose menu has Timing is off
+ * (synced lyrics: opens the timing bar), Wrong lyrics?, Edit, Translate,
+ * Share lyrics and, for a reviewed transcription, sharing it publicly.
+ * While picking lines to share, the row is the pick bar.
  */
-export function LyricsTools({ lyrics, track, synced }: { lyrics: Lyrics; track: Track; synced: boolean }) {
+export function LyricsFooter({ lyrics, track, synced, texts, extras }: FooterProps) {
+  const [timing, setTiming] = useState(false);
   const tapping = useWrongLyrics((s) => s.tapping === track.id);
   const held = useTimingHeld(lyrics, track.id);
+  const fetched = lyrics.offsetMs ?? 0;
+  const own = useLyricsEditor((s) => s.ownIds.has(track.id));
+  const picking = useLyricPick((s) => s.picking && s.trackId === track.id);
+  const share = useShareTranscription(lyrics, track);
+  useNudgeKeys(track.id, fetched, synced && !held);
+  // A new song closes the timing bar and ends tapping.
+  useEffect(
+    () => () => {
+      setTiming(false);
+      setTapping(null);
+    },
+    [track.id],
+  );
   // The check started meanwhile: tapping waits with the stepper.
   useEffect(() => {
     if (held && useWrongLyrics.getState().tapping === track.id) setTapping(null);
   }, [held, track.id]);
-  const tapRef = useRef<HTMLButtonElement>(null);
-  const wrongRef = useRef<HTMLButtonElement>(null);
-  const shareRef = useRef<HTMLSpanElement>(null);
-  const toggleTap = () => setTapping(tapping ? null : track.id);
-  const more = (e: MouseEvent<HTMLButtonElement>) => {
+  const mine = lyrics.source === "user" || lyrics.source === "auto";
+  const label = lyricsFrom(lyrics);
+
+  const menu = (e: MouseEvent<HTMLButtonElement>) => {
     const items: MenuItem[] = [];
-    const share = shareRef.current?.querySelector("button") ?? null;
-    if (collapsed(share)) items.push({ label: share!.textContent ?? "", icon: Globe, onSelect: () => share!.click() });
-    if (collapsed(tapRef.current) && !held) items.push({ label: "Tap to sync", icon: Hand, checked: tapping, onSelect: toggleTap });
-    if (collapsed(wrongRef.current)) items.push({ label: "Wrong lyrics?", icon: AlertTriangle, onSelect: () => openWrongLyrics(track) });
-    if (items.length) openContextMenu("More lyrics tools", items, e.currentTarget);
+    if (synced) items.push({ label: TIMING_ITEM, icon: Clock, onSelect: () => setTiming(true) });
+    items.push({ label: "Wrong lyrics?", icon: AlertTriangle, onSelect: () => openWrongLyrics(track) });
+    items.push({ label: mine ? "Edit lyrics" : own ? "Edit your lyrics" : "Write your own", icon: PenLine, onSelect: () => openLyricsEditor(track) });
+    if (extras.canTranslate)
+      items.push({
+        label: extras.trans ? "Hide translation" : "Translate",
+        icon: Languages,
+        disabled: extras.translating,
+        onSelect: extras.toggleTranslation,
+      });
+    items.push({ label: "Share lyrics", icon: ImageIcon, separator: true, onSelect: () => useLyricPick.getState().start(track.id) });
+    if (share.offer) items.push({ label: SHARE_LABEL, icon: Globe, onSelect: share.open });
+    openContextMenu(OPTIONS_LABEL, items, e.currentTarget);
   };
+
   return (
-    <div className="lyrics-trust" role="toolbar" aria-label="Lyrics tools">
-      {lyrics.check === "notChecked" && <CheckModelOffer compact />}
-      {lyrics.disagree && <p className="lyrics-trust__hint">Other lyrics found for this song say something different.</p>}
-      {tapping && (
-        <p className="lyrics-trust__hint" role="status">
-          Click a line as it's sung.{" "}
-          <button type="button" className="lyrics__source-edit" onClick={() => setTapping(null)}>
+    <div className="lyrics-trust" role="group" aria-label="Lyrics tools">
+      {timing && synced && (
+        <div className="lyrics-trust__timing" role="toolbar" aria-label="Lyrics timing tools">
+          <TimingStepper lyrics={lyrics} track={track} held={held} />
+          <button
+            type="button"
+            className={`lyrics-trust__btn ${tapping ? "is-on" : ""}`}
+            aria-pressed={tapping}
+            title={held ? TIMING_HELD : "Click a line as it's sung to line the lyrics up there"}
+            disabled={held}
+            onClick={() => setTapping(tapping ? null : track.id)}
+          >
+            Tap to sync
+          </button>
+          <button
+            type="button"
+            className="lyrics-trust__btn"
+            onClick={() => {
+              setTapping(null);
+              setTiming(false);
+            }}
+          >
             Done
           </button>
-        </p>
-      )}
-      <div className="lyrics-trust__bar">
-        <CheckStatus lyrics={lyrics} track={track} />
-        <span className="lyrics-trust__actions">
-          {synced && <TimingStepper lyrics={lyrics} track={track} held={held} />}
-          {synced && (
-            <button
-              ref={tapRef}
-              type="button"
-              className={`lyrics-trust__btn lyrics-trust__tap ${tapping ? "is-on" : ""}`}
-              aria-pressed={tapping}
-              title={held ? TIMING_HELD : "Click a line as it's sung to line the lyrics up there"}
-              disabled={held}
-              onClick={toggleTap}
-            >
-              Tap to sync
-            </button>
+          {tapping && (
+            <span className="lyrics-trust__hint" role="status">
+              Click a line as it's sung.
+            </span>
           )}
-          <button
-            ref={wrongRef}
-            type="button"
-            className={`lyrics-trust__btn lyrics-trust__wrong ${lyrics.disagree ? "is-prominent" : ""}`}
-            onClick={() => openWrongLyrics(track)}
-          >
-            {lyrics.disagree && <AlertTriangle size={14} aria-hidden="true" />}
-            Wrong lyrics?
+        </div>
+      )}
+      {picking ? (
+        <LyricPickBar track={track} texts={texts} />
+      ) : (
+        <div className="lyrics-trust__bar">
+          <span className="lyrics-trust__from">{label}</span>
+          <button type="button" className="lyrics-trust__btn lyrics-trust__more" aria-label={OPTIONS_LABEL} title="More" onClick={menu}>
+            <MoreHorizontal size={18} aria-hidden="true" />
           </button>
-          <span ref={shareRef} className="lyrics-trust__share">
-            <ShareTranscription lyrics={lyrics} track={track} />
-          </span>
-          <button
-            type="button"
-            className={`lyrics-trust__btn lyrics-trust__more ${synced ? "has-tap" : ""} ${lyrics.disagree ? "" : "has-wrong"}`}
-            aria-label="More lyrics tools"
-            title="More"
-            onClick={more}
-          >
-            <MoreHorizontal size={16} aria-hidden="true" />
-          </button>
-        </span>
-      </div>
+        </div>
+      )}
+      {share.dialog}
+    </div>
+  );
+}
+
+/** Share lyrics, while picking: how many lines are picked, Cancel and Share lyrics. */
+function LyricPickBar({ track, texts }: { track: Track; texts: string[] }) {
+  const pick = useLyricPick();
+  // A new song, or leaving the view, ends picking.
+  useEffect(() => () => useLyricPick.getState().cancel(), [track.id]);
+  const n = pick.picked.length;
+  return (
+    <div className="lyrics__pickbar" role="group" aria-label="Pick lyrics to share">
+      <span className="lyrics__pickcount" aria-live="polite">
+        {n === 0 ? `Pick up to ${LYRIC_LINES_MAX} lines` : `${n} of ${LYRIC_LINES_MAX} lines`}
+      </span>
+      <Button variant="ghost" size="sm" onClick={pick.cancel}>
+        Cancel
+      </Button>
+      <Button
+        variant="primary"
+        size="sm"
+        disabled={n === 0}
+        onClick={() => {
+          const lines = pick.picked.map((i) => texts[i]).filter(Boolean);
+          pick.cancel();
+          openShareCard({
+            kind: "track",
+            id: track.id,
+            title: track.title,
+            subtitle: trackArtistLine(track),
+            thumb: track.thumb,
+            durationMs: track.durationMs,
+            lyrics: lines,
+          });
+        }}
+      >
+        Share lyrics
+      </Button>
     </div>
   );
 }
@@ -448,8 +372,7 @@ export function tapLine(trackId: string, line: LyricLine, lyrics: Lyrics): boole
 /** What the lyrics view says instead of lyrics, and what can be done. */
 export function LyricsNotice({ info, track }: { info: Lyrics; track: Track }) {
   const n = info.notice;
-  const p = useCheckProgress(track.id, n === "checking");
-  if (!n) return null;
+  if (!n || n === "checking") return null;
   return (
     <div className="lyrics-page__empty-wrap lyrics-trust__notice">
       <p className="lyrics-page__empty">{NOTICE_TEXT[n]}</p>
@@ -459,17 +382,6 @@ export function LyricsNotice({ info, track }: { info: Lyrics; track: Track }) {
         </p>
       )}
       {n === "unavailable" && <p className="lyrics-trust__notice-note">{UNAVAILABLE_NOTE}</p>}
-      {n === "checking" &&
-        (p ? (
-          <p className="lyrics-trust__notice-note" role="status">
-            {p.spin && <Loader2 size={14} aria-hidden="true" className="lyrics-trust__spin" />} {p.text}
-          </p>
-        ) : (
-          <p className="lyrics-trust__notice-note">
-            <Loader2 size={14} aria-hidden="true" className="lyrics-trust__spin" /> The lyrics found are being compared with the song on
-            this computer.
-          </p>
-        ))}
       <div className="lyrics-trust__notice-actions">
         {n === "versionHeld" && info.pick && (
           <Button variant="primary" onClick={() => void chooseLyrics(track.id, info.pick!)}>
@@ -481,22 +393,16 @@ export function LyricsNotice({ info, track }: { info: Lyrics; track: Track }) {
             Show lyrics again
           </Button>
         )}
-        {p?.retry && (
-          <Button variant="primary" onClick={() => retryCheck(track.id)}>
-            Try again
-          </Button>
-        )}
         {n === "unavailable" && (
           <Button variant="primary" onClick={() => lyricsChanged(track.id)}>
             Retry
           </Button>
         )}
-        <Button
-          variant={n === "versionHeld" || n === "chosenNone" || n === "unavailable" || n === "instrumental" ? "ghost" : "primary"}
-          onClick={() => openWrongLyrics(track)}
-        >
-          Wrong lyrics?
-        </Button>
+        {n !== "noneMatched" && (
+          <Button variant="ghost" onClick={() => openWrongLyrics(track)}>
+            Wrong lyrics?
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -633,7 +539,6 @@ export function WrongLyricsDialog() {
           >
             Look again
           </button>
-          {!c.canCheck && <CheckModelOffer />}
         </>
       )}
       <div className="wrong-lyrics__actions">

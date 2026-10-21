@@ -13,6 +13,8 @@ export interface MockTranscribeHooks {
   later: (ms: number, fn: () => void) => void;
   /** Lyrics from somewhere other than transcription. */
   hasLyrics: (trackId: string) => boolean;
+  /** Already transcribed. */
+  transcribed?: (trackId: string) => boolean;
   /** Saves the canned result as the song's own lyrics, marked auto. */
   save: (trackId: string, text: string, model: TranscribeModel) => void;
   albumTracks: (albumId: string) => string[];
@@ -33,6 +35,9 @@ export const CANNED_LRC = [
 ].join("\n");
 
 type Fail = "download" | "checksum" | "disk" | null;
+
+/** Songs that start playing are written down when they have no lyrics (the test setup turns it off; tests of it turn it on). */
+export const mockFollow = { on: true };
 
 export class MockTranscribe {
   /** Step length for fake progress (tests make it short). */
@@ -56,6 +61,7 @@ export class MockTranscribe {
   playing = false;
   /** The batch is paused by the user. */
   userPaused = false;
+
   /** Songs done with a model other than the chosen one. */
   private otherModel = new Map<string, TranscribeModel>();
 
@@ -204,8 +210,7 @@ export class MockTranscribe {
     const fail = this.failNextDownload;
     this.failNextDownload = null;
     if (fail === "disk") {
-      this.error = { kind: "disk", message: `Not enough free space. The model needs ${Math.ceil(SIZES[kind] / 1048576) + 256} MB free and 120 MB is available.` };
-      this.emit();
+      this.downloadFailed("disk", `Not enough free space. The model needs ${Math.ceil(SIZES[kind] / 1048576) + 256} MB free and 120 MB is available.`);
       return;
     }
     const dl = { kind, done: 0, cancelled: false };
@@ -234,7 +239,7 @@ export class MockTranscribe {
     this.hooks.later(this.stepMs, () => step(1));
   }
 
-  private downloadFailed(kind: "download" | "checksum", message: string) {
+  private downloadFailed(kind: "download" | "checksum" | "disk", message: string) {
     this.download = null;
     this.error = { kind, message };
     if (this.current?.stage === "waitingForModel") {
@@ -262,7 +267,6 @@ export class MockTranscribe {
   private enqueue(ids: string[], background: boolean, front: boolean): number {
     this.usable();
     const model = this.model();
-    if (!this.installed.has(model) && !this.download) this.downloadModel(model);
     const fresh = ids.filter((id) => this.current?.trackId !== id && !this.queue.some((j) => j.trackId === id));
     const jobs = fresh.map((trackId) => ({ trackId, background, now: front }));
     if (front) this.queue.unshift(...jobs);
@@ -275,11 +279,25 @@ export class MockTranscribe {
     this.error = undefined;
     this.emit();
     this.pump();
+    // As in the core, the download's outcome comes after the songs are queued.
+    if (!this.installed.has(model) && !this.download) this.downloadModel(model);
     return jobs.length;
   }
 
   transcribeTrack(trackId: string) {
     this.enqueue([trackId], false, true);
+  }
+
+  /** A song started: it and the next ones without lyrics are written down, the playing one first. Quiet. */
+  follow(playing: string, next: string[]) {
+    if (!mockFollow.on || !this.hooks.settings().transcribeLyrics) return;
+    const need = (id: string) => !this.hooks.hasLyrics(id) && !this.empty.has(id) && !this.hooks.transcribed?.(id);
+    const ahead = next.filter((id) => id !== playing && need(id));
+    if (need(playing)) {
+      this.queue = this.queue.filter((j) => j.trackId !== playing);
+      this.enqueue([playing], false, true);
+    }
+    if (ahead.length) this.enqueue(ahead, false, false);
   }
   transcribeAlbum(albumId: string) {
     this.usable();

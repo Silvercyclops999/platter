@@ -661,6 +661,7 @@ export class MockBackend implements Backend {
       emitDone: (trackId, found) => this.emit("transcribe://done", { trackId, found }),
       later: (ms, fn) => this.later(ms, fn),
       title: (id) => this.trackById(id)?.title,
+      transcribed: (id) => !!this.own.get(id)?.auto,
       hasLyrics: (id) => {
         const t = this.trackById(id);
         const own = this.own.get(id);
@@ -2349,7 +2350,8 @@ export class MockBackend implements Backend {
   private setCurrent(item: QueueItem | null, play: boolean, startMs = 0) {
     // Like the core: a loop belongs to one track.
     if (item !== this.current) this.abLoop = null;
-    if (item && play && item !== this.current) this.logListen(item.track);
+    const started = !!item && play && item !== this.current;
+    if (started) this.logListen(item.track);
     this.current = item;
     this.positionMs = startMs;
     if (item && item.track.title.endsWith(BROKEN_TRACK_TITLE_SUFFIX) && play) {
@@ -2364,6 +2366,8 @@ export class MockBackend implements Backend {
     if (this.status === "playing") this.startTick();
     else this.stopTick();
     this.emitState();
+    // Like the core: songs without lyrics are written down as they play.
+    if (started) this.transcribe.follow(item.track.id, [...this.userQueue, ...this.ctxOrder.slice(this.ctxPos + 1)].slice(0, 2).map((q) => q.track.id));
   }
 
   private advance(natural: boolean, manual = false) {

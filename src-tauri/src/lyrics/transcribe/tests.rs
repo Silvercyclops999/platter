@@ -708,6 +708,53 @@ async fn a_bridge_doing_the_lyrics_holds_the_batch_but_not_songs_asked_for() {
     assert!(f.db.read(store::unreleased_todo).unwrap().is_empty());
 }
 
+// ---------------------------------------------------------------- following playback
+
+#[tokio::test]
+async fn the_playing_song_and_the_next_without_lyrics_are_written_down_model_first() {
+    let f = fx();
+    // "502" has lyrics elsewhere; no model yet: following downloads it.
+    f.other.0.lock().push("502".into());
+    f.t.follow(Some("501".into()), vec!["502".into(), "503".into(), "504".into()]).await;
+    let s = f.t.status();
+    assert!(s.models[0].downloading || s.models[0].installed, "the model downloads by itself");
+    until(&f.t, "501 and 503 done", |s| idle(s) && f.events.done.lock().len() == 2).await;
+    let done: Vec<String> = f.events.done.lock().iter().map(|d| d.0.clone()).collect();
+    assert_eq!(done, ["501", "503"], "the playing song first, the one with lyrics skipped, two ahead at most");
+    // Already done: asking again does nothing.
+    f.t.follow(Some("501".into()), vec![]).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(idle(&f.t.status()));
+    assert_eq!(f.events.done.lock().len(), 2);
+}
+
+#[tokio::test]
+async fn skipping_on_drops_songs_no_longer_coming_up() {
+    let f = fx();
+    install(&f).await;
+    f.t.pause();
+    // Paused: songs asked for one at a time still run, so only the playing
+    // one goes; the next ones wait in the queue.
+    f.t.follow(Some("601".into()), vec!["602".into(), "603".into()]).await;
+    until(&f.t, "601 done", |_| f.events.done.lock().iter().any(|d| d.0 == "601")).await;
+    assert_eq!(f.t.status().queued, 2);
+    // The listener skipped ahead: 602 and 603 aren't coming up any more.
+    f.t.follow(Some("701".into()), vec![]).await;
+    until(&f.t, "701 done", |_| f.events.done.lock().iter().any(|d| d.0 == "701")).await;
+    let s = until(&f.t, "queue empty", idle).await;
+    assert_eq!(s.queued, 0);
+    assert!(!f.events.done.lock().iter().any(|d| d.0 == "602" || d.0 == "603"));
+}
+
+#[tokio::test]
+async fn following_is_quiet_when_transcription_is_off() {
+    let f = fx();
+    f.t.set_options(false, None);
+    f.t.follow(Some("501".into()), vec!["502".into()]).await;
+    let s = f.t.status();
+    assert!(idle(&s) && s.error.is_none() && !s.models[0].downloading);
+}
+
 /// Results from the user's other devices: "802" was transcribed elsewhere.
 #[derive(Default)]
 struct FakeShared {

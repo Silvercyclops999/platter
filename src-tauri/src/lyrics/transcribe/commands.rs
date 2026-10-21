@@ -190,3 +190,24 @@ pub async fn transcribe_cancel(t: State<'_, Transcriber>, track_id: Option<Strin
 pub async fn transcribe_found_nothing(db: State<'_, DbHandle>, track_id: String) -> AppResult<bool> {
     db.read_async(move |c| store::found_nothing(c, &track_id)).await
 }
+
+/// Each song that starts, and the next ones in the queue, go to
+/// [`Transcriber::follow`], so songs without lyrics are written down as
+/// they play.
+pub fn follow_playback(t: Transcriber, player: PlayerHandle, mut events: tokio::sync::broadcast::Receiver<crate::audio::TrackingEvent>) {
+    use tokio::sync::broadcast::error::RecvError;
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let playing = match events.recv().await {
+                Ok(crate::audio::TrackingEvent::TrackStarted { track, .. }) => track.id,
+                Ok(_) | Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => return,
+            };
+            let next = match player.state().await {
+                Ok(s) => s.queue.user_queue.iter().chain(&s.queue.next_up).map(|i| i.track.id.clone()).take(super::FOLLOW_AHEAD).collect(),
+                Err(_) => Vec::new(),
+            };
+            t.follow(Some(playing), next).await;
+        }
+    });
+}

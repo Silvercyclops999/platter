@@ -4,6 +4,7 @@
  * link, unreleased music never getting a song.link line, and picking lyric
  * lines for a lyric card.
  */
+import { chooseLyricsOption } from "./lyricsOptions";
 import { ONLINE_EXTRAS } from "./onlineExtras";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -256,7 +257,7 @@ describe("lyric cards", () => {
     const seek = vi.spyOn(backend, "playSeek");
     playing(words, 40_000);
     render(<LyricsPane />);
-    fireEvent.click(await screen.findByRole("button", { name: "Share lyrics" }));
+    await chooseLyricsOption("Share lyrics");
     const view = screen.getByLabelText("Lyrics", { selector: ".lyrics__scroll" });
     const lines = [...view.querySelectorAll<HTMLButtonElement>("button.lyrics__line:not(.lyrics__line--gap)")];
     for (const l of lines.slice(0, 5)) fireEvent.click(l);
@@ -278,9 +279,9 @@ describe("lyric cards", () => {
     clearLyricsCache();
     playing(words, 40_000);
     render(<LyricsPane />);
-    fireEvent.click(await screen.findByRole("button", { name: "Share lyrics" }));
+    await chooseLyricsOption("Share lyrics");
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(useLyricPick.getState().picking).toBe(false);
-    expect(screen.getByRole("button", { name: "Share lyrics" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Lyrics options" })).toBeInTheDocument();
   });
 });

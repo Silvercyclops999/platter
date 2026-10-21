@@ -194,24 +194,24 @@ describe("synced lyrics", () => {
     expect(seek).toHaveBeenCalledWith(t[target].startMs);
   });
 
-  it("stops following on a hand scroll and stays put until Sync", async () => {
+  it("stops following on a hand scroll and stays put until Follow along", async () => {
     at(words, 30_000);
     render(<LyricsPane />);
     const scroller = await screen.findByLabelText("Lyrics", { selector: ".lyrics__scroll" });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     fireEvent.wheel(scroller, { deltaY: 400 });
-    const sync = screen.getByRole("button", { name: /^Sync/ });
-    expect(sync).toHaveTextContent("Sync");
+    const sync = screen.getByRole("button", { name: /^Follow along/ });
+    expect(sync).toHaveTextContent("Follow along");
     expect(sync).toHaveClass("lyrics__sync");
     // No timer brings following back: the pill stays.
     act(() => vi.advanceTimersByTime(60_000));
-    expect(screen.getByRole("button", { name: /^Sync/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Follow along/ })).toBeInTheDocument();
     // The highlight keeps moving while scrolled away (ticks, not a seek).
     act(() => usePlayer.setState({ positionMs: 31_000 }));
-    expect(screen.getByRole("button", { name: /^Sync/ })).toBeInTheDocument();
-    // Sync resumes at once.
-    fireEvent.click(screen.getByRole("button", { name: /^Sync/ }));
-    expect(screen.queryByRole("button", { name: /^Sync/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /^Follow along/ })).toBeInTheDocument();
+    // Follow along resumes at once.
+    fireEvent.click(screen.getByRole("button", { name: /^Follow along/ }));
+    expect(screen.queryByRole("button", { name: /^Follow along/ })).toBeNull();
   });
 
   it("shows the credit line under the lyrics", async () => {
@@ -229,15 +229,15 @@ describe("plain and missing lyrics", () => {
     const view = await screen.findByLabelText("Lyrics", { selector: ".lyrics__scroll" });
     const note = within(view).getByText(UNSYNCED_NOTE);
     expect(note).toBe(view.querySelector(".lyrics__lines")!.firstElementChild);
-    // The only button is Share lyrics (lines don't seek).
-    expect(within(view).queryAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Share lyrics"]);
+    // No buttons in the lines (they don't seek); the rest is in Lyrics options.
+    expect(within(view).queryAllByRole("button")).toEqual([]);
     const ls = view.querySelectorAll("p.lyrics__line");
     expect(ls.length).toBeGreaterThan(5);
     expect([...ls].every((l) => !/is-(past|current|future)/.test(l.className))).toBe(true);
     expect(view.querySelector("[aria-current]")).toBeNull();
     fireEvent.click(ls[3]);
     expect(seek).not.toHaveBeenCalled();
-    expect(screen.queryByRole("button", { name: /^Sync/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Follow along/ })).toBeNull();
   });
 
   it("a clicked line hands focus back so Space pauses, and arrows on a line stop following", async () => {
@@ -251,7 +251,7 @@ describe("plain and missing lyrics", () => {
     expect(document.activeElement).toBe(view);
     line.focus();
     fireEvent.keyDown(line, { key: "ArrowDown" });
-    expect(await screen.findByRole("button", { name: /^Sync/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /^Follow along/ })).toBeInTheDocument();
   });
 
   it("synced lyrics have no unsynced note", async () => {
@@ -276,7 +276,7 @@ describe("plain and missing lyrics", () => {
     expect(view.querySelector("[aria-current]")).toBeNull();
     fireEvent.click(view.querySelectorAll("p.lyrics__line")[2]);
     expect(seek).not.toHaveBeenCalled();
-    expect(screen.queryByRole("button", { name: /^Sync/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Follow along/ })).toBeNull();
   });
 
   it("with borrowed timing turned on, a live version follows along and still says where the timing is from", async () => {
@@ -546,13 +546,13 @@ describe("following, seeking and the keyboard", () => {
     const { el, spy } = await scrollerOf();
     await screen.findByRole("button", { current: true });
     fireEvent.wheel(el, { deltaY: 400 });
-    expect(screen.getByRole("button", { name: /^Sync/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Follow along/ })).toBeInTheDocument();
     const target = t.findIndex((l) => l.text && l.startMs > 90_000);
     act(() => void player.seek(t[target].startMs));
     // Still paused: the line it landed on is current, followed, with no easing.
     expect(usePlayer.getState().state?.status).toBe("paused");
     expect(document.querySelectorAll(".lyrics__line")[target]).toHaveAttribute("aria-current", "true");
-    expect(screen.queryByRole("button", { name: /^Sync/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Follow along/ })).toBeNull();
     expect(spy).toHaveBeenLastCalledWith(expect.objectContaining({ behavior: "auto" }));
   });
 
@@ -604,7 +604,12 @@ describe("following, seeking and the keyboard", () => {
       render(<LyricsPane />);
       const { spy } = await scrollerOf();
       await screen.findByRole("button", { current: true });
-      fireEvent.click(await screen.findByRole("button", { name: "Translate" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Lyrics options" }));
+      const translate = useUi.getState().menu?.items.find((i) => i.label === "Translate");
+      act(() => {
+        useUi.setState({ menu: null });
+        translate!.onSelect!();
+      });
       await waitFor(() => expect(document.querySelector(".lyrics__extra--trans")).not.toBeNull());
       expect(spy).toHaveBeenCalled();
       // Its name includes the translation.
@@ -648,6 +653,6 @@ describe("following, seeking and the keyboard", () => {
     fireEvent.keyDown(lines[3], { key: "ArrowUp" });
     // The verse break is skipped.
     expect(two).toHaveFocus();
-    expect(screen.getByRole("button", { name: /^Sync/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Follow along/ })).toBeInTheDocument();
   });
 });

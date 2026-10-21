@@ -14,7 +14,6 @@ import { useArtColours } from "../lib/useTint";
 import { currentLineIndex, lyricsChanged, timedLines, useLyrics } from "../shell/lyrics";
 import { LyricWords, usePlayhead } from "../shell/lyricWords";
 import { openLyricsEditor } from "../stores/lyricsEditor";
-import { useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import "./pages/parity.css";
 import { player, usePlayer } from "../stores/player";
@@ -152,10 +151,9 @@ function LyricsFull({ track }: { track: Track }) {
 
 /**
  * A song with no lyrics: say so plainly, and offer to look again (the
- * sources may have it now) or to write them (while that's on in Settings).
+ * sources may have it now) or to write them.
  */
 export function NoLyrics({ track }: { track: Track }) {
-  const showAdd = useSettings((s) => s.settings?.lyricsShowAdd ?? true);
   const [looking, setLooking] = useState(false);
   const lookAgain = async () => {
     setLooking(true);
@@ -173,18 +171,16 @@ export function NoLyrics({ track }: { track: Track }) {
       <p className="ph-lyrics__empty-title">No lyrics for this song</p>
       <p className="ph-lyrics__empty-text">None of your lyrics sources have it yet.</p>
       <div className="ph-lyrics__empty-actions">
-        {showAdd && (
-          <button
-            type="button"
-            className="ph-pill is-primary"
-            onClick={() => {
-              phone.closeLyrics();
-              openLyricsEditor(track);
-            }}
-          >
-            <PenLine size={16} aria-hidden="true" /> Add lyrics
-          </button>
-        )}
+        <button
+          type="button"
+          className="ph-pill is-primary"
+          onClick={() => {
+            phone.closeLyrics();
+            openLyricsEditor(track);
+          }}
+        >
+          <PenLine size={16} aria-hidden="true" /> Add lyrics
+        </button>
         <button type="button" className="ph-pill" disabled={looking} onClick={() => void lookAgain()}>
           <RotateCw size={16} aria-hidden="true" className={looking ? "ph-spin" : undefined} /> {looking ? "Looking…" : "Look again"}
         </button>

@@ -132,7 +132,7 @@ describe("More", () => {
       Library: 6,
       "Downloads and devices": 5,
       Appearance: 5,
-      Lyrics: 4,
+      Lyrics: 3,
       Integrations: 0,
       "Sharing and friends": 6,
       App: 5,
@@ -259,9 +259,10 @@ describe("pages", () => {
     const user = userEvent.setup();
     render(<SettingsPage />);
     const lyrics = await screen.findByRole("region", { name: "Lyrics" });
-    expect(within(lyrics).queryByRole("button", { name: "Manage Lyrics transcription" })).toBeNull();
-    await user.click(within(lyrics).getByRole("switch", { name: "Transcribe songs without lyrics on this computer" }));
+    // On by default on a computer.
     expect(await within(lyrics).findByRole("button", { name: "Manage Lyrics transcription" })).toBeInTheDocument();
+    await user.click(within(lyrics).getByRole("switch", { name: "Write down lyrics for songs without them" }));
+    await waitFor(() => expect(within(lyrics).queryByRole("button", { name: "Manage Lyrics transcription" })).toBeNull());
   });
 
   it("a page's rows wait until its service is connected", async () => {

@@ -1282,7 +1282,7 @@ impl Default for Settings {
             plex_edit_lock: true,
             plex_edit_match_unreleased: true,
             drag_and_drop: true,
-            transcribe_lyrics: false,
+            transcribe_lyrics: !cfg!(mobile),
             transcribe_model: None,
             transcribe_gpu: Default::default(),
             transcribe_processor: Default::default(),
@@ -2879,6 +2879,29 @@ fn phone_defaults_once(db: &DbHandle, s: &mut Settings, had_saved: bool) {
     }
 }
 
+/// Set once a computer's saved settings had transcription turned on.
+const LYRICS_ON_KEY: &str = "app.settings.lyricsWrittenDown1";
+
+/// Computers write down lyrics for songs without them by default. Settings
+/// saved before that had it off (it used to be opt-in), so they get it on
+/// once; turning it off afterwards sticks.
+fn lyrics_on_once(db: &DbHandle, s: &mut Settings, had_saved: bool) {
+    match db.read(|c| kv_get(c, LYRICS_ON_KEY)) {
+        Ok(None) => {}
+        Ok(Some(_)) => return,
+        Err(e) => return tracing::warn!("lyrics default not checked: {e}"),
+    }
+    if had_saved && !s.transcribe_lyrics {
+        s.transcribe_lyrics = true;
+        if let Err(e) = save(db, s) {
+            return tracing::warn!("lyrics default not saved: {e}");
+        }
+    }
+    if let Err(e) = db.write(|c| kv_set(c, LYRICS_ON_KEY, "1")) {
+        tracing::warn!("lyrics default not marked: {e}");
+    }
+}
+
 /// Read settings for showing and following. When the database can't be
 /// read this gives the defaults; anything that saves uses [`try_load`],
 /// which says so instead, so defaults never overwrite real settings.
@@ -2919,6 +2942,8 @@ pub fn try_load(db: &DbHandle) -> AppResult<Settings> {
     };
     if cfg!(mobile) {
         phone_defaults_once(db, &mut s, had_saved);
+    } else {
+        lyrics_on_once(db, &mut s, had_saved);
     }
     s.clamp();
     // Ids saved before they carried their server (crate::sid).
@@ -3782,8 +3807,9 @@ mod tests {
         assert!(s.show_plex_avatar);
         assert!(s.read_file_tags && s.group_editions && !s.show_fan_edits);
         assert!(s.drag_and_drop);
-        // Transcription is opt-in (it downloads a model); its results show.
-        assert!(!s.transcribe_lyrics && s.show_auto_lyrics);
+        // Computers write down lyrics for songs without them; the results show.
+        assert_eq!(s.transcribe_lyrics, !cfg!(mobile));
+        assert!(s.show_auto_lyrics);
         // Transcriptions sync and the share offer is on (asking every time); unreleased songs aren't offered.
         assert!(s.sync_transcriptions && s.share_transcriptions && !s.share_transcriptions_unreleased);
         // No model picked: the default follows the graphics card; Auto uses it.
@@ -3852,7 +3878,6 @@ mod tests {
             "statsCompare",
             "shareTranscriptionsUnreleased",
             "syncEnabled",
-            "transcribeLyrics",
             "notifyNewReleases",
         ] {
             assert_eq!(v[k], serde_json::json!(false), "{k} must start off");
@@ -5026,6 +5051,31 @@ mod tests {
         save(&db, &s).unwrap();
         phone_defaults_once(&db, &mut s, true);
         assert!(!s.show_to_my_devices && !load(&db).show_to_my_devices);
+    }
+
+    #[test]
+    fn a_saved_computer_gets_transcription_on_once() {
+        let (saved, _d) = db();
+        let mut s = Settings { transcribe_lyrics: false, ..Default::default() };
+        save(&saved, &s).unwrap();
+        lyrics_on_once(&saved, &mut s, true);
+        assert!(s.transcribe_lyrics && load_raw_transcribe(&saved));
+        // Turned off again: it stays off.
+        s.transcribe_lyrics = false;
+        save(&saved, &s).unwrap();
+        lyrics_on_once(&saved, &mut s, true);
+        assert!(!s.transcribe_lyrics && !load_raw_transcribe(&saved));
+        // A new install is only marked.
+        let (fresh, _e) = db();
+        let mut s = Settings { transcribe_lyrics: false, ..Default::default() };
+        lyrics_on_once(&fresh, &mut s, false);
+        assert!(!s.transcribe_lyrics);
+        assert!(fresh.read(|c| kv_get(c, LYRICS_ON_KEY)).unwrap().is_some());
+    }
+
+    fn load_raw_transcribe(db: &DbHandle) -> bool {
+        let raw = db.read(|c| kv_get(c, KEY)).unwrap().unwrap();
+        serde_json::from_str::<Settings>(&raw).unwrap().transcribe_lyrics
     }
 
     #[test]

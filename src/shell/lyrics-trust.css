@@ -1,12 +1,8 @@
-/* ---------------------------------------------------------------- Lyrics you can trust
-   Under the lyrics, in a row of its own: the check note on the left; the
-   timing stepper, Tap to sync and Wrong lyrics? on the right. Every control
-   is one height (--lyrics-control) on one line; when the row gets narrow
-   the less-used actions move into the More menu instead of wrapping. Hints
-   and the model offer sit just above the row. */
+/* ---------------------------------------------------------------- Under the lyrics
+   One quiet row: where the lyrics came from on the left, the options
+   button on the right. The timing bar opens just above it when asked. */
 
 .lyrics-trust {
-  container: lyrics-tools / inline-size;
   flex: none;
   display: flex;
   flex-direction: column;
@@ -18,47 +14,29 @@
 .lyrics-trust__bar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--space-4);
   min-width: 0;
   height: var(--lyrics-control);
 }
-.lyrics-trust__status {
-  flex: 1 1 auto;
+.lyrics-trust__from {
   min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+  color: rgba(255, 255, 255, 0.6);
 }
-.lyrics-trust__check {
-  min-width: 0;
-  display: inline-flex;
+.lyrics-trust__timing {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.72);
-  cursor: default;
+  gap: var(--space-2);
+  animation: lyrics-rise-in var(--motion-quick) var(--motion-easing);
 }
-.lyrics-trust__check svg { flex: none; }
-.lyrics-trust__check-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.lyrics-trust__check.is-checked { color: rgba(255, 255, 255, 0.86); }
-.lyrics-trust__check.is-checked svg { color: var(--color-success); }
-.lyrics-trust__pick { flex: none; font-weight: 600; color: rgba(255, 255, 255, 0.72); }
-.lyrics-trust__retry {
-  flex: none;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: #fff;
-  font: inherit;
-  font-weight: 700;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
+@keyframes lyrics-rise-in {
+  from { opacity: 0; transform: translateY(calc(6px * var(--motion-move))); }
+  to { opacity: 1; transform: none; }
 }
-.lyrics-trust__retry:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; border-radius: var(--radius-row); }
-.lyrics-trust__actions { flex: none; display: flex; align-items: center; gap: var(--space-2); }
-
 /* Shared by the stepper, the text buttons and More. */
 .lyrics-trust__btn,
 .lyrics-trust__step,
@@ -88,8 +66,6 @@ button.lyrics-trust__offset:hover { background: rgba(255, 255, 255, 0.12); color
 .lyrics-trust__step:focus-visible,
 .lyrics-trust__offset:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
 .lyrics-trust__btn.is-on { background: #fff; color: #121110; }
-.lyrics-trust__wrong.is-prominent { background: var(--color-warning); color: #121110; }
-.lyrics-trust__wrong.is-prominent:hover { background: color-mix(in srgb, var(--color-warning) 85%, #fff); color: #121110; }
 
 /* The timing stepper: one segmented control. */
 .lyrics-trust__stepper {
@@ -110,21 +86,7 @@ button.lyrics-trust__offset:hover { background: rgba(255, 255, 255, 0.12); color
 }
 .lyrics-trust__offset.is-moved { color: #fff; cursor: pointer; }
 
-/* More: only when something has moved into it. */
-.lyrics-trust__more { display: none; width: var(--lyrics-control); padding: 0; }
-.lyrics-trust__share { display: contents; }
-@container lyrics-tools (max-width: 760px) {
-  .lyrics-trust__share .lyrics-trust__btn { display: none; }
-  .lyrics-trust__actions:has(.lyrics-trust__share .lyrics-trust__btn) .lyrics-trust__more { display: inline-flex; }
-}
-@container lyrics-tools (max-width: 640px) {
-  .lyrics-trust__tap { display: none; }
-  .lyrics-trust__more.has-tap { display: inline-flex; }
-}
-@container lyrics-tools (max-width: 500px) {
-  .lyrics-trust__wrong:not(.is-prominent) { display: none; }
-  .lyrics-trust__more.has-wrong { display: inline-flex; }
-}
+.lyrics-trust__more { flex: none; width: var(--lyrics-control); padding: 0; color: rgba(255, 255, 255, 0.72); }
 
 .lyrics-trust__hint {
   margin: 0;
@@ -135,23 +97,6 @@ button.lyrics-trust__offset:hover { background: rgba(255, 255, 255, 0.12); color
 @keyframes lyrics-trust-spin { to { transform: rotate(360deg); } }
 .lyrics-trust__spin { animation: lyrics-trust-spin 1s linear infinite; vertical-align: -2px; }
 @media (prefers-reduced-motion: reduce) { .lyrics-trust__spin { animation: none; } }
-
-/* The model offer, just above the toolbar and in the picker. */
-.lyrics-trust__offer {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  max-width: 560px;
-  padding: var(--space-3);
-  border-radius: var(--radius-card);
-  background: rgba(0, 0, 0, 0.4);
-  color: rgba(255, 255, 255, 0.9);
-  font-size: var(--font-size-sm);
-  line-height: 1.45;
-}
-.lyrics-trust__offer p { margin: 0; }
-.lyrics-trust__offer-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.wrong-lyrics .lyrics-trust__offer { max-width: none; margin: var(--space-3) var(--space-3) 0; background: var(--color-state-hover); color: var(--color-text-secondary); }
 
 /* Nothing shown, and why. */
 .lyrics-trust__notice-note {

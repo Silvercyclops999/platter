@@ -16,7 +16,9 @@ import { DEFAULT_SETTINGS, type PlayerState, type Track } from "../lib/types";
 import { LyricsPane } from "../shell/LyricsView";
 import { SettingsPage } from "../pages/SettingsPage";
 import { FullWindow } from "../shell/FullWindow";
-import { clearLyricsCache, lyricsSourceLabel } from "../shell/lyrics";
+import { clearLyricsCache } from "../shell/lyrics";
+import { lyricsFrom } from "../shell/LyricsTrust";
+import { chooseLyricsOption } from "./lyricsOptions";
 import { LyricsEditorHost } from "../shell/LyricsEditor";
 import { clearTimes, moveTo, nextStampable, nudge, prevStampable, reconcile, stamp, timelineWindow } from "../shell/lyricsSync";
 import { fullWindow } from "../stores/fullWindow";
@@ -178,7 +180,7 @@ describe("lyrics editor", () => {
     at(none, 0);
     page();
     await screen.findByText("No lyrics for this song");
-    await user.click(screen.getByRole("button", { name: "Add lyrics" }));
+    await user.click(screen.getByRole("button", { name: "Write your own" }));
     const dlg = await screen.findByRole("dialog", { name: `Add lyrics: ${none.title}` });
     const box = within(dlg).getByRole("textbox", { name: "Lyrics" });
     await waitFor(() => expect(box).toHaveFocus());
@@ -193,18 +195,10 @@ describe("lyrics editor", () => {
     expect(lyricsEditLabel(none.id)).toBe("Edit lyrics");
     expect(await screen.findByText("Second line")).toBeInTheDocument();
     expect(screen.getByText("Your lyrics")).toBeInTheDocument();
-    // Edit opens them again.
-    await user.click(screen.getByRole("button", { name: "Edit" }));
+    // Edit in Lyrics options opens them again.
+    await chooseLyricsOption(/^Edit/);
     const again = await screen.findByRole("dialog", { name: `Edit lyrics: ${none.title}` });
     await waitFor(() => expect(within(again).getByRole("textbox", { name: "Lyrics" })).toHaveValue("First line\nSecond line"));
-  });
-
-  it("hides Add lyrics in the empty view when its setting is off", async () => {
-    useSettings.setState({ settings: { ...DEFAULT_SETTINGS, lyricsShowAdd: false } });
-    at(none, 0);
-    page();
-    await screen.findByText("No lyrics for this song");
-    expect(screen.queryByRole("button", { name: "Add lyrics" })).toBeNull();
   });
 
   it("Cancel closes at once with nothing changed, and asks first when there is", async () => {
@@ -404,7 +398,7 @@ describe("lyrics editor", () => {
       </>,
     );
     act(() => void fullWindow.open("lyrics"));
-    await user.click(await screen.findByRole("button", { name: "Add lyrics" }));
+    await user.click(await screen.findByRole("button", { name: "Write your own" }));
     expect(await screen.findByRole("dialog", { name: `Add lyrics: ${none.title}` })).toBeInTheDocument();
     // Space in the editor isn't play/pause for the expanded view.
     const toggle = vi.spyOn(player, "toggle").mockResolvedValue(undefined);
@@ -442,27 +436,25 @@ describe("which lyrics show", () => {
   });
 
   it("says where lyrics came from, including a file next to the song", async () => {
-    expect(lyricsSourceLabel({ synced: false, lines: ["x"], source: "file" })).toBe("From the lyrics file next to this song");
-    expect(lyricsSourceLabel({ synced: false, lines: ["x"], source: "user" })).toBe("Your lyrics");
-    expect(lyricsSourceLabel({ synced: false, lines: ["x"], source: "plex" })).toBe("Lyrics from Plex");
-    expect(lyricsSourceLabel({ synced: false, lines: ["x"], source: "plex", credit: "Lyrics licensed" })).toBeNull();
-    expect(lyricsSourceLabel({ synced: false, lines: ["x"], source: "lrclib", credit: "Lyrics from LRCLIB" })).toBeNull();
+    expect(lyricsFrom({ synced: false, lines: ["x"], source: "file" })).toBe("From the lyrics file next to this song");
+    expect(lyricsFrom({ synced: false, lines: ["x"], source: "user" })).toBe("Your lyrics");
+    expect(lyricsFrom({ synced: false, lines: ["x"], source: "plex" })).toBe("From your server");
+    expect(lyricsFrom({ synced: false, lines: ["x"], source: "auto" })).toBe("Written down by Platter");
+    expect(lyricsFrom({ synced: false, lines: ["x"], source: "plex", credit: "Lyrics licensed" })).toBeNull();
+    expect(lyricsFrom({ synced: false, lines: ["x"], source: "lrclib", credit: "Lyrics from LRCLIB" })).toBeNull();
     at(fromFile, 0);
     page();
     expect(await screen.findByText("From the lyrics file next to this song")).toBeInTheDocument();
   });
 
-  it("Settings has both lyrics options, in the Appearance section", async () => {
+  it("Settings has Prefer my own lyrics, and no Show Add lyrics row (Write your own is always there)", async () => {
     const user = userEvent.setup();
     await loadSettings();
     render(<SettingsPage />);
     const prefer = await screen.findByRole("switch", { name: "Prefer my own lyrics over your server's" });
-    const add = screen.getByRole("switch", { name: "Show Add lyrics on songs without lyrics" });
+    expect(screen.queryByRole("switch", { name: "Show Add lyrics on songs without lyrics" })).toBeNull();
     expect(prefer).toHaveAttribute("aria-checked", "false");
-    expect(add).toHaveAttribute("aria-checked", "true");
     await user.click(prefer);
     await waitFor(() => expect(useSettings.getState().settings?.lyricsPreferOwn).toBe(true));
-    await user.click(add);
-    await waitFor(() => expect(useSettings.getState().settings?.lyricsShowAdd).toBe(false));
   });
 });

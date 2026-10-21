@@ -133,9 +133,11 @@ html:root[data-look-now-playing="left"] .app.fw-beside .resize-handle--right { r
    across, with room on the right. */
 .fw--lyrics .fw__stage { justify-content: flex-start; padding-left: clamp(var(--space-6), calc(var(--fw-w) * 0.22), 640px); }
 /* No lyrics: there's no column to line up with, so the column and its
-   "No lyrics" message sit in the middle of the window. */
-.fw--lyrics .fw__stage:has(.lyrics-page__empty-wrap) { justify-content: center; padding-left: clamp(var(--space-6), calc(var(--fw-w) * 0.05), var(--space-16)); }
+   "No lyrics" message sit in the middle of the window. While the words are
+   being written down the column stays put, so the lyrics arrive in place. */
+.fw--lyrics .fw__stage:has(.lyrics-page__empty-wrap:not(.lyrics-page__empty-wrap--writing)) { justify-content: center; padding-left: clamp(var(--space-6), calc(var(--fw-w) * 0.05), var(--space-16)); }
 .fw__lyrics .lyrics-page__empty-wrap { text-align: center; }
+.fw__lyrics .lyrics-page__empty-wrap--writing { text-align: start; align-items: flex-start; }
 .fw__lyrics-mode {
   width: min(1040px, 100%);
   height: 100%;

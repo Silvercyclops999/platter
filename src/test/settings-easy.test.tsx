@@ -37,6 +37,13 @@ afterEach(() => {
  */
 const NOT_A_ROW: Record<string, string> = {
   volume: "the player bar",
+  lyricsShowAdd: "decided by the app: Write your own is always there",
+  transcribeModel: "decided by the app from the graphics card",
+  transcribeGpu: "decided by the app from the graphics card",
+  transcribeProcessor: "decided by the app",
+  lyricsCheckAudio: "decided by the app: always when the model is there",
+  lyricsFixTiming: "decided by the app: always when the model is there",
+  lyricsOfficialFirst: "decided by the app: always",
   artCacheMb: "artCache",
   crossfadeSeconds: "crossfade",
   eqBands: "eqEnabled",

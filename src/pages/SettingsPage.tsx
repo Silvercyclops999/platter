@@ -68,7 +68,7 @@ import { EXPLICIT_OPTIONS, TagScanNote } from "./FileTagSettings";
 import { CheckTagsButton, MusicFolderControl, MusicFolderNote, MusicFolderPath, PlexLibrarySettings } from "./TagEditorSettings";
 import { ChangeFolderControl, FolderNote, QueueNote, RemoveAllControl, StorageNote, downloadsTitle, useDownloadStatus } from "./DownloadSettings";
 import { DeviceFormatSetting, DeviceListSetting, OpenDevicesButton } from "./DeviceSyncSettings";
-import { BatchControl, BatchNote, GPU_OPTIONS, GpuNote, ModelControl, PROCESSOR_OPTIONS, TranscribeNote } from "./TranscribeSettings";
+import { BatchControl, BatchNote, TranscribeNote } from "./TranscribeSettings";
 import { ChangeSyncFolder, KeyCopyButton, SyncNowControl, SyncSwitch, syncNote, useSyncFile } from "./SyncSettings";
 import { suggestionLine, useDownloadSuggestions } from "../components/DownloadSuggestions";
 import {
@@ -3469,14 +3469,6 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       control: (ids) => toggle(s, "lyricsPreferOwn", ids),
     },
     {
-      key: "lyricsShowAdd",
-      section: "Lyrics",
-      title: "Show Add lyrics on songs without lyrics",
-      description: "The lyrics view offers to write lyrics for a song without them.",
-      more: "The lyrics view offers to write lyrics for a song that has none. Add lyrics stays in the song's menu either way.",
-      control: (ids) => toggle(s, "lyricsShowAdd", ids),
-    },
-    {
       key: "lyricsLiveTiming",
       section: "Lyrics",
       title: "Show borrowed timing on live versions",
@@ -3485,37 +3477,12 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       control: (ids) => toggle(s, "lyricsLiveTiming", ids),
     },
     {
-      key: "lyricsCheckAudio",
-      section: "Lyrics",
-      title: "Check lyrics against the song",
-      description: "Skips lyrics that belong to another song, checked here. This device only.",
-      more: "Compares the lyrics found with a short part of the song, using the speech model on this computer, and skips lyrics that belong to another song. Until the model is downloaded, lyrics show as not checked. The song never leaves this computer. This device only.",
-      control: (ids) => toggle(s, "lyricsCheckAudio", ids),
-    },
-    {
-      key: "lyricsFixTiming",
-      section: "Lyrics",
-      title: "Fix lyrics timing automatically",
-      description: "Lyrics that run early, late or drift are moved to match. This device only.",
-      more: "Checked lyrics that run early or late, or drift over the song, are moved to match it. Off shows them with the timing they came with. This device only.",
-      control: (ids) => toggle(s, "lyricsFixTiming", ids),
-    },
-    {
       key: "lyricsReleasedForVersions",
       section: "Lyrics",
       title: "Use released lyrics for other versions",
       description: "Other versions show the released version's lyrics without asking.",
       more: "Unreleased songs, alternate versions, live takes and songs with a version tag show lyrics found for the released version without asking. Off asks first with Use anyway, unless the check finds they match the song.",
       control: (ids) => toggle(s, "lyricsReleasedForVersions", ids),
-    },
-    {
-      key: "lyricsOfficialFirst",
-      section: "Lyrics",
-      page: "transcription",
-      title: "Look for official lyrics before transcribing",
-      description: "Shows matching official lyrics instead of transcribing.",
-      more: "Before a song is transcribed, synced lyrics from its server, files next to it and LRCLIB are checked against it, and a match is shown instead. Transcribed songs are looked at again each week. A song you set to show its transcription keeps it.",
-      control: (ids) => toggle(s, "lyricsOfficialFirst", ids),
     },
     {
       key: "lyricsChoices",
@@ -3900,40 +3867,11 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
     {
       key: "transcribeLyrics",
       section: "Lyrics",
-      title: "Transcribe songs without lyrics on this computer",
-      description: "A speech model writes lyrics; the audio never leaves this computer. This device only.",
-      more: "Adds Transcribe this song to the lyrics view and the album menu. A speech model is downloaded once, and songs are transcribed on this computer only; the audio never leaves it. Results may be wrong and can be fixed in the lyrics editor. This device only.",
+      title: "Write down lyrics for songs without them",
+      description: "Done on this computer as songs play; the audio never leaves it. This device only.",
+      more: "When a song has no lyrics anywhere, Platter writes them down as it plays, and does the next songs in the queue ahead of time. A speech model downloads once, the first time it's needed. Results can have mistakes and can be fixed with Edit lyrics. This device only.",
       note: <TranscribeNote />,
       control: (ids) => toggle(s, "transcribeLyrics", ids),
-    },
-    {
-      key: "transcribeModel",
-      section: "Lyrics",
-      page: "transcription",
-      title: "Speech model",
-      description: "Small suits most songs; Turbo is best on a graphics card. This device only.",
-      more: "Small is faster and right for most songs on the processor. Medium is a little more accurate, but much slower and works the processor much harder. Turbo is the most accurate and is made for the graphics card, where a song takes seconds; it's the default when one is used. The size is the download. This device only.",
-      control: (ids) => <ModelControl s={s} ids={ids} />,
-    },
-    {
-      key: "transcribeGpu",
-      section: "Lyrics",
-      page: "transcription",
-      title: "Use the graphics card",
-      description: "Auto uses a graphics card that can help. This device only.",
-      more: "Auto transcribes on the graphics card when there's one that can help, which is much faster and keeps the processor cool. The lyrics check uses it too. Off uses the processor only. Processor use and the busy pause still apply. This device only.",
-      note: <GpuNote setting={s?.transcribeGpu} />,
-      control: (ids) => select(s, (x) => x.transcribeGpu ?? "auto", GPU_OPTIONS, ids, (v) => void updateSettings({ transcribeGpu: v })),
-    },
-    {
-      key: "transcribeProcessor",
-      section: "Lyrics",
-      page: "transcription",
-      title: "Processor use",
-      description: "How hard transcription may work the processor. This device only.",
-      more: "How hard transcription and the lyrics check may work the processor. Light keeps it cool and quiet, Fast finishes sooner. It always runs at low priority, so other programs come first. This device only.",
-      control: (ids) =>
-        select(s, (x) => x.transcribeProcessor ?? "light", PROCESSOR_OPTIONS, ids, (v) => void updateSettings({ transcribeProcessor: v })),
     },
     {
       key: "transcribePauseBusy",

@@ -137,19 +137,7 @@
 .lyr-ed__actions { display: flex; align-items: center; gap: var(--space-2); }
 .lyr-ed__missing { font-size: var(--font-size-sm); color: var(--color-warning-text); }
 
-/* Under the lyrics: where they came from, and Edit or Add for your own. */
-.lyrics__source {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  max-width: 880px;
-  margin: 0 auto;
-  padding: 0 var(--space-8) var(--space-12);
-  font-size: var(--font-size-sm);
-  color: rgba(255, 255, 255, 0.7);
-}
-.lyrics__credit + .lyrics__source { margin-top: calc(-1 * var(--space-8)); }
-.lyrics--full .lyrics__source { max-width: none; padding-inline: 0; }
+/* A quiet text button on the lyrics' colour. */
 .lyrics__source-edit {
   padding: 0;
   border: 0;

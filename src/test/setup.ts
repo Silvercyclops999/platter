@@ -3,6 +3,7 @@ import { cleanup, configure } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 import { toastExpiry, useToasts } from "../stores/toasts";
 import { advancedView, settingsView } from "../pages/settingsMeta";
+import { mockFollow } from "../lib/mock/transcribe";
 
 afterEach(() => {
   // Vitest runs without globals, so Testing Library can't auto-register cleanup.
@@ -35,3 +36,7 @@ advancedView.startOpen = true;
 // also show in their group, so a test of one row needn't open its page first
 // (settings-layout.test.tsx turns this off to test the pages themselves).
 settingsView.inlinePages = true;
+
+// Songs that start playing aren't written down on their own, so a test of a
+// song without lyrics sees it as it is (transcribe.test.tsx turns it on).
+mockFollow.on = false;
