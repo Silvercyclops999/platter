@@ -93,6 +93,8 @@ struct FakeRecognizer {
     hold_after: AtomicUsize,
     /// What the last run was told about the song.
     last_hints: Mutex<Option<Hints>>,
+    /// Runs that are blocking now (the stage says transcribing before a run starts).
+    blocked: AtomicUsize,
 }
 
 impl FakeRecognizer {
@@ -105,6 +107,7 @@ impl FakeRecognizer {
             crashed_too_often: AtomicBool::new(false),
             hold_after: AtomicUsize::new(usize::MAX),
             last_hints: Mutex::new(None),
+            blocked: AtomicUsize::new(0),
         })
     }
 }
@@ -138,9 +141,11 @@ impl Recognizer for FakeRecognizer {
             Behaviour::Words(s) => Ok(s),
             Behaviour::Fail => Err(RecognizeError::Failed("boom".into())),
             Behaviour::Block => {
+                self.blocked.fetch_add(1, Ordering::SeqCst);
                 while !cancel.is_set() {
                     std::thread::sleep(Duration::from_millis(5));
                 }
+                self.blocked.fetch_sub(1, Ordering::SeqCst);
                 Err(RecognizeError::Cancelled)
             }
             Behaviour::Crash => Err(RecognizeError::Crashed),
@@ -858,7 +863,8 @@ async fn following_waits_while_paused_and_skipping_past_stops_the_song() {
     // Blocked before resuming, so 601 can't finish before the skip.
     *f.rec.behaviour.lock() = Behaviour::Block;
     f.t.resume();
-    until(&f.t, "601 running", |s| s.current.as_ref().is_some_and(|c| c.track_id == "601" && c.stage == Stage::Transcribing)).await;
+    until(&f.t, "601 running", |s| s.current.as_ref().is_some_and(|c| c.track_id == "601")).await;
+    until_true("601 blocking", || f.rec.blocked.load(Ordering::SeqCst) == 1).await;
     *f.rec.behaviour.lock() = words;
     // The listener skipped ahead: 601 stops and 602 leaves the queue.
     f.t.follow(Some("701".into()), vec![]).await;
@@ -898,7 +904,8 @@ async fn a_cancelled_or_failed_song_isnt_followed_again() {
     // Cancelled by the user: the same.
     *f.rec.behaviour.lock() = Behaviour::Block;
     f.t.follow(Some("602".into()), vec![]).await;
-    until(&f.t, "602 running", |s| s.current.as_ref().is_some_and(|c| c.track_id == "602" && c.stage == Stage::Transcribing)).await;
+    until(&f.t, "602 running", |s| s.current.as_ref().is_some_and(|c| c.track_id == "602")).await;
+    until_true("602 blocking", || f.rec.blocked.load(Ordering::SeqCst) == 1).await;
     f.t.cancel(Some("602"));
     *f.rec.behaviour.lock() = words;
     until(&f.t, "stopped", idle).await;
