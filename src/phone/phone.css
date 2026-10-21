@@ -842,6 +842,8 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 .ph-actions__left, .ph-actions__right { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .ph-actions__left { gap: 10px; }
 .ph-songs { list-style: none; margin: 0; padding: 0; }
+.ph-artist .ph-songs { transition: opacity var(--ph-quick) var(--ph-ease); }
+.ph-songs--waiting { opacity: .45; }
 .ph-song { display: flex; align-items: center; height: 64px; }
 .ph-song__main { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; height: 100%; }
 .ph-song__num { flex: none; min-width: 22px; text-align: right; font-size: 14px; color: var(--color-text-muted); }
