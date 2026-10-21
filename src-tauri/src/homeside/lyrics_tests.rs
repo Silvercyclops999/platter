@@ -62,12 +62,12 @@ impl Recognizer for FakeRec {
     fn unavailable(&self) -> Option<String> {
         None
     }
-    fn transcribe(&self, model: &Path, _: ModelKind, _: &[f32], threads: usize, _: &str, _: Stop, _: Progress) -> Result<Vec<Segment>, RecognizeError> {
+    fn transcribe(&self, model: &Path, _: ModelKind, _: &[f32], threads: usize, _: &crate::lyrics::transcribe::engine::Hints, _: Stop, _: Progress) -> Result<Vec<Segment>, RecognizeError> {
         assert!(model.is_file());
         self.runs.fetch_add(1, Ordering::SeqCst);
         self.threads.store(threads, Ordering::SeqCst);
         let w = |t: &str, at: u32| Word { start_ms: at, end_ms: at + 250, text: format!(" {t}") };
-        Ok(vec![Segment { words: vec![w("night", 1000), w("song", 1300)] }])
+        Ok(vec![Segment { words: vec![w("night", 1000), w("song", 1300)], sure: None }])
     }
 }
 

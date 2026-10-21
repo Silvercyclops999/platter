@@ -156,6 +156,20 @@ pub fn title(c: &Connection, track_id: &str) -> AppResult<Option<String>> {
     Ok(c.query_row("SELECT title FROM tracks WHERE id = ?1", params![track_id], |r| r.get(0)).optional()?)
 }
 
+/// The song's title and artist (the track artist, else the album's), when
+/// it's in the library. "Various Artists" names nobody.
+pub fn title_artist(c: &Connection, track_id: &str) -> AppResult<Option<(String, Option<String>)>> {
+    Ok(c.query_row(
+        "SELECT title, coalesce(nullif(trim(track_artist), ''), artist_title) FROM tracks WHERE id = ?1",
+        params![track_id],
+        |r| {
+            let artist: String = r.get(1)?;
+            Ok((r.get(0)?, (!crate::lyrics::various_artists(&artist)).then_some(artist)))
+        },
+    )
+    .optional()?)
+}
+
 /// A transcribed song was looked at for official synced lyrics now.
 pub fn official_checked(c: &Connection, track_id: &str, now: i64) -> AppResult<()> {
     c.execute(

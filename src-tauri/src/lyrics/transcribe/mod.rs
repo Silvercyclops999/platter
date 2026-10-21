@@ -1584,18 +1584,22 @@ impl Transcriber {
         boosted.store(boost, Ordering::Relaxed);
         let started = Instant::now();
         let seconds = pcm.len() / audio::RATE as usize;
+        let hints = {
+            let id = id.clone();
+            let song = d.db.read_async(move |c| store::title_artist(c, &id)).await.ok().flatten();
+            engine::Hints::for_song(kind, song.as_ref().map(|s| s.0.as_str()), song.as_ref().and_then(|s| s.1.as_deref()))
+        };
         let res = {
             let rec = d.recognizer.clone();
-            let (cancel, pcm) = (cancel.clone(), pcm.clone());
+            let (cancel, pcm, hints) = (cancel.clone(), pcm.clone(), hints.clone());
             let me = self.clone();
             let progress: engine::Progress = Arc::new(move |step| me.helper_step(step));
-            tokio::task::spawn_blocking(move || rec.transcribe(&model_path, kind, &pcm, threads, engine::LANGUAGE, cancel, progress))
-                .await
+            tokio::task::spawn_blocking(move || rec.transcribe(&model_path, kind, &pcm, threads, &hints, cancel, progress)).await
         };
         let segments = match res {
             Ok(Ok(s)) => {
                 d.speeds.record(kind, on_gpu, pcm.len() as f64 / audio::RATE as f64, started.elapsed());
-                s
+                lines::keep_sure(s, &hints.prompt)
             }
             Ok(Err(RecognizeError::Cancelled)) => {
                 // Stopped for a song asked for: keep the audio for later.

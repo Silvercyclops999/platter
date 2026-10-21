@@ -15,10 +15,13 @@ pub struct Word {
     pub text: String,
 }
 
-/// Words the recognizer grouped together (roughly a phrase or sentence).
+/// Words the recognizer grouped together (roughly a phrase or sentence),
+/// and how sure it was of them on average (0 to 1) when it said.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Segment {
     pub words: Vec<Word>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sure: Option<f32>,
 }
 
 /// One lyric line: its words, trimmed and joined with single spaces.
@@ -54,6 +57,13 @@ const STOCK_PHRASES: [&str; 6] = [
     "you",
     "thank you",
 ];
+
+/// A segment the recognizer was less sure of than this is left out: over
+/// music, made-up lines come out around 0.2 to 0.4, sung ones well above.
+pub const UNSURE: f32 = 0.4;
+/// When more than this share of the words is unsure, the song gets no
+/// lyrics rather than the few lines left.
+const MOSTLY_UNSURE: f32 = 0.6;
 
 /// Words in parentheses that describe a sound rather than a lyric.
 const SOUND_WORDS: [&str; 12] = [
@@ -160,6 +170,29 @@ fn tidy_line(mut words: Vec<Word>) -> Vec<Word> {
     }
     words.retain(|w| !w.text.is_empty());
     words
+}
+
+/// The segments worth showing: unsure ones and the prompt read back (the
+/// title and artist the model was given, written out over music) are left
+/// out, and a song that's mostly unsure gets none at all.
+pub fn keep_sure(segments: Vec<Segment>, prompt: &str) -> Vec<Segment> {
+    let prompt = fold(prompt);
+    let echo = |seg: &Segment| {
+        let all: String = seg.words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ");
+        !prompt.is_empty() && fold(&all) == prompt
+    };
+    let total: usize = segments.iter().map(|s| s.words.len()).sum();
+    let (kept, dropped): (Vec<Segment>, Vec<Segment>) =
+        segments.into_iter().partition(|s| s.sure.is_none_or(|p| p >= UNSURE) && !echo(s));
+    let unsure: usize = dropped.iter().map(|s| s.words.len()).sum();
+    if total > 0 && unsure as f32 / total as f32 > MOSTLY_UNSURE {
+        tracing::info!(words = total, unsure, "transcription mostly unsure: no lyrics");
+        return Vec::new();
+    }
+    if unsure > 0 {
+        tracing::info!(words = total, unsure, "unsure lines left out");
+    }
+    kept
 }
 
 /// Segments to lines: a new line per segment, on a pause, or when long.
@@ -295,7 +328,7 @@ mod tests {
     }
 
     fn seg(words: Vec<Word>) -> Segment {
-        Segment { words }
+        Segment { words, sure: None }
     }
 
     #[test]
@@ -377,5 +410,32 @@ mod tests {
     fn nothing_sung_gives_no_lines() {
         assert!(to_lines(&[seg(vec![w(0, 100, " [BLANK_AUDIO]")]), seg(vec![w(200, 300, " you")])]).is_empty());
         assert_eq!(to_lrc(&[]), "");
+    }
+
+    fn sure(p: f32, words: &[&str]) -> Segment {
+        Segment { words: words.iter().enumerate().map(|(i, t)| w(i as u32 * 300, i as u32 * 300 + 200, t)).collect(), sure: Some(p) }
+    }
+
+    #[test]
+    fn unsure_lines_are_left_out() {
+        let segs = vec![sure(0.9, &[" Hold", " on"]), sure(0.2, &[" banana", " river"]), sure(0.8, &[" to", " me", " now"])];
+        let kept = keep_sure(segs, "");
+        let text: Vec<String> = kept.iter().map(|s| s.words.iter().map(|w| w.text.trim()).collect::<Vec<_>>().join(" ")).collect();
+        assert_eq!(text, vec!["Hold on", "to me now"]);
+        assert_eq!(keep_sure(vec![seg(vec![w(0, 100, " hi")])], "").len(), 1, "no score keeps the line");
+    }
+
+    #[test]
+    fn a_mostly_unsure_song_gets_no_lyrics() {
+        let segs = vec![sure(0.9, &[" Hey"]), sure(0.3, &[" la", " la", " la"]), sure(0.1, &[" na", " na"])];
+        assert!(keep_sure(segs, "").is_empty());
+    }
+
+    #[test]
+    fn the_title_read_back_is_left_out() {
+        let segs = vec![sure(0.95, &[" Golden", " Hour", " by", " Kacey."]), sure(0.9, &[" Golden", " hour", " shining"])];
+        let kept = keep_sure(segs, "Golden Hour by Kacey.");
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].words[2].text, " shining", "a sung line with the title stays");
     }
 }

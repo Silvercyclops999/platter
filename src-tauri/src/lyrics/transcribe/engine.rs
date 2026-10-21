@@ -11,8 +11,59 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use super::lines::{Segment, Word};
 use super::model::ModelKind;
 
-/// The language songs are transcribed in.
+/// The language songs are transcribed in when the model only knows English.
 pub const LANGUAGE: &str = "en";
+/// Asks the model to hear which language is sung.
+pub const DETECT: &str = "auto";
+/// A detected language this unsure falls back to English.
+pub const DETECT_SURE: f32 = 0.5;
+
+/// What a run is told about the song.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct Hints {
+    /// A language code, or [`DETECT`].
+    pub language: String,
+    /// Words the model reads before the song (its title and artist), so
+    /// names come out spelled right. Empty for none.
+    #[serde(default)]
+    pub prompt: String,
+}
+
+impl Hints {
+    /// English, no prompt.
+    pub fn english() -> Self {
+        Self { language: LANGUAGE.into(), prompt: String::new() }
+    }
+
+    /// For a song: the model's language (every language with the large
+    /// model, English with the English-only ones) and its title and artist.
+    pub fn for_song(kind: ModelKind, title: Option<&str>, artist: Option<&str>) -> Self {
+        let language = if kind.multilingual() { DETECT } else { LANGUAGE };
+        Self { language: language.into(), prompt: prompt_for(title, artist) }
+    }
+}
+
+/// "Title by Artist." from whatever is known. A version note after the
+/// title ("(Remastered 2011)", "- Live") is left off: it isn't sung.
+pub fn prompt_for(title: Option<&str>, artist: Option<&str>) -> String {
+    let clean = |s: Option<&str>| s.map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned);
+    let title = title.map(str::trim).map(|t| &t[..[" (", " [", " - "].iter().filter_map(|m| t.find(m)).min().unwrap_or(t.len())]);
+    match (clean(title), clean(artist)) {
+        (Some(t), Some(a)) => format!("{t} by {a}."),
+        (Some(t), None) => format!("{t}."),
+        (None, Some(a)) => format!("{a}."),
+        (None, None) => String::new(),
+    }
+}
+
+/// The language to transcribe in from a detection: the likeliest one when
+/// it's sure enough, else English.
+pub fn detected_language(best: Option<(&str, f32)>) -> &str {
+    match best {
+        Some((code, p)) if p >= DETECT_SURE => code,
+        _ => LANGUAGE,
+    }
+}
 
 /// How a run is getting on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -65,13 +116,15 @@ impl Stop {
 
 /// One token as the recognizer gave it: its raw text bytes (a token can
 /// end partway through a character, such as the three bytes of "♪"), its
-/// times in milliseconds and the attention-based start when known.
+/// times in milliseconds, the attention-based start when known and how sure
+/// the model was of it (0 to 1).
 #[derive(Debug, Clone, PartialEq)]
 pub struct RawToken {
     pub bytes: Vec<u8>,
     pub start_ms: u32,
     pub end_ms: u32,
     pub dtw_ms: Option<u32>,
+    pub p: f32,
 }
 
 /// Candidates decoded when a window is tried again at a higher temperature.
@@ -153,7 +206,8 @@ pub fn segments_from_tokens(segments: &[Vec<RawToken>]) -> Vec<Segment> {
         let words = words_timed(seg, &times[at..at + seg.len()]);
         at += seg.len();
         if !words.is_empty() {
-            out.push(Segment { words });
+            let sure = Some(seg.iter().map(|t| t.p).sum::<f32>() / seg.len() as f32);
+            out.push(Segment { words, sure });
         }
     }
     out
@@ -179,7 +233,7 @@ pub trait Recognizer: Send + Sync {
         kind: ModelKind,
         pcm: &[f32],
         threads: usize,
-        language: &str,
+        hints: &Hints,
         cancel: Stop,
         progress: Progress,
     ) -> Result<Vec<Segment>, RecognizeError>;
@@ -244,7 +298,7 @@ impl Recognizer for Missing {
     fn unavailable(&self) -> Option<String> {
         unavailable_here()
     }
-    fn transcribe(&self, _: &Path, _: ModelKind, _: &[f32], _: usize, _: &str, _: Stop, _: Progress) -> Result<Vec<Segment>, RecognizeError> {
+    fn transcribe(&self, _: &Path, _: ModelKind, _: &[f32], _: usize, _: &Hints, _: Stop, _: Progress) -> Result<Vec<Segment>, RecognizeError> {
         Err(RecognizeError::Failed("not in this build".into()))
     }
 }
@@ -264,9 +318,29 @@ pub mod whisper {
     use super::super::lines::Segment;
     use super::super::model::ModelKind;
     use super::{
-        FALLBACK_CANDIDATES, FALLBACK_STEP, Progress, RawToken, RecognizeError, Recognizer, Step, Stop, segments_from_tokens,
-        unavailable_here,
+        DETECT, FALLBACK_CANDIDATES, FALLBACK_STEP, Hints, Progress, RawToken, RecognizeError, Recognizer, Step, Stop,
+        detected_language, segments_from_tokens, unavailable_here,
     };
+
+    /// How much of the song the language is heard from, from a third in
+    /// (past the intro, where the singing usually is).
+    const DETECT_MS: usize = 30_000;
+
+    /// The language to transcribe `pcm` in: asked for, or heard.
+    fn language(state: &mut whisper_rs::WhisperState, pcm: &[f32], threads: usize, hints: &Hints) -> String {
+        if hints.language != DETECT {
+            return hints.language.clone();
+        }
+        let rate = super::super::audio::RATE as usize;
+        let from = (pcm.len() / 3).min(pcm.len().saturating_sub(DETECT_MS / 1000 * rate));
+        let heard = state.pcm_to_mel(&pcm[from..], threads).ok().and_then(|_| state.lang_detect(0, threads).ok()).and_then(|(id, probs)| {
+            let code = whisper_rs::get_lang_str(id)?;
+            Some((code, probs.get(id as usize).copied().unwrap_or(0.0)))
+        });
+        let code = detected_language(heard).to_owned();
+        tracing::info!(language = %code, sure = heard.map(|h| h.1), "language heard");
+        code
+    }
 
     /// whisper.cpp, keeping the last model loaded between songs.
     #[derive(Default)]
@@ -337,7 +411,7 @@ pub mod whisper {
             kind: ModelKind,
             pcm: &[f32],
             threads: usize,
-            language: &str,
+            hints: &Hints,
             stop: Stop,
             progress: Progress,
         ) -> Result<Vec<Segment>, RecognizeError> {
@@ -351,6 +425,7 @@ pub mod whisper {
             let (_, ctx) = slot.as_ref().expect("just loaded");
             let mut state = ctx.create_state().map_err(|e| RecognizeError::Failed(e.to_string()))?;
             progress(Step::Percent(0));
+            let language = language(&mut state, pcm, threads, hints);
 
             // A window the model is unsure of is decoded again hotter; on
             // music that happens often, so it's capped at two more tries with
@@ -358,7 +433,10 @@ pub mod whisper {
             let mut p = FullParams::new(SamplingStrategy::Greedy { best_of: FALLBACK_CANDIDATES });
             p.set_temperature_inc(FALLBACK_STEP);
             p.set_n_threads(threads as i32);
-            p.set_language(Some(language));
+            p.set_language(Some(&language));
+            if !hints.prompt.is_empty() {
+                p.set_initial_prompt(&hints.prompt);
+            }
             p.set_token_timestamps(true);
             // Each window on its own: carrying text over makes the model loop
             // on a chorus.
@@ -413,6 +491,7 @@ pub mod whisper {
                         start_ms: (d.t0.max(0) * 10) as u32,
                         end_ms: (d.t1.max(0) * 10) as u32,
                         dtw_ms: (d.t_dtw >= 0).then(|| (d.t_dtw * 10) as u32),
+                        p: d.p,
                     });
                 }
                 all.push(tokens);
@@ -431,7 +510,7 @@ mod tests {
     use super::*;
 
     fn tok(bytes: &[u8], at: u32) -> RawToken {
-        RawToken { bytes: bytes.to_vec(), start_ms: at, end_ms: at + 100, dtw_ms: None }
+        RawToken { bytes: bytes.to_vec(), start_ms: at, end_ms: at + 100, dtw_ms: None, p: 1.0 }
     }
 
     #[test]
@@ -448,8 +527,34 @@ mod tests {
     #[test]
     fn the_attention_time_ends_a_word_when_known() {
         // The attention time is where the token ends; it starts about a token before.
-        let words = words_from_tokens(&[RawToken { bytes: b" hey".to_vec(), start_ms: 500, end_ms: 900, dtw_ms: Some(620) }]);
+        let words = words_from_tokens(&[RawToken { bytes: b" hey".to_vec(), start_ms: 500, end_ms: 900, dtw_ms: Some(620), p: 1.0 }]);
         assert_eq!((words[0].start_ms, words[0].end_ms), (432, 620));
+    }
+
+    #[test]
+    fn songs_get_their_title_and_artist_and_the_models_language() {
+        let h = Hints::for_song(ModelKind::Turbo, Some(" Golden Hour "), Some("Kacey"));
+        assert_eq!(h, Hints { language: DETECT.into(), prompt: "Golden Hour by Kacey.".into() });
+        assert_eq!(Hints::for_song(ModelKind::Small, Some("Song"), None).language, LANGUAGE, "English-only models stay English");
+        assert_eq!(prompt_for(None, Some("Band")), "Band.");
+        assert_eq!(prompt_for(Some(" "), None), "");
+        assert_eq!(prompt_for(Some("Hey Jude (Remastered 2015)"), Some("The Beatles")), "Hey Jude by The Beatles.");
+        assert_eq!(prompt_for(Some("Song - Live [Bonus]"), None), "Song.");
+        assert_eq!(prompt_for(Some("(You Gotta) Fight"), None), "(You Gotta) Fight.", "a title starting with brackets stays");
+    }
+
+    #[test]
+    fn an_unsure_language_falls_back_to_english() {
+        assert_eq!(detected_language(Some(("es", 0.9))), "es");
+        assert_eq!(detected_language(Some(("cy", 0.3))), "en");
+        assert_eq!(detected_language(None), "en");
+    }
+
+    #[test]
+    fn a_segment_is_as_sure_as_its_tokens() {
+        let t = |b: &[u8], p: f32| RawToken { bytes: b.to_vec(), start_ms: 0, end_ms: 100, dtw_ms: None, p };
+        let segs = segments_from_tokens(&[vec![t(b" a", 0.9), t(b" b", 0.5)]]);
+        assert!((segs[0].sure.unwrap() - 0.7).abs() < 1e-6);
     }
 
     #[test]

@@ -15,7 +15,7 @@ use futures::stream::BoxStream;
 use parking_lot::Mutex;
 
 use super::audio::{AudioError, RATE};
-use super::engine::{Progress, RecognizeError, Recognizer, Step, Stop};
+use super::engine::{Hints, Progress, RecognizeError, Recognizer, Step, Stop};
 use super::lines::{Segment, Word};
 use super::model::{DownloadError, ModelFetch, ModelKind, ModelSpec, ModelStore, sha256_hex};
 use super::pace::fake::FakeLoad;
@@ -86,6 +86,8 @@ struct FakeRecognizer {
     crashed_too_often: AtomicBool,
     /// Runs after this many block until cancelled.
     hold_after: AtomicUsize,
+    /// What the last run was told about the song.
+    last_hints: Mutex<Option<Hints>>,
 }
 
 impl FakeRecognizer {
@@ -97,6 +99,7 @@ impl FakeRecognizer {
             last_threads: AtomicUsize::new(0),
             crashed_too_often: AtomicBool::new(false),
             hold_after: AtomicUsize::new(usize::MAX),
+            last_hints: Mutex::new(None),
         })
     }
 }
@@ -108,15 +111,16 @@ impl Recognizer for FakeRecognizer {
     fn transcribe(
         &self,
         model: &Path,
-        _kind: ModelKind,
+        kind: ModelKind,
         pcm: &[f32],
         threads: usize,
-        language: &str,
+        hints: &Hints,
         cancel: Stop,
         progress: Progress,
     ) -> Result<Vec<Segment>, RecognizeError> {
         assert!(model.is_file(), "the model is on disk");
-        assert_eq!(language, "en");
+        assert_eq!(hints.language, if kind.multilingual() { engine::DETECT } else { engine::LANGUAGE });
+        *self.last_hints.lock() = Some(hints.clone());
         let run = self.runs.fetch_add(1, Ordering::SeqCst) + 1;
         if run > self.hold_after.load(Ordering::SeqCst) {
             *self.behaviour.lock() = Behaviour::Block;
@@ -279,6 +283,7 @@ fn words(text: &str, at: u32) -> Segment {
             .enumerate()
             .map(|(i, w)| Word { start_ms: at + i as u32 * 300, end_ms: at + i as u32 * 300 + 250, text: format!(" {w}") })
             .collect(),
+        sure: None,
     }
 }
 
@@ -1326,7 +1331,7 @@ impl Recognizer for Script {
         _kind: ModelKind,
         _pcm: &[f32],
         threads: usize,
-        _language: &str,
+        _hints: &Hints,
         cancel: Stop,
         progress: Progress,
     ) -> Result<Vec<Segment>, RecognizeError> {
@@ -1439,11 +1444,11 @@ impl Recognizer for Available {
         kind: ModelKind,
         pcm: &[f32],
         threads: usize,
-        language: &str,
+        hints: &Hints,
         cancel: Stop,
         progress: Progress,
     ) -> Result<Vec<Segment>, RecognizeError> {
-        self.0.transcribe(model, kind, pcm, threads, language, cancel, progress)
+        self.0.transcribe(model, kind, pcm, threads, hints, cancel, progress)
     }
     fn unload(&self) {
         self.0.unload()
@@ -1559,7 +1564,7 @@ async fn a_lyrics_check_waiting_for_the_helper_pauses_the_batch() {
     let asked = std::time::Instant::now();
     let res = tokio::task::spawn_blocking(move || {
         // A check's song is "asked for" by the script (four threads), and finishes.
-        check.transcribe(&model, ModelKind::Small, &[0.0; 16], 4, "en", Stop::new(), Arc::new(|_| {}))
+        check.transcribe(&model, ModelKind::Small, &[0.0; 16], 4, &Hints::english(), Stop::new(), Arc::new(|_| {}))
     });
     h.script.gate.store(true, Ordering::SeqCst);
     res.await.unwrap().unwrap();
@@ -1756,7 +1761,7 @@ fn real_model_speed() {
     assert_eq!(rec.unavailable(), None);
     let started = std::time::Instant::now();
     let segs = rec
-        .transcribe(Path::new(&model), kind, &pcm, threads, engine::LANGUAGE, Stop::new(), Arc::new(|_| {}))
+        .transcribe(Path::new(&model), kind, &pcm, threads, &Hints::english(), Stop::new(), Arc::new(|_| {}))
         .unwrap();
     let took = started.elapsed();
     let lines = lines::to_lines(&segs);
@@ -1793,7 +1798,7 @@ fn real_model_timing() {
             println!("{:?}: not here, skipped", spec.kind);
             continue;
         }
-        let segs = rec.transcribe(&path, spec.kind, &pcm, 2, engine::LANGUAGE, Stop::new(), Arc::new(|_| {})).unwrap();
+        let segs = rec.transcribe(&path, spec.kind, &pcm, 2, &Hints::english(), Stop::new(), Arc::new(|_| {})).unwrap();
         let e = super::timing_tests::errors(&truth, &super::timing_tests::line_starts(&lines::to_lines(&segs)));
         println!("{:?}: line start errors {e:?} ms", spec.kind);
         assert!(e.iter().all(|x| x.abs() <= 300), "{:?}: {e:?}", spec.kind);

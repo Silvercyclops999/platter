@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 use parking_lot::{Condvar, Mutex};
 use serde::{Deserialize, Serialize};
 
-use super::engine::{self, Progress, RecognizeError, Recognizer, Stop};
+use super::engine::{self, Hints, Progress, RecognizeError, Recognizer, Stop};
 use super::lines::Segment;
 use super::model::ModelKind;
 
@@ -346,7 +346,7 @@ impl Recognizer for CheckRoute {
         kind: ModelKind,
         pcm: &[f32],
         threads: usize,
-        language: &str,
+        hints: &Hints,
         cancel: Stop,
         progress: Progress,
     ) -> Result<Vec<Segment>, RecognizeError> {
@@ -358,7 +358,7 @@ impl Recognizer for CheckRoute {
             // Its own lane may still hold a model from before.
             self.own.unload();
         }
-        rec.transcribe(model, kind, pcm, threads, language, cancel, progress)
+        rec.transcribe(model, kind, pcm, threads, hints, cancel, progress)
     }
 
     /// Only its own: the transcription queue frees the shared one.
@@ -609,7 +609,7 @@ mod tests {
         fn unavailable(&self) -> Option<String> {
             None
         }
-        fn transcribe(&self, _: &std::path::Path, _: ModelKind, _: &[f32], _: usize, _: &str, _: Stop, _: Progress) -> Result<Vec<Segment>, RecognizeError> {
+        fn transcribe(&self, _: &std::path::Path, _: ModelKind, _: &[f32], _: usize, _: &Hints, _: Stop, _: Progress) -> Result<Vec<Segment>, RecognizeError> {
             self.runs.fetch_add(1, Ordering::SeqCst);
             Ok(vec![])
         }
@@ -623,7 +623,7 @@ mod tests {
         let g = Gpu::new(Arc::new(|| vec![dev(0, "RTX", DeviceKind::Discrete, 16)]));
         let (own, shared) = (Arc::new(Counting::default()), Arc::new(Counting::default()));
         let route = CheckRoute { gpu: g.clone(), own: own.clone(), shared: shared.clone() };
-        let go = |kind| route.transcribe(std::path::Path::new("m.bin"), kind, &[0.0], 2, "en", Stop::new(), Arc::new(|_| {}));
+        let go = |kind| route.transcribe(std::path::Path::new("m.bin"), kind, &[0.0], 2, &Hints::english(), Stop::new(), Arc::new(|_| {}));
         let runs = || (own.runs.load(Ordering::SeqCst), shared.runs.load(Ordering::SeqCst));
         // The card is looked for first, then used: one helper, one model on it.
         go(ModelKind::Small).unwrap();

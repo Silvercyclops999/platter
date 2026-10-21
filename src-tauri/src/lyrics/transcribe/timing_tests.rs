@@ -41,6 +41,7 @@ fn runs() -> Vec<Run> {
                                 start_ms: t[1].as_u64().unwrap() as u32,
                                 end_ms: t[2].as_u64().unwrap() as u32,
                                 dtw_ms: (dtw >= 0).then_some(dtw as u32),
+                                p: 1.0,
                             }
                         })
                         .collect()
@@ -90,7 +91,7 @@ fn first_rule(segments: &[Vec<RawToken>]) -> Vec<Segment> {
                     w.end_ms = w.end_ms.max(t.end_ms);
                 }
             }
-            Segment { words }
+            Segment { words, sure: None }
         })
         .collect()
 }
@@ -146,7 +147,7 @@ fn stored_transcriptions_with_the_first_timing_are_moved_into_place() {
 
 #[test]
 fn a_word_starts_one_token_before_its_attention_time() {
-    let tok = |b: &str, dtw: u32| RawToken { bytes: b.as_bytes().to_vec(), start_ms: 0, end_ms: 0, dtw_ms: Some(dtw) };
+    let tok = |b: &str, dtw: u32| RawToken { bytes: b.as_bytes().to_vec(), start_ms: 0, end_ms: 0, dtw_ms: Some(dtw), p: 1.0 };
     // " hold" ends at 10.40 s, " on" at 10.70 s: "hold" began about 0.22 s before it ended.
     let segs = segments_from_tokens(&[vec![tok(" hold", 10_400), tok(" on", 10_700)], vec![tok(" now", 13_000)]]);
     assert_eq!((segs[0].words[0].start_ms, segs[0].words[0].end_ms), (10_175, 10_400));
@@ -159,7 +160,7 @@ fn a_word_starts_one_token_before_its_attention_time() {
     assert_eq!(segs[0].words[0].text, " silver");
     assert_eq!((segs[0].words[0].start_ms, segs[0].words[0].end_ms), (1850, 2200));
     // Without attention times the token's own times are used.
-    let plain = RawToken { bytes: b" hey".to_vec(), start_ms: 500, end_ms: 900, dtw_ms: None };
+    let plain = RawToken { bytes: b" hey".to_vec(), start_ms: 500, end_ms: 900, dtw_ms: None, p: 1.0 };
     let segs = segments_from_tokens(&[vec![plain]]);
     assert_eq!((segs[0].words[0].start_ms, segs[0].words[0].end_ms), (500, 900));
 }

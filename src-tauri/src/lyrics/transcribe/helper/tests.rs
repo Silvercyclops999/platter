@@ -38,7 +38,7 @@ impl Recognizer for Fake {
         _kind: ModelKind,
         pcm: &[f32],
         threads: usize,
-        language: &str,
+        hints: &Hints,
         cancel: Stop,
         progress: Progress,
     ) -> Result<Vec<Segment>, RecognizeError> {
@@ -48,7 +48,8 @@ impl Recognizer for Fake {
         }
         let n = self.busy.fetch_add(1, Ordering::SeqCst) + 1;
         self.most_busy.fetch_max(n, Ordering::SeqCst);
-        let res = self.run(model, pcm, threads, language, cancel, progress);
+        let language = if hints.prompt.is_empty() { hints.language.clone() } else { format!("{} [{}]", hints.language, hints.prompt) };
+        let res = self.run(model, pcm, threads, &language, cancel, progress);
         self.busy.fetch_sub(1, Ordering::SeqCst);
         res
     }
@@ -82,7 +83,7 @@ impl Fake {
         progress(engine::Step::Percent(10));
         progress(engine::Step::Percent(50));
         let text = format!("{} {} {threads} {language}", model.display(), pcm.iter().sum::<f32>());
-        Ok(vec![Segment { words: vec![Word { start_ms: 0, end_ms: 10, text }] }])
+        Ok(vec![Segment { words: vec![Word { start_ms: 0, end_ms: 10, text }], sure: None }])
     }
 }
 
@@ -167,7 +168,7 @@ fn fx(idle: Duration) -> Fx {
 fn run_kind(h: &dyn Recognizer, kind: ModelKind, pcm: &[f32], cancel: Stop) -> (Result<Vec<Segment>, RecognizeError>, Vec<Step>) {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let s = seen.clone();
-    let res = h.transcribe(Path::new("m/small.bin"), kind, pcm, 2, "en", cancel, Arc::new(move |p| s.lock().push(p)));
+    let res = h.transcribe(Path::new("m/small.bin"), kind, pcm, 2, &Hints::english(), cancel, Arc::new(move |p| s.lock().push(p)));
     let seen = seen.lock().clone();
     (res, seen)
 }
@@ -216,7 +217,7 @@ fn a_run_goes_through_the_helper_and_back() {
     assert_eq!(f.n.started.load(Ordering::SeqCst), 1);
     assert_eq!(*f.n.lowest.lock(), vec![true, false], "Light runs lowest, the others below normal");
     // A failure is just that run's.
-    let res = f.helper.transcribe(Path::new("missing.bin"), ModelKind::Small, &[1.0], 2, "en", never(), Arc::new(|_| {}));
+    let res = f.helper.transcribe(Path::new("missing.bin"), ModelKind::Small, &[1.0], 2, &Hints::english(), never(), Arc::new(|_| {}));
     assert_eq!(res.unwrap_err(), RecognizeError::Failed("model didn't load".into()));
     assert!(f.helper.running() && !f.helper.crashed_too_often());
 }

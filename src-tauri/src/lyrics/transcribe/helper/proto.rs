@@ -15,7 +15,7 @@ use super::super::model::ModelKind;
 
 /// Bumped when the messages change; the app and its helper are always the
 /// same binary, so a mismatch means something else answered.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 const MARK: u8 = 0xA7;
 const JSON: u8 = b'J';
@@ -29,7 +29,16 @@ const MAX_FRAME: usize = 512 * 1024 * 1024;
 pub enum Request {
     /// Followed by a samples frame of `samples` floats (16 kHz mono).
     #[serde(rename_all = "camelCase")]
-    Transcribe { model: PathBuf, kind: ModelKind, threads: usize, language: String, samples: usize, lowest: bool },
+    Transcribe {
+        model: PathBuf,
+        kind: ModelKind,
+        threads: usize,
+        language: String,
+        #[serde(default)]
+        prompt: String,
+        samples: usize,
+        lowest: bool,
+    },
     /// Stop the run in progress (ignored when nothing runs).
     Cancel,
     /// Free the loaded model.
@@ -115,12 +124,13 @@ mod tests {
             kind: ModelKind::Small,
             threads: 2,
             language: "en".into(),
+            prompt: "Song by Band.".into(),
             samples: 3,
             lowest: true,
         };
         write_msg(&mut buf, &req).unwrap();
         write_samples(&mut buf, &[0.5, -1.0, 0.25]).unwrap();
-        let seg = Segment { words: vec![Word { start_ms: 10, end_ms: 20, text: " hi".into() }] };
+        let seg = Segment { words: vec![Word { start_ms: 10, end_ms: 20, text: " hi".into() }], sure: Some(0.75) };
         write_msg(&mut buf, &Reply::Done { segments: vec![seg.clone()] }).unwrap();
         write_msg(&mut buf, &Reply::Progress { step: Step::Loading }).unwrap();
         write_msg(&mut buf, &Reply::Progress { step: Step::Percent(40) }).unwrap();

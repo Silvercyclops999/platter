@@ -39,7 +39,7 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 
-use super::engine::{self, Progress, RecognizeError, Recognizer, Stop};
+use super::engine::{self, Hints, Progress, RecognizeError, Recognizer, Stop};
 use super::gpu::Gpu;
 use super::lines::Segment;
 use super::model::ModelKind;
@@ -258,7 +258,7 @@ impl Helper {
         kind: ModelKind,
         pcm: &[f32],
         threads: usize,
-        language: &str,
+        hints: &Hints,
         cancel: Stop,
         progress: Progress,
         priority: bool,
@@ -288,7 +288,8 @@ impl Helper {
                 model: model.to_path_buf(),
                 kind,
                 threads,
-                language: language.to_owned(),
+                language: hints.language.clone(),
+                prompt: hints.prompt.clone(),
                 samples: pcm.len(),
                 lowest,
             };
@@ -334,11 +335,11 @@ impl Recognizer for Helper {
         kind: ModelKind,
         pcm: &[f32],
         threads: usize,
-        language: &str,
+        hints: &Hints,
         cancel: Stop,
         progress: Progress,
     ) -> Result<Vec<Segment>, RecognizeError> {
-        self.run_one(model, kind, pcm, threads, language, cancel, progress, false)
+        self.run_one(model, kind, pcm, threads, hints, cancel, progress, false)
     }
 
     fn unload(&self) {
@@ -372,11 +373,11 @@ impl Recognizer for Priority {
         kind: ModelKind,
         pcm: &[f32],
         threads: usize,
-        language: &str,
+        hints: &Hints,
         cancel: Stop,
         progress: Progress,
     ) -> Result<Vec<Segment>, RecognizeError> {
-        self.0.run_one(model, kind, pcm, threads, language, cancel, progress, true)
+        self.0.run_one(model, kind, pcm, threads, hints, cancel, progress, true)
     }
 
     fn crashed_too_often(&self) -> bool {

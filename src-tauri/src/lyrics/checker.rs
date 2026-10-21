@@ -578,7 +578,7 @@ impl Checker {
                 Arc::new(move |_| me.touch(&id))
             };
             let res = tokio::task::spawn_blocking(move || {
-                rec.transcribe(&model, kind, &slice, threads, engine::LANGUAGE, Stop::new(), progress)
+                rec.transcribe(&model, kind, &slice, threads, &engine::Hints::english(), Stop::new(), progress)
             })
             .await;
             match res {

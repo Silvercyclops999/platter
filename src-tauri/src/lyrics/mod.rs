@@ -112,7 +112,7 @@ fn track_query(c: &Connection, id: &str) -> AppResult<Option<Query>> {
 }
 
 /// "Various Artists" and its usual spellings.
-fn various_artists(a: &str) -> bool {
+pub(crate) fn various_artists(a: &str) -> bool {
     matches!(exact_key(a).as_str(), "various artists" | "various" | "va" | "various artist")
 }
 

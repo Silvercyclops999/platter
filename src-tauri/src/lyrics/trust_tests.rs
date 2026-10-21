@@ -359,7 +359,7 @@ impl Recognizer for FakeRecognizer {
     fn unavailable(&self) -> Option<String> {
         None
     }
-    fn transcribe(&self, _: &Path, _: ModelKind, pcm: &[f32], threads: usize, _: &str, _: Stop, _: Progress) -> Result<Vec<Segment>, RecognizeError> {
+    fn transcribe(&self, _: &Path, _: ModelKind, pcm: &[f32], threads: usize, _: &crate::lyrics::transcribe::engine::Hints, _: Stop, _: Progress) -> Result<Vec<Segment>, RecognizeError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.threads.store(threads, Ordering::SeqCst);
         let start = window_start(pcm);
@@ -371,7 +371,7 @@ impl Recognizer for FakeRecognizer {
             .filter(|(t, _)| *t >= start && *t < end)
             .map(|(t, w)| Word { start_ms: t - start, end_ms: t - start + 250, text: format!(" {w}") })
             .collect();
-        Ok(if words.is_empty() { vec![] } else { vec![Segment { words }] })
+        Ok(if words.is_empty() { vec![] } else { vec![Segment { words, sure: None }] })
     }
 }
 

@@ -83,13 +83,13 @@ pub fn serve(
     };
     let mut result = Ok(());
     for work in rx {
-        let (model, kind, threads, language, lowest, pcm, stop) = match work {
+        let (model, kind, threads, hints, lowest, pcm, stop) = match work {
             Work::Unload => {
                 rec.unload();
                 continue;
             }
-            Work::Run { req: Request::Transcribe { model, kind, threads, language, lowest, .. }, pcm, stop } => {
-                (model, kind, threads, language, lowest, pcm, stop)
+            Work::Run { req: Request::Transcribe { model, kind, threads, language, prompt, lowest, .. }, pcm, stop } => {
+                (model, kind, threads, engine::Hints { language, prompt }, lowest, pcm, stop)
             }
             Work::Run { .. } => continue,
         };
@@ -105,7 +105,7 @@ pub fn serve(
                 }
             })
         };
-        let reply = match rec.transcribe(&model, kind, &pcm, threads, &language, stop, progress) {
+        let reply = match rec.transcribe(&model, kind, &pcm, threads, &hints, stop, progress) {
             Ok(segments) => Reply::Done { segments },
             Err(RecognizeError::Cancelled) => Reply::Cancelled,
             Err(RecognizeError::Failed(message)) => Reply::Failed { message },

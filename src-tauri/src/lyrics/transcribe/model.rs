@@ -41,6 +41,11 @@ impl ModelKind {
         if gpu { ModelKind::Turbo } else { ModelKind::Small }
     }
 
+    /// Hears every language (the others are English only).
+    pub fn multilingual(self) -> bool {
+        self == ModelKind::Turbo
+    }
+
     /// The model used: the one picked in Settings, else the default.
     pub fn chosen(picked: Option<ModelKind>, gpu: bool) -> ModelKind {
         picked.unwrap_or_else(|| Self::default_for(gpu))
