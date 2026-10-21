@@ -49,6 +49,7 @@ pub mod scrobble;
 pub mod settings;
 pub mod share;
 pub mod sid;
+pub mod songs;
 pub mod sleeve;
 pub mod smart;
 pub mod soundmap;
@@ -1925,6 +1926,8 @@ pub fn run() {
             digging::commands::crates,
             digging::commands::crate_page,
             albumshuffle::album_shuffle_tracks,
+            songs::songs_page,
+            songs::songs_play_ids,
             digging::commands::album_crates,
             sleeve::sides::album_sides,
             sleeve::sides::album_sides_set,

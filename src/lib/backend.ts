@@ -13,6 +13,8 @@ import { artPixelSize, onPhoneLadder, PHONE_ART_SAMPLE, phoneArtPixelSize } from
 
 import { createMockBackend } from "./mock";
 import type {
+  SongsPage,
+  SongsQuery,
   DiscogsReport,
   AutomixView,
   MixStyle,
@@ -691,6 +693,10 @@ export interface Backend {
   cratePage(kind: CrateKind, key: string): Promise<CratePage | null>;
   /** Shuffle albums: the songs of these albums (every album when empty) in a random album order, each album in track order; `invalid` when none can play. */
   albumShuffleTracks(albumIds: string[]): Promise<string[]>;
+  /** Your Library > Songs: one page of every song in the column's order, with the count and running time of what's in view. */
+  songsPage(query: SongsQuery, offset: number, limit: number): Promise<SongsPage>;
+  /** What plays from a row of the songs table: its order around that song (from the top when it's gone). */
+  songsPlayIds(query: SongsQuery, startTrackId?: string): Promise<{ trackIds: string[] }>;
   /** An album page's crate shelves: its label, producers and studios (empty while either setting is off). */
   albumCrates(id: string): Promise<AlbumShelf[]>;
   /** An album's record sides from what's cached (never looks anything up). */
@@ -1615,6 +1621,8 @@ export function createTauriBackend(): Backend {
     sleepCancel: () => call("sleep_cancel"),
     cratePage: (kind, key) => call("crate_page", { kind, key }),
     albumShuffleTracks: (albumIds) => call("album_shuffle_tracks", { albumIds }),
+    songsPage: (query, offset, limit) => call("songs_page", { query, offset, limit }),
+    songsPlayIds: (query, startTrackId) => call("songs_play_ids", { query, startTrackId }),
     albumCrates: (id) => call("album_crates", { id }),
     albumSides: (id) => call("album_sides", { id }),
     setAlbumSides: (id, starts) => call("album_sides_set", { id, starts }),

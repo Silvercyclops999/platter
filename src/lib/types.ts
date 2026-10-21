@@ -53,6 +53,27 @@ export interface Album {
   tint: string | null;
 }
 
+/** Your Library > Songs: the column the table is in order of. */
+export type SongSort = "title" | "artist" | "album" | "year" | "time" | "plays" | "added" | "lastPlayed" | "rating" | "trackNumber" | "format";
+export interface SongsQuery {
+  sort: SongSort;
+  desc: boolean;
+  /** Words that must each be in the title, artist or album. */
+  find: string;
+}
+export interface SongRow {
+  track: Track;
+  year: number | null;
+  /** When the album came into the library (unix seconds). */
+  addedAt: number;
+}
+export interface SongsPage {
+  rows: SongRow[];
+  /** Songs in view, and their running time. */
+  total: number;
+  totalMs: number;
+}
+
 export interface Track {
   id: string;
   title: string;

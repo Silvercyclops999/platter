@@ -1,4 +1,4 @@
-import { ChevronLeft, Disc3, Minimize2 } from "lucide-react";
+import { ChevronLeft, Disc3, ListMusic, Minimize2 } from "lucide-react";
 import { useLayoutEffect, useMemo, useState } from "react";
 import { Button, IconButton } from "../components/Button";
 import { player } from "../stores/player";
@@ -71,6 +71,11 @@ export function LibraryPage({ tab, archive = false }: { tab?: LibraryTab; archiv
       <div className="lib-tools lib-tools--wide">
         <LibrarySearch query={query} setQuery={setQuery} filter={model.filter} alwaysOpen />
         <span className="lib-tools__end">
+          {!archive && (
+            <Button size="sm" variant="ghost" icon={<ListMusic size={16} />} onClick={() => nav.go({ name: "songs" })}>
+              Songs
+            </Button>
+          )}
           {model.filter === "album" && !model.loading && model.shown.length > 1 && (
             <Button
               size="sm"

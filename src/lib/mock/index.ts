@@ -38,6 +38,8 @@ import type { Backend, HapticKind, Unlisten } from "../backend";
 import { compareApproximate, compareMap, compareMapLoop } from "../compare";
 import type { BetterCopiesStatus, LastGet, SleepChoice, SleepTimerView, Tap, TapInput, TapOutcome } from "../types";
 import type {
+  SongRow,
+  SongsQuery,
   IsrcRelease,
   MiniplayerGo,
   TagCheckScope,
@@ -2287,7 +2289,7 @@ export class MockBackend implements Backend {
       }
       default: {
         const tracks = (c.trackIds ?? []).map((i) => this.trackById(i)!).filter(Boolean);
-        const title = c.kind === "search" ? "Search results" : c.id === "albums" ? "Albums on shuffle" : "Tracks";
+        const title = c.kind === "search" ? "Search results" : c.id === "albums" ? "Albums on shuffle" : c.id === "songs" ? "Your songs" : "Tracks";
         return { tracks, info: { kind: c.kind, id: c.id ?? null, title } };
       }
     }
@@ -3383,6 +3385,57 @@ export class MockBackend implements Backend {
       }
       if (!out.length) throw { kind: "invalid", message: "There are no albums to play here." };
       return out;
+    });
+  }
+  /** Your Library > Songs, as the core orders it: empty values last either way, then album, disc and track. */
+  private songRows(q: SongsQuery): SongRow[] {
+    const albums = new Map(this.fx.albums.map((a) => [a.id, a]));
+    const words = q.find.toLowerCase().split(/\s+/).filter(Boolean);
+    const rows: SongRow[] = this.fx.tracks
+      .filter((t) => albums.has(t.albumId) && !this.hidden.hides(t))
+      .filter((t) => words.every((w) => [t.title, t.artistTitle, t.trackArtist ?? "", albums.get(t.albumId)!.title].some((v) => v.toLowerCase().includes(w))))
+      .map((track) => ({ track, year: albums.get(track.albumId)!.year ?? null, addedAt: albums.get(track.albumId)!.addedAt }));
+    const text = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" });
+    const value = (r: SongRow): string | number | null => {
+      const t = r.track;
+      switch (q.sort) {
+        case "title": return t.title;
+        case "artist": return t.trackArtist || t.artistTitle;
+        case "album": return t.albumTitle;
+        case "year": return r.year;
+        case "time": return t.durationMs;
+        case "plays": return t.viewCount;
+        case "added": return r.addedAt;
+        case "lastPlayed": return t.lastViewedAt;
+        case "rating": return t.userRating;
+        case "trackNumber": return t.trackNumber;
+        case "format": return t.bitDepth == null && t.sampleRate == null && t.bitrate == null ? null : (t.bitDepth ?? 0) * 1e9 + (t.sampleRate ?? 0) * 10 + (t.bitrate ?? 0) / 1e4;
+      }
+    };
+    const dir = q.desc ? -1 : 1;
+    return rows.sort((a, b) => {
+      const x = value(a);
+      const y = value(b);
+      if (x === null || y === null) {
+        if (x !== y) return x === null ? 1 : -1;
+      } else {
+        const c = typeof x === "number" && typeof y === "number" ? x - y : text(String(x), String(y));
+        if (c) return c * dir;
+      }
+      return text(a.track.albumTitle, b.track.albumTitle) || a.track.discNumber - b.track.discNumber || a.track.trackNumber - b.track.trackNumber;
+    });
+  }
+  songsPage(query: SongsQuery, offset: number, limit: number) {
+    return this.delay(() => {
+      const all = this.songRows(query);
+      return { rows: all.slice(offset, offset + Math.min(500, Math.max(1, limit))), total: all.length, totalMs: all.reduce((n, r) => n + r.track.durationMs, 0) };
+    });
+  }
+  songsPlayIds(query: SongsQuery, startTrackId?: string) {
+    return this.delay(() => {
+      const ids = this.songRows(query).map((r) => r.track.id);
+      const at = Math.max(0, startTrackId ? ids.indexOf(startTrackId) : 0);
+      return { trackIds: ids.slice(Math.max(0, at - 500), Math.max(0, at - 500) + 2000) };
     });
   }
   albumSides(id: string) {

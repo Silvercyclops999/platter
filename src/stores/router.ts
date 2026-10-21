@@ -29,6 +29,8 @@ export type Route =
   | { name: "playlist"; id: string }
   /** Liked Songs. */
   | { name: "liked" }
+  /** Your Library > Songs: every song as a table. */
+  | { name: "songs" }
   /** Settings, or one of its pages (an integration or a tool with its own page); `row` opens where that row is. */
   | { name: "settings"; page?: import("../pages/settingsMeta").PageId; row?: string; section?: import("../pages/settingsMeta").GroupName }
   /** What was played here, by day and listening session. */

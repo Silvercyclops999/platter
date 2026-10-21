@@ -9,6 +9,7 @@ import { ArtistPage } from "../pages/ArtistPage";
 import { HomePage } from "../pages/HomePage";
 import { LibraryPage } from "../pages/LibraryPage";
 import { LikedPage } from "../pages/LikedPage";
+import { SongsPage } from "../pages/SongsPage";
 import { PlaylistPage } from "../pages/PlaylistPage";
 import { SearchPage } from "../pages/SearchPage";
 import { useApp } from "../stores/app";
@@ -231,6 +232,8 @@ export function Page({ route }: { route: Route }) {
       return <BringPage />;
     case "liked":
       return <LikedPage />;
+    case "songs":
+      return <SongsPage />;
     case "settings":
       return <SettingsPage />;
     case "recents":
