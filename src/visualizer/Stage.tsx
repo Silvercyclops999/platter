@@ -1,14 +1,16 @@
 /**
  * The visualizer: fills its box (the whole now playing screen on the phone,
  * the expanded view on the computer) with the playing cover's colours,
- * moving with the music. Three styles:
+ * moving with the music. Four styles:
  *
  * - Grooves: a record in the cover's colours with the cover as its label,
  *   rings running out on the beat (WebGL2).
  * - Blur: the cover's colours as large soft shapes drifting round the cover
  *   and swelling with the low end; the cover small and sharp (WebGL2).
- * - Bars: one row of rounded bars where the cover sits, in its lead colour,
- *   over the cover blurred and dimmed (Canvas 2D).
+ * - Ring (saved as "bars"): the record under its turning label, with a strobe
+ *   ring of marks round the rim that grow with each band, over the cover
+ *   blurred and dimmed (Canvas 2D).
+ * - Cover: just the album art over itself blurred; nothing moves.
  *
  * Without WebGL2 (or after the GPU context is lost) Grooves and Blur are
  * drawn with a few CSS layers instead. The sharp cover is the page's own
@@ -350,7 +352,7 @@ function MovingStage({ style, phone = false, cover }: StageProps & { style: Excl
         sig.step(bands, cur, dt, clock.current * 1000);
       }
       // The record speeds up and slows down like a platter, never jumping.
-      const wantSpin = playing && !still && style === "grooves" ? SPIN_DEG_S : 0;
+      const wantSpin = playing && !still && style !== "blur" ? SPIN_DEG_S : 0;
       spinSpeed.current += (wantSpin - spinSpeed.current) * (1 - Math.exp(-dt / 700));
       spin.current = (spin.current + (spinSpeed.current * dt) / 1000) % 360;
 
@@ -359,10 +361,10 @@ function MovingStage({ style, phone = false, cover }: StageProps & { style: Excl
         giveBack(touched.current);
         touched.current = el;
       }
-      if (el && style !== "bars") {
+      if (el) {
         const breath = 1 + motion * (0.03 * sig.pulse + 0.012 * sig.low * MOTION.gain);
         el.style.setProperty("--vis-breath", breath.toFixed(4));
-        if (style === "grooves") el.style.setProperty("--vis-spin", `${spin.current.toFixed(2)}deg`);
+        if (style !== "blur") el.style.setProperty("--vis-spin", `${spin.current.toFixed(2)}deg`);
       }
 
       const b = box.current;
@@ -370,7 +372,7 @@ function MovingStage({ style, phone = false, cover }: StageProps & { style: Excl
         bars.current.step(bands, dt);
         const c = barCanvas.current;
         const ctx = c?.getContext("2d");
-        if (c && ctx) drawBars(ctx, bars.current.shown, b, barFill.current, sig.pulse * motion);
+        if (c && ctx) drawRing(ctx, bars.current.shown, b, barFill.current, sig.pulse * motion);
       } else if (renderer === "webgl2" && glRef.current && !glRef.current.lost) {
         frame.time = clock.current;
         frame.spin = (spin.current * Math.PI) / 180;
@@ -480,33 +482,67 @@ function moveFields(fields: (HTMLElement | null)[], sig: MusicSignals, motion: n
   }
 }
 
+/** Ring: the record round the label, as a share of the label's radius, and the marks round its rim. */
+export const RING_DISC = 2.2;
+const TAU = Math.PI * 2;
+const RING_GAP = 1.08;
+const RING_REACH = 0.34;
+
 /**
- * Bars: one row across the cover's place, rising from its bottom edge.
- * Rounded, a little gap between each, never quite empty (a dot at rest).
+ * Ring: the record under its turning label, and round its rim a strobe
+ * ring of marks that stays still while the record turns, one mark per band
+ * (bass at the top, mirrored down both sides), each a dot at rest that
+ * grows outward into a short bar with its band.
  */
-export function drawBars(ctx: CanvasRenderingContext2D, levels: Float32Array, b: Box, fill: { top: string; bottom: string }, pulse: number) {
-  const { w, h, rect } = b;
+export function drawRing(ctx: CanvasRenderingContext2D, levels: Float32Array, b: Box, fill: { top: string; bottom: string }, pulse: number) {
+  const { w, h } = b;
+  const [cx, cy, label] = b.anchor;
   ctx.clearRect(0, 0, w, h);
-  const n = levels.length;
-  if (!n || rect.w <= 0) return;
-  const gapShare = 0.45;
-  const bw = rect.w / (n + (n - 1) * gapShare);
-  const step = bw * (1 + gapShare);
-  const floor = rect.y + rect.h;
-  const grad = ctx.createLinearGradient(0, rect.y, 0, floor);
-  grad.addColorStop(0, fill.top);
-  grad.addColorStop(1, fill.bottom);
-  ctx.fillStyle = grad;
+  if (label <= 0) return;
+  const disc = label * RING_DISC;
+  // The record, with fine grooves between the label and the rim.
+  ctx.beginPath();
+  ctx.arc(cx, cy, disc, 0, TAU);
+  ctx.fillStyle = "#0d0c0b";
+  ctx.fill();
+  ctx.lineWidth = Math.max(1, disc / 260);
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.035)";
+  ctx.beginPath();
+  for (let r = label * 1.06; r < disc * 0.97; r += disc / 64) {
+    ctx.moveTo(cx + r, cy);
+    ctx.arc(cx, cy, r, 0, TAU);
+  }
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+  ctx.beginPath();
+  ctx.arc(cx, cy, disc, 0, TAU);
+  ctx.stroke();
+  // The marks.
+  const half = levels.length;
+  const n = half * 2;
+  if (!half) return;
+  const r0 = disc * RING_GAP;
+  const reach = disc * RING_REACH;
+  const bw = Math.max(2, ((TAU * r0) / n) * 0.36);
+  const grad = ctx.createRadialGradient(cx, cy, r0, cx, cy, r0 + reach);
+  grad.addColorStop(0, fill.bottom);
+  grad.addColorStop(1, fill.top);
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = bw;
+  ctx.lineCap = "round";
   ctx.globalAlpha = Math.min(1, 0.86 + 0.14 * pulse);
   ctx.beginPath();
   for (let i = 0; i < n; i++) {
-    const bh = Math.max(bw, levels[i] * rect.h);
-    const x = rect.x + i * step;
-    const y = floor - bh;
-    const r = bw / 2;
-    if (typeof ctx.roundRect === "function") ctx.roundRect(x, y, bw, bh, r);
-    else ctx.rect(x, y, bw, bh);
+    const v = levels[i < half ? i : n - 1 - i];
+    const a = -Math.PI / 2 + ((i + 0.5) / n) * TAU;
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    const from = r0 + bw / 2;
+    // Never quite zero long, so the round caps still draw the dot.
+    const to = from + Math.max(0.5, v * reach);
+    ctx.moveTo(cx + c * from, cy + s * from);
+    ctx.lineTo(cx + c * to, cy + s * to);
   }
-  ctx.fill();
+  ctx.stroke();
   ctx.globalAlpha = 1;
 }

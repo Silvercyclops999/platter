@@ -75,7 +75,8 @@ impl StreamQuality {
 
 /// The visualizer's picture, remembered (not a setting row): Grooves, the
 /// record in the cover's colours; Blur, the cover's colours as soft shapes;
-/// Bars, a row of spectrum bars over the cover; Cover, just the album art.
+/// Bars (shown as Ring), a record with a ring of level marks round it;
+/// Cover, just the album art.
 /// Styles from before the rework read as Grooves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

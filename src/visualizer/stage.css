@@ -23,7 +23,7 @@
 .vis-stage__canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
 .vis-stage__canvas[hidden] { display: none; }
 
-/* Bars (and the CSS layers): the cover itself, soft and dim, fills the view. */
+/* Ring, Cover (and the CSS layers): the cover itself, soft and dim, fills the view. */
 .vis-stage__backdrop {
   position: absolute;
   inset: -12%;
@@ -140,15 +140,19 @@
   transition: none !important;
   will-change: transform;
 }
-/* Grooves: the cover is the record's label, round, with its spindle hole. */
-.vis-cover--grooves {
+/* Grooves and Ring: the cover is the record's label, round, with its spindle hole. */
+.vis-cover--grooves,
+.vis-cover--bars {
   border-radius: 50% !important;
   overflow: hidden;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 0 0 5px rgba(255, 255, 255, 0.025), 0 12px 32px rgba(0, 0, 0, 0.5) !important;
 }
 .vis-cover--grooves .art,
-.vis-cover--grooves img { border-radius: 50% !important; }
-.vis-cover--grooves::after {
+.vis-cover--grooves img,
+.vis-cover--bars .art,
+.vis-cover--bars img { border-radius: 50% !important; }
+.vis-cover--grooves::after,
+.vis-cover--bars::after {
   content: "";
   position: absolute;
   left: 50%;
@@ -164,8 +168,6 @@
 .vis-cover--blur { box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5), 0 6px 18px rgba(0, 0, 0, 0.32), 0 0 0 0.5px rgba(255, 255, 255, 0.16) !important; }
 /* Cover: just the album art, lifted off itself blurred. */
 .vis-cover--cover { box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5), 0 6px 18px rgba(0, 0, 0, 0.32), 0 0 0 0.5px rgba(255, 255, 255, 0.16) !important; }
-/* Bars: the cover keeps its place (the bars stand in it) but isn't drawn. */
-.vis-cover--bars { opacity: 0; box-shadow: none !important; }
 
 /* ---- the phone: the art takes the whole now playing screen */
 .ph-np.is-art { background: #0b0a09; }
@@ -186,11 +188,11 @@
 .ph-np.is-art .ph-upnext__row { background: rgba(255, 255, 255, 0.07) !important; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
 /* The top bar takes the art's scrim instead of the tint band. */
 .ph-np.is-art .ph-np__top { background: none; }
-/* Over the art the cover gives it room: the label smallest, Bars the widest. */
+/* Over the art the cover gives it room: Ring's label smallest (its record and ring go round it), Cover the widest. */
 .ph-np.is-art--grooves .ph-np__cover { width: min(52%, 224px); }
 .ph-np.is-art--blur .ph-np__cover { width: min(66%, 290px, max(200px, calc(100dvh - var(--ph-safe-top) - var(--ph-safe-bottom) - 470px))); }
 .ph-np.is-art--cover .ph-np__cover { width: min(100%, 400px, max(220px, calc(100dvh - var(--ph-safe-top) - var(--ph-safe-bottom) - 460px))); }
-.ph-np.is-art--bars .ph-np__cover { width: min(100%, 400px, max(220px, calc(100dvh - var(--ph-safe-top) - var(--ph-safe-bottom) - 460px))); }
+.ph-np.is-art--bars .ph-np__cover { width: min(30%, 132px); }
 .ph-np.is-art .ph-np__art { position: relative; }
 /* The cover opens and closes the visualizer with a tap. */
 .ph-np__art[role="button"] { cursor: pointer; -webkit-tap-highlight-color: transparent; }
@@ -236,9 +238,9 @@
 .fw__now--art .fw__meta { width: 100%; align-items: center; }
 .fw__now--art .fw__artists { justify-content: center; }
 .fw__now--art .fw__cover { cursor: pointer; }
-/* Bars get a wide stage of their own where the cover would be. */
-.fw.fw--art-bars .fw__now--art { width: min(760px, 100%); }
-.fw--art-bars .fw__now--art .fw__cover { aspect-ratio: 2 / 1; }
+/* Ring: a small label, with room round it for its record and the ring. */
+.fw--art-bars .fw__now--art .fw__cover { width: 30%; }
+.fw--art-bars .fw__art-slot { margin-block: 29%; }
 .fw__art-slot { position: relative; display: flex; justify-content: center; width: 100%; }
 .fw--art-grooves .fw__now--art .fw__cover { width: 58%; }
 .fw--art-grooves .fw__art-slot { margin-bottom: var(--space-8); }
@@ -248,7 +250,7 @@
 .fw--art-cover .fw__art-slot { margin-bottom: var(--space-4); }
 .fw__art-meta { width: 100%; }
 .fw__now:not(.fw__now--art) .fw__cover.is-tappable { cursor: pointer; }
-/* Hidden controls fade, then leave the tab order too (the bars with them). */
+/* Hidden controls fade, then leave the tab order too (the player bar with them). */
 .fw.is-bare .fw__chrome {
   opacity: 0;
   pointer-events: none;
