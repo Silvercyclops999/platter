@@ -413,6 +413,7 @@ impl Default for Platform {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_worker(
     mut c: Controller,
     rx: mpsc::Receiver<Msg>,

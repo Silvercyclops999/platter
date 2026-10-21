@@ -137,7 +137,9 @@ fn reads_albums_and_each_songs_advisory() {
     // Unknown (2) stays unknown rather than counting as clean.
     assert_eq!(t, vec![Some(true), Some(false), None]);
     assert!(deezer::albums(&json!({ "error": { "code": 4 } })).is_empty());
-    assert!(deezer::is_error(&json!({ "error": { "code": 4, "message": "Quota limit exceeded" } })));
+    assert_eq!(deezer::error(&json!({ "error": { "code": 4, "message": "Quota limit exceeded" } })), Some(deezer::DzError::Busy));
+    assert_eq!(deezer::error(&json!({ "error": { "code": 800, "message": "no data" } })), Some(deezer::DzError::NoData));
+    assert_eq!(deezer::error(&v), None);
 }
 
 #[test]
@@ -176,6 +178,9 @@ fn picks_by_artist_title_and_song_count() {
     assert_eq!(deezer::pick("Night Drive", "The Rue Ellis feat. Mara", 12, &found).map(|a| a.id), Some(3));
     assert_eq!(deezer::pick("Daylight", "Rue Ellis", 12, &found), None);
     assert_eq!(deezer::pick("Night Drive", "Nobody", 12, &found), None);
+    // A name inside another isn't the same artist.
+    let islands = [dz(5, "Night Drive", "Rue Ellis Islands", 12, true), dz(6, "Night Drive", "Rue Ellis & Mara", 12, true)];
+    assert_eq!(deezer::pick("Night Drive", "Rue Ellis", 12, &islands).map(|a| a.id), Some(6));
 }
 
 fn lt(id: &str, title: &str, n: u32, secs: u64) -> LocalTrack {
@@ -289,6 +294,18 @@ async fn deezer_busy_or_answering_an_error_stops_the_round() {
         assert_eq!(round(&db, &http).await, (0, 0), "{status} {body}");
         assert_eq!(http.calls("search/album"), 1, "the rest wait for the next round");
     }
+}
+
+#[tokio::test]
+async fn an_error_about_one_album_doesnt_hold_up_the_rest() {
+    let (db, _d) = db_with(
+        &[album("a1", "Night Drive", &[]), album("a2", "Daylight", &[])],
+        &[track("t1", "a1", 1, "Neon"), track("t2", "a2", 1, "Sun")],
+    );
+    let http = Arc::new(FakeHttp::new());
+    http.route("search/album", 200, &json!({ "error": { "code": 800, "message": "no data" } }).to_string());
+    assert_eq!(round(&db, &http).await, (2, 0), "both asked, each kept as no match");
+    assert_eq!(round(&db, &http).await, (0, 0));
 }
 
 #[tokio::test]

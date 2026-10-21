@@ -221,10 +221,13 @@ async fn get(http: &dyn InfoHttp, url: &str) -> Result<Value, LookupError> {
         return Err(LookupError::Unavailable(format!("Deezer answered {}", r.status)));
     }
     let v: Value = r.json().map_err(|e: AppError| LookupError::Unavailable(e.to_string()))?;
-    if deezer::is_error(&v) {
-        return Err(LookupError::Unavailable("Deezer couldn't answer right now".into()));
+    match deezer::error(&v) {
+        Some(deezer::DzError::Busy) => Err(LookupError::Unavailable("Deezer is busy right now".into())),
+        // An error about this request only: nothing found, so one album
+        // can't hold up the rest.
+        Some(deezer::DzError::NoData) => Ok(serde_json::json!({ "data": [] })),
+        None => Ok(v),
     }
-    Ok(v)
 }
 
 /// Finds an album on Deezer and its songs' marks. Ok(None): no sure match.
