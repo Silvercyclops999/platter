@@ -208,7 +208,7 @@ pub fn read_raw(c: &Connection) -> AppResult<Raw> {
     {
         let mut st = c.prepare(
             "SELECT t.id, t.artist_id, t.album_id, t.track_number, t.duration_ms, t.genres, t.user_rating,
-                    t.view_count, t.last_viewed_at, f.explicit, f.flags, coalesce(f.version, f.release)
+                    t.view_count, t.last_viewed_at, coalesce(f.explicit, (SELECT x.explicit FROM explicit_found x WHERE x.track_id = t.id)), f.flags, coalesce(f.version, f.release)
              FROM tracks t LEFT JOIN file_tags f ON f.part_key = t.part_key AND f.status = 'ok'",
         )?;
         let mut rows = st.query([])?;

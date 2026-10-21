@@ -52,7 +52,7 @@ use tokio::sync::watch;
 use crate::audio::events::{ErrorPayload, EventSink, OutputLost, PlayerState, PositionPayload};
 use crate::audio::output::OutputState;
 use crate::audio::player::PlayerHandle;
-use crate::db::ArtCache;
+use crate::db::{ArtCache, DbHandle};
 use media::{Controller, OsCommand};
 
 /// The App settings this module acts on. All are per device.
@@ -212,7 +212,15 @@ impl Platform {
 
     /// Start the worker, tray, keys and launch at login.
     #[cfg(desktop)]
-    pub fn start<R: Runtime>(self, app: &AppHandle<R>, player: PlayerHandle, art: ArtCache, cover_dir: PathBuf, switches: Switches) {
+    pub fn start<R: Runtime>(
+        self,
+        app: &AppHandle<R>,
+        player: PlayerHandle,
+        art: ArtCache,
+        cover_dir: PathBuf,
+        switches: Switches,
+        db: DbHandle,
+    ) {
         let Self { tx, rx, tray: tray_tx, menu: menu_tx } = self;
         app.manage(tray::Tray::<R>::default());
         app.manage(menubar::MenuBar::<R>::default());
@@ -251,7 +259,7 @@ impl Platform {
         let set_keys = move |on: bool| keys::apply(&keys_app, on, keys_cmd.clone());
         let _ = std::thread::Builder::new()
             .name("platter-media".into())
-            .spawn(move || run_worker(controller, rx, worker_tx, art, cover_dir, rt, set_keys));
+            .spawn(move || run_worker(controller, rx, worker_tx, art, cover_dir, rt, set_keys, db));
 
         // Seed the worker with the restored queue (the player doesn't emit
         // until something changes).
@@ -337,7 +345,15 @@ impl Platform {
     /// A phone: no tray, menu bar, media keys or launch at login. The
     /// system's own now playing controls come from a native plugin (not
     /// yet); the worker keeps its state ready for it.
-    pub fn start<R: Runtime>(self, app: &AppHandle<R>, player: PlayerHandle, art: ArtCache, cover_dir: PathBuf, switches: Switches) {
+    pub fn start<R: Runtime>(
+        self,
+        app: &AppHandle<R>,
+        player: PlayerHandle,
+        art: ArtCache,
+        cover_dir: PathBuf,
+        switches: Switches,
+        db: DbHandle,
+    ) {
         let Self { tx, rx } = self;
         let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<OsCommand>();
         let on_command = move |c: OsCommand| {
@@ -361,7 +377,7 @@ impl Platform {
         let rt = tauri::async_runtime::handle();
         let _ = std::thread::Builder::new()
             .name("platter-media".into())
-            .spawn(move || run_worker(controller, rx, worker_tx, art, cover_dir, rt, |_| {}));
+            .spawn(move || run_worker(controller, rx, worker_tx, art, cover_dir, rt, |_| {}, db));
         {
             let tx = tx.clone();
             tauri::async_runtime::spawn(async move {
@@ -397,6 +413,7 @@ fn run_worker(
     cover_dir: PathBuf,
     rt: tauri::async_runtime::RuntimeHandle,
     set_keys: impl Fn(bool),
+    db: DbHandle,
 ) {
     while let Ok(msg) = rx.recv() {
         let at = Instant::now();
@@ -404,7 +421,14 @@ fn run_worker(
             Msg::State(s) => {
                 let before = c.track_id().map(str::to_owned);
                 c.on_state(&s, at);
-                // New track: fetch its cover from the art cache.
+                // New track: whether it's explicit (a quick read here)...
+                if c.track_id() != before.as_deref()
+                    && let Some(id) = c.track_id().map(str::to_owned)
+                {
+                    let explicit = db.read(|x| crate::explicit::track_explicit(x, &id)).unwrap_or(false);
+                    c.on_explicit(&id, explicit);
+                }
+                // ...and its cover from the art cache.
                 if c.track_id() != before.as_deref()
                     && let (Some(id), Some(thumb)) = (c.track_id(), c.thumb())
                 {

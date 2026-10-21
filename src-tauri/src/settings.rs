@@ -610,6 +610,9 @@ pub struct Settings {
     /// Look albums Plex couldn't match up on MusicBrainz: a match means Plex
     /// missed it and the album is released (needs MusicBrainz on).
     pub check_unmatched_musicbrainz: bool,
+    /// Ask Deezer which songs are explicit when their files don't say
+    /// (sends artist and album names; crate::explicit).
+    pub explicit_lookup: bool,
     /// Albums sharing ARCHIVE_GROUP show as one card with an edition picker.
     pub group_editions: bool,
     /// Edit in Plex (covers, matches, details, merge) on servers this
@@ -1259,6 +1262,7 @@ impl Default for Settings {
             show_fan_edits: false,
             count_unmatched_unreleased: true,
             check_unmatched_musicbrainz: false,
+            explicit_lookup: true,
             group_editions: true,
             plex_edit_show: true,
             plex_edit_lock: true,
@@ -1560,6 +1564,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "showFanEdits",
     "countUnmatchedUnreleased",
     "checkUnmatchedMusicbrainz",
+    "explicitLookup",
     "groupEditions",
     "plexEditShow",
     "plexEditLock",
@@ -1921,6 +1926,7 @@ pub struct SettingsPatch {
     pub show_fan_edits: Option<bool>,
     pub count_unmatched_unreleased: Option<bool>,
     pub check_unmatched_musicbrainz: Option<bool>,
+    pub explicit_lookup: Option<bool>,
     pub group_editions: Option<bool>,
     pub plex_edit_show: Option<bool>,
     pub plex_edit_lock: Option<bool>,
@@ -2312,6 +2318,7 @@ impl Settings {
         set(&mut self.show_fan_edits, p.show_fan_edits);
         set(&mut self.count_unmatched_unreleased, p.count_unmatched_unreleased);
         set(&mut self.check_unmatched_musicbrainz, p.check_unmatched_musicbrainz);
+        set(&mut self.explicit_lookup, p.explicit_lookup);
         set(&mut self.group_editions, p.group_editions);
         set(&mut self.plex_edit_show, p.plex_edit_show);
         set(&mut self.plex_edit_lock, p.plex_edit_lock);
@@ -3203,6 +3210,7 @@ pub fn publish(s: &Settings, live: &Live, db: &DbHandle) {
     live.auto_update.store(s.update_by_itself, Ordering::Relaxed);
     live.share_public_links.store(s.share_public_links && on, Ordering::Relaxed);
     live.lyrics_lrclib.store(s.lyrics_lrclib && on, Ordering::Relaxed);
+    crate::explicit::set_enabled(s.explicit_lookup && on);
     live.sleeve.show.store(s.show_sleeve_notes, Ordering::Relaxed);
     live.diary.on.store(s.keep_diary, Ordering::Relaxed);
     live.diary.auto.store(s.keep_diary && s.diary_auto, Ordering::Relaxed);

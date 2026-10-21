@@ -27,7 +27,7 @@ use objc2_foundation::{NSArray, NSData, NSObject, NSObjectProtocol, NSString};
 use objc2_ui_kit::{UIScene, UISceneConnectionOptions, UISceneDelegate, UISceneSession};
 use tauri::{AppHandle, Listener, Manager, Wry};
 
-use super::{CarAction, CarItem, CarList, CarRow, CarSection, Connect, Kept, NowKey, OnConnect, Reach, Tab};
+use super::{CarAction, CarItem, CarList, CarRow, CarSection, Connect, ExplicitRows, Kept, NowKey, OnConnect, Reach, Tab};
 use crate::audio::player::PlayerHandle;
 use crate::audio::queue::Repeat;
 use crate::backend::Backends;
@@ -282,6 +282,9 @@ thread_local! {
     static MARKABLE: RefCell<std::collections::VecDeque<(Retained<CPListItem>, CarItem)>> =
         const { RefCell::new(std::collections::VecDeque::new()) };
     static NOW_KEY: RefCell<NowKey> = RefCell::new(NowKey::default());
+    /// Rows to give the explicit mark as they're built (read off the main
+    /// thread with each list).
+    static EXPLICIT: RefCell<ExplicitRows> = RefCell::new(ExplicitRows::default());
 }
 
 /// Marks every row on screen that plays what's playing now (main thread).
@@ -500,8 +503,26 @@ fn show_tabs() {
     };
     tauri::async_runtime::spawn_blocking(move || {
         let data = read_tabs(Some(&app));
-        let _ = app.run_on_main_thread(move || build_tabs(data, asked));
+        let marks = tab_marks(&app, &data);
+        let _ = app.run_on_main_thread(move || {
+            EXPLICIT.with(|e| *e.borrow_mut() = marks);
+            build_tabs(data, asked)
+        });
     });
+}
+
+/// The explicit marks for every tab's rows (blocking: off the main thread).
+fn tab_marks(app: &AppHandle<Wry>, data: &TabData) -> ExplicitRows {
+    let db = app.state::<DbHandle>();
+    db.read(|c| {
+        let mut m = super::explicit_sections(c, &data.home)?;
+        m.extend(super::explicit_rows(c, data.library.iter().chain(&data.downloaded).chain(&data.radio))?);
+        Ok(m)
+    })
+    .unwrap_or_else(|e| {
+        tracing::debug!("CarPlay explicit marks not read: {e}");
+        ExplicitRows::default()
+    })
 }
 
 /// Builds and shows the tab bar (main thread), unless a newer rebuild was
@@ -639,14 +660,20 @@ fn show_up_next() {
     let player = app.state::<PlayerHandle>().inner().clone();
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let items = match player.state().await {
-            Ok(s) => super::up_next(&s.queue),
+        let (items, marks) = match player.state().await {
+            Ok(s) => {
+                let items = super::up_next(&s.queue);
+                let db = app.state::<DbHandle>().inner().clone();
+                let marks = db.read_async(move |c| super::explicit_queue(c, &s.queue)).await.unwrap_or_default();
+                (items, marks)
+            }
             Err(e) => {
                 tracing::warn!("CarPlay queue not read: {e}");
-                Vec::new()
+                (Vec::new(), ExplicitRows::default())
             }
         };
         let _ = app.run_on_main_thread(move || {
+            EXPLICIT.with(|e| e.borrow_mut().extend(marks));
             let Some(controller) = CAR.with(|c| c.borrow().clone()) else { return };
             let Some(mtm) = MainThreadMarker::new() else { return };
             let t = list_template(mtm, "Up next", &items, false);
@@ -853,6 +880,11 @@ fn text_row(mtm: MainThreadMarker, text: &str, detail: Option<&str>) -> Retained
 
 fn row(mtm: MainThreadMarker, item: &CarItem) -> Retained<CPListItem> {
     let r = text_row(mtm, &item.title, item.subtitle.as_deref());
+    if EXPLICIT.with(|e| e.borrow().marks(item)) {
+        // SAFETY: CPListItem's explicitContent setter (iOS 14), on our own
+        // row on the main thread.
+        let _: () = unsafe { msg_send![&*r, setExplicitContent: true] };
+    }
     if let (Some(thumb), Some(app)) = (&item.thumb, APP.get()) {
         load_art(app, thumb.clone(), OnMain(r.clone()));
     }
@@ -1043,7 +1075,9 @@ fn open_list(app: &AppHandle<Wry>, which: &CarList) {
             let kept = db.read(Kept::read).unwrap_or_default();
             items = super::offline_rows(items, &kept, offline_only(&app));
         }
+        let marks = db.read(|c| super::explicit_rows(c, &items)).unwrap_or_default();
         let _ = app.run_on_main_thread(move || {
+            EXPLICIT.with(|e| e.borrow_mut().extend(marks));
             let Some(controller) = CAR.with(|c| c.borrow().clone()) else { return };
             let Some(mtm) = MainThreadMarker::new() else { return };
             let t = list_template(mtm, which.title(), &items, false);

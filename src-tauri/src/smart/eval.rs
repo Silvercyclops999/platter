@@ -93,7 +93,7 @@ pub fn read_rows(c: &Connection) -> AppResult<Vec<Row>> {
         "SELECT t.id, t.artist_id, t.artist_title, t.track_artist, t.album_title, t.disc_number, t.track_number,
                 al.year, coalesce(al.added_at, 0), t.view_count, t.last_viewed_at, t.user_rating, t.duration_ms,
                 coalesce(al.section, 'albums'), coalesce(al.genres, '[]'), coalesce(al.styles, '[]'),
-                coalesce(al.moods, '[]'), t.genres, f.explicit, f.version, al.format, coalesce(al.subformats, '[]'), t.title, al.studio, al.matched, mc.found, t.album_id,
+                coalesce(al.moods, '[]'), t.genres, coalesce(f.explicit, (SELECT x.explicit FROM explicit_found x WHERE x.track_id = t.id)), f.version, al.format, coalesce(al.subformats, '[]'), t.title, al.studio, al.matched, mc.found, t.album_id,
                 f.era, t.codec, coalesce(f.version, f.release, CASE WHEN at.version IS NULL THEN at.release END)
          FROM tracks t
          LEFT JOIN albums al ON al.id = t.album_id

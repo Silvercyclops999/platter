@@ -750,6 +750,86 @@ pub fn shuffle_downloads_context(c: &Connection) -> AppResult<PlayContext> {
     Ok(PlayContext { kind: ContextKind::Tracks, id: None, track_ids: Some(ids) })
 }
 
+/// Rows the car marks explicit (`CPListItem.explicitContent`): explicit
+/// songs, albums with an explicit song, and Up next rows playing one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExplicitRows {
+    tracks: HashSet<String>,
+    albums: HashSet<String>,
+    /// Up next rows, by queue item id.
+    queue: HashSet<String>,
+}
+
+impl ExplicitRows {
+    /// Whether a row gets the car's explicit mark.
+    pub fn marks(&self, item: &CarItem) -> bool {
+        match &item.action {
+            CarAction::PlayFrom { track_id, .. } => self.tracks.contains(track_id),
+            CarAction::Jump(item_id) => self.queue.contains(item_id),
+            CarAction::Open(CarList::Songs { kind: ContextKind::Album, id, .. }) => self.albums.contains(id),
+            CarAction::Play(ctx) | CarAction::Shuffle(ctx) if ctx.kind == ContextKind::Album => {
+                ctx.id.as_ref().is_some_and(|id| self.albums.contains(id))
+            }
+            _ => false,
+        }
+    }
+
+    /// Adds another list's marks.
+    pub fn extend(&mut self, other: ExplicitRows) {
+        self.tracks.extend(other.tracks);
+        self.albums.extend(other.albums);
+        self.queue.extend(other.queue);
+    }
+}
+
+/// The explicit marks for these rows (and rows of covers in sections).
+pub fn explicit_rows<'a>(c: &Connection, items: impl IntoIterator<Item = &'a CarItem>) -> AppResult<ExplicitRows> {
+    let mut out = ExplicitRows::default();
+    for item in items {
+        match &item.action {
+            CarAction::PlayFrom { track_id, .. } => {
+                if crate::explicit::track_explicit(c, track_id)? {
+                    out.tracks.insert(track_id.clone());
+                }
+            }
+            CarAction::Open(CarList::Songs { kind: ContextKind::Album, id, .. }) => {
+                if crate::explicit::album_explicit(c, id)? {
+                    out.albums.insert(id.clone());
+                }
+            }
+            CarAction::Play(ctx) | CarAction::Shuffle(ctx) if ctx.kind == ContextKind::Album => {
+                if let Some(id) = &ctx.id
+                    && crate::explicit::album_explicit(c, id)?
+                {
+                    out.albums.insert(id.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
+/// The explicit marks for a tab of sections.
+pub fn explicit_sections(c: &Connection, sections: &[CarSection]) -> AppResult<ExplicitRows> {
+    let items = sections.iter().flat_map(|s| s.rows.iter()).filter_map(|r| match r {
+        CarRow::Item(i) => Some(i),
+        CarRow::Covers { .. } => None,
+    });
+    explicit_rows(c, items)
+}
+
+/// The explicit marks for Up next ([`up_next`]).
+pub fn explicit_queue(c: &Connection, q: &QueueView) -> AppResult<ExplicitRows> {
+    let mut out = ExplicitRows::default();
+    for i in q.user_queue.iter().chain(&q.next_up).take(LIST_MAX) {
+        if crate::explicit::track_explicit(c, &i.track.id)? {
+            out.queue.insert(i.item_id.clone());
+        }
+    }
+    Ok(out)
+}
+
 pub mod siri;
 
 #[cfg(target_os = "ios")]

@@ -514,11 +514,16 @@ pub fn drop_hidden(c: &Connection, tracks: &mut Vec<Track>, view: TagView) -> Ap
         return Ok(skipped);
     }
     let mut st = c.prepare_cached("SELECT explicit, flags FROM file_tags WHERE part_key = ?1 AND status = 'ok'")?;
+    let mut found = c.prepare_cached("SELECT explicit FROM explicit_found WHERE track_id = ?1")?;
     let mut keep = Vec::with_capacity(tracks.len());
     for t in tracks.drain(..) {
         let row: Option<(Option<i64>, Option<String>)> =
             st.query_row([&t.part_key], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
-        let (explicit, flags) = row.unwrap_or_default();
+        let (mut explicit, flags) = row.unwrap_or_default();
+        // The file's tag, else what Deezer said.
+        if explicit.is_none() && view.filter_explicit {
+            explicit = found.query_row([&t.id], |r| r.get(0)).optional()?;
+        }
         if view.filter_explicit && explicit == Some(1) {
             skipped.explicit += 1;
         } else if !view.show_edits && is_edit(flags.as_deref()) {
@@ -617,7 +622,7 @@ pub fn album_release(c: &Connection, album_id: &str) -> AppResult<provenance::Al
 // ------------------------------------------------------------------ UI index
 
 /// Badges for one song (only songs with something to show are listed).
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackBadges {
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -638,7 +643,7 @@ pub struct TrackBadges {
 }
 
 /// What the tags say about one album.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AlbumBadges {
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -754,6 +759,15 @@ pub fn index(c: &Connection) -> AppResult<TagIndex> {
             });
             out.groups.insert(g, m.into_iter().map(|x| x.0).collect());
         }
+    }
+    // Songs explicit by Deezer's answer (their files say nothing), and so
+    // their albums.
+    let (tracks, albums) = crate::explicit::found_marks(c)?;
+    for id in tracks {
+        out.tracks.entry(id).or_default().explicit = true;
+    }
+    for id in albums {
+        out.albums.entry(id).or_default().explicit = true;
     }
     Ok(out)
 }

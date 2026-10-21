@@ -1361,6 +1361,23 @@ badge shows `version`, else `release`. `groups` maps a group key to its editions
 `{ albumId, title, label, year }[]`, two or more, the face first. The face is
 the edition labelled Standard, else a released one, else the earliest.
 
+Most files carry no explicit tag, so songs whose files don't say are looked
+up on Deezer's public catalogue in the background (`crate::explicit`, setting
+`explicitLookup`). For each album with such a song, released by the one
+unreleased rule, one search by album artist and title picks the album (same
+artist and title with version notes set aside, then the nearest song count,
+then the explicit edition unless the title says clean or edited), and one
+more read lists its songs. Songs are matched by title, else by disc and
+place when both albums have as many songs and the lengths agree within 10 s.
+Deezer's explicit songs count as explicit, its not explicit and edited ones
+as clean, and the rest stay unknown. Answers go in `explicit_found` and
+`explicit_check` (a match is asked again after 90 days, no match after 14),
+one album every 1.5 s, newest first, a minute after start and after each
+library sync. Deezer down, busy or answering an error ends the round with
+nothing stored. A file's own tag always wins. `tracks` and `albums` above
+include songs explicit by Deezer's answer and their albums, and the explicit
+filter, smart playlists, mixes and CarPlay read the same answer.
+
 `ARCHIVE_VERSION` joins the unreleased check for sharing and Discord: any of
 unreleased, leak, leaked, demo, snippet, session, build or alternate counts.
 Without one, the file's release status does (unreleased, leaked and
@@ -4128,6 +4145,7 @@ The rest of the fields, with their defaults:
 | `rescanAfterTagEdit` | bool, true | After tags are saved, Plex rescans just the folders written to. |
 | `askBeforeManyFiles` | bool, true | A tag save that changes more than 50 files asks first (in the UI). |
 | `explicitContent` | `"allowed"` or `"filtered"`, `"allowed"` | Filtered leaves songs tagged explicit out of every context that plays, with one toast per context. |
+| `explicitLookup` | bool, true | Look up on Deezer which songs are explicit when their files don't say. Synced. See File tags above. |
 | `showFanEdits` | bool, false | Off leaves fan and AI edits (`ARCHIVE_FLAGS`) out of album pages and what plays, and hides albums made only of them. |
 | `releaseStatusTag` | string, `""` | Where a file's release status is read from: `""` (Auto) reads `ARCHIVE_VERSION`, then `STATUS`, then Picard's release status and type; a tag name (up to 64 characters, no `=`; "auto" counts as Auto) reads that tag after `ARCHIVE_VERSION` instead. A new name reads the files again in the background. Synced. See File tags. |
 | `releaseStatusValues` | `{ value, status: "released"\|"unreleased"\|"leaked"\|"alternate" }[]`, `[]` | Custom values and what they mean, checked before the built-in ones. Up to 50, each up to 60 characters, trimmed; the same value (any case) again replaces the earlier one, and blank values are dropped. Synced. |
