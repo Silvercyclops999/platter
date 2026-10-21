@@ -756,6 +756,69 @@ describe("the phone", () => {
     expect(usePhoneVis.getState().open).toBe(false);
   });
 
+  it("doesn't skip on a quick drag that stopped before the finger lifted", async () => {
+    const next = vi.spyOn(player, "next").mockImplementation(() => Promise.resolve());
+    const np = open();
+    const art = screen.getByTestId("np-art");
+    Object.defineProperty(art, "clientWidth", { value: 400, configurable: true });
+    Object.defineProperty(np, "clientHeight", { value: 800, configurable: true });
+    let now = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    fireEvent.pointerDown(art, { pointerId: 1, button: 0, clientX: 300, clientY: 400 });
+    // 40 px left in 20 ms: a flick's speed, short of the distance...
+    for (let i = 1; i <= 2; i++) {
+      now += 10;
+      fireEvent.pointerMove(art, { pointerId: 1, clientX: 300 - 20 * i, clientY: 400 });
+    }
+    // ...then held still a second before lifting.
+    now += 1000;
+    await act(async () => void fireEvent.pointerUp(art, { pointerId: 1, clientX: 260, clientY: 400 }));
+    expect(next).not.toHaveBeenCalled();
+    // The same drag lifted at once is a flick.
+    now += 500;
+    fireEvent.pointerDown(art, { pointerId: 1, button: 0, clientX: 300, clientY: 400 });
+    for (let i = 1; i <= 2; i++) {
+      now += 10;
+      fireEvent.pointerMove(art, { pointerId: 1, clientX: 300 - 20 * i, clientY: 400 });
+    }
+    now += 10;
+    await act(async () => void fireEvent.pointerUp(art, { pointerId: 1, clientX: 260, clientY: 400 }));
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the cover carrying on through other updates, and lets go once the next song plays", async () => {
+    const proto = HTMLElement.prototype as unknown as Record<string, unknown>;
+    const had = proto.animate;
+    // The carry-on never finishes by itself here, so the row stays on its way.
+    proto.animate = () => ({ finished: new Promise(() => {}), cancel: () => {} });
+    try {
+      vi.spyOn(player, "next").mockImplementation(() => Promise.resolve());
+      const [a, b] = mock.fx.tracks;
+      const was = usePlayer.getState().state!;
+      const nowItem = { itemId: "q1", track: a, source: "context" as const };
+      const nextItem = { itemId: "q2", track: b, source: "context" as const };
+      act(() => usePlayer.setState({ state: { ...was, track: a, queue: { ...was.queue, current: nowItem, nextUp: [nextItem] } } }));
+      const np = open();
+      const art = screen.getByTestId("np-art");
+      Object.defineProperty(art, "clientWidth", { value: 400, configurable: true });
+      Object.defineProperty(np, "clientHeight", { value: 800, configurable: true });
+      const row = screen.getByTestId("np-deck");
+      await act(async () => swipe(art, -160));
+      const on = row.style.transform;
+      expect(on).toMatch(/translateX\(-/);
+      const s = usePlayer.getState().state!;
+      // Buffering, the volume: the row carries on.
+      act(() => usePlayer.setState({ state: { ...s, volume: s.volume / 2, status: "buffering" } }));
+      expect(row.style.transform).toBe(on);
+      // The next song plays: the row lets go.
+      act(() => usePlayer.setState({ state: { ...s, track: b, queue: { ...s.queue, current: nextItem, nextUp: [] } } }));
+      await waitFor(() => expect(row.style.transform).toBe(""));
+    } finally {
+      if (had === undefined) delete proto.animate;
+      else proto.animate = had;
+    }
+  });
+
   it("hides the controls with a tap on the art beside the cover and brings them back", () => {
     setPhoneVis(true);
     const np = open();

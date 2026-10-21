@@ -109,7 +109,7 @@ function SongList({
       </header>
       <div className="ph-actions">
         <div className="ph-actions__left">
-          <PlayPill playing={playing} label={playing ? "Pause" : `Play ${title}`} onClick={() => (here && !genre ? void player.toggle() : play(undefined, undefined, ids))} />
+          <PlayPill playing={playing} label={playing ? "Pause" : `Play ${title}`} onClick={() => (playing || (here && !genre) ? void player.toggle() : play(undefined, undefined, ids))} />
           <PhoneShuffleToggle id={contextId} kind={contextKind} name={title} />
         </div>
         <div className="ph-actions__right">

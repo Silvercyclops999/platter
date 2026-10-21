@@ -18,7 +18,7 @@ import { CLOSE_FRACTION, SKIP_FRACTION, follow, lockAxis, release } from "../pho
 import { anchorTarget, PHONE_ANCHOR } from "../phone/lyricsFollow";
 import { cardWindow } from "../phone/LyricsScreen";
 import { inLibraryLine, topByPlays } from "../phone/pages/Artist";
-import { topGenres } from "../phone/pages/Playlist";
+import { PhonePlaylist, topGenres } from "../phone/pages/Playlist";
 import { dockInset } from "../phone/dockInset";
 import { PhoneShell } from "../phone/PhoneShell";
 import { CLOSE_MS } from "../phone/NowPlaying";
@@ -576,6 +576,33 @@ describe("pages", () => {
     act(() => phone.push({ kind: "track", track: t, inPlaylist: { playlist: pl, itemId: "i1", order: ["i1"] } }));
     sheet = await screen.findByRole("dialog", { name: t.title });
     expect(within(sheet).getByRole("button", { name: "Remove from this playlist" })).toBeInTheDocument();
+  });
+});
+
+describe("playlist genre pills", () => {
+  it("the play button pauses while the playlist plays, with or without a genre picked", async () => {
+    const [a, b] = tracks();
+    const pl = mock.fx.playlists[0];
+    vi.spyOn(backend, "playlistPage").mockResolvedValue({
+      playlist: pl,
+      tracks: [{ ...a, genres: ["Jazz"] }, { ...b, genres: ["Soul"] }],
+      itemIds: ["i1", "i2"],
+    } as Awaited<ReturnType<typeof backend.playlistPage>>);
+    const toggle = vi.spyOn(player, "toggle").mockResolvedValue(undefined as never);
+    const playPlaylist = vi.spyOn(player, "playPlaylist").mockResolvedValue(undefined as never);
+    play(a, { status: "playing" });
+    const s = usePlayer.getState().state!;
+    act(() => usePlayer.setState({ state: { ...s, queue: { ...s.queue, context: { kind: "playlist", id: pl.id, title: pl.title } } } }));
+    render(<PhonePlaylist id={pl.id} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Soul" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    expect(toggle).toHaveBeenCalledTimes(1);
+    expect(playPlaylist).not.toHaveBeenCalled();
+    // Paused, a picked genre plays just its songs.
+    act(() => usePlayer.setState({ state: { ...usePlayer.getState().state!, status: "paused" } }));
+    fireEvent.click(screen.getByRole("button", { name: `Play ${pl.title}` }));
+    expect(playPlaylist).toHaveBeenCalledWith(pl.id, undefined, undefined, [b.id]);
+    expect(toggle).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -57,6 +57,11 @@ export function previousCover(s: PlayerState | null | undefined, positionMs: num
   return cur;
 }
 
+/** What plays, by its place in the queue (the same song twice counts as a change). */
+export function playingKey(s: PlayerState | null | undefined): string {
+  return `${s?.queue.current?.itemId ?? ""}|${s?.track?.id ?? ""}`;
+}
+
 /** How long the row takes to cover `left` px at the speed it was let go (px per ms). */
 export function settleMs(left: number, speed: number): number {
   return Math.round(Math.min(SKIP_SETTLE_MAX_MS, Math.max(160, Math.abs(left) / Math.max(Math.abs(speed), 0.9))));
@@ -111,13 +116,13 @@ export const CoverDeck = memo(function CoverDeck({ screen, onClose, art: artStyl
     el.classList.remove("is-moving");
   }, [held]);
 
-  // Let go of the old song once the player says what plays now (or gives up waiting).
+  // Let go of the old song once the player says another one plays (or gives up waiting). Any other
+  // update (buffering, volume, the queue) leaves the row carrying on.
   useEffect(() => {
     if (!held) return;
-    let unsub = () => {};
     const t = setTimeout(() => setHeld(null), SKIP_HOLD_MS);
-    unsub = usePlayer.subscribe((s, p) => {
-      if (s.state !== p.state) setHeld(null);
+    const unsub = usePlayer.subscribe((s, p) => {
+      if (playingKey(s.state) !== playingKey(p.state)) setHeld(null);
     });
     return () => {
       clearTimeout(t);
