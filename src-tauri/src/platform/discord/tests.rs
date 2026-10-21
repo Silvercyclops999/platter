@@ -1399,3 +1399,46 @@ fn the_pushed_status_leaves_the_imgur_key_unread_until_something_needs_it() {
     assert!(r.key_state().saved);
     assert_eq!(keys.reads_of(super::art::IMGUR_ACCOUNT), 1);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_listening_session_started_mid_song_shows_while_the_song_plays() {
+    let party: Arc<parking_lot::Mutex<Option<super::activity::Party>>> = Arc::default();
+    let shared = party.clone();
+    let r = rig_cfg(FakeArt::new(ArtOutcome::Url(COVER.into())), FakeLib::default(), DiscordSettings::default(), move |c| c.party = shared);
+    r.events.send(started(song("1"))).unwrap();
+    wait(2.0).await;
+    assert!(last(&r.discord).unwrap().get("party").is_none());
+    *party.lock() = Some(super::activity::Party { id: "0123456789abcdef".into(), size: 2, max: 11, join: None });
+    // The player says where it is every second the whole time.
+    for s in 3..60u64 {
+        r.events
+            .send(TrackingEvent::Progress { track_id: "1".into(), position_ms: s * 1000, duration_ms: 200_000, listened_ms: s * 1000 })
+            .unwrap();
+        wait(1.0).await;
+    }
+    assert_eq!(last(&r.discord).unwrap()["party"]["size"], serde_json::json!([2, 11]));
+}
+
+#[tokio::test]
+async fn a_host_that_answered_with_a_server_error_is_tried_last_for_the_next_covers() {
+    let c = resolver(None);
+    all_hosts_ok(&c);
+    c.up.route(LITTERBOX_UPLOAD, server_error());
+    assert_eq!(c.r.resolve(&keyless(CoverHost::Auto)).await, ArtOutcome::Url(X0_LINK.into()));
+    assert_eq!(c.up.urls(), vec![LITTERBOX_UPLOAD, X0_UPLOAD]);
+    // The next album goes straight to the host that worked.
+    let next = ArtRequest { album_id: "al2".into(), ..keyless(CoverHost::Auto) };
+    assert_eq!(c.r.resolve(&next).await, ArtOutcome::Url(X0_LINK.into()));
+    assert_eq!(c.up.urls(), vec![LITTERBOX_UPLOAD, X0_UPLOAD, X0_UPLOAD]);
+    // It's still tried when nothing else works, and is back in its place once it does.
+    c.up.route(X0_UPLOAD, None);
+    c.up.route(UGUU_UPLOAD, None);
+    c.up.route(CATBOX_UPLOAD, None);
+    c.up.route(LITTERBOX_UPLOAD, text(LITTER));
+    let third = ArtRequest { album_id: "al3".into(), ..keyless(CoverHost::Auto) };
+    assert_eq!(c.r.resolve(&third).await, ArtOutcome::Url(LITTER.into()));
+    assert_eq!(c.up.urls().last().map(String::as_str), Some(LITTERBOX_UPLOAD));
+    all_hosts_ok(&c);
+    let fourth = ArtRequest { album_id: "al4".into(), ..keyless(CoverHost::Auto) };
+    assert_eq!(c.r.resolve(&fourth).await, ArtOutcome::Url(LITTER.into()));
+}

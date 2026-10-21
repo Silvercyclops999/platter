@@ -285,7 +285,13 @@ pub struct ArtResolver {
     /// Albums whose upload failed this session (not tried again until restart
     /// or a new key).
     failed: Mutex<HashSet<String>>,
+    /// Hosts that were down or answered with a server error lately, with
+    /// when: tried after the others until [`HOST_REST`] has passed.
+    resting: Mutex<std::collections::HashMap<Host, std::time::Instant>>,
 }
+
+/// How long a host that failed goes to the back of the line.
+const HOST_REST: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
 impl ArtResolver {
     pub fn new(
@@ -307,6 +313,7 @@ impl ArtResolver {
             key: Mutex::new(None),
             rejected: Mutex::new(false),
             failed: Mutex::new(HashSet::new()),
+            resting: Mutex::new(Default::default()),
         }
     }
 
@@ -497,6 +504,13 @@ impl ArtResolver {
             hosts.extend_from_slice(req.hosts.chain());
         }
         hosts.retain(|h| !exclude.contains(h));
+        // A host that failed lately (Litterbox answering 500 for days, say)
+        // is tried last, so each song doesn't wait on it first.
+        {
+            let mut resting = self.resting.lock();
+            resting.retain(|_, at| at.elapsed() < HOST_REST);
+            hosts.sort_by_key(|h| resting.contains_key(h));
+        }
         if hosts.is_empty() {
             if imgur_key.is_some() && exclude.is_empty() {
                 return ArtOutcome::UploadFailed("Imgur refused the client ID".into());
@@ -530,10 +544,14 @@ impl ArtResolver {
                 Ok(u) => u,
                 Err(e) => {
                     tracing::info!("cover upload to {} failed: {e}", host.label());
+                    if matches!(e, AppError::Server(_) | AppError::Network(_)) {
+                        self.resting.lock().insert(host, std::time::Instant::now());
+                    }
                     last = e.to_string();
                     continue;
                 }
             };
+            self.resting.lock().remove(&host);
             if !self.warm(&url).await {
                 tracing::info!("{} doesn't serve the cover as an image; trying the next host", host.label());
                 last = format!("{} gave no direct image link", host.label());

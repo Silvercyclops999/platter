@@ -416,6 +416,10 @@ impl Runner {
         mut settings: watch::Receiver<DiscordSettings>,
         mut side: mpsc::UnboundedReceiver<Side>,
     ) {
+        // Kept across turns of the loop: the player's events come every
+        // second and a sleep made fresh each turn would never end.
+        let mut party_tick = tokio::time::interval(self.cfg.gap.max(Duration::from_millis(1)));
+        party_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             let wake = self.dirty.then_some(self.not_before);
             tokio::select! {
@@ -433,7 +437,7 @@ impl Runner {
                 }
                 Some(m) = side.recv() => self.on_side(m),
                 _ = tokio::time::sleep_until(wake.unwrap_or_else(Instant::now)), if wake.is_some() => self.flush().await,
-                _ = tokio::time::sleep(self.cfg.gap), if self.watches_party() => {
+                _ = party_tick.tick(), if self.watches_party() => {
                     let p = self.cfg.party.lock().clone();
                     if p != self.party {
                         self.party = p;
