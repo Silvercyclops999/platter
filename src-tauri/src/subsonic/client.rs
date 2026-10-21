@@ -311,7 +311,7 @@ impl SubsonicClient {
 
 /// The `subsonic-response` object: its status fields and the whole object.
 pub fn envelope(bytes: &[u8]) -> AppResult<(Status, serde_json::Value)> {
-    let v: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| AppError::Invalid(NOT_SUBSONIC.into()))?;
+    let v: serde_json::Value = crate::web::decode_json(bytes).map_err(|_| AppError::Invalid(NOT_SUBSONIC.into()))?;
     let body = v.get("subsonic-response").cloned().ok_or_else(|| AppError::Invalid(NOT_SUBSONIC.into()))?;
     let status: Status = serde_json::from_value(body.clone()).map_err(|_| AppError::Invalid(NOT_SUBSONIC.into()))?;
     Ok((status, body))

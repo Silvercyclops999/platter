@@ -1388,3 +1388,13 @@ async fn live_throwaway_navidrome() {
     os.remove(&saved.tag).await.unwrap();
     drop(backends);
 }
+
+/// A song tagged with a broken character (half of an emoji) loads with a
+/// replacement mark; the server isn't taken for something else.
+#[test]
+fn a_tag_with_a_broken_character_does_not_stop_the_answer() {
+    let body = br#"{"subsonic-response":{"status":"ok","version":"1.16.1","song":{"id":"s1","title":"Fire \ud83c"}}}"#;
+    let (status, v) = super::client::envelope(body).unwrap();
+    assert_eq!(status.status, "ok");
+    assert_eq!(v["song"]["title"], "Fire \u{fffd}");
+}

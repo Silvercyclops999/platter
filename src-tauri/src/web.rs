@@ -189,6 +189,79 @@ pub const SERVER_MAX: usize = 256 * 1024 * 1024;
 /// Most a web service's answer may be.
 pub const WEB_MAX: usize = 64 * 1024 * 1024;
 
+/// Decodes a music server's JSON reply. A tag with a broken character comes
+/// back as bytes that aren't UTF-8, as a lone UTF-16 half (`\ud83d` with no
+/// partner) or as a control character that wasn't escaped, and JSON rejects
+/// all three. Such a reply is read again with each broken character swapped
+/// for U+FFFD (a control character is escaped and kept), so one bad tag
+/// doesn't stop a whole library from loading.
+pub fn decode_json<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> serde_json::Result<T> {
+    serde_json::from_slice(bytes).or_else(|e| {
+        let text = String::from_utf8_lossy(bytes);
+        let fixed = repair_strings(text.as_bytes());
+        if fixed == bytes { Err(e) } else { serde_json::from_slice(&fixed) }
+    })
+}
+
+/// Swaps lone UTF-16 halves inside JSON strings for `�` and escapes raw
+/// control characters there. Everything outside strings is left alone.
+fn repair_strings(bytes: &[u8]) -> Vec<u8> {
+    fn half(b: &[u8], i: usize) -> Option<u16> {
+        let h = b.get(i..i + 6)?;
+        if h[0] != b'\\' || h[1] != b'u' || !h[2..].iter().all(u8::is_ascii_hexdigit) {
+            return None;
+        }
+        u16::from_str_radix(std::str::from_utf8(&h[2..]).ok()?, 16).ok()
+    }
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut in_string = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if !in_string {
+            in_string = b == b'"';
+            out.push(b);
+            i += 1;
+            continue;
+        }
+        match b {
+            b'"' => {
+                in_string = false;
+                out.push(b);
+                i += 1;
+            }
+            // An escape: a UTF-16 half or pair, any other \u, or a two-byte one.
+            b'\\' => {
+                if let Some(u) = half(bytes, i) {
+                    let paired = |n: Option<u16>| n.is_some_and(|n| (0xDC00..0xE000).contains(&n));
+                    if (0xD800..0xDC00).contains(&u) && paired(half(bytes, i + 6)) {
+                        out.extend_from_slice(&bytes[i..i + 12]);
+                        i += 12;
+                    } else if (0xD800..0xE000).contains(&u) {
+                        out.extend_from_slice(b"\\ufffd");
+                        i += 6;
+                    } else {
+                        out.extend_from_slice(&bytes[i..i + 6]);
+                        i += 6;
+                    }
+                } else {
+                    out.extend_from_slice(&bytes[i..(i + 2).min(bytes.len())]);
+                    i += 2;
+                }
+            }
+            0x00..=0x1f => {
+                out.extend_from_slice(format!("\\u{b:04x}").as_bytes());
+                i += 1;
+            }
+            _ => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
 #[async_trait]
 pub trait Web: Send + Sync {
     async fn send(&self, req: WebRequest) -> AppResult<HttpResponse>;
@@ -343,6 +416,38 @@ pub mod fake {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn broken_characters_become_replacement_characters() {
+        let body = br#"{"a":"x\ud83dy","b":"\ud83d\ude00","c":"\\ud83d","d":"\udc00","e":"\ud83d\u0041"}"#;
+        assert!(serde_json::from_slice::<serde_json::Value>(body).is_err());
+        let v: serde_json::Value = decode_json(body).unwrap();
+        assert_eq!(v["a"], "x\u{fffd}y");
+        assert_eq!(v["b"], "\u{1f600}");
+        assert_eq!(v["c"], "\\ud83d");
+        assert_eq!(v["d"], "\u{fffd}");
+        assert_eq!(v["e"], "\u{fffd}A");
+        let latin1 = b"{\"a\":\"Beyonc\xe9\"}";
+        assert!(serde_json::from_slice::<serde_json::Value>(latin1).is_err());
+        let v: serde_json::Value = decode_json(latin1).unwrap();
+        assert_eq!(v["a"], "Beyonc\u{fffd}");
+    }
+
+    #[test]
+    fn a_raw_control_character_in_a_tag_is_kept() {
+        let body = b"{\"a\":\"one\ttwo\",\"b\":[1,\n2]}";
+        assert!(serde_json::from_slice::<serde_json::Value>(body).is_err());
+        let v: serde_json::Value = decode_json(body).unwrap();
+        assert_eq!(v["a"], "one\ttwo");
+        assert_eq!(v["b"], serde_json::json!([1, 2]));
+    }
+
+    #[test]
+    fn a_reply_that_is_not_json_still_fails() {
+        assert!(decode_json::<serde_json::Value>(b"<html>").is_err());
+        assert!(decode_json::<serde_json::Value>(b"{\"a\":\"\xe9").is_err());
+        assert!(decode_json::<serde_json::Value>(b"{\"a\":\"\\").is_err());
+    }
 
     #[tokio::test]
     async fn keys_never_follow_a_redirect_to_another_host() {

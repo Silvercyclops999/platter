@@ -862,3 +862,20 @@ async fn the_same_album_on_plex_and_jellyfin_is_one_card() {
     // Jellyfin's favourite arrived as a like on its own copy.
     assert_eq!(n(&format!("SELECT count(*) FROM tracks WHERE id = '{}:t1' AND user_rating >= 10", tag())), 1);
 }
+
+/// A song tagged with a broken character (half of an emoji) loads with a
+/// replacement mark instead of failing the whole list.
+#[tokio::test]
+async fn a_tag_with_a_broken_character_does_not_stop_the_list() {
+    let s = MockServer::start().await;
+    let body = br#"{"Items":[{"Id":"s1","Name":"Fire \ud83c"},{"Id":"s2","Name":"Fine"}],"TotalRecordCount":2}"#;
+    Mock::given(method("GET"))
+        .and(path("/Items"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(body.to_vec(), "application/json"))
+        .mount(&s)
+        .await;
+    let client = JellyfinClient::new(super::client::http(), &s.uri(), identity()).unwrap().signed_in(Token::new(TOKEN).unwrap(), "u1");
+    let v: serde_json::Value = client.get_json("/Items", &[]).await.unwrap();
+    assert_eq!(v["Items"][0]["Name"], "Fire \u{fffd}");
+    assert_eq!(v["Items"][1]["Name"], "Fine");
+}
