@@ -1014,3 +1014,32 @@ async fn a_song_opened_ahead_still_joins_gaplessly() {
     want.extend(decode_all(&b, "wav").0);
     assert_same(&settled_samples(&r.cap, want.len()).await, &want);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_seek_that_reopens_the_song_converts_for_the_copy_it_reopened() {
+    let dir = tempfile::tempdir().unwrap();
+    // A downloaded copy one second long, at the output's rate: a seek past
+    // its end fails, and by then the download is gone, so the song opens
+    // again from the server, whose copy is at another rate and in mono.
+    let file = dir.path().join("a.wav");
+    std::fs::write(&file, wav_tone(RATE, 2, RATE as usize, 440.0, 0.5)).unwrap();
+    let local = super::source::LocalFiles(Arc::new(Downloaded([("a".to_string(), file.clone())].into_iter().collect())));
+    let mut r = rig_local(RATE, cfg(), None, Some(local), false).await;
+    let other = 22_050u32;
+    r.server.add("/t/a", Route { body: wav_tone(other, 1, other as usize * 6, 440.0, 0.5), ..Default::default() });
+    let mut tr = t("a");
+    tr.duration_ms = 6_000;
+    r.engine.load(tr, "ia".into(), 0, false).unwrap();
+    wait_buffered(&r.engine, 500).await;
+    std::fs::remove_file(&file).unwrap();
+    r.cap.clear();
+    assert!(r.engine.seek(4_000));
+    r.engine.play().unwrap();
+    let ev = collect_until(&mut r.events, is_drained, Duration::from_secs(10)).await;
+    assert!(!ev.iter().any(|e| matches!(e, EngineEvent::Ended { early: Some(_), .. })), "{ev:?}");
+    assert!(r.server.state.requests.load(Ordering::SeqCst) >= 1, "opened again from the server");
+    // Two seconds at the output's rate, give or take the resampler's edges.
+    let got = r.cap.len_frames(2) as f64;
+    let want = 2.0 * RATE as f64;
+    assert!((got - want).abs() < want * 0.05, "{got} frames, want about {want}");
+}
