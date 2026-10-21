@@ -32,7 +32,8 @@ export const SHORTCUTS: ShortcutDef[] = [
   { id: "help", section: "basic", label: "Show keyboard shortcuts", keys: ["Mod", "/"] },
   { id: "palette", section: "basic", label: "Quick search and commands", keys: ["Mod", "K"] },
   { id: "createPlaylist", section: "basic", label: "Create playlist", keys: ["Alt", "Shift", "P"] },
-  { id: "filterLibrary", section: "basic", label: "Filter Your Library", keys: ["Mod", "F"] },
+  { id: "createSmartPlaylist", section: "basic", label: "Create smart playlist", keys: ["Alt", "Shift", "O"] },
+  { id: "filterLibrary", section: "basic", label: "Find in this list, or filter Your Library", keys: ["Mod", "F"] },
   { id: "selectAll", section: "basic", label: "Select all songs in a list", keys: ["Mod", "A"] },
   { id: "menu", section: "basic", label: "Open the menu for the focused item", keys: ["Shift", "F10"] },
   { id: "playFocused", section: "basic", label: "Play the focused song", keys: ["Enter"] },
@@ -63,6 +64,7 @@ export const SHORTCUTS: ShortcutDef[] = [
   { id: "queue", section: "navigation", label: "Queue", keys: ["Alt", "Shift", "Q"] },
   { id: "nowPlaying", section: "navigation", label: "Now playing view", keys: ["Alt", "Shift", "N"] },
   { id: "devices", section: "navigation", label: "Connect to a device", keys: ["Alt", "Shift", "D"] },
+  { id: "goToPlaying", section: "navigation", label: "Go to the playing song", keys: ["Mod", "Shift", "J"] },
   { id: "settings", section: "navigation", label: "Settings", keys: ["Mod", ","] },
   // Layout
   { id: "toggleSidebar", section: "layout", label: "Collapse or expand Your Library", keys: ["Alt", "Shift", "L"] },

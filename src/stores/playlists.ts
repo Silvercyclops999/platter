@@ -54,6 +54,25 @@ export const usePlaylistUi = create<PlaylistUi>()((set) => ({
 const UNDO_MS = 8000;
 
 
+/** The playlist last picked in "Add to playlist", kept on this device. */
+const LAST_KEY = "platter.lastPlaylist.v1"; // gitleaks:allow (localStorage key name, not a secret)
+
+export function lastPlaylistId(): string | null {
+  try {
+    return localStorage.getItem(LAST_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function rememberLastPlaylist(id: string) {
+  try {
+    localStorage.setItem(LAST_KEY, id);
+  } catch {
+    // Storage refused (a private window): the menu just doesn't offer it.
+  }
+}
+
 const songs = (n: number) => (n === 1 ? "1 song" : `${n} songs`);
 
 /**
@@ -80,6 +99,7 @@ export async function createPlaylist(opts: { trackIds?: string[]; title?: string
 /** Add songs at the end. Asks first when some are already there (Settings). */
 export async function addToPlaylist(playlist: Playlist, trackIds: string[]): Promise<void> {
   if (!trackIds.length) return;
+  rememberLastPlaylist(playlist.id);
   // Someone else's playlist: the songs go to its owner.
   if (isShared(playlist.id)) {
     await addToShared(playlist, trackIds);

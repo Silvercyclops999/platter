@@ -171,7 +171,7 @@ pub const MENUS: &[MenuDef] = &[
             Entry::Native(Native::SelectAll),
             Entry::Separator,
             ui("menu-search", "Search", Some("Cmd+L"), "search"),
-            ui("menu-filter-library", "Filter Your Library", Some("Cmd+F"), "filterLibrary"),
+            ui("menu-filter-library", "Find", Some("Cmd+F"), "filterLibrary"),
         ],
     },
     MenuDef {

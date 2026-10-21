@@ -1,4 +1,4 @@
-import { CircleHelp, CornerDownLeft, Disc3, History, House, Keyboard, LibraryBig, ListMusic, Music, Repeat, Search, Settings, Shuffle, User, Volume1, Volume2 } from "lucide-react";
+import { AudioWaveform, CircleHelp, CornerDownLeft, Disc3, History, House, Keyboard, LibraryBig, ListMusic, Music, Repeat, Search, Settings, Shuffle, Sparkles, User, Volume1, Volume2 } from "lucide-react";
 import { help } from "../stores/help";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Dialog } from "../components/Dialog";
@@ -13,6 +13,8 @@ import { nav } from "../stores/router";
 import { useUi } from "../stores/ui";
 import { shortcutLabel } from "./shortcuts";
 import { VOLUME_KEY_STEP } from "./useShortcuts";
+import { goToPlaying } from "./goToPlaying";
+import { newSmartPlaylist } from "../stores/curate";
 
 interface Cmd {
   id: string;
@@ -30,6 +32,8 @@ const NAV_COMMANDS: Cmd[] = [
   { id: "go-artists", label: "Library: Artists", icon: <LibraryBig size={16} />, group: "Navigation", run: () => nav.go({ name: "library", tab: "artists" }) },
   { id: "go-playlists", label: "Library: Playlists", icon: <LibraryBig size={16} />, group: "Navigation", run: () => nav.go({ name: "library", tab: "playlists" }) },
   { id: "go-recents", label: "Go to Recents", icon: <History size={16} />, group: "Navigation", run: () => nav.go({ name: "recents" }) },
+  { id: "go-playing", label: "Go to the playing song", hint: shortcutLabel("goToPlaying"), icon: <AudioWaveform size={16} />, group: "Navigation", run: goToPlaying },
+  { id: "new-smart-playlist", label: "New smart playlist", hint: shortcutLabel("createSmartPlaylist"), icon: <Sparkles size={16} />, group: "Navigation", run: () => newSmartPlaylist() },
   { id: "go-settings", label: "Open settings", hint: `${modKey}+,`, icon: <Settings size={16} />, group: "Navigation", run: () => nav.go({ name: "settings" }) },
   { id: "go-back", label: "Go back", hint: shortcutLabel("back"), icon: <CornerDownLeft size={16} />, group: "Navigation", run: () => nav.back() },
   { id: "shortcuts", label: "Keyboard shortcuts", hint: shortcutLabel("help"), icon: <Keyboard size={16} />, group: "Navigation", run: () => useUi.getState().setShortcutsOpen(true) },

@@ -213,3 +213,9 @@
 }
 button.pl-gap__btn:hover { color: var(--color-text-primary); background: var(--color-state-hover); }
 .pl-gap--no .pl-gap__btn { font-style: italic; cursor: default; }
+
+/* Find in this playlist. */
+.pl-find__none { padding: var(--space-4) var(--space-2); color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+/* The finder sits beside the sort, at the end of the action row. */
+.pl-find { margin-left: auto; }
+.pl-find ~ .pl-sort { margin-left: 0; }

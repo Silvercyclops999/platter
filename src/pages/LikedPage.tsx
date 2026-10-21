@@ -1,6 +1,6 @@
 import { observeElementRect, useVirtualizer, type Virtualizer } from "@tanstack/react-virtual";
 import { ArrowDownUp, Heart, List, Pause, Play, Rows3, Search, X } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { Button, IconButton } from "../components/Button";
 import { ContextShuffleButton } from "../components/ShuffleButton";
 import { openContextMenu } from "../components/ContextMenu";
@@ -35,6 +35,7 @@ import {
   type LikedView,
 } from "./liked";
 import "./liked.css";
+import { usePageFind, usePageReveal } from "../shell/pageFind";
 import { FacetChips, FacetsEmpty, facetSongs, songFacts, useAlbumFacts, useFacets } from "../shell/FacetChips";
 import { NO_CHIPS, chipOptions, chipsOn } from "../lib/libraryChips";
 import { useLibraryView } from "../stores/library";
@@ -174,7 +175,20 @@ export function LikedPage() {
       el,
     );
 
-  const openFind = () => setFindOpen(true);
+  const openFind = useCallback(() => {
+    setFindOpen(true);
+    findRef.current?.focus();
+  }, []);
+  usePageFind(empty ? null : openFind);
+  // Back to the playing song: the table scrolls to it, or the finder and
+  // chip that hide it are cleared.
+  const tableReveal = useRef<((trackId: string) => boolean) | null>(null);
+  const reveal = useCallback((trackId: string) => {
+    if (tableReveal.current?.(trackId)) return;
+    setQuery("");
+    setChip(null);
+  }, []);
+  usePageReveal(reveal);
 
   if (error && !data) return <LoadError what="Liked Songs" error={error} onRetry={retry} />;
 
@@ -304,6 +318,7 @@ export function LikedPage() {
             liked={liked}
             entering={entering}
             onPlay={(t) => playFrom(t.id)}
+            revealRef={tableReveal}
           />
         )}
       </div>
@@ -321,6 +336,7 @@ function LikedTable({
   liked,
   entering,
   onPlay,
+  revealRef,
 }: {
   rows: Track[];
   loading: boolean;
@@ -330,6 +346,7 @@ function LikedTable({
   liked: ReadonlySet<string>;
   entering: ReadonlySet<string>;
   onPlay: (t: Track) => void;
+  revealRef?: MutableRefObject<((trackId: string) => boolean) | null>;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
@@ -365,6 +382,18 @@ function LikedTable({
   // The whole list for select-all, ranges, Home / End and type-ahead.
   const model = useMemo(() => ({ keys: rows.map((t) => t.id), tracks: rows }), [rows]);
   const scrollToIndex = useCallback((i: number) => v.scrollToIndex(i, { align: "auto" }), [v]);
+  useEffect(() => {
+    if (!revealRef) return;
+    revealRef.current = (trackId) => {
+      const i = rows.findIndex((t) => t.id === trackId);
+      if (i < 0) return false;
+      v.scrollToIndex(i, { align: "center" });
+      return true;
+    };
+    return () => {
+      revealRef.current = null;
+    };
+  }, [revealRef, rows, v]);
 
   return (
     <div ref={root} className={`liked__list liked__list--${view}`}>

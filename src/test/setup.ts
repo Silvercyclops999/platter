@@ -13,6 +13,8 @@ afterEach(() => {
   vi.useRealTimers();
   // No test starts with another one's toasts.
   useToasts.setState({ toasts: [] });
+  // Nor with the playlist another test last added to ("Add to <it>" in menus).
+  localStorage.removeItem("platter.lastPlaylist.v1");
 });
 
 // findBy* and waitFor give up after 10 s. Tests wait for a condition, never

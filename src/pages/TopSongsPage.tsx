@@ -8,7 +8,7 @@
  * library until it's saved.
  */
 import { Ellipsis, ListPlus, Pause, Play, Search, Sparkles } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
 import { DownloadButton } from "../components/DownloadButton";
@@ -29,6 +29,7 @@ import { useContextState } from "./cards";
 import { usePageBar } from "./detail";
 import { toneStyle, YearBanner } from "./TopSongsTile";
 import "./liked.css";
+import { usePageFind } from "../shell/pageFind";
 import "./top-songs.css";
 import { LoadError } from "../components/LoadError";
 import { failText } from "../lib/errorText";
@@ -108,6 +109,11 @@ export function TopSongsPage({ year }: { year: number | null }) {
   const play = (start?: string) => player.playMix(key, ids, start);
   const toggle = () => (isContext ? player.toggle() : play());
   usePageBar(list ? title : undefined, isContext && playing, toggle);
+  const openFind = useCallback(() => {
+    setFindOpen(true);
+    findRef.current?.focus();
+  }, []);
+  usePageFind(on && list ? openFind : null);
 
   if (!on)
     return (

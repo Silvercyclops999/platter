@@ -2,7 +2,7 @@
 import type { MouseEvent } from "react";
 import { Card } from "../components/Card";
 import { openContextMenu } from "../components/ContextMenu";
-import { addToPlaylistItem, albumSongs, playlistEditItems } from "../components/PlaylistPicker";
+import { addToPlaylistItems, albumSongs, playlistEditItems } from "../components/PlaylistPicker";
 import { shareItem } from "../components/ShareMenu";
 import { plexEditItem } from "../components/PlexEditMenu";
 import { tagAlbumItems, tagArtistItem } from "../components/TagEditMenu";
@@ -57,7 +57,7 @@ export function useAlbumActions(album: Album): ItemActions & { openMenu: (at: { 
       [
         { label: playing ? "Pause" : "Play", onSelect: play },
         { label: "Add to queue", onSelect: () => player.queueAlbum(album.id) },
-        addToPlaylistItem(albumSongs(album.id)),
+        ...addToPlaylistItems(albumSongs(album.id)),
         { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: album.artistId }) },
         { label: "Go to artist radio", onSelect: () => nav.go({ name: "radio", seed: `artist:${album.artistId}` }) },
         moveToSectionItem(album),

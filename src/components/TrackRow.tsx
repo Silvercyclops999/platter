@@ -36,7 +36,7 @@ import { ArchiveQualityBadge, archiveQualityLabel, badgeVersion, ExplicitBadge, 
 import { useTrackBadges } from "../stores/fileTags";
 import { openContextMenu } from "./ContextMenu";
 import { tagTrackItem } from "./TagEditMenu";
-import { addToPlaylistItem } from "./PlaylistPicker";
+import { addToPlaylistItems } from "./PlaylistPicker";
 import { isTypeAheadKey, linkStep, rowStep, typeAhead, typeAheadIndex } from "./listKeys";
 import { SaveButton } from "./SaveButton";
 import { DownloadedMark } from "./DownloadButton";
@@ -94,7 +94,7 @@ export function trackMenuItems(
 ): MenuItem[] {
   return [
     ...(extra.before ?? []),
-    addToPlaylistItem(() => [track.id]),
+    ...addToPlaylistItems(() => [track.id]),
     likeItem(() => [track]),
     ...(extra.afterPlaylist ?? []),
     { label: "Add to queue", onSelect: () => void player.addToQueue([track]) },
@@ -143,7 +143,7 @@ export function multiTrackMenuItems(trackIds: string[], tracks: Track[] = []): M
   return [
     { label: "Add to queue", onSelect: () => void player.addToQueue(queueable(trackIds, tracks)) },
     ...(tracks.length ? [likeItem(() => tracks)] : []),
-    addToPlaylistItem(() => trackIds),
+    ...addToPlaylistItems(() => trackIds),
   ];
 }
 

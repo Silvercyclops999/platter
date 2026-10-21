@@ -848,6 +848,15 @@
 .track-row__note + .track-row__note::before { content: "·"; margin-right: var(--space-2); }
 .track-row.is-unavailable { opacity: 0.4; }
 .track-row:focus-visible { background: var(--color-state-selected); outline-offset: -2px; }
+/* Back to the playing song: the row it lands on pulses once. */
+.track-row--found { animation: track-row-found 1.2s ease-out; }
+@keyframes track-row-found {
+  0%, 30% { background: var(--color-state-selected); }
+  100% { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .track-row--found { animation: none; background: var(--color-state-selected); }
+}
 .track-row.is-active .track-row__title { color: var(--color-playing); }
 .track-row__num {
   position: relative;
