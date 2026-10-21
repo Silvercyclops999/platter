@@ -632,17 +632,20 @@ fn home_item(h: HomeItem) -> CarItem {
     }
 }
 
+/// After a like that didn't go through, whether the heart goes back: not
+/// when another song is showing or the heart was tapped again since.
+pub fn like_goes_back(shown_track: Option<&str>, shown_liked: bool, track: &str, tried: bool) -> bool {
+    shown_track == Some(track) && shown_liked == tried
+}
+
 /// An opened album, playlist, mix or Liked songs: Play and Shuffle first,
 /// then each song, which plays it from there.
 fn songs_list(c: &Connection, kind: ContextKind, id: &str, liked_min: f64) -> AppResult<Vec<CarItem>> {
     let tracks = match kind {
         ContextKind::Album => queries::album_tracks(c, id)?,
-        ContextKind::Playlist => {
-            let ids: Vec<String> = crate::db::playlists::items(c, id)?.into_iter().map(|i| i.track_id).collect();
-            let found: std::collections::HashMap<String, crate::model::Track> =
-                queries::tracks_by_ids(c, &ids)?.into_iter().map(|t| (t.id.clone(), t)).collect();
-            ids.iter().filter_map(|t| found.get(t).cloned()).collect()
-        }
+        // The list the player plays, so a row's place is the song's place
+        // there (and a playlist made here opens by the id it had).
+        ContextKind::Playlist => queries::playlist_page(c, id)?.tracks,
         ContextKind::Mix => crate::mixes::store::tracks(c, id)?.0,
         ContextKind::Liked => crate::db::likes::liked_tracks(c, liked_min)?,
         ContextKind::Artist | ContextKind::Tracks | ContextKind::Search | ContextKind::Radio => Vec::new(),
