@@ -60,8 +60,10 @@ export function useLidarrReady(): boolean {
   const [ready, setReady] = useState(false);
   const [version, setVersion] = useState(0);
   useEffect(() => {
-    const un = backend.listen("bridge://changed", () => setVersion((v) => v + 1));
-    return () => void un.then((f) => f());
+    // A Bridge paired, or Plex answering at last (who owns the server is known then).
+    const again = () => setVersion((v) => v + 1);
+    const offs = [backend.listen("bridge://changed", again), backend.listen("auth://changed", again)];
+    return () => offs.forEach((un) => void un.then((f) => f()));
   }, []);
   useEffect(() => {
     let alive = true;

@@ -260,3 +260,16 @@ describe("Library doctor", () => {
     expect(sync).toHaveBeenCalledWith(false);
   });
 });
+
+describe("an artist you don't have", () => {
+  it("shows Get albums once the server answers, after a first answer that came before it", async () => {
+    const real = mock.lidarrStatus.bind(mock);
+    // Plex still being looked for: not yet known to be the owner.
+    vi.spyOn(mock, "lidarrStatus").mockImplementationOnce(async () => ({ ...(await real()), ready: false, notOwner: true }));
+    render(<ArtistPage id={MockCatalogue.artistId(1)} catalogue />);
+    expect(await screen.findByText(/Set up Lidarr in Settings/, {}, SLOW)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Get albums" })).toBeNull();
+    act(() => mock.emit("auth://changed", { state: "signedIn", username: "listener", needsServerPick: false }));
+    expect(await screen.findByRole("button", { name: "Get albums" }, SLOW)).toBeInTheDocument();
+  });
+});
