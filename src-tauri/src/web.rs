@@ -197,8 +197,11 @@ pub const WEB_MAX: usize = 64 * 1024 * 1024;
 /// doesn't stop a whole library from loading.
 pub fn decode_json<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> serde_json::Result<T> {
     serde_json::from_slice(bytes).or_else(|e| {
-        let text = String::from_utf8_lossy(bytes);
-        let fixed = repair_strings(text.as_bytes());
+        // A reply that reads fine but has the wrong shape has nothing to repair.
+        if e.is_data() || e.is_io() {
+            return Err(e);
+        }
+        let fixed = repair_strings(String::from_utf8_lossy(bytes).as_bytes());
         if fixed == bytes { Err(e) } else { serde_json::from_slice(&fixed) }
     })
 }
@@ -443,10 +446,32 @@ mod tests {
     }
 
     #[test]
+    fn escaped_quotes_and_text_outside_strings_are_left_alone() {
+        let body = b"{\"a\":\"say \\\"hi\\\" \\ud83d\",\r\n\"b\":\"x\x00y\"}";
+        let v: serde_json::Value = decode_json(body).unwrap();
+        assert_eq!(v["a"], "say \"hi\" \u{fffd}");
+        assert_eq!(v["b"], "x\u{0}y");
+    }
+
+    #[test]
+    fn a_reply_with_the_wrong_shape_keeps_its_own_error() {
+        #[derive(Debug, serde::Deserialize)]
+        struct Needs {
+            #[allow(dead_code)]
+            id: u32,
+        }
+        let e = decode_json::<Needs>(b"{\"name\":\"Caf\xe9\"}").unwrap_err();
+        assert!(e.is_data(), "repaired, then missing its id: {e}");
+        let e = decode_json::<Needs>(b"{\"id\":\"x\"}").unwrap_err();
+        assert!(e.is_data(), "{e}");
+    }
+
+    #[test]
     fn a_reply_that_is_not_json_still_fails() {
         assert!(decode_json::<serde_json::Value>(b"<html>").is_err());
         assert!(decode_json::<serde_json::Value>(b"{\"a\":\"\xe9").is_err());
         assert!(decode_json::<serde_json::Value>(b"{\"a\":\"\\").is_err());
+        assert!(decode_json::<serde_json::Value>(b"{\"a\":\"\\u12").is_err());
     }
 
     #[tokio::test]

@@ -536,7 +536,7 @@ pub fn parse_lyrics(body: &[u8]) -> Option<Lyrics> {
     let text = crate::lyrics::encoding::decode(body);
     let trimmed = text.trim_start_matches('\u{feff}').trim_start();
     let lyrics = if trimmed.starts_with('{') {
-        serde_json::from_str::<Value>(trimmed)
+        super::client::decode_json::<Value>(trimmed.as_bytes())
             .ok()
             .and_then(|v| parse_lyrics_json(&v))?
     } else if trimmed.starts_with('<') {

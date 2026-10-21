@@ -514,6 +514,9 @@ async fn fetch_and_store_page(
     }
 }
 
+/// Most items named in the log for a broken character in one run (past that
+/// the log has made its point).
+const BROKEN_NOTED_MAX: usize = 1000;
 /// Items already named in the log for a broken character this run.
 static BROKEN_NOTED: std::sync::LazyLock<Mutex<HashSet<String>>> = std::sync::LazyLock::new(Default::default);
 
@@ -537,8 +540,11 @@ fn note_broken(kind: &str, id: &str, fields: &[(&str, &str)]) -> bool {
     let Some((field, text)) = fields.iter().find(|(_, t)| t.contains('\u{fffd}')) else {
         return false;
     };
-    if !BROKEN_NOTED.lock().insert(format!("{kind}:{id}")) {
-        return false;
+    {
+        let mut noted = BROKEN_NOTED.lock();
+        if noted.len() >= BROKEN_NOTED_MAX || !noted.insert(format!("{kind}:{id}")) {
+            return false;
+        }
     }
     tracing::warn!(kind, id, field, text, "a tag has a broken character; it shows as a replacement mark until the tag is fixed");
     true
