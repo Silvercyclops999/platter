@@ -24,7 +24,9 @@ pub struct Hints {
     /// A language code, or [`DETECT`].
     pub language: String,
     /// Words the model reads before the song (its title and artist), so
-    /// names come out spelled right. Empty for none.
+    /// names come out spelled right. It guides the first stretches of the
+    /// song most: the model's running context pushes it out after that.
+    /// Empty for none.
     #[serde(default)]
     pub prompt: String,
 }
@@ -46,7 +48,8 @@ impl Hints {
 /// "Title by Artist." from whatever is known. A version note after the
 /// title ("(Remastered 2011)", "- Live") is left off: it isn't sung.
 pub fn prompt_for(title: Option<&str>, artist: Option<&str>) -> String {
-    let clean = |s: Option<&str>| s.map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned);
+    // A NUL (a tag separator) can't go to the speech library.
+    let clean = |s: Option<&str>| s.map(|s| s.replace('\0', " ")).map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
     let title = title.map(str::trim).map(|t| &t[..[" (", " [", " - "].iter().filter_map(|m| t.find(m)).min().unwrap_or(t.len())]);
     match (clean(title), clean(artist)) {
         (Some(t), Some(a)) => format!("{t} by {a}."),
@@ -322,23 +325,34 @@ pub mod whisper {
         detected_language, segments_from_tokens, unavailable_here,
     };
 
-    /// How much of the song the language is heard from, from a third in
-    /// (past the intro, where the singing usually is).
+    /// The language is heard from this much of the song at a quarter, half
+    /// and three quarters of the way in, and the three listens vote (one
+    /// could land on a solo).
     const DETECT_MS: usize = 30_000;
 
     /// The language to transcribe `pcm` in: asked for, or heard.
-    fn language(state: &mut whisper_rs::WhisperState, pcm: &[f32], threads: usize, hints: &Hints) -> String {
+    fn language(state: &mut whisper_rs::WhisperState, pcm: &[f32], threads: usize, hints: &Hints, stop: &Stop) -> String {
         if hints.language != DETECT {
             return hints.language.clone();
         }
-        let rate = super::super::audio::RATE as usize;
-        let from = (pcm.len() / 3).min(pcm.len().saturating_sub(DETECT_MS / 1000 * rate));
-        let heard = state.pcm_to_mel(&pcm[from..], threads).ok().and_then(|_| state.lang_detect(0, threads).ok()).and_then(|(id, probs)| {
-            let code = whisper_rs::get_lang_str(id)?;
-            Some((code, probs.get(id as usize).copied().unwrap_or(0.0)))
-        });
+        let len = DETECT_MS / 1000 * super::super::audio::RATE as usize;
+        let mut total: Vec<f32> = Vec::new();
+        let mut listens = 0;
+        for at in [1, 2, 3] {
+            if stop.is_set() {
+                break;
+            }
+            let from = (pcm.len() * at / 4).min(pcm.len().saturating_sub(len));
+            let slice = &pcm[from..(from + len).min(pcm.len())];
+            let Ok((_, probs)) = state.pcm_to_mel(slice, threads).and_then(|_| state.lang_detect(0, threads)) else { continue };
+            total.resize(probs.len(), 0.0);
+            total.iter_mut().zip(&probs).for_each(|(t, p)| *t += p);
+            listens += 1;
+        }
+        let best = total.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).map(|(i, p)| (i, p / listens.max(1) as f32));
+        let heard = best.and_then(|(id, p)| Some((whisper_rs::get_lang_str(id as i32)?, p)));
         let code = detected_language(heard).to_owned();
-        tracing::info!(language = %code, sure = heard.map(|h| h.1), "language heard");
+        tracing::info!(language = %code, sure = heard.map(|h| h.1), listens, "language heard");
         code
     }
 
@@ -425,7 +439,7 @@ pub mod whisper {
             let (_, ctx) = slot.as_ref().expect("just loaded");
             let mut state = ctx.create_state().map_err(|e| RecognizeError::Failed(e.to_string()))?;
             progress(Step::Percent(0));
-            let language = language(&mut state, pcm, threads, hints);
+            let language = language(&mut state, pcm, threads, hints, &stop);
 
             // A window the model is unsure of is decoded again hotter; on
             // music that happens often, so it's capped at two more tries with
@@ -541,6 +555,7 @@ mod tests {
         assert_eq!(prompt_for(Some("Hey Jude (Remastered 2015)"), Some("The Beatles")), "Hey Jude by The Beatles.");
         assert_eq!(prompt_for(Some("Song - Live [Bonus]"), None), "Song.");
         assert_eq!(prompt_for(Some("(You Gotta) Fight"), None), "(You Gotta) Fight.", "a title starting with brackets stays");
+        assert_eq!(prompt_for(Some("Song"), Some("A\0B")), "Song by A B.", "no NUL reaches the library");
     }
 
     #[test]

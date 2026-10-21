@@ -1586,7 +1586,10 @@ impl Transcriber {
         let seconds = pcm.len() / audio::RATE as usize;
         let hints = {
             let id = id.clone();
-            let song = d.db.read_async(move |c| store::title_artist(c, &id)).await.ok().flatten();
+            let song = d.db.read_async(move |c| store::title_artist(c, &id)).await.unwrap_or_else(|e| {
+                tracing::warn!("the song's title wasn't readable for the transcription: {e}");
+                None
+            });
             engine::Hints::for_song(kind, song.as_ref().map(|s| s.0.as_str()), song.as_ref().and_then(|s| s.1.as_deref()))
         };
         let res = {

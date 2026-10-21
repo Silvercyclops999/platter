@@ -553,6 +553,36 @@ async fn a_song_is_transcribed_and_opens_in_the_editor() {
 }
 
 #[tokio::test]
+async fn the_model_hears_the_title_and_unsure_lines_are_left_out() {
+    let f = fx();
+    install(&f).await;
+    let mut guess = words("banana river", 3000);
+    guess.sure = Some(0.1);
+    let mut sung = words("hello there friend", 1000);
+    sung.sure = Some(0.9);
+    *f.rec.behaviour.lock() = Behaviour::Words(vec![sung, guess, words("second line", 5000)]);
+    f.t.transcribe_track("801").unwrap();
+    until(&f.t, "done", |s| idle(s) && !f.events.done.lock().is_empty()).await;
+    assert_eq!(*f.rec.last_hints.lock(), Some(Hints { language: "en".into(), prompt: "Tape One by Test Artist.".into() }));
+    let own = f.db.read(|c| user::get(c, "801")).unwrap().unwrap();
+    assert!(own.text.contains("Hello") && own.text.contains("Second"), "{}", own.text);
+    assert!(!own.text.contains("Banana"), "the unsure line is left out: {}", own.text);
+}
+
+#[tokio::test]
+async fn a_mostly_unsure_song_is_saved_with_nothing_found() {
+    let f = fx();
+    install(&f).await;
+    let mut guess = words("la la la la", 1000);
+    guess.sure = Some(0.2);
+    *f.rec.behaviour.lock() = Behaviour::Words(vec![guess, words("hey", 5000)]);
+    f.t.transcribe_track("801").unwrap();
+    until(&f.t, "done", |s| idle(s) && !f.events.done.lock().is_empty()).await;
+    assert_eq!(*f.events.done.lock(), vec![("801".to_string(), false)]);
+    assert!(f.db.read(|c| user::get(c, "801")).unwrap().is_none(), "no wrong lyrics shown");
+}
+
+#[tokio::test]
 async fn no_words_found_is_remembered() {
     let f = fx();
     install(&f).await;

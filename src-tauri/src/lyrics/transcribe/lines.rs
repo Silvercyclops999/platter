@@ -60,7 +60,11 @@ const STOCK_PHRASES: [&str; 6] = [
 
 /// A segment the recognizer was less sure of than this is left out: over
 /// music, made-up lines come out around 0.2 to 0.4, sung ones well above.
-pub const UNSURE: f32 = 0.4;
+/// Set low on purpose until the measured songs say otherwise.
+pub const UNSURE: f32 = 0.35;
+/// The prompt can only be read back while it's in the model's context:
+/// near the start.
+const ECHO_BEFORE_MS: u32 = 60_000;
 /// When more than this share of the words is unsure, the song gets no
 /// lyrics rather than the few lines left.
 const MOSTLY_UNSURE: f32 = 0.6;
@@ -173,20 +177,22 @@ fn tidy_line(mut words: Vec<Word>) -> Vec<Word> {
 }
 
 /// The segments worth showing: unsure ones and the prompt read back (the
-/// title and artist the model was given, written out over music) are left
-/// out, and a song that's mostly unsure gets none at all.
+/// title and artist the model was given, written out over music near the
+/// start) are left out, and a song that's mostly unsure gets none at all.
+/// A prompt that's only the title is never taken for an echo: the title
+/// is often sung.
 pub fn keep_sure(segments: Vec<Segment>, prompt: &str) -> Vec<Segment> {
-    let prompt = fold(prompt);
+    let prompt = if prompt.contains(" by ") { fold(prompt) } else { String::new() };
     let echo = |seg: &Segment| {
         let all: String = seg.words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ");
-        !prompt.is_empty() && fold(&all) == prompt
+        !prompt.is_empty() && seg.words.first().is_some_and(|w| w.start_ms < ECHO_BEFORE_MS) && fold(&all) == prompt
     };
     let total: usize = segments.iter().map(|s| s.words.len()).sum();
     let (kept, dropped): (Vec<Segment>, Vec<Segment>) =
         segments.into_iter().partition(|s| s.sure.is_none_or(|p| p >= UNSURE) && !echo(s));
     let unsure: usize = dropped.iter().map(|s| s.words.len()).sum();
     if total > 0 && unsure as f32 / total as f32 > MOSTLY_UNSURE {
-        tracing::info!(words = total, unsure, "transcription mostly unsure: no lyrics");
+        tracing::warn!(words = total, unsure, "transcription mostly unsure: no lyrics");
         return Vec::new();
     }
     if unsure > 0 {
@@ -426,6 +432,13 @@ mod tests {
     }
 
     #[test]
+    fn the_line_between_sure_and_unsure() {
+        let kept = keep_sure(vec![sure(UNSURE, &[" a", " b", " c"]), sure(UNSURE - 0.01, &[" d"]), sure(0.9, &[" e"])], "");
+        assert_eq!(kept.len(), 2, "exactly the threshold stays");
+        assert_eq!(kept[0].words[0].text, " a");
+    }
+
+    #[test]
     fn a_mostly_unsure_song_gets_no_lyrics() {
         let segs = vec![sure(0.9, &[" Hey"]), sure(0.3, &[" la", " la", " la"]), sure(0.1, &[" na", " na"])];
         assert!(keep_sure(segs, "").is_empty());
@@ -433,9 +446,20 @@ mod tests {
 
     #[test]
     fn the_title_read_back_is_left_out() {
-        let segs = vec![sure(0.95, &[" Golden", " Hour", " by", " Kacey."]), sure(0.9, &[" Golden", " hour", " shining"])];
-        let kept = keep_sure(segs, "Golden Hour by Kacey.");
+        let echo = || sure(0.95, &[" Golden", " Hour", " by", " Kacey."]);
+        let line = || sure(0.9, &[" Golden", " hour", " shining", " on", " me", " now", " baby", " yeah"]);
+        let kept = keep_sure(vec![echo(), line()], "Golden Hour by Kacey.");
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].words[2].text, " shining", "a sung line with the title stays");
+        let mut late = echo();
+        late.words.iter_mut().for_each(|w| w.start_ms += ECHO_BEFORE_MS);
+        assert_eq!(keep_sure(vec![late, line()], "Golden Hour by Kacey.").len(), 2, "only near the start");
+    }
+
+    #[test]
+    fn a_title_alone_is_never_an_echo() {
+        // A compilation song: no artist in the prompt, and the chorus is the title.
+        let kept = keep_sure(vec![sure(0.9, &[" Yesterday."]), sure(0.9, &[" All", " my", " troubles"])], "Yesterday.");
+        assert_eq!(kept.len(), 2);
     }
 }
