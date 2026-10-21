@@ -138,7 +138,8 @@ describe("one-click Get", () => {
     expect(get).not.toHaveBeenCalled();
   });
 
-  it("is on album rows in search, and Get the album on song rows", async () => {
+  it("is on album rows in search, and Get the album on song rows when a tap doesn't get the song", async () => {
+    await setUp({ lidarrTapToGet: false });
     render(<SearchPage query="low tide" />);
     expect(await screen.findByRole("button", { name: "Get Low Tide Radio" }, SLOW)).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: /^Get the album, Low Tide Radio/ }, SLOW)).toBeInTheDocument();

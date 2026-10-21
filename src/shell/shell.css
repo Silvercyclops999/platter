@@ -834,7 +834,7 @@
 .getting-line__close:hover { background: var(--color-state-hover); }
 @keyframes getting-breathe { 50% { opacity: 0.6; } }
 @media (prefers-reduced-motion: reduce) {
-  .getting-line__fill { transition: none; animation: none !important; }
+  .getting-line__fill { animation: none !important; }
 }
 .player-bar__extras { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-1); min-width: 0; }
 .private-pill {
