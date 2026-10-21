@@ -2,12 +2,12 @@ import { Ellipsis, Pause, Play, SlidersHorizontal } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button, IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
-import { FIELDS, rangeWords } from "../components/SmartPlaylistEditor";
+import { FIELDS, fieldKind, rangeWords } from "../components/SmartPlaylistEditor";
 import { Skeleton } from "../components/Skeleton";
 import { TrackList, TrackRow, TrackRowSkeleton, trackMenuItems } from "../components/TrackRow";
 import { backend } from "../lib/backend";
 import { formatLongDuration, plural } from "../lib/format";
-import type { SmartPage, SmartRules } from "../lib/types";
+import type { SmartPage, SmartRule, SmartRules } from "../lib/types";
 import { useLoad } from "../lib/useLoad";
 import { bookmarkPageItem, deleteSmartPlaylist, editSmartPlaylist } from "../stores/curate";
 import { player, usePlayer } from "../stores/player";
@@ -19,6 +19,8 @@ const OP_WORDS: Record<string, string> = {
   isNot: "is not",
   contains: "contains",
   notContains: "doesn't contain",
+  beginsWith: "begins with",
+  endsWith: "ends with",
   gt: "over",
   lt: "under",
   inLast: "in the last",
@@ -37,12 +39,25 @@ export function spanWords(v: string): string {
 
 /** "Genre is Rock, and Plays over 3". */
 export function rulesLine(r: SmartRules): string {
-  if (!r.rules.length) return "Every song in your library";
-  const parts = r.rules.map((x) => {
+  const groups = r.groups ?? [];
+  if (!r.rules.length && !groups.length) return "Every song in your library";
+  const words = (x: SmartRule) => {
     const label = FIELDS.find((f) => f.value === x.field)?.label ?? x.field;
-    const value = x.value === "true" ? "yes" : x.value === "false" ? "no" : x.op === "between" ? rangeWords(x.value) : x.op === "inLast" || x.op === "notInLast" ? spanWords(x.value) : x.value;
+    const value =
+      x.value === "true"
+        ? "yes"
+        : x.value === "false"
+          ? "no"
+          : x.op === "between" && fieldKind(x.field) === "number"
+            ? x.value.split("..").join(" and ")
+            : x.op === "between"
+              ? rangeWords(x.value)
+              : x.op === "inLast" || x.op === "notInLast"
+                ? spanWords(x.value)
+                : x.value;
     return `${label} ${OP_WORDS[x.op] ?? x.op} ${value}`;
-  });
+  };
+  const parts = [...r.rules.map(words), ...groups.map((g) => (g.rules.length === 1 ? words(g.rules[0]) : `(${g.rules.map(words).join(g.matchAll ? " and " : " or ")})`))];
   return parts.join(r.matchAll ? ", and " : ", or ");
 }
 

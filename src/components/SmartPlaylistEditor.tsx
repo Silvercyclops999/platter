@@ -1,14 +1,15 @@
 /**
  * The smart playlist editor, mounted once in the shell: match all or any of
- * a list of rules, a limit, a sort and an update schedule, with a live count
- * of the songs the rules find. With an AI provider set, a prompted playlist
+ * a list of rules and groups of rules (each group its own all or any), a
+ * limit, a sort and an update schedule, with a live count of the songs the
+ * rules find. With an AI provider set, a prompted playlist
  * starts from a description that fills the rules and picks songs.
  */
-import { MessageSquareText, Plus, Sparkles, X } from "lucide-react";
+import { ListPlus, MessageSquareText, Plus, Sparkles, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { backend } from "../lib/backend";
 import { formatDuration } from "../lib/format";
-import type { AppError, Described, SmartField, SmartOp, SmartPreview, SmartRule, SmartRules, SmartSort, SmartUpdate } from "../lib/types";
+import type { AppError, Described, SmartField, SmartOp, SmartPreview, SmartRule, SmartRuleGroup, SmartRules, SmartSort, SmartUpdate } from "../lib/types";
 import { hasCap } from "../stores/caps";
 import { closeSmartEditor, isPlatterSmart, useCurate, type SmartEditorState } from "../stores/curate";
 import { nav } from "../stores/router";
@@ -20,14 +21,16 @@ import { Dialog } from "./Dialog";
 import { Select, type SelectOption } from "./Select";
 import "./smart-editor.css";
 
-type Kind = "tag" | "text" | "number" | "decade" | "date" | "bool" | "choice";
+type Kind = "tag" | "text" | "number" | "decade" | "date" | "bool" | "choice" | "list";
 
 export const FIELDS: { value: SmartField; label: string; kind: Kind; hint?: string }[] = [
   { value: "genre", label: "Genre", kind: "tag", hint: "Rock" },
   { value: "style", label: "Style", kind: "tag", hint: "Shoegaze" },
   { value: "mood", label: "Mood", kind: "tag", hint: "Mellow" },
+  { value: "title", label: "Title", kind: "text" },
   { value: "artist", label: "Artist", kind: "text" },
   { value: "album", label: "Album", kind: "text" },
+  { value: "trackNumber", label: "Track number", kind: "number", hint: "1" },
   { value: "year", label: "Year", kind: "number", hint: "1999" },
   { value: "decade", label: "Decade", kind: "decade" },
   { value: "addedAt", label: "Added", kind: "date" },
@@ -43,8 +46,12 @@ export const FIELDS: { value: SmartField; label: string; kind: Kind; hint?: stri
   { value: "era", label: "Era", kind: "text" },
   { value: "played", label: "Played", kind: "date" },
   { value: "skips", label: "Skips", kind: "number", hint: "0" },
+  { value: "lastSkipped", label: "Last skipped", kind: "date" },
+  { value: "playlist", label: "Playlist", kind: "list" },
   { value: "unreleased", label: "Unreleased", kind: "bool" },
   { value: "lossless", label: "Lossless", kind: "bool" },
+  { value: "sampleRate", label: "Sample rate (kHz)", kind: "number", hint: "96" },
+  { value: "bitDepth", label: "Bit depth", kind: "number", hint: "24" },
   { value: "finished", label: "Album finished", kind: "bool" },
 ];
 
@@ -58,12 +65,15 @@ const OPS: Record<Kind, { value: SmartOp; label: string }[]> = {
     { value: "isNot", label: "is not" },
     { value: "contains", label: "contains" },
     { value: "notContains", label: "doesn't contain" },
+    { value: "beginsWith", label: "begins with" },
+    { value: "endsWith", label: "ends with" },
   ],
   number: [
     { value: "is", label: "is" },
     { value: "isNot", label: "is not" },
     { value: "gt", label: "is more than" },
     { value: "lt", label: "is less than" },
+    { value: "between", label: "is between" },
   ],
   decade: [
     { value: "is", label: "is" },
@@ -78,6 +88,10 @@ const OPS: Record<Kind, { value: SmartOp; label: string }[]> = {
   choice: [
     { value: "is", label: "is" },
     { value: "isNot", label: "is not" },
+  ],
+  list: [
+    { value: "is", label: "has the song" },
+    { value: "isNot", label: "doesn't have the song" },
   ],
 };
 
@@ -131,6 +145,10 @@ const LIMITS: SelectOption<LimitChoice>[] = [
   { value: "hours", label: "Limit to hours" },
 ];
 
+/** The core's limits (smart/rules.rs). */
+const MAX_RULES = 30;
+const MAX_GROUPS = 10;
+
 export const fieldKind = (f: SmartField): Kind => FIELDS.find((x) => x.value === f)?.kind ?? "text";
 
 /** "45d" -> "45 days", "1m" -> "month". */
@@ -171,6 +189,8 @@ const OP_WORDS: Record<SmartOp, string> = {
   isNot: "is not",
   contains: "contains",
   notContains: "doesn't contain",
+  beginsWith: "begins with",
+  endsWith: "ends with",
   gt: "over",
   lt: "under",
   inLast: "in the last",
@@ -180,14 +200,18 @@ const OP_WORDS: Record<SmartOp, string> = {
 
 /** One rule in words: "Mood is Chill", "Length under 3", "Played between 1 Jun 2026 and 31 Aug 2026". */
 export function ruleWords(r: SmartRule): string {
-  const label = FIELDS.find((f) => f.value === r.field)?.label.replace(/ \((minutes|stars)\)$/, "") ?? r.field;
-  if (fieldKind(r.field) === "bool") return `${label}: ${r.value === "true" ? "yes" : "no"}`;
+  const label = FIELDS.find((f) => f.value === r.field)?.label.replace(/ \((minutes|stars|kHz)\)$/, "") ?? r.field;
+  const kind = fieldKind(r.field);
+  if (kind === "bool") return `${label}: ${r.value === "true" ? "yes" : "no"}`;
+  if (kind === "list") return `${label} "${r.value}" ${r.op === "is" ? "has it" : "doesn't have it"}`;
   let value = r.value;
-  if (r.op === "between") value = rangeWords(r.value);
+  if (r.op === "between" && kind === "number") value = r.value.split("..").join(" and ");
+  else if (r.op === "between") value = rangeWords(r.value);
   else if (r.op === "inLast" || r.op === "notInLast") value = SPANS.find((s) => s.value === r.value)?.label ?? r.value;
   else if (r.field === "releaseType") value = RELEASE_TYPES.find((t) => t.value === r.value)?.label ?? r.value;
   else if (r.field === "decade") value = `${r.value}s`;
   else if (r.field === "duration") value = `${r.value} min`;
+  else if (r.field === "sampleRate") value = `${r.value} kHz`;
   return `${label} ${OP_WORDS[r.op]} ${value}`;
 }
 
@@ -196,9 +220,16 @@ function defaultValue(kind: Kind): string {
   return kind === "date" ? "30d" : kind === "bool" ? "true" : kind === "decade" ? "1990" : kind === "choice" ? "albums" : "";
 }
 
-/** Rules with a value only (an empty one is still being typed). */
+/** A rule still being typed: no value, or one side of a range. */
+const unfinished = (x: SmartRule) => x.value.trim() === "" || (x.op === "between" && x.value.split("..").some((side) => side.trim() === ""));
+
+/** Rules with a value only, and groups with such a rule. */
 export function completeRules(r: SmartRules): SmartRules {
-  return { ...r, rules: r.rules.filter((x) => x.value.trim() !== "") };
+  const out: SmartRules = { ...r, rules: r.rules.filter((x) => !unfinished(x)) };
+  const groups = (r.groups ?? []).map((g) => ({ ...g, rules: g.rules.filter((x) => !unfinished(x)) })).filter((g) => g.rules.length);
+  if (groups.length) out.groups = groups;
+  else delete out.groups;
+  return out;
 }
 
 const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "");
@@ -218,30 +249,57 @@ export function SmartEditorHost() {
   return <SmartPlaylistEditor key={ed.id ?? "new"} initial={ed} />;
 }
 
-function RuleRow({ rule, index, onChange, onRemove }: { rule: SmartRule; index: number; onChange: (r: SmartRule) => void; onRemove: () => void }) {
+/** Names of your playlists, for rules that name one. */
+function usePlaylistNames(on: boolean): string[] {
+  const [names, setNames] = useState<string[]>([]);
+  useEffect(() => {
+    if (!on) return;
+    let alive = true;
+    backend.playlists().then(
+      (all) => alive && setNames([...new Set(all.map((p) => p.title))].sort((a, b) => a.localeCompare(b))),
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, [on]);
+  return names;
+}
+
+function RuleRow({ rule, name, listId, onChange, onRemove }: { rule: SmartRule; name: string; listId: string; onChange: (r: SmartRule) => void; onRemove: () => void }) {
   const kind = fieldKind(rule.field);
   const def = FIELDS.find((f) => f.value === rule.field);
-  const n = index + 1;
+  const n = name;
   let value;
   if (kind === "date" && rule.op === "between") {
     const [from = "", to = ""] = rule.value.split("..");
     value = (
       <span className="smart-ed__range">
-        <input className="pl-edit__input smart-ed__date" type="date" aria-label={`Rule ${n} from`} value={from} onChange={(e) => onChange({ ...rule, value: `${e.target.value}..${to}` })} />
+        <input className="pl-edit__input smart-ed__date" type="date" aria-label={`${n} from`} value={from} onChange={(e) => onChange({ ...rule, value: `${e.target.value}..${to}` })} />
         <span>and</span>
-        <input className="pl-edit__input smart-ed__date" type="date" aria-label={`Rule ${n} to`} value={to} onChange={(e) => onChange({ ...rule, value: `${from}..${e.target.value}` })} />
+        <input className="pl-edit__input smart-ed__date" type="date" aria-label={`${n} to`} value={to} onChange={(e) => onChange({ ...rule, value: `${from}..${e.target.value}` })} />
+      </span>
+    );
+  } else if (kind === "number" && rule.op === "between") {
+    const [from = "", to = ""] = rule.value.split("..");
+    const only = (v: string) => v.replace(/[^\d.]/g, "");
+    value = (
+      <span className="smart-ed__range">
+        <input className="pl-edit__input smart-ed__num" inputMode="decimal" aria-label={`${n} from`} value={from} placeholder={def?.hint ?? ""} onChange={(e) => onChange({ ...rule, value: `${only(e.target.value)}..${to}` })} />
+        <span>and</span>
+        <input className="pl-edit__input smart-ed__num" inputMode="decimal" aria-label={`${n} to`} value={to} onChange={(e) => onChange({ ...rule, value: `${from}..${only(e.target.value)}` })} />
       </span>
     );
   } else if (kind === "date")
   {
     // A span the list doesn't have ("45d" from a description) stays choosable.
     const spans = SPANS.some((s) => s.value === rule.value) ? SPANS : [...SPANS, { value: rule.value, label: spanLabel(rule.value) }];
-    value = <Select label={`Rule ${n} time`} value={rule.value} options={spans} onChange={(v) => onChange({ ...rule, value: v })} />;
+    value = <Select label={`${n} time`} value={rule.value} options={spans} onChange={(v) => onChange({ ...rule, value: v })} />;
   }
   else if (kind === "bool")
     value = (
       <Select
-        label={`Rule ${n} value`}
+        label={`${n} value`}
         value={rule.value}
         options={[
           { value: "true", label: "Yes" },
@@ -250,16 +308,17 @@ function RuleRow({ rule, index, onChange, onRemove }: { rule: SmartRule; index: 
         onChange={(v) => onChange({ ...rule, value: v })}
       />
     );
-  else if (kind === "decade") value = <Select label={`Rule ${n} decade`} value={rule.value} options={DECADES} onChange={(v) => onChange({ ...rule, value: v })} />;
-  else if (kind === "choice") value = <Select label={`Rule ${n} release type`} value={rule.value} options={RELEASE_TYPES} onChange={(v) => onChange({ ...rule, value: v })} />;
+  else if (kind === "decade") value = <Select label={`${n} decade`} value={rule.value} options={DECADES} onChange={(v) => onChange({ ...rule, value: v })} />;
+  else if (kind === "choice") value = <Select label={`${n} release type`} value={rule.value} options={RELEASE_TYPES} onChange={(v) => onChange({ ...rule, value: v })} />;
   else
     value = (
       <input
         className="pl-edit__input smart-ed__value"
-        aria-label={`Rule ${n} value`}
+        aria-label={`${n} value`}
         value={rule.value}
         inputMode={kind === "number" ? "decimal" : undefined}
-        placeholder={def?.hint ?? ""}
+        placeholder={kind === "list" ? "Playlist name" : (def?.hint ?? "")}
+        list={kind === "list" ? listId : undefined}
         maxLength={200}
         onChange={(e) => onChange({ ...rule, value: e.target.value })}
       />
@@ -267,27 +326,33 @@ function RuleRow({ rule, index, onChange, onRemove }: { rule: SmartRule; index: 
   return (
     <li className="smart-ed__rule">
       <Select
-        label={`Rule ${n} field`}
+        label={`${n} field`}
         value={rule.field}
         options={FIELDS}
         onChange={(f) => {
           const k = fieldKind(f);
-          onChange({ field: f, op: OPS[k][0].value, value: k === kind ? rule.value : defaultValue(k) });
+          onChange({ field: f, op: OPS[k][0].value, value: k === kind && rule.op !== "between" ? rule.value : defaultValue(k) });
         }}
       />
       <Select
-        label={`Rule ${n} comparison`}
+        label={`${n} comparison`}
         value={rule.op}
         options={OPS[kind]}
         onChange={(op) => {
-          // A range and a span read their values differently.
           const was = rule.op === "between";
-          const value = op === "between" && !was ? lastMonthRange() : op !== "between" && was ? "30d" : rule.value;
+          let value = rule.value;
+          if (kind === "number") {
+            // A number range starts from the number there was.
+            if (op === "between" && !was) value = `${rule.value}..${rule.value}`;
+            else if (op !== "between" && was) value = rule.value.split("..")[0] ?? "";
+          } else if (op === "between" && !was) value = lastMonthRange();
+          // A range and a span read their values differently.
+          else if (op !== "between" && was) value = "30d";
           onChange({ ...rule, op, value });
         }}
       />
       {value}
-      <IconButton label={`Remove rule ${n}`} size="sm" icon={<X size={16} />} onClick={onRemove} />
+      <IconButton label={`Remove ${n.toLowerCase()}`} size="sm" icon={<X size={16} />} onClick={onRemove} />
     </li>
   );
 }
@@ -346,14 +411,18 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
   }, [describeText, describing]);
 
   /** Use another reading for a rule the description made. */
-  const choose = (index: number, other: SmartRule) => {
+  type Offer = Described["choices"][number];
+  const ruleAt = (c: Offer) => (c.group == null ? rules.rules[c.index] : rules.groups?.[c.group]?.rules[c.index]);
+  const choose = (c: Offer, other: SmartRule) => {
     if (!described) return;
-    const old = rules.rules[index];
+    const old = ruleAt(c);
     if (!old) return;
-    setRules({ ...rules, rules: rules.rules.map((x, j) => (j === index ? other : x)) });
+    const swap = (list: SmartRule[]) => list.map((x, j) => (j === c.index ? other : x));
+    if (c.group == null) setRules({ ...rules, rules: swap(rules.rules) });
+    else setRules({ ...rules, groups: (rules.groups ?? []).map((g, gi) => (gi === c.group ? { ...g, rules: swap(g.rules) } : g)) });
     setDescribed({
       ...described,
-      choices: described.choices.map((c) => (c.index === index ? { ...c, others: c.others.map((o) => (o === other ? old : o)) } : c)),
+      choices: described.choices.map((x) => (x === c ? { ...x, others: x.others.map((o) => (o === other ? old : o)) } : x)),
     });
   };
 
@@ -379,9 +448,24 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
     setRules({ ...rules, rules: rules.rules.filter((_, j) => j !== i) });
     // Readings offered for later rules move up with them.
     if (described)
-      setDescribed({ ...described, choices: described.choices.filter((c) => c.index !== i).map((c) => (c.index > i ? { ...c, index: c.index - 1 } : c)) });
+      setDescribed({
+        ...described,
+        choices: described.choices
+          .filter((c) => c.group != null || c.index !== i)
+          .map((c) => (c.group == null && c.index > i ? { ...c, index: c.index - 1 } : c)),
+      });
   };
   const add = () => setRules({ ...rules, rules: [...rules.rules, { field: "genre", op: "is", value: "" }] });
+  // Groups: each its own all or any, one level deep.
+  const groups = rules.groups ?? [];
+  const setGroups = (next: SmartRuleGroup[]) => setRules({ ...rules, groups: next });
+  const setGroup = (g: number, next: SmartRuleGroup | null) =>
+    setGroups(next ? groups.map((x, j) => (j === g ? next : x)) : groups.filter((_, j) => j !== g));
+  const addGroup = () => setGroups([...groups, { matchAll: false, rules: [{ field: "genre", op: "is", value: "" }] }]);
+  const ruleCount = rules.rules.length + groups.reduce((n, g) => n + g.rules.length, 0);
+  const full = ruleCount >= MAX_RULES;
+  const listId = `${id}-playlists`;
+  const playlistNames = usePlaylistNames([...rules.rules, ...groups.flatMap((g) => g.rules)].some((r) => r.field === "playlist"));
   const limitChoice: LimitChoice = rules.limit ? rules.limit.unit : "none";
 
   const makeRules = async () => {
@@ -478,7 +562,7 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
                 onChange={(e) => setDescribeText(e.target.value)}
               />
             </label>
-            {described && described.rules.rules.length + described.unknown.length > 0 && (
+            {described && described.rules.rules.length + (described.rules.groups?.length ?? 0) + described.unknown.length > 0 && (
               <ul className="smart-ed__chips" aria-label="Understood">
                 {rules.rules.map((r, i) => (
                   <li key={i} className="smart-ed__chip">
@@ -488,15 +572,41 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
                     </button>
                   </li>
                 ))}
+                {groups.map((g, gi) => {
+                  const words = g.rules.map(ruleWords).join(g.matchAll ? " and " : " or ");
+                  return (
+                    <li key={`g${gi}`} className="smart-ed__chip">
+                      <span>{words}</span>
+                      <button
+                        type="button"
+                        className="smart-ed__chip-x"
+                        aria-label={`Remove ${words}`}
+                        onClick={() => {
+                          setGroup(gi, null);
+                          // Offers for the group's words go with it; later groups move up.
+                          if (described)
+                            setDescribed({
+                              ...described,
+                              choices: described.choices
+                                .filter((c) => c.group !== gi)
+                                .map((c) => (c.group != null && c.group > gi ? { ...c, group: c.group - 1 } : c)),
+                            });
+                        }}
+                      >
+                        <X size={12} />
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
             {described?.choices
-              .filter((c) => rules.rules[c.index])
+              .filter((c) => ruleAt(c))
               .map((c) => (
-                <p key={`${c.index}-${c.text}`} className="smart-ed__note smart-ed__choice">
+                <p key={`${c.group ?? ""}-${c.index}-${c.text}`} className="smart-ed__note smart-ed__choice">
                   "{c.text}" could also be{" "}
                   {c.others.map((o, k) => (
-                    <button key={k} type="button" className="smart-ed__chip smart-ed__chip--alt" onClick={() => choose(c.index, o)}>
+                    <button key={k} type="button" className="smart-ed__chip smart-ed__chip--alt" onClick={() => choose(c, o)}>
                       {ruleWords(o)}
                     </button>
                   ))}
@@ -566,12 +676,64 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
         </div>
         <ul className="smart-ed__rules" aria-label="Rules">
           {rules.rules.map((r, i) => (
-            <RuleRow key={i} rule={r} index={i} onChange={(x) => update(i, x)} onRemove={() => remove(i)} />
+            <RuleRow key={i} rule={r} name={`Rule ${i + 1}`} listId={listId} onChange={(x) => update(i, x)} onRemove={() => remove(i)} />
           ))}
         </ul>
-        <Button variant="ghost" size="sm" icon={<Plus size={16} />} onClick={add} className="smart-ed__add">
-          Add rule
-        </Button>
+        {groups.map((g, gi) => {
+          const label = `Group ${gi + 1}`;
+          return (
+            <section key={gi} className="smart-ed__group" aria-label={label}>
+              <div className="smart-ed__match">
+                <Select
+                  label={`${label} match`}
+                  value={g.matchAll ? "all" : "any"}
+                  options={[
+                    { value: "any", label: "Any of these" },
+                    { value: "all", label: "All of these" },
+                  ]}
+                  onChange={(v) => setGroup(gi, { ...g, matchAll: v === "all" })}
+                />
+                <IconButton label={`Remove ${label.toLowerCase()}`} size="sm" icon={<X size={16} />} onClick={() => setGroup(gi, null)} />
+              </div>
+              <ul className="smart-ed__rules" aria-label={`${label} rules`}>
+                {g.rules.map((r, i) => (
+                  <RuleRow
+                    key={i}
+                    rule={r}
+                    name={`${label} rule ${i + 1}`}
+                    listId={listId}
+                    onChange={(x) => setGroup(gi, { ...g, rules: g.rules.map((y, j) => (j === i ? x : y)) })}
+                    // The last rule out takes the group with it.
+                    onRemove={() => setGroup(gi, g.rules.length > 1 ? { ...g, rules: g.rules.filter((_, j) => j !== i) } : null)}
+                  />
+                ))}
+              </ul>
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Plus size={16} />}
+                disabled={full}
+                onClick={() => setGroup(gi, { ...g, rules: [...g.rules, { field: g.rules[g.rules.length - 1]?.field ?? "genre", op: "is", value: "" }] })}
+                className="smart-ed__add"
+              >
+                Add a rule
+              </Button>
+            </section>
+          );
+        })}
+        <div className="smart-ed__adds">
+          <Button variant="ghost" size="sm" icon={<Plus size={16} />} onClick={add} disabled={full} className="smart-ed__add">
+            Add rule
+          </Button>
+          <Button variant="ghost" size="sm" icon={<ListPlus size={16} />} onClick={addGroup} disabled={full || groups.length >= MAX_GROUPS} className="smart-ed__add">
+            Add a group
+          </Button>
+        </div>
+        <datalist id={listId}>
+          {playlistNames.map((n) => (
+            <option key={n} value={n} />
+          ))}
+        </datalist>
         <div className="smart-ed__options">
           <span className="smart-ed__option">
             <Select
@@ -625,6 +787,11 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
         <p className="smart-ed__count" role="status" aria-live="polite" data-testid="smart-count">
           {preview ? previewLine(preview) : "Counting songs"}
         </p>
+        {preview?.notes?.map((n) => (
+          <p key={n} className="smart-ed__note smart-ed__warn">
+            {n}
+          </p>
+        ))}
         <p className="smart-ed__note">{where}</p>
         {serverOffer && (
           <label className="smart-ed__server">

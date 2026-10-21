@@ -47,6 +47,7 @@ fn rules_become_a_plex_query_and_read_back_the_same() {
             rule(Field::Liked, Op::Is, "true"),
             rule(Field::Decade, Op::IsNot, "1980"),
         ],
+        groups: vec![],
         limit: Some(Limit { unit: LimitUnit::Songs, value: 50 }),
         sort: SortBy::Random,
         update: Update::Live,
@@ -114,8 +115,8 @@ fn existing_plex_smart_playlists_map_to_the_editor() {
 
 #[test]
 fn rules_the_editor_cant_show_say_so() {
-    let title = "library://x/directory/%2Flibrary%2Fsections%2F7%2Fall%3Ftype%3D10%26track.title%3Dlove";
-    let e = plexuri::rules_from(&plexuri::parse_content(title).unwrap(), 10.0, &TagIds::new()).unwrap_err();
+    let size = "library://x/directory/%2Flibrary%2Fsections%2F7%2Fall%3Ftype%3D10%26track.mediaSize%253E%253E%3D1000";
+    let e = plexuri::rules_from(&plexuri::parse_content(size).unwrap(), 10.0, &TagIds::new()).unwrap_err();
     assert!(e.to_string().contains("Edit it in Plex"), "{e}");
     let albums = "/library/sections/7/all?type=9";
     assert!(plexuri::parse_content(albums).is_err());
@@ -148,6 +149,96 @@ fn values_are_checked() {
     assert!(rule(Field::Genre, Op::Gt, "Rock").check().is_err());
     assert!(rule(Field::ReleaseType, Op::Is, "live").check().is_ok());
     assert!(rule(Field::Duration, Op::Lt, "4").check().is_ok());
+}
+
+#[test]
+fn groups_new_fields_and_ways_to_match_round_trip_through_plex() {
+    // All of: title begins with "Love", rated 3 to 4 stars, years 1990 to 1999, any of two moods.
+    let rules = SmartRules {
+        match_all: true,
+        rules: vec![
+            rule(Field::Title, Op::BeginsWith, "Love"),
+            rule(Field::Album, Op::EndsWith, "Live"),
+            rule(Field::Year, Op::Between, "1990..1999"),
+            rule(Field::LastSkipped, Op::NotInLast, "30d"),
+        ],
+        groups: vec![
+            RuleGroup { match_all: false, rules: vec![rule(Field::Mood, Op::Is, "Night"), rule(Field::Genre, Op::Is, "Rock")] },
+            RuleGroup { match_all: true, rules: vec![rule(Field::Rating, Op::Between, "3..4.5")] },
+        ],
+        ..Default::default()
+    };
+    assert!(rules.plex_gaps().is_empty(), "{:?}", rules.plex_gaps());
+    let q = plexuri::build_query(&rules, 10.0, &tags()).unwrap();
+    assert_eq!(
+        q,
+        "type=10&track.title%3C=Love&album.title%3E=Live\
+         &push=1&album.year%3E%3E=1989&and=1&album.year%3C%3C=2000&pop=1\
+         &track.lastSkippedAt%3C%3C=-30d\
+         &push=1&album.mood=31&or=1&album.genre=11&pop=1\
+         &push=1&push=1&track.userRating%3E%3E=5&and=1&track.userRating%3C%3C=10&pop=1&pop=1"
+    );
+    let back = plexuri::rules_from(&plexuri::parse_content(&format!("/library/sections/7/all?{q}")).unwrap(), 10.0, &tags()).unwrap();
+    assert_eq!(back, rules);
+
+    // Match any with a group inside: the whole query is one "or" group.
+    let any = SmartRules {
+        match_all: false,
+        rules: vec![rule(Field::Artist, Op::Is, "Alpha")],
+        groups: vec![RuleGroup { match_all: true, rules: vec![rule(Field::Mood, Op::Is, "Night"), rule(Field::PlayCount, Op::Lt, "2")] }],
+        ..Default::default()
+    };
+    let q = plexuri::build_query(&any, 10.0, &tags()).unwrap();
+    assert_eq!(q, "type=10&push=1&artist.title%3D=Alpha&or=1&push=1&album.mood=31&and=1&track.viewCount%3C%3C=2&pop=1&pop=1");
+    let back = plexuri::rules_from(&plexuri::parse_content(&format!("/library/sections/7/all?{q}")).unwrap(), 10.0, &tags()).unwrap();
+    assert_eq!(back, any);
+}
+
+#[test]
+fn groups_deeper_than_the_editor_holds_open_read_only() {
+    let deep = "/library/sections/7/all?type=10&push=1&album.year=1990&or=1&push=1&album.year=1991&and=1&push=1&album.year=1992&or=1&album.year=1993&pop=1&pop=1&pop=1";
+    let e = plexuri::rules_from(&plexuri::parse_content(deep).unwrap(), 10.0, &TagIds::new()).unwrap_err();
+    assert!(e.to_string().contains("Edit it in Plex"), "{e}");
+    let mixed = "/library/sections/7/all?type=10&album.year=1990&or=1&album.year=1991&and=1&album.year=1992";
+    assert!(plexuri::parse_content(mixed).unwrap_err().to_string().contains("Edit it in Plex"));
+    let unbalanced = "/library/sections/7/all?type=10&push=1&album.year=1990";
+    assert!(plexuri::parse_content(unbalanced).is_err());
+}
+
+#[test]
+fn new_rules_plex_cant_hold_are_named() {
+    for r in [
+        rule(Field::TrackNumber, Op::Is, "1"),
+        rule(Field::Playlist, Op::Is, "Road trip"),
+        rule(Field::SampleRate, Op::Gt, "48"),
+        rule(Field::BitDepth, Op::Is, "24"),
+        rule(Field::Year, Op::Between, "1990.5..1999"),
+    ] {
+        let rules = SmartRules { groups: vec![RuleGroup { match_all: true, rules: vec![r.clone()] }], ..Default::default() };
+        assert_eq!(rules.plex_gaps().len(), 1, "{r:?}");
+    }
+}
+
+#[test]
+fn groups_and_ranges_are_checked() {
+    let empty = SmartRules { groups: vec![RuleGroup { match_all: true, rules: vec![] }], ..Default::default() };
+    assert!(empty.check().unwrap_err().to_string().contains("at least one rule"));
+    let many = SmartRules {
+        groups: (0..MAX_GROUPS + 1).map(|_| RuleGroup { match_all: true, rules: vec![rule(Field::Year, Op::Is, "1990")] }).collect(),
+        ..Default::default()
+    };
+    assert!(many.check().is_err());
+    let too_many_rules = SmartRules {
+        rules: (0..20).map(|_| rule(Field::Year, Op::Is, "1990")).collect(),
+        groups: vec![RuleGroup { match_all: true, rules: (0..11).map(|_| rule(Field::Year, Op::Is, "1990")).collect() }],
+        ..Default::default()
+    };
+    assert!(too_many_rules.check().is_err());
+    assert!(rule(Field::Year, Op::Between, "1999..1990").check().is_err());
+    assert!(rule(Field::Rating, Op::Between, "3..6").check().is_err());
+    assert!(rule(Field::Year, Op::Between, "1990..1999").check().is_ok());
+    assert!(rule(Field::Title, Op::BeginsWith, "").check().is_err());
+    assert!(rule(Field::Playlist, Op::Gt, "x").check().is_err());
 }
 
 // ---- local evaluation -----------------------------------------------------------
@@ -207,6 +298,62 @@ fn each_field_evaluates_locally() {
     assert_eq!(run(rule(Field::ReleaseType, Op::Is, "live")), ["4"]);
     assert_eq!(run(rule(Field::Explicit, Op::Is, "false")), ["1", "2", "3"]);
     assert_eq!(run(rule(Field::Version, Op::Contains, "master")), ["4"]);
+}
+
+#[test]
+fn new_fields_and_ways_to_match_evaluate_locally() {
+    let mut rows = rows();
+    rows[0].playlists = vec!["road trip".into()];
+    rows[0].sample_rate = Some(96_000);
+    rows[0].bit_depth = Some(24);
+    rows[1].sample_rate = Some(44_100);
+    rows[1].bit_depth = Some(16);
+    rows[2].last_skipped = Some(NOW - 3 * DAY);
+    let run = |r: Rule| ids(eval::evaluate(&rows, &SmartRules { rules: vec![r], ..Default::default() }, NOW, 10.0, 0));
+    assert_eq!(run(rule(Field::Title, Op::BeginsWith, "song 1")), ["1"]);
+    assert_eq!(run(rule(Field::Title, Op::EndsWith, "4")), ["4"]);
+    assert_eq!(run(rule(Field::Artist, Op::BeginsWith, "GAM")), ["4"]);
+    assert_eq!(run(rule(Field::TrackNumber, Op::Lt, "3")), ["1", "2"]);
+    assert_eq!(run(rule(Field::Year, Op::Between, "1975..1992")), ["1", "2", "3"]);
+    assert_eq!(run(rule(Field::Duration, Op::Between, "4..5")), ["2", "3"]);
+    assert_eq!(run(rule(Field::LastSkipped, Op::InLast, "1w")), ["3"]);
+    assert_eq!(run(rule(Field::Playlist, Op::Is, "Road Trip")), ["1"]);
+    assert_eq!(run(rule(Field::Playlist, Op::IsNot, "Road Trip")), ["2", "3", "4"]);
+    // A playlist that isn't there matches nothing.
+    assert!(run(rule(Field::Playlist, Op::Is, "Gone")).is_empty());
+    assert_eq!(run(rule(Field::SampleRate, Op::Gt, "48")), ["1"]);
+    assert_eq!(run(rule(Field::SampleRate, Op::Is, "44.1")), ["2"]);
+    assert_eq!(run(rule(Field::BitDepth, Op::Is, "24")), ["1"]);
+    // No file details: only "is not" matches.
+    assert_eq!(run(rule(Field::BitDepth, Op::IsNot, "24")), ["2", "3", "4"]);
+}
+
+#[test]
+fn groups_count_as_one_rule() {
+    let rows = rows();
+    // Rock, and either from the 70s or played lately.
+    let r = SmartRules {
+        match_all: true,
+        rules: vec![rule(Field::Genre, Op::Is, "Rock")],
+        groups: vec![RuleGroup { match_all: false, rules: vec![rule(Field::Decade, Op::Is, "1970"), rule(Field::LastPlayed, Op::InLast, "1w")] }],
+        ..Default::default()
+    };
+    assert_eq!(ids(eval::evaluate(&rows, &r, NOW, 10.0, 0)), ["1", "2", "4"]);
+    // Jazz, or (Alpha and liked).
+    let r = SmartRules {
+        match_all: false,
+        rules: vec![rule(Field::Genre, Op::Is, "Jazz")],
+        groups: vec![RuleGroup { match_all: true, rules: vec![rule(Field::Artist, Op::Is, "Alpha"), rule(Field::Liked, Op::Is, "true")] }],
+        ..Default::default()
+    };
+    assert_eq!(ids(eval::evaluate(&rows, &r, NOW, 10.0, 0)), ["2", "3"]);
+}
+
+#[test]
+fn a_rule_naming_a_missing_playlist_says_so() {
+    let names = vec!["Road trip".to_string()];
+    assert!(super::missing_playlists(&["road TRIP".into()], &names).is_empty());
+    assert_eq!(super::missing_playlists(&["Gone".into(), "Gone".into()], &names), ["No playlist is called \"Gone\", so that rule can't match it."]);
 }
 
 #[test]

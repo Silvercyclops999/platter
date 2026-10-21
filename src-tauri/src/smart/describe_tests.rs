@@ -203,6 +203,15 @@ fn limits_sorts_and_match_any() {
     assert!(d.rules.match_all);
     assert_eq!(d.notes.len(), 1, "{:?}", d.notes);
     assert!(d.notes[0].contains("Rock and Jazz"), "{}", d.notes[0]);
+    // With "or", the two become a group of their own: either genre, and lossless.
+    let d = run("rock or jazz, lossless");
+    assert!(d.rules.match_all && d.notes.is_empty(), "{:?} {:?}", d.notes, d.choices);
+    assert_eq!(rules_of(&d), ["lossless is true"]);
+    assert_eq!(d.rules.groups.len(), 1);
+    assert!(!d.rules.groups[0].match_all);
+    assert_eq!(d.rules.groups[0].rules.iter().map(|r| r.value.as_str()).collect::<Vec<_>>(), ["Rock", "Jazz"]);
+    // "Jazz" could be the album too: the offer points into the group.
+    assert_eq!((d.choices[0].group, d.choices[0].index), (Some(0), 1));
 }
 
 #[test]

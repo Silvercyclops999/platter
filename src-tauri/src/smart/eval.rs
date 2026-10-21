@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use rusqlite::Connection;
 
-use super::rules::{Day, Field, Kind, LimitUnit, Op, Rule, SmartRules, SortBy, parse_range, parse_span};
+use super::rules::{Day, Field, Kind, LimitUnit, Op, Rule, SmartRules, SortBy, parse_number_range, parse_range, parse_span};
 use crate::error::AppResult;
 
 /// One song as the rules see it.
@@ -50,6 +50,13 @@ pub struct Row {
     pub plays_at: Vec<i64>,
     /// Every song on the album has been played.
     pub album_finished: bool,
+    /// Newest skip in the listen history, unix seconds.
+    pub last_skipped: Option<i64>,
+    /// The playlists it's on, by name (folded).
+    pub playlists: Vec<String>,
+    /// Hz and bits, from the file details.
+    pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u32>,
 }
 
 /// FLAC, ALAC, WAV and the other lossless codecs Plex reports.
@@ -74,7 +81,7 @@ pub fn read_rows(c: &Connection) -> AppResult<Vec<Row>> {
             here.insert(k, at / 1000);
         }
     }
-    let mut history: HashMap<String, (Vec<i64>, u32)> = HashMap::new();
+    let mut history: HashMap<String, (Vec<i64>, u32, Option<i64>)> = HashMap::new();
     {
         let sql = format!("WITH plays AS ({}) SELECT rating_key, played_at, skipped FROM plays WHERE rating_key IS NOT NULL", crate::db::listens::ALL_PLAYS);
         let mut st = c.prepare(&sql)?;
@@ -84,9 +91,19 @@ pub fn read_rows(c: &Connection) -> AppResult<Vec<Row>> {
             let e = history.entry(k).or_default();
             if skipped != 0 {
                 e.1 += 1;
+                e.2 = e.2.max(Some(at / 1000));
             } else {
                 e.0.push(at / 1000);
             }
+        }
+    }
+    let mut lists: HashMap<String, Vec<String>> = HashMap::new();
+    {
+        let mut st = c.prepare("SELECT DISTINCT i.track_id, p.title FROM playlist_items i JOIN playlists p ON p.id = i.playlist_id")?;
+        let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        for r in rows {
+            let (k, title) = r?;
+            lists.entry(k).or_default().push(fold(&title));
         }
     }
     let mut st = c.prepare(
@@ -94,7 +111,8 @@ pub fn read_rows(c: &Connection) -> AppResult<Vec<Row>> {
                 al.year, coalesce(al.added_at, 0), t.view_count, t.last_viewed_at, t.user_rating, t.duration_ms,
                 coalesce(al.section, 'albums'), coalesce(al.genres, '[]'), coalesce(al.styles, '[]'),
                 coalesce(al.moods, '[]'), t.genres, coalesce(f.explicit, (SELECT x.explicit FROM explicit_found x WHERE x.track_id = t.id)), f.version, al.format, coalesce(al.subformats, '[]'), t.title, al.studio, al.matched, mc.found, t.album_id,
-                f.era, t.codec, coalesce(f.version, f.release, CASE WHEN at.version IS NULL THEN at.release END)
+                f.era, t.codec, coalesce(f.version, f.release, CASE WHEN at.version IS NULL THEN at.release END),
+                t.sample_rate, t.bit_depth
          FROM tracks t
          LEFT JOIN albums al ON al.id = t.album_id
          LEFT JOIN album_mb_check mc ON mc.album_id = t.album_id
@@ -132,7 +150,7 @@ pub fn read_rows(c: &Connection) -> AppResult<Vec<Row>> {
         );
         let era: Option<String> = r.get(27)?;
         let codec: Option<String> = r.get(28)?;
-        let (plays_at, skips) = history.remove(&id).unwrap_or_default();
+        let (plays_at, skips, last_skipped) = history.remove(&id).unwrap_or_default();
         out.push(Row {
             played_here: here.get(&id).copied(),
             album_id,
@@ -141,6 +159,10 @@ pub fn read_rows(c: &Connection) -> AppResult<Vec<Row>> {
             skips,
             plays_at,
             album_finished: false,
+            last_skipped,
+            playlists: lists.remove(&id).unwrap_or_default(),
+            sample_rate: r.get(30)?,
+            bit_depth: r.get(31)?,
             id,
             title: r.get(22)?,
             artist_id: r.get(1)?,
@@ -166,6 +188,13 @@ pub fn read_rows(c: &Connection) -> AppResult<Vec<Row>> {
     }
     mark_finished(&mut out);
     Ok(out)
+}
+
+/// Every playlist's name (for rules that name one).
+pub fn playlist_names(c: &Connection) -> AppResult<Vec<String>> {
+    let mut st = c.prepare_cached("SELECT title FROM playlists")?;
+    let names = st.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+    Ok(names)
 }
 
 /// Albums whose every song has a play.
@@ -203,13 +232,19 @@ fn text(op: Op, have: &[&str], want: &str) -> bool {
         Op::IsNot => !hit(&|h| h == want),
         Op::Contains => hit(&|h| h.contains(&want)),
         Op::NotContains => !hit(&|h| h.contains(&want)),
+        Op::BeginsWith => hit(&|h| h.starts_with(&want)),
+        Op::EndsWith => hit(&|h| h.ends_with(&want)),
         _ => false,
     }
 }
 
 /// A number rule. A song without the number (no year) matches only "is not".
-fn number(op: Op, have: Option<f64>, want: f64) -> bool {
+/// `range` is the "between" value.
+fn number(op: Op, have: Option<f64>, want: f64, range: &str) -> bool {
     let Some(h) = have else { return op == Op::IsNot };
+    if op == Op::Between {
+        return parse_number_range(range).is_some_and(|(a, b)| h >= a - 1e-9 && h <= b + 1e-9);
+    }
     match op {
         Op::Is => (h - want).abs() < 1e-9,
         Op::IsNot => (h - want).abs() >= 1e-9,
@@ -256,19 +291,25 @@ pub fn matches_tz(r: &Rule, row: &Row, now: i64, liked_min: f64, tz_min: i32) ->
                 text(r.op, &have, v)
             }
             Field::Album => text(r.op, &[row.album.as_str()], v),
+            Field::Title => text(r.op, &[row.title.as_str()], v),
             Field::Era => text(r.op, &row.era.as_deref().into_iter().collect::<Vec<_>>(), v),
             _ => text(r.op, &row.version.as_deref().into_iter().collect::<Vec<_>>(), v),
         },
         Kind::Number => {
             let want: f64 = v.parse().unwrap_or(0.0);
-            match r.field {
-                Field::Year => number(r.op, row.year.map(f64::from), want),
-                Field::PlayCount => number(r.op, Some(row.plays as f64), want),
+            let have = match r.field {
+                Field::Year => row.year.map(f64::from),
+                Field::PlayCount => Some(row.plays as f64),
                 // Stars against Plex's 0 to 10.
-                Field::Rating => number(r.op, Some(row.rating.unwrap_or(0.0) / 2.0), want),
-                Field::Skips => number(r.op, Some(row.skips as f64), want),
-                _ => number(r.op, Some(row.duration_ms as f64 / 60_000.0), want),
-            }
+                Field::Rating => Some(row.rating.unwrap_or(0.0) / 2.0),
+                Field::Skips => Some(row.skips as f64),
+                Field::TrackNumber => Some(row.track as f64).filter(|n| *n > 0.0),
+                // kHz.
+                Field::SampleRate => row.sample_rate.filter(|n| *n > 0).map(|n| n as f64 / 1000.0),
+                Field::BitDepth => row.bit_depth.filter(|n| *n > 0).map(f64::from),
+                _ => Some(row.duration_ms as f64 / 60_000.0),
+            };
+            number(r.op, have, want, v)
         }
         Kind::Decade => {
             let want: i32 = v.parse().unwrap_or(0);
@@ -280,6 +321,7 @@ pub fn matches_tz(r: &Rule, row: &Row, now: i64, liked_min: f64, tz_min: i32) ->
                 Field::AddedAt => Some(row.added_at).filter(|a| *a > 0).into_iter().collect(),
                 Field::LastPlayed => row.last_played.into_iter().collect(),
                 Field::Played => row.plays_at.clone(),
+                Field::LastSkipped => row.last_skipped.into_iter().collect(),
                 _ => row.played_here.into_iter().collect(),
             };
             if r.op == Op::Between {
@@ -305,7 +347,22 @@ pub fn matches_tz(r: &Rule, row: &Row, now: i64, liked_min: f64, tz_min: i32) ->
             let is = row.section == v;
             if r.op == Op::Is { is } else { !is }
         }
+        Kind::List => {
+            let is = row.playlists.contains(&fold(v));
+            if r.op == Op::Is { is } else { !is }
+        }
     }
+}
+
+/// Whether a song matches the rules and groups together.
+pub fn matches_all_tz(rules: &SmartRules, row: &Row, now: i64, liked_min: f64, tz_min: i32) -> bool {
+    if rules.rules.is_empty() && rules.groups.is_empty() {
+        return true;
+    }
+    let one = |r: &Rule| matches_tz(r, row, now, liked_min, tz_min);
+    let group = |g: &super::rules::RuleGroup| if g.match_all { g.rules.iter().all(one) } else { g.rules.iter().any(one) };
+    let mut each = rules.rules.iter().map(one).chain(rules.groups.iter().map(group));
+    if rules.match_all { each.all(|b| b) } else { each.any(|b| b) }
 }
 
 /// A small stable hash, for random order that holds until the next update.
@@ -328,13 +385,7 @@ pub fn evaluate<'a>(rows: &'a [Row], rules: &SmartRules, now: i64, liked_min: f6
 pub fn evaluate_tz<'a>(rows: &'a [Row], rules: &SmartRules, now: i64, liked_min: f64, seed: u64, tz_min: i32) -> Vec<&'a Row> {
     let mut hit: Vec<&Row> = rows
         .iter()
-        .filter(|row| {
-            if rules.rules.is_empty() {
-                return true;
-            }
-            let mut each = rules.rules.iter().map(|r| matches_tz(r, row, now, liked_min, tz_min));
-            if rules.match_all { each.all(|b| b) } else { each.any(|b| b) }
-        })
+        .filter(|row| matches_all_tz(rules, row, now, liked_min, tz_min))
         .collect();
     let library = |a: &&Row, b: &&Row| {
         fold(&a.artist)

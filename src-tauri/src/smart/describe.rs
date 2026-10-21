@@ -19,7 +19,7 @@ use std::collections::{HashMap, HashSet};
 use serde::Serialize;
 
 use super::eval::Row;
-use super::rules::{Day, Field, Limit, LimitUnit, MAX_RULES, Op, Rule, SmartRules, SortBy, range_value};
+use super::rules::{Day, Field, Limit, LimitUnit, MAX_RULES, Op, Rule, RuleGroup, SmartRules, SortBy, range_value};
 use crate::identity::fold::fold_text;
 
 /// Longest description read.
@@ -35,8 +35,11 @@ const MAX_OTHERS: usize = 4;
 pub struct Choice {
     /// The words, as typed.
     pub text: String,
-    /// The rule they made (index into `rules.rules`).
+    /// The rule they made (index into `rules.rules`, or into the group's rules).
     pub index: usize,
+    /// The group the rule is in (index into `rules.groups`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<usize>,
     /// Rules they could make instead.
     pub others: Vec<Rule>,
 }
@@ -471,7 +474,8 @@ fn flip(mut r: Rule) -> Rule {
         Op::NotInLast => Op::InLast,
         Op::Gt => Op::Lt,
         Op::Lt => Op::Gt,
-        Op::Between => Op::Between,
+        // Describing never makes these.
+        Op::Between | Op::BeginsWith | Op::EndsWith => r.op,
     };
     r
 }
@@ -518,7 +522,7 @@ impl<'a> Parser<'a> {
             && !others.is_empty()
         {
             let others = others.into_iter().take(MAX_OTHERS).map(|o| if negate { flip(o) } else { o }).collect();
-            self.choices.push(Choice { text: self.text(self.i, n), index, others });
+            self.choices.push(Choice { text: self.text(self.i, n), index, group: None, others });
         }
     }
 
@@ -1332,8 +1336,36 @@ impl<'a> Parser<'a> {
                 doubled.push(*f);
             }
         }
+        let mut groups: Vec<RuleGroup> = Vec::new();
+        // "Rock or jazz, lossless": either genre, and lossless. The two go in a group of their
+        // own.
+        let grouped = doubled.len() == 1 && self.or_seen && fields.len() > 1;
         if fields.len() == 1 && (doubled.len() == 1 || self.or_seen) && self.rules.len() > 1 {
             match_all = false;
+        } else if grouped {
+            let f = doubled[0];
+            let either = |r: &Rule| r.field == f && r.op == Op::Is;
+            // Where each rule goes: (in the group, its place).
+            let (mut kept, mut moved) = (0, 0);
+            let mut place: Vec<(bool, usize)> = Vec::new();
+            for r in &self.rules {
+                if either(r) {
+                    place.push((true, moved));
+                    moved += 1;
+                } else {
+                    place.push((false, kept));
+                    kept += 1;
+                }
+            }
+            for c in &mut self.choices {
+                if let Some(&(in_group, i)) = place.get(c.index) {
+                    c.index = i;
+                    c.group = in_group.then_some(0);
+                }
+            }
+            let (one, rest): (Vec<Rule>, Vec<Rule>) = std::mem::take(&mut self.rules).into_iter().partition(either);
+            self.rules = rest;
+            groups.push(RuleGroup { match_all: false, rules: one });
         } else if let Some(f) = doubled.first() {
             let names: Vec<&str> = self.rules.iter().filter(|r| r.field == *f && r.op == Op::Is).map(|r| r.value.as_str()).collect();
             self.notes.push(format!(
@@ -1368,7 +1400,7 @@ impl<'a> Parser<'a> {
         };
         Described {
             title,
-            rules: SmartRules { match_all, rules: self.rules, limit: self.limit, sort: self.sort, ..Default::default() },
+            rules: SmartRules { match_all, rules: self.rules, groups, limit: self.limit, sort: self.sort, ..Default::default() },
             unknown,
             choices: self.choices,
             notes: self.notes,

@@ -193,6 +193,9 @@ pub struct Preview {
     pub tracks: Vec<Track>,
     /// Why these rules need a Platter smart playlist (empty: Plex can hold them).
     pub plex_gaps: Vec<String>,
+    /// Rules that can't match as meant ("No playlist is called ...").
+    #[serde(default)]
+    pub notes: Vec<String>,
 }
 
 /// `smart_save` payload.
@@ -354,11 +357,19 @@ impl Smart {
         let rows = self.rows().await?;
         let songs = self.songs(&rows, &rules, &picks, 0);
         let first: Vec<String> = songs.iter().take(PREVIEW_ROWS).map(|(id, _)| id.clone()).collect();
+        let named: Vec<String> = rules.all_rules().filter(|r| r.field == rules::Field::Playlist).map(|r| r.value.trim().to_string()).collect();
+        let notes = if named.is_empty() {
+            Vec::new()
+        } else {
+            let names = self.db().read_async(eval::playlist_names).await?;
+            missing_playlists(&named, &names)
+        };
         Ok(Preview {
             count: songs.len() as u32,
             duration_ms: songs.iter().map(|(_, d)| d).sum(),
             tracks: self.tracks(first).await?,
             plex_gaps: rules.plex_gaps(),
+            notes,
         })
     }
 
@@ -611,4 +622,19 @@ impl Smart {
         let model = if s.ai_model.trim().is_empty() { prompt::DEFAULT_MODEL.to_string() } else { s.ai_model.trim().to_string() };
         prompt::generate(&self.inner.ai, &model, text, &rows, self.now(), self.liked_min()).await
     }
+}
+
+/// A note for each playlist a rule names that isn't in the library (any more).
+pub fn missing_playlists(named: &[String], names: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for n in named {
+        let folded = n.to_lowercase();
+        if !names.iter().any(|x| x.trim().to_lowercase() == folded) {
+            let note = format!("No playlist is called \"{n}\", so that rule can't match it.");
+            if !out.contains(&note) {
+                out.push(note);
+            }
+        }
+    }
+    out
 }

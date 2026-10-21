@@ -149,15 +149,38 @@ const LABEL: Record<string, string> = {
   skips: "Skips",
   finished: "Album finished",
   played: "Played",
+  trackNumber: "Track number",
+  playlist: "Playlist",
+  sampleRate: "Sample rate",
+  bitDepth: "Bit depth",
 };
+
+/** Every rule, those in groups too. */
+export const allRules = (r: SmartRules): SmartRule[] => [...r.rules, ...(r.groups ?? []).flatMap((g) => g.rules)];
+
+/** "1990..1999": two numbers, the first not more than the second. */
+function numberRange(v: string): [number, number] | null {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*\.\.\s*(\d+(?:\.\d+)?)\s*$/.exec(v);
+  if (!m) return null;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  return a <= b ? [a, b] : null;
+}
 
 /** Why Plex can't hold these rules (same rules as the core). */
 export function plexGaps(r: SmartRules): string[] {
   const out: string[] = [];
-  for (const rule of r.rules) {
+  const add = (s: string) => !out.includes(s) && out.push(s);
+  const dates = ["addedAt", "lastPlayed", "lastSkipped"];
+  for (const rule of allRules(r)) {
     const l = LABEL[rule.field];
-    if (l && !out.includes(`${l} isn't something Plex can filter on`)) out.push(`${l} isn't something Plex can filter on`);
-    else if (!l && rule.op === "between" && !out.includes("Plex can't filter between two dates")) out.push("Plex can't filter between two dates");
+    if (l) add(`${l} isn't something Plex can filter on`);
+    else if (rule.op === "between" && dates.includes(rule.field)) add("Plex can't filter between two dates");
+    else if (rule.op === "between") {
+      const scale = rule.field === "rating" ? 2 : 1;
+      const range = numberRange(rule.value);
+      if (!range || !Number.isInteger(range[0] * scale) || !Number.isInteger(range[1] * scale))
+        add(`Plex filters ${rule.field === "playCount" ? "plays" : rule.field} between whole numbers only`);
+    }
   }
   if (r.limit?.unit === "hours") out.push("Plex limits by number of songs, not hours");
   if (r.update !== "live") out.push("Plex smart playlists are always up to date");
@@ -189,13 +212,19 @@ function checkRule(r: SmartRule): boolean {
     case "album":
     case "version":
     case "era":
+    case "title":
+    case "playlist":
       return v.length > 0;
     case "year":
     case "playCount":
     case "skips":
     case "duration":
-      return v !== "" && Number(v) >= 0;
+    case "trackNumber":
+    case "sampleRate":
+    case "bitDepth":
+      return r.op === "between" ? numberRange(v) !== null : v !== "" && Number(v) >= 0;
     case "rating":
+      if (r.op === "between") return (numberRange(v)?.[1] ?? 6) <= 5;
       return v !== "" && Number(v) >= 0 && Number(v) <= 5;
     case "decade":
       return /^\d{4}$/.test(v) && Number(v) % 10 === 0;
@@ -203,6 +232,7 @@ function checkRule(r: SmartRule): boolean {
     case "lastPlayed":
     case "playedHere":
     case "played":
+    case "lastSkipped":
       return r.op === "between" ? range(v) !== null : span(v) !== null;
     case "liked":
     case "explicit":
@@ -227,12 +257,21 @@ function text(op: SmartRule["op"], have: string[], want: string): boolean {
       return h.some((x) => x.includes(w));
     case "notContains":
       return !h.some((x) => x.includes(w));
+    case "beginsWith":
+      return h.some((x) => x.startsWith(w));
+    case "endsWith":
+      return h.some((x) => x.endsWith(w));
     default:
       return false;
   }
 }
 
-function num(op: SmartRule["op"], have: number, want: number): boolean {
+function num(op: SmartRule["op"], have: number | null, want: number, value = ""): boolean {
+  if (have === null) return op === "isNot";
+  if (op === "between") {
+    const r = numberRange(value);
+    return !!r && have >= r[0] && have <= r[1];
+  }
   return op === "is" ? have === want : op === "isNot" ? have !== want : op === "gt" ? have > want : op === "lt" ? have < want : false;
 }
 
@@ -274,6 +313,21 @@ export class MockSmart {
         return text(r.op, [t.artistTitle, ...(t.trackArtist ? [t.trackArtist] : [])], v);
       case "album":
         return text(r.op, [t.albumTitle], v);
+      case "title":
+        return text(r.op, [t.title], v);
+      case "trackNumber":
+        return num(r.op, t.trackNumber || null, Number(v), v);
+      case "sampleRate":
+        return num(r.op, t.sampleRate ? t.sampleRate / 1000 : null, Number(v), v);
+      case "bitDepth":
+        return num(r.op, t.bitDepth ?? null, Number(v), v);
+      case "playlist": {
+        const names = this.fx.playlists.filter((p) => (this.fx.playlistTracks.get(p.id) ?? []).includes(t.id)).map((p) => p.title.toLowerCase());
+        const is = names.includes(v.trim().toLowerCase());
+        return r.op === "is" ? is : !is;
+      }
+      case "lastSkipped":
+        return r.op === "notInLast";
       case "version":
       case "era":
         return text(r.op, [], v);
@@ -290,17 +344,17 @@ export class MockSmart {
         return all.every((x) => x.viewCount > 0) === (v === "true");
       }
       case "year":
-        return num(r.op, a?.year ?? 0, Number(v));
+        return num(r.op, a?.year ?? 0, Number(v), v);
       case "decade": {
         const is = a?.year != null && a.year - (a.year % 10) === Number(v);
         return r.op === "is" ? is : !is;
       }
       case "playCount":
-        return num(r.op, t.viewCount, Number(v));
+        return num(r.op, t.viewCount, Number(v), v);
       case "rating":
-        return num(r.op, (t.userRating ?? 0) / 2, Number(v));
+        return num(r.op, (t.userRating ?? 0) / 2, Number(v), v);
       case "duration":
-        return num(r.op, t.durationMs / 60_000, Number(v));
+        return num(r.op, t.durationMs / 60_000, Number(v), v);
       case "addedAt":
       case "lastPlayed":
       case "playedHere":
@@ -327,9 +381,11 @@ export class MockSmart {
   /** The songs, in order, after rules, picks, sort and limit. */
   songs(rules: SmartRules, picks: string[] = []): Track[] {
     let hit = this.fx.tracks.filter((t) => {
-      if (!rules.rules.length) return true;
+      const groups = rules.groups ?? [];
+      if (!rules.rules.length && !groups.length) return true;
       const a = this.hooks.album(t.albumId);
-      const each = rules.rules.map((r) => this.matches(r, t, a));
+      const one = (r: SmartRule) => this.matches(r, t, a);
+      const each = [...rules.rules.map(one), ...groups.map((g) => (g.matchAll ? g.rules.every(one) : g.rules.some(one)))];
       return rules.matchAll ? each.every(Boolean) : each.some(Boolean);
     });
     const by = {
@@ -358,14 +414,23 @@ export class MockSmart {
   }
 
   private check(rules: SmartRules) {
-    for (const r of rules.rules) if (!checkRule(r)) invalid(`Check the value for ${r.field}.`);
+    for (const r of allRules(rules)) if (!checkRule(r)) invalid(`Check the value for ${r.field}.`);
+    if ((rules.groups ?? []).some((g) => !g.rules.length)) invalid("A group needs at least one rule.");
     if (rules.limit && (rules.limit.value <= 0 || !Number.isFinite(rules.limit.value))) invalid("Check the limit.");
   }
 
   preview(rules: SmartRules, picks: string[] = []): SmartPreview {
     this.check(rules);
     const songs = this.songs(rules, picks);
-    return { count: songs.length, durationMs: songs.reduce((s, t) => s + t.durationMs, 0), tracks: songs.slice(0, 50), plexGaps: plexGaps(rules) };
+    const names = this.fx.playlists.map((p) => p.title.toLowerCase());
+    const notes = [
+      ...new Set(
+        allRules(rules)
+          .filter((r) => r.field === "playlist" && !names.includes(r.value.trim().toLowerCase()))
+          .map((r) => `No playlist is called "${r.value.trim()}", so that rule can't match it.`),
+      ),
+    ];
+    return { count: songs.length, durationMs: songs.reduce((s, t) => s + t.durationMs, 0), tracks: songs.slice(0, 50), plexGaps: plexGaps(rules), notes };
   }
 
   private summary(l: MockSmartList, tracks?: Track[]): SmartSummary {
@@ -534,6 +599,7 @@ export function mockDescribe(text: string, names: { genre: string[]; artist: str
   ];
   let i = 0;
   let negate = false;
+  let orSeen = false;
   let lastUnknown = -2;
   outer: while (i < w.length) {
     const at = (k: number) => w[i + k] ?? "";
@@ -559,6 +625,11 @@ export function mockDescribe(text: string, names: { genre: string[]; artist: str
       continue;
     if (phrase(/^i (loved|liked|like|love)/, () => ({ field: "liked", op: "is", value: "true" }))) continue;
     const word = at(0);
+    if (word === "or") {
+      orSeen = true;
+      i++;
+      continue;
+    }
     if (["no", "not", "without"].includes(word)) {
       negate = true;
       i++;
@@ -606,6 +677,20 @@ export function mockDescribe(text: string, names: { genre: string[]; artist: str
     i++;
   }
   const title = text.trim().replace(/[.!?,]+$/, "").replace(/^./, (c) => c.toUpperCase()).slice(0, 100);
+  // "Rock or jazz, lossless": either genre in a group, and the rest (as the core reads it).
+  const fields = new Set(rules.map((r) => r.field));
+  const doubled = [...fields].filter((f) => rules.filter((r) => r.field === f && r.op === "is" && r.value !== "true" && r.value !== "false").length > 1);
+  if (orSeen && fields.size === 1 && rules.length > 1) return { title, rules: { matchAll: false, rules, limit: null, sort: "none", update: "live" }, unknown, choices: [], notes: [] };
+  if (orSeen && doubled.length === 1 && fields.size > 1) {
+    const either = (r: SmartRule) => r.field === doubled[0] && r.op === "is";
+    return {
+      title,
+      rules: { matchAll: true, rules: rules.filter((r) => !either(r)), groups: [{ matchAll: false, rules: rules.filter(either) }], limit: null, sort: "none", update: "live" },
+      unknown,
+      choices: [],
+      notes: [],
+    };
+  }
   return { title, rules: { matchAll: true, rules, limit: null, sort: "none", update: "live" }, unknown, choices: [], notes: [] };
 }
 
