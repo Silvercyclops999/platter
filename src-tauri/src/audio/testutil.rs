@@ -373,6 +373,9 @@ pub struct FakeResolver {
     pub slow_more: Mutex<Option<std::time::Duration>>,
     /// This many `more` calls fail (network) before answering.
     pub more_fails: AtomicUsize,
+    /// Track ids whose stream is a transcode capped to a quality limit:
+    /// `original` gives `/o/{id}` for them.
+    pub capped: Mutex<std::collections::HashSet<String>>,
 }
 
 impl FakeResolver {
@@ -390,6 +393,7 @@ impl FakeResolver {
             slow_context: Mutex::new(None),
             slow_more: Mutex::new(None),
             more_fails: AtomicUsize::new(0),
+            capped: Mutex::new(std::collections::HashSet::new()),
         })
     }
 }
@@ -417,6 +421,16 @@ impl TrackResolver for FakeResolver {
             headers: vec![],
             size: None,
             codec_hint: Some("wav".into()),
+        })
+    }
+    async fn original(&self, track: &Track) -> Option<AppResult<StreamSource>> {
+        self.capped.lock().contains(&track.id).then(|| {
+            Ok(StreamSource {
+                url: format!("{}/o/{}", self.base, track.id),
+                headers: vec![],
+                size: None,
+                codec_hint: Some("wav".into()),
+            })
         })
     }
 }

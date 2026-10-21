@@ -1735,11 +1735,10 @@ impl PlexClient {
         if let Ok(v) = session.parse() {
             headers.insert("x-plex-session-identifier", v);
         }
-        // Plex picks a built-in profile from X-Plex-Platform; the iOS one
-        // only streams music over HLS and answers 400 to a plain MP3 over
-        // HTTP. Naming the target keeps phones on the same answer as the
-        // desktop profiles, which already allow it.
-        #[cfg(any(target_os = "ios", target_os = "android"))]
+        // Plex picks a built-in profile from X-Plex-Platform. Some of them
+        // (iOS, macOS) only stream music over HLS and answer 400 to a plain
+        // MP3 over HTTP, so the target is named on every platform. A profile
+        // that already allows it is unchanged by the extra target.
         headers.insert(
             "x-plex-client-profile-extra",
             reqwest::header::HeaderValue::from_static(
@@ -2372,6 +2371,10 @@ mod tests {
         assert!(!t.url.as_str().contains(TOKEN));
         assert!(t.url.as_str().contains("maxAudioBitrate=320"));
         assert!(t.url.as_str().contains("path=%2Flibrary%2Fmetadata%2F500"));
+        // Every platform names the MP3 over HTTP target, or the macOS
+        // profile answers 400.
+        let extra = t.headers["x-plex-client-profile-extra"].to_str().unwrap();
+        assert!(extra.contains("protocol=http") && extra.contains("container=mp3") && extra.contains("audioCodec=mp3"), "{extra}");
         assert!(c.stream_request("relative").is_err());
     }
 

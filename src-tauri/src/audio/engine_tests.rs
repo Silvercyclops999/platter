@@ -417,6 +417,37 @@ async fn transcode_refused_twice_fails_after_one_retry() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn capped_stream_refused_plays_the_original_file() {
+    // Away from home the stream is a transcode to the quality limit. The
+    // server answers 400 to it and to the fallback transcode: the original
+    // file plays instead of the song being skipped.
+    let mut r = rig().await;
+    let good = wav_tone(RATE, 2, 20_000, 500.0, 0.5);
+    r.server.add("/t/a", Route { status: Some(400), ..Default::default() });
+    r.server.add("/x/a", Route { status: Some(400), ..Default::default() });
+    r.server.add("/o/a", Route { body: good.clone(), ..Default::default() });
+    r.resolver.capped.lock().insert("a".into());
+    r.engine.load(t("a"), "ia".into(), 0, true).unwrap();
+    let ev = collect_until(&mut r.events, is_drained, Duration::from_secs(20)).await;
+    assert!(!ev.iter().any(|e| matches!(e, EngineEvent::Failed { .. })), "{ev:?}");
+    assert_eq!(r.server.state.ranges_for("/o/a").len(), 1);
+    let (want, _, _) = decode_all(&good, "wav");
+    assert_same(&settled_samples(&r.cap, want.len()).await, &want);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refused_transcode_without_a_cap_still_fails() {
+    // The stream was the original already: nothing else to try.
+    let mut r = rig().await;
+    r.server.add("/t/a", Route { status: Some(400), ..Default::default() });
+    r.server.add("/x/a", Route { status: Some(400), ..Default::default() });
+    r.engine.load(t("a"), "ia".into(), 0, true).unwrap();
+    let ev = collect_until(&mut r.events, |e| matches!(e, EngineEvent::Failed { .. }), Duration::from_secs(10)).await;
+    assert!(matches!(ev.last().unwrap(), EngineEvent::Failed { error: AppError::Server(_), .. }), "{ev:?}");
+    assert!(r.server.state.ranges_for("/o/a").is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn transcode_also_failing_reports_failure() {
     let mut r = rig().await;
     r.server.add("/t/a", Route { body: vec![1u8; 5000], ..Default::default() });

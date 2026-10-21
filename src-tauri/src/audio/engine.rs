@@ -2297,13 +2297,33 @@ fn refused_400(e: &OpenFail) -> bool {
     matches!(e, OpenFail::Retry(AppError::Server(m)) if m == "http 400")
 }
 
+/// Which way a loader opened its track, so a reopen (after a failed seek)
+/// asks the same way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Via {
+    /// Download, disk cache, then [`TrackResolver::stream`].
+    Stream,
+    /// [`TrackResolver::transcode`], after the stream failed.
+    Transcode,
+    /// [`TrackResolver::original`], after a capped stream and the
+    /// transcoder were both refused.
+    Original,
+}
+
 fn open_track(
     env: &Env,
     track: &Track,
-    transcode: bool,
+    via: Via,
     prio: &PriorityCell,
 ) -> Result<Opened, OpenFail> {
-    if transcode {
+    // No original on offer any more (the connection changed and nothing is
+    // capped now): the plain stream is the file itself.
+    if via == Via::Original
+        && let Some(src) = env.rt.block_on(env.resolver.original(track))
+    {
+        return open_from(env, track, src.map_err(OpenFail::Fatal)?, Origin::Stream, prio);
+    }
+    if via == Via::Transcode {
         let src = env
             .rt
             .block_on(env.resolver.transcode(track))
@@ -2565,19 +2585,35 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
         let t = track.clone();
         env.rt.spawn(async move { resolver.audio_info(&t).await })
     };
-    // 1. Open: cache → original stream → transcoder.
-    let mut transcoded = false;
-    let mut opened = match open_track(&env, &track, false, &ctl.prio) {
+    // 1. Open: cache → stream → transcoder → original file (when the
+    // stream was itself a capped transcode).
+    let mut via = Via::Stream;
+    let mut opened = match open_track(&env, &track, Via::Stream, &ctl.prio) {
         Ok(o) => o,
         Err(OpenFail::Fatal(e)) => return fail(&env, key, &track, e),
         // Out of reach: the transcoder is on the same server.
         Err(OpenFail::Retry(e)) if unreachable(&e) => return fail(&env, key, &track, e),
         Err(OpenFail::Retry(e)) => {
             tracing::info!("track {} not playable directly ({e}); trying transcode", track.id);
-            transcoded = true;
-            match open_track(&env, &track, true, &ctl.prio) {
+            via = Via::Transcode;
+            match open_track(&env, &track, Via::Transcode, &ctl.prio) {
                 Ok(o) => o,
-                Err(OpenFail::Fatal(e) | OpenFail::Retry(e)) => return fail(&env, key, &track, e),
+                Err(OpenFail::Fatal(e)) => return fail(&env, key, &track, e),
+                Err(OpenFail::Retry(e)) if unreachable(&e) => return fail(&env, key, &track, e),
+                // The server won't convert it: the original file plays
+                // instead when a quality cap was all that stood in the way.
+                Err(OpenFail::Retry(e)) => match env.rt.block_on(env.resolver.original(&track)) {
+                    None => return fail(&env, key, &track, e),
+                    Some(Err(e)) => return fail(&env, key, &track, e),
+                    Some(Ok(src)) => {
+                        tracing::info!("transcode of {} refused ({e}); playing the original file", track.id);
+                        via = Via::Original;
+                        match open_from(&env, &track, src, Origin::Stream, &ctl.prio) {
+                            Ok(o) => o,
+                            Err(OpenFail::Fatal(e) | OpenFail::Retry(e)) => return fail(&env, key, &track, e),
+                        }
+                    }
+                },
             }
         }
     };
@@ -2617,7 +2653,7 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
             }
         }
     }
-    core.publish_source(key, source_info(&track, &opened, transcoded, info));
+    core.publish_source(key, source_info(&track, &opened, via == Via::Transcode, info));
     if let Some(task) = late_info {
         let core = core.clone();
         env.rt.spawn(async move {
@@ -2690,7 +2726,7 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
             if let Err(e) = opened.dec.seek_ms(ms) {
                 tracing::warn!("seek failed on {}: {e}", track.id);
                 // Reopen from scratch and try once more.
-                match open_track(&env, &track, transcoded, &ctl.prio) {
+                match open_track(&env, &track, via, &ctl.prio) {
                     Ok(o) => {
                         opened = o;
                         if opened.dec.seek_ms(ms).is_err() {
@@ -2823,10 +2859,10 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                 return;
             }
             Err(e) => {
-                if !pushed_any && !transcoded && !matches!(e, DecodeError::Io(_)) {
+                if !pushed_any && via == Via::Stream && !matches!(e, DecodeError::Io(_)) {
                     tracing::info!("decode of {} failed ({e}); trying transcode", track.id);
-                    transcoded = true;
-                    match open_track(&env, &track, true, &ctl.prio) {
+                    via = Via::Transcode;
+                    match open_track(&env, &track, Via::Transcode, &ctl.prio) {
                         Ok(o) => {
                             opened = o;
                             conv = match converter(&opened.dec, out_fmt) {
