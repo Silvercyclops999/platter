@@ -498,7 +498,8 @@ async fn the_feeds_carry_looks_downloads_and_plays_between_devices() {
         b.db.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM imported_plays", [], |r| r.get::<_, i64>(0))?)).unwrap() == 1
     })
     .await;
-    assert!(applied.lock().iter().any(|x| x.looks == 1));
+    // The callback runs after the files are written, so wait for it too.
+    until("the applied look reported", || applied.lock().iter().any(|x| x.looks == 1)).await;
     // The download is only a suggestion on the phone: nothing downloads.
     let s = crate::sync::download_intent::suggestions(&b.store, &[]).unwrap();
     assert_eq!((s.len(), s[0].title.as_str(), s[0].devices[0].as_str()), (1, "Blue", "Device pc"));
