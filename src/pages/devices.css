@@ -57,7 +57,7 @@
 
 .device-card__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); margin-top: var(--space-6); }
 .device-field { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
-.device-field__label { font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-text-muted); }
+.device-field__label { font-size: var(--font-size-xs); font-weight: var(--font-weight-semibold); letter-spacing: 0; text-transform: none; color: var(--color-text-muted); }
 .device-field__value { display: flex; align-items: center; gap: var(--space-2); min-height: 32px; font-size: var(--font-size-md); color: var(--color-text-primary); min-width: 0; }
 
 .device-sel { margin-top: var(--space-6); padding-top: var(--space-4); border-top: 1px solid var(--color-border); }

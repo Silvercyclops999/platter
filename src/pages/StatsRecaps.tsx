@@ -10,7 +10,7 @@ import { Art } from "../components/Art";
 import { Button } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import { backend } from "../lib/backend";
-import { barFractions, minutes, monthName } from "../lib/stats";
+import { minutes, monthName } from "../lib/stats";
 import type { MonthRecap, StatsRange, StatsSpan } from "../lib/statsTypes";
 import { useLoad } from "../lib/useLoad";
 import "./ledger.css";
@@ -71,7 +71,6 @@ function RecapLine({ r }: { r: MonthRecap }) {
 
 function RecapCard({ month, onShare }: { month: string; onShare: (r: MonthRecap) => void }) {
   const { data: r, error } = useLoad(() => backend.statsMonthRecap(month), [month]);
-  const fr = r ? barFractions(r.daily.map((d) => d.ms)) : [];
   const record = r?.topAlbums[0];
   const name = monthName(month);
   const [m, y] = name.split(" ");
@@ -86,9 +85,6 @@ function RecapCard({ month, onShare }: { month: string; onShare: (r: MonthRecap)
         </h3>
         {error ? <p className="stats-muted">Couldn't load this month.</p> : !r ? <Skeleton width="80%" height={16} style={{ marginTop: 8 }} /> : <RecapLine r={r} />}
       </div>
-      <span className="recap__days" aria-hidden="true">
-        {r && fr.map((f, i) => <span key={i} className={r.daily[i].ms > 0 ? "" : "is-off"} style={{ height: `${Math.max(r.daily[i].ms > 0 ? 10 : 0, f * 100)}%` }} />)}
-      </span>
       {r && (
         <Button size="sm" variant="ghost" className="recap__share" icon={<Share2 size={14} />} onClick={() => onShare(r)} aria-label={`Share ${name}`}>
           Share

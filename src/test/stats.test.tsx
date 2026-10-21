@@ -20,10 +20,10 @@ import { shareOfTop } from "../lib/statsCharts";
 import { activeSlice, activeWeeks, axisTicks, bestPoint, calendarMonths, daySentence, daysSentence, duration, heroSentence, hourOrder, longDuration, isMostlyEmpty, minuteScale, minutesSentence, peakHours, standoutWeekday } from "../lib/statsStory";
 import type { MonthRecap, StatsOverview, StatsPoint, TopSong } from "../lib/statsTypes";
 import { DEFAULT_SETTINGS } from "../lib/types";
-import { BarChart, DayCharts, ListeningCalendar } from "../pages/StatsCharts";
 import { momentCards, momentDate } from "../pages/StatsMoments";
 import { monthLine, shortListen } from "../pages/MonthStory";
 import { StatsPage } from "../pages/StatsPage";
+import { heroLine } from "../pages/StatsHero";
 import { recapChange } from "../pages/StatsRecaps";
 import { AppMenu } from "../shell/TopBar";
 import { useLibraryLoader, useLibraryModel } from "../shell/useLibrary";
@@ -162,33 +162,21 @@ describe("mock stats rules", () => {
 });
 
 describe("Stats page", () => {
-  it("shows totals, a chart and top lists, and changes range", async () => {
+  it("shows one line of totals, the record played most and top lists, and changes range", async () => {
     const user = userEvent.setup();
     render(<StatsPage />);
     expect(await screen.findByRole("heading", { level: 1, name: "Stats" })).toBeInTheDocument();
     const hero = await screen.findByTestId("stats-hero");
     const o = await backend.statsOverview(toRange({ kind: "4w" }, (await backend.statsSpan()).today));
-    expect(within(hero).getByTestId("hero-sentence")).toHaveTextContent(`You listened for ${duration(o.totals.ms)} on ${o.totals.days} days. ${o.topArtists[0].name} took`);
-    // The top artist and song lead the top lists; the hero doesn't repeat them.
-    expect(within(hero).queryByText("Top artist")).toBeNull();
-    expect(within(hero).queryByText("Top song")).toBeNull();
-    expect(within(hero).getAllByText(o.topArtists[0].name)).toHaveLength(1);
-    expect(within(hero).getByText("Longest streak")).toBeInTheDocument();
-    expect(within(hero).getByText("New artists found")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /Last 4 weeks/ })).toBeInTheDocument();
-    expect(screen.getByRole("figure", { name: /Minutes listened per day/ })).toBeInTheDocument();
-    // The minutes under the hero are their own section, headed right under the page title's level.
-    expect(screen.getByRole("heading", { level: 2, name: "Minutes per day" })).toBeInTheDocument();
-    // When you listened: every story opens with its sentence.
-    // The stories load after the totals: wait for them rather than reading the skeleton.
-    expect(await within(screen.getByTestId("story-days")).findByText(/^You listened on \d+ of these 28 days/)).toBeInTheDocument();
-    expect(await within(screen.getByTestId("story-minutes")).findByText(/^Your biggest day was \w+day, /)).toBeInTheDocument();
-    expect(within(screen.getByTestId("story-day")).getByText(/^You're an? \w+ listener: /)).toBeInTheDocument();
+    // One plain line of totals and the record played most: no sentence, no charts.
+    expect(within(hero).getByTestId("hero-sentence")).toHaveTextContent(heroLine(o));
+    expect(within(hero).getByTestId("stats-record")).toBeInTheDocument();
+    expect(screen.queryByRole("figure", { name: /Minutes listened per/ })).toBeNull();
+    expect(screen.queryByTestId("story-days")).toBeNull();
+    expect(document.querySelector(".stats-share, .recap__days")).toBeNull();
     expect(screen.getByRole("heading", { name: "Your top songs" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "All time" }));
-    expect(await screen.findByRole("heading", { name: /All time/ })).toBeInTheDocument();
-    expect(await screen.findByRole("figure", { name: /Minutes listened per month/ })).toBeInTheDocument();
-    expect(within(await screen.findByTestId("stats-hero")).getByText("Artists you've played")).toBeInTheDocument();
+    await waitFor(async () => expect(screen.getByTestId("hero-sentence")).toHaveTextContent(heroLine(await backend.statsOverview({ from: null, to: null }, 50))));
     await user.click(screen.getByRole("tab", { name: "Artists" }));
     expect(await screen.findByRole("heading", { name: "Your top artists" })).toBeInTheDocument();
     expect(screen.getByTestId("stats-feature")).toHaveAccessibleName(/^Your top artist: /);
@@ -369,99 +357,6 @@ describe("your stats", () => {
 });
 
 describe("stats charts", () => {
-  const days = (n: number, from = "2026-09-01") => Array.from({ length: n }, (_, i) => ({ key: addDays(from, i), plays: i % 3, ms: (i % 3) * 600_000 }));
-
-  it("the bar chart has a summary, a label for every bar, and moves by keyboard", async () => {
-    const user = userEvent.setup();
-    const points = days(10);
-    render(<BarChart points={points} bucket="day" label="Minutes listened per day, test" />);
-    const fig = screen.getByRole("figure", { name: "Minutes listened per day, test" });
-    expect(fig).toHaveAccessibleDescription(/Minutes listened per day\. 6 of 10 days with listening, averaging 15 minutes\. Most: Sep 3, 2026, 20 minutes\./);
-    expect(screen.getAllByRole("img", { name: /^Sep \d+, 2026: \d+ minutes, \d+ plays?$/ })).toHaveLength(10);
-    const bars = screen.getByRole("group", { name: /Arrow keys move through the days/ });
-    await user.tab();
-    expect(bars).toHaveFocus();
-    // Focus starts on the last day with listening (Sep 9), then arrows move.
-    expect(screen.getByTestId("bars-readout")).toHaveTextContent("Sep 9, 2026 20 min · 2 plays");
-    await user.keyboard("{ArrowRight}");
-    expect(screen.getByTestId("bars-readout")).toHaveTextContent("Sep 10, 2026 0 min · 0 plays");
-    await user.keyboard("{Home}");
-    expect(screen.getByTestId("bars-readout")).toHaveTextContent("Sep 1, 2026");
-    expect(bars).toHaveAttribute("aria-activedescendant", expect.stringMatching(/b0$/));
-  });
-
-  it("the best bar takes the accent and is labelled with its value and cover", () => {
-    const points = days(10);
-    const { container } = render(<BarChart points={points} bucket="day" label="Minutes, test" best={{ thumb: "/cover.jpg" }} footnote="15 min on an average day you listened." />);
-    const peaks = container.querySelectorAll(".bars__bar.is-peak");
-    expect(peaks).toHaveLength(1);
-    // Sep 3, 6 and 9 tie on 20 minutes; the latest wins.
-    expect(peaks[0]).toHaveAccessibleName("Sep 9, 2026: 20 minutes, 2 plays");
-    expect(container.querySelector(".bars__note")).toHaveTextContent("20 min");
-    expect(container.querySelector(".bars__note .art")).not.toBeNull();
-    expect(screen.getByTestId("bars-readout")).toHaveTextContent("15 min on an average day you listened.");
-    // A light scale in real units.
-    expect([...container.querySelectorAll(".bars__tick")].map((t) => t.textContent)).toEqual(["0", "5 min", "10 min", "15 min", "20 min"]);
-  });
-
-  it("your day marks the peak hours and the standout weekday, with a table and keyboard", async () => {
-    const user = userEvent.setup();
-    const hours = Array.from({ length: 24 }, (_, h) => (h === 23 ? 50 : h === 0 ? 40 : h === 1 ? 30 : h === 9 ? 10 : 0) * 60_000);
-    const weekdays = [10, 10, 10, 30, 10, 10, 10].map((m) => m * 60_000);
-    const { container } = render(<DayCharts hours={hours} weekdays={weekdays} />);
-    const hourFig = screen.getByRole("figure", { name: "Listening by hour of the day" });
-    expect(within(hourFig).getAllByRole("img", { name: /^\d+ (AM|PM): \d+ minutes$/ })).toHaveLength(24);
-    // Drawn from 6 AM, so the late-night peak sits together at the right.
-    const peaks = [...hourFig.querySelectorAll(".bars__bar.is-peak")].map((b) => b.getAttribute("aria-label"));
-    expect(peaks).toEqual(["11 PM: 50 minutes", "12 AM: 40 minutes", "1 AM: 30 minutes"]);
-    expect(within(hourFig).getByRole("table", { name: "Minutes listened by hour of the day" })).toBeInTheDocument();
-    const weekFig = screen.getByRole("figure", { name: "Listening by day of the week" });
-    expect([...weekFig.querySelectorAll(".bars__bar.is-peak")].map((b) => b.getAttribute("aria-label"))).toEqual(["Wednesday: 30 minutes"]);
-    expect(screen.getByTestId("day-readout")).toHaveTextContent("92% of your listening falls between 11 PM and 2 AM.");
-    act(() => screen.getByRole("group", { name: /Arrow keys move through the hours/ }).focus());
-    expect(screen.getByTestId("day-readout")).toHaveTextContent("11 PM to 12 AM 50 min");
-    await user.keyboard("{ArrowRight}");
-    expect(screen.getByTestId("day-readout")).toHaveTextContent("12 AM to 1 AM 40 min");
-    expect(hourFig.querySelectorAll(".bars__xlabel")).toHaveLength(4);
-    expect(container.querySelectorAll(".chart--week .bars__xlabel")).toHaveLength(7);
-  });
-
-  it("the calendar shows months from the first play, with the best day marked and a text table", async () => {
-    const user = userEvent.setup();
-    const points = [
-      { key: "2026-10-01", plays: 3, ms: 600_000 },
-      { key: "2026-10-08", plays: 6, ms: 1_200_000 },
-    ];
-    render(<ListeningCalendar points={points} from="2026-09-18" to="2026-10-15" footnote="2 days with listening." />);
-    const fig = screen.getByTestId("stats-calendar");
-    // September had nothing, so only October is drawn.
-    expect(within(fig).getAllByText("October")).toHaveLength(1);
-    expect(within(fig).queryByText("September")).toBeNull();
-    const table = within(fig).getByRole("table", { name: "Listening by month" });
-    expect(within(table).getByRole("row", { name: "October 2026 2 30" })).toBeInTheDocument();
-    expect(fig.querySelector(".cal__day.is-best")).toHaveAccessibleName("Thu, Oct 8, 2026: 20 min, 6 plays");
-    expect(within(fig).getByRole("img", { name: "Fri, Oct 16, 2026: outside this range" })).toBeInTheDocument();
-    const grid = within(fig).getByRole("group", { name: /Arrow keys move by day and week/ });
-    act(() => grid.focus());
-    expect(screen.getByTestId("cal-readout")).toHaveTextContent("Thu, Oct 8, 2026: 20 min, 6 plays");
-    await user.keyboard("{ArrowUp}");
-    expect(screen.getByTestId("cal-readout")).toHaveTextContent("Thu, Oct 1, 2026: 10 min, 3 plays");
-    // Oct 1 is the first day drawn, so left stays there; right moves on.
-    await user.keyboard("{ArrowLeft}{ArrowRight}");
-    expect(screen.getByTestId("cal-readout")).toHaveTextContent("Fri, Oct 2, 2026: no listening");
-  });
-
-  it("a mostly empty range shows only the weeks with listening and counts the quiet ones", () => {
-    const points = ["2026-03-18", "2026-08-16", "2026-10-01", "2026-10-02", "2026-10-08"].map((key, i) => ({ key, plays: 2, ms: (i + 1) * 600_000 }));
-    render(<ListeningCalendar points={points} from="2026-01-01" to="2026-10-15" footnote="5 days with listening." />);
-    const fig = screen.getByTestId("stats-calendar");
-    expect(within(fig).getByRole("table", { name: "Weeks with listening" })).toBeInTheDocument();
-    expect(within(fig).getByText("21 quiet weeks")).toBeInTheDocument();
-    expect(within(fig).getByText("5 quiet weeks")).toBeInTheDocument();
-    expect(screen.getByTestId("cal-readout")).toHaveTextContent("Only the weeks you listened in. 5 days with listening.");
-    expect(fig.querySelector(".cal__day.is-best")).toHaveAccessibleName("Thu, Oct 8, 2026: 50 min, 2 plays");
-  });
-
   it("each top row's bar is its share of the #1", () => {
     expect(shareOfTop([10, 5, 2, 0])).toEqual([1, 0.5, 0.2, 0]);
     expect(shareOfTop([])).toEqual([]);

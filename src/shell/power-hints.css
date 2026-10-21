@@ -16,11 +16,11 @@
   background: var(--color-accent);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
   color: var(--color-text-on-accent);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: var(--font-weight-bold);
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
   line-height: 1;
-  text-transform: uppercase;
+  text-transform: none;
   white-space: nowrap;
 }
 .power-hint__typed { opacity: 0.45; }

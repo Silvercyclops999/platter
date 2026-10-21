@@ -14,7 +14,6 @@ import { barFractions, formatPlays, rangeLabel, toRange, type RangeChoice } from
 import { duration } from "../../lib/statsStory";
 import type { StatsOverview } from "../../lib/statsTypes";
 import { useLoad } from "../../lib/useLoad";
-import { MinutesStory, WhenYouListened } from "../../pages/StatsCharts";
 import { CompareSection } from "../../pages/StatsCompare";
 import { MomentsSection } from "../../pages/StatsMoments";
 import { MonthlySection, monthsIn } from "../../pages/StatsRecaps";
@@ -60,8 +59,8 @@ function Section({ title, children, aside }: { title: string; children: ReactNod
   );
 }
 
-/** The overview, as the computer's: the hero and its minutes, the top lists, when you listened, moments. */
-function Overview({ o, title, isAll, isYear, today }: { o: StatsOverview; title: string; isAll: boolean; isYear: boolean; today: string }) {
+/** The overview, as the computer's: the one-line hero, the top lists, moments. */
+function Overview({ o, title, isAll, isYear }: { o: StatsOverview; title: string; isAll: boolean; isYear: boolean }) {
   const moments = useLoad(() => backend.statsMoments({ from: isAll ? null : o.from, to: isAll ? null : o.to }), [o.from, o.to, isAll]);
   const [songsShown, setSongsShown] = useState(10);
   const [artistsShown, setArtistsShown] = useState(5);
@@ -81,7 +80,6 @@ function Overview({ o, title, isAll, isYear, today }: { o: StatsOverview; title:
   return (
     <div className="stats stats--phone">
       <StatsHero o={o} moments={moments.data} title={title} isAll={isAll} />
-      <MinutesStory o={o} title={title} today={today} />
 
       {songs.length > 0 && (
         <Section title="Your top songs">
@@ -157,7 +155,6 @@ function Overview({ o, title, isAll, isYear, today }: { o: StatsOverview; title:
         </Section>
       )}
 
-      <WhenYouListened o={o} today={today} />
       <MomentsSection moments={moments.data} rangeTitle={title} isYear={isYear} year={year} error={!!moments.error} />
     </div>
   );
@@ -235,7 +232,7 @@ export function PhoneStats({ tab: openTab, month, friend }: { tab?: StatsTab; mo
             ) : (
               <>
                 <h2 className="sr-only ph-stats__range">{title}</h2>
-                <Overview key={`${range?.from}:${range?.to}`} o={o.data} title={title} isAll={!range?.from && !range?.to} isYear={choice.kind === "year" || choice.kind === "pickYear"} today={span.data?.today ?? o.data.to} />
+                <Overview key={`${range?.from}:${range?.to}`} o={o.data} title={title} isAll={!range?.from && !range?.to} isYear={choice.kind === "year" || choice.kind === "pickYear"} />
               </>
             ))}
           {tab === "recaps" && (

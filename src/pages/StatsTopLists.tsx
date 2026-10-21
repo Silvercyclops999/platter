@@ -13,7 +13,6 @@ import { TrackList, TrackRow } from "../components/TrackRow";
 import { backend } from "../lib/backend";
 import { formatPlays, type toRange } from "../lib/stats";
 import { duration } from "../lib/statsStory";
-import { shareOfTop } from "../lib/statsCharts";
 import type { StatsOverview, StatsTopKind, TopSong } from "../lib/statsTypes";
 import { player } from "../stores/player";
 import { createPlaylist } from "../stores/playlists";
@@ -90,19 +89,9 @@ function rowsFor(o: StatsOverview, kind: StatsTopKind): Row[] {
 
 const countLine = (plays: number, ms: number) => `${formatPlays(plays)} · ${duration(ms)}`;
 
-/** The slim bar for a row's plays against the #1's. */
-function ShareBar({ share }: { share: number }) {
-  return (
-    <span className="stats-share" aria-hidden="true">
-      <span className="stats-share__fill" style={{ width: `${Math.max(2, share * 100)}%` }} />
-    </span>
-  );
-}
-
-function Count({ plays, ms, share }: { plays: number; ms: number; share: number }) {
+function Count({ plays, ms }: { plays: number; ms: number }) {
   return (
     <span className="stats-count">
-      <ShareBar share={share} />
       <span className="stats-count__text">{countLine(plays, ms)}</span>
     </span>
   );
@@ -156,7 +145,7 @@ function Feature({ r, kind, playSongs }: { r: Row; kind: StatsTopKind; playSongs
   );
 }
 
-function ListRows({ rows, kind, shares, start, playSongs }: { rows: Row[]; kind: StatsTopKind; shares: number[]; start: number; playSongs: (first: string) => void }) {
+function ListRows({ rows, kind, start, playSongs }: { rows: Row[]; kind: StatsTopKind; start: number; playSongs: (first: string) => void }) {
   if (kind === "songs")
     return (
       <TrackList label="Top songs" header={false}>
@@ -170,7 +159,7 @@ function ListRows({ rows, kind, shares, start, playSongs }: { rows: Row[]; kind:
               showArt
               showAlbum={false}
               onPlay={() => playSongs(r.song!.track!.id)}
-              trailing={<Count plays={r.plays} ms={r.ms} share={shares[start - 1 + i]} />}
+              trailing={<Count plays={r.plays} ms={r.ms} />}
             />
           ) : (
             <div key={r.key} className="stats-row stats-row--gone" role="row">
@@ -185,7 +174,7 @@ function ListRows({ rows, kind, shares, start, playSongs }: { rows: Row[]; kind:
                 <span className="stats-row__sub truncate">{r.sub} · not in your library</span>
               </span>
               <span role="gridcell">
-                <Count plays={r.plays} ms={r.ms} share={shares[start - 1 + i]} />
+                <Count plays={r.plays} ms={r.ms} />
               </span>
             </div>
           ),
@@ -215,7 +204,7 @@ function ListRows({ rows, kind, shares, start, playSongs }: { rows: Row[]; kind:
               </span>
             )}
           </span>
-          <Count plays={r.plays} ms={r.ms} share={shares[start - 1 + i]} />
+          <Count plays={r.plays} ms={r.ms} />
         </li>
       ))}
     </ol>
@@ -228,7 +217,6 @@ export function TopLists({ o, range, title }: { o: StatsOverview; range: ReturnT
   const panel = useId();
   const rows = rowsFor(o, kind);
   const total = rows.length;
-  const shares = shareOfTop(rows.map((r) => r.plays));
   const songIds = o.topSongs.map((s) => s.track?.id).filter((x): x is string => !!x);
   const playSongs = (first: string) => void player.playTracks(songIds, first);
   const ids = () => backend.statsPlayIds(range, kind, 50);
@@ -283,7 +271,7 @@ export function TopLists({ o, range, title }: { o: StatsOverview; range: ReturnT
           <div className={`stats-top stats-top--${kind}`}>
             <Feature r={rows[0]} kind={kind} playSongs={playSongs} />
             <div className="stats-top__rest">
-              {shown.length > 0 && <ListRows rows={shown} kind={kind} shares={shares} start={2} playSongs={playSongs} />}
+              {shown.length > 0 && <ListRows rows={shown} kind={kind} start={2} playSongs={playSongs} />}
               {total > SHORT_LIST && (
                 <Button size="sm" variant="ghost" className="stats-more" onClick={() => setMore(!more)}>
                   {more ? "Show less" : "Show more"}

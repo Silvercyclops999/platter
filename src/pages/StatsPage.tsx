@@ -21,7 +21,6 @@ import type { StatsMoments, StatsOverview, StatsSpan } from "../lib/statsTypes";
 import { useLoad } from "../lib/useLoad";
 import { nav, useRouter, type StatsTab } from "../stores/router";
 import { useSettings } from "../stores/settings";
-import { MinutesStory, WhenYouListened } from "./StatsCharts";
 import { CompareSection } from "./StatsCompare";
 import { WrappedSection } from "./StatsWrapped";
 import { DiaryPage } from "./DiaryPage";
@@ -32,7 +31,6 @@ import { TopLists } from "./StatsTopLists";
 import "./ledger.css";
 import "./stats.css";
 
-export { BarChart } from "./StatsCharts";
 
 type ChipId = RangeChoice["kind"];
 
@@ -246,9 +244,7 @@ export function StatsPage({ tab: openTab, month, friend }: { tab?: StatsTab; mon
     return (
       <>
         <StatsHero o={o} moments={moments.data} title={title} isAll={isAll} />
-        <MinutesStory o={o} title={title} today={span?.today ?? o.to} />
         <TopLists key={`${range.from}:${range.to}`} o={o} range={range} title={title} />
-        <WhenYouListened o={o} today={span?.today ?? o.to} />
         <MomentsSection moments={moments.data} rangeTitle={title} isYear={isYear} year={o.to.slice(0, 4)} error={!!moments.error} />
       </>
     );

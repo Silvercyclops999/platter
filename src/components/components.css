@@ -243,10 +243,10 @@
   height: 18px;
   padding: 0 6px;
   border-radius: 3px;
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: var(--font-weight-bold);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   white-space: nowrap;
   line-height: 1;
 }

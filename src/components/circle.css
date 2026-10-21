@@ -72,8 +72,8 @@
   margin: var(--space-6) 0 var(--space-2);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-bold);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--color-text-muted);
 }
 .invite__group .invite__heading { margin-top: 0; }

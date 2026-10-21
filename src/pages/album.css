@@ -108,8 +108,8 @@
 .album-side__label {
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-semibold);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--color-text-secondary);
 }
 .album-side.is-playing .album-side__label { color: var(--color-accent); }
