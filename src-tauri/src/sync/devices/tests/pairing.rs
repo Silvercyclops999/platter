@@ -360,6 +360,46 @@ async fn saying_no_to_a_device_that_joined_with_the_long_code_pairs_nothing() {
     assert!(host_side.confirm(true).is_err(), "nothing is asking now");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_welcome_the_relay_turns_away_leaves_no_half_link() {
+    let ntfy = FakeNtfy::start().await;
+    let phone = real_clock("phone", ACCT);
+    let pc = real_clock("pc", ACCT);
+    let host_side = DevicePairing::new(deps(&phone, &ntfy.url));
+    let joiner = DevicePairing::new(deps(&pc, &ntfy.url));
+    let long = host_side.start().await.unwrap().long_code.unwrap();
+    until("the code's listener on the relay", || ntfy.requests().iter().any(|r| r.starts_with("GET") && r.contains("/json"))).await;
+    let join = tokio::spawn(async move { joiner.join(&long, None).await });
+    until("the phone to ask", || host_side.state().phase == PairPhase::Confirm).await;
+    // The welcome can't be sent: the link saved for it is taken back.
+    ntfy.set_limited(true);
+    host_side.confirm(true).unwrap();
+    until("the phone to give up", || host_side.state().phase == PairPhase::Expired).await;
+    assert!(phone.links.all().is_empty(), "no link without a welcome sent");
+    assert!(join.await.unwrap().is_err());
+    assert!(pc.links.all().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_link_that_cant_be_saved_sends_no_welcome() {
+    let ntfy = FakeNtfy::start().await;
+    let phone = real_clock("phone", ACCT);
+    let pc = real_clock("pc", ACCT);
+    let host_side = DevicePairing::new(deps(&phone, &ntfy.url));
+    let joiner = DevicePairing::new(deps(&pc, &ntfy.url));
+    let long = host_side.start().await.unwrap().long_code.unwrap();
+    until("the code's listener on the relay", || ntfy.requests().iter().any(|r| r.starts_with("GET") && r.contains("/json"))).await;
+    let join = tokio::spawn(async move { joiner.join(&long, None).await });
+    until("the phone to ask", || host_side.state().phase == PairPhase::Confirm).await;
+    // The phone can't save the link (its database refuses the write).
+    phone.db.write(|c| Ok(c.execute_batch("DROP TABLE kv")?)).unwrap();
+    host_side.confirm(true).unwrap();
+    until("the phone to give up", || host_side.state().phase == PairPhase::Expired).await;
+    assert_eq!(ntfy.published().len(), 1, "the join only: the other device was never told it's paired");
+    assert!(join.await.unwrap().is_err());
+    assert!(pc.links.all().is_empty());
+}
+
 #[tokio::test]
 async fn a_relay_that_cant_be_reached_hides_the_long_code_and_says_so() {
     let d = dev("phone");

@@ -9,30 +9,45 @@ use super::{Device, NAME_MAX, SelItem, SelKind};
 
 const KEY: &str = "devices.list";
 
-pub fn load(db: &DbHandle) -> Vec<Device> {
-    db.read(|c| kv_get(c, KEY))
-        .ok()
-        .flatten()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+fn parse(s: Option<String>) -> Vec<Device> {
+    s.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
 }
 
+pub fn load(db: &DbHandle) -> Vec<Device> {
+    db.read(|c| kv_get(c, KEY)).ok().map(parse).unwrap_or_default()
+}
+
+#[cfg(test)]
 pub fn save(db: &DbHandle, list: &[Device]) -> AppResult<()> {
-    let json = serde_json::to_string(list).map_err(|e| AppError::Internal(e.to_string()))?;
-    db.write(|c| kv_set(c, KEY, &json))
+    edit(db, |l| {
+        *l = list.to_vec();
+        Ok(())
+    })
+}
+
+/// Reads the list, changes it and saves it while holding the db's writer,
+/// so two changes at once (a rename while a sync notes its time) can't undo
+/// each other. `f` must not use the db.
+pub fn edit<T>(db: &DbHandle, f: impl FnOnce(&mut Vec<Device>) -> AppResult<T>) -> AppResult<T> {
+    db.write(|c| {
+        let mut list = parse(kv_get(c, KEY)?);
+        let out = f(&mut list)?;
+        let json = serde_json::to_string(&list).map_err(|e| AppError::Internal(e.to_string()))?;
+        kv_set(c, KEY, &json)?;
+        Ok(out)
+    })
 }
 
 /// Changes one device and saves the list. Returns the changed device.
 pub fn update(db: &DbHandle, id: &str, f: impl FnOnce(&mut Device) -> AppResult<()>) -> AppResult<Device> {
-    let mut list = load(db);
-    let d = list
-        .iter_mut()
-        .find(|d| d.id == id)
-        .ok_or_else(|| AppError::NotFound("That device isn't on this computer any more.".into()))?;
-    f(d)?;
-    let out = d.clone();
-    save(db, &list)?;
-    Ok(out)
+    edit(db, |list| {
+        let d = list
+            .iter_mut()
+            .find(|d| d.id == id)
+            .ok_or_else(|| AppError::NotFound("That device isn't on this computer any more.".into()))?;
+        f(d)?;
+        Ok(d.clone())
+    })
 }
 
 /// A device name as typed: trimmed, at most [`NAME_MAX`] characters.
@@ -96,6 +111,44 @@ mod tests {
         assert_eq!(d.name, "Car");
         assert_eq!(load(&db)[0].name, "Car");
         assert!(update(&db, "nope", |_| Ok(())).is_err());
+    }
+
+    #[test]
+    fn changes_at_the_same_time_all_land() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DbHandle::open(dir.path().join("d.db")).unwrap();
+        save(&db, &[device()]).unwrap();
+        let threads: Vec<_> = (0..16)
+            .map(|i| {
+                let db = db.clone();
+                std::thread::spawn(move || {
+                    update(&db, "d1", |d| {
+                        // Slow enough that unguarded writers would overlap.
+                        std::thread::sleep(std::time::Duration::from_millis(2));
+                        set_selected(d, SelKind::Album, &format!("a{i}"), "x", true);
+                        Ok(())
+                    })
+                    .unwrap();
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        assert_eq!(load(&db)[0].selection.len(), 16);
+    }
+
+    #[test]
+    fn a_change_that_fails_saves_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DbHandle::open(dir.path().join("d.db")).unwrap();
+        save(&db, &[device()]).unwrap();
+        let r = update(&db, "d1", |d| {
+            d.name = "Half done".into();
+            Err(AppError::Invalid("no".into()))
+        });
+        assert!(r.is_err());
+        assert_eq!(load(&db)[0].name, "Player");
     }
 
     #[test]

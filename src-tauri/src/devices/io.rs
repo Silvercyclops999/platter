@@ -41,6 +41,29 @@ fn part_of(to: &Path) -> PathBuf {
     to.with_file_name(format!(".{name}{PART_SUFFIX}"))
 }
 
+/// Opens the partial file empty. A link someone left under its name is
+/// removed rather than written through, so a write can't land outside the
+/// device's music folder; a leftover half file is emptied (removing it can
+/// wait on Windows while something else has it open).
+fn fresh_part(part: &Path) -> io::Result<File> {
+    match fs::symlink_metadata(part) {
+        Ok(m) if m.is_file() => fs::OpenOptions::new().write(true).truncate(true).open(part),
+        Ok(m) if !m.is_dir() => {
+            fs::remove_file(part)?;
+            fs::OpenOptions::new().write(true).create_new(true).open(part)
+        }
+        _ => fs::OpenOptions::new().write(true).create_new(true).open(part),
+    }
+}
+
+/// Refuses a link where a file Platter adds to should be.
+fn not_a_link(p: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(p) {
+        Ok(m) if m.file_type().is_symlink() => Err(io::Error::new(io::ErrorKind::InvalidInput, "a link, not a file")),
+        _ => Ok(()),
+    }
+}
+
 fn finish(part: &Path, to: &Path, f: File) -> io::Result<()> {
     f.sync_all()?;
     drop(f);
@@ -55,7 +78,7 @@ impl DeviceIo for StdIo {
         let part = part_of(to);
         let mut run = || -> io::Result<u64> {
             let mut src = File::open(from)?;
-            let mut out = File::create(&part)?;
+            let mut out = fresh_part(&part)?;
             let mut buf = vec![0u8; CHUNK];
             let mut n = 0u64;
             loop {
@@ -86,7 +109,7 @@ impl DeviceIo for StdIo {
         }
         let part = part_of(to);
         let r = (|| {
-            let mut f = File::create(&part)?;
+            let mut f = fresh_part(&part)?;
             f.write_all(bytes)?;
             finish(&part, to, f)
         })();
@@ -97,6 +120,7 @@ impl DeviceIo for StdIo {
     }
 
     fn append(&self, to: &Path, bytes: &[u8]) -> io::Result<()> {
+        not_a_link(to)?;
         let mut f = fs::OpenOptions::new().create(true).append(true).open(to)?;
         f.write_all(bytes)?;
         f.sync_all()
@@ -315,6 +339,38 @@ mod tests {
         StdIo.append(&p, b"a\n").unwrap();
         StdIo.append(&p, b"b\n").unwrap();
         assert_eq!(fs::read(&p).unwrap(), b"a\nb\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_left_under_a_partial_name_is_not_written_through() {
+        let d = tempfile::tempdir().unwrap();
+        let outside = d.path().join("outside.txt");
+        fs::write(&outside, b"keep me").unwrap();
+        let src = d.path().join("src.bin");
+        fs::write(&src, b"song").unwrap();
+        let dev = d.path().join("dev");
+        fs::create_dir_all(&dev).unwrap();
+
+        let to = dev.join("song.flac");
+        std::os::unix::fs::symlink(&outside, part_of(&to)).unwrap();
+        StdIo.copy_in(&src, &to, &|| false, &mut |_| {}).unwrap();
+        assert_eq!(fs::read(&to).unwrap(), b"song");
+
+        let manifest = dev.join(".platter-sync.json");
+        std::os::unix::fs::symlink(&outside, part_of(&manifest)).unwrap();
+        StdIo.write_bytes(&manifest, b"{}").unwrap();
+        assert_eq!(fs::read(&manifest).unwrap(), b"{}");
+
+        // A leftover half file is replaced, not added to.
+        fs::write(part_of(&to), b"half of an old copy").unwrap();
+        StdIo.copy_in(&src, &to, &|| false, &mut |_| {}).unwrap();
+        assert_eq!(fs::read(&to).unwrap(), b"song");
+
+        let journal = dev.join("journal");
+        std::os::unix::fs::symlink(&outside, &journal).unwrap();
+        assert!(StdIo.append(&journal, b"x\n").is_err());
+        assert_eq!(fs::read(&outside).unwrap(), b"keep me");
     }
 
     #[test]
