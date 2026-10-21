@@ -158,6 +158,9 @@ const CALLS: [string, (b: ReturnType<typeof createTauriBackend>) => Promise<unkn
   ["crates", (b) => b.crates("label"), { kind: "label" }],
   ["crate_page", (b) => b.cratePage("producer", "max volume"), { kind: "producer", key: "max volume" }],
   ["album_shuffle_tracks", (b) => b.albumShuffleTracks(["8", "9"]), { albumIds: ["8", "9"] }],
+  ["sleep_get", (b) => b.sleepGet(), undefined],
+  ["sleep_set", (b) => b.sleepSet({ kind: "minutes", minutes: 30 }), { choice: { kind: "minutes", minutes: 30 } }],
+  ["sleep_cancel", (b) => b.sleepCancel(), undefined],
   ["album_crates", (b) => b.albumCrates("5"), { id: "5" }],
   ["album_sides", (b) => b.albumSides("5"), { id: "5" }],
   ["album_sides_set", (b) => b.setAlbumSides("5", ["t3"]), { id: "5", starts: ["t3"] }],
@@ -183,6 +186,7 @@ const EVENTS = [
   "toast",
   "update://ready",
   "settings://changed",
+  "sleep://changed",
 ] as const;
 
 describe("Tauri bridge matches docs/IPC.md", () => {
@@ -285,6 +289,8 @@ describe("mock backend covers the whole contract", () => {
     await m.eqUseForOutput(true);
     await m.settingsSet({ eqPreset: "bassBoost" });
     m.unplugOutput("mock:headphones");
+    await m.sleepSet({ kind: "minutes", minutes: 5 });
+    await m.sleepCancel();
     vi.useRealTimers();
     expect([...seen].sort()).toEqual([...EVENTS].sort());
     m.dispose();

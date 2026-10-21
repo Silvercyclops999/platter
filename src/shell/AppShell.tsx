@@ -1,4 +1,5 @@
 import { PanelRightOpen } from "lucide-react";
+import { followSleep } from "../stores/sleep";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { DragAnnouncer } from "../components/DragAnnouncer";
 import { Tooltip } from "../components/Tooltip";
@@ -271,6 +272,7 @@ export function AppShell() {
   useEffect(() => afterFirstPaint(() => void startSocial().then(() => startSharing())), []);
   useEffect(() => afterFirstPaint(() => void startCircle()), []);
   useEffect(() => void startCurate(), []);
+  useEffect(() => void followSleep(), []);
   const frame = useLayout().frame ?? "classic";
   const hostsEl = (
     <>

@@ -4,6 +4,7 @@
  * It is a different arrangement of the same stores and core calls the
  * desktop uses; nothing here talks to a server.
  */
+import { followSleep } from "../stores/sleep";
 import { CircleUserRound, Home, Library, Search } from "lucide-react";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { backend } from "../lib/backend";
@@ -96,6 +97,7 @@ export function PhoneShell() {
   useLibraryRecents();
   useEffect(() => void loadOwnLyricsIds(), []);
   useEffect(() => void startDownloads(), []);
+  useEffect(() => void followSleep(), []);
   useEffect(() => afterFirstPaint(() => void startLyricsTrust()), []);
   useEffect(() => followStatusBar(), []);
   // A page reached from elsewhere (a link in a sheet) lights its own tab.

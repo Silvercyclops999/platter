@@ -709,6 +709,15 @@ export interface PlayContext {
   trackIds?: string[];
 }
 
+/** What the sleep timer is asked to do (`sleep_set`). */
+export type SleepChoice = { kind: "minutes"; minutes: number } | { kind: "track" } | { kind: "album" };
+
+/** A running sleep timer (`sleep_get`, `sleep://changed`). `endsAtMs` is Unix ms. */
+export type SleepTimerView =
+  | { kind: "minutes"; minutes: number; endsAtMs: number }
+  | { kind: "track"; trackId: string }
+  | { kind: "album"; albumId: string };
+
 export interface PlayContextArgs {
   context: PlayContext;
   startTrackId?: string;
@@ -4734,6 +4743,8 @@ export interface EventMap {
   "device-sync://copy": DeviceCopyProgress;
   /** The hidden songs and artists changed. */
   "hidden://changed": HiddenItem[];
+  /** The sleep timer was set, cleared or ran out. */
+  "sleep://changed": SleepTimerView | null;
   /** Bookmarks changed (newest first). */
   "bookmarks://changed": Bookmark[];
   /** Platter smart playlists changed. */

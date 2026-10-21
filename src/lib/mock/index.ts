@@ -36,7 +36,7 @@
  */
 import type { Backend, HapticKind, Unlisten } from "../backend";
 import { compareApproximate, compareMap, compareMapLoop } from "../compare";
-import type { BetterCopiesStatus, LastGet, Tap, TapInput, TapOutcome } from "../types";
+import type { BetterCopiesStatus, LastGet, SleepChoice, SleepTimerView, Tap, TapInput, TapOutcome } from "../types";
 import type {
   IsrcRelease,
   MiniplayerGo,
@@ -3318,6 +3318,51 @@ export class MockBackend implements Backend {
   }
   albumCrates(id: string) {
     return this.delay(() => this.crateIndex.shelves(id));
+  }
+  private sleepTimer: SleepTimerView | null = null;
+  private sleepSeq = 0;
+  sleepGet() {
+    return this.delay(() => this.sleepTimer);
+  }
+  /** Like the core: pauses at the time, or when the song (or the album's last song) ends; no fade here. */
+  sleepSet(choice: SleepChoice) {
+    return this.delay(() => {
+      const t = this.current?.track;
+      let timer: SleepTimerView;
+      if (choice.kind === "minutes") {
+        if (!Number.isInteger(choice.minutes) || choice.minutes < 1 || choice.minutes > 720) throw { kind: "invalid", message: "Pick from 1 minute to 12 hours." };
+        timer = { kind: "minutes", minutes: choice.minutes, endsAtMs: Date.now() + choice.minutes * 60_000 };
+      } else if (!t) throw { kind: "invalid", message: "Nothing is playing." };
+      else timer = choice.kind === "track" ? { kind: "track", trackId: t.id } : { kind: "album", albumId: t.albumId };
+      const seq = ++this.sleepSeq;
+      this.sleepTimer = timer;
+      this.emit("sleep://changed", timer);
+      const check = () => {
+        if (seq !== this.sleepSeq || !this.sleepTimer) return;
+        const cur = this.current?.track;
+        const done =
+          timer.kind === "minutes"
+            ? Date.now() >= timer.endsAtMs
+            : timer.kind === "track"
+              ? cur?.id !== timer.trackId
+              : cur?.albumId !== timer.albumId;
+        if (!done) return this.later(1000, check);
+        this.sleepTimer = null;
+        this.pauseNow();
+        this.emitState();
+        this.emit("sleep://changed", null);
+      };
+      this.later(1000, check);
+      return timer;
+    });
+  }
+  sleepCancel() {
+    return this.delay(() => {
+      this.sleepSeq++;
+      if (!this.sleepTimer) return;
+      this.sleepTimer = null;
+      this.emit("sleep://changed", null);
+    });
   }
   /** Like the core: whole albums in a random order, 50 at most, hidden songs and artists left out. */
   albumShuffleTracks(albumIds: string[]) {

@@ -67,7 +67,7 @@ import { FADE_MS, reduced } from "./motion";
 import { DeviceSheet } from "./DeviceSheet";
 import { SignalSheet } from "./SignalSheet";
 import { phone, usePhoneUi, type Sheet } from "./phoneUi";
-import { CUSTOM_MAX, CUSTOM_MIN, SLEEP_CHOICES, cancelSleep, sleepLabel, startSleep, useSleep } from "./sleepTimer";
+import { CUSTOM_MAX, CUSTOM_MIN, SLEEP_CHOICES, cancelSleep, sameChoice, sleepLabel, startSleep, useSleep } from "../stores/sleep";
 import { Dialog } from "../components/Dialog";
 import { RECENT_LIMIT } from "../shell/QueuePanel";
 import { PersonFace, addedBy } from "../shell/ListenStrip";
@@ -603,7 +603,7 @@ export function SleepSheet() {
       <ul className="ph-rows" aria-label="Stop after">
         {timer && (
           <li>
-            <button type="button" className="ph-row ph-row--text ph-row--danger" onClick={() => pick(cancelSleep)}>
+            <button type="button" className="ph-row ph-row--text ph-row--danger" onClick={() => pick(() => void cancelSleep())}>
               Turn off the timer
             </button>
           </li>
@@ -612,7 +612,7 @@ export function SleepSheet() {
           const on = sameChoice(timer, c.choice);
           return (
             <li key={c.label}>
-              <button type="button" className={`ph-row ph-row--text ${on ? "is-on" : ""}`} aria-current={on || undefined} onClick={() => pick(() => startSleep(c.choice))}>
+              <button type="button" className={`ph-row ph-row--text ${on ? "is-on" : ""}`} aria-current={on || undefined} onClick={() => pick(() => void startSleep(c.choice))}>
                 {c.label}
                 {on && <Check size={20} aria-hidden="true" className="ph-row__tick" />}
               </button>
@@ -625,7 +625,7 @@ export function SleepSheet() {
               className="ph-custom"
               onSubmit={(e) => {
                 e.preventDefault();
-                if (valid) pick(() => startSleep({ kind: "minutes", minutes: n }));
+                if (valid) pick(() => void startSleep({ kind: "minutes", minutes: n }));
               }}
             >
               <label className="ph-custom__label">
@@ -647,12 +647,6 @@ export function SleepSheet() {
   );
 }
 
-/** Whether the running timer is this choice. */
-function sameChoice(t: ReturnType<typeof useSleep.getState>["timer"], c: (typeof SLEEP_CHOICES)[number]["choice"]): boolean {
-  if (!t || t.kind !== c.kind) return false;
-  return t.kind !== "minutes" || (c.kind === "minutes" && t.minutes === c.minutes);
-}
-
 const clockFmt = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 
 /** "Stops at 9:02, in 14 min", kept up to date while the sheet is open. */
@@ -667,11 +661,11 @@ function SleepLine() {
   if (!timer) return <>Music fades out and stops.</>;
   if (timer.kind === "track") return <>Stops at the end of this song.</>;
   if (timer.kind === "album") return <>Stops at the end of this album.</>;
-  const left = Math.max(0, timer.endsAt - Date.now());
+  const left = Math.max(0, timer.endsAtMs - Date.now());
   const mins = Math.ceil(left / 60_000);
   return (
     <span className="tabular">
-      Stops at {clockFmt.format(new Date(timer.endsAt))}, in {mins} min
+      Stops at {clockFmt.format(new Date(timer.endsAtMs))}, in {mins} min
     </span>
   );
 }
