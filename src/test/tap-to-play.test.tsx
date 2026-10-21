@@ -73,7 +73,7 @@ beforeEach(async () => {
   useToasts.setState({ toasts: [] });
   useRouter.getState().reset();
   useTaps.setState({ current: null });
-  mock.taps.length = 0;
+  mock.resetTaps();
   resetCatalogueCache();
   resetRequests();
   await setUp();
