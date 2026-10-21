@@ -700,7 +700,10 @@ async fn a_bridge_doing_the_lyrics_holds_the_batch_but_not_songs_asked_for() {
     // So does the quiet one for a song whose lyrics didn't match.
     f.t.transcribe_quietly("502");
     until(&f.t, "502 done", |_| f.events.done.lock().iter().any(|d| d.0 == "502")).await;
-    assert_eq!(f.t.status().paused, Some(PauseReason::Bridge), "the batch still waits");
+    // Once that song is through (its done event comes just before the
+    // worker settles), the batch still waits.
+    until(&f.t, "the batch still waits", |s| s.paused == Some(PauseReason::Bridge)).await;
+    assert_eq!(f.events.done.lock().len(), 2, "and nothing of the batch ran here");
     // The Bridge went quiet (or a problem): the batch goes on here.
     bridge.store(false, Ordering::SeqCst);
     f.t.poke();
