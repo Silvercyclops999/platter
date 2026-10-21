@@ -245,7 +245,7 @@ describe("Stats tabs", () => {
     const m = span.months[1];
     const { unmount } = render(<StatsPage tab="overview" month={m} />);
     expect(await screen.findByRole("heading", { name: monthName(m) })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "A month" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Month" })).toHaveAttribute("aria-pressed", "true");
     unmount();
     await settings({ statsCompare: true });
     render(<StatsPage friend="Sam" />);

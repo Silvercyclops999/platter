@@ -196,8 +196,21 @@ describe("Stats page", () => {
     const lists = screen.getAllByRole("tabpanel").find((p) => p.classList.contains("stats-section__panel"))!;
     const rows = within(lists).getAllByRole("listitem");
     for (const r of rows) expect(r.querySelector(".art, .stats-genre-tile")).not.toBeNull();
-    await user.click(screen.getByRole("button", { name: "A month" }));
+    await user.click(screen.getByRole("button", { name: "Month" }));
     expect(await screen.findByRole("combobox", { name: "Month" })).toBeInTheDocument();
+  });
+
+  it("has one Year chip: this year first, other years in its picker, and the range sits under the tabs", async () => {
+    const user = userEvent.setup();
+    render(<StatsPage />);
+    const range = await screen.findByRole("group", { name: "Range" });
+    expect(within(range).getAllByRole("button").map((b) => b.textContent)).toEqual(["4 weeks", "6 months", "Year", "Month", "All time", "Custom"]);
+    const tabs = screen.getByRole("tablist", { name: "Stats" });
+    expect(tabs.compareDocumentPosition(range) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.click(within(range).getByRole("button", { name: "Year" }));
+    expect(within(range).getByRole("button", { name: "Year" })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("heading", { name: "This year" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Year" })).toBeInTheDocument();
   });
 
   it("Play these plays the top songs; Save as playlist makes one", async () => {

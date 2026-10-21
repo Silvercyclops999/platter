@@ -26,7 +26,8 @@
 .stats-muted { color: var(--color-text-secondary); font-size: var(--font-size-sm); margin: var(--space-2) 0; }
 
 /* The range and the tabs: words on a rule, the chosen one underlined. */
-.stats-range { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); min-height: 36px; margin-bottom: var(--space-2); }
+/* Tabs first, then the range for the panel under them. */
+.stats-range { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); min-height: 36px; margin-bottom: var(--space-8); }
 .stats-range__note { margin: 0; color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 .stats-range .chips { gap: var(--space-1); }
 :root .stats .stats-range .chip {
@@ -40,7 +41,8 @@
 }
 :root .stats .stats-range .chip:hover { background: none; color: var(--color-text-primary); }
 :root .stats .stats-range .chip.is-selected { background: none; color: var(--color-text-primary); font-weight: var(--font-weight-semibold); box-shadow: inset 0 -2px 0 var(--color-accent); }
-.stats-tabs { margin-bottom: var(--space-10, 40px); border-bottom: 1px solid var(--stats-line); }
+.stats-tabs { margin-bottom: var(--space-4); border-bottom: 1px solid var(--stats-line); }
+.stats-tabs + .stats-panel { margin-top: var(--space-6); }
 :root .stats .stats-tabs .tab {
   height: 40px;
   padding: 0 var(--space-1);

@@ -1,6 +1,6 @@
 /**
  * Stats: your listening for a range of days. Range chips (4 weeks, 6
- * months, this year, a picked year or month, all time, custom dates), then
+ * months, a picked year or month, all time, custom dates), then
  * three tabs. Overview: the range in a sentence with two facts, top songs,
  * artists, albums and genres with Play these and Save as playlist, when you
  * listened (each chart led by a sentence) and moments. Recaps: the range's
@@ -46,9 +46,8 @@ const TABS: { id: StatsTab; label: string }[] = [
 const CHIPS: { id: ChipId; label: string }[] = [
   { id: "4w", label: "4 weeks" },
   { id: "6m", label: "6 months" },
-  { id: "year", label: "This year" },
-  { id: "pickYear", label: "A year" },
-  { id: "pickMonth", label: "A month" },
+  { id: "pickYear", label: "Year" },
+  { id: "pickMonth", label: "Month" },
   { id: "all", label: "All time" },
   { id: "custom", label: "Custom" },
 ];
@@ -65,7 +64,7 @@ function choiceFor(id: ChipId, span: StatsSpan | undefined, prev: RangeChoice): 
   const { years, months } = pickable(span);
   switch (id) {
     case "pickYear":
-      return { kind: "pickYear", year: years[0] ?? Number(today.slice(0, 4)) };
+      return yearChoice(years[0] ?? Number(today.slice(0, 4)), today);
     case "pickMonth":
       return { kind: "pickMonth", month: months[0] ?? today.slice(0, 7) };
     case "custom":
@@ -75,19 +74,36 @@ function choiceFor(id: ChipId, span: StatsSpan | undefined, prev: RangeChoice): 
   }
 }
 
+/** A picked year: this year counts up to today, any other the whole year. */
+function yearChoice(year: number, today: string): RangeChoice {
+  return year === Number(today.slice(0, 4)) ? { kind: "year" } : { kind: "pickYear", year };
+}
+
+/** Which chip a choice belongs to: this year is under Year. */
+const chipOf = (c: RangeChoice): ChipId => (c.kind === "year" ? "pickYear" : c.kind);
+
 function RangePicker({ choice, span, onChange }: { choice: RangeChoice; span: StatsSpan | undefined; onChange: (c: RangeChoice) => void }) {
   const { years, months } = pickable(span);
+  const today = span?.today ?? new Date().toISOString().slice(0, 10);
+  const thisYear = Number(today.slice(0, 4));
+  const yearOptions = years.includes(thisYear) ? years : [thisYear, ...years];
+  const on = chipOf(choice);
   return (
     <div className="stats-range">
       <ChipRow label="Range" scroll>
         {CHIPS.map((c) => (
-          <button key={c.id} type="button" aria-pressed={choice.kind === c.id} className={`chip ${choice.kind === c.id ? "is-selected" : ""}`} onClick={() => onChange(choiceFor(c.id, span, choice))}>
+          <button key={c.id} type="button" aria-pressed={on === c.id} className={`chip ${on === c.id ? "is-selected" : ""}`} onClick={() => on !== c.id && onChange(choiceFor(c.id, span, choice))}>
             {c.label}
           </button>
         ))}
       </ChipRow>
-      {choice.kind === "pickYear" && years.length > 0 && (
-        <Select label="Year" value={String(choice.year)} options={years.map((y) => ({ value: String(y), label: String(y) }))} onChange={(v) => onChange({ kind: "pickYear", year: Number(v) })} />
+      {on === "pickYear" && (
+        <Select
+          label="Year"
+          value={String(choice.kind === "pickYear" ? choice.year : thisYear)}
+          options={yearOptions.map((y) => ({ value: String(y), label: y === thisYear ? "This year" : String(y) }))}
+          onChange={(v) => onChange(yearChoice(Number(v), today))}
+        />
       )}
       {choice.kind === "pickMonth" && months.length > 0 && (
         <Select label="Month" value={choice.month} options={months.map((m) => ({ value: m, label: monthName(m) }))} onChange={(v) => onChange({ kind: "pickMonth", month: v })} />
@@ -255,6 +271,8 @@ export function StatsPage({ tab: openTab, month, friend }: { tab?: StatsTab; mon
         />
       ) : (
         <>
+          <Tabs label="Stats" items={tabs} value={tab} onChange={pickTab} idPrefix="stats-tabs" className="stats-tabs" />
+          {/* The range sits under the tabs, with the panel it changes. */}
           {tab === "diary" ? null : tab === "compare" ? (
             <div className="stats-range">
               <p className="stats-range__note">Compare looks at your top artists and songs from the last six months.</p>
@@ -262,7 +280,6 @@ export function StatsPage({ tab: openTab, month, friend }: { tab?: StatsTab; mon
           ) : (
             <RangePicker choice={choice} span={span} onChange={setChoice} />
           )}
-          <Tabs label="Stats" items={tabs} value={tab} onChange={pickTab} idPrefix="stats-tabs" className="stats-tabs" />
           <div id="stats-tabs-panel" role="tabpanel" aria-labelledby={`stats-tabs-tab-${tab}`} className="stats-panel" tabIndex={0} data-testid={`stats-panel-${tab}`}>
             {tab !== "compare" && tab !== "diary" && (
               <h2 className="sr-only" aria-live="polite">
