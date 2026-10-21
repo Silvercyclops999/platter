@@ -94,6 +94,12 @@ pub fn studio_key(name: &str) -> String {
     fold_with_tail(name, STUDIO_TAIL)
 }
 
+/// A genre's folded name: case, spaces, hyphens and dots don't count, so
+/// "Hip-Hop", "Hip Hop" and "hiphop" are one genre.
+pub fn genre_key(name: &str) -> String {
+    fold_name(name).chars().filter(|ch| !ch.is_whitespace() && !matches!(ch, '-' | '\u{2010}' | '\u{2011}' | '_' | '.')).collect()
+}
+
 /// The labels in one label field: "A / B" and "A; B" name two.
 pub fn split_labels(s: &str) -> Vec<String> {
     s.split(['/', ';', '|'])
@@ -301,7 +307,7 @@ pub fn members(c: &Connection, shows: &dyn Fn(&str) -> bool) -> AppResult<(Vec<M
             }
             let genres: Vec<String> = serde_json::from_str(&genres).unwrap_or_default();
             for g in genres {
-                out.push(Member::new(CrateKind::Genre, fold_name(&g), &g, &id));
+                out.push(Member::new(CrateKind::Genre, genre_key(&g), &g, &id));
             }
             if let Some(s) = studio.filter(|s| !s.trim().is_empty()) {
                 plex_label.insert(id.clone(), s);

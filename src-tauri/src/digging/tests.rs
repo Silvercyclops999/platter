@@ -194,6 +194,24 @@ fn studios_eras_years_and_genres() {
 }
 
 #[test]
+fn genres_that_differ_by_spaces_hyphens_or_case_are_one_crate() {
+    let c = db();
+    album(&c, "a1", "Ada", Some(1990), None, &["Hip-Hop"], 1);
+    album(&c, "a2", "Bo", Some(1991), None, &["Hip-Hop"], 1);
+    album(&c, "a3", "Cy", Some(1992), None, &["Hip Hop"], 1);
+    album(&c, "a4", "Di", Some(1993), None, &["hiphop"], 1);
+    album(&c, "a5", "Ed", Some(1994), None, &["Hip-Hop/Rap", "Rap"], 1);
+    album(&c, "a6", "Fi", Some(1995), None, &["Rap"], 1);
+    let ix = all(&c);
+    let genres = names(&ix, CrateKind::Genre);
+    let hip = genres.iter().find(|(n, _)| n == "Hip-Hop").expect("one Hip-Hop crate, named as most albums spell it");
+    assert_eq!(hip.1, ["a1", "a2", "a3", "a4"]);
+    assert!(!genres.iter().any(|(n, _)| n == "Hip Hop" || n == "hiphop"), "{genres:?}");
+    assert_eq!(super::genre_key("Hip-Hop"), super::genre_key("hip hop"));
+    assert_ne!(super::genre_key("Hip-Hop"), super::genre_key("Hip-Hop/Rap"));
+}
+
+#[test]
 fn album_shelves_list_the_other_albums_other_artists_first_and_skip_empty_crates() {
     let c = db();
     album(&c, "a1", "Ada", Some(1990), Some("Low Tide"), &[], 1);
