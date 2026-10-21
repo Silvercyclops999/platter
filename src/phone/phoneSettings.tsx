@@ -46,9 +46,9 @@ export const SIRI_DISLIKE: SelectOption<string>[] = [
 
 /** What to say, for the "Ask Siri" row. */
 export const SIRI_PHRASES =
-  'End with "on Platter". "Play Kanye West on shuffle", "play the album Donda", "play my Road Trip playlist", ' +
-  '"play Daily Mix 2", "play hip-hop", "play the new Drake album", "play something", "play Runaway next", ' +
-  '"add Donda to the queue", "play more like this", "I like this song", "I don\'t like this song", ' +
+  'End with "on Platter". "Play The Beatles on shuffle", "play the album Abbey Road", "play my Road Trip playlist", ' +
+  '"play Daily Mix 2", "play hip-hop", "play the newest album by The Beatles", "play something", "play Yesterday next", ' +
+  '"add Abbey Road to the queue", "play more like this", "I like this song", "I don\'t like this song", ' +
   '"add this to my Road Trip playlist". Pause, skip and "turn on shuffle" work too. Songs you don\'t have are ' +
   "got through Lidarr when it's set up.";
 
@@ -165,7 +165,7 @@ export function phoneRows(s: Settings | null): RowDef[] {
       section: "Downloads and devices",
       group: SIRI,
       title: "Ask Siri",
-      description: 'Say "Hey Siri, play Donda on Platter". Tap ? for everything you can say.',
+      description: 'Say "Hey Siri, play Abbey Road on Platter". Tap ? for everything you can say.',
       more: SIRI_PHRASES,
       control: () => null,
     },
