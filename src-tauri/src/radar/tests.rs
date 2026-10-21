@@ -101,6 +101,8 @@ struct FakeLidarr {
     ready: AtomicBool,
     list: Mutex<Vec<RequestRecord>>,
     clock: Mutex<i64>,
+    /// Claims that aren't simply ours, by event.
+    claims: Mutex<HashMap<String, ClaimState>>,
 }
 
 #[async_trait]
@@ -140,6 +142,9 @@ impl RadarLidarr for FakeLidarr {
         };
         self.list.lock().push(r.clone());
         Ok(r)
+    }
+    fn claim(&self, event: &str) -> AppResult<ClaimState> {
+        Ok(self.claims.lock().get(event).cloned().unwrap_or(ClaimState::Ours))
     }
 }
 
@@ -482,6 +487,34 @@ async fn following_gets_new_albums_and_eps_found_after_the_follow() {
     let o = r.radar.check().await.unwrap();
     assert!(o.auto.is_empty());
     assert_eq!(r.lidarr.list.lock().len(), 2);
+}
+
+#[tokio::test]
+async fn only_one_device_asks_and_a_new_claim_waits_for_the_next_pass() {
+    let r = auto_rig();
+    r.radar.check().await.unwrap();
+    r.later(CHECK_EVERY);
+    r.mb.route("/release-group?query=", Some(answer(vec![album(20, "Paper Moon", 1), album(21, "Second Wind", 2)])));
+    // Another device claimed Second Wind first; Paper Moon's claim is new.
+    r.lidarr.claims.lock().insert(format!("follow:{}", id(20)), ClaimState::Settling);
+    r.lidarr.claims.lock().insert(
+        format!("follow:{}", id(21)),
+        ClaimState::Theirs(crate::lidarr::shared::Claim { device: "phone".into(), label: "iPhone".into(), at: 1 }),
+    );
+    let o = r.radar.check().await.unwrap();
+    assert!(o.auto.is_empty(), "nothing asked: one is theirs, one is settling");
+    assert!(r.lidarr.list.lock().is_empty());
+    // Half an hour on, the claim has settled: the waiting one is asked for, the other never.
+    r.lidarr.claims.lock().remove(&format!("follow:{}", id(20)));
+    r.lidarr.claims.lock().remove(&format!("follow:{}", id(21)));
+    r.later(1800);
+    let made = r.radar.get_waiting().await.unwrap();
+    assert_eq!(made.iter().map(|x| x.title.as_str()).collect::<Vec<_>>(), vec!["Paper Moon"]);
+    assert!(r.notes.0.lock().iter().any(|(t, b)| t == "New from artists you follow" && b == "Getting Paper Moon by Northlight."));
+    // Nothing left: no more asks and no more notifications.
+    let n = r.notes.0.lock().len();
+    assert!(r.radar.get_waiting().await.unwrap().is_empty());
+    assert_eq!(r.notes.0.lock().len(), n);
 }
 
 #[tokio::test]

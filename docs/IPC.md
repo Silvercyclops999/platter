@@ -2941,7 +2941,7 @@ New official albums, EPs and singles from followed artists and the ten artists p
 
 Every followed artist is looked at (up to 500), then the ones played most while there are fewer than 60.
 
-Following an artist gets their new albums and EPs, and singles too with `followGetSingles`, unless the follow has `justShow` or `followGet` is off. Only releases found after the artist was followed are asked for, oldest first, at most `autoRequestCap` a day (refused ones don't count, the rest wait for the next day), through the same path as `lidarr_request` without the typed name: the owner check, MusicBrainz guards, then the whole setup check. A release asked for once is never asked for again. A summary notification follows. Artists an older build had auto-request on for become followed artists once, followed when it was turned on.
+Following an artist gets their new albums and EPs, and singles too with `followGetSingles`, unless the follow has `justShow` or `followGet` is off. Only releases found after the artist was followed are asked for, oldest first, at most `autoRequestCap` a day (refused ones don't count, the rest wait for the next day), through the same path as `lidarr_request` without the typed name: the owner check, MusicBrainz guards, then the whole setup check. A release asked for once is never asked for again, and only one of your devices asks for it: each claims the release first and asks on a later pass (about half an hour on) once its claim has settled and still wins. A summary notification follows. Artists an older build had auto-request on for become followed artists once, followed when it was turned on.
 
 | Command | Args | Returns |
 | --- | --- | --- |
