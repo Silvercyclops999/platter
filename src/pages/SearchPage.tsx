@@ -20,7 +20,7 @@ import { hitInfo, hitMenuItems, hitOf, mixedHits, openHit, playHit, rememberHit,
 import { AlbumCard, ArtistCard, PlaylistCard, useContextState } from "./cards";
 import { otherVersionsText } from "./era";
 import { TopSongsResults, useTopSongsFound } from "./TopSongsResults";
-import { CatalogueList, CatalogueRow, CatalogueSkeleton, CatalogueTopResult, catalogueRows, foldName, hasCatalogue, useCatalogueSearch, type CatalogueResults } from "./SearchCatalogue";
+import { CatalogueList, CatalogueRow, CatalogueSkeleton, CatalogueTopResult, catalogueRows, useTapPlays, foldName, hasCatalogue, useCatalogueSearch, type CatalogueResults } from "./SearchCatalogue";
 import { CatalogueAlbumCard, CatalogueArtistCard } from "./catalogue";
 import { useLidarrReady } from "./lidarrShared";
 import type { HelpHit } from "../help/pages";
@@ -314,6 +314,7 @@ export function SearchPage({ query }: { query: string }) {
   // Music you don't have, in with the library's results as it arrives.
   const cat = useCatalogueSearch(q, filter);
   const lidarrReady = useLidarrReady();
+  const tapPlays = useTapPlays(lidarrReady);
 
   // Each request gets a sequence number and only the newest one may update
   // the screen, so a slow answer to an older query never replaces a newer one.
@@ -434,7 +435,7 @@ export function SearchPage({ query }: { query: string }) {
                 </ul>
               )}
               <ul className="sr-list" aria-label="Results">
-                {interleave(catTop && res.top ? [res.top, ...rows] : rows, cat ? catalogueRows(cat, "all", catTop?.mbid) : []).map((item) => {
+                {interleave(catTop && res.top ? [res.top, ...rows] : rows, cat ? catalogueRows(cat, "all", catTop?.mbid, tapPlays) : []).map((item) => {
                   if (item.cat) return <CatalogueRow key={item.cat.key} row={item.cat} lidarrReady={lidarrReady} />;
                   const h = item.lib!;
                   const others = h.kind === "track" && h.track ? res.versions?.[h.track.id] : undefined;

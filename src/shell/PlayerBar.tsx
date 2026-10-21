@@ -51,6 +51,8 @@ import { HifiMark } from "./HifiMark";
 import { SignalBadge, SignalPanel } from "./SignalPath";
 import { openSignal } from "../stores/signalPath";
 import { AudioLines } from "lucide-react";
+import { dismissTap, followTaps, getting, gettingFill, gettingLabel, useTaps } from "../stores/taps";
+import type { Tap } from "../lib/types";
 
 /** Seek bar keys: arrows move 5 s, Page Up/Down 25 s. */
 export const SEEK_KEY_STEP = 5_000;
@@ -428,6 +430,46 @@ export function SuggestionButtons() {
   );
 }
 
+/**
+ * In place of the seek bar while a tapped song is on its way: a thin line
+ * that fills (Searching, Downloading 62%, Ready in a moment), and why when
+ * it's waiting or didn't come.
+ */
+export function GettingLine({ tap }: { tap: Tap }) {
+  const label = gettingLabel(tap.phase, tap.progress);
+  const fill = gettingFill(tap.phase, tap.progress);
+  const stuck = tap.phase === "waiting" || tap.phase === "failed";
+  return (
+    <div className={`getting-line ${stuck ? "getting-line--stuck" : ""}`} role="status" aria-live="polite" aria-label={`Getting ${tap.title}: ${label}`}>
+      <span className="getting-line__label">{label}</span>
+      <span className="getting-line__track" aria-hidden="true">
+        <span className="getting-line__fill" style={{ transform: `scaleX(${fill})` }} />
+      </span>
+      {tap.message && <span className="getting-line__why truncate" title={tap.message}>{tap.message}</span>}
+      {stuck && (
+        <button type="button" className="getting-line__close" onClick={dismissTap}>
+          OK
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The tapped song in the bar while it comes; what's still playing meanwhile under it. */
+function GettingNow({ tap, playing }: { tap: Tap; playing: string | null }) {
+  return (
+    <>
+      <span className="player-bar__art">
+        <Art path={tap.thumb} sleeve={{ title: tap.album, artist: tap.artist }} size={56} />
+      </span>
+      <div className="player-bar__meta">
+        <div className="player-bar__title truncate">{tap.title}</div>
+        <div className="player-bar__sub truncate">{playing ? `${tap.artist} · still playing ${playing}` : tap.artist}</div>
+      </div>
+    </>
+  );
+}
+
 /** Bottom player bar. */
 export function PlayerBar() {
   const state = usePlayer((s) => s.state);
@@ -438,6 +480,9 @@ export function PlayerBar() {
   const toggleOutput = useUi((s) => s.toggleOutput);
   const buttons = useLayout().playerButtons;
   const track = state?.track;
+  const tap = useTaps((s) => s.current);
+  useEffect(() => followTaps(), []);
+  const coming = getting(tap) ? tap : null;
   const songDrags = useSettings((s) => s.settings?.dragAndDrop !== false);
   // The playing song drags like a track row.
   const dragNow =
@@ -450,8 +495,10 @@ export function PlayerBar() {
   return (
     <aside className="player-bar" aria-label="Player">
       <NowPlayingAnnouncer text={nowText} />
-      <div className="player-bar__now" role="region" aria-label={nowText ?? "Nothing playing"} {...dragNow}>
-        {track ? (
+      <div className="player-bar__now" role="region" aria-label={coming ? `Getting ${coming.title}` : (nowText ?? "Nothing playing")} {...(coming ? null : dragNow)}>
+        {coming ? (
+          <GettingNow tap={coming} playing={track && state?.status === "playing" ? track.title : null} />
+        ) : track ? (
           <>
             <button
               type="button"
@@ -501,7 +548,7 @@ export function PlayerBar() {
 
       <div className="player-bar__center">
         <PlayControls />
-        <SeekBar />
+        {coming ? <GettingLine tap={coming} /> : <SeekBar />}
       </div>
 
       <div className="player-bar__extras">

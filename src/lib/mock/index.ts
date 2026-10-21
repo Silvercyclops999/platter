@@ -36,6 +36,7 @@
  */
 import type { Backend, HapticKind, Unlisten } from "../backend";
 import { compareApproximate, compareMap, compareMapLoop } from "../compare";
+import type { LastGet, Tap, TapInput, TapOutcome } from "../types";
 import type {
   IsrcRelease,
   MiniplayerGo,
@@ -4077,6 +4078,76 @@ export class MockBackend implements Backend {
   }
   lidarrGet(input: LidarrRequestInput) {
     return this.delay(() => this.lidarr.get(this.settings, input, Math.floor(Date.now() / 1000)));
+  }
+  /** Taps in the mock: the song is searched, downloaded and lands in a few seconds. */
+  taps: Tap[] = [];
+  lastGet: LastGet | null = null;
+  lidarrTap(input: TapInput) {
+    return this.delay((): TapOutcome => {
+      if (!this.settings.lidarrTapToGet) throw { kind: "invalid", message: "Getting songs with a tap is off. Turn it on in Settings > Lidarr > More." };
+      const same = this.taps.find((t) => t.phase !== "failed" && t.releaseGroupId === (input.releaseGroupId ?? "") && t.title === input.title);
+      this.taps.forEach((t) => (t.wanted = t === same));
+      if (same) return { tap: { ...same }, needs: null };
+      const out = this.lidarr.get(this.settings, {
+        releaseGroupId: input.releaseGroupId ?? "",
+        title: input.album ?? input.title,
+        artist: input.artist,
+        artistId: input.artistId ?? null,
+        artistMbid: input.artistMbid ?? null,
+        typed: input.typed ?? null,
+      } as LidarrRequestInput, Math.floor(Date.now() / 1000));
+      if (!out.record) return { tap: null, needs: out.needs };
+      const tap: Tap = {
+        id: `tap-${this.taps.length + 1}`,
+        title: input.title,
+        artist: input.artist,
+        album: input.album ?? out.record.title,
+        releaseGroupId: input.releaseGroupId ?? "",
+        thumb: input.thumb ?? null,
+        durationMs: input.durationMs ?? null,
+        phase: "searching",
+        progress: null,
+        message: null,
+        requestId: out.record.id,
+        timings: { foundMs: null, downloadedMs: null, playingMs: null, inLibraryMs: null },
+        wanted: true,
+        fromDownload: false,
+      };
+      this.taps.unshift(tap);
+      this.followTap(tap, Date.now());
+      return { tap: { ...tap }, needs: null };
+    });
+  }
+  private followTap(tap: Tap, t0: number) {
+    const step = (ms: number, f: () => void) =>
+      setTimeout(() => {
+        f();
+        this.emit("lidarr://tap", { ...tap });
+      }, ms);
+    step(700, () => {
+      tap.phase = "downloading";
+      tap.progress = 0;
+      tap.timings.foundMs = Date.now() - t0;
+    });
+    for (let i = 1; i <= 5; i++) step(700 + i * 500, () => (tap.progress = i * 20));
+    step(3400, () => {
+      tap.phase = "playing";
+      tap.progress = null;
+      tap.fromDownload = true;
+      tap.timings.downloadedMs = tap.timings.playingMs = Date.now() - t0;
+    });
+    step(5000, () => {
+      tap.phase = "ready";
+      tap.fromDownload = false;
+      tap.timings.inLibraryMs = Date.now() - t0;
+      this.lastGet = { title: tap.title, at: Math.floor(Date.now() / 1000), timings: { ...tap.timings } };
+    });
+  }
+  lidarrTaps() {
+    return this.delay(() => this.taps.map((t) => ({ ...t })));
+  }
+  lidarrLastGet() {
+    return this.delay(() => this.lastGet);
   }
   lidarrSearchAgain(id: string) {
     return this.delay(() => this.lidarr.searchAgain(id, Math.floor(Date.now() / 1000)));
