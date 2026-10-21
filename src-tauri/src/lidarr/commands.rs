@@ -344,6 +344,12 @@ pub async fn lidarr_hunt(upgrades: State<'_, Upgrades>) -> AppResult<Vec<super::
     upgrades.hunt().await
 }
 
+/// Better copies: the practice week, and whether swaps are paused today.
+#[tauri::command]
+pub fn better_copies_status(upgrades: State<'_, Upgrades>) -> super::better::BetterStatus {
+    upgrades.better_status()
+}
+
 /// What's New and a notification for an album Lidarr brought in.
 pub struct AppAnnouncer {
     pub app: tauri::AppHandle,

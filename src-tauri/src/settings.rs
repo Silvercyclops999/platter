@@ -877,6 +877,12 @@ pub struct Settings {
     /// Upgrades ask before each swap (off swaps on their own, under the
     /// same rules).
     pub upgrades_ask: bool,
+    /// Better copies of albums already in the library are looked for and
+    /// swapped in by themselves (released albums only, never one holding
+    /// an unreleased file).
+    pub better_copies: bool,
+    /// What better copies aim for.
+    pub better_copies_aim: crate::lidarr::modes::Target,
     /// Ask Plex to scan just the new folder when a Managed album Lidarr
     /// imported doesn't show up in Plex within about two minutes.
     pub lidarr_scan_after_import: bool,
@@ -1383,7 +1389,9 @@ impl Default for Settings {
             lidarr_away_url: String::new(),
             show_missing_releases: true,
             lidarr_staging_folder: String::new(),
-            upgrades_ask: true,
+            upgrades_ask: false,
+            better_copies: true,
+            better_copies_aim: crate::lidarr::modes::Target::Lossless,
             lidarr_scan_after_import: true,
             lidarr_free_staging: true,
             lidarr_practice_until: -1,
@@ -1637,6 +1645,8 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "showMissingReleases",
     "lidarrStagingFolder",
     "upgradesAsk",
+    "betterCopies",
+    "betterCopiesAim",
     "lidarrScanAfterImport",
     "lidarrFreeStaging",
     "lidarrPracticeUntil",
@@ -2055,6 +2065,8 @@ pub struct SettingsPatch {
     pub show_missing_releases: Option<bool>,
     pub lidarr_staging_folder: Option<String>,
     pub upgrades_ask: Option<bool>,
+    pub better_copies: Option<bool>,
+    pub better_copies_aim: Option<crate::lidarr::modes::Target>,
     pub lidarr_scan_after_import: Option<bool>,
     pub lidarr_free_staging: Option<bool>,
     pub lidarr_practice_until: Option<i64>,
@@ -2654,6 +2666,8 @@ impl Settings {
             self.lidarr_staging_folder = staging_folder(f)?;
         }
         set(&mut self.upgrades_ask, p.upgrades_ask);
+        set(&mut self.better_copies, p.better_copies);
+        set(&mut self.better_copies_aim, p.better_copies_aim);
         set(&mut self.lidarr_scan_after_import, p.lidarr_scan_after_import);
         set(&mut self.lidarr_free_staging, p.lidarr_free_staging);
         if let Some(v) = p.lidarr_practice_until {
@@ -3012,7 +3026,7 @@ pub fn try_load(db: &DbHandle) -> AppResult<Settings> {
 /// because they didn't read (None when everything read).
 fn parse_stored(raw: &str) -> (Settings, Option<String>) {
     let v = match serde_json::from_str::<serde_json::Value>(raw) {
-        Ok(v) => migrate_unreleased(migrate_names(v)),
+        Ok(v) => migrate_better_copies(migrate_unreleased(migrate_names(v))),
         Err(e) => return (Settings::default(), Some(format!("(not JSON: {e})"))),
     };
     if let Ok(s) = serde_json::from_value::<Settings>(v.clone()) {
@@ -3086,6 +3100,18 @@ pub fn migrate_unreleased(mut v: serde_json::Value) -> serde_json::Value {
         "ask"
     };
     o.insert("unreleasedSharing".to_owned(), serde_json::Value::from(rule));
+    v
+}
+
+/// Settings saved before better copies came by themselves: swaps no
+/// longer ask first (the first week of better copies only lists them).
+pub fn migrate_better_copies(mut v: serde_json::Value) -> serde_json::Value {
+    let Some(o) = v.as_object_mut() else { return v };
+    if o.contains_key("betterCopies") {
+        return v;
+    }
+    o.insert("betterCopies".to_owned(), serde_json::Value::Bool(true));
+    o.insert("upgradesAsk".to_owned(), serde_json::Value::Bool(false));
     v
 }
 
@@ -4520,15 +4546,18 @@ mod tests {
     fn upgrade_settings_default_sync_check_and_round_trip() {
         let mut s = Settings::default();
         assert!(s.lidarr_staging_folder.is_empty(), "upgrades are off until a staging folder is set");
-        assert!(s.upgrades_ask, "asking before each swap is on by default");
+        assert!(!s.upgrades_ask, "swaps don't ask first: better copies' first week only lists them");
+        assert!(s.better_copies && s.better_copies_aim == crate::lidarr::modes::Target::Lossless);
         assert_eq!(s.upgrade_official_prefix, "Official");
-        for k in ["lidarrStagingFolder", "upgradesAsk", "upgradeOfficialPrefix"] {
+        for k in ["lidarrStagingFolder", "upgradesAsk", "upgradeOfficialPrefix", "betterCopies", "betterCopiesAim"] {
             assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
         }
-        let p: SettingsPatch = serde_json::from_str(r#"{"lidarrStagingFolder":" /downloads/upgrades/ ","upgradesAsk":false}"#).unwrap();
+        let p: SettingsPatch =
+            serde_json::from_str(r#"{"lidarrStagingFolder":" /downloads/upgrades/ ","upgradesAsk":false,"betterCopies":false,"betterCopiesAim":"hiRes"}"#).unwrap();
         s.apply(&p).unwrap();
         assert_eq!(s.lidarr_staging_folder, "/downloads/upgrades");
-        assert!(!s.upgrades_ask);
+        assert!(!s.upgrades_ask && !s.better_copies);
+        assert_eq!(s.better_copies_aim, crate::lidarr::modes::Target::HiRes);
         // Through the stored form and back.
         let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
         assert_eq!((back.lidarr_staging_folder.as_str(), back.upgrades_ask), ("/downloads/upgrades", false));
@@ -4541,7 +4570,12 @@ mod tests {
         s.apply(&SettingsPatch { lidarr_staging_folder: Some("  ".into()), ..Default::default() }).unwrap();
         assert!(s.lidarr_staging_folder.is_empty(), "blank turns upgrades off");
         let old: Settings = serde_json::from_str("{}").unwrap();
-        assert!(old.upgrades_ask && old.lidarr_staging_folder.is_empty());
+        assert!(!old.upgrades_ask && old.lidarr_staging_folder.is_empty());
+        // Saved before better copies: asking turns off once, and stays the user's after.
+        let (m, _) = parse_stored(r#"{"upgradesAsk":true}"#);
+        assert!(m.better_copies && !m.upgrades_ask);
+        let (m, _) = parse_stored(r#"{"upgradesAsk":true,"betterCopies":false}"#);
+        assert!(!m.better_copies && m.upgrades_ask, "chosen since: left alone");
     }
 
     #[test]

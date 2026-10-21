@@ -95,6 +95,8 @@ const SHOWN_WHEN: Record<string, string> = {
   aiModel: "an AI provider chosen (curate.test.tsx)",
   upgradesAsk: "Lidarr checked and ready (lidarr-upgrade tests)",
   upgradeOfficialPrefix: "Lidarr checked and ready",
+  betterCopies: "Lidarr checked and ready",
+  betterCopiesAim: "Lidarr checked and ready, with better copies on",
   subsonicCheckMinutes: "a Subsonic server (subsonic-servers.test.tsx)",
   saveQueueOnServer: "a server that keeps queues (subsonic-servers.test.tsx)",
   lidarrHeaders: "an away address for Lidarr (lidarr.test.tsx)",

@@ -170,6 +170,12 @@ pub mod tests {
         Shared::new(store, Arc::new(move || label.clone()))
     }
 
+    /// The shared store on a test's own database, with a clock (ms) the test moves.
+    pub fn on_with_clock(db: &DbHandle, clock: Arc<AtomicU64>) -> Shared {
+        let store = SyncStore::with_clock(db.clone(), "test-device", Arc::new(move || clock.load(Ordering::SeqCst)));
+        Shared::new(store, Arc::new(|| "Test computer".to_string()))
+    }
+
     /// The shared store on a test's own database.
     pub fn on(db: &DbHandle) -> Shared {
         Shared::new(SyncStore::new(db.clone(), "test-device"), Arc::new(|| "Test computer".to_string()))

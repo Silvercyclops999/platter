@@ -796,6 +796,17 @@ struct Rig {
     hosts: Arc<TestHosts>,
     up: Upgrades,
     lidarr: Lidarr,
+    /// Unix seconds, for everything in the rig.
+    now: Arc<std::sync::atomic::AtomicI64>,
+    ms: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl Rig {
+    fn later(&self, secs: i64) {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.now.fetch_add(secs, SeqCst);
+        self.ms.fetch_add(secs as u64 * 1000, SeqCst);
+    }
 }
 
 /// The official release's tracklist on the faked MusicBrainz.
@@ -810,7 +821,13 @@ fn first_light_releases() -> Value {
 fn rig() -> Rig {
     let b = share_box();
     let db = DbHandle::open(b.host.root.join("u.db")).unwrap();
-    let s = crate::settings::Settings { lidarr_url: "http://10.20.30.40:8686".into(), lidarr_staging_folder: STAGING.into(), ..Default::default() };
+    let s = crate::settings::Settings {
+        lidarr_url: "http://10.20.30.40:8686".into(),
+        lidarr_staging_folder: STAGING.into(),
+        better_copies: false,
+        upgrades_ask: true,
+        ..Default::default()
+    };
     crate::settings::save(&db, &s).unwrap();
     db.write(|c| {
         c.execute_batch(&format!(
@@ -837,16 +854,22 @@ fn rig() -> Rig {
     );
     mb.route(&format!("/release?release-group={RG_FIRST}"), Some(first_light_releases()));
     let web = FakeLidarr::new();
+    let now = Arc::new(std::sync::atomic::AtomicI64::new(1_800_000_000));
+    let ms = Arc::new(std::sync::atomic::AtomicU64::new(1_800_000_000_000));
+    let clock = {
+        let n = now.clone();
+        move || n.load(std::sync::atomic::Ordering::SeqCst)
+    };
     let lidarr = Lidarr::new(LidarrDeps {
         web: web.clone(),
         keys: Arc::new(MemoryStore::new()),
         db: db.clone(),
         plex: Arc::new(Plex),
-        clock: Arc::new(|| 1_800_000_000),
+        clock: Arc::new(clock.clone()),
         mb: mb.clone(),
         artist_mbid: Arc::new(Mbid),
         album_wait: std::time::Duration::ZERO,
-        shared: super::shared::tests::on(&db),
+        shared: super::shared::tests::on_with_clock(&db, ms.clone()),
         plex_server: Arc::new(super::plexside::fake::FakePlex::default()),
     });
     lidarr.set_key(Some("abc123")).unwrap();
@@ -857,10 +880,10 @@ fn rig() -> Rig {
         db: db.clone(),
         hosts: hosts.clone(),
         plex: plex.clone(),
-        clock: Arc::new(|| 1_800_000_000),
+        clock: Arc::new(clock),
         status: Arc::new(TagStatus),
     });
-    Rig { b, db, web, mb, plex, hosts, up, lidarr }
+    Rig { b, db, web, mb, plex, hosts, up, lidarr, now, ms }
 }
 
 fn assert_only_allowed_writes(web: &FakeLidarr) {
@@ -1181,8 +1204,10 @@ fn drop_sketch(r: &Rig) {
 #[tokio::test]
 async fn with_asking_off_a_clean_album_swaps_on_its_own_and_a_mixed_one_waits() {
     let r = rig();
-    let s = crate::settings::Settings { upgrades_ask: false, ..crate::settings::load(&r.db) };
+    let s = crate::settings::Settings { upgrades_ask: false, better_copies: true, ..crate::settings::load(&r.db) };
     crate::settings::save(&r.db, &s).unwrap();
+    // Better copies' own first week is long over.
+    put_shared(&r, "betterCopies:since", &(1_800_000_000_i64 - super::better::PRACTICE_S - 1));
     let id = imported(&r).await;
     assert_eq!(r.up.auto_swap().await, 0, "the unreleased file makes it wait for a person");
     assert!(r.b.share("Northlight/First Light/01 Dawn.mp3").exists());
@@ -1232,4 +1257,255 @@ async fn a_swap_stops_when_lidarr_switched_the_edition_since_the_offer() {
     assert!(e.contains("Lidarr moved First Light to the 3-track edition") && e.contains("didn't swap anything"), "{e}");
     assert!(r.up.records()[0].swaps.is_empty() && r.up.records()[0].failure.is_none(), "nothing swapped, nothing to undo");
     assert!(r.lidarr.changes().iter().any(|c| c.by_lidarr && c.what == "Lidarr switched First Light to the 3-track edition"));
+}
+
+// ---------------------------------------------------------------- better copies
+
+/// Better copies on, asking off, the setup check green, practice mode over.
+async fn better_rig() -> Rig {
+    let r = rig();
+    let s = crate::settings::Settings { better_copies: true, upgrades_ask: false, lidarr_practice_until: 0, ..crate::settings::load(&r.db) };
+    crate::settings::save(&r.db, &s).unwrap();
+    r.lidarr.check().await.unwrap();
+    r
+}
+
+/// Mark the third song of First Light a demo in its own tags (the album stays official).
+fn sketch_is_a_demo(r: &Rig) {
+    r.db.write(|c| {
+        c.execute("INSERT INTO file_tags (part_key, status, version, scanned_at) VALUES ('/p/3', 'ok', 'demo', 1)", [])?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+/// One pass of better copies, with the claim settled.
+async fn pass(r: &Rig) -> Vec<super::hunt::HuntItem> {
+    r.up.better_copies().await.unwrap();
+    r.later(3_600 + 61);
+    r.up.better_copies().await.unwrap()
+}
+
+#[tokio::test]
+async fn better_copies_never_ask_for_an_album_holding_an_unreleased_song() {
+    let r = better_rig().await;
+    confirmed(&r).await;
+    sketch_is_a_demo(&r);
+    assert!(pass(&r).await.is_empty(), "First Light has a demo in it; the build and the leak are unreleased");
+    assert!(r.web.writes().is_empty(), "nothing sent to Lidarr");
+    assert!(r.up.records().is_empty());
+    // The demo alone kept it: without it, the album is asked for.
+    r.db.write(|c| {
+        c.execute("DELETE FROM file_tags WHERE part_key = '/p/3'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    r.later(86_400);
+    let items = pass(&r).await;
+    assert_eq!(items.iter().map(|i| i.state).collect::<Vec<_>>(), vec![super::hunt::HuntState::Requested]);
+}
+
+#[tokio::test]
+async fn better_copies_confirm_the_one_matching_release_ask_once_and_practice_first() {
+    let r = better_rig().await;
+    drop_sketch(&r);
+    // The first pass claims the album; nothing is asked until the claim has settled.
+    assert!(r.up.better_copies().await.unwrap().is_empty());
+    assert!(r.web.writes().is_empty());
+    assert!(r.up.better_copies().await.unwrap().is_empty(), "not again straight away");
+    r.later(3_600 + 61);
+    let items = r.up.better_copies().await.unwrap();
+    assert_eq!(items.iter().map(|i| (i.title.as_str(), i.state)).collect::<Vec<_>>(), vec![("First Light", super::hunt::HuntState::Requested)]);
+    assert_eq!(r.up.for_album("a1").await.unwrap().confirmed.unwrap().release_group_id, RG_FIRST, "same title and the very same tracklist");
+    assert_only_allowed_writes(&r.web);
+    let rec = r.up.records()[0].clone();
+    assert_eq!(rec.request.destination.as_deref(), Some("/staging/upgrades/Northlight"), "only ever into staging");
+    // Once a day for every device.
+    let n = r.web.writes().len();
+    r.later(3_600);
+    assert!(r.up.better_copies().await.unwrap().is_empty());
+    assert_eq!(r.web.writes().len(), n);
+    // It lands: the first week only says what would be swapped.
+    r.web.import();
+    r.up.refresh().await.unwrap();
+    assert!(r.up.better_practice());
+    assert_eq!(r.up.auto_swap().await, 0);
+    assert!(r.b.share("Northlight/First Light/01 Dawn.mp3").exists());
+    assert!(r.lidarr.changes().iter().any(|e| e.practice && e.what == "Would swap 2 songs on First Light by Northlight"));
+    // A week on, it swaps by itself, old files kept in the backup folder.
+    r.later(super::better::PRACTICE_S);
+    assert_eq!(r.up.auto_swap().await, 1);
+    assert!(r.b.share("Northlight/First Light/01 Dawn.flac").exists());
+    assert!(!r.b.share("Northlight/First Light/01 Dawn.mp3").exists());
+    let backup = r.up.records()[0].swaps[0].files[0].backup.clone();
+    assert!(Path::new(&backup).exists(), "the old file is kept: {backup}");
+    // Undo puts it back, pauses swaps for the day, and the album is never asked for again.
+    let id = r.up.records()[0].request.id.clone();
+    r.up.undo(&id).await.unwrap();
+    assert!(r.b.share("Northlight/First Light/01 Dawn.mp3").exists());
+    assert!(r.up.better_paused());
+    let hunt = r.up.hunt_album("a1", super::modes::Target::Lossless, &r.up.confirmations()).await;
+    assert!(hunt.is_none(), "Look for better copies leaves it be too");
+    r.later(86_400);
+    assert!(!r.up.better_paused(), "the next day");
+    let n = r.web.writes().len();
+    r.later(super::hunt::RECHECK_S);
+    pass(&r).await;
+    assert_eq!(r.web.writes().len(), n, "kept as it is");
+    // Kept for every device, even one with no record of the swap.
+    put_records(&r, &[]);
+    r.later(super::hunt::RECHECK_S);
+    pass(&r).await;
+    assert_eq!(r.web.writes().len(), n, "still kept as it is");
+}
+
+/// End to end: the offer keeps the song (Unreleased) and the check right
+/// before the swap reads the album again, so either stops it.
+#[tokio::test]
+async fn better_copies_leave_an_album_alone_when_a_song_turns_out_unreleased() {
+    let r = better_rig().await;
+    drop_sketch(&r);
+    pass(&r).await;
+    r.web.import();
+    r.up.refresh().await.unwrap();
+    r.later(super::better::PRACTICE_S);
+    // Marked a demo since it was asked for: nothing is swapped.
+    r.db.write(|c| {
+        c.execute("INSERT INTO file_tags (part_key, status, version, scanned_at) VALUES ('/p/2', 'ok', 'demo', 1)", [])?;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(r.up.auto_swap().await, 0);
+    assert!(r.b.share("Northlight/First Light/01 Dawn.mp3").exists());
+    assert!(r.b.share("Northlight/First Light/02 Noon.mp3").exists());
+}
+
+#[tokio::test]
+async fn a_failed_swap_pauses_better_copies_until_the_next_day() {
+    let r = better_rig().await;
+    drop_sketch(&r);
+    pass(&r).await;
+    r.web.import();
+    r.up.refresh().await.unwrap();
+    r.later(super::better::PRACTICE_S);
+    r.b.faults.lock().backup_unwritable = true;
+    assert_eq!(r.up.auto_swap().await, 0);
+    assert!(r.up.better_paused());
+    assert!(r.b.share("Northlight/First Light/01 Dawn.mp3").exists());
+    // The fault is gone and the album could go, but not for a day.
+    r.b.faults.lock().backup_unwritable = false;
+    let mut list = r.up.records();
+    assert!(list[0].failure.is_some());
+    list[0].failure = None;
+    put_records(&r, &list);
+    assert_eq!(r.up.auto_swap().await, 0, "paused");
+    assert!(r.b.share("Northlight/First Light/01 Dawn.mp3").exists());
+    r.later(86_400);
+    assert!(!r.up.better_paused());
+    assert_eq!(r.up.auto_swap().await, 1, "a day on");
+}
+
+fn put_records(r: &Rig, list: &[super::upgrade::UpgradeRecord]) {
+    let json = serde_json::to_string(list).unwrap();
+    r.db.write(|c| crate::db::store::kv_set(c, "lidarr.upgrades", &json)).unwrap();
+}
+
+fn put_shared<T: serde::Serialize>(r: &Rig, key: &str, v: &T) {
+    r.lidarr.shared().put(key, v).unwrap();
+}
+
+#[tokio::test]
+async fn at_most_ten_albums_swap_on_their_own_a_day() {
+    let r = better_rig().await;
+    drop_sketch(&r);
+    pass(&r).await;
+    r.web.import();
+    r.up.refresh().await.unwrap();
+    r.later(super::better::PRACTICE_S);
+    // Ten albums were swapped on their own today already, on any of the user's devices.
+    let today = r.now.load(std::sync::atomic::Ordering::SeqCst).div_euclid(86_400);
+    put_shared(&r, "betterCopies:day", &json!({"day": today, "swapped": super::better::DAY_SWAPS}));
+    assert_eq!(r.up.auto_swap().await, 0, "the day's ten are done");
+    assert!(r.b.share("Northlight/First Light/01 Dawn.mp3").exists());
+    r.later(86_400);
+    assert_eq!(r.up.auto_swap().await, 1, "tomorrow");
+}
+
+#[tokio::test]
+async fn better_copies_wait_on_a_device_that_cant_reach_the_files_and_when_off() {
+    let r = better_rig().await;
+    drop_sketch(&r);
+    *r.hosts.1.lock() = false;
+    assert!(pass(&r).await.is_empty(), "the phone never asks or swaps");
+    *r.hosts.1.lock() = true;
+    let s = crate::settings::Settings { better_copies: false, ..crate::settings::load(&r.db) };
+    crate::settings::save(&r.db, &s).unwrap();
+    assert!(pass(&r).await.is_empty());
+    assert!(r.web.writes().is_empty());
+}
+
+#[tokio::test]
+async fn the_days_asks_count_for_every_device_and_another_devices_album_is_left_to_it() {
+    let r = better_rig().await;
+    drop_sketch(&r);
+    confirmed(&r).await;
+    let today = r.now.load(std::sync::atomic::Ordering::SeqCst).div_euclid(86_400);
+    put_shared(&r, "betterCopies:day", &json!({"day": today, "asked": super::better::DAY_ASKS}));
+    assert!(pass(&r).await.is_empty(), "today's asks are used up");
+    assert!(r.web.writes().is_empty());
+    // The next day, but another device asks for First Light.
+    r.later(86_400);
+    put_shared(&r, "betterCopies:by:a1", &"another-device");
+    assert!(pass(&r).await.is_empty());
+    assert!(r.web.writes().is_empty());
+    r.lidarr.shared().remove("betterCopies:by:a1").unwrap();
+    r.later(86_400);
+    assert_eq!(pass(&r).await.len(), 1);
+    assert_eq!(r.lidarr.shared().get::<String>("betterCopies:by:a1"), Some(r.lidarr.shared().device()));
+}
+
+#[tokio::test]
+async fn with_better_copies_off_every_swap_waits_for_a_person() {
+    let r = rig();
+    let s = crate::settings::Settings { upgrades_ask: false, lidarr_practice_until: 0, ..crate::settings::load(&r.db) };
+    crate::settings::save(&r.db, &s).unwrap();
+    put_shared(&r, "betterCopies:since", &(1_800_000_000_i64 - super::better::PRACTICE_S - 1));
+    imported(&r).await;
+    drop_sketch(&r);
+    assert_eq!(r.up.auto_swap().await, 0, "even with asking off");
+    assert!(r.b.share("Northlight/First Light/01 Dawn.mp3").exists());
+    // And its practice week starts again when it's turned back on.
+    assert_eq!(r.up.better_status().practice_until, None);
+}
+
+#[tokio::test]
+async fn the_practice_week_starts_with_the_first_pass_and_again_after_turning_it_off() {
+    let r = better_rig().await;
+    imported(&r).await;
+    drop_sketch(&r);
+    // Before any pass: nothing swaps.
+    assert_eq!(r.up.auto_swap().await, 0);
+    assert_eq!(r.up.better_status().practice_until, None);
+    r.later(super::better::PRACTICE_S * 2);
+    assert_eq!(r.up.auto_swap().await, 0, "the week hasn't started yet");
+    r.up.better_copies().await.unwrap();
+    let start = r.now.load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(r.up.better_status().practice_until, Some(start + super::better::PRACTICE_S));
+    // Off and on again: a fresh week.
+    let s = crate::settings::Settings { better_copies: false, upgrades_ask: true, ..crate::settings::load(&r.db) };
+    crate::settings::save(&r.db, &s).unwrap();
+    r.later(super::better::PRACTICE_S);
+    assert_eq!(r.up.auto_swap().await, 0);
+    assert_eq!(r.up.better_status().practice_until, None);
+    let s = crate::settings::Settings { better_copies: true, upgrades_ask: false, ..crate::settings::load(&r.db) };
+    crate::settings::save(&r.db, &s).unwrap();
+    assert_eq!(r.up.auto_swap().await, 0, "a fresh week first");
+    assert!(r.b.share("Northlight/First Light/01 Dawn.mp3").exists());
+    // The week starts with the next pass and, once over, the album swaps.
+    r.later(86_400);
+    r.up.better_copies().await.unwrap();
+    assert_eq!(r.up.auto_swap().await, 0);
+    r.later(super::better::PRACTICE_S);
+    assert_eq!(r.up.auto_swap().await, 1);
+    assert!(r.b.share("Northlight/First Light/01 Dawn.flac").exists());
 }

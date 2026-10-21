@@ -36,7 +36,7 @@
  */
 import type { Backend, HapticKind, Unlisten } from "../backend";
 import { compareApproximate, compareMap, compareMapLoop } from "../compare";
-import type { LastGet, Tap, TapInput, TapOutcome } from "../types";
+import type { BetterCopiesStatus, LastGet, Tap, TapInput, TapOutcome } from "../types";
 import type {
   IsrcRelease,
   MiniplayerGo,
@@ -4436,6 +4436,11 @@ export class MockBackend implements Backend {
   }
   lidarrHunt() {
     return this.delay(() => this.lidarrMock.hunt());
+  }
+  /** Tests set this to show the practice week or a pause. */
+  betterStatus: BetterCopiesStatus = { practiceUntil: null, paused: false };
+  betterCopiesStatus() {
+    return this.delay(() => ({ ...this.betterStatus }));
   }
 
   // ---------------------------------------------------------------- listening stats

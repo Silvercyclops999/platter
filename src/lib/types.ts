@@ -1303,6 +1303,10 @@ export interface Settings {
   lidarrStagingFolder: string;
   /** Upgrades ask before each swap (off swaps on their own, under the same rules). */
   upgradesAsk: boolean;
+  /** Better copies of every released album in the library, a few a day, swapped in under the swap rules. */
+  betterCopies: boolean;
+  /** What better copies aim for. */
+  betterCopiesAim: "lossless" | "hiRes";
   /** Ask Plex to scan just the new folder when a Managed import doesn't show up within about two minutes. */
   lidarrScanAfterImport: boolean;
   /** Free a protected album's staging copy once it's in the library and unmonitored. */
@@ -1907,7 +1911,9 @@ export const DEFAULT_SETTINGS: Settings = {
   lidarrAwayUrl: "",
   showMissingReleases: true,
   lidarrStagingFolder: "",
-  upgradesAsk: true,
+  upgradesAsk: false,
+  betterCopies: true,
+  betterCopiesAim: "lossless",
   lidarrScanAfterImport: true,
   lidarrFreeStaging: true,
   lidarrPracticeUntil: -1,
@@ -2988,6 +2994,12 @@ export interface LidarrCatchUpReport {
 
 export type LidarrHuntState = "atTarget" | "requested" | "waiting" | "partlyUpgraded" | "outOfScope" | "needsProfile" | "failed";
 
+/** Better copies: the practice week (ends then, unix seconds) and a pause after a failure or an undo. */
+export interface BetterCopiesStatus {
+  practiceUntil: number | null;
+  paused: boolean;
+}
+
 export interface LidarrHuntItem {
   albumId: string;
   title: string;
@@ -3411,7 +3423,7 @@ export interface UpgradeOffer {
   /** Ask about each song, whatever the setting says. */
   askEach: boolean;
   askReason: string | null;
-  /** "Upgrades: ask before each swap". */
+  /** "Ask before each swap". */
   ask: boolean;
   /** Where old files go. */
   backupDir: string;

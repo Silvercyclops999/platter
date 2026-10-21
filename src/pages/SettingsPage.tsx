@@ -104,9 +104,9 @@ import {
   useLidarr,
 } from "./LidarrSettings";
 import { LidarrAwayProblem, useHomeSides } from "./LidarrHomeSide";
-import { LidarrArtistsList, LidarrChangesList, LidarrWaitingList, LidarrWorkStatus } from "./LidarrModes";
+import { HiResProfileButton, LidarrArtistsList, LidarrChangesList, LidarrWaitingList, LidarrWorkStatus } from "./LidarrModes";
 import { LidarrRequestsList } from "./LidarrRequest";
-import { OfficialPrefixField, ShareMapEditor, StagingFolderField, UpgradesList } from "./LidarrUpgrade";
+import { BetterCopiesNote, OfficialPrefixField, ShareMapEditor, StagingFolderField, UpgradesList } from "./LidarrUpgrade";
 
 /** Minutes between Subsonic change checks the setting offers. */
 const SUBSONIC_CHECK_OPTIONS = [
@@ -641,12 +641,17 @@ function select<T extends string>(
   return <Select value={value(s)} options={options} onChange={onChange} labelledBy={ids.title} describedBy={ids.desc} />;
 }
 
-/** Albums a week a Straight away person gets (same as the core's REQUEST_LIMIT_CHOICES). */
+const AIM_OPTIONS: SelectOption<string>[] = [
+  { value: "lossless", label: "Lossless" },
+  { value: "hiRes", label: "Hi-res" },
+];
+
 const FOLLOW_GET_OPTIONS: SelectOption<string>[] = [
   { value: "get", label: "Get them" },
   { value: "show", label: "Just show them" },
 ];
 
+/** Albums a week a Straight away person gets (same as the core's REQUEST_LIMIT_CHOICES). */
 const REQUEST_LIMIT_OPTIONS = [5, 10, 20, 50].map((n) => ({ value: String(n), label: `${n} albums` }));
 
 /** 1 to 50; applies on every valid entry, snaps back on blur if invalid. */
@@ -3342,12 +3347,33 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
           ...(s?.lidarrStagingFolder
             ? ([
                 {
+                  key: "betterCopies",
+                  section: "Integrations",
+                  page: "lidarr",
+                  title: "Better copies",
+                  description: "Better copies of your released albums come in and swap in. Never anything unreleased.",
+                  more: "Once a day Platter asks Lidarr for better copies of released albums below Aim for, into the staging folder only, and swaps each song in once it's proven the same recording. An album with anything unreleased in it, even one song, is never touched. The first week only lists what would be swapped, in the changes log. At most 10 albums swap a day, and a swap that fails or that you undo stops swaps for a day. Old files go to the backup folder, never deleted, and Undo puts them back. Albums Lidarr got for you get better copies from Lidarr itself.",
+                  note: s.betterCopies ? <BetterCopiesNote /> : undefined,
+                  control: (ids) => toggle(s, "betterCopies", ids),
+                },
+                {
+                  key: "betterCopiesAim",
+                  section: "Integrations",
+                  page: "lidarr",
+                  title: "Aim for",
+                  description: "Lossless is CD quality. Hi-res needs a Lidarr profile that stops at FLAC 24bit.",
+                  note: s.betterCopiesAim === "hiRes" ? <HiResProfileButton /> : undefined,
+                  shown: s.betterCopies,
+                  control: (ids) =>
+                    select(s, (x) => x.betterCopiesAim ?? "lossless", AIM_OPTIONS, ids, (v) => updateSettings({ betterCopiesAim: v as Settings["betterCopiesAim"] })),
+                },
+                {
                   key: "upgradesAsk",
                   section: "Integrations",
                   page: "lidarr",
-                  title: "Upgrades: ask before each swap",
+                  title: "Ask before each swap",
                   description: "On shows what would change and waits for you. Off swaps on its own.",
-                  more: "On shows what would change and waits for you. Off swaps a better copy in on its own once it arrives, under the same rules. An album folder with anything kept as it is always asks, song by song.",
+                  more: "On shows what would change and waits for you. Off swaps a better copy in on its own once it arrives, under the same rules, while Better copies is on. An album folder with anything kept as it is always asks, song by song.",
                   control: (ids) => toggle(s, "upgradesAsk", ids),
                 },
                 {

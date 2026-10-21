@@ -230,6 +230,7 @@ import type {
   LidarrChange,
   LidarrFixAction,
   LidarrHuntItem,
+  BetterCopiesStatus,
   LidarrModeSetting,
   LidarrProposal,
   LidarrRematchPlan,
@@ -1180,6 +1181,7 @@ export interface Backend {
   lidarrStagedAdd(id: string, always: boolean): Promise<LidarrStaged>;
   lidarrStagedUndo(id: string, trashOk: boolean): Promise<LidarrStaged>;
   lidarrHunt(): Promise<LidarrHuntItem[]>;
+  betterCopiesStatus(): Promise<BetterCopiesStatus>;
   /** Where this computer reaches the music share. */
   musicShareGet(): Promise<ShareMap>;
   musicShareSet(map: ShareMap): Promise<ShareMap>;
@@ -1939,6 +1941,7 @@ export function createTauriBackend(): Backend {
     lidarrStagedAdd: (id, always) => call("lidarr_staged_add", { id, always }),
     lidarrStagedUndo: (id, trashOk) => call("lidarr_staged_undo", { id, trashOk }),
     lidarrHunt: () => call("lidarr_hunt"),
+    betterCopiesStatus: () => call("better_copies_status"),
     musicShareGet: () => call("music_share_get"),
     musicShareSet: (map) => call("music_share_set", { map }),
     musicSharePlexFolders: () => call("music_share_plex_folders"),

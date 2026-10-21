@@ -15,12 +15,14 @@
 //! songs never swap settles as "partly upgraded" and stops. Albums without
 //! a confirmed official release are out of scope and say so.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::modes::{ArtistPrefs, Target};
 use super::quality::{CD, Rank};
 use super::status::RequestState;
-use super::upgrade::Upgrades;
+use super::upgrade::{Confirmed, Upgrades};
 use crate::error::AppResult;
 
 /// How long before an album is looked at again.
@@ -110,75 +112,79 @@ impl Upgrades {
             })
             .await
             .unwrap_or_default();
-        let target = target_rank(p.target);
-        let floor = Rank(target.0 - 1);
         let confirmed = self.confirmations();
-        let shared = self.lidarr().shared();
-        let now = self.now();
         let mut out = Vec::new();
         for id in ids {
-            let Ok(a) = self.album(&id).await else { continue };
-            if a.unreleased {
-                continue;
-            }
-            let Some((rank, label)) = a.current() else { continue };
-            let mut item = HuntItem { album_id: id.clone(), title: a.title.clone(), artist: a.artist.clone(), now: label, state: HuntState::AtTarget, note: None };
-            if rank >= target {
+            if let Some(item) = self.hunt_album(&id, p.target, &confirmed).await {
                 out.push(item);
-                continue;
             }
-            let Some(c) = confirmed.get(&id) else {
-                item.state = HuntState::OutOfScope;
-                item.note = Some("No confirmed official studio release to ask for. Confirm which release it is from the album's menu.".into());
-                out.push(item);
-                continue;
-            };
-            let key = format!("hunt:{id}");
-            let swaps_now = self.records().iter().filter(|r| r.album_id == id).map(|r| r.swaps.iter().filter(|s| !s.undone).count()).sum::<usize>();
-            let prev: Option<Tried> = shared.get(&key);
-            if let Some(t) = &prev {
-                if t.settled {
-                    item.state = HuntState::PartlyUpgraded;
-                    out.push(item);
-                    continue;
-                }
-                if now - t.at < RECHECK_S && t.aim == floor.0 && t.release_group == c.release_group_id {
-                    item.state = HuntState::Waiting;
-                    out.push(item);
-                    continue;
-                }
-                if settles(t, swaps_now) {
-                    let _ = shared.put(&key, &Tried { settled: true, ..t.clone() });
-                    item.state = HuntState::PartlyUpgraded;
-                    item.note = Some("Some songs were upgraded; the rest don't match a better copy, so Platter stopped looking.".into());
-                    out.push(item);
-                    continue;
-                }
-            }
-            // A request still in progress isn't asked for again.
-            if self.records().iter().any(|r| r.album_id == id && !r.request.state.settled() && r.request.state != RequestState::Failed) {
-                item.state = HuntState::Waiting;
-                out.push(item);
-                continue;
-            }
-            match self.request_aimed(&id, Some(floor)).await {
-                Ok(_) => {
-                    let _ = shared.put(&key, &Tried { release_group: c.release_group_id.clone(), aim: floor.0, at: now, swaps_before: swaps_now, settled: false });
-                    item.state = HuntState::Requested;
-                }
-                Err(e) => {
-                    let msg = e.to_string();
-                    item.state = if p.target == Target::HiRes && msg.contains("profile") { HuntState::NeedsProfile } else { HuntState::Failed };
-                    item.note = Some(if item.state == HuntState::NeedsProfile {
-                        format!("Hi-res needs a profile that stops at FLAC 24bit. Platter can add the {} profile (it asks first).", super::changes::HIRES_PROFILE)
-                    } else {
-                        msg
-                    });
-                }
-            }
-            out.push(item);
         }
         out
+    }
+
+    /// One album: at the target, out of scope, waiting on its last try,
+    /// settled, or asked for now into staging. None for an album that
+    /// isn't there any more or isn't released.
+    pub(super) async fn hunt_album(&self, id: &str, aim: Target, confirmed: &HashMap<String, Confirmed>) -> Option<HuntItem> {
+        let a = self.album(id).await.ok()?;
+        // Unreleased in any part, or a swap undone before: left as it is.
+        if !a.all_released() || self.kept_as_is(id) {
+            return None;
+        }
+        let (rank, label) = a.current()?;
+        let target = target_rank(aim);
+        let floor = Rank(target.0 - 1);
+        let shared = self.lidarr().shared();
+        let now = self.now();
+        let mut item = HuntItem { album_id: id.to_string(), title: a.title.clone(), artist: a.artist.clone(), now: label, state: HuntState::AtTarget, note: None };
+        if rank >= target {
+            return Some(item);
+        }
+        let Some(c) = confirmed.get(id) else {
+            item.state = HuntState::OutOfScope;
+            item.note = Some("No confirmed official studio release to ask for. Confirm which release it is from the album's menu.".into());
+            return Some(item);
+        };
+        let key = format!("hunt:{id}");
+        let swaps_now = self.records().iter().filter(|r| r.album_id == id).map(|r| r.swaps.iter().filter(|s| !s.undone).count()).sum::<usize>();
+        let prev: Option<Tried> = shared.get(&key);
+        if let Some(t) = &prev {
+            if t.settled {
+                item.state = HuntState::PartlyUpgraded;
+                return Some(item);
+            }
+            if now - t.at < RECHECK_S && t.aim == floor.0 && t.release_group == c.release_group_id {
+                item.state = HuntState::Waiting;
+                return Some(item);
+            }
+            if settles(t, swaps_now) {
+                let _ = shared.put(&key, &Tried { settled: true, ..t.clone() });
+                item.state = HuntState::PartlyUpgraded;
+                item.note = Some("Some songs were upgraded; the rest don't match a better copy, so Platter stopped looking.".into());
+                return Some(item);
+            }
+        }
+        // A request still in progress isn't asked for again.
+        if self.records().iter().any(|r| r.album_id == id && !r.request.state.settled() && r.request.state != RequestState::Failed) {
+            item.state = HuntState::Waiting;
+            return Some(item);
+        }
+        match self.request_aimed_one(id, Some(floor)).await {
+            Ok(_) => {
+                let _ = shared.put(&key, &Tried { release_group: c.release_group_id.clone(), aim: floor.0, at: now, swaps_before: swaps_now, settled: false });
+                item.state = HuntState::Requested;
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                item.state = if aim == Target::HiRes && msg.contains("profile") { HuntState::NeedsProfile } else { HuntState::Failed };
+                item.note = Some(if item.state == HuntState::NeedsProfile {
+                    format!("Hi-res needs a profile that stops at FLAC 24bit. Platter can add the {} profile (it asks first).", super::changes::HIRES_PROFILE)
+                } else {
+                    msg
+                });
+            }
+        }
+        Some(item)
     }
 }
 
