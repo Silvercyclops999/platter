@@ -688,7 +688,7 @@ async fn a_long_list_says_how_many_it_leaves_out() {
 
 
 mod pictures {
-    use super::super::pictures::{draw, mix_artists, picture_for, CarPicture};
+    use super::super::pictures::{draw, drawn, mix_artists, picture_for, CarPicture};
     use super::*;
 
     fn decoded(png: &[u8]) -> image::RgbImage {
@@ -778,8 +778,23 @@ mod pictures {
             title: "Supercalifragilisticexpialidocious Radio and a very long name indeed".into(),
             artists: vec!["Sigur Rós".into(), "Łona".into(), "日本".into()],
         };
+        // A name the type has no letters for is left off rather than printed as boxes.
+        let CarPicture::Mix { artists, .. } = drawn(&p, 240) else { panic!("a sleeve") };
+        assert_eq!(artists, vec!["Sigur Rós", "Łona"]);
         let img = decoded(&draw(&p, 240));
         assert!(marked(&img) > 0);
+        // Nothing runs into the sleeve's right margin: a long word is cut, not clipped.
+        let edge = (img.width() * 96 / 100..img.width()).flat_map(|x| (0..img.height()).map(move |y| (x, y)));
+        let ground = *img.get_pixel(img.width() - 1, img.height() - 1);
+        assert!(edge.into_iter().all(|(x, y)| img.get_pixel(x, y).0.iter().zip(ground.0).all(|(a, b)| a.abs_diff(b) <= 24)));
+    }
+
+    #[test]
+    fn a_small_sleeve_keys_like_any_other_with_its_name() {
+        let a = CarPicture::Mix { title: "Daily Mix 1".into(), artists: vec!["Motte".into()] };
+        let b = CarPicture::Mix { title: "Daily Mix 1".into(), artists: vec!["Saltglass".into()] };
+        assert_eq!(drawn(&a, 120), drawn(&b, 120));
+        assert_ne!(drawn(&a, 240), drawn(&b, 240));
     }
 
     #[test]

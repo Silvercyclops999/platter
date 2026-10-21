@@ -669,14 +669,24 @@ thread_local! {
         RefCell::new(std::collections::HashMap::new());
 }
 
+/// Pictures kept drawn; past this the oldest mixes' are drawn again when shown.
+const PICTURES_MAX: usize = 64;
+
 /// One of Platter's own pictures (pictures.rs), drawn once per size.
 fn picture_image(p: &CarPicture, px: u32) -> Option<Retained<objc2_ui_kit::UIImage>> {
+    let p = pictures::drawn(p, px);
     let key = (format!("{p:?}"), px);
     if let Some(img) = PICTURES.with(|m| m.borrow().get(&key).cloned()) {
         return Some(img);
     }
-    let img = objc2_ui_kit::UIImage::imageWithData(&NSData::with_bytes(&pictures::draw(p, px)))?;
-    PICTURES.with(|m| m.borrow_mut().insert(key, img.clone()));
+    let img = objc2_ui_kit::UIImage::imageWithData(&NSData::with_bytes(&pictures::draw(&p, px)))?;
+    PICTURES.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.len() >= PICTURES_MAX {
+            m.clear();
+        }
+        m.insert(key, img.clone());
+    });
     Some(img)
 }
 
