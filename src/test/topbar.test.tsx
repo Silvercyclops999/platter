@@ -68,6 +68,19 @@ describe("back and forward", () => {
   });
 });
 
+describe("search box", () => {
+  it("shows the results page's query, empties on other pages, and Back brings it back", () => {
+    render(<TopBar />);
+    const box = screen.getByRole("combobox", { name: /search/i }) as HTMLInputElement;
+    act(() => nav.go({ name: "search", query: "glass" }));
+    expect(box.value).toBe("glass");
+    act(() => nav.go({ name: "album", id: "a1" }));
+    expect(box.value).toBe("");
+    act(() => nav.back());
+    expect(box.value).toBe("glass");
+  });
+});
+
 describe("narrow windows", () => {
   it("collapse the pill to a round search button beside Home", async () => {
     const user = userEvent.setup();

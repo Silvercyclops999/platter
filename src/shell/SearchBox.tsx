@@ -191,9 +191,10 @@ export function SearchBox({ collapsed = false }: { collapsed?: boolean }) {
   const quietFocus = useRef(false);
   const listId = useId();
 
-  // The box shows the results page's query when you arrive on one.
+  // The box shows the results page's query when you arrive on one, and
+  // empties when you go anywhere else (Back to the results brings it back).
   useEffect(() => {
-    if (routeQuery !== null) setText(routeQuery);
+    setText(routeQuery ?? "");
     setOpen(false);
     setSel(-1);
   }, [entry.key, routeQuery]);
