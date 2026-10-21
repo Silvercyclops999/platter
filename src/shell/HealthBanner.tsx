@@ -8,14 +8,14 @@ import { toast } from "../stores/toasts";
 import { useUi } from "../stores/ui";
 import { healthBanner, type BannerAction } from "./bannerView";
 
-const ACTION_LABEL: Record<BannerAction, string> = {
+export const ACTION_LABEL: Record<BannerAction, string> = {
   signIn: "Sign in",
   signOut: "Use another account",
   libraryGuide: "How to add one",
   localNetwork: "Open Settings",
 };
 
-function LibraryGuide({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function LibraryGuide({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <Dialog open={open} onClose={onClose} label="Add a music library in Plex" className="guide">
       <h2 className="guide__title">Add a music library in Plex</h2>
@@ -32,6 +32,14 @@ function LibraryGuide({ open, onClose }: { open: boolean; onClose: () => void })
       </div>
     </Dialog>
   );
+}
+
+/** Does what a banner's button says; the library guide is the caller's to open. */
+export function runBannerAction(a: BannerAction, openGuide: () => void) {
+  if (a === "signIn") useUi.getState().setSignInOpen(true);
+  else if (a === "signOut") void backend.authSignOut().catch(() => {});
+  else if (a === "localNetwork") void backend.openLocalNetworkSettings().catch(() => toast.error("Couldn't open System Settings"));
+  else openGuide();
 }
 
 /** The app-state banner at the top of the main view. */
@@ -52,12 +60,7 @@ export function HealthBanner() {
   const view = healthBanner(health, now);
   if (!view) return null;
 
-  const run = (a: BannerAction) => {
-    if (a === "signIn") useUi.getState().setSignInOpen(true);
-    else if (a === "signOut") void backend.authSignOut().catch(() => {});
-    else if (a === "localNetwork") void backend.openLocalNetworkSettings().catch(() => toast.error("Couldn't open System Settings"));
-    else setGuide(true);
-  };
+  const run = (a: BannerAction) => runBannerAction(a, () => setGuide(true));
 
   return (
     <div className="main__banner">

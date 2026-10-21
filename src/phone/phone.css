@@ -250,8 +250,9 @@
   pointer-events: none;
 }
 .ph-dock > * { pointer-events: auto; }
-/* Why songs are dimmed: a quiet line on the page colour over the mini player and tabs. */
+/* The app's state (why songs are dimmed, a full phone, no library): a quiet line on the page colour over the mini player and tabs. */
 .ph-offline-strip { margin: 0; padding: 8px var(--ph-gutter); background-color: var(--color-bg-base); color: var(--color-text-secondary); font-size: 13px; line-height: 1.35; text-align: center; border-top: 1px solid var(--color-border); }
+.ph-offline-strip__action { display: inline; margin: -8px 0 -8px 2px; padding: 8px 4px; border: 0; background: none; color: var(--color-text-primary); font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 /* With the mini player up, the dock is one opaque strip from its top to the bottom of the screen: no see-through gap between it and the tabs. */
 .phone.has-mini .ph-dock:not(.is-mini-away) { background-color: var(--color-bg-base); background-image: var(--paper-grain, none); pointer-events: auto; }
 .ph-dock .ph-mini { transition: transform var(--ph-slide) var(--ph-ease), opacity var(--ph-quick) var(--ph-ease); }
@@ -1176,7 +1177,7 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 /* A playlist's cover over its name, smaller than an album's so the songs start sooner. */
 .ph-playlist__head { display: flex; flex-direction: column; align-items: center; text-align: center; padding-top: 4px; }
 .ph-playlist__cover { width: 44%; max-width: 200px; border-radius: 4px; overflow: hidden; box-shadow: 0 14px 32px rgba(0, 0, 0, 0.35); margin-bottom: 16px; }
-.ph-playlist__cover .art, .ph-playlist__cover .liked-cover { width: 100% !important; height: auto !important; aspect-ratio: 1; }
+.ph-playlist__cover .art, .ph-playlist__cover .liked-cover, .ph-playlist__cover .blend-cover { width: 100% !important; height: auto !important; aspect-ratio: 1; }
 .ph-backbar.is-titled .ph-backbar__back { background: none !important; }
 :root[data-theme-base="light"] .ph-artist__name { text-shadow: none; }
 /* Plates on the dark mini player and Home card read light on every look. */

@@ -8,7 +8,7 @@ import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { demoHealth, HEALTH_DEMOS, type HealthDemo } from "../lib/mock/health";
 import type { Health } from "../lib/types";
-import { CachedOnlyStrip } from "../phone/PhoneShell";
+import { HealthStrip } from "../phone/PhoneShell";
 import { SongRow, songCantPlay } from "../phone/pages/common";
 import { usePlayer } from "../stores/player";
 import { cachedOnlyReason } from "../shell/bannerView";
@@ -85,7 +85,7 @@ describe("why songs are dimmed", () => {
 
   it("the phone shows the reason over the tabs and takes it away on reconnect", () => {
     act(() => useApp.setState({ health: h("offline") }));
-    render(<CachedOnlyStrip />);
+    render(<HealthStrip />);
     expect(screen.getByTestId("phone-offline-strip")).toHaveTextContent("Can't reach your server");
     act(() => useApp.setState({ health: h("local") }));
     expect(screen.queryByTestId("phone-offline-strip")).toBeNull();

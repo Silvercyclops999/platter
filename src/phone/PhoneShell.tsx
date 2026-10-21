@@ -17,7 +17,8 @@ import { loadOwnLyricsIds } from "../stores/lyricsEditor";
 import { useCurrentEntry, type HistoryEntry, type Route } from "../stores/router";
 import { usePlayer } from "../stores/player";
 import { useApp } from "../stores/app";
-import { cachedOnlyReason } from "../shell/bannerView";
+import { phoneHealthLine } from "../shell/bannerView";
+import { ACTION_LABEL, LibraryGuide, runBannerAction } from "../shell/HealthBanner";
 import { tap } from "./bits";
 import { LyricsScreen } from "./LyricsScreen";
 import { MiniPlayer } from "./MiniPlayer";
@@ -50,16 +51,27 @@ const TAB_ICON: Record<PhoneTab, typeof Home> = { home: Home, search: Search, li
 export const NOTCH = typeof window !== "undefined" && notchFromUrl(window.location.search);
 
 /**
- * One line over the tabs while only songs on the phone can play, saying why:
- * the songs dimmed in every list are explained wherever you are.
+ * One line over the tabs for the app's state: why only songs on the phone
+ * can play (the songs dimmed in every list are explained wherever you are),
+ * no music library, a full phone, a relay connection, a sign-in to redo.
  */
-export function CachedOnlyStrip() {
-  const reason = useApp((s) => cachedOnlyReason(s.health, "phone"));
-  if (!reason) return null;
+export function HealthStrip() {
+  const health = useApp((s) => s.health);
+  const [guide, setGuide] = useState(false);
+  const line = phoneHealthLine(health);
+  if (!line) return null;
   return (
-    <p className="ph-offline-strip" role="status" data-testid="phone-offline-strip">
-      {reason}
-    </p>
+    <>
+      <p className={`ph-offline-strip is-${line.kind}`} role="status" data-testid="phone-offline-strip">
+        {line.message}
+        {line.action && (
+          <button type="button" className="ph-offline-strip__action" onClick={() => runBannerAction(line.action!, () => setGuide(true))}>
+            {ACTION_LABEL[line.action]}
+          </button>
+        )}
+      </p>
+      <LibraryGuide open={guide} onClose={() => setGuide(false)} />
+    </>
   );
 }
 
@@ -100,7 +112,7 @@ export function PhoneShell() {
         <PageStack render={renderPage} />
       </main>
       <div ref={dock} className="ph-dock" aria-hidden={covered || undefined} inert={inertUnder || undefined}>
-        <CachedOnlyStrip />
+        <HealthStrip />
         <MiniPlayer />
         <nav className="ph-tabs" aria-label="Tabs">
           {TABS.map((t) => {

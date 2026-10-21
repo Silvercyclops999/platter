@@ -129,3 +129,25 @@ export function healthBanner(h: Health | null, now: number = Date.now()): Banner
   }
   return null;
 }
+
+/**
+ * The one line the phone shows over its tabs for the app's state, or null
+ * when there's nothing to say. The phone has no banner, so every state the
+ * desktop would show one for lands here, worded for a phone.
+ */
+export function phoneHealthLine(h: Health | null, now: number = Date.now()): BannerView | null {
+  if (!h) return null;
+  const kind = h.banner?.kind;
+  const action = kind ? ACTION[kind] : undefined;
+  const cached = cachedOnlyReason(h, "phone");
+  if (cached) return { kind: TONE[kind ?? ""] ?? "offline", message: cached, action };
+  switch (kind) {
+    case "noMusicLibrary":
+      return { kind: "info", message: "Your server doesn't have a music library yet.", action };
+    case "diskFull":
+      return { kind: "warning", message: "This phone is almost full, so new songs can't be saved. Free up some space." };
+    case "relay":
+      return { kind: "warning", message: "Playing through Plex Relay, so quality is lower. Turn on Remote Access in Plex for full quality." };
+  }
+  return healthBanner(h, now);
+}
