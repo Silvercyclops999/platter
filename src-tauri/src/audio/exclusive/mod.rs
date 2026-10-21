@@ -52,6 +52,13 @@ pub(super) enum Opened {
     Device { guard: DeviceGuard, rate: u32, bits: u16 },
 }
 
+/// Why built-in outputs play shared. Taken on their own they answer the
+/// stream with a bad-object error (`'!obj'`), so they aren't tried.
+pub(crate) const BUILT_IN: &str = "Built-in speakers and headphone jacks always play shared. Bit-perfect is for a DAC or an audio interface.";
+
+/// Why a device that was taken wouldn't then play.
+pub(crate) const WOULD_NOT_PLAY: &str = "The device wouldn't play on its own, so it plays shared.";
+
 /// Opens `device_id` (the id from the device list) exclusively at `rate`.
 #[allow(unused_variables)]
 pub(super) fn open(device_id: &str, rate: u32, channels: u16) -> Result<Opened, String> {

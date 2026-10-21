@@ -209,6 +209,52 @@ pub fn wants_exclusive(ids: &[String], device: Option<&OutputDevice>) -> bool {
     device.is_some_and(|d| ids.contains(&d.id))
 }
 
+/// Devices that won't play on their own, with why: built-in outputs, and
+/// any that refused the stream once it held them. Bit-perfect isn't tried on
+/// them again this run (no failed open per song, no reopen per rate), until
+/// it's turned off and on again for that device.
+#[derive(Clone, Default)]
+pub(crate) struct Refused(Arc<Mutex<std::collections::HashMap<String, String>>>);
+
+impl Refused {
+    /// Notes a refusal that will happen again. False when it was known.
+    pub(crate) fn note(&self, id: &str, reason: &str) -> bool {
+        self.0.lock().insert(id.to_string(), reason.to_string()).is_none()
+    }
+
+    pub(crate) fn reason(&self, id: &str) -> Option<String> {
+        self.0.lock().get(id).cloned()
+    }
+
+    /// Forgets devices no longer marked bit-perfect, so turning it back on tries again.
+    pub(crate) fn keep_only(&self, ids: &[String]) {
+        self.0.lock().retain(|k, _| ids.contains(k));
+    }
+
+    /// Whether a refusal says the same every time, so it's worth keeping.
+    pub(crate) fn lasting(reason: &str) -> bool {
+        reason == super::exclusive::BUILT_IN || reason == super::exclusive::WOULD_NOT_PLAY
+    }
+}
+
+/// What an open does about bit-perfect on `device`.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ExclusivePlan {
+    /// Not asked for: shared.
+    Shared,
+    /// Try to take the device.
+    Try,
+    /// Asked for, but the device refused before: shared, with why.
+    Refused(String),
+}
+
+pub(crate) fn exclusive_plan(ids: &[String], device: Option<&OutputDevice>, refused: &Refused) -> ExclusivePlan {
+    match device.filter(|d| wants_exclusive(ids, Some(d))) {
+        None => ExclusivePlan::Shared,
+        Some(d) => refused.reason(&d.id).map_or(ExclusivePlan::Try, ExclusivePlan::Refused),
+    }
+}
+
 // ---------------------------------------------------------------- capture
 
 #[derive(Default)]
@@ -536,6 +582,8 @@ pub struct CpalOutput {
     opened: Arc<Mutex<Option<OutputDevice>>>,
     /// Devices that open exclusively (bit-perfect).
     exclusive_ids: Arc<Mutex<Vec<String>>>,
+    /// Of those, the ones that won't.
+    refused: Refused,
     preferred_rate: Option<u32>,
     exclusive: Arc<Mutex<Exclusive>>,
 }
@@ -786,6 +834,7 @@ impl AudioOutput for CpalOutput {
         let selected = self.selected.clone();
         let opened = self.opened.clone();
         let exclusive_ids = self.exclusive_ids.lock().clone();
+        let refused = self.refused.clone();
         let preferred_rate = self.preferred_rate;
         let exclusive = self.exclusive.clone();
         *exclusive.lock() = Exclusive::Off;
@@ -825,7 +874,11 @@ impl AudioOutput for CpalOutput {
                 // Bit-perfect: the device on its own, at the music's rate.
                 let mut supported = default_config;
                 let mut _hog = None;
-                if let Some(d) = info.as_ref().filter(|d| wants_exclusive(&exclusive_ids, Some(d))) {
+                let plan = exclusive_plan(&exclusive_ids, info.as_ref(), &refused);
+                if let ExclusivePlan::Refused(reason) = &plan {
+                    *exclusive.lock() = Exclusive::Fallback { reason: reason.clone() };
+                }
+                if let (ExclusivePlan::Try, Some(d)) = (&plan, info.as_ref()) {
                     let rate = preferred_rate.unwrap_or(default_config.sample_rate());
                     match super::exclusive::open(&d.id, rate, 2) {
                         Ok(super::exclusive::Opened::Own { stream, rate, channels, bits }) => {
@@ -855,7 +908,9 @@ impl AudioOutput for CpalOutput {
                             }
                         },
                         Err(reason) => {
-                            tracing::info!("bit-perfect output fell back to shared: {reason}");
+                            if !Refused::lasting(&reason) || refused.note(&d.id, &reason) {
+                                tracing::info!("bit-perfect output fell back to shared: {reason}");
+                            }
                             *exclusive.lock() = Exclusive::Fallback { reason };
                         }
                     }
@@ -868,21 +923,32 @@ impl AudioOutput for CpalOutput {
                 let mut stream = open_stream(&device, &supported, renderer.clone(), ctx.clone());
                 // The device on its own wouldn't open a stream: give it back
                 // and play shared, saying why, instead of not playing at all.
+                // It's remembered, so the next song doesn't try again.
                 if let (Err(e), Some(_)) = (&stream, &_hog) {
-                    tracing::info!("bit-perfect stream failed, playing shared: {e}");
+                    tracing::info!("bit-perfect stream failed, playing shared from now on: {e}");
                     _hog = None;
-                    *exclusive.lock() = Exclusive::Fallback {
-                        reason: "The device wouldn't play on its own, so it plays shared.".into(),
-                    };
-                    if let Some(d) = find() {
-                        device = d;
+                    let reason = super::exclusive::WOULD_NOT_PLAY;
+                    if let Some(d) = info.as_ref() {
+                        refused.note(&d.id, reason);
                     }
-                    match device.default_output_config() {
-                        Ok(c) => {
-                            supported = c;
-                            stream = open_stream(&device, &supported, renderer.clone(), ctx.clone());
+                    *exclusive.lock() = Exclusive::Fallback { reason: reason.into() };
+                    // Giving the device back puts its old rate back, and it can
+                    // come back as a new object: one more try after it settles.
+                    for wait in [0, 250] {
+                        std::thread::sleep(Duration::from_millis(wait));
+                        if let Some(d) = find() {
+                            device = d;
                         }
-                        Err(e) => stream = Err(format!("audio device: {e}")),
+                        match device.default_output_config() {
+                            Ok(c) => {
+                                supported = c;
+                                stream = open_stream(&device, &supported, renderer.clone(), ctx.clone());
+                            }
+                            Err(e) => stream = Err(format!("audio device: {e}")),
+                        }
+                        if stream.is_ok() {
+                            break;
+                        }
                     }
                 }
                 let stream = match stream {
@@ -988,6 +1054,7 @@ impl AudioOutput for CpalOutput {
     }
 
     fn set_exclusive_devices(&mut self, ids: Vec<String>) {
+        self.refused.keep_only(&ids);
         *self.exclusive_ids.lock() = ids;
     }
 
@@ -996,16 +1063,18 @@ impl AudioOutput for CpalOutput {
         if ids.is_empty() {
             return false;
         }
+        // A device that refused plays shared, so songs at other rates don't reopen it.
+        let try_it = |d: Option<&OutputDevice>| exclusive_plan(&ids, d, &self.refused) == ExclusivePlan::Try;
         if let Some(o) = self.opened() {
             // The open stream's device is the one a reopen would use,
             // unless the choice moved since.
             let sel = self.selected.lock().clone();
             if sel.is_none() || sel.as_deref() == Some(o.id.as_str()) {
-                return wants_exclusive(&ids, Some(&o));
+                return try_it(Some(&o));
             }
         }
         let devices = cpal_list_isolated();
-        wants_exclusive(&ids, pick_device(&devices, self.selected.lock().as_deref()).as_ref())
+        try_it(pick_device(&devices, self.selected.lock().as_deref()).as_ref())
     }
 
     fn set_preferred_rate(&mut self, rate: Option<u32>) {
@@ -1033,6 +1102,41 @@ mod tests {
             name: format!("{id} name"),
             is_default: default,
         }
+    }
+
+    #[test]
+    fn a_device_that_refuses_bit_perfect_plays_shared_without_trying_again() {
+        let ids = vec!["dac".to_string(), "spk".to_string()];
+        let refused = Refused::default();
+        assert_eq!(exclusive_plan(&ids, Some(&dev("other", true)), &refused), ExclusivePlan::Shared);
+        assert_eq!(exclusive_plan(&ids, Some(&dev("spk", true)), &refused), ExclusivePlan::Try);
+        // The built-in speakers refuse ('!obj' once taken): said once, then remembered.
+        let why = crate::audio::exclusive::BUILT_IN;
+        assert!(Refused::lasting(why) && Refused::lasting(crate::audio::exclusive::WOULD_NOT_PLAY));
+        assert!(refused.note("spk", why));
+        assert!(!refused.note("spk", why), "logged once");
+        assert_eq!(exclusive_plan(&ids, Some(&dev("spk", true)), &refused), ExclusivePlan::Refused(why.into()));
+        // The DAC is still tried; a busy device isn't remembered.
+        assert_eq!(exclusive_plan(&ids, Some(&dev("dac", false)), &refused), ExclusivePlan::Try);
+        assert!(!Refused::lasting("Another app is using the device on its own."));
+        // Turning bit-perfect off and on for the speakers tries again.
+        refused.keep_only(&["dac".to_string()]);
+        assert_eq!(refused.reason("spk"), None);
+        assert_eq!(exclusive_plan(&ids, Some(&dev("spk", true)), &refused), ExclusivePlan::Try);
+    }
+
+    #[test]
+    fn a_refused_device_doesnt_ask_for_a_reopen_per_song() {
+        let mut out = CpalOutput::new();
+        out.set_exclusive_devices(vec!["spk".into()]);
+        out.refused.note("spk", crate::audio::exclusive::WOULD_NOT_PLAY);
+        // Nothing open and no such device here: the plan is what decides.
+        assert_eq!(exclusive_plan(&["spk".into()], Some(&dev("spk", true)), &out.refused), ExclusivePlan::Refused(crate::audio::exclusive::WOULD_NOT_PLAY.into()));
+        // Choosing it again keeps the note; dropping it from the list forgets it.
+        out.set_exclusive_devices(vec!["spk".into()]);
+        assert!(out.refused.reason("spk").is_some());
+        out.set_exclusive_devices(vec![]);
+        assert!(out.refused.reason("spk").is_none());
     }
 
     #[test]

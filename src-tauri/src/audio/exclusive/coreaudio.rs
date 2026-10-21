@@ -7,12 +7,13 @@ use std::ptr::NonNull;
 
 use objc2_core_audio::{
     AudioObjectGetPropertyData, AudioObjectID, AudioObjectPropertyAddress, AudioObjectSetPropertyData,
-    kAudioDevicePropertyHogMode, kAudioDevicePropertyNominalSampleRate, kAudioHardwarePropertyTranslateUIDToDevice,
+    kAudioDevicePropertyHogMode, kAudioDevicePropertyNominalSampleRate, kAudioDevicePropertyTransportType,
+    kAudioDeviceTransportTypeBuiltIn, kAudioHardwarePropertyTranslateUIDToDevice,
     kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject, kAudioObjectUnknown,
 };
 use objc2_core_foundation::CFString;
 
-use super::Opened;
+use super::{BUILT_IN, Opened};
 
 fn address(selector: u32) -> AudioObjectPropertyAddress {
     AudioObjectPropertyAddress {
@@ -94,6 +95,9 @@ impl Drop for DeviceGuard {
 
 pub(super) fn open(uid: &str, rate: u32) -> Result<Opened, String> {
     let device = device_for_uid(uid).ok_or("The device wasn't found.")?;
+    if get(device, kAudioDevicePropertyTransportType, 0u32) == Ok(kAudioDeviceTransportTypeBuiltIn) {
+        return Err(BUILT_IN.into());
+    }
     let me = std::process::id() as i32;
     let owner = get(device, kAudioDevicePropertyHogMode, -1i32).map_err(|s| format!("The device wouldn't say who holds it ({s})."))?;
     if owner != -1 && owner != me {
