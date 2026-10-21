@@ -62,9 +62,10 @@ describe("bringing the setup over after the first sign-in", () => {
   const toasts = () => useToasts.getState().toasts.map((t) => t.message);
 
   it("copies from the computer by itself, with no screen, and says what came", async () => {
-    mock.deviceSync.addDevice("Studio PC");
     shell();
     copyInBackground();
+    await new Promise((r) => setTimeout(r, 30));
+    act(() => mock.deviceSync.addDevice("Studio PC"));
     await waitFor(() => expect(toasts()).toContain("Brought your setup over from Studio PC"), { timeout: 3000 });
     expect((await backend.settingsGet()).accent).toBe("brass");
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -80,6 +81,16 @@ describe("bringing the setup over after the first sign-in", () => {
     await waitFor(() => expect(toasts()).toContain("Brought your setup over from Studio PC"));
   });
 
+  it("copies nothing when signing in again with a computer already linked", async () => {
+    mock.deviceSync.addDevice("Studio PC");
+    const copy = vi.spyOn(backend, "pairCopySettings");
+    copyInBackground();
+    await new Promise((r) => setTimeout(r, 60));
+    act(() => mock.deviceSync.addDevice("Kitchen iPad"));
+    await new Promise((r) => setTimeout(r, 60));
+    expect(copy).not.toHaveBeenCalled();
+  });
+
   it("stops waiting after a while; everyday sync brings things over later", async () => {
     const copy = vi.spyOn(backend, "pairCopySettings");
     copyInBackground(20);
@@ -90,10 +101,11 @@ describe("bringing the setup over after the first sign-in", () => {
   });
 
   it("stays quiet when the computer doesn't answer or sync is off", async () => {
-    mock.deviceSync.addDevice("Studio PC");
     mock.deviceSync.copyFails = true;
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     copyInBackground();
+    await new Promise((r) => setTimeout(r, 30));
+    act(() => mock.deviceSync.addDevice("Studio PC"));
     await waitFor(() => expect(warn).toHaveBeenCalledWith("first copy", expect.anything()), { timeout: 3000 });
     expect(toasts()).toEqual([]);
     mock.deviceSync.copyFails = false;
@@ -114,6 +126,15 @@ describe("Devices on the phone", () => {
     expect(row.queryByRole("button")).toBeNull();
     expect(screen.queryByText(/USB drive/)).toBeNull();
     expect(screen.getByRole("button", { name: "Downloads on this phone" })).toBeInTheDocument();
+  });
+
+  it("with sync off, says so and goes to the setting instead of promising the computer", async () => {
+    await backend.settingsSet({ ...DEFAULT_SETTINGS, deviceSync: false });
+    const row = await openYou();
+    expect(await row.findByText("Keeping devices in sync is off")).toBeInTheDocument();
+    expect(row.queryByText(/shows up here by itself/)).toBeNull();
+    fireEvent.click(row.getByRole("button", { name: "Turn on" }));
+    await waitFor(() => expect(useRouter.getState().entries[useRouter.getState().index].route).toMatchObject({ name: "settings", page: "sync" }));
   });
 });
 

@@ -13,8 +13,8 @@ import { toast } from "../stores/toasts";
 export const BACKGROUND_WAIT_MS = 10 * 60_000;
 
 /**
- * Copy from the computer quietly. When no computer is linked yet, wait a
- * while for one to turn up. Only a finished copy says anything; a failure
+ * Copy from the computer quietly, once one turns up within a while. With a
+ * computer already linked it's a sign-in again, and nothing is copied. Only a finished copy says anything; a failure
  * stays quiet because the next sync round tries again.
  */
 export function copyInBackground(waitMs = BACKGROUND_WAIT_MS): void {
@@ -34,11 +34,16 @@ export function copyInBackground(waitMs = BACKGROUND_WAIT_MS): void {
       (e: unknown) => console.warn("first copy", e),
     );
   };
+  // The first look decides: a computer already linked means this is a sign-in
+  // again, and the phone keeps its own settings (signing in changes nothing).
+  let first = true;
   const look = () =>
     backend.deviceSyncStatus().then(
       (o) => {
         if (done) return;
-        if (!o.on) finish();
+        const wasFirst = first;
+        first = false;
+        if (!o.on || (wasFirst && o.devices.length > 0)) finish();
         else if (o.devices.length > 0) run();
       },
       () => {},

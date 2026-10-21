@@ -166,8 +166,8 @@ export function syncRowWords(d: DeviceSyncDevice, others: number): { title: stri
 
 /**
  * Keep my devices in sync, on Devices: before another device turns up, one
- * line saying it will by itself; after, how the devices are doing, with Sync
- * now.
+ * line saying it will by itself (or, with sync off, the way to turn it on);
+ * after, how the devices are doing, with Sync now.
  */
 export function SyncRow() {
   const [ov, setOv, { failed, reload }] = useDeviceSync();
@@ -190,6 +190,18 @@ export function SyncRow() {
       </div>
     );
   if (!ov) return <div className="ph-you__sync" data-testid="you-sync" aria-busy="true" />;
+  if (!d && !ov.on)
+    return (
+      <div className="ph-you__sync" data-testid="you-sync">
+        <span className="ph-you__sync-text">
+          <span className="ph-you__sync-title">Keeping devices in sync is off</span>
+          <span className="ph-you__sync-note">Turn it on to bring your look, pins and follows over from your computer.</span>
+        </span>
+        <button type="button" className="ph-text-btn" onClick={toSettings}>
+          Turn on
+        </button>
+      </div>
+    );
   if (!d)
     return (
       <div className="ph-you__sync" data-testid="you-sync">
