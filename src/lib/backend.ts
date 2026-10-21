@@ -681,6 +681,8 @@ export interface Backend {
   crates(kind: CrateKind): Promise<CrateList>;
   /** One crate with all its albums; null when there's no such crate. */
   cratePage(kind: CrateKind, key: string): Promise<CratePage | null>;
+  /** Shuffle albums: the songs of these albums (every album when empty) in a random album order, each album in track order; `invalid` when none can play. */
+  albumShuffleTracks(albumIds: string[]): Promise<string[]>;
   /** An album page's crate shelves: its label, producers and studios (empty while either setting is off). */
   albumCrates(id: string): Promise<AlbumShelf[]>;
   /** An album's record sides from what's cached (never looks anything up). */
@@ -1602,6 +1604,7 @@ export function createTauriBackend(): Backend {
     creditPage: (name) => call("credit_page", { name }),
     crates: (kind) => call("crates", { kind }),
     cratePage: (kind, key) => call("crate_page", { kind, key }),
+    albumShuffleTracks: (albumIds) => call("album_shuffle_tracks", { albumIds }),
     albumCrates: (id) => call("album_crates", { id }),
     albumSides: (id) => call("album_sides", { id }),
     setAlbumSides: (id, starts) => call("album_sides_set", { id, starts }),

@@ -66,6 +66,7 @@ const RULES: [RegExp, LucideIcon][] = [
   [/^Add to Liked Songs$/, Heart],
   [/^Remove from Liked Songs$/, HeartOff],
   [/^Go to album$/, Disc3],
+  [/^Shuffle albums$/, Disc3],
   [/^Go to /, UserRound],
   [/^(Add|Edit) lyrics$/, MicVocal],
   [/^Transcribe/, Captions],

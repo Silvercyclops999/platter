@@ -3131,6 +3131,7 @@ The library filed like record crates: by label, producer, studio, era (decade), 
 | `crates` | `{ kind }` | `CrateList` |
 | `crate_page` | `{ kind, key }` | `CratePage`, or null when there's no such crate |
 | `album_crates` | `{ id }` (album) | `AlbumShelf[]` |
+| `album_shuffle_tracks` | `{ albumIds: string[] }` | `string[]` song ids, or `invalid` when no album has a song that can play |
 
 `kind` is `"label"|"producer"|"studio"|"era"|"year"|"genre"`.
 `CrateList = { kind, crates: Crate[] }` with `Crate = { kind, key, name, count, artists, fromYear?, toYear?, albums: Album[] }`, `albums` being the first 12 by year.
@@ -3142,6 +3143,8 @@ Where albums go. Label: the label the album's sleeve notes last put together (ke
 Names fold so spellings share a crate: case, spacing and punctuation don't count, nor a leading "The", nor endings such as "Records", "Recordings", "Music", "Ltd" (labels) or "Studios", "Recording" (studios). `key` is the folded name, the person's folded name for producers. A crate shows the spelling used most; on a tie, one not all in capitals, then the shortest. A crate holds two albums or more, so crates of one never show. Hidden editions and other servers' copies leave crates, as they leave the library.
 
 `crates` sorts by size (then name); eras and years come newest first. A crate's albums run by year, then artist and title. `onMap` says the album has songs on the sound map. `years` lists, for an era, its years that are crates themselves. `trackIds` is every song album by album for Play all and Shuffle (5,000 at most). `album_crates` gives the album's label crates, then producers, then studios (biggest first within each), each with the crate's other albums (other artists first, 12 at most); crates with nothing else in them are left out.
+
+`album_shuffle_tracks` is Shuffle albums, for a crate, the albums in the Library view, an artist or the whole library (`albumIds` empty). The albums go in a random order, 50 at most, each one's songs in disc and track order. Albums not in the current server or tag view, hidden songs and songs by hidden artists are left out, and albums with nothing left are passed over. The window plays the ids as a `tracks` context with id `albums` and `shuffle: false`, so each album plays whole and gapless.
 
 The answer is worked out once and kept until the library, the credit index, `album_facts`, the files' tags or the view change.
 

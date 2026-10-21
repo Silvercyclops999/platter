@@ -67,6 +67,7 @@ export const MENU_ACTIONS: Record<string, MenuAction> = {
   volumeDown: { shortcut: "volumeDown", run: () => void player.nudgeVolume(-VOLUME_KEY_STEP) },
   shuffle: { shortcut: "shuffle", run: () => player.toggleShuffle(!!useSettings.getState().settings?.smartShuffle) },
   repeat: { shortcut: "repeat", run: () => player.cycleRepeatNow() },
+  shuffleAlbums: { run: () => void player.shuffleAlbums() },
   miniplayer: { run: () => void miniplayer.toggle() },
   fullWindow: { run: () => fullWindow.toggle() },
   lyrics: { run: () => fullWindow.toggleLyrics() },

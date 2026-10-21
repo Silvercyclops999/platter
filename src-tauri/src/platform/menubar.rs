@@ -188,6 +188,7 @@ pub const MENUS: &[MenuDef] = &[
             Entry::Separator,
             play(SHUFFLE_ID, "Shuffle", Some("Cmd+S"), "shuffle", true),
             play(REPEAT_ID, "Repeat", Some("Cmd+R"), "repeat", true),
+            play("menu-shuffle-albums", "Shuffle Albums", None, "shuffleAlbums", false),
         ],
     },
     MenuDef {

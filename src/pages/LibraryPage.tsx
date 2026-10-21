@@ -1,6 +1,7 @@
-import { ChevronLeft, Minimize2 } from "lucide-react";
+import { ChevronLeft, Disc3, Minimize2 } from "lucide-react";
 import { useLayoutEffect, useMemo, useState } from "react";
-import { IconButton } from "../components/Button";
+import { Button, IconButton } from "../components/Button";
+import { player } from "../stores/player";
 import { LibraryCollection, LibraryTableHead } from "../shell/LibraryCollection";
 import { LibraryChips, LibrarySearch, LibrarySortView } from "../shell/LibraryControls";
 import { FacetChips, FacetsEmpty, facetEntries, facetOptions, useAlbumFacts, useFacets } from "../shell/FacetChips";
@@ -69,7 +70,19 @@ export function LibraryPage({ tab, archive = false }: { tab?: LibraryTab; archiv
       {!archive && <LibraryChips filter={model.filter} sub={model.sub} kinds={model.kinds} downloaded={model.downloaded} shelf={model.shelf} />}
       <div className="lib-tools lib-tools--wide">
         <LibrarySearch query={query} setQuery={setQuery} filter={model.filter} alwaysOpen />
-        <LibrarySortView filter={model.filter} sort={model.sort} view={view} views={WIDE_VIEWS} setView={(v) => useLibraryView.getState().setWideView(v)} />
+        <span className="lib-tools__end">
+          {model.filter === "album" && !model.loading && model.shown.length > 1 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<Disc3 size={16} />}
+              onClick={() => void player.shuffleAlbums(model.shown.filter((e) => e.kind === "album").map((e) => e.id))}
+            >
+              Shuffle albums
+            </Button>
+          )}
+          <LibrarySortView filter={model.filter} sort={model.sort} view={view} views={WIDE_VIEWS} setView={(v) => useLibraryView.getState().setWideView(v)} />
+        </span>
       </div>
       {chipView && options && <FacetChips view={chipView} options={options} chips={chips} onChange={setChips} />}
       {chipView && chipsOn(archive ? chips : active) && !model.loading && model.shown.length === 0 && !query ? (

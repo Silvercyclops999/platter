@@ -803,6 +803,7 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 .ph-library__head { display: flex; align-items: center; justify-content: space-between; }
 .ph-library__head .ph-title { margin-bottom: 12px; }
 .ph-library__bar { display: flex; align-items: center; justify-content: space-between; margin: 4px 0 4px; }
+.ph-library__end { display: flex; align-items: center; gap: 4px; }
 .ph-lib-list { list-style: none; margin: 0; padding: 0; }
 .ph-lib-row { display: flex; align-items: center; gap: 14px; width: 100%; height: 72px; }
 .ph-lib-row--ghost { height: 64px; margin: 8px 0; border-radius: 6px; background: var(--ph-faint); list-style: none; }

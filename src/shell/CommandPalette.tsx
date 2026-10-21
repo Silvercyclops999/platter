@@ -39,6 +39,7 @@ const NAV_COMMANDS: Cmd[] = [
   { id: "next", label: "Next song", hint: `${modKey}+→`, icon: <Music size={16} />, group: "Playback", run: () => player.next() },
   { id: "previous", label: "Previous song", hint: `${modKey}+←`, icon: <Music size={16} />, group: "Playback", run: () => player.previous() },
   { id: "shuffle", label: "Shuffle on / off", hint: `${modKey}+S`, icon: <Shuffle size={16} />, group: "Playback", run: () => player.toggleShuffle(!!useSettings.getState().settings?.smartShuffle) },
+  { id: "shuffle-albums", label: "Shuffle albums", icon: <Disc3 size={16} />, group: "Playback", run: () => void player.shuffleAlbums() },
   { id: "repeat", label: "Repeat: off, all, one", hint: `${modKey}+R`, icon: <Repeat size={16} />, group: "Playback", run: () => player.cycleRepeatNow() },
   { id: "volume-up", label: "Volume up", hint: `${modKey}+↑`, icon: <Volume2 size={16} />, group: "Playback", run: () => player.nudgeVolume(VOLUME_KEY_STEP) },
   { id: "volume-down", label: "Volume down", hint: `${modKey}+↓`, icon: <Volume1 size={16} />, group: "Playback", run: () => player.nudgeVolume(-VOLUME_KEY_STEP) },

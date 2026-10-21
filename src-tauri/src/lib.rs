@@ -2,6 +2,7 @@
 // the compiler checks it is safe to share across threads.
 #![recursion_limit = "256"]
 
+pub mod albumshuffle;
 pub mod analysis;
 pub mod archive;
 pub mod artistinfo;
@@ -1905,6 +1906,7 @@ pub fn run() {
             sleeve::commands::credit_page,
             digging::commands::crates,
             digging::commands::crate_page,
+            albumshuffle::album_shuffle_tracks,
             digging::commands::album_crates,
             sleeve::sides::album_sides,
             sleeve::sides::album_sides_set,

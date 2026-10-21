@@ -940,7 +940,9 @@ impl CacheLookup {
                     }
                     ContextKind::Tracks | ContextKind::Search => ResolvedContext {
                         tracks: queries::tracks_by_ids(c, &ctx.track_ids.clone().unwrap_or_default())?,
-                        title: None,
+                        // Shuffle albums (`album_shuffle_tracks`).
+                        title: (ctx.kind == ContextKind::Tracks && id == crate::albumshuffle::CONTEXT_ID)
+                            .then(|| crate::albumshuffle::TITLE.to_string()),
                     },
                 };
                 let skipped = crate::tags::store::drop_hidden(c, &mut resolved.tracks, view)?;
