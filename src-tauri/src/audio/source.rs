@@ -47,6 +47,12 @@ pub trait TrackResolver: Send + Sync {
     /// A transcoded fallback (e.g. MP3/AAC or FLAC from the universal
     /// transcoder) used when the original can't be decoded.
     async fn transcode(&self, track: &Track) -> AppResult<StreamSource>;
+    /// The original file, when [`Self::stream`] gave a transcode capped to
+    /// a quality limit (away from home) and the server refused both it and
+    /// [`Self::transcode`]. None when the stream already was the original.
+    async fn original(&self, _track: &Track) -> Option<AppResult<StreamSource>> {
+        None
+    }
     /// Loudness data (Plex gain and peak) and silence measured on an earlier
     /// play, if known. Fetched while the stream opens; None plays the track
     /// with only the preamp.

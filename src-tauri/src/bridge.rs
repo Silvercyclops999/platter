@@ -534,6 +534,16 @@ impl TrackResolver for PlexStreams {
         Ok(source_of(req, Some("mp3".into())))
     }
 
+    /// Only when [`Self::stream`] would cap this song: the file as it is.
+    async fn original(&self, track: &Track) -> Option<AppResult<StreamSource>> {
+        let client = match self.0.client_for(&track.id).await {
+            Ok(c) => c,
+            Err(e) => return Some(Err(e)),
+        };
+        stream_cap_kbps(client.connection(), track.bitrate, self.1.home(), self.1.away())?;
+        Some(client.stream_request(&track.part_key).map(|req| source_of(req, track.codec.clone())))
+    }
+
     /// Loudness from the cache, or from Plex track detail on first play
     /// (then cached); measured silence from the cache.
     async fn audio_info(&self, track: &Track) -> Option<TrackAudio> {

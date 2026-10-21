@@ -118,6 +118,10 @@ impl TrackResolver for RoutedStreams {
         self.0.for_id(&track.id)?.streams().transcode(track).await
     }
 
+    async fn original(&self, track: &Track) -> Option<AppResult<StreamSource>> {
+        self.0.for_id(&track.id).ok()?.streams().original(track).await
+    }
+
     async fn audio_info(&self, track: &Track) -> Option<TrackAudio> {
         self.0.for_id(&track.id).ok()?.streams().audio_info(track).await
     }
