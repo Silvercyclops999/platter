@@ -331,14 +331,14 @@ The computer answers only your own devices signed in to the same
 Plex account, and only after they've said who they are. It checks every
 request the way the Bridge does, takes keys and passwords out of what it
 sends back, and keeps the Lidarr key to itself. You can turn it off on the
-computer with Let my other devices use Lidarr through this computer, in
-Settings > Lidarr under Home side.
+computer with Let my other devices use Lidarr through this computer, under
+More in Settings > Lidarr.
 
 Platter tries Lidarr's home address first, then its away address, then a
-computer at home, then the Bridge. Settings > Lidarr > Home side lists
-which of them you have, whether each is on now and which one answers. When
-none is on and there's no away address, it says "Lidarr isn't reachable
-away from home. Turn on a computer at home or add the Bridge."
+computer at home, then the Bridge. Settings > Lidarr shows nothing about
+this while it works. When you have one of them but none is on and there's
+no away address, it says "Lidarr isn't reachable away from home. Turn on a
+computer at home or add the Bridge."
 
 ## What needs a computer
 
