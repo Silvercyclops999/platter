@@ -64,6 +64,9 @@ impl ModelFetch for FakeFetch {
     }
 }
 
+/// Words that depend on what's heard.
+type Hearing = Arc<dyn Fn(&[f32]) -> Vec<Segment> + Send + Sync>;
+
 #[derive(Clone)]
 enum Behaviour {
     Words(Vec<Segment>),
@@ -76,7 +79,7 @@ enum Behaviour {
     /// background song); runs with more give these words.
     BlockBelow(usize, Vec<Segment>),
     /// Words that depend on what's heard.
-    Hearing(Arc<dyn Fn(&[f32]) -> Vec<Segment> + Send + Sync>),
+    Hearing(Hearing),
 }
 
 struct FakeRecognizer {
