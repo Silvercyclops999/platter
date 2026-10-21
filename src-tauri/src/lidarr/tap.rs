@@ -385,6 +385,9 @@ impl Taps {
 
     /// A song was tapped.
     pub async fn tap(&self, input: TapInput) -> AppResult<TapOutcome> {
+        if !self.lidarr.is_owner() {
+            return Err(AppError::Invalid(crate::lidarr::NOT_OWNER.into()));
+        }
         if !self.settings().lidarr_tap_to_get {
             return Err(AppError::Invalid("Getting songs with a tap is off. Turn it on in Settings > Lidarr > More.".into()));
         }
