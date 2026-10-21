@@ -510,11 +510,22 @@ impl DevicePairing {
             self.end(PairPhase::Declined, None);
             return Ok(());
         }
+        // The link is saved before the welcome goes: the other device treats
+        // the welcome as paired, so this end must already be.
+        let p = match self.add(&joined.link, &joined.name, &joined.version, &joined.device) {
+            Ok(p) => p,
+            Err(e) => {
+                self.end(PairPhase::Expired, None);
+                return Err(e);
+            }
+        };
         if let Err(e) = relay.publish(&wtopic, &wbody).await {
+            if let Err(e) = self.d.links.remove(&p.id) {
+                tracing::warn!("device pairing: couldn't take back a link the welcome never reached: {e}");
+            }
             self.end(PairPhase::Expired, None);
             return Err(AppError::Network(relay_error(e)));
         }
-        let p = self.add(&joined.link, &joined.name, &joined.version, &joined.device)?;
         self.done(&p.name);
         self.paired(&p);
         Ok(())

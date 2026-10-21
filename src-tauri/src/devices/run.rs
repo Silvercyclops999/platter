@@ -543,26 +543,27 @@ impl Devices {
         if !v.removable && folder.is_empty() {
             return Err(AppError::Invalid("That drive isn't removable. Choose a music folder on it instead of the whole drive.".into()));
         }
-        let mut list = store::load(self.db());
-        if let Some(id) = &v.id
-            && let Some(d) = list.iter().find(|d| d.volume_id.as_deref() == Some(id) && d.folder.eq_ignore_ascii_case(&folder))
-        {
-            return Err(AppError::Invalid(format!("That folder is already the device {}.", d.name)));
-        }
-        let d = Device {
-            id: uuid::Uuid::new_v4().to_string(),
-            name,
-            volume_id: v.id.clone(),
-            volume_label: v.label.clone(),
-            folder,
-            format: None,
-            budget_gb: None,
-            selection: vec![],
-            last_sync: None,
-            last_root: Some(v.root.to_string_lossy().into_owned()),
-        };
-        list.push(d.clone());
-        store::save(self.db(), &list)?;
+        let d = store::edit(self.db(), |list| {
+            if let Some(id) = &v.id
+                && let Some(d) = list.iter().find(|d| d.volume_id.as_deref() == Some(id) && d.folder.eq_ignore_ascii_case(&folder))
+            {
+                return Err(AppError::Invalid(format!("That folder is already the device {}.", d.name)));
+            }
+            let d = Device {
+                id: uuid::Uuid::new_v4().to_string(),
+                name,
+                volume_id: v.id.clone(),
+                volume_label: v.label.clone(),
+                folder,
+                format: None,
+                budget_gb: None,
+                selection: vec![],
+                last_sync: None,
+                last_root: Some(v.root.to_string_lossy().into_owned()),
+            };
+            list.push(d.clone());
+            Ok(d)
+        })?;
         self.changed();
         Ok(d)
     }
@@ -578,9 +579,10 @@ impl Devices {
         if self.status().is_some_and(|s| s.running() && s.device_id == id) {
             return Err(AppError::Invalid("Cancel the sync to this device first.".into()));
         }
-        let mut list = store::load(self.db());
-        list.retain(|d| d.id != id);
-        store::save(self.db(), &list)?;
+        store::edit(self.db(), |list| {
+            list.retain(|d| d.id != id);
+            Ok(())
+        })?;
         self.changed();
         Ok(())
     }
