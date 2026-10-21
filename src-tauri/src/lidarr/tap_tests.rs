@@ -420,3 +420,13 @@ async fn an_album_lidarr_already_lists_is_only_monitored_then_grabbed() {
     assert_eq!(writes(&t.r.web)[before..].to_vec(), vec![(Method::Put, "/api/v1/album/monitor".into()), (Method::Post, "/api/v1/release".into())]);
     assert_eq!(t.r.web.st.lock().grabbed, ["nzb-1"]);
 }
+
+#[tokio::test]
+async fn someone_who_doesnt_own_the_server_cant_get_a_song() {
+    let t = setup().await;
+    t.r.lidarr.set_owner(false);
+    let e = t.taps.tap(tap_in()).await.unwrap_err();
+    assert_eq!(e.to_string(), format!("invalid: {}", crate::lidarr::NOT_OWNER));
+    assert!(t.taps.list().is_empty(), "no tap is followed");
+    assert!(t.r.web.writes().is_empty(), "nothing goes to Lidarr");
+}
