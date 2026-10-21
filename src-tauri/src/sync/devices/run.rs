@@ -513,9 +513,42 @@ impl DeviceSync {
         self.send(link, replies).await;
     }
 
+    /// Link to every device on the Plex account this one isn't linked to
+    /// yet, and drop links to devices that left it. Gives the keys of the
+    /// devices newly linked.
+    pub fn account_links(&self, me: &crate::homeside::account::Me, list: &[crate::homeside::account::AccountDevice]) -> Vec<crate::remote::peer::auth::PeerKey> {
+        use crate::homeside::account::{self, Kind};
+        let links = &self.wire.links;
+        let Some(plan) = account::plan(Kind::Device, me, list, &links.all(), &links.apart(), crate::homeside::DEFAULT_RELAY, |_| true) else { return Vec::new() };
+        let mut changed = false;
+        for id in &plan.drop {
+            tracing::info!("device sync: a device left the Plex account; its link is gone");
+            self.drop_link(id);
+            changed |= self.peer.forget(id).is_ok();
+        }
+        let now_s = (relay_peer::system_ms() / 1000) as i64;
+        let mut fresh = Vec::new();
+        for w in &plan.add {
+            match links.add_auto(w, now_s) {
+                Ok(()) => {
+                    tracing::info!("device sync: linked with a device on the Plex account");
+                    fresh.push(w.key.clone());
+                    changed = true;
+                }
+                Err(e) => tracing::warn!("device sync: couldn't link with a device on the Plex account: {e}"),
+            }
+        }
+        if changed {
+            self.kick();
+            self.status_changed();
+        }
+        fresh
+    }
+
     /// Unpair: tell the other device, then forget it here (also when it
     /// can't be reached).
     pub async fn forget(&self, link_id: &str) -> crate::error::AppResult<()> {
+        self.wire.links.unpaired(link_id);
         if let Some(link) = self.wire.links.link(link_id) {
             let _ = tokio::time::timeout(Duration::from_secs(10), self.wire.send(&link, &Msg::SyncBye)).await;
         }

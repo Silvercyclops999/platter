@@ -1,4 +1,6 @@
-//! The Bridge itself: Platter's home side without a window. It pairs once,
+//! The Bridge itself: Platter's home side without a window. Signed in to
+//! Plex through plex.tv/link, it links by itself to every Platter on the
+//! same account (`super::account`). Without that sign-in it pairs once,
 //! either with the code from `BRIDGE_PAIR_CODE` (made on a computer) or by
 //! showing a code of its own in its log while it isn't paired (entered on a
 //! computer or phone). It takes how to reach Lidarr from its own settings
@@ -18,7 +20,7 @@
 //! plex.tv, MusicBrainz). The health check listens on 127.0.0.1 inside the
 //! container.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
@@ -27,6 +29,7 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use tokio::sync::{mpsc, watch};
 
+use super::account::{self, AccountDevice, Kind, Me};
 use super::code::PairCode;
 use super::keys::FileKeys;
 use super::link::Link;
@@ -45,6 +48,7 @@ use crate::lidarr::waves_bridge::PlanAlbums;
 use crate::plex::PlexState;
 use crate::plex::keychain::{ACCOUNT_TOKEN, TokenStore};
 use crate::plex::token::Token;
+use crate::remote::peer::auth::PeerKey;
 use crate::social::listen::relay::{RelayEvent, RelayFactory};
 use crate::sync::SyncStore;
 use crate::sync::store::{LIDARR, TRANSCRIPTS};
@@ -305,6 +309,8 @@ pub struct Bridge {
     lidarr_on: AtomicBool,
     /// The lyrics line last sent, so a change goes out.
     lyrics_sent: Mutex<Option<super::wire::LyricsLine>>,
+    /// Look at the account's devices now (just signed in).
+    account_now: tokio::sync::Notify,
 }
 
 impl Bridge {
@@ -355,6 +361,7 @@ impl Bridge {
             lyrics: Default::default(),
             lidarr_on: AtomicBool::new(lidarr_on),
             lyrics_sent: Mutex::default(),
+            account_now: tokio::sync::Notify::new(),
         })
     }
 
@@ -393,6 +400,51 @@ impl Bridge {
             tracing::info!("{what}");
             s.doing = what.to_string();
         }
+    }
+
+    fn hello_msg(&self) -> Msg {
+        Msg::Hello { name: self.p.env.name.clone(), version: super::VERSION.into(), music: self.p.music, waves: true, device: self.plex_id() }
+    }
+
+    /// The Bridge's Plex client id.
+    fn plex_id(&self) -> String {
+        self.p.plex.as_ref().map(|p| p.identity().client_id.clone()).unwrap_or_default()
+    }
+
+    // ------------------------------------------------------------ by account
+
+    /// Signed in to Plex as its own device (plex.tv/link): the sign-in that
+    /// finds the account's devices.
+    fn own_sign_in(&self) -> Option<Token> {
+        self.p.db.read(|c| kv_get(c, PLEX_OWN_KEY)).ok().flatten()?;
+        self.p.keys.get(ACCOUNT_TOKEN).ok().flatten()
+    }
+
+    /// Link to every computer and phone on the account the Bridge isn't
+    /// linked to yet, and drop links to devices that left it. Gives the
+    /// keys of the devices newly linked.
+    pub fn account_links(&self, me: &Me, list: &[AccountDevice]) -> Vec<PeerKey> {
+        let links = &self.wire.links;
+        let Some(plan) = account::plan(Kind::Bridge, me, list, &links.all(), &links.apart(), super::DEFAULT_RELAY, |_| true) else { return Vec::new() };
+        let changed = !plan.add.is_empty() || !plan.drop.is_empty();
+        for id in &plan.drop {
+            tracing::info!("A device left your Plex account; its link is gone.");
+            let _ = links.remove(id);
+        }
+        let mut fresh = Vec::new();
+        for w in &plan.add {
+            match links.add_auto(w, self.now_s()) {
+                Ok(()) => {
+                    tracing::info!("Linked with {} on your Plex account.", if w.name.is_empty() { "a device" } else { &w.name });
+                    fresh.push(w.key.clone());
+                }
+                Err(e) => tracing::warn!("Couldn't link with a device on your Plex account: {e}"),
+            }
+        }
+        if changed {
+            self.links_changed.notify_one();
+        }
+        fresh
     }
 
     // ------------------------------------------------------------ pairing
@@ -477,7 +529,7 @@ impl Bridge {
             if *stop.borrow() {
                 return;
             }
-            if !self.wire.links.all().is_empty() {
+            if !self.wire.links.all().is_empty() || self.own_sign_in().is_some() {
                 *self.shown.lock() = None;
                 tokio::select! {
                     _ = stop.changed() => return,
@@ -549,11 +601,19 @@ impl Bridge {
     /// Handle one message from a paired desktop.
     pub async fn handle(&self, link: &Link, msg: Msg) {
         if !matches!(msg, Msg::Unpair) && self.greet.lock().remove(&link.id) {
-            let hello = Msg::Hello { name: self.p.env.name.clone(), version: super::VERSION.into(), music: self.p.music, waves: true };
+            let hello = self.hello_msg();
             let _ = self.wire.send(link, &hello).await;
         }
         match msg {
             Msg::Config(mut cfg) => {
+                if !cfg.device.is_empty() && cfg.device.len() <= 100 {
+                    let device = cfg.device.clone();
+                    let _ = self.wire.links.update(&link.id, |p| {
+                        if !p.auto {
+                            p.device = Some(device);
+                        }
+                    });
+                }
                 if cfg.version.is_empty()
                     && let Some(p) = self.wire.links.get(&link.id)
                 {
@@ -582,6 +642,7 @@ impl Bridge {
             }
             Msg::Unpair => {
                 tracing::info!("Unpaired by the desktop.");
+                self.wire.links.unpaired(&link.id);
                 if let Some(l) = self.lyrics() {
                     l.forget_link(&link.id).await;
                 }
@@ -621,17 +682,22 @@ impl Bridge {
     /// Bridge's own settings always win.
     pub async fn apply_config(&self, cfg: &BridgeConfig) -> AppResult<()> {
         let mut s = crate::settings::try_load(&self.p.db)?;
-        s.lidarr_url = self.p.env.lidarr_url.clone().unwrap_or_else(|| cfg.lidarr_url.clone());
-        s.lidarr_away_url = String::new();
-        s.lidarr_staging_folder = cfg.staging_folder.clone();
-        s.lidarr_scan_after_import = cfg.scan_after_import;
-        s.lidarr_free_staging = cfg.free_staging;
-        s.lidarr_practice_until = cfg.practice_until;
-        s.upgrades_ask = cfg.upgrades_ask;
-        crate::settings::save(&self.p.db, &s)?;
-        let server = crate::lidarr::url_key(&s.lidarr_url);
-        self.p.db.write(|c| kv_set(c, SERVER_KEY, &server))?;
-        self.p.lidarr.set_server_key(Some(server));
+        // A computer or phone without Lidarr set up (every device links now)
+        // leaves the Bridge's Lidarr as it is.
+        let has_lidarr = self.p.env.lidarr_url.is_some() || !cfg.lidarr_url.trim().is_empty();
+        if has_lidarr {
+            s.lidarr_url = self.p.env.lidarr_url.clone().unwrap_or_else(|| cfg.lidarr_url.clone());
+            s.lidarr_away_url = String::new();
+            s.lidarr_staging_folder = cfg.staging_folder.clone();
+            s.lidarr_scan_after_import = cfg.scan_after_import;
+            s.lidarr_free_staging = cfg.free_staging;
+            s.lidarr_practice_until = cfg.practice_until;
+            s.upgrades_ask = cfg.upgrades_ask;
+            crate::settings::save(&self.p.db, &s)?;
+            let server = crate::lidarr::url_key(&s.lidarr_url);
+            self.p.db.write(|c| kv_set(c, SERVER_KEY, &server))?;
+            self.p.lidarr.set_server_key(Some(server));
+        }
         // A computer before the switches sends neither: Lidarr stays on, lyrics stay as they are.
         let lidarr_on = cfg.lidarr.unwrap_or(true);
         if self.lidarr_on.swap(lidarr_on, Ordering::SeqCst) != lidarr_on {
@@ -641,7 +707,7 @@ impl Bridge {
         if let (Some(on), Some(l)) = (cfg.lyrics, self.lyrics()) {
             l.set_opts(Opts { on, hours: cfg.lyrics_hours, utc_offset_s: cfg.utc_offset_s.clamp(-14 * 3600, 14 * 3600), lrclib: cfg.lrclib }).await;
         }
-        let key = self.p.env.lidarr_key.clone().or_else(|| cfg.lidarr_key.clone());
+        let key = self.p.env.lidarr_key.clone().or_else(|| cfg.lidarr_key.clone().filter(|_| has_lidarr));
         if let Some(k) = key {
             self.p.lidarr.set_key(Some(&k))?;
         }
@@ -802,7 +868,7 @@ impl Bridge {
                         continue;
                     }
                 };
-                tracing::info!("To let the Bridge read your Plex library, open https://plex.tv/link and enter {}.", pin.code);
+                tracing::info!("To let the Bridge read your Plex library and find your devices, open https://plex.tv/link and enter {}.", pin.code);
                 me.status.lock().plex_link = Some(pin.code.clone());
                 me.send_status().await;
                 match plex.plex_tv().poll_pin(&pin.id, Duration::from_secs(5), PLEX_LINK_WAIT, cancel.clone()).await {
@@ -813,9 +879,10 @@ impl Bridge {
                             continue;
                         }
                         let _ = me.p.db.write(|c| kv_set(c, PLEX_OWN_KEY, "1"));
-                        tracing::info!("Signed in to Plex. The Bridge shows in Plex's Authorized Devices as Platter, where you can sign it out.");
+                        tracing::info!("Signed in to Plex. The Bridge shows in Plex's Authorized Devices as Platter, where you can sign it out. Every Platter on your Plex account now finds it by itself.");
                         me.plex_linking.store(false, Ordering::SeqCst);
                         me.plex_now.notify_one();
+                        me.account_now.notify_one();
                         return;
                     }
                     Err(e) => tracing::debug!("plex.tv/link: {e}"),
@@ -1023,31 +1090,54 @@ impl Bridge {
     /// sends shared changes and a heartbeat. Ends when `stop` turns true.
     pub async fn run(self: Arc<Self>, mut stop: watch::Receiver<bool>) {
         let (tx, mut rx) = mpsc::channel::<Incoming>(64);
-        let mut listening: HashSet<String> = HashSet::new();
+        let mut listening: HashMap<String, watch::Sender<bool>> = HashMap::new();
         let mut changes = self.p.store.subscribe();
         let mut catch = tokio::time::interval(crate::lidarr::catchup::EVERY);
         let mut beat = tokio::time::interval(HEARTBEAT);
         let mut library = tokio::time::interval(LIBRARY_EVERY);
         let mut tick = tokio::time::interval(Duration::from_secs(30));
         let mut waves = tokio::time::interval(crate::lidarr::waves::LOOK_EVERY);
-        let (stop_links, _) = watch::channel(false);
         let mut dirty: Option<tokio::time::Instant> = None;
         beat.tick().await;
         self.migrate_plex().await;
         self.connect_plex().await;
+        if self.own_sign_in().is_none() && self.p.plex.is_some() {
+            // The sign-in that finds the account's devices, even when the
+            // Bridge reaches Plex some other way.
+            if let Some(plex) = self.p.plex.clone() {
+                self.ask_plex_link(plex);
+            }
+        }
         tokio::spawn(self.clone().show_code_while_unpaired(stop.clone()));
+        let looker = account::Looker::new(Arc::new(BridgeAccount(Arc::downgrade(&self))), self.p.relays.clone(), super::DEFAULT_RELAY, self.p.clock.clone());
+        tokio::spawn(looker.clone().run(stop.clone()));
+        looker.look_now();
         loop {
-            // A listener for every link (new pairings included).
-            for link in self.wire.links.links() {
-                if listening.insert(link.id.clone()) {
-                    tokio::spawn(peer::listen(self.wire.clone(), link, tx.clone(), stop_links.subscribe()));
+            // A listener for every link (new pairings included), and none
+            // for a link that's gone.
+            let links = self.wire.links.links();
+            listening.retain(|id, s| {
+                let keep = links.iter().any(|l| &l.id == id);
+                if !keep {
+                    let _ = s.send(true);
+                    self.hello.lock().remove(id);
+                }
+                keep
+            });
+            for link in links {
+                if !listening.contains_key(&link.id) {
+                    let (s, stop_one) = watch::channel(false);
+                    listening.insert(link.id.clone(), s);
+                    tokio::spawn(peer::listen(self.wire.clone(), link, tx.clone(), stop_one));
                 }
             }
             self.alive.store(self.now_s(), Ordering::SeqCst);
             let flush_at = dirty.map(|d| d + SETTLE);
             tokio::select! {
                 _ = stop.changed() => {
-                    let _ = stop_links.send(true);
+                    for s in listening.values() {
+                        let _ = s.send(true);
+                    }
                     return;
                 }
                 Some(inc) = rx.recv() => match inc {
@@ -1060,7 +1150,7 @@ impl Bridge {
                         } else if self.hello.lock().insert(id.clone())
                             && let Some(link) = self.wire.links.link(&id)
                         {
-                            let hello = Msg::Hello { name: self.p.env.name.clone(), version: super::VERSION.into(), music: self.p.music, waves: true };
+                            let hello = self.hello_msg();
                             let _ = self.wire.send(&link, &hello).await;
                             dirty = Some(tokio::time::Instant::now());
                         }
@@ -1101,6 +1191,7 @@ impl Bridge {
                 _ = self.library_now.notified() => self.sync_library().await,
                 _ = self.plex_now.notified() => self.connect_plex().await,
                 _ = self.links_changed.notified() => {}
+                _ = self.account_now.notified() => looker.look_now(),
                 _ = tick.tick() => self.lyrics_tick().await,
             }
         }
@@ -1154,6 +1245,38 @@ pub fn build(env: Env) -> AppResult<Parts> {
     lidarr.set_announcer(Arc::new(LogAnnouncer));
     let relays: Arc<dyn RelayFactory> = Arc::new(crate::social::listen::relay::Ntfy::new().map_err(AppError::Internal)?);
     Ok(Parts { env, db, keys, relays, clock: Arc::new(peer::system_ms), store, lidarr, web, plex: Some(plex), music })
+}
+
+/// The Bridge's side of links by account (`super::account`).
+struct BridgeAccount(std::sync::Weak<Bridge>);
+
+#[async_trait::async_trait]
+impl account::AccountSide for BridgeAccount {
+    async fn me(&self) -> Option<(Me, Token)> {
+        let b = self.0.upgrade()?;
+        let token = b.own_sign_in()?;
+        let id = b.plex_id();
+        (!id.is_empty()).then(|| (Me { id, key: PeerKey::from_token(&token), bridge: true }, token))
+    }
+
+    async fn list(&self, token: &Token) -> AppResult<Vec<AccountDevice>> {
+        let b = self.0.upgrade().ok_or_else(|| AppError::Internal("stopped".into()))?;
+        let plex = b.p.plex.as_ref().ok_or_else(|| AppError::Invalid("no Plex".into()))?;
+        let list = account::parse_list(&plex.plex_tv().devices_json(token).await?)?;
+        // Devices reach Lidarr through the Bridge, so it links only to the
+        // server owner's.
+        let servers = crate::plex::discovery::servers_from_resources(plex.plex_tv().resources(token).await?);
+        let machine = b.p.db.read(|c| kv_get(c, PLEX_SERVER_KEY)).ok().flatten();
+        if account::owns_server(&servers, machine.as_deref()) {
+            return Ok(list);
+        }
+        tracing::warn!("The Bridge is signed in to a Plex account that doesn't own your server, so it doesn't link to any device. Sign it in with the Plex account that owns the server.");
+        Ok(account::only_bridges(&list))
+    }
+
+    async fn apply(&self, me: &Me, list: &[AccountDevice]) -> Vec<PeerKey> {
+        self.0.upgrade().map(|b| b.account_links(me, list)).unwrap_or_default()
+    }
 }
 
 /// New albums go to the log (desktops show their own).

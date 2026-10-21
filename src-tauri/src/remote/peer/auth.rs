@@ -71,6 +71,11 @@ impl PeerKey {
         h.update(token.expose().as_bytes());
         Self(h.finalize().into())
     }
+
+    /// The key itself, for what's derived from it (`crate::homeside::account`).
+    pub(crate) fn bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
 }
 
 /// The account tag in the network announcement: 16 hex digits of

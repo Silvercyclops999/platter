@@ -1,7 +1,8 @@
 /**
  * Copy from my computer, on the phone: a setup step after the first
- * sign-in (and from the You tab later). With no computer paired yet it asks
- * for the 6-digit code the computer shows; then it copies one group at a
+ * sign-in (and from the You tab later). With no computer linked yet it waits
+ * for one: every Platter on the same Plex account finds the others by
+ * itself, so there's no code to type. Then it copies one group at a
  * time with a progress line, and can be stopped. What came stays, and the
  * next round with the computer brings the rest. The words are the ones
  * Settings uses on the computer; only the arrangement is the phone's.
@@ -11,7 +12,6 @@ import { create } from "zustand";
 import { backend } from "../lib/backend";
 import { errorMessage } from "../lib/errorText";
 import type { DeviceCopyProgress, DeviceCopyResult } from "../lib/types";
-import { pairCodeReady } from "../pages/KeepInSyncSettings";
 import { tap } from "./bits";
 import "../pages/ledger.css";
 import "./sync-setup.css";
@@ -28,7 +28,10 @@ export function closeSyncStep() {
   useSyncStep.setState({ open: false, firstRun: false });
 }
 
-export type SyncStepPhase = "choose" | "code" | "copying" | "done" | "stopped" | "failed";
+export type SyncStepPhase = "choose" | "looking" | "copying" | "done" | "stopped" | "failed";
+
+/** How often the phone checks whether its computer has turned up. */
+const LOOK_MS = 3000;
 
 /** "Copying your pins and folders… 2 of 7". */
 export function progressLine(p: DeviceCopyProgress): string {
@@ -49,8 +52,6 @@ export function SyncStepHost() {
 export function SyncStep({ firstRun, onClose }: { firstRun: boolean; onClose: () => void }) {
   const [phase, setPhase] = useState<SyncStepPhase>(firstRun ? "choose" : "copying");
   const [paired, setPaired] = useState<boolean | null>(null);
-  const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<DeviceCopyProgress | null>(null);
   const [result, setResult] = useState<DeviceCopyResult | null>(null);
@@ -90,7 +91,7 @@ export function SyncStep({ firstRun, onClose }: { firstRun: boolean; onClose: ()
     );
   };
 
-  /** Copy now if a computer is paired; ask for its code first if not. */
+  /** Copy now if a computer is linked; wait for one to turn up if not. */
   const begin = () => {
     tap();
     backend.deviceSyncStatus().then(
@@ -102,7 +103,7 @@ export function SyncStep({ firstRun, onClose }: { firstRun: boolean; onClose: ()
           setError("Turn on Keep my devices in sync first, in Settings under Sync.");
           setPhase("failed");
         } else if (any) copy();
-        else setPhase("code");
+        else setPhase("looking");
       },
       (e: unknown) => {
         if (!alive.current) return;
@@ -132,25 +133,32 @@ export function SyncStep({ firstRun, onClose }: { firstRun: boolean; onClose: ()
     // Once, on open.
   }, []);
 
-  const join = () => {
-    if (!pairCodeReady(code) || busy) return;
-    tap();
-    setBusy(true);
-    setError(null);
-    backend.devicePairJoin(code.trim()).then(
-      () => {
-        if (!alive.current) return;
-        setBusy(false);
-        setPaired(true);
-        copy();
-      },
-      (e: unknown) => {
-        if (!alive.current) return;
-        setBusy(false);
-        setError(errorMessage(e) || "Couldn't pair. Try again.");
-      },
-    );
-  };
+  // Waiting for the computer: it links by itself once it's open and
+  // signed in to the same Plex account.
+  useEffect(() => {
+    if (phase !== "looking") return;
+    let done = false;
+    const check = () =>
+      backend.deviceSyncStatus().then(
+        (o) => {
+          if (!alive.current || done || o.devices.length === 0) return;
+          done = true;
+          setPaired(true);
+          copy();
+        },
+        () => {},
+      );
+    const off = backend.listen("device-sync://status", (devices) => {
+      if (devices.length > 0) void check();
+    });
+    const t = window.setInterval(() => void check(), LOOK_MS);
+    return () => {
+      done = true;
+      window.clearInterval(t);
+      void off.then((u) => u());
+    };
+    // copy is stable enough for this: it only sets state.
+  }, [phase]);
 
   const stop = () => {
     tap();
@@ -189,39 +197,18 @@ export function SyncStep({ firstRun, onClose }: { firstRun: boolean; onClose: ()
           </>
         )}
 
-        {phase === "code" && (
+        {phase === "looking" && (
           <>
             <div className="ph-signin__words">
               <p className="ph-eyebrow">Copy from my computer</p>
               <h1 id="ph-sync-title" className="ph-title ph-signin__title">
-                Type the code from your computer
+                Looking for your computer
               </h1>
-              <p className="ph-signin__lead">On your computer, open Settings, then Sync, and choose Add a device. Type the 6 digits it shows. Both need to be on the same Wi-Fi.</p>
-              <label className="ph-sync-step__label" htmlFor="ph-sync-code">
-                Code
-              </label>
-              <input
-                id="ph-sync-code"
-                className="ph-sync-step__code tabular"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                maxLength={7}
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") join();
-                }}
-              />
-              {error && (
-                <p className="ph-signin__error" role="alert">
-                  {error}
-                </p>
-              )}
+              <p className="ph-sync-step__line" role="status" aria-live="polite">
+                Open Platter on your computer, signed in to the same Plex account. This phone finds it by itself.
+              </p>
             </div>
             <div className="ph-signin__actions">
-              <button type="button" className="ph-big-btn is-primary" onClick={join} disabled={!pairCodeReady(code) || busy}>
-                {busy ? "Pairing" : "Pair and copy"}
-              </button>
               <button type="button" className="ph-big-btn is-quiet" onClick={close}>
                 Not now
               </button>
@@ -306,7 +293,7 @@ export function SyncStep({ firstRun, onClose }: { firstRun: boolean; onClose: ()
               </p>
             </div>
             <div className="ph-signin__actions">
-              <button type="button" className="ph-big-btn is-primary" onClick={paired === false ? () => setPhase("code") : begin}>
+              <button type="button" className="ph-big-btn is-primary" onClick={paired === false ? () => setPhase("looking") : begin}>
                 Try again
               </button>
               <button type="button" className="ph-big-btn is-quiet" onClick={close}>

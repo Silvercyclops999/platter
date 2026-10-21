@@ -224,18 +224,27 @@ pub struct LidarrStatus {
     /// One of the user's computers at home, or a Bridge, answers Lidarr
     /// requests for this device now (no address or key needed here).
     pub home_side: bool,
+    /// Signed in as someone who doesn't own the server: Lidarr isn't used
+    /// from here at all.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub not_owner: bool,
 }
 
 impl LidarrStatus {
     /// Lidarr can be asked from this device: set up here, or through a
     /// home side.
     pub fn usable(&self) -> bool {
-        ((self.url_set || self.away_set) && self.has_key) || self.home_side
+        !self.not_owner && (((self.url_set || self.away_set) && self.has_key) || self.home_side)
     }
 }
 
 /// When nothing answers for Lidarr away from home.
 pub const HOME_SIDE_OFF: &str = "Lidarr isn't reachable away from home. Turn on a computer at home or add the Bridge.";
+/// Signed in as someone who doesn't own the server: Lidarr isn't asked,
+/// here or through a Bridge or a computer at home.
+pub const NOT_OWNER: &str = "Only the owner of this Plex server can get music through Lidarr.";
+/// A Bridge is there but isn't answering (it lost its link, say).
+pub const BRIDGE_QUIET: &str = "Your Bridge isn't answering, so Lidarr can't be reached away from home yet. Platter is linking to it again by itself. If this is still here in a few minutes, check that the Bridge is running on your server.";
 
 /// Worked-out modes and when (unix seconds).
 type ModesAt = (i64, Vec<modes::ArtistMode>);
@@ -331,7 +340,8 @@ impl Lidarr {
         let set = !home.trim().is_empty() || !away.trim().is_empty();
         let moved = if has_key { self.moved(&home, &away) } else { None };
         let home_side = self.home_side_up();
-        let direct = set && has_key && moved.is_none();
+        let owner = self.is_owner();
+        let direct = owner && set && has_key && moved.is_none();
         LidarrStatus {
             url_set: !home.trim().is_empty(),
             away_set: !away.trim().is_empty(),
@@ -341,6 +351,7 @@ impl Lidarr {
             header_names: self.headers().into_iter().map(|(n, _)| n).collect(),
             unencrypted: [home, away].into_iter().filter(|u| unencrypted(u)).collect(),
             moved,
+            not_owner: !owner,
         }
     }
 
@@ -425,6 +436,9 @@ impl Lidarr {
     /// came from another device) is left out: the key never goes there.
     /// With no address or key here, only the home sides (they hold the key).
     fn routes(&self) -> AppResult<Vec<Arc<dyn LidarrRoute>>> {
+        if !self.is_owner() {
+            return Err(AppError::Invalid(NOT_OWNER.into()));
+        }
         let (home_set, away_set) = self.urls();
         let computer = self.computer_route();
         let bridge = self.bridge_route();

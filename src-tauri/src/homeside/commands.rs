@@ -113,7 +113,8 @@ pub fn home_sides(computers: Vec<ComputerSide>, bridges: &[BridgeInfo], offering
         first.answers = true;
     }
     let none_on = !sides.iter().any(|s| s.on);
-    HomeSides { offering, problem: (none_on && !offering && !away_set).then(|| crate::lidarr::HOME_SIDE_OFF.to_string()), sides }
+    let words = if bridges.is_empty() { crate::lidarr::HOME_SIDE_OFF } else { crate::lidarr::BRIDGE_QUIET };
+    HomeSides { offering, problem: (none_on && !offering && !away_set).then(|| words.to_string()), sides }
 }
 
 /// Settings > Lidarr > Home side.
@@ -124,5 +125,10 @@ pub async fn lidarr_home_sides(
     devices: State<'_, DeviceService>,
 ) -> AppResult<HomeSides> {
     let away = lidarr.status().away_set;
-    Ok(home_sides(devices.sync.home_computers(), &bridge.overview().bridges, devices.sync.peer.offers_lidarr(), away))
+    let bridges = bridge.overview().bridges;
+    if !bridges.is_empty() && !bridges.iter().any(|b| b.online) {
+        // Not answering: look for it on the Plex account again now.
+        bridge.relook_now();
+    }
+    Ok(home_sides(devices.sync.home_computers(), &bridges, devices.sync.peer.offers_lidarr(), away))
 }

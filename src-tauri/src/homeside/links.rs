@@ -66,6 +66,9 @@ pub struct Paired {
     /// last hello), for Settings' list of home sides.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub offers_lidarr: bool,
+    /// Linked by Plex account (`super::account`), not with a code.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto: bool,
 }
 
 #[derive(Clone)]
@@ -139,14 +142,75 @@ impl Links {
             in_step: Vec::new(),
             catching_up_since: None,
             offers_lidarr: false,
+            auto: false,
         });
         self.save(&list)
+    }
+
+    /// A link by Plex account. One that was here before (its device left
+    /// the list for a while) carries on with its replay guard, so nothing
+    /// it already took is taken again. It reads its inbox from a little
+    /// before now, for what the other end sent before this one linked.
+    pub fn add_auto(&self, w: &super::account::Wanted, now_s: i64) -> AppResult<()> {
+        let kept: Option<Guard> = self.db.read(|c| kv_get(c, &self.kept_key(&w.link.id))).ok().flatten().and_then(|s| serde_json::from_str(&s).ok());
+        self.add(&w.link, &w.name, "", now_s)?;
+        let since = (now_s - super::account::BACKLOG_S).max(0).to_string();
+        self.update(&w.link.id, |p| {
+            p.auto = true;
+            p.device = Some(w.device.clone());
+            p.since = Some(since);
+            if let Some(g) = kept {
+                p.guard = g;
+            }
+        })
+    }
+
+    fn kept_key(&self, id: &str) -> String {
+        format!("{}.kept.{id}", self.list_key)
+    }
+
+    fn apart_key(&self) -> String {
+        format!("{}.apart", self.list_key)
+    }
+
+    /// Devices the user unpaired: never linked again by account.
+    pub fn apart(&self) -> Vec<String> {
+        self.db.read(|c| kv_get(c, &self.apart_key())).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    }
+
+    /// Keep this device apart from now on (it was unpaired by account).
+    pub fn keep_apart(&self, device: &str) -> AppResult<()> {
+        let _one = self.lock.lock();
+        let mut l = self.apart();
+        if !l.iter().any(|d| d == device) {
+            l.push(device.to_string());
+            l.truncate(500);
+            let json = serde_json::to_string(&l).map_err(|e| AppError::Internal(e.to_string()))?;
+            self.db.write(|c| kv_set(c, &self.apart_key(), &json))?;
+        }
+        Ok(())
+    }
+
+    /// The user unpaired this link: an account link's device stays apart.
+    pub fn unpaired(&self, id: &str) {
+        if let Some(p) = self.get(id).filter(|p| p.auto)
+            && let Some(d) = p.device
+            && let Err(e) = self.keep_apart(&d)
+        {
+            tracing::warn!("couldn't keep an unpaired device apart: {e}");
+        }
     }
 
     pub fn remove(&self, id: &str) -> AppResult<()> {
         let _ = self.keys.delete(&self.secret_account(id));
         let _one = self.lock.lock();
         let mut list = self.all();
+        if let Some(p) = list.iter().find(|p| p.id == id && p.auto)
+            && let Ok(json) = serde_json::to_string(&p.guard)
+        {
+            // An account link can come back with the same id: its guard stays.
+            self.db.write(|c| kv_set(c, &self.kept_key(id), &json))?;
+        }
         list.retain(|p| p.id != id);
         self.save(&list)?;
         self.db.write(|c| {

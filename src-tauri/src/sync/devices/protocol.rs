@@ -400,6 +400,7 @@ impl SyncPeer {
             m @ (Msg::Get { .. } | Msg::Write { .. }) => self.on_home_request(link, m).await,
             Msg::SyncBye => {
                 tracing::info!("A device unpaired itself.");
+                self.d.links.unpaired(&link.id);
                 if let Err(e) = self.d.links.remove(&link.id) {
                     tracing::warn!("device sync: couldn't forget the device: {e}");
                 }

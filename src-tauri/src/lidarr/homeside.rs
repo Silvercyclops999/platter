@@ -32,9 +32,15 @@ use crate::plex::token::Token;
 /// Gives the Bridge route when a Bridge is paired and answering.
 pub type RouteFn = Arc<dyn Fn() -> Option<Arc<dyn LidarrRoute>> + Send + Sync>;
 
+/// Whether the signed-in account owns the server, asked each time.
+pub type OwnerFn = Arc<dyn Fn() -> bool + Send + Sync>;
+
 #[derive(Default)]
 pub struct Hooks {
     bridge: AtomicBool,
+    /// Whether the signed-in account owns the server (the app sets it; the
+    /// Bridge has none and checks its own account when linking).
+    owner: RwLock<Option<OwnerFn>>,
     route: RwLock<Option<RouteFn>>,
     /// A computer at home answering over a device link (`crate::homeside::computer`).
     computer: RwLock<Option<RouteFn>>,
@@ -203,13 +209,29 @@ impl Lidarr {
         self.home.server.read().clone()
     }
 
+    /// How to tell whether the signed-in account owns the server. Only the
+    /// owner gets music through Lidarr: from here, through a Bridge or a
+    /// computer at home, and when answering for their other devices.
+    pub fn set_owner_check(&self, f: OwnerFn) {
+        *self.home.owner.write() = Some(f);
+    }
+
+    pub fn set_owner(&self, owner: bool) {
+        self.set_owner_check(Arc::new(move || owner));
+    }
+
+    /// The one check every Lidarr entry point makes.
+    pub fn is_owner(&self) -> bool {
+        self.home.owner.read().as_ref().is_none_or(|f| f())
+    }
+
     /// On a desktop: how to reach Lidarr through a paired Bridge.
     pub fn set_bridge_route(&self, f: Option<RouteFn>) {
         *self.home.route.write() = f;
     }
 
     pub(super) fn bridge_route(&self) -> Option<Arc<dyn LidarrRoute>> {
-        if self.bridge_mode() {
+        if self.bridge_mode() || !self.is_owner() {
             return None;
         }
         self.home.route.read().as_ref().and_then(|f| f())
@@ -222,7 +244,7 @@ impl Lidarr {
     }
 
     pub(super) fn computer_route(&self) -> Option<Arc<dyn LidarrRoute>> {
-        if self.bridge_mode() {
+        if self.bridge_mode() || !self.is_owner() {
             return None;
         }
         self.home.computer.read().as_ref().and_then(|f| f())
@@ -239,7 +261,7 @@ impl Lidarr {
     /// home side. With the secrets that must never be in an answer (the key
     /// and any proxy header values).
     pub fn home_side_route(&self) -> Option<(super::api::DirectRoute, Vec<Token>)> {
-        if self.bridge_mode() {
+        if self.bridge_mode() || !self.is_owner() {
             return None;
         }
         let (home, away) = self.urls();

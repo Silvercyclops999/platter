@@ -106,6 +106,43 @@ fn routes_go_home_away_computer_then_bridge_with_each_side_up_or_down() {
     assert_eq!(order(&r.lidarr), Err("invalid: Add Lidarr's API key first.".to_string()));
 }
 
+#[test]
+fn only_the_servers_owner_asks_a_bridge_or_a_computer_at_home() {
+    let r = rig();
+    let (pc, br) = sides(&r.lidarr);
+    pc.store(true, Ordering::SeqCst);
+    br.store(true, Ordering::SeqCst);
+    let mut s = crate::settings::load(&r.db);
+    s.lidarr_url = String::new();
+    crate::settings::save(&r.db, &s).unwrap();
+    assert_eq!(order(&r.lidarr), Ok(vec![Route::Computer, Route::Bridge]));
+
+    // Signed in as someone the server is only shared with: neither is asked.
+    let owner = Arc::new(AtomicBool::new(false));
+    let o = owner.clone();
+    r.lidarr.set_owner_check(Arc::new(move || o.load(Ordering::SeqCst)));
+    assert_eq!(order(&r.lidarr), Err(format!("invalid: {}", crate::lidarr::NOT_OWNER)));
+    let st = r.lidarr.status();
+    assert!(!st.home_side && !st.usable() && !st.ready && st.not_owner, "{st:?}");
+    assert!(r.lidarr.home_side_route().is_none(), "and it doesn't answer for other devices");
+
+    // Nor with Lidarr's address and key set here (the owner's computer,
+    // with someone else signed in on it).
+    let mut s = crate::settings::load(&r.db);
+    s.lidarr_url = "http://10.20.30.40:8686".into();
+    crate::settings::save(&r.db, &s).unwrap();
+    r.lidarr.set_key(Some("abc123")).unwrap();
+    assert_eq!(order(&r.lidarr), Err(format!("invalid: {}", crate::lidarr::NOT_OWNER)));
+    assert!(!r.lidarr.status().usable());
+    assert!(r.lidarr.home_side_route().is_none());
+
+    // The owner signs in again: everything is back, checked each time.
+    owner.store(true, Ordering::SeqCst);
+    assert_eq!(order(&r.lidarr).map(|v| v[0]), Ok(Route::Home));
+    assert!(r.lidarr.home_side_route().is_some());
+    assert!(!r.lidarr.status().not_owner);
+}
+
 #[tokio::test]
 async fn the_first_route_that_answers_is_used() {
     use Route::*;

@@ -2,10 +2,11 @@
  * Settings > Bridge: Platter Bridge, the optional helper for a server
  * (docs/BRIDGE.md), as one card. It says what the Bridge does for you, in
  * order, with the things it does today first-class and the rest marked
- * as coming. Not paired, the card leads with the three steps (copy one
- * line, start it, type the code it shows). Paired, it says how each thing
- * is going. Each benefit's switch, the night hours and the other ways to
- * pair sit under the page's More (rows in SettingsPage).
+ * as coming. With no Bridge yet, the card leads with the two steps (copy
+ * one line, start it and sign it in to Plex): every Platter on the same
+ * Plex account then finds it by itself, with no code. With one, it says how
+ * each thing is going. Each benefit's switch and the night hours sit under
+ * the page's More (rows in SettingsPage).
  */
 import { useEffect, useState, type ReactNode } from "react";
 import { create } from "zustand";
@@ -25,7 +26,7 @@ import { compareSemver } from "../lib/version";
 export const BRIDGE_DESCRIPTION =
   "Optional. A small helper for your server that does Platter's heavy and always-on work while your computers are off: lyrics for every song, transcribed at night, and Lidarr from anywhere. Platter works fully without it, and nothing is installed on your server unless you set it up. It talks to Platter only through the same sealed relay as Listen along, and opens no ports.";
 
-const SECTION_WORDS = "bridge server docker unraid container home side lidarr pair code add unpair headless relay lyrics transcribe night";
+const SECTION_WORDS = "bridge server docker unraid container home side lidarr plex sign in link add unpair headless relay lyrics transcribe night";
 
 /** What the Bridge does for you, in this order. `live`: it does it today. */
 export const BENEFITS = [
@@ -100,60 +101,6 @@ export function lyricsWords(line: BridgeLyricsLine | null | undefined, on: boole
 export function takesOver(b: BridgeInfo, on: boolean): boolean {
   const s = b.status?.lyrics?.state;
   return on && b.online && (s === "downloading" || s === "waiting" || s === "busy" || s === "working" || s === "done");
-}
-
-/** Step 3, and Add another Bridge under More: enter the code a Bridge shows in its log. */
-export function AddBridge({ onAdded, compact = false }: { onAdded?: () => void; compact?: boolean }) {
-  const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const add = () => {
-    if (!code.trim() || busy) return;
-    setBusy(true);
-    setError(null);
-    backend.bridgeJoin(code.trim()).then(
-      (name) => {
-        setBusy(false);
-        setCode("");
-        toast.info(`Paired with ${name}`);
-        onAdded?.();
-      },
-      (e: unknown) => {
-        setBusy(false);
-        setError(failText("Couldn't add the Bridge", e, 300));
-      },
-    );
-  };
-  return (
-    <div className={compact ? "bridge-add" : "bridge-add bridge-add--row"} data-testid="bridge-add">
-      <div className="bridge-add__field">
-        <input
-          className="setting-text bridge-add__input"
-          value={code}
-          placeholder="PBB-..."
-          spellCheck={false}
-          autoCapitalize="off"
-          autoComplete="off"
-          aria-label="The code from the Bridge, starting with PBB-"
-          onChange={(e) => setCode(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              add();
-            }
-          }}
-        />
-        <Button size="sm" variant="primary" disabled={busy || !code.trim()} onClick={add}>
-          {busy ? "Waiting for the Bridge" : "Add the Bridge"}
-        </Button>
-      </div>
-      {error && (
-        <p className="info-key__error" role="alert">
-          {error}
-        </p>
-      )}
-    </div>
-  );
 }
 
 export function bridgeMatches(query: string): boolean {
@@ -263,8 +210,8 @@ function Benefit({ title, live, children }: { title: string; live: boolean; chil
   );
 }
 
-/** Not paired: what it does, then the three steps. */
-function SetUp({ onAdded }: { onAdded: () => void }) {
+/** No Bridge yet: what it does, then the two steps. */
+function SetUp() {
   const [where, setWhere] = useState<"docker" | "unraid">("docker");
   return (
     <div className="bridge-card" data-testid="bridge-setup">
@@ -279,7 +226,7 @@ function SetUp({ onAdded }: { onAdded: () => void }) {
           </Benefit>
         ))}
       </ol>
-      <h4 className="bridge-card__subtitle">Set it up in three steps</h4>
+      <h4 className="bridge-card__subtitle">Set it up in two steps</h4>
       <ol className="bridge-steps">
         <li className="bridge-step">
           <span className="bridge-step__n" aria-hidden="true">
@@ -326,17 +273,10 @@ function SetUp({ onAdded }: { onAdded: () => void }) {
             2
           </span>
           <div className="bridge-step__body">
-            <div className="bridge-step__title">Start it</div>
-            <p className="bridge-step__hint">It shows a code starting with PBB- in its log. It works once, for an hour.</p>
-          </div>
-        </li>
-        <li className="bridge-step">
-          <span className="bridge-step__n" aria-hidden="true">
-            3
-          </span>
-          <div className="bridge-step__body">
-            <div className="bridge-step__title">Type the code it shows</div>
-            <AddBridge onAdded={onAdded} compact />
+            <div className="bridge-step__title">Start it and sign it in to Plex</div>
+            <p className="bridge-step__hint">
+              Its log shows a short code. Open plex.tv/link and enter it, signed in as the owner of your Plex server. Every Platter signed in as the owner finds the Bridge by itself within a minute. There's nothing to type here.
+            </p>
           </div>
         </li>
       </ol>
@@ -415,7 +355,7 @@ function PairedCard({ b, appVersion, settings, onUnpair }: { b: BridgeInfo; appV
       )}
       {st?.plexLink && (
         <p className="bridge-card__note" data-testid="bridge-plex-link">
-          To let it read your Plex library, open plex.tv/link and enter <code>{st.plexLink}</code>.
+          To let it read your Plex library and find your devices, open plex.tv/link and enter <code>{st.plexLink}</code>.
         </p>
       )}
       {st?.musicPlexPath && (
@@ -448,45 +388,19 @@ function PairedCard({ b, appVersion, settings, onUnpair }: { b: BridgeInfo; appV
   );
 }
 
-/** Under More: start the Bridge with a code made here (BRIDGE_PAIR_CODE). */
-export function PairWithCode() {
-  const [ov, , load] = useBridge();
-  const pair = () =>
-    backend.bridgePairStart().then(
-      () => load(),
-      () => toast.error("Couldn't make a pair code"),
-    );
-  const cancel = () => void backend.bridgePairCancel().then(load);
-  if (!ov) return <Skeleton width={120} height={32} radius="pill" />;
-  if (!ov.pairing)
-    return (
-      <Button size="sm" onClick={() => void pair()}>
-        Pair a Bridge
-      </Button>
-    );
-  return (
-    <div data-testid="bridge-code" className="bridge-code-block">
-      <p className="setting-row__desc">Start the Bridge with BRIDGE_PAIR_CODE set to this code. It works once, for the next hour, while Platter is open here:</p>
-      <code className="bridge-code">{ov.pairing.code}</code>{" "}
-      <Button size="sm" variant="ghost" onClick={() => copy(ov.pairing?.code ?? "", "The code")}>
-        Copy
-      </Button>{" "}
-      <Button size="sm" variant="ghost" onClick={cancel}>
-        Cancel
-      </Button>
-    </div>
-  );
-}
-
 export function BridgeSettings() {
-  const [ov, setOv, load] = useBridge();
+  const [ov, setOv] = useBridge();
   const appVersion = useAppVersion();
   const settings = useSettings((x) => x.settings);
   const unpair = (b: BridgeInfo) =>
     backend.bridgeUnpair(b.id).then(
       (o) => {
         setOv(o);
-        toast.info(`${b.name} was unpaired. Remove its container if you don't need it any more`);
+        toast.info(
+          b.auto
+            ? `${b.name} was unpaired. It won't link to this device again. Remove its container if you don't need it any more`
+            : `${b.name} was unpaired. Remove its container if you don't need it any more`,
+        );
       },
       () => toast.error("Couldn't unpair the Bridge"),
     );
@@ -499,7 +413,7 @@ export function BridgeSettings() {
       {!ov ? (
         <Skeleton height={320} radius="card" />
       ) : ov.bridges.length === 0 ? (
-        <SetUp onAdded={load} />
+        <SetUp />
       ) : (
         ov.bridges.map((b) => <PairedCard key={b.id} b={b} appVersion={appVersion} settings={settings} onUnpair={() => void unpair(b)} />)
       )}

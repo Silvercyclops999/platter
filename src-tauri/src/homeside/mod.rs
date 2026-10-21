@@ -24,6 +24,7 @@
 //! The Lidarr side of it (settings writes queued, modes shared by desktops,
 //! the Bridge route) is in `crate::lidarr::homeside`.
 
+pub mod account;
 pub mod code;
 pub mod commands;
 pub mod computer;

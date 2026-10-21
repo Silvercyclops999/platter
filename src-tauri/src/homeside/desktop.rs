@@ -1,5 +1,6 @@
-//! The desktop's side of Platter Bridge: Settings > Bridge (pair, list,
-//! unpair), sending the Bridge how to reach Lidarr and Plex (sealed), keeping
+//! The desktop's side of Platter Bridge: Settings > Bridge (list, unpair;
+//! Bridges on the same Plex account link by themselves, `super::account`;
+//! pairing with a code stays for a Bridge not signed in to Plex), sending the Bridge how to reach Lidarr and Plex (sealed), keeping
 //! shared Lidarr state in step with it, and the route through it for a
 //! desktop away from home.
 
@@ -103,6 +104,8 @@ pub struct BridgeInfo {
     pub online: bool,
     pub status: Option<BridgeStatus>,
     pub music: MusicAccess,
+    /// Found on the Plex account (no code).
+    pub auto: bool,
 }
 
 /// A code waiting for its Bridge.
@@ -159,6 +162,8 @@ pub struct Desktop {
     on_lyrics: RwLock<Option<OnLyrics>>,
     /// The have list last sent, per link (this run only): its digest and when.
     sent_have: Mutex<HashMap<String, (u64, i64)>>,
+    /// Look at the account's devices again (a code-paired Bridge said who it is).
+    relook: RwLock<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl Desktop {
@@ -183,11 +188,61 @@ impl Desktop {
             sent_plan: Mutex::default(),
             on_lyrics: RwLock::default(),
             sent_have: Mutex::default(),
+            relook: RwLock::default(),
         });
         // Lidarr's last route: through a Bridge that's answering.
         let weak = Arc::downgrade(&me);
         me.d.lidarr.set_bridge_route(Some(Arc::new(move || weak.upgrade().and_then(|d| d.route()))));
         me
+    }
+
+    pub fn set_relook(&self, f: Arc<dyn Fn() + Send + Sync>) {
+        *self.relook.write() = Some(f);
+    }
+
+    /// Look at the account's devices again soon (a Bridge isn't answering).
+    pub fn relook_now(&self) {
+        if let Some(f) = self.relook.read().clone() {
+            f();
+        }
+    }
+
+    /// Link to every Bridge on the Plex account this computer isn't linked
+    /// to yet, and drop links to Bridges that left it. A Bridge paired with
+    /// a code that went quiet gives way to one of the same name linked by
+    /// account. Gives the keys of the Bridges newly linked.
+    pub fn account_links(&self, me: &super::account::Me, list: &[super::account::AccountDevice]) -> Vec<crate::remote::peer::auth::PeerKey> {
+        use super::account::{self, Kind};
+        let links = &self.wire.links;
+        let now = self.now_s();
+        // A code-paired Bridge counts only while it answers: one that lost
+        // its half of the pairing is linked again by account.
+        let answers = |p: &super::links::Paired| now - p.paired_at < ONLINE_S || self.seen(&p.id).last_seen.is_some_and(|t| now - t < ONLINE_S);
+        let Some(plan) = account::plan(Kind::Bridge, me, list, &links.all(), &links.apart(), super::DEFAULT_RELAY, answers) else { return Vec::new() };
+        let mut changed = false;
+        for id in &plan.drop {
+            tracing::info!("A Bridge left the Plex account; its link is gone.");
+            changed |= self.forget(id).is_ok();
+        }
+        let mut fresh = Vec::new();
+        for w in &plan.add {
+            match links.add_auto(w, self.now_s()) {
+                Ok(()) => {
+                    tracing::info!("Linked with a Bridge on the Plex account.");
+                    fresh.push(w.key.clone());
+                    changed = true;
+                }
+                Err(e) => tracing::warn!("couldn't link with a Bridge on the Plex account: {e}"),
+            }
+        }
+        for id in account::replaced(&links.all(), |id| self.seen(id).last_seen, self.now_s()) {
+            tracing::info!("A Bridge paired with a code went quiet and is linked by account now; the old pairing is gone.");
+            changed |= self.forget(&id).is_ok();
+        }
+        if changed {
+            self.links_changed.notify_one();
+        }
+        fresh
     }
 
     /// Bring in my listening: handed to a paired Bridge that can run it.
@@ -340,6 +395,7 @@ impl Desktop {
                     last_seen: s.last_seen,
                     status: s.status,
                     music: s.music,
+                    auto: p.auto,
                 }
             })
             .collect();
@@ -465,6 +521,7 @@ impl Desktop {
 
     /// Forget a Bridge (and tell it to forget this desktop).
     pub async fn unpair(&self, id: &str) -> AppResult<()> {
+        self.wire.links.unpaired(id);
         if let Some(link) = self.wire.links.link(id) {
             let _ = tokio::time::timeout(Duration::from_secs(10), self.wire.send(&link, &Msg::Unpair)).await;
         }
@@ -532,6 +589,7 @@ impl Desktop {
             utc_offset_s: crate::lidarr::waves::local_offset(&self.d.db, self.now_s()),
             lrclib: s.lyrics_lrclib,
             lidarr: Some(s.bridge_lidarr),
+            device: self.d.plex.as_ref().map(|p| p.identity().client_id.clone()).unwrap_or_default(),
         }
     }
 
@@ -572,11 +630,20 @@ impl Desktop {
         let now = self.now_s();
         self.set_seen(&link.id, |s| s.last_seen = Some(now));
         match msg {
-            Msg::Hello { name, version, music, waves } => {
+            Msg::Hello { name, version, music, waves, device } => {
+                let mut learned = false;
                 let _ = self.wire.links.update(&link.id, |p| {
                     p.name = name.chars().take(60).collect();
                     p.version = version.chars().take(20).collect();
+                    if !p.auto && !device.is_empty() && device.len() <= 100 && p.device.as_deref() != Some(device.as_str()) {
+                        p.device = Some(device);
+                        learned = true;
+                    }
                 });
+                if learned && let Some(f) = self.relook.read().clone() {
+                    // A Bridge linked by account too goes now.
+                    f();
+                }
                 self.set_seen(&link.id, |s| {
                     s.music = music;
                     s.waves = waves;
@@ -628,6 +695,7 @@ impl Desktop {
             Msg::Failed { id, message } => self.pending.resolve(id, Err(message)),
             Msg::Unpair => {
                 tracing::info!("A Bridge unpaired itself.");
+                self.wire.links.unpaired(&link.id);
                 let _ = self.forget(&link.id);
             }
             Msg::Config(_) | Msg::Get { .. } | Msg::Write { .. } | Msg::WavesPlan(_) | Msg::LyricsHave { .. } => {}

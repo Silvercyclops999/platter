@@ -250,6 +250,20 @@ impl PlexTv {
             .map_err(map_send_error)
     }
 
+    /// `GET /api/v2/devices`: every device signed in to the account (or
+    /// Home user) the token belongs to, each with its own token. The raw
+    /// JSON, for `crate::homeside::account::parse_list`.
+    pub async fn devices_json(&self, token: &Token) -> AppResult<Vec<u8>> {
+        let resp = self
+            .http
+            .get(self.url("/api/v2/devices")?)
+            .header("x-plex-token", token.header_value()?)
+            .send()
+            .await
+            .map_err(map_send_error)?;
+        Ok(check_status(resp).await?.bytes().await.map_err(map_send_error)?.to_vec())
+    }
+
     /// `GET /api/v2/resources?includeHttps=1&includeRelay=1` (all resources;
     /// filter with [`Resource::is_server`]).
     pub async fn resources(&self, token: &Token) -> AppResult<Vec<Resource>> {

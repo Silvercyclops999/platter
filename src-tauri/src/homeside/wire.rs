@@ -85,6 +85,10 @@ pub struct BridgeConfig {
     /// before the switch (on).
     #[serde(default)]
     pub lidarr: Option<bool>,
+    /// The desktop's Plex client id, so a Bridge it paired with a code
+    /// isn't linked to it a second time by account. Empty from older builds.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub device: String,
 }
 
 /// When the Bridge transcribes (in the computer's time zone).
@@ -249,6 +253,9 @@ pub enum Msg {
         music: MusicAccess,
         #[serde(default)]
         waves: bool,
+        /// The Bridge's Plex client id (empty from older builds).
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        device: String,
     },
     /// From a desktop.
     Config(Box<BridgeConfig>),

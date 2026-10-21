@@ -70,6 +70,15 @@ describe("Lidarr home side", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Lidarr isn't reachable away from home. Turn on a computer at home or add the Bridge.");
   });
 
+  it("with a Bridge that isn't answering, says so instead of asking to add one", async () => {
+    mock.bridgeState = { ...mock.bridgeState, bridges: [bridge(false)] };
+    render(<LidarrHomeSides />);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Your Bridge isn't answering");
+    expect(alert).toHaveTextContent("Platter is linking to it again by itself.");
+    expect(alert).not.toHaveTextContent("add the Bridge");
+  });
+
   it("on the computer with Lidarr set up, says it answers for your other devices", async () => {
     await mock.settingsSet({ lidarrUrl: "http://10.20.30.40:8686" });
     await mock.lidarrKeySet("abc123");

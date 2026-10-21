@@ -2776,6 +2776,9 @@ export interface LidarrStatus {
   /** A computer at home or a Bridge answers Lidarr for this device now
    * (no address or key needed here). */
   homeSide?: boolean;
+  /** Signed in as someone who doesn't own the Plex server: Lidarr isn't
+   * used from this device at all. */
+  notOwner?: boolean;
   /** The address came from another device with a host the key wasn't
    * entered for, so the key isn't sent there: the words to show. */
   moved?: string | null;
@@ -5239,7 +5242,7 @@ export interface BridgeLyricsLine {
 /** A setting given to the Bridge in its own environment. */
 export type BridgeEnvSetting = "lidarrUrl" | "lidarrKey" | "plexUrl" | "plexToken" | "musicPlexPath";
 
-/** A paired Bridge. */
+/** A Bridge this device is linked to. */
 export interface BridgeInfo {
   id: string;
   name: string;
@@ -5250,6 +5253,8 @@ export interface BridgeInfo {
   online: boolean;
   status: BridgeStatus | null;
   music: BridgeMusicAccess;
+  /** Found on the Plex account (no code). */
+  auto?: boolean;
 }
 
 /** A pair code waiting for its Bridge. */

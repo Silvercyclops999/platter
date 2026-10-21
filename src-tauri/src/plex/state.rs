@@ -118,6 +118,9 @@ struct Inner {
     /// Clients for the account's other servers (more than one library), by
     /// server tag, with when their connection was picked.
     others: Mutex<std::collections::HashMap<String, (PlexClient, std::time::Instant)>>,
+    /// The last answer to whether the account owns the connected server:
+    /// 0 not signed in, 1 no, 2 yes.
+    owner: std::sync::atomic::AtomicU8,
 }
 
 /// Least time between checks asked for by replies from the server.
@@ -197,6 +200,7 @@ impl PlexState {
                 account_read: watch::channel(true).0,
                 offline: Arc::default(),
                 others: Mutex::new(std::collections::HashMap::new()),
+                owner: std::sync::atomic::AtomicU8::new(0),
             }),
         })
     }
@@ -530,6 +534,28 @@ impl PlexState {
     /// list). Never logged or shown.
     pub async fn account_token(&self) -> Option<Token> {
         self.inner.session.read().await.account.clone()
+    }
+
+    /// The signed-in account owns the connected server (only the owner
+    /// gets music through Lidarr, and links to Bridges).
+    pub async fn owns_current_server(&self) -> bool {
+        let s = self.inner.session.read().await;
+        s.account.is_some() && s.current.as_ref().is_some_and(|c| c.server.owned)
+    }
+
+    /// The same without waiting, or None when not signed in to Plex. While
+    /// the session is being changed, the answer from the last time.
+    pub fn owns_current_server_now(&self) -> Option<bool> {
+        use std::sync::atomic::Ordering::Relaxed;
+        let Ok(s) = self.inner.session.try_read() else {
+            return match self.inner.owner.load(Relaxed) {
+                0 => None,
+                n => Some(n == 2),
+            };
+        };
+        let owns = s.account.as_ref().map(|_| s.current.as_ref().is_some_and(|c| c.server.owned));
+        self.inner.owner.store(owns.map_or(0, |o| if o { 2 } else { 1 }), Relaxed);
+        owns
     }
 
     /// The connected server's own access token and addresses, only when it
@@ -1670,6 +1696,31 @@ mod tests {
         // The list is kept for when plex.tv is down.
         let cache = DiscoveryCache::load(dir.path());
         assert!(cache.servers.iter().any(|s| s.machine_id == "m2"));
+    }
+
+    #[tokio::test]
+    async fn only_the_owner_of_the_connected_server_counts_as_its_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        let (st, _rec) = state(dir.path(), "http://127.0.0.1:9", Arc::new(MemoryStore::new()));
+        assert_eq!(st.owns_current_server_now(), None, "not signed in");
+        assert!(!st.owns_current_server().await);
+
+        for owned in [true, false] {
+            let server = pms("m1", true).await;
+            let mut r = resource("m1", &server.uri());
+            r["owned"] = serde_json::json!(owned);
+            let tv = plex_tv(serde_json::json!([r])).await;
+            let dir = tempfile::tempdir().unwrap();
+            let store = Arc::new(MemoryStore::new());
+            store.set(ACCOUNT_TOKEN, &Token::new(ACCT).unwrap()).unwrap();
+            let (st, _rec) = state(dir.path(), &tv.uri(), store);
+            st.restore().await.unwrap();
+            assert_eq!(st.owns_current_server().await, owned);
+            assert_eq!(st.owns_current_server_now(), Some(owned));
+            // Asked while the session is being changed: the last answer.
+            let _w = st.inner.session.write().await;
+            assert_eq!(st.owns_current_server_now(), Some(owned));
+        }
     }
 
     #[tokio::test]

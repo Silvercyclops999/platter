@@ -106,7 +106,6 @@ const SHOWN_WHEN: Record<string, string> = {
   bridgeLyrics: "a Bridge paired (bridge-settings.test.tsx)",
   bridgeLyricsHours: "a Bridge paired",
   bridgeLidarr: "a Bridge paired",
-  bridgeAddAnother: "a Bridge paired",
 };
 
 describe("every setting", () => {

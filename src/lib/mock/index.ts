@@ -4565,7 +4565,10 @@ export class MockBackend implements Backend {
       if (first) first.answers = true;
       const offering = this.settings.homeSideLidarr && this.lidarr.status(this.settings).hasKey && !!(this.settings.lidarrUrl.trim() || this.settings.lidarrAwayUrl.trim());
       const away = !!this.settings.lidarrAwayUrl.trim();
-      const problem = !first && !offering && !away ? "Lidarr isn't reachable away from home. Turn on a computer at home or add the Bridge." : null;
+      const words = this.bridgeState.bridges.length
+        ? "Your Bridge isn't answering, so Lidarr can't be reached away from home yet. Platter is linking to it again by itself. If this is still here in a few minutes, check that the Bridge is running on your server."
+        : "Lidarr isn't reachable away from home. Turn on a computer at home or add the Bridge.";
+      const problem = !first && !offering && !away ? words : null;
       return { offering, sides, problem };
     });
   }
@@ -4635,6 +4638,14 @@ export class MockBackend implements Backend {
   }
   bridgeSendSettings() {
     return this.delay(() => undefined);
+  }
+  /** A Bridge on the same Plex account turns up by itself (no code). */
+  bridgeFound() {
+    void this.bridgeJoin("PBB-q3Vx8bN2kLm9TzR4wYc7HdE1fGj5sAo6pUi0eWn3vXb8yZaQk").then(() => {
+      const bridges = this.bridgeState.bridges;
+      this.bridgeState = { ...this.bridgeState, bridges: bridges.map((b, i) => (i === bridges.length - 1 ? { ...b, auto: true } : b)) };
+      this.emit("bridge://changed", null);
+    });
   }
   /** "Add the Bridge": a code the Bridge showed (PBB-) pairs it after a moment. */
   bridgeJoin(code: string) {

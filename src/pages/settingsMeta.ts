@@ -332,12 +332,10 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "discordClearOnPause",
   "discordStatusLine",
   "discordListenAlong",
-  // Platter Bridge: each benefit's switch and the night hours, under its card's More; the other ways to pair.
+  // Platter Bridge: each benefit's switch and the night hours, under its card's More.
   "bridgeLyrics",
   "bridgeLyricsHours",
   "bridgeLidarr",
-  "bridgeAddAnother",
-  "bridgePairCode",
   // Sharing and friends: share cards, sessions, invites, and unreleased music feature by feature.
   "blends",
   "shareCardQr",

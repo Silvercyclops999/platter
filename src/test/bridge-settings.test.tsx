@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -12,7 +12,6 @@ import {
   BridgeSettings,
   DOCKER_LINE,
   useBridgeStore,
-  PairWithCode,
   bridgeMatches,
   bridgeVersionLine,
   envList,
@@ -23,6 +22,7 @@ import { LidarrWorkStatus } from "../pages/LidarrModes";
 import { SettingsPage } from "../pages/SettingsPage";
 import { MORE_OPEN_KEY, advancedView, inMore, settingsView } from "../pages/settingsMeta";
 import { loadSettings } from "../stores/settings";
+import { useToasts } from "../stores/toasts";
 
 const mock = backend as MockBackend;
 
@@ -67,7 +67,7 @@ describe("Settings > Bridge", () => {
     expect(bridgeMatches("equalizer")).toBe(false);
   });
 
-  it("not paired: says what it does for you in order, then the three steps", async () => {
+  it("no Bridge yet: says what it does for you in order, then the two steps, with no code", async () => {
     const user = userEvent.setup();
     render(<BridgeSettings />);
     const card = await screen.findByTestId("bridge-setup");
@@ -84,30 +84,25 @@ describe("Settings > Bridge", () => {
     expect(benefits.map((b) => b.textContent?.includes("Coming"))).toEqual([false, true, true, false, true]);
     expect(benefits[0]).toHaveTextContent("Your computer never does the heavy work.");
     expect(BENEFITS.filter((b) => b.live).map((b) => b.key)).toEqual(["lyrics", "lidarr"]);
-    // Three steps: copy one line (or the Unraid template), start it, type its code.
-    expect(within(card).getByText("Set it up in three steps")).toBeInTheDocument();
+    // Two steps: copy one line (or the Unraid template), start it and sign it in to Plex.
+    expect(within(card).getByText("Set it up in two steps")).toBeInTheDocument();
     expect(within(card).getByTestId("bridge-line")).toHaveTextContent(DOCKER_LINE);
     expect(DOCKER_LINE).toContain("/music:ro");
     expect(DOCKER_LINE.includes("\n")).toBe(false);
     await user.click(within(card).getByRole("tab", { name: "Unraid" }));
     expect(within(card).getByRole("tabpanel")).toHaveTextContent("platter-bridge.xml");
     expect(within(card).getByRole("button", { name: "Copy the template link" })).toBeInTheDocument();
-    expect(card).toHaveTextContent("Start it");
-    expect(card).toHaveTextContent("It shows a code starting with PBB- in its log.");
-    expect(within(card).getByTestId("bridge-add")).toBeInTheDocument();
+    expect(card).toHaveTextContent("Start it and sign it in to Plex");
+    expect(card).toHaveTextContent("Open plex.tv/link and enter it, signed in as the owner of your Plex server.");
+    expect(card).toHaveTextContent("finds the Bridge by itself");
+    expect(card).not.toHaveTextContent("PBB-");
+    expect(within(card).queryByRole("textbox")).toBeNull();
   });
 
-  it("adds a Bridge from the code it shows, then says how each thing is going", async () => {
-    const user = userEvent.setup();
+  it("a Bridge on the same Plex account shows up by itself, then says how each thing is going", async () => {
     render(<BridgeSettings />);
-    const add = await screen.findByTestId("bridge-add");
-    const field = within(add).getByRole("textbox", { name: "The code from the Bridge, starting with PBB-" });
-    // A code of the other kind is turned away with words.
-    await user.type(field, "PB1-q3Vx8bN2kLm9TzR4wYc7HdE1fGj5sAo6pUi0eWn3vXb8yZaQk");
-    await user.click(within(add).getByRole("button", { name: "Add the Bridge" }));
-    expect(await within(add).findByRole("alert")).toHaveTextContent("starts with PBB-");
-    await user.clear(field);
-    await user.type(field, "PBB-q3Vx8bN2kLm9TzR4wYc7HdE1fGj5sAo6pUi0eWn3vXb8yZaQk{Enter}");
+    await screen.findByTestId("bridge-setup");
+    act(() => mock.bridgeFound());
     const row = await screen.findByTestId("bridge-row");
     expect(screen.queryByTestId("bridge-setup")).toBeNull();
     expect(row).toHaveTextContent("Shed Bridge");
@@ -119,32 +114,17 @@ describe("Settings > Bridge", () => {
     expect(within(row).getByTestId("bridge-music-path")).toHaveTextContent("MUSIC_PLEX_PATH to /data/media/Music on the Bridge so it can add albums itself");
   });
 
-  it("pairs with a code made here (under More), then shows the Bridge and lets you unpair it", async () => {
-    // Long enough that a busy machine still sees the code before the Bridge pairs.
-    mock.bridgePairAfterMs = 1500;
+  it("unpairing a Bridge found on the account asks once more and says it won't come back on its own", async () => {
     const user = userEvent.setup();
-    render(
-      <>
-        <BridgeSettings />
-        <PairWithCode />
-      </>,
-    );
-    await user.click(await screen.findByRole("button", { name: "Pair a Bridge" }));
-    const code = await screen.findByTestId("bridge-code");
-    expect(code).toHaveTextContent(/PB1-\S+/);
-    expect(code).toHaveTextContent("BRIDGE_PAIR_CODE");
-    const row = await screen.findByTestId("bridge-row", {}, { timeout: 5000 });
-    expect(row).toHaveTextContent("Platter Bridge");
-    expect(row).toHaveTextContent("read-write");
-    expect(row).toHaveTextContent("Last catch-up");
-    expect(row).toHaveTextContent("Second Wind");
-    expect(within(row).getByTestId("bridge-lyrics")).toHaveTextContent("Transcribing Second Wind. 1,204 songs done, about 3,398 to go.");
-    await waitFor(() => expect(screen.queryByTestId("bridge-code")).toBeNull());
-    // Unpair asks once more.
+    render(<BridgeSettings />);
+    await screen.findByTestId("bridge-setup");
+    act(() => mock.bridgeFound());
+    const row = await screen.findByTestId("bridge-row");
     await user.click(within(row).getByRole("button", { name: "Unpair" }));
-    await user.click(within(row).getByRole("button", { name: "Unpair Platter Bridge" }));
+    await user.click(within(row).getByRole("button", { name: "Unpair Shed Bridge" }));
     expect(await screen.findByTestId("bridge-setup")).toBeInTheDocument();
     expect(screen.queryByTestId("bridge-row")).toBeNull();
+    await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.message).join(" ")).toMatch(/It won't link to this device again/));
   });
 
   it("says plainly when the lyrics work is off, can't run, or the Bridge is too old for it", async () => {
@@ -242,8 +222,8 @@ describe("Settings > Bridge", () => {
         </StrictMode>,
       );
       const page = await screen.findByRole("region", { name: "Bridge" });
-      const add = await within(page).findByTestId("bridge-add");
-      await user.type(within(add).getByRole("textbox"), "PBB-q3Vx8bN2kLm9TzR4wYc7HdE1fGj5sAo6pUi0eWn3vXb8yZaQk{Enter}");
+      await within(page).findByTestId("bridge-setup");
+      act(() => mock.bridgeFound());
       await within(page).findByTestId("bridge-row");
       await waitFor(() => expect(page.querySelector(".settings__page-blurb")).toHaveTextContent("Connected"));
       await user.click(within(page).getByRole("button", { name: /^More in Bridge/ }));
@@ -256,14 +236,13 @@ describe("Settings > Bridge", () => {
       expect(within(page).queryByRole("switch", { name: "Lyrics for every song" })).toBeNull();
     });
 
-    it("before pairing, More holds only the other way to pair", async () => {
-      const user = userEvent.setup();
+    it("before a Bridge turns up, there are no codes anywhere on the page", async () => {
       render(<SettingsPage page="bridge" />);
       const page = await screen.findByRole("region", { name: "Bridge" });
       await within(page).findByTestId("bridge-setup");
-      await user.click(within(page).getByRole("button", { name: /^More in Bridge/ }));
-      expect([...page.querySelectorAll<HTMLElement>("[data-setting]")].map((r) => r.dataset.setting)).toEqual(["bridgePairCode"]);
-      expect(within(page).getByRole("button", { name: "Pair a Bridge" })).toBeInTheDocument();
+      expect(page.querySelector('[data-setting="bridgePairCode"], [data-setting="bridgeAddAnother"]')).toBeNull();
+      expect(within(page).queryByRole("button", { name: "Pair a Bridge" })).toBeNull();
+      expect(page).not.toHaveTextContent("PBB-");
     });
   });
 

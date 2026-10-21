@@ -429,6 +429,12 @@ fn desktop_plugins(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> 
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Links by Plex account, kept for the life of the app.
+struct AccountLinks {
+    _looker: Arc<homeside::account::Looker>,
+    _keep: tokio::sync::watch::Sender<bool>,
+}
+
 pub fn run() {
     // `platter --next` and the rest talk to the running app and exit.
     if let Some(code) = feed::deck::cli::main(&std::env::args().collect::<Vec<_>>()) {
@@ -882,6 +888,13 @@ pub fn run() {
                 }),
                 plex_server: Arc::new(lidarr::plexside::PlexLive(plex.clone())),
             });
+            {
+                // Only the Plex server's owner gets music through Lidarr.
+                // Without a Plex sign-in (another kind of server), Lidarr
+                // is whoever set it up here.
+                let plex = plex.clone();
+                lidarr_service.set_owner_check(Arc::new(move || plex.owns_current_server_now().unwrap_or(true)));
+            }
             tauri::async_runtime::spawn(lidarr::request::watch(lidarr_service.clone()));
             // Bring in my listening: albums from Played a lot, a few a day.
             let bring_in = {
@@ -1544,6 +1557,22 @@ pub fn run() {
                     })));
                     let weak = Arc::downgrade(&devices.sync);
                     lidarr.set_computer_route(Some(Arc::new(move || weak.upgrade().and_then(|d| d.computer_route()))));
+                }
+                // Sign in once: Bridges and the user's other devices on the
+                // same Plex account link by themselves, with no codes.
+                {
+                    let bridges = app.state::<Arc<homeside::desktop::Desktop>>().inner().clone();
+                    let looker = homeside::account::Looker::new(
+                        Arc::new(homeside::account::AppAccount { plex: plex.clone(), bridges: bridges.clone(), devices: devices.sync.clone() }),
+                        Arc::new(social::listen::relay::Ntfy::new().map_err(error::AppError::Internal)?),
+                        homeside::DEFAULT_RELAY,
+                        Arc::new(sync::store::system_ms),
+                    );
+                    let again = looker.clone();
+                    bridges.set_relook(Arc::new(move || again.look_now()));
+                    let (keep, stop) = tokio::sync::watch::channel(false);
+                    tauri::async_runtime::spawn(looker.clone().run(stop));
+                    app.manage(AccountLinks { _looker: looker, _keep: keep });
                 }
                 app.manage(devices);
             }

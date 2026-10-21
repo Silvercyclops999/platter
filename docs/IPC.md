@@ -2793,7 +2793,8 @@ Optional: the home side on a server (docs/BRIDGE.md). Settings > Bridge.
 | `bridge_send_settings` | – | – |
 
 `BridgeOverview` is `{ bridges, pairing, queued }`: each paired Bridge
-(`id`, `name`, `version`, `pairedAt`, `lastSeen`, `online`, `music`:
+(`id`, `name`, `version`, `pairedAt`, `lastSeen`, `online`, `auto` (true
+when it linked by itself through the Plex account), `music`:
 `none | readOnly | readWrite`, and `status`, what it last said: `doing`,
 `lastCatchUp`, `problem`, `fromEnv`: which of `lidarrUrl`, `lidarrKey`,
 `plexUrl`, `plexToken`, `musicPlexPath` are set on the Bridge itself and win
@@ -2859,6 +2860,12 @@ uses only the last two. The setup check's and a request preview's `route`
 can now be `computer`. `LidarrStatus` gains `homeSide` (a computer or a
 Bridge answers now); `ready` is true with only a home side once a check
 through it passed.
+
+Only the Plex server's owner uses Lidarr. Signed in as anyone else, every
+Lidarr command fails with "Only the owner of this Plex server can get music
+through Lidarr.", `LidarrStatus` has `notOwner: true` with `ready` false,
+and the device neither asks a home side nor answers as one. Without a Plex
+sign-in (another kind of server) Lidarr is whoever set it up on the device.
 
 | Command | Args | Returns |
 | --- | --- | --- |
@@ -3282,6 +3289,10 @@ changes, `device-sync://pair` → `PairState`, and `device-sync://copy` →
 `CopyProgress` as a copy from the computer moves to its next group.
 
 ### Pairing
+
+Devices and Bridges signed in to the same Plex account link by themselves
+(docs/BRIDGE.md, Linking), so the codes below are only for older builds.
+A device unpaired by hand isn't linked by itself again.
 
 `device_pair_start` shows two codes for 10 minutes. The 6-digit one is for
 a device on the same network: `device_pair_join` there finds the device

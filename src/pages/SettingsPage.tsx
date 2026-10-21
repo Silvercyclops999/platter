@@ -47,7 +47,7 @@ import { PlaylistNameSetting } from "./PlaylistSettings";
 import { LibraryImportSettings, importMatches } from "./LibraryImportSettings";
 import { PerDaySelect } from "./BringIn";
 import { AutomationSettings, StreamDeckSettings, automationMatches, streamDeckMatches } from "./StreamDeckSettings";
-import { AddBridge, BridgeSettings, NIGHT_HOURS_OPTIONS, PairWithCode, bridgeMatches, useBridge } from "./BridgeSettings";
+import { BridgeSettings, NIGHT_HOURS_OPTIONS, bridgeMatches, useBridge } from "./BridgeSettings";
 import { MixExclusions } from "./MixExclusions";
 import { ArtistAliases } from "./ArtistAliases";
 import { DismissedArtists } from "./DiscoverSettings";
@@ -74,7 +74,6 @@ import { suggestionLine, useDownloadSuggestions } from "../components/DownloadSu
 import {
   DeviceSyncNowButton,
   ForgetDeviceButton,
-  PairButton,
   TakeHeldButton,
   deviceLine,
   deviceNote,
@@ -1498,8 +1497,8 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       page: "sync",
       group: "Keep my devices in sync",
       title: "Keep my devices in sync",
-      description: "Paired devices swap changes directly, at home and away. This device only.",
-      more: "Paired devices of the same Plex account swap changes directly: over your network at home, and through the sealed relay when one is away. There's no server, and your sign-in and keys never travel. Your look syncs; each device keeps its own layout, and downloads stay on the device that made them. This device only.",
+      description: "Your devices on this Plex account swap changes directly, at home and away. This device only.",
+      more: "Every Platter signed in to the same Plex account finds the others by itself and swaps changes with them directly: over your network at home, and through the sealed relay when one is away. There's no server, and your sign-in and keys never travel. Your look syncs; each device keeps its own layout, and downloads stay on the device that made them. This device only.",
       note: devSyncFailed ? "Couldn't read sync status." : deviceSyncNote(s, devSync),
       control: (ids) => toggle(s, "deviceSync", ids),
     },
@@ -1530,26 +1529,6 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       note: deviceNote(d),
       control: () => <ForgetDeviceButton device={d} onOv={setDevSync} />,
     })) satisfies RowDef[]),
-    {
-      key: "deviceSyncAdd",
-      section: "App",
-      page: "sync",
-      group: "Keep my devices in sync",
-      title: "Add a device",
-      description: "Shows codes here for your other device to type, at home or away.",
-      more: "Shows a 6-digit code for a device on the same network, and a long code with its QR code for a device somewhere else. Both devices must be signed in to the same Plex account. The codes work for 10 minutes.",
-      control: () => <PairButton kind="add" onPaired={reloadDevSync} />,
-    },
-    {
-      key: "deviceSyncJoin",
-      section: "App",
-      page: "sync",
-      group: "Keep my devices in sync",
-      title: "Pair with a code",
-      description: "Type the 6 digits another device shows, or paste its long code when away.",
-      more: "The 6-digit code works only on the same network. Away from home, use the long code or scan its QR code: it pairs through the sealed relay.",
-      control: () => <PairButton kind="join" onPaired={reloadDevSync} />,
-    },
     ...((devSync?.devices.length
       ? [
           {
@@ -3175,24 +3154,6 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       description: "The Bridge does Lidarr work and answers your devices away from home.",
       more: "The Bridge catches up with Lidarr after downloads, keeps protected albums safe, runs Bring in my listening and lets your phone reach Lidarr away from home, even with every computer off. Off, it leaves all of that to your computers.",
       control: (ids) => toggle(s, "bridgeLidarr", ids),
-    },
-    {
-      key: "bridgeAddAnother",
-      section: "Integrations",
-      page: "bridge",
-      shown: !!bridge?.bridges.length,
-      title: "Add another Bridge",
-      description: "Type the code another Bridge shows in its log, starting with PBB-.",
-      control: () => null,
-      block: () => <AddBridge compact />,
-    },
-    {
-      key: "bridgePairCode",
-      section: "Integrations",
-      page: "bridge",
-      title: "Pair with a code made here",
-      description: "For starting a Bridge with BRIDGE_PAIR_CODE instead of typing its code here.",
-      control: () => <PairWithCode />,
     },
     ...(lidarr.ready
       ? ([

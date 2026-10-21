@@ -108,15 +108,12 @@ folder is for lyrics; read-only is enough. Add
 `-e LIDARR_URL=http://10.20.30.40:8686 -e LIDARR_API_KEY=your-lidarr-api-key`
 if you'd like it to reach Lidarr before a computer has told it how.
 
-Then pair it and let it into Plex:
-
-1. `docker logs platter-bridge` shows a pair code that starts with `PBB-`.
-   `docker exec platter-bridge platter-bridge status` shows it too.
-2. In Platter on your computer or your phone: **Settings > Bridge > Add the
-   Bridge**, and enter the code. It works once, for an hour; while the
-   Bridge isn't paired it shows a new one every hour.
-3. The log then asks you to open plex.tv/link and enter a short code, so the
-   Bridge can read your Plex library. Settings > Bridge shows the same code.
+Then sign it in to Plex. `docker logs platter-bridge` asks you to open
+plex.tv/link and enter a short code (`docker exec platter-bridge
+platter-bridge status` shows it too). Sign in with the Plex account that owns
+your server. That's all: every Platter signed in to that account, computer
+or phone, finds the Bridge by itself within a minute. There's no code to type
+into Platter.
 
 Leave out `LIDARR_URL` and `LIDARR_API_KEY` and the Bridge takes them from
 Platter on a computer at home instead, once one is open.
@@ -185,34 +182,42 @@ Settings > Bridge on your computer, for example "Set MUSIC_PLEX_PATH to
 since it only reads. To let the Bridge add albums, set it and restart the
 container.
 
-## Pairing
+## Linking
 
-Pairing happens once, one of two ways. The Bridge shows a code in its log
-and you enter it in Platter (Settings > Bridge > Add the Bridge), on a
-computer or a phone. Or Platter shows a code (Settings > Bridge > Pair a
-Bridge) and the Bridge reads it from `BRIDGE_PAIR_CODE` the first time it
-starts. Either way the two prove they both know the code without sending it
-anywhere, and agree on a key only they have. Each code works once, for an
-hour, and only for the first device to use it; a code of one kind never
-pairs as the other. The Bridge's own code is only in its log and on its
-status page, which only the server itself can open. Restarting or recreating
-the container before pairing makes a new code and the old one stops working,
-so use the latest one in the log.
+The Bridge and your devices find each other through your Plex account.
+plex.tv lists every device signed in to an account, each with its own
+sign-in, and shows that list only to the account itself. Each Platter reads
+the list, and both ends of a link work out the same key from the two
+devices' sign-ins, so nothing secret is sent anywhere to set it up. A Plex
+Home user, a friend you share your server with, or anyone else isn't on
+your list and can't link. Sign a device out in Plex's Authorized Devices and
+its link goes too.
 
-After pairing with `BRIDGE_PAIR_CODE`, clear it from the container's
-settings. The Bridge remembers the code was used (a fingerprint of it, not
-the code), so leaving it set does no harm: at each start it says the code is
-used up and can be removed, and skips it. An unused code that has expired
-is skipped the same way.
+Only the account that owns your Plex server links. A Bridge signed in to
+any other account links to nothing and says so in its log. On a device,
+Lidarr works only while it's signed in as the server's owner: if someone
+else signs in on it, its Bridge link goes, it stops answering for your
+other devices, and it doesn't use Lidarr even with your key saved there.
 
-Once paired, Platter sends the Bridge how to reach Lidarr (Lidarr's home
+If something breaks a link (the Bridge loses its data folder, say), the two
+link again by themselves the next time they look, which is every few
+minutes and right away when a device signs in.
+
+A Bridge without a Plex sign-in of its own (one that only has `PLEX_TOKEN`)
+still asks for plex.tv/link, since that's how it finds your devices. Older
+Platter builds can still pair with the code the Bridge shows in its log while
+it isn't signed in, or with `BRIDGE_PAIR_CODE`; clear that from the
+container's settings once it's paired.
+
+Once linked, a computer with Lidarr set up sends the Bridge how to reach Lidarr (Lidarr's home
 address and API key) and its Lidarr settings, every time the Bridge starts,
 so a changed key reaches it too. Whatever is set on the Bridge itself
 (`LIDARR_URL`, `LIDARR_API_KEY`, `PLEX_URL`, `PLEX_TOKEN`) wins, and
 Settings > Bridge says which of those the Bridge has of its own.
 
 To unpair, use **Unpair** in Settings > Bridge. The Bridge hears it and
-forgets your computer. Then remove the container if you like.
+forgets that device, and the two don't link again by themselves. Then remove
+the container if you like.
 
 ## Plex
 
@@ -264,7 +269,7 @@ when something happens). If you run your own ntfy server, there's no limit.
 | `LIDARR_URL`, `LIDARR_API_KEY` | Lidarr as the server reaches it. They win over what a computer sends. |
 | `PLEX_URL` | Plex's address as the server reaches it. Optional. |
 | `PLEX_TOKEN` | A token for that Plex server, with `PLEX_URL`. Optional. |
-| `BRIDGE_PAIR_CODE` | A code from Settings > Bridge > Pair a Bridge. Used once; clear it after pairing. Optional. |
+| `BRIDGE_PAIR_CODE` | A pair code from an older Platter build. Not needed: the Bridge links by your Plex account. Used once; clear it after pairing. Optional. |
 | `BRIDGE_NAME` | What Platter calls this Bridge. Default "Platter Bridge". |
 | `MUSIC_PLEX_PATH` | The path Plex uses for the folder mounted at `/music`. |
 | `MUSIC_DIR` | Where the music folder is mounted, if not `/music`. |
@@ -275,8 +280,7 @@ when something happens). If you run your own ntfy server, there's no limit.
 
 ## Logs and health
 
-`docker logs platter-bridge` says plainly what it's doing: its pair code
-while it isn't paired, the plex.tv/link code while it waits for Plex,
+`docker logs platter-bridge` says plainly what it's doing: the plex.tv/link code while it waits for Plex,
 catching up, what it added. `docker exec platter-bridge platter-bridge
 status` prints the same in short. Docker's health check runs
 `platter-bridge health`, which is healthy while the Bridge keeps working.
@@ -316,13 +320,14 @@ on from where the Bridge got to.
 
 ## A computer at home
 
-You may not need the Bridge at all. Pair your phone with your computer
-(Settings > Sync, Keep my devices in sync) and, as long as Platter is open
+You may not need the Bridge at all. Your phone and your computer find each
+other through your Plex account (Settings > Sync, Keep my devices in sync)
+and, as long as Platter is open
 on that computer and Lidarr is set up there, the phone can get albums, see
 what's missing and send requests through it. On the same network it goes
 straight across; away from home it goes through the same sealed relay.
 
-The computer answers only your own paired devices signed in to the same
+The computer answers only your own devices signed in to the same
 Plex account, and only after they've said who they are. It checks every
 request the way the Bridge does, takes keys and passwords out of what it
 sends back, and keeps the Lidarr key to itself. You can turn it off on the

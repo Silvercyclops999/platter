@@ -61,19 +61,14 @@ async function openYou() {
 const step = () => within(screen.getByTestId("phone-sync-step"));
 
 describe("Copy from my computer", () => {
-  it("before pairing, asks for the computer's code, pairs, copies and says what came", async () => {
+  it("before the computer turns up, waits for it with no code, then copies and says what came", async () => {
     const row = await openYou();
     fireEvent.click(await row.findByRole("button", { name: /Copy settings from my computer/ }));
-    expect(await screen.findByRole("heading", { name: "Type the code from your computer" })).toBeInTheDocument();
-    const input = step().getByLabelText("Code");
-    const pairBtn = step().getByRole("button", { name: "Pair and copy" });
-    expect(pairBtn).toBeDisabled();
-    // A wrong code says so and stays.
-    fireEvent.change(input, { target: { value: "111111" } });
-    fireEvent.click(pairBtn);
-    expect(await step().findByRole("alert")).toHaveTextContent("That code doesn't match. Check the code on the other device.");
-    fireEvent.change(input, { target: { value: mock.deviceSync.otherCode } });
-    fireEvent.click(step().getByRole("button", { name: "Pair and copy" }));
+    expect(await screen.findByRole("heading", { name: "Looking for your computer" })).toBeInTheDocument();
+    expect(step().getByRole("status")).toHaveTextContent("Open Platter on your computer, signed in to the same Plex account. This phone finds it by itself.");
+    expect(step().queryByRole("textbox")).toBeNull();
+    // The computer links by itself (same Plex account), and the copy starts.
+    act(() => mock.deviceSync.addDevice("Studio PC"));
     expect(await screen.findByRole("heading", { name: "In sync with Studio PC" }, { timeout: 3000 })).toBeInTheDocument();
     const copied = within(step().getByRole("list", { name: "Copied" }));
     expect(copied.getAllByRole("listitem").map((li) => li.textContent)).toEqual([

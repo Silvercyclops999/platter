@@ -5,14 +5,13 @@
  * Sync now, held changes and what to sync. The phone's Copy from my
  * computer is in phone-sync.test.tsx.
  */
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Toaster } from "../components/Toast";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS } from "../lib/types";
-import { pairCodeReady } from "../pages/KeepInSyncSettings";
 import { SettingsPage } from "../pages/SettingsPage";
 import { usePhoneForm } from "../phone/form";
 import { PhoneShell } from "../phone/PhoneShell";
@@ -40,80 +39,14 @@ beforeEach(async () => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Keep my devices in sync", () => {
-  it("is on by default and says when nothing is paired yet", async () => {
+  it("is on by default, says devices show up by themselves, and asks for no code", async () => {
     render(<SettingsPage />);
     const sw = await screen.findByRole("switch", { name: "Keep my devices in sync" });
     expect(sw).toHaveAttribute("aria-checked", "true");
-    await waitFor(() => expect(row("Keep my devices in sync").getByText("No other device paired yet. Add one below.")).toBeInTheDocument());
+    await waitFor(() => expect(row("Keep my devices in sync").getByText("Your other devices signed in to this Plex account show up here by themselves.")).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Sync now" })).toBeNull();
-  });
-
-  it("adding a device shows the 6-digit code, the long code and its QR code, then the device", async () => {
-    const user = userEvent.setup();
-    render(<SettingsPage />);
-    await user.click(row("Add a device").getByRole("button", { name: "Show codes" }));
-    const dialog = await screen.findByRole("dialog", { name: "Add a device" });
-    const code = await within(dialog).findByLabelText(/^Code \d \d \d \d \d \d$/);
-    expect(code.textContent).toMatch(/^\d{3} \d{3}$/);
-    expect(within(dialog).getByText("On the same network")).toBeInTheDocument();
-    expect(within(dialog).getByText("Somewhere else")).toBeInTheDocument();
-    expect(within(dialog).getByRole("img", { name: "QR code for the long code" })).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Copy the long code" })).toBeInTheDocument();
-    expect(within(dialog).getByText(/Works for (10|9):\d\d/)).toBeInTheDocument();
-    act(() => mock.deviceSync.pairArrives("Studio PC"));
-    await within(dialog).findByText(/Paired with Studio PC. The two keep in sync from now on/);
-    await user.click(within(dialog).getByRole("button", { name: "Done" }));
-    await waitFor(() => expect(row("Studio PC").getByText(/^In sync, last just now$/)).toBeInTheDocument());
-    expect(row("Keep my devices in sync").getByText("In sync with Studio PC.")).toBeInTheDocument();
-  });
-
-  it("a device that used the long code is paired only after a yes here", async () => {
-    const user = userEvent.setup();
-    render(<SettingsPage />);
-    await user.click(row("Add a device").getByRole("button", { name: "Show codes" }));
-    const dialog = await screen.findByRole("dialog", { name: "Add a device" });
-    await within(dialog).findByLabelText(/^Code /);
-    act(() => mock.deviceSync.pairAsks("Kitchen iPad"));
-    await within(dialog).findByText(/Pair with Kitchen iPad\? It used the long code/);
-    expect(mock.deviceSync.devices).toHaveLength(0);
-    await user.click(within(dialog).getByRole("button", { name: "Pair" }));
-    await within(dialog).findByText(/Paired with Kitchen iPad/);
-    expect(mock.deviceSync.devices.map((d) => d.name)).toEqual(["Kitchen iPad"]);
-  });
-
-  it("saying no to a device that used the long code pairs nothing", async () => {
-    const user = userEvent.setup();
-    render(<SettingsPage />);
-    await user.click(row("Add a device").getByRole("button", { name: "Show codes" }));
-    const dialog = await screen.findByRole("dialog", { name: "Add a device" });
-    await within(dialog).findByLabelText(/^Code /);
-    act(() => mock.deviceSync.pairAsks("Someone's Laptop"));
-    await user.click(await within(dialog).findByRole("button", { name: "Don't pair" }));
-    await within(dialog).findByText(/Not paired. Get new codes to try again/);
-    expect(mock.deviceSync.devices).toHaveLength(0);
-    expect(within(dialog).getByRole("button", { name: "New codes" })).toBeInTheDocument();
-  });
-
-  it("with the relay down the long code is hidden and the 6-digit code still shows", async () => {
-    const user = userEvent.setup();
-    mock.deviceSync.relayDown = true;
-    render(<SettingsPage />);
-    await user.click(row("Add a device").getByRole("button", { name: "Show codes" }));
-    const dialog = await screen.findByRole("dialog", { name: "Add a device" });
-    await within(dialog).findByLabelText(/^Code \d/);
-    expect(within(dialog).getByText("The relay can't be reached. The 6-digit code still works on this network.")).toBeInTheDocument();
-    expect(within(dialog).queryByRole("button", { name: "Copy the long code" })).toBeNull();
-    expect(within(dialog).queryByRole("img", { name: "QR code for the long code" })).toBeNull();
-  });
-
-  it("closing the dialog stops the codes, even while they're being made", async () => {
-    const user = userEvent.setup();
-    const cancel = vi.spyOn(backend, "devicePairCancel");
-    const { unmount } = render(<SettingsPage />);
-    await user.click(row("Add a device").getByRole("button", { name: "Show codes" }));
-    await screen.findByRole("dialog", { name: "Add a device" });
-    unmount();
-    expect(cancel).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Show codes" })).toBeNull();
+    expect(document.querySelector('[data-setting="deviceSyncAdd"], [data-setting="deviceSyncJoin"]')).toBeNull();
   });
 
   it("says when the sync status can't be read, and Retry reads it again", async () => {
@@ -123,81 +56,8 @@ describe("Keep my devices in sync", () => {
     await waitFor(() => expect(row("Keep my devices in sync").getByText("Couldn't read sync status.")).toBeInTheDocument());
     mock.deviceSync.statusFails = false;
     await user.click(row("Couldn't read sync status").getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(row("Keep my devices in sync").getByText("No other device paired yet. Add one below.")).toBeInTheDocument());
+    await waitFor(() => expect(row("Keep my devices in sync").getByText("Your other devices signed in to this Plex account show up here by themselves.")).toBeInTheDocument());
     expect(screen.queryByText("Couldn't read sync status", { selector: ".setting-row__title" })).toBeNull();
-  });
-
-  it("codes that ran out offer new ones; cancelling stops showing them", async () => {
-    const user = userEvent.setup();
-    const cancel = vi.spyOn(backend, "devicePairCancel");
-    render(<SettingsPage />);
-    await user.click(row("Add a device").getByRole("button", { name: "Show codes" }));
-    const dialog = await screen.findByRole("dialog", { name: "Add a device" });
-    await within(dialog).findByLabelText(/^Code /);
-    act(() => mock.deviceSync.expirePair());
-    await within(dialog).findByText(/Those codes ran out/);
-    await user.click(within(dialog).getByRole("button", { name: "New codes" }));
-    await within(dialog).findByLabelText(/^Code /);
-    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    expect(cancel).toHaveBeenCalled();
-  });
-
-  it("pairs with the right 6-digit code and explains a wrong one", async () => {
-    const user = userEvent.setup();
-    render(<SettingsPage />);
-    await user.click(row("Pair with a code").getByRole("button", { name: "Enter a code" }));
-    const dialog = await screen.findByRole("dialog", { name: "Pair with a code" });
-    const field = within(dialog).getByRole("textbox", { name: "Code" });
-    const pair = within(dialog).getByRole("button", { name: "Pair" });
-    expect(pair).toBeDisabled();
-    await user.type(field, "111 111");
-    await user.click(pair);
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent("That code doesn't match");
-    await user.clear(field);
-    await user.type(field, "135790");
-    await user.click(pair);
-    await within(dialog).findByText("Paired with Studio PC. The two keep in sync from now on.");
-    await user.click(within(dialog).getByRole("button", { name: "Done" }));
-    await waitFor(() => expect(row("Studio PC").getByRole("button", { name: "Unpair" })).toBeInTheDocument());
-  });
-
-  it("failure states: away from home, another account, the relay down, a code that isn't one", async () => {
-    const user = userEvent.setup();
-    render(<SettingsPage />);
-    await user.click(row("Pair with a code").getByRole("button", { name: "Enter a code" }));
-    const dialog = await screen.findByRole("dialog", { name: "Pair with a code" });
-    const field = within(dialog).getByRole("textbox", { name: "Code" });
-    const pair = within(dialog).getByRole("button", { name: "Pair" });
-    const tryCode = async (code: string, said: RegExp) => {
-      await user.clear(field);
-      await user.type(field, code);
-      await user.click(pair);
-      await waitFor(() => expect(within(dialog).getByRole("alert")).toHaveTextContent(said));
-    };
-    mock.deviceSync.away = true;
-    await tryCode("135790", /No device on this network is showing a code. Away from home, use the long code/);
-    mock.deviceSync.away = false;
-    mock.deviceSync.otherAccount = true;
-    await tryCode("135790", /signed in to a different Plex account/);
-    await tryCode(mock.deviceSync.otherLong, /didn't answer/);
-    mock.deviceSync.otherAccount = false;
-    mock.deviceSync.relayDown = true;
-    await tryCode(mock.deviceSync.otherLong, /The relay can't be reached/);
-    // Not a code at all: Pair stays off.
-    await user.clear(field);
-    await user.type(field, "hello");
-    expect(pair).toBeDisabled();
-    expect(screen.queryByText("Studio PC", { selector: ".setting-row__title" })).toBeNull();
-  });
-
-  it("the long code from away pairs, pasted or as the QR code's link", async () => {
-    const user = userEvent.setup();
-    render(<SettingsPage />);
-    await user.click(row("Pair with a code").getByRole("button", { name: "Enter a code" }));
-    const dialog = await screen.findByRole("dialog", { name: "Pair with a code" });
-    fireEvent.change(within(dialog).getByRole("textbox", { name: "Code" }), { target: { value: `platter://pair-device/${mock.deviceSync.otherLong}` } });
-    await user.click(within(dialog).getByRole("button", { name: "Pair" }));
-    await within(dialog).findByText(/Paired with Studio PC/);
   });
 
   it("unpairing asks first, then the device is gone", async () => {
@@ -266,14 +126,6 @@ describe("Keep my devices in sync", () => {
     expect(row("Saved looks and themes").getByText(/Each device keeps its own layout/)).toBeInTheDocument();
   });
 
-  it("reads a code as ready only when it's 6 digits or a long code", () => {
-    expect(pairCodeReady("135 790")).toBe(true);
-    expect(pairCodeReady("13579")).toBe(false);
-    expect(pairCodeReady(mock.deviceSync.otherLong)).toBe(true);
-    expect(pairCodeReady(`platter://pair-device/${mock.deviceSync.otherLong}`)).toBe(true);
-    expect(pairCodeReady("PB1-short")).toBe(false);
-    expect(pairCodeReady("platter://copy-keys/135790")).toBe(false);
-  });
 });
 
 describe("downloads on your other devices", () => {
