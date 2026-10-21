@@ -35,7 +35,7 @@ fn ids(v: &serde_json::Value, key: &str) -> Vec<String> {
 
 /// Read a socket message. Others (scheduled tasks, sessions) are None.
 pub fn event_of(text: &str) -> Option<LiveEvent> {
-    let v: serde_json::Value = serde_json::from_str(text).ok()?;
+    let v: serde_json::Value = crate::web::decode_json(text.as_bytes()).ok()?;
     let data = &v["Data"];
     match v["MessageType"].as_str()? {
         "LibraryChanged" => {

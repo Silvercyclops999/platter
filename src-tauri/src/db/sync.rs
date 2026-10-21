@@ -25,6 +25,7 @@ use parking_lot::Mutex;
 use rusqlite::OptionalExtension;
 
 use crate::error::{AppError, AppResult};
+use crate::model::{Album, Artist, Track};
 
 use super::DbHandle;
 use super::queries::now_s;
@@ -470,6 +471,7 @@ async fn fetch_and_store_page(
     match kind {
         ItemKind::Artist => {
             let items = ctx.source.artists(section_id, start, PAGE_SIZE).await?;
+            note_broken_tags(&items, &[], &[]);
             let n = items.len() as u64;
             let src = ctx.src.clone();
             ctx.db.write_async(move |c| {
@@ -483,6 +485,7 @@ async fn fetch_and_store_page(
         }
         ItemKind::Album => {
             let items = ctx.source.albums(section_id, start, PAGE_SIZE).await?;
+            note_broken_tags(&[], &items, &[]);
             let n = items.len() as u64;
             let src = ctx.src.clone();
             ctx.db.write_async(move |c| {
@@ -496,6 +499,7 @@ async fn fetch_and_store_page(
         }
         ItemKind::Track => {
             let items = ctx.source.tracks(section_id, start, PAGE_SIZE).await?;
+            note_broken_tags(&[], &[], &items);
             let n = items.len() as u64;
             let src = ctx.src.clone();
             ctx.db.write_async(move |c| {
@@ -510,11 +514,42 @@ async fn fetch_and_store_page(
     }
 }
 
+/// Items already named in the log for a broken character this run.
+static BROKEN_NOTED: std::sync::LazyLock<Mutex<HashSet<String>>> = std::sync::LazyLock::new(Default::default);
+
+/// Names in the log, once per item per run, each item whose name came from
+/// the server with a broken character (read as U+FFFD), so the tag can be
+/// found and fixed without the warning coming back on every sync.
+fn note_broken_tags(artists: &[Artist], albums: &[Album], tracks: &[Track]) {
+    for a in artists {
+        note_broken("artist", &a.id, &[("name", &a.title), ("sort name", &a.sort_title)]);
+    }
+    for a in albums {
+        note_broken("album", &a.id, &[("title", &a.title), ("sort title", &a.sort_title)]);
+    }
+    for t in tracks {
+        note_broken("track", &t.id, &[("title", &t.title), ("track artist", t.track_artist.as_deref().unwrap_or(""))]);
+    }
+}
+
+/// True when this call logged the item (first time this run).
+fn note_broken(kind: &str, id: &str, fields: &[(&str, &str)]) -> bool {
+    let Some((field, text)) = fields.iter().find(|(_, t)| t.contains('\u{fffd}')) else {
+        return false;
+    };
+    if !BROKEN_NOTED.lock().insert(format!("{kind}:{id}")) {
+        return false;
+    }
+    tracing::warn!(kind, id, field, text, "a tag has a broken character; it shows as a replacement mark until the tag is fixed");
+    true
+}
+
 /// Returns `None` when cancelled.
 async fn incremental_pass(ctx: &Ctx, section_id: &str, since: i64, gen_: i64) -> AppResult<Option<(u64, u64)>> {
     ctx.progress(SyncPhase::Incremental, 0, 0);
     let changes = ctx.source.changed_since(section_id, since).await?;
     let changed = (changes.artists.len() + changes.albums.len() + changes.tracks.len()) as u64;
+    note_broken_tags(&changes.artists, &changes.albums, &changes.tracks);
     ctx.progress(SyncPhase::Incremental, 0, changed);
     if ctx.cancelled() {
         return Ok(None);
@@ -689,4 +724,18 @@ pub fn select_section(db: &DbHandle, section_id: &str) -> AppResult<()> {
 /// The section chosen with [`select_section`], if any.
 pub fn selected_section(db: &DbHandle) -> Option<String> {
     db.read(|c| store::kv_get(c, SELECTED_SECTION_KEY)).ok().flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_broken_tag_is_named_once_per_item() {
+        let broken = [("title", "Fire \u{fffd}")];
+        assert!(note_broken("track", "broken-once-1", &broken));
+        assert!(!note_broken("track", "broken-once-1", &broken), "not again on the next sync");
+        assert!(note_broken("album", "broken-once-1", &broken), "another kind is another item");
+        assert!(!note_broken("track", "broken-once-2", &[("title", "Fine")]));
+    }
 }

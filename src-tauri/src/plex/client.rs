@@ -1818,73 +1818,12 @@ impl PlexClient {
     }
 }
 
-/// Decodes a Plex reply. A tag with a broken character comes back as bytes
-/// that aren't UTF-8, or as a lone UTF-16 half (`\ud83d` with no partner),
-/// and JSON rejects both; such a reply is read again with each broken
-/// character swapped for U+FFFD, so one bad tag doesn't stop the whole
-/// library from loading.
-pub(crate) fn decode_json<T: DeserializeOwned>(bytes: &[u8]) -> serde_json::Result<T> {
-    serde_json::from_slice(bytes).or_else(|e| {
-        let text = String::from_utf8_lossy(bytes);
-        let fixed = fix_lone_surrogates(text.as_bytes());
-        if fixed == bytes { Err(e) } else { serde_json::from_slice(&fixed) }
-    })
-}
-
-fn fix_lone_surrogates(bytes: &[u8]) -> Vec<u8> {
-    fn half(b: &[u8], i: usize) -> Option<u16> {
-        let h = b.get(i..i + 6)?;
-        if h[0] != b'\\' || h[1] != b'u' {
-            return None;
-        }
-        u16::from_str_radix(std::str::from_utf8(&h[2..]).ok()?, 16).ok()
-    }
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'\\' {
-            // An escape: a UTF-16 half or pair, any other \\u, or a two-byte one.
-            if let Some(u) = half(bytes, i) {
-                let paired = |n: Option<u16>| n.is_some_and(|n| (0xDC00..0xE000).contains(&n));
-                if (0xD800..0xDC00).contains(&u) && paired(half(bytes, i + 6)) {
-                    out.extend_from_slice(&bytes[i..i + 12]);
-                    i += 12;
-                } else if (0xD800..0xE000).contains(&u) {
-                    out.extend_from_slice(b"\\ufffd");
-                    i += 6;
-                } else {
-                    out.extend_from_slice(&bytes[i..i + 6]);
-                    i += 6;
-                }
-            } else {
-                out.extend_from_slice(&bytes[i..(i + 2).min(bytes.len())]);
-                i += 2;
-            }
-        } else {
-            out.push(bytes[i]);
-            i += 1;
-        }
-    }
-    out
-}
+/// Plex replies go through the shared decoder, which reads past a tag with a
+/// broken character instead of failing the whole page.
+pub(crate) use crate::web::decode_json;
 
 #[cfg(test)]
 mod tests {
-
-    #[test]
-    fn broken_characters_become_replacement_characters() {
-        let body = br#"{"a":"x\ud83dy","b":"\ud83d\ude00","c":"\\ud83d","d":"\udc00"}"#;
-        assert!(serde_json::from_slice::<serde_json::Value>(body).is_err());
-        let v: serde_json::Value = decode_json(body).unwrap();
-        assert_eq!(v["a"], "x\u{fffd}y");
-        assert_eq!(v["b"], "\u{1f600}");
-        assert_eq!(v["c"], "\\ud83d");
-        assert_eq!(v["d"], "\u{fffd}");
-        let latin1 = b"{\"a\":\"Beyonc\xe9\"}";
-        assert!(serde_json::from_slice::<serde_json::Value>(latin1).is_err());
-        let v: serde_json::Value = decode_json(latin1).unwrap();
-        assert_eq!(v["a"], "Beyonc\u{fffd}");
-    }
     use super::*;
     use wiremock::matchers::{header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -2150,6 +2089,28 @@ mod tests {
         let s = m.audio_stream().unwrap();
         assert_eq!(s.gain, Some(-7.5));
         assert_eq!(s.album_gain, Some(-6.1));
+    }
+
+    /// A song tagged with a broken character (half of an emoji, as a cut-off
+    /// tag holds, or a byte that isn't UTF-8) loads with a replacement mark,
+    /// and the rest of the library page still loads.
+    #[tokio::test]
+    async fn a_tag_with_a_broken_character_does_not_stop_the_page() {
+        let server = MockServer::start().await;
+        let body = b"{\"MediaContainer\":{\"size\":3,\"totalSize\":3,\"Metadata\":[\
+            {\"ratingKey\":\"1\",\"type\":\"track\",\"title\":\"Fire \\ud83c\"},\
+            {\"ratingKey\":\"2\",\"type\":\"track\",\"title\":\"Caf\xe9\"},\
+            {\"ratingKey\":\"3\",\"type\":\"track\",\"title\":\"Fine \\ud83d\\ude00\"}]}}";
+        Mock::given(method("GET"))
+            .and(path("/library/sections/7/all"))
+            .and(query_param("type", "10"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(body.to_vec(), "application/json"))
+            .mount(&server)
+            .await;
+        let p = client(&server).tracks("7", 0, 500).await.unwrap();
+        let titles: Vec<&str> = p.items.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(titles, ["Fire \u{fffd}", "Caf\u{fffd}", "Fine \u{1f600}"]);
+        assert_eq!(p.total, 3);
     }
 
     #[tokio::test]

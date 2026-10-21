@@ -232,13 +232,13 @@ impl JellyfinClient {
     pub async fn get_json<T: DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> AppResult<T> {
         let resp = self.send(Method::GET, path, query, None).await?;
         let bytes = crate::web::body_capped(resp, crate::web::SERVER_MAX, |_| AppError::Network(OFFLINE.into())).await?;
-        serde_json::from_slice(&bytes).map_err(|e| AppError::Decode(format!("{path}: {e}")))
+        crate::web::decode_json(&bytes).map_err(|e| AppError::Decode(format!("{path}: {e}")))
     }
 
     pub async fn post_json<T: DeserializeOwned>(&self, path: &str, query: &[(&str, String)], body: &serde_json::Value) -> AppResult<T> {
         let resp = self.send(Method::POST, path, query, Some(body)).await?;
         let bytes = crate::web::body_capped(resp, crate::web::SERVER_MAX, |_| AppError::Network(OFFLINE.into())).await?;
-        serde_json::from_slice(&bytes).map_err(|e| AppError::Decode(format!("{path}: {e}")))
+        crate::web::decode_json(&bytes).map_err(|e| AppError::Decode(format!("{path}: {e}")))
     }
 
     /// A request whose answer isn't read.
@@ -254,7 +254,7 @@ impl JellyfinClient {
             other => other,
         })?;
         let bytes = crate::web::body_capped(resp, crate::web::SERVER_MAX, |_| AppError::Network(OFFLINE.into())).await?;
-        let info: PublicInfo = serde_json::from_slice(&bytes).map_err(|_| AppError::Invalid(NOT_JELLYFIN.into()))?;
+        let info: PublicInfo = crate::web::decode_json(&bytes).map_err(|_| AppError::Invalid(NOT_JELLYFIN.into()))?;
         check_info(&info)?;
         Ok(info)
     }
