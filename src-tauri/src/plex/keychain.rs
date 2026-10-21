@@ -14,6 +14,10 @@ use super::token::Token;
 use crate::error::{AppError, AppResult};
 
 pub const KEYRING_SERVICE: &str = "app.platter.player";
+/// The service debug builds use, so a test build never reads or replaces the installed app's items (on a Mac every
+/// rebuild is a new identity, and reading the app's item asks for the
+/// login password).
+pub const DEV_KEYRING_SERVICE: &str = "app.platter.player.dev";
 /// Account (plex.tv) token.
 pub const ACCOUNT_TOKEN: &str = "plex-token";
 /// Access token for the selected server, stored only when it differs from the
@@ -74,6 +78,17 @@ pub fn signing_owner() -> Option<String> {
     option_env!("APPLE_TEAM_ID").map(str::trim).filter(|t| !t.is_empty()).map(|t| format!("developer-id:{t}"))
 }
 
+/// The keychain service this build uses: [`KEYRING_SERVICE`] for every
+/// release build, signed or not, so an update never loses the sign-in,
+/// else [`DEV_KEYRING_SERVICE`].
+pub fn keyring_service() -> &'static str {
+    service_for(cfg!(debug_assertions))
+}
+
+fn service_for(debug: bool) -> &'static str {
+    if debug { DEV_KEYRING_SERVICE } else { KEYRING_SERVICE }
+}
+
 /// Accounts older builds saved as items of their own. Others (AirPlay
 /// passwords, ones added later) move into the macOS vault when first read.
 pub fn known_accounts() -> Vec<String> {
@@ -126,7 +141,7 @@ impl KeyringStore {
     /// A store for one Home user's entries (switching writes the new user's
     /// token there).
     pub fn for_profile(profile: Option<&str>) -> Self {
-        KeyringStore { profile: profile.map(str::to_string), ..Self::with_service(KEYRING_SERVICE) }
+        KeyringStore { profile: profile.map(str::to_string), ..Self::with_service(keyring_service()) }
     }
 
     pub fn with_service(service: &str) -> Self {
@@ -134,8 +149,12 @@ impl KeyringStore {
         let inner = all
             .entry(service.to_string())
             .or_insert_with(|| {
+                let backend: Arc<dyn Backend> = match dev_secrets_path() {
+                    Some(path) => Arc::new(DevFile::new(path)),
+                    None => Arc::new(OsKeychain { service: service.to_string() }),
+                };
                 Arc::new(CachedStore::new(
-                    Arc::new(OsKeychain { service: service.to_string() }),
+                    backend,
                     Options {
                         layout: os_layout(),
                         legacy: known_accounts(),
@@ -175,6 +194,73 @@ struct OsKeychain {
 impl OsKeychain {
     fn entry(&self, account: &str) -> AppResult<keyring::Entry> {
         keyring::Entry::new(&self.service, account).map_err(map_keyring)
+    }
+}
+
+/// Debug builds on a Mac keep their secrets in this file in the app data
+/// folder instead of the keychain: every rebuild is a new app to macOS, and
+/// each would ask for the login password. None everywhere else.
+fn dev_secrets_path() -> Option<PathBuf> {
+    if !(cfg!(debug_assertions) && cfg!(target_os = "macos")) {
+        return None;
+    }
+    DATA_DIR.get().map(|d| d.join("dev-secrets.json"))
+}
+
+/// Secrets in one JSON file only this user can read (debug builds on a Mac,
+/// see [`dev_secrets_path`]).
+struct DevFile {
+    path: PathBuf,
+    lock: Mutex<()>,
+}
+
+impl DevFile {
+    fn new(path: PathBuf) -> Self {
+        DevFile { path, lock: Mutex::new(()) }
+    }
+
+    fn load(&self) -> AppResult<HashMap<String, String>> {
+        match std::fs::read(&self.path) {
+            Ok(b) => serde_json::from_slice(&b).map_err(|_| AppError::Internal("dev secrets file is not valid".into())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+            Err(_) => Err(AppError::Internal("dev secrets file can't be read".into())),
+        }
+    }
+
+    fn save(&self, map: &HashMap<String, String>) -> AppResult<()> {
+        let failed = |_| AppError::Internal("dev secrets file can't be saved".into());
+        let body = serde_json::to_vec(map).map_err(|_| AppError::Internal("dev secrets file can't be saved".into()))?;
+        let tmp = self.path.with_extension("json.new");
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+        use std::io::Write;
+        opts.open(&tmp).and_then(|mut f| f.write_all(&body).and_then(|_| f.sync_all())).map_err(failed)?;
+        std::fs::rename(&tmp, &self.path).map_err(failed)
+    }
+}
+
+impl Backend for DevFile {
+    fn read(&self, account: &str) -> AppResult<Option<String>> {
+        let _g = self.lock.lock();
+        Ok(self.load()?.remove(account))
+    }
+
+    fn write(&self, account: &str, value: &str) -> AppResult<()> {
+        let _g = self.lock.lock();
+        let mut map = self.load()?;
+        map.insert(account.to_string(), value.to_string());
+        self.save(&map)
+    }
+
+    fn remove(&self, account: &str) -> AppResult<()> {
+        let _g = self.lock.lock();
+        let mut map = self.load()?;
+        if map.remove(account).is_some() {
+            self.save(&map)?;
+        }
+        Ok(())
     }
 }
 
@@ -279,6 +365,41 @@ impl TokenStore for CountingStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dev_file_keeps_secrets_for_this_user_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dev-secrets.json");
+        let f = DevFile::new(path.clone());
+        assert_eq!(f.read("vault").unwrap(), None);
+        f.write("vault", "one").unwrap();
+        f.write("other", "two").unwrap();
+        assert_eq!(f.read("vault").unwrap().as_deref(), Some("one"));
+        f.remove("vault").unwrap();
+        f.remove("vault").unwrap();
+        assert_eq!(f.read("vault").unwrap(), None);
+        // A new run reads what the last one saved.
+        assert_eq!(DevFile::new(path.clone()).read("other").unwrap().as_deref(), Some("two"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        // A broken file is an error, never an empty store that overwrites it.
+        std::fs::write(&path, b"{not json").unwrap();
+        assert!(f.read("other").is_err());
+        assert!(f.write("other", "x").is_err());
+    }
+
+    #[test]
+    fn test_builds_keep_their_own_keychain_items() {
+        // Release builds keep the app's items, signed or not; debug builds
+        // never touch them.
+        assert_eq!(service_for(false), KEYRING_SERVICE);
+        assert_eq!(service_for(true), DEV_KEYRING_SERVICE);
+        assert_ne!(DEV_KEYRING_SERVICE, KEYRING_SERVICE);
+        assert_eq!(keyring_service(), service_for(cfg!(debug_assertions)));
+    }
 
     fn round_trip(store: &dyn TokenStore, account: &str) {
         store.delete(account).unwrap();
