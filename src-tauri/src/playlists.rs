@@ -46,6 +46,28 @@ pub trait PlaylistRemote: Send + Sync {
     async fn delete(&self, id: &str) -> AppResult<()>;
     /// The playlist and its rows as Plex has them now.
     async fn fetch(&self, id: &str) -> AppResult<(Playlist, Vec<PlaylistEntry>)>;
+    /// A playlist named `title`, last changed close to `at` (unix seconds),
+    /// that starts with `track_ids`: a create that got no clear answer and
+    /// landed anyway. None where the server can't be asked.
+    async fn find_made(&self, _title: &str, _track_ids: &[String], _at: i64) -> AppResult<Option<String>> {
+        Ok(None)
+    }
+}
+
+/// How far apart a lost create's send and the playlist's last change in
+/// Plex may be (the two clocks, and the rest of a long create's songs).
+const MADE_SLACK_S: i64 = 10 * 60;
+
+/// A playlist last changed close enough to `at` to be the one a lost
+/// create made (one of the user's own, changed long before or after, isn't).
+fn made_near(updated_at: Option<i64>, at: i64) -> bool {
+    updated_at.is_some_and(|t| (t - at).abs() <= MADE_SLACK_S)
+}
+
+/// Rows that are the start of `track_ids` (all of them, or the first part
+/// a long create got in).
+fn starts_with(rows: &[PlaylistEntry], track_ids: &[String]) -> bool {
+    !rows.is_empty() && rows.len() <= track_ids.len() && rows.iter().zip(track_ids).all(|(r, t)| &r.track_id == t)
 }
 
 /// What the UI hears about.
@@ -113,6 +135,17 @@ impl PlaylistRemote for PlexPlaylists {
         let p = c.playlist(id).await?;
         let rows = c.playlist_rows(id).await?;
         Ok((p, rows.into_iter().map(|(track_id, item_id)| PlaylistEntry { track_id, item_id }).collect()))
+    }
+    async fn find_made(&self, title: &str, track_ids: &[String], at: i64) -> AppResult<Option<String>> {
+        let Some(first) = track_ids.first() else { return Ok(None) };
+        let lists = self.0.client_for(first).await?.playlists().await?;
+        for p in lists.into_iter().filter(|p| !p.smart && p.title == title && made_near(p.updated_at, at)) {
+            let (_, rows) = self.fetch(&p.id).await?;
+            if starts_with(&rows, track_ids) {
+                return Ok(Some(p.id));
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -383,8 +416,18 @@ impl Playlists {
                 let tx = c.transaction()?;
                 let p = local::editable(&tx, &id)?;
                 let local_only = local::is_local_only(&tx, &p.id)?;
+                // A create that went out without an answer stays queued: if
+                // it landed, its replay finds that playlist and deletes it.
+                let sent: Vec<Op> = local::queued(&tx)?
+                    .into_iter()
+                    .filter(|q| q.playlist_id == p.id && matches!(q.op, Op::CreateSent { .. }))
+                    .map(|q| q.op)
+                    .collect();
                 local::delete(&tx, &p.id)?;
                 local::drop_ops_for(&tx, &p.id)?;
+                for op in &sent {
+                    local::enqueue(&tx, &p.id, op)?;
+                }
                 if !local_only {
                     local::enqueue(&tx, &p.id, &Op::Delete)?;
                 }
@@ -477,7 +520,8 @@ impl Playlists {
         let remote = &self.inner.remote;
         let pid = q.playlist_id.as_str();
         match &q.op {
-            Op::Create => self.replay_create(q).await,
+            Op::Create => self.replay_create(q, None).await,
+            Op::CreateSent { at, title, track_ids } => self.replay_create(q, Some((*at, title, track_ids))).await,
             Op::Add { track_ids, item_ids, sent } => {
                 // An earlier send that got no clear answer may have landed:
                 // if the playlist already ends with these songs, don't add
@@ -566,23 +610,46 @@ impl Playlists {
         }
     }
 
-    async fn replay_create(&self, q: &QueuedOp) -> AppResult<Replayed> {
+    /// `sent`: when an earlier try went out without a clear answer.
+    async fn replay_create(&self, q: &QueuedOp, sent: Option<(i64, &String, &Vec<String>)>) -> AppResult<Replayed> {
         let local_id = q.playlist_id.clone();
         let lid = local_id.clone();
         let snapshot = self
             .db()
             .read_async(move |c| Ok(local::playlist(c, &lid)?.map(|p| (p, local::items(c, &lid)))))
             .await?;
+        let remote = &self.inner.remote;
+        // An earlier try may have made it already (named and filled as it
+        // was sent): that one is used, not a second.
+        let made = match sent {
+            Some((at, title, tracks)) => remote.find_made(title, tracks, at).await?.map(|id| (id, title.clone())),
+            None => None,
+        };
         let Some((p, items)) = snapshot else {
-            return Ok(Replayed::Done(None)); // deleted before it reached Plex
+            // Deleted before it reached Plex; one an earlier try made goes too.
+            if let Some((id, _)) = made {
+                match remote.delete(&id).await {
+                    Ok(()) | Err(AppError::NotFound(_)) => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            return Ok(Replayed::Done(None));
         };
         let items = items?;
         if items.is_empty() {
             return Ok(Replayed::Waiting);
         }
         let tracks: Vec<String> = items.iter().map(|i| i.track_id.clone()).collect();
-        let remote = &self.inner.remote;
-        let plex_id = remote.create(&p.title, &tracks).await?;
+        // What Plex has it named, when an earlier try made it.
+        let made_as = made.as_ref().map(|(_, t)| t.clone());
+        let plex_id = match made {
+            Some((id, _)) => id,
+            None => {
+                let seq = q.seq;
+                self.db().write_async(move |c| local::mark_sent(c, seq)).await?;
+                remote.create(&p.title, &tracks).await?
+            }
+        };
         if let Some(s) = p.summary.as_deref().filter(|s| !s.is_empty())
             && let Err(e) = remote.update(&plex_id, None, Some(s)).await
         {
@@ -591,12 +658,43 @@ impl Playlists {
         }
         let rows = remote.fetch(&plex_id).await.map(|(_, rows)| rows).unwrap_or_default();
         let pid = plex_id.clone();
-        self.db()
+        let adopted = self
+            .db()
             .write_async(move |c| {
                 let tx = c.transaction()?;
+                let Some(here) = local::playlist(&tx, &local_id)? else {
+                    // Deleted here while Plex was making it: delete it there too.
+                    local::enqueue(&tx, &pid, &Op::Delete)?;
+                    tx.commit()?;
+                    return Ok(false);
+                };
                 local::adopt(&tx, &local_id, &pid)?;
                 local::drop_ops_after_create(&tx, &pid)?;
+                // Renamed or described here meanwhile: Plex has the old ones.
+                let plex_title = made_as.as_deref().unwrap_or(&p.title);
+                let title = Some(here.title.clone()).filter(|t| t != plex_title);
+                let summary = Some(here.summary.clone().unwrap_or_default()).filter(|s| s.as_str() != p.summary.as_deref().unwrap_or(""));
+                if title.is_some() || summary.is_some() {
+                    local::enqueue(&tx, &pid, &Op::Update { title, summary })?;
+                }
                 let now = local::items(&tx, &pid)?;
+                // An earlier try made it with other songs than it has now:
+                // Plex's rows go and these are added, in this order.
+                if made_as.is_some() && !rows.iter().map(|r| &r.track_id).eq(items.iter().map(|i| &i.track_id)) {
+                    for (index, r) in rows.iter().enumerate() {
+                        if let Some(rid) = &r.item_id {
+                            let item = ItemRef { item_id: rid.clone(), track_id: r.track_id.clone(), index };
+                            local::enqueue(&tx, &pid, &Op::Remove { item })?;
+                        }
+                    }
+                    if !now.is_empty() {
+                        let track_ids = now.iter().map(|i| i.track_id.clone()).collect();
+                        let item_ids = now.iter().map(|i| i.item_id.clone()).collect();
+                        local::enqueue(&tx, &pid, &Op::Add { track_ids, item_ids, sent: false })?;
+                    }
+                    tx.commit()?;
+                    return Ok(true);
+                }
                 // Plex made it without its last songs (a long playlist goes
                 // out in parts and a later part failed): those are added.
                 let landed = rows.len();
@@ -617,6 +715,20 @@ impl Playlists {
                     if !now.iter().any(|n| n.item_id == gone.item_id) {
                         let item = ItemRef { item_id: gone.item_id.clone(), track_id: gone.track_id.clone(), index };
                         local::enqueue(&tx, &pid, &Op::Remove { item })?;
+                    }
+                }
+                // Rows Plex has, moved here meanwhile: put them in the same order there.
+                let kept: Vec<&local::Item> = now.iter().filter(|n| items[..in_plex].iter().any(|s| s.item_id == n.item_id)).collect();
+                let sent_order: Vec<&local::Item> = items[..in_plex].iter().filter(|s| kept.iter().any(|k| k.item_id == s.item_id)).collect();
+                if kept.iter().map(|k| &k.item_id).ne(sent_order.iter().map(|s| &s.item_id)) {
+                    let at = |i: &local::Item| ItemRef {
+                        item_id: i.item_id.clone(),
+                        track_id: i.track_id.clone(),
+                        index: items.iter().position(|s| s.item_id == i.item_id).unwrap_or(0),
+                    };
+                    for (k, i) in kept.iter().enumerate() {
+                        let after = k.checked_sub(1).map(|p| at(kept[p]));
+                        local::enqueue(&tx, &pid, &Op::Move { item: at(i), after })?;
                     }
                 }
                 let added: Vec<usize> = (0..now.len()).filter(|&i| !items.iter().any(|s| s.item_id == now[i].item_id)).collect();
@@ -642,10 +754,10 @@ impl Playlists {
                     }
                 }
                 tx.commit()?;
-                Ok(())
+                Ok(true)
             })
             .await?;
-        Ok(Replayed::Done(Some(plex_id)))
+        Ok(Replayed::Done(adopted.then_some(plex_id)))
     }
 
     /// The Plex id of a row. A row only known here is looked up in Plex by
@@ -675,7 +787,7 @@ impl Playlists {
         let title = title_now().await.or(edited);
         let name = title.map(|t| format!("\"{t}\"")).unwrap_or_else(|| "a playlist".into());
         let message = match &q.op {
-            Op::Create => format!("Your server didn't accept the new playlist {name}."),
+            Op::Create | Op::CreateSent { .. } => format!("Your server didn't accept the new playlist {name}."),
             Op::Delete => format!("Your server didn't delete {name}."),
             _ => format!("Your server didn't accept a change to {name}. Showing it as it is there."),
         };

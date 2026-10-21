@@ -242,6 +242,11 @@ impl PlaylistRemote for RoutedPlaylists {
     async fn fetch(&self, id: &str) -> AppResult<(Playlist, Vec<PlaylistEntry>)> {
         self.0.for_id(id)?.playlists().fetch(id).await
     }
+
+    async fn find_made(&self, title: &str, track_ids: &[String], at: i64) -> AppResult<Option<String>> {
+        let Some(first) = track_ids.first() else { return Ok(None) };
+        self.0.for_id(first)?.playlists().find_made(title, track_ids, at).await
+    }
 }
 
 /// Play reports to each track's server.
