@@ -192,7 +192,9 @@ impl BusyGate {
         while self.samples.front().is_some_and(|(first, _)| at.duration_since(*first) > t.window) {
             self.samples.pop_front();
         }
-        let full = self.samples.len() >= t.needed();
+        // Readings far apart (a starved sampler) never fill a window, and
+        // load() then calls it calm after enough tries: judge what's there.
+        let full = self.samples.len() >= t.needed() || (self.attempts > t.needed() && !self.samples.is_empty());
         let avg = if self.samples.is_empty() {
             0.0
         } else {
@@ -576,6 +578,19 @@ mod tests {
         assert_eq!(g.load(&t), Load::Busy);
         g.observe(at(33), pct(5.0), &t);
         assert_eq!(g.load(&t), Load::Calm);
+    }
+
+    #[test]
+    fn readings_too_far_apart_to_fill_a_window_still_say_busy() {
+        let t = t();
+        let mut g = BusyGate::default();
+        let start = Instant::now();
+        // Each reading is more than a window after the last one.
+        let gap = t.window + Duration::from_secs(1);
+        for i in 0..=t.needed() as u32 {
+            g.observe(start + gap * i, pct(90.0), &t);
+        }
+        assert_eq!(g.load(&t), Load::Busy, "not calm for want of a full window");
     }
 
     #[test]
