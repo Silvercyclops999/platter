@@ -17,10 +17,12 @@
 //! - [`pace`]   threads, the busy pause and the breather between songs
 //! - [`voice`]  the singing separated from the music first, on a graphics card
 //! - [`quiet`]  the separated voice's quiet parts, hushed and checked
+//! - [`align`]  lyrics found without timing, lined up to what was heard
 //! - [`lines`]  timed words to lyric lines and LRC
 //! - [`store`]  the `lyrics_auto` table
 //! - [`commands`] Tauri commands, events and the app's side of the traits
 
+pub mod align;
 pub mod audio;
 pub mod commands;
 pub mod engine;
