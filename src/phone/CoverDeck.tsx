@@ -217,6 +217,7 @@ export const CoverDeck = memo(function CoverDeck({ screen, onClose, art: artStyl
       ref={art}
       className="ph-np__art"
       data-testid="np-art"
+      data-no-press
       {...handlers}
       {...(onTap && {
         role: "button",
