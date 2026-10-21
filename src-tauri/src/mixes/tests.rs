@@ -803,7 +803,7 @@ fn intros_skits_and_snippets_look_like_filler() {
         ("Song", 40 * s),
         ("Introspection", 50 * s),
     ] {
-        assert!(filler_shape(title, ms), "{title} {ms}");
+        assert!(filler_shape(title, ms, 200 * s), "{title} {ms}");
     }
     for (title, ms) in [
         ("Song", 200 * s),
@@ -815,8 +815,23 @@ fn intros_skits_and_snippets_look_like_filler() {
         ("Skitzo Dancer", 220 * s),
         ("Interlude", 150 * s),
     ] {
-        assert!(!filler_shape(title, ms), "{title} {ms}");
+        assert!(!filler_shape(title, ms, 200 * s), "{title} {ms}");
     }
+    // An album of short songs keeps them, all but its skits.
+    for (title, ms) in [("Song", 50 * s), ("Prelude No. 4", 110 * s), ("Intro", 40 * s)] {
+        assert!(!filler_shape(title, ms, 90 * s), "{title} {ms}");
+    }
+    assert!(filler_shape("Skit", 40 * s, 90 * s));
+}
+
+#[test]
+fn an_album_of_short_songs_stays_in_mixes() {
+    let mut r = raw();
+    for t in r.tracks.iter_mut().filter(|t| t.album_id == "r0-al0") {
+        t.duration_ms = 50_000;
+    }
+    let lib = lib_of(r, &opts());
+    assert!(lib.tracks.iter().all(|t| !t.filler && t.eligible));
 }
 
 /// [`raw`] with an intro, a skit and an interlude on r0's first album, all

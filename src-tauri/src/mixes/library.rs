@@ -33,6 +33,9 @@ const CO_WINDOW: usize = 4;
 const FILLER_MS: u64 = 60_000;
 /// An intro, outro or interlude by name, shorter than this.
 const FILLER_NAMED_MS: u64 = 150_000;
+/// An album whose middle track runs shorter than this is made of short
+/// songs (punk, a set of preludes): only skits count as filler there.
+const SHORT_ALBUM_MS: u64 = 120_000;
 /// Plays on its own that bring a filler track back into mixes.
 const FILLER_SOLO_PLAYS: u32 = 3;
 /// A Plex history entry this close to a local play of the same song is that
@@ -295,22 +298,40 @@ fn fold(s: &str) -> String {
 }
 
 /// Whether a track looks like an intro, skit or snippet rather than a song:
-/// under a minute, "Skit" in the title, or an intro, outro, interlude,
-/// prelude or segue by name that runs under two and a half minutes. Plex
-/// has no mark for these, so the title and length are what there is. An
-/// unknown length (0) never counts as short.
-pub fn filler_shape(title: &str, duration_ms: u64) -> bool {
-    if duration_ms > 0 && duration_ms < FILLER_MS {
-        return true;
-    }
+/// "Skit" in the title, or under a minute, or an intro, outro, interlude,
+/// prelude or segue by name that runs under two and a half minutes (or of
+/// unknown length). Plex has no mark for these, so the title and length are
+/// what there is. On an album of short songs (`album_median_ms` under two
+/// minutes) only skits count, and a song of unknown length (0) is never
+/// short by length alone.
+pub fn filler_shape(title: &str, duration_ms: u64, album_median_ms: u64) -> bool {
     let folded = crate::identity::fold::fold_text(title);
     let words: Vec<&str> = folded.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
     let has = |list: &[&str]| words.iter().any(|w| list.contains(w));
     if has(&["skit", "skits"]) {
         return true;
     }
-    let short = duration_ms == 0 || duration_ms < FILLER_NAMED_MS;
-    short && has(&["intro", "introduction", "outro", "interlude", "prelude", "segue"])
+    if album_median_ms > 0 && album_median_ms < SHORT_ALBUM_MS {
+        return false;
+    }
+    if duration_ms > 0 && duration_ms < FILLER_MS {
+        return true;
+    }
+    duration_ms < FILLER_NAMED_MS && has(&["intro", "introduction", "outro", "interlude", "prelude", "segue"])
+}
+
+/// The middle track length of each album (ms), known lengths only.
+fn album_medians(tracks: &[RawTrack]) -> HashMap<&str, u64> {
+    let mut by: HashMap<&str, Vec<u64>> = HashMap::new();
+    for t in tracks.iter().filter(|t| t.duration_ms > 0) {
+        by.entry(t.album_id.as_str()).or_default().push(t.duration_ms);
+    }
+    by.into_iter()
+        .map(|(a, mut v)| {
+            v.sort_unstable();
+            (a, v[v.len() / 2])
+        })
+        .collect()
 }
 
 impl Lib {
@@ -367,7 +388,11 @@ impl Lib {
         let ex_albums: HashSet<&str> = opts.exclude_albums.iter().map(String::as_str).collect();
         let ex_genres: HashSet<String> = opts.exclude_genres.iter().map(|g| fold(g)).collect();
         let view = opts.tag_view;
-        for t in raw.tracks {
+        let filler: Vec<bool> = {
+            let medians = album_medians(&raw.tracks);
+            raw.tracks.iter().map(|t| filler_shape(&t.title, t.duration_ms, medians.get(t.album_id.as_str()).copied().unwrap_or(0))).collect()
+        };
+        for (t, filler) in raw.tracks.into_iter().zip(filler) {
             let artist = match artist_ix.get(&t.artist_id) {
                 Some(&a) => a,
                 None => {
@@ -419,7 +444,7 @@ impl Lib {
                 skips: 0,
                 last_played_ms: t.last_viewed_at.map(|s| s * 1000),
                 eligible,
-                filler: filler_shape(&t.title, t.duration_ms),
+                filler,
             });
         }
         lib.read_plays(raw.listens, raw.history);
