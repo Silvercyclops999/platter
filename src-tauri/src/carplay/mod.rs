@@ -21,6 +21,11 @@ use crate::plex::types::{Health, HealthStatus};
 /// Most rows one CarPlay list shows; cars allow 100 to 500, and a long list
 /// is hard to use while driving anyway.
 pub const LIST_MAX: usize = 100;
+/// Rows every car shows: some cut any list to 12 while driving, and the
+/// fewest a list may be given room for.
+pub const LIST_SHORT: usize = 12;
+/// Most releases an artist's list pages through: far more than anyone has.
+const RELEASES_MAX: usize = 2000;
 
 /// One row on the car's screen.
 #[derive(Debug, Clone, PartialEq)]
@@ -51,6 +56,9 @@ pub enum CarAction {
     ShuffleLibrary,
     /// Open another list.
     Open(CarList),
+    /// Show another page of this list in place of the one showing, so a
+    /// long list never goes deeper than the car allows.
+    Turn { list: CarList, page: usize },
     /// Play this queue entry (its item id) now: a row in Up next.
     Jump(String),
     /// A message, not a choice: picking it does nothing.
@@ -65,7 +73,8 @@ pub enum CarList {
     Playlists,
     Albums,
     Artists,
-    /// One artist: Popular, then their albums.
+    /// One artist: Popular, then everything they put out, newest first, a
+    /// page at a time when it's longer than the car shows.
     Artist { id: String, name: String },
     /// An album, playlist, mix or Liked songs, opened: Play and Shuffle,
     /// then its songs.
@@ -227,38 +236,206 @@ pub fn library() -> Vec<CarItem> {
 /// One of the lists a row opens, at most [`LIST_MAX`] long. `liked_min` is
 /// the rating that counts as liked (Settings).
 pub fn list(c: &Connection, which: &CarList, liked_min: f64) -> AppResult<Vec<CarItem>> {
+    page(c, which, liked_min, 0, LIST_MAX)
+}
+
+/// A page of a list, for a car that shows `room` rows. Only an artist's
+/// list has pages; the others are the same on every page.
+pub fn page(c: &Connection, which: &CarList, liked_min: f64, page: usize, room: usize) -> AppResult<Vec<CarItem>> {
     Ok(match which {
         CarList::RecentlyPlayed => queries::recently_played(c, LIST_MAX)?.into_iter().map(home_item).collect(),
         CarList::RecentlyAdded => queries::recently_added(c, LIST_MAX)?.into_iter().map(album_item).collect(),
         CarList::Playlists => queries::home_playlists(c, LIST_MAX)?.into_iter().map(playlist_item).collect(),
-        CarList::Albums => queries::albums(c, AlbumSort::Recent, 0, LIST_MAX as u32, None)?
-            .items
-            .into_iter()
-            .map(album_item)
-            .collect(),
-        CarList::Artists => queries::artists(c, ArtistSort::Plays, 0, LIST_MAX as u32)?
-            .items
-            .into_iter()
-            .map(artist_item)
-            .collect(),
-        CarList::Artist { id, .. } => artist(c, id)?,
+        CarList::Albums => {
+            let albums = every(|off| Ok(queries::albums(c, AlbumSort::Name, off, PAGE_READ, None)?.items))?;
+            let rows = albums.into_iter().map(|a| (letter(&a.sort_title), album_item(a))).collect();
+            a_to_z(which, rows, ("album", "albums"), page, room.clamp(LIST_SHORT, LIST_MAX))
+        }
+        CarList::Artists => {
+            let artists = every(|off| Ok(queries::artists(c, ArtistSort::Name, off, PAGE_READ)?.items))?;
+            let rows = artists.into_iter().map(|a| (letter(&a.sort_title), artist_item(a))).collect();
+            a_to_z(which, rows, ("artist", "artists"), page, room.clamp(LIST_SHORT, LIST_MAX))
+        }
+        CarList::Artist { id, .. } => artist(c, which, id, page, room.clamp(LIST_SHORT, LIST_MAX))?,
         CarList::Songs { kind, id, .. } => songs_list(c, *kind, id, liked_min)?,
     })
 }
 
-/// An artist's list: Popular (which plays on through the albums, as the
-/// artist page's play does), then each album.
-fn artist(c: &Connection, id: &str) -> AppResult<Vec<CarItem>> {
-    let popular = CarItem {
-        title: "Popular".to_string(),
-        subtitle: None,
-        thumb: None,
-        action: play(ContextKind::Artist, id),
+/// Rows read from the library at a time.
+const PAGE_READ: u32 = 500;
+
+/// Every row a paged read gives, `read` taking the offset.
+fn every<T>(mut read: impl FnMut(u32) -> AppResult<Vec<T>>) -> AppResult<Vec<T>> {
+    let mut out = Vec::new();
+    loop {
+        let got = read(out.len() as u32)?;
+        let done = got.len() < PAGE_READ as usize;
+        out.extend(got);
+        if done {
+            return Ok(out);
+        }
+    }
+}
+
+/// The letter a name files under: its first letter without accents, or #
+/// for numbers, symbols and other scripts.
+fn letter(sort_title: &str) -> char {
+    use unicode_normalization::UnicodeNormalization;
+    match sort_title.nfd().find(|c| c.is_alphanumeric()).map(|c| c.to_ascii_uppercase()) {
+        Some(c) if c.is_ascii_uppercase() => c,
+        _ => '#',
+    }
+}
+
+/// A run of letters on an A to Z list, and where its rows are.
+#[derive(Debug)]
+struct Letters {
+    first: char,
+    /// The last letter in the run other than #.
+    last: Option<char>,
+    hash: bool,
+    start: usize,
+    end: usize,
+}
+
+impl Letters {
+    fn label(&self) -> String {
+        let letters = match self.last {
+            Some(last) if last == self.first => last.to_string(),
+            Some(last) => format!("{} to {last}", self.first),
+            None => return "#".to_string(),
+        };
+        if self.hash { format!("{letters} and #") } else { letters }
+    }
+}
+
+/// Rows grouped into at most `room` runs of letters, each as even as whole
+/// letters allow; one run per letter when there's room.
+fn letter_runs(letters: &[char], room: usize) -> Vec<Letters> {
+    let mut buckets: Vec<(char, usize, usize)> = Vec::new();
+    for (i, l) in letters.iter().enumerate() {
+        match buckets.last_mut() {
+            Some((b, _, end)) if b == l => *end = i + 1,
+            _ => buckets.push((*l, i, i + 1)),
+        }
+    }
+    let target = if buckets.len() <= room { 1 } else { letters.len().div_ceil(room) };
+    let mut runs: Vec<Letters> = Vec::new();
+    for (l, start, end) in buckets {
+        let open = runs.last().is_some_and(|r| r.end - r.start < target);
+        let run = match runs.last_mut() {
+            Some(r) if open => r,
+            _ => {
+                runs.push(Letters { first: l, last: None, hash: false, start, end });
+                runs.last_mut().expect("just pushed")
+            }
+        };
+        run.end = end;
+        if l == '#' {
+            run.hash = true;
+        } else {
+            run.last = Some(l);
+        }
+    }
+    runs
+}
+
+/// Every album or artist, A to Z (numbers and symbols under # at the end).
+/// When they don't all fit the car, the first page is a row per run of
+/// letters, and each run has its own pages (All letters first, More last);
+/// every page turns in place.
+fn a_to_z(which: &CarList, mut rows: Vec<(char, CarItem)>, noun: (&str, &str), page: usize, room: usize) -> Vec<CarItem> {
+    // Stable: A to Z as the library sorts names, # after Z.
+    rows.sort_by_key(|(l, _)| if *l == '#' { 26 } else { *l as u8 - b'A' });
+    if rows.len() <= room {
+        return rows.into_iter().map(|(_, r)| r).collect();
+    }
+    let letters: Vec<char> = rows.iter().map(|(l, _)| *l).collect();
+    let runs = letter_runs(&letters, room);
+    let turn = |page| CarAction::Turn { list: which.clone(), page };
+    let count = |n: usize| if n == 1 { format!("1 {}", noun.0) } else { format!("{n} {}", noun.1) };
+    // Every page after the first: its run, and its rows.
+    let mut pages: Vec<(usize, usize, usize)> = Vec::new();
+    let mut firsts = Vec::new();
+    for (i, run) in runs.iter().enumerate() {
+        firsts.push(pages.len() + 1);
+        let starts = page_starts(run.end - run.start, room);
+        for (k, s) in starts.iter().enumerate() {
+            let e = starts.get(k + 1).copied().unwrap_or(run.end - run.start);
+            pages.push((i, run.start + s, run.start + e));
+        }
+    }
+    let Some(&(run, start, end)) = page.checked_sub(1).and_then(|p| pages.get(p)) else {
+        return runs
+            .iter()
+            .zip(firsts)
+            .map(|(r, first)| CarItem { title: r.label(), subtitle: Some(count(r.end - r.start)), thumb: None, action: turn(first) })
+            .collect();
     };
-    let albums = queries::artist_albums(c, id, LIST_MAX - 1)?;
+    let run = &runs[run];
+    let more = run.end - end;
+    let mut out = vec![CarItem { title: "All letters".to_string(), subtitle: None, thumb: None, action: turn(0) }];
+    out.extend(rows.drain(start..end).map(|(_, r)| r));
+    if more > 0 {
+        let subtitle = format!("{more} more {} in {}", if more == 1 { noun.0 } else { noun.1 }, run.label());
+        out.push(CarItem { title: "More".to_string(), subtitle: Some(subtitle), thumb: None, action: turn(page + 1) });
+    }
+    out
+}
+
+/// An artist's list: Popular (which plays on through the albums, as the
+/// artist page's play does), then every release, newest first. When that's
+/// more than the car shows, the first page ends in Older releases and the
+/// next ones start with Newer releases; both turn the page in place.
+fn artist(c: &Connection, which: &CarList, id: &str, page: usize, room: usize) -> AppResult<Vec<CarItem>> {
+    let mut albums = queries::artist_albums(c, id, RELEASES_MAX)?;
+    sort_newest_first(&mut albums);
+    let starts = page_starts(albums.len(), room);
+    let page = page.min(starts.len() - 1);
+    let start = starts[page];
+    let end = starts.get(page + 1).copied().unwrap_or(albums.len());
+    let turn = |page| CarAction::Turn { list: which.clone(), page };
+    let head = if page == 0 {
+        CarItem { title: "Popular".to_string(), subtitle: None, thumb: None, action: play(ContextKind::Artist, id) }
+    } else {
+        CarItem { title: "Newer releases".to_string(), subtitle: None, thumb: None, action: turn(page - 1) }
+    };
+    let older = albums.len() - end;
+    let mut out = vec![head];
     // On the artist's own list the name says nothing new: the year and the
     // kind of release do.
-    Ok(std::iter::once(popular).chain(albums.into_iter().map(artist_album_item)).collect())
+    out.extend(albums.drain(start..end).map(artist_album_item));
+    if older > 0 {
+        let more = if older == 1 { "1 more".to_string() } else { format!("{older} more") };
+        out.push(CarItem { title: "Older releases".to_string(), subtitle: Some(more), thumb: None, action: turn(page + 1) });
+    }
+    Ok(out)
+}
+
+/// Newest first, as a discography is; demos and unreleased music after
+/// everything that came out, then undated releases last in each part.
+fn sort_newest_first(albums: &mut [crate::model::Album]) {
+    use crate::model::ReleaseSection;
+    albums.sort_by_key(|a| {
+        let archive = matches!(a.section, ReleaseSection::Demos | ReleaseSection::Unreleased);
+        (archive, a.year.is_none(), std::cmp::Reverse(a.year), std::cmp::Reverse(a.added_at))
+    });
+}
+
+/// Where each page of an artist's `total` releases starts, for a car that
+/// shows `room` rows: every page has its first row (Popular or Newer
+/// releases), and each page but the last ends in Older releases.
+fn page_starts(total: usize, room: usize) -> Vec<usize> {
+    let mut starts = vec![0];
+    let mut at = 0;
+    loop {
+        // All that's left fits with just the first row.
+        if total - at < room {
+            return starts;
+        }
+        at += room - 2;
+        starts.push(at);
+    }
 }
 
 /// The Downloaded tab: everything kept on the phone, newest first, so the
@@ -483,6 +660,16 @@ pub struct NowKey {
     pub track_id: Option<String>,
 }
 
+/// The playing song's album, opened to its songs: what Now Playing's album
+/// button shows. None when nothing plays or the album isn't in the library.
+pub fn now_album(c: &Connection, now: &NowKey) -> AppResult<Option<CarList>> {
+    let Some(id) = &now.album_id else { return Ok(None) };
+    Ok(queries::albums_by_ids(c, std::slice::from_ref(id))?
+        .into_iter()
+        .next()
+        .map(|a| CarList::Songs { kind: ContextKind::Album, id: a.id, title: a.title }))
+}
+
 /// Whether a row plays what's playing now, to show it as playing: the same
 /// album, playlist, mix or Liked songs, or the album the playing song is on.
 pub fn is_playing(item: &CarItem, now: &NowKey) -> bool {
@@ -675,7 +862,7 @@ impl Kept {
             CarAction::PlayFrom { track_id, .. } => return self.tracks.contains(track_id),
             CarAction::Start { context, .. } => (context.kind, context.id.as_deref().unwrap_or_default()),
             CarAction::ShuffleLibrary => return !self.tracks.is_empty(),
-            CarAction::Open(_) | CarAction::Jump(_) | CarAction::Info => return true,
+            CarAction::Open(_) | CarAction::Turn { .. } | CarAction::Jump(_) | CarAction::Info => return true,
         };
         match kind {
             ContextKind::Album => self.item(ItemKind::Album, id),
