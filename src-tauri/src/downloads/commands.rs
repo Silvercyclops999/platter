@@ -69,19 +69,22 @@ impl DownloadSource for PlexSource {
             }),
             Some(k) => {
                 let session = uuid::Uuid::new_v4().to_string();
-                Ok(Fetch {
-                    src: source_of(client.transcode_request(&track.id, k, &session)?, Some("mp3".into())),
-                    resumable: false,
-                    session: Some(session),
-                })
+                let src = source_of(client.transcode_request(&track.id, k, &session)?, Some("mp3".into()));
+                // Named with the song's server, so the stop goes there.
+                let session = match crate::sid::tag_of(&track.id) {
+                    Some(tag) => format!("{tag}:{session}"),
+                    None => session,
+                };
+                Ok(Fetch { src, resumable: false, session: Some(session) })
             }
         }
     }
 
     async fn finished(&self, fetch: &Fetch) {
+        // The session carries its song's server tag (see `fetch`).
         if let Some(s) = &fetch.session
-            && let Ok(c) = self.0.client().await
-            && let Err(e) = c.transcode_stop(s).await
+            && let Ok(c) = self.0.client_for(s).await
+            && let Err(e) = c.transcode_stop(crate::sid::key(s)).await
         {
             tracing::debug!("transcode stop: {e}");
         }
