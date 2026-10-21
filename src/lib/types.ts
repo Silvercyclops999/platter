@@ -1780,7 +1780,7 @@ export const DEFAULT_SETTINGS: Settings = {
   plexEditLock: true,
   plexEditMatchUnreleased: true,
   dragAndDrop: true,
-  transcribeLyrics: false,
+  transcribeLyrics: true,
   transcribeModel: null,
   transcribeGpu: "auto",
   transcribeProcessor: "light",

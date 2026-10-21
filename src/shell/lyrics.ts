@@ -238,25 +238,6 @@ useSettings.subscribe((s) => {
 // Saving or removing lyrics in the editor.
 useLyricsEditor.subscribe((s, p) => s.version !== p.version && clearLyricsCache());
 
-/**
- * Where the lyrics came from, shown under them. None when the credit line
- * already says (LRCLIB, licensed lyrics).
- */
-export function lyricsSourceLabel(l: Lyrics): string | null {
-  switch (l.source) {
-    case "user":
-      return "Your lyrics";
-    case "auto":
-      return "Auto-transcribed, may be wrong.";
-    case "file":
-      return "From the lyrics file next to this song";
-    case "lrclib":
-      return null;
-    default:
-      return l.credit ? null : "Lyrics from Plex";
-  }
-}
-
 // ---------------------------------------------------------------- timing
 
 /** The timed lines to show, or null when the lyrics aren't synced. */

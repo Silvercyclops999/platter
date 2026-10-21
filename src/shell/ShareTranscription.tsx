@@ -1,5 +1,5 @@
-import { Globe, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { backend } from "../lib/backend";
@@ -46,12 +46,12 @@ function useWatchPlayThrough(track: Track, watching: boolean) {
 }
 
 /**
- * In the lyrics tools for a song showing a transcription: "Share these
- * lyrics publicly", once the user reviewed them and the song qualifies.
- * Opens a dialog with exactly what LRCLIB gets; nothing is sent until the
- * user confirms there.
+ * For a song showing a transcription: whether "Share these lyrics publicly"
+ * is offered (once the user reviewed them and the song qualifies), the
+ * action that opens its dialog, and the dialog to render. The dialog shows
+ * exactly what LRCLIB gets; nothing is sent until the user confirms there.
  */
-export function ShareTranscription({ lyrics, track }: { lyrics: Lyrics; track: Track }) {
+export function useShareTranscription(lyrics: Lyrics, track: Track): { offer: boolean; open: () => void; dialog: ReactNode } {
   const auto = lyrics.source === "auto";
   const version = useLyricsShare((s) => s.version);
   const [info, setInfo] = useState<LyricsShareInfo | null>(null);
@@ -72,16 +72,12 @@ export function ShareTranscription({ lyrics, track }: { lyrics: Lyrics; track: T
 
   useWatchPlayThrough(track, auto && info?.whyNot === "notReviewed");
 
-  if (!auto || !info?.offer || !info.payload) return null;
-  return (
-    <>
-      <button type="button" className="lyrics-trust__btn" onClick={() => setOpen(true)}>
-        <Globe size={14} aria-hidden="true" />
-        {SHARE_LABEL}
-      </button>
-      {open && <ShareDialog info={info} track={track} onClose={() => setOpen(false)} />}
-    </>
-  );
+  const offer = auto && !!info?.offer && !!info.payload;
+  return {
+    offer,
+    open: () => setOpen(true),
+    dialog: offer && open && info ? <ShareDialog info={info} track={track} onClose={() => setOpen(false)} /> : null,
+  };
 }
 
 function ShareDialog({ info, track, onClose }: { info: LyricsShareInfo; track: Track; onClose: () => void }) {

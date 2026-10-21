@@ -5,6 +5,7 @@
  * unreleased rule, and failures that change nothing.
  */
 import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { chooseLyricsOption, lyricsOptions } from "./lyricsOptions";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { backend } from "../lib/backend";
@@ -100,9 +101,9 @@ describe("the offer", () => {
     render(<LyricsPane />);
     await screen.findByText("Hello there");
     await act(() => new Promise((r) => setTimeout(r, 20)));
-    expect(screen.queryByRole("button", { name: SHARE_LABEL })).toBeNull();
+    expect(await lyricsOptions()).not.toContain(SHARE_LABEL);
     act(() => openLyricsEditor(released));
-    expect(await screen.findByRole("button", { name: SHARE_LABEL })).toBeInTheDocument();
+    await waitFor(async () => expect(await lyricsOptions()).toContain(SHARE_LABEL));
   });
 
   it("comes after the song plays through with the lyrics showing", async () => {
@@ -117,7 +118,7 @@ describe("the offer", () => {
     expect(mock.lyricsShare.reviewed.has(released.id)).toBe(false);
     act(() => usePlayer.setState({ positionMs: 0 }));
     for (let ms = 1000; ms <= released.durationMs; ms += 1000) act(() => usePlayer.setState({ positionMs: ms }));
-    expect(await screen.findByRole("button", { name: SHARE_LABEL })).toBeInTheDocument();
+    await waitFor(async () => expect(await lyricsOptions()).toContain(SHARE_LABEL));
   });
 
   it("is only for transcriptions, and not when the setting is off", async () => {
@@ -127,7 +128,7 @@ describe("the offer", () => {
     const { unmount } = render(<LyricsPane />);
     await screen.findByText("My own words");
     await act(() => new Promise((r) => setTimeout(r, 20)));
-    expect(screen.queryByRole("button", { name: SHARE_LABEL })).toBeNull();
+    expect(await lyricsOptions()).not.toContain(SHARE_LABEL);
     unmount();
 
     clearLyricsCache();
@@ -136,7 +137,7 @@ describe("the offer", () => {
     render(<LyricsPane />);
     await screen.findByText("Hello there");
     await act(() => new Promise((r) => setTimeout(r, 20)));
-    expect(screen.queryByRole("button", { name: SHARE_LABEL })).toBeNull();
+    expect(await lyricsOptions()).not.toContain(SHARE_LABEL);
   });
 });
 
@@ -146,7 +147,7 @@ describe("the dialog", () => {
     mock.lyricsShare.reviewed.add(released.id);
     playing(released);
     render(<LyricsPane />);
-    await userEvent.click(await screen.findByRole("button", { name: SHARE_LABEL }));
+    await waitFor(() => chooseLyricsOption(SHARE_LABEL));
     const dialog = screen.getByRole("dialog", { name: "Share lyrics publicly" });
     expect(within(dialog).getByText(SHARE_NOTE)).toBeInTheDocument();
     expect(within(dialog).getByText(released.title)).toBeInTheDocument();
@@ -164,7 +165,7 @@ describe("the dialog", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(mock.lyricsShare.sent).toEqual([]);
 
-    await userEvent.click(screen.getByRole("button", { name: SHARE_LABEL }));
+    await chooseLyricsOption(SHARE_LABEL);
     await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Share" }));
     await waitFor(() => expect(mock.lyricsShare.sent).toHaveLength(1));
     expect(mock.lyricsShare.sent[0].payload).toMatchObject({
@@ -176,7 +177,7 @@ describe("the dialog", () => {
     });
     // A quiet confirmation, and no second offer.
     await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.message)).toContain(SHARED_TOAST));
-    await waitFor(() => expect(screen.queryByRole("button", { name: SHARE_LABEL })).toBeNull());
+    await waitFor(async () => expect(await lyricsOptions()).not.toContain(SHARE_LABEL));
   });
 
   it("says why when sharing fails and changes nothing", async () => {
@@ -185,7 +186,7 @@ describe("the dialog", () => {
     mock.lyricsShare.failNext = "offline";
     playing(released);
     render(<LyricsPane />);
-    await userEvent.click(await screen.findByRole("button", { name: SHARE_LABEL }));
+    await waitFor(() => chooseLyricsOption(SHARE_LABEL));
     await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Share" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't reach LRCLIB. Check your connection and try again. Nothing was shared.");
     expect(mock.lyricsShare.sent).toEqual([]);
@@ -195,7 +196,7 @@ describe("the dialog", () => {
     await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Share" }));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("LRCLIB didn't take these lyrics: Lyrics are too short"));
     await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
-    expect(screen.getByRole("button", { name: SHARE_LABEL })).toBeInTheDocument();
+    expect(await lyricsOptions()).toContain(SHARE_LABEL);
   });
 });
 
@@ -208,14 +209,14 @@ describe("unreleased songs", () => {
     const { unmount } = render(<LyricsPane />);
     await screen.findByText("Hello there");
     await act(() => new Promise((r) => setTimeout(r, 20)));
-    expect(screen.queryByRole("button", { name: SHARE_LABEL })).toBeNull();
+    expect(await lyricsOptions()).not.toContain(SHARE_LABEL);
     expect((await backend.lyricsShareInfo(unreleased.id)).whyNot).toBe("unreleased");
     unmount();
 
     clearLyricsCache();
     await settings({ shareTranscriptionsUnreleased: true });
     render(<LyricsPane />);
-    await userEvent.click(await screen.findByRole("button", { name: SHARE_LABEL }));
+    await waitFor(() => chooseLyricsOption(SHARE_LABEL));
     expect(within(screen.getByRole("dialog")).getByText(UNRELEASED_NOTE)).toBeInTheDocument();
   });
 });

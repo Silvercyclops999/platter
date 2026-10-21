@@ -138,10 +138,9 @@ export const COMMON: ReadonlySet<string> = new Set([
   "accent",
   "artworkColours",
   "reduceMotion",
-  // Lyrics: whether and how they show.
+  // Lyrics: whether they show, where they come from, and writing them down.
   "lyricsMode",
-  "lyricsPreferOwn",
-  "showPronunciation",
+  "lyricsLrclib",
   "transcribeLyrics",
   // Sharing and friends: privacy and the main ways to share.
   "privateSession",
@@ -309,7 +308,6 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "themeFile",
   // Lyrics: fine tuning and translation.
   "lyricsLiveTiming",
-  "lyricsFixTiming",
   "lyricsReleasedForVersions",
   "lyricsChoices",
   "translationService",
@@ -320,7 +318,6 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "transcribeFasterAway",
   "transcribeUnreleased",
   "syncTranscriptions",
-  "lyricsOfficialFirst",
   // Integrations: tokens, caches, ports and the finer Discord and Lidarr rules.
   "infoListenbrainzToken",
   "infoCache",
@@ -412,15 +409,10 @@ const BY_KEY: Record<string, HelpRef> = {
   spineWidthByTracks: ["getting-started", "record-shelf"],
   lyricsMode: ["lyrics-and-transcription", "where-lyrics-come-from"],
   lyricsLrclib: ["lyrics-and-transcription", "lrclib"],
-  lyricsCheckAudio: ["lyrics-and-transcription", "checking-lyrics-against-the-song"],
-  lyricsFixTiming: ["lyrics-and-transcription", "timing-fixes"],
   lyricsChoices: ["lyrics-and-transcription", "wrong-lyrics"],
   showPronunciation: ["lyrics-and-transcription", "translation-and-pronunciation"],
   translationService: ["lyrics-and-transcription", "translation-and-pronunciation"],
   transcribeLyrics: ["lyrics-and-transcription", "transcription"],
-  lyricsOfficialFirst: ["lyrics-and-transcription", "transcription"],
-  transcribeModel: ["lyrics-and-transcription", "the-model-download"],
-  transcribeProcessor: ["lyrics-and-transcription", "processor-and-graphics-card"],
   shareTranscriptions: ["lyrics-and-transcription", "sharing-transcriptions"],
   sharePublicLinks: ["listening-together", "share-links"],
   shareMyMusic: ["listening-together", "sharing-your-music"],

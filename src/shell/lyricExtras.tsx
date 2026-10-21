@@ -1,9 +1,8 @@
 /**
  * Lines under lyrics lines: a romanised pronunciation (made by the core on
  * this computer, while Show pronunciation is on) and a translation (from
- * the service set in Settings, after Translate is pressed).
+ * the service set in Settings, after Translate is picked in the lyrics options).
  */
-import { Languages } from "lucide-react";
 import { useEffect, useState } from "react";
 import { backend } from "../lib/backend";
 import type { AppError } from "../lib/types";
@@ -113,19 +112,5 @@ export function LyricExtras({ extras, i }: { extras: Extras; i: number }) {
       )}
       {t && <span className="lyrics__extra lyrics__extra--trans">{t}</span>}
     </>
-  );
-}
-
-/** Translate / Hide translation, under the lyrics, when a service is set. */
-export function TranslateButton({ extras }: { extras: Extras }) {
-  if (!extras.canTranslate) return null;
-  const shown = !!extras.trans;
-  return (
-    <p className="lyrics__share">
-      <button type="button" className="lyrics__source-edit" onClick={extras.toggleTranslation} disabled={extras.translating} aria-pressed={shown}>
-        <Languages size={14} aria-hidden="true" />
-        {extras.translating ? "Translating…" : shown ? "Hide translation" : "Translate"}
-      </button>
-    </p>
   );
 }

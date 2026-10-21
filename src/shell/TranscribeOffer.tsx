@@ -1,98 +1,89 @@
-import { AudioLines } from "lucide-react";
 import { useEffect } from "react";
 import { Button } from "../components/Button";
-import type { TranscribeStatus } from "../lib/types";
-import { checkFoundNothing, modelSize, transcribe, useTranscribe } from "../stores/transcribe";
+import type { Track, TranscribeStatus } from "../lib/types";
+import { openLyricsEditor } from "../stores/lyricsEditor";
+import { checkFoundNothing, transcribe, useTranscribe } from "../stores/transcribe";
 
-/** What the song being transcribed is doing, in words. */
-export function stageText(c: NonNullable<TranscribeStatus["current"]>, s: TranscribeStatus): string {
-  const line = stageLine(c, s);
-  const quiet = quietNote(c);
-  if (!quiet) return line;
-  return line.endsWith("…") ? `${line} ${quiet}` : `${line}. ${quiet}`;
-}
+/** Said while a song's words are being written down. */
+export const WRITING_TEXT = "Writing down the words…";
+/** Said while the speech model downloads for the first time. */
+export const FIRST_TIME_TEXT = "Getting ready to write down lyrics, first time only";
+/** Said for a song transcribed with no words found. */
+export const NO_WORDS_TEXT = "No words were heard in this song";
 
-function stageLine(c: NonNullable<TranscribeStatus["current"]>, s: TranscribeStatus): string {
-  switch (c.stage) {
-    case "waitingForModel": {
-      const m = s.models.find((x) => x.kind === s.model);
-      const pct = m && m.sizeBytes ? Math.floor((m.doneBytes / m.sizeBytes) * 100) : 0;
-      return `Downloading the speech model… ${pct}%`;
-    }
-    case "reading":
-      return "Reading the song…";
-    case "decoding":
-      return "Getting the audio ready…";
-    case "loading":
-      return "Loading the speech model…";
-    case "transcribing":
-      // The percent moves once per 30 second stretch of the song.
-      return c.percent === 0 ? "Transcribing…" : `Transcribing… ${c.percent}%`;
+/** How far along the song (or the first model download) is, 0 to 100, or null when it can't say yet. */
+export function writingPercent(c: NonNullable<TranscribeStatus["current"]>, s: TranscribeStatus): number | null {
+  if (c.stage === "waitingForModel") {
+    const m = s.models.find((x) => x.kind === s.model);
+    return m && m.sizeBytes ? Math.floor((m.doneBytes / m.sizeBytes) * 100) : null;
   }
+  // The percent moves once per 30 second stretch of the song.
+  return c.stage === "transcribing" && c.percent > 0 ? c.percent : null;
 }
 
-/** Said when nothing has moved for a while. */
-function quietNote(c: NonNullable<TranscribeStatus["current"]>): string {
-  if (c.quietSecs === undefined) return "";
-  const min = Math.max(1, Math.floor(c.quietSecs / 60));
-  return `No progress for ${min === 1 ? "a minute" : `${min} minutes`}. Your computer may be busy; it keeps going.`;
+/** A thin line that fills as the work goes; one that moves on its own when the amount isn't known. */
+function ProgressLine({ percent, label }: { percent: number | null; label: string }) {
+  return (
+    <div
+      className={`lyrics-page__progress ${percent === null ? "is-unknown" : ""}`}
+      role="progressbar"
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={percent ?? undefined}
+    >
+      <span className="lyrics-page__progress-fill" style={percent === null ? undefined : { width: `${percent}%` }} />
+    </div>
+  );
 }
 
 /**
- * The lyrics view's offer for a song without lyrics, when transcription is
- * on: "Transcribe this song", its progress, or why it didn't work.
+ * The lyrics view for a song with no lyrics anywhere. When this computer
+ * writes lyrics down, the song is already being done (it starts as the song
+ * plays): its progress shows, then the lyrics replace it. Otherwise, or when
+ * it found no words: "No lyrics for this song" and a quiet Write your own.
  */
-export function TranscribeOffer({ trackId }: { trackId: string }) {
+export function NoLyrics({ track }: { track: Track }) {
   const status = useTranscribe((s) => s.status);
-  const empty = useTranscribe((s) => s.empty.has(trackId));
+  const empty = useTranscribe((s) => s.empty.has(track.id));
   const on = !!status?.enabled && status.available;
   useEffect(() => {
-    if (on) void checkFoundNothing(trackId);
-  }, [on, trackId]);
-  if (!status || !on) return null;
+    if (on) void checkFoundNothing(track.id);
+  }, [on, track.id]);
 
-  const current = status.current?.trackId === trackId ? status.current : undefined;
-  if (current) {
+  const current = on && status.current?.trackId === track.id ? status.current : undefined;
+  const queued = on && !current && status.upNext === track.id;
+  if (status && (current || queued)) {
+    const first = current?.stage === "waitingForModel";
+    const text = first ? FIRST_TIME_TEXT : WRITING_TEXT;
     return (
-      <div className="lyrics-page__transcribe" role="status">
-        <p className="lyrics-page__transcribe-note">{stageText(current, status)}</p>
-        <Button variant="ghost" onClick={() => void transcribe.cancel(trackId)}>
-          Cancel
-        </Button>
+      <div className="lyrics-page__empty-wrap lyrics-page__empty-wrap--writing" role="status">
+        <p className="lyrics-page__writing">{text}</p>
+        <ProgressLine percent={current ? writingPercent(current, status) : null} label={text} />
       </div>
     );
   }
-  if (status.upNext === trackId) {
-    return (
-      <div className="lyrics-page__transcribe" role="status">
-        <p className="lyrics-page__transcribe-note">{status.current?.background ? "Pausing the background song first…" : "Up next…"}</p>
-        <Button variant="ghost" onClick={() => void transcribe.cancel(trackId)}>
-          Cancel
-        </Button>
-      </div>
-    );
-  }
-  const failed = status.error?.trackId === trackId ? status.error : undefined;
-  const model = status.models.find((m) => m.kind === status.model);
-  const needsModel = !!model && !model.installed;
+  // This song failed, or the model download did (it's tried again with the next song).
+  const e = on ? status.error : undefined;
+  const failed = e && (e.trackId === track.id || (!e.trackId && e.kind !== "transcribe")) ? e : undefined;
   return (
-    <div className="lyrics-page__transcribe">
+    <div className="lyrics-page__empty-wrap">
+      <p className="lyrics-page__empty">{empty ? NO_WORDS_TEXT : "No lyrics for this song"}</p>
       {failed && (
         <p className="lyrics-page__transcribe-note" role="alert">
           {failed.message}
         </p>
       )}
-      {empty && !failed && <p className="lyrics-page__transcribe-note">No words were found when this song was transcribed.</p>}
-      {!empty && (
-        <>
-          <Button variant="ghost" icon={<AudioLines size={16} />} onClick={() => void transcribe.track(trackId)}>
-            {failed ? "Try again" : "Transcribe this song"}
+      <div className="lyrics-page__empty-actions">
+        {on && !empty && (
+          <Button variant="primary" onClick={() => void transcribe.track(track.id)}>
+            {failed ? "Try again" : "Write down the words"}
           </Button>
-          <p className="lyrics-page__transcribe-note">
-            {needsModel ? `Downloads the ${modelSize(model.sizeBytes)} speech model first. ` : ""}Runs on this computer; the song never leaves it.
-          </p>
-        </>
-      )}
+        )}
+        <button type="button" className="lyrics__source-edit" onClick={() => openLyricsEditor(track)}>
+          Write your own
+        </button>
+      </div>
     </div>
   );
 }

@@ -1,70 +1,70 @@
 # Lyrics and transcription
 
-Where lyrics come from, how Platter checks and fixes them, and how to write or transcribe your own.
+Where lyrics come from, what Platter does when a song has none, and how to fix the odd one that's wrong.
 
-![The lyrics view with Not checked, the timing buttons, Tap to sync and Wrong lyrics?](images/lyrics.png)
+![The lyrics view: just the words, with where they came from and the options button underneath](images/lyrics.png)
 
 ## Where lyrics come from
 
-Platter looks in this order:
+Press the lyrics button and the words are there. Platter looks in this order:
 
-1. Your server: a `.lrc` or `.txt` file next to the song, or lyrics Plex has.
+1. Your server: a `.lrc` or `.txt` file next to the song, or lyrics your server has.
 2. Lyrics you wrote in Platter.
-3. LRCLIB, a free lyrics library, if you turn it on.
-4. A transcription made on this computer, only when nothing else fits.
+3. LRCLIB, a free lyrics library.
+4. Lyrics Platter wrote down from the song itself, when nothing else has them.
 
-To show your own lyrics first, turn on Settings, Lyrics, Prefer my own lyrics over Plex's.
+The quiet line under the lyrics says which one you're seeing. To show your own lyrics first, turn on Prefer my own lyrics over your server's (Settings, Lyrics, More).
 
 ### When there are none
 
-If a lyrics source couldn't be reached, the view says Couldn't get lyrics right now. Press **Retry**, or wait: Platter asks again when you're back online. That's different from no lyrics anywhere, and from This song is instrumental, which shows when the title says instrumental or karaoke, or LRCLIB marks the song that way.
+If a lyrics source couldn't be reached, the view says Couldn't get lyrics right now. Press Retry, or wait: Platter asks again when you're back online. That's different from no lyrics anywhere, and from This song is instrumental, which shows when the title says instrumental or karaoke, or LRCLIB marks the song that way.
 
 ### LRCLIB
 
-Settings, Lyrics, Lyrics from LRCLIB when Plex has none starts off. Platter sends the song's artist, title, album and length, and keeps answers for 30 days. On live versions, found lyrics show without timing unless you turn on Show borrowed timing on live versions.
+Settings, Lyrics, Lyrics from LRCLIB when your server has none is on. Platter sends the song's artist, title, album and length, and keeps answers for 30 days. Turn it off and nothing is sent.
 
-## Checking lyrics against the song
+## Writing down songs without lyrics
 
-With Settings, Lyrics, Check lyrics against the song on, Platter listens to a short part of the song with the speech model on this computer and skips lyrics that belong to another song. The song never leaves your computer. Until the [speech model](#the-model-download) is downloaded, lyrics show as Not checked.
+On a computer, a song with no lyrics anywhere gets them written down as it plays. The lyrics view shows Writing down the words with a line that fills, then the lyrics replace it. The next songs in the queue are done ahead of time, so most songs already have lyrics when they start. The audio never leaves your computer.
 
-Lyrics show straight away while the check runs, marked Checking lyrics against the song. If they turn out to belong to another song, Platter moves to a set that matches, or says None of the lyrics found match this song.
+The first time, Platter downloads its speech model, which takes a minute or two. The view says Getting ready to write down lyrics, first time only.
 
-### Timing fixes
+Lyrics written this way can have mistakes. Fix them with Edit lyrics in the options menu. To stop it, turn off Settings, Lyrics, Write down lyrics for songs without them.
 
-Settings, Lyrics, Fix lyrics timing automatically moves checked lyrics that run early, late or drift. To move them yourself, use the minus and plus buttons under the lyrics (or the `-` and `+` keys), or Tap to sync. Every quick press counts. While the check is still running, the buttons wait, since it may move the timing itself, and they come back as soon as it's done (or if it gets stuck).
+A Platter Bridge on your server can do every song in your library overnight instead, so your computers and phone already have them.
 
-Demos and other versions ask before using the released song's lyrics (Use anyway), unless you turn on Use released lyrics for other versions.
+### Unreleased songs
+
+Settings, Lyrics, Lyrics transcription has Transcribe all unreleased music without lyrics, which works through them in the background, resting between songs. It pauses on battery power and gives way to playback.
+
+## Behind the scenes
+
+Platter listens to a short part of the song and checks that the lyrics found belong to it, and that they're in time. Lyrics that belong to another song are swapped for ones that match. Lyrics that run early or late are moved. None of this needs anything from you.
 
 ## Wrong lyrics?
 
-Choose Wrong lyrics? under the lyrics or in a song's menu to see every set found and what the check said. Pick another set, or choose Transcribe this song, Write or paste lyrics, or No lyrics for this song. Let Platter pick goes back to automatic. **Look again** asks the lyrics sources again, in case they have the song now.
+The options button under the lyrics (or a song's menu) has Wrong lyrics?. It lists every set found. Pick another set, or choose Transcribe this song, Write or paste lyrics, or No lyrics for this song. Let Platter pick goes back to automatic. Look again asks the lyrics sources again, in case they have the song now.
+
+If the timing is off, choose Timing is off. Use the minus and plus buttons (or the `-` and `+` keys) to move the lyrics half a second at a time, or Tap to sync and click a line as it's sung.
 
 Your picks and timing win over everything automatic. Settings, Lyrics, Lyrics choices and timing has Reset.
 
 ## Writing your own
 
-Choose Add lyrics or Edit lyrics and type or paste the words, one line each. To sync them, play the song and press `Space` as each line starts. Your lyrics stay in Platter, never in your music folder, and Export .lrc saves a copy.
+Choose Write your own or Edit lyrics in the options menu and type or paste the words, one line each. To sync them, play the song and press `Space` as each line starts. Your lyrics stay in Platter, never in your music folder, and Export .lrc saves a copy.
 
 ## Translation and pronunciation
 
-Settings, Lyrics, Show pronunciation adds a romanised line under Japanese, Korean, Chinese, Hindi and Cyrillic lyrics, made on this computer.
+Show pronunciation adds a romanised line under Japanese, Korean, Chinese, Hindi and Cyrillic lyrics, made on this computer.
 
-For translation, put the address of a LibreTranslate-compatible service in Settings, Lyrics, Translation service address, and pick a language in Translate lyrics into. Lyrics then get a Translate button. With no service set, nothing is sent.
+For translation, put the address of a LibreTranslate-compatible service in Translation service address, and pick a language in Translate lyrics into. The options menu then has Translate. With no service set, nothing is sent.
 
 ## Transcription
 
-Turn on Settings, Lyrics, Transcribe songs without lyrics on this computer. Transcribe this song then shows in the lyrics view, and Transcribe songs without lyrics in an album's menu. Transcribe all unreleased songs without lyrics, with Transcribe now, works through them in the background. The audio never leaves your computer. The models understand English only; fix mistakes in the lyrics editor.
-
-### The model download
-
-The model downloads once, the first time you need it, or now with Download under Speech model. Small (181 MB) is right for most songs. Medium (514 MB) is a little more accurate but much slower. Delete model frees the space.
-
-### Processor and graphics card
-
-On Windows and Linux the model runs on the processor at low priority. On a Mac it uses the graphics card (GPU) when it can, which runs cooler. Processor use sets how hard it works: Light (the default), Balanced or Fast. Transcription needs a processor with AVX2 (most from 2013 on).
+Write down lyrics for songs without them is on for computers. Albums have Transcribe songs without lyrics in their menu too. The speech model uses the graphics card when there's one that helps, and the processor at low priority otherwise.
 
 ### Sharing transcriptions
 
-Sync transcriptions to my devices sends them through your sync file, so each song is transcribed once. It needs Lyrics you wrote on under Sync.
+Sync transcriptions to my devices sends them through your sync file, so each song is written down once. It needs Lyrics you wrote on under Sync.
 
-With Offer to share transcriptions publicly on, a transcription you've reviewed gets Share these lyrics publicly. It shows exactly what goes to LRCLIB and asks every time. [Unreleased songs](archive-and-release-status.md) are left out unless you turn on Including unreleased songs, because sharing makes the title public.
+With Offer to share transcriptions publicly on, a transcription you've reviewed gets Share these lyrics publicly in the options menu. It shows exactly what goes to LRCLIB and asks every time. [Unreleased songs](archive-and-release-status.md) are left out unless you turn on Including unreleased songs, because sharing makes the title public.

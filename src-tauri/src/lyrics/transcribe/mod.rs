@@ -272,6 +272,8 @@ pub enum Official {
     Unknown,
 }
 
+/// Songs after the playing one written down ahead of time.
+pub const FOLLOW_AHEAD: usize = 2;
 /// A transcribed song is looked at again for official synced lyrics this often.
 pub const OFFICIAL_RECHECK_S: i64 = 7 * 24 * 3600;
 /// Songs looked at per round of upkeep.
@@ -317,6 +319,8 @@ struct Job {
     /// Part of a long background run (the batch, Redo): it waits while a
     /// paired Bridge does that work.
     batch: bool,
+    /// Asked for because it's playing or coming up next ([`Transcriber::follow`]).
+    follow: bool,
 }
 
 struct Download {
@@ -705,7 +709,7 @@ impl Transcriber {
             let mut st = self.inner.st.lock();
             for id in &p.ids {
                 if !st.queue.iter().any(|j| &j.track_id == id) {
-                    st.queue.push_back(Job { track_id: id.clone(), background: true, check_other: true, now: false, redo: false, batch: true });
+                    st.queue.push_back(Job { track_id: id.clone(), background: true, check_other: true, now: false, redo: false, batch: true, follow: false });
                 }
             }
             st.batch = BatchProgress { done: p.done.min(p.total), total: p.total.max(p.ids.len()) };
@@ -732,7 +736,7 @@ impl Transcriber {
                 if st.queue.iter().any(|j| j.track_id == id) || st.current.as_ref().is_some_and(|r| r.job.track_id == id) {
                     continue;
                 }
-                st.queue.push_back(Job { track_id: id, background: true, check_other: false, now: false, redo: true, batch: true });
+                st.queue.push_back(Job { track_id: id, background: true, check_other: false, now: false, redo: true, batch: true, follow: false });
                 added += 1;
             }
             st.batch.total += added;
@@ -963,10 +967,10 @@ impl Transcriber {
     /// Queue songs. Songs asked for now go before the background batch; a
     /// single song goes first. Returns how many were added.
     fn enqueue(&self, ids: Vec<String>, background: bool, check_other: bool, front: bool) -> AppResult<usize> {
-        self.enqueue_as(ids, background, check_other, front, false)
+        self.enqueue_as(ids, background, check_other, front, false, false)
     }
 
-    fn enqueue_as(&self, ids: Vec<String>, background: bool, check_other: bool, front: bool, batch: bool) -> AppResult<usize> {
+    fn enqueue_as(&self, ids: Vec<String>, background: bool, check_other: bool, front: bool, batch: bool, follow: bool) -> AppResult<usize> {
         if front { self.check_usable()? } else { self.check_background()? }
         let start_download = {
             let st = self.inner.st.lock();
@@ -992,7 +996,7 @@ impl Transcriber {
                     st.queue.remove(pos);
                     st.batch.total = st.batch.total.saturating_sub(1);
                 }
-                let job = Job { track_id: id, background, check_other, now: front, redo: false, batch };
+                let job = Job { track_id: id, background, check_other, now: front, redo: false, batch, follow };
                 if front {
                     fronts.push(job);
                 } else if background {
@@ -1034,6 +1038,59 @@ impl Transcriber {
         }
     }
 
+    /// Playback moved on: the playing song and the ones coming up next that
+    /// have no lyrics are written down, the playing one first, so lyrics are
+    /// there without anyone asking. Songs an earlier call queued that are no
+    /// longer playing or next leave the queue (one already being worked on
+    /// finishes). Quiet: does nothing when transcription is off or can't
+    /// run here. The model downloads the first time it's needed.
+    pub async fn follow(&self, playing: Option<String>, next: Vec<String>) {
+        let rec = &self.inner.deps.recognizer;
+        if !self.inner.st.lock().enabled || rec.unavailable().is_some() || rec.crashed_too_often() {
+            return;
+        }
+        let mut wanted: Vec<String> = Vec::new();
+        for id in playing.iter().chain(next.iter().take(FOLLOW_AHEAD)) {
+            if !wanted.contains(id) {
+                wanted.push(id.clone());
+            }
+        }
+        {
+            let mut st = self.inner.st.lock();
+            let before = st.queue.len();
+            st.queue.retain(|j| !j.follow || wanted.contains(&j.track_id));
+            let dropped = before - st.queue.len();
+            st.batch.total = st.batch.total.saturating_sub(dropped);
+        }
+        let d = &self.inner.deps;
+        let mut need = Vec::new();
+        for id in wanted {
+            let done = {
+                let id = id.clone();
+                d.db.read_async(move |c| store::done(c, &id)).await.unwrap_or(false)
+            };
+            if !done && !d.other.has_lyrics(&id).await {
+                need.push(id);
+            }
+        }
+        let playing = playing.filter(|p| need.first() == Some(p));
+        let next: Vec<String> = need.into_iter().filter(|id| Some(id) != playing.as_ref()).collect();
+        if let Some(id) = playing {
+            // Coming up before, playing now: it goes to the front.
+            {
+                let mut st = self.inner.st.lock();
+                if let Some(pos) = st.queue.iter().position(|j| j.follow && j.track_id == id && !j.now) {
+                    st.queue.remove(pos);
+                    st.batch.total = st.batch.total.saturating_sub(1);
+                }
+            }
+            let _ = self.enqueue_as(vec![id], false, true, true, false, true);
+        }
+        if !next.is_empty() {
+            let _ = self.enqueue_as(next, false, true, false, false, true);
+        }
+    }
+
     /// An album's songs without lyrics.
     pub async fn transcribe_album(&self, album_id: &str) -> AppResult<usize> {
         self.check_background()?;
@@ -1062,7 +1119,7 @@ impl Transcriber {
         self.check_background()?;
         self.settle_gpu().await;
         let ids = self.inner.deps.db.read_async(store::unreleased_todo).await?;
-        self.enqueue_as(ids, true, true, false, true)
+        self.enqueue_as(ids, true, true, false, true, false)
     }
 
     /// These songs in the background, skipping any with lyrics from another

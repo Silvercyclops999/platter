@@ -1,7 +1,8 @@
 /**
- * Lyrics transcribed on this computer: the Settings rows (switch, model with
- * its size, download, delete, the batch), the lyrics view's offer and its
- * progress, the auto-transcribed note with Edit, and each failure state
+ * Lyrics written down on this computer: the Settings rows (the switch, on by
+ * default, and the batch), songs written down as they play (the model
+ * downloading by itself the first time), the lyrics view's progress, the
+ * "Written down by Platter" line with Edit lyrics, and each failure state
  * (model download failed, checksum mismatch, out of disk, transcription
  * failed) shown in plain words.
  */
@@ -15,10 +16,13 @@ import { mockLyricsKind } from "../lib/mock/details";
 import { mockMatched, mockPlexMissed } from "../lib/mock/fixtures";
 import { DEFAULT_SETTINGS, type PlayerState, type Track } from "../lib/types";
 import { LyricsPane } from "../shell/LyricsView";
-import { stageText } from "../shell/TranscribeOffer";
+import { FIRST_TIME_TEXT, NO_WORDS_TEXT, WRITING_TEXT, writingPercent } from "../shell/TranscribeOffer";
+import { lyricsFrom, OPTIONS_LABEL } from "../shell/LyricsTrust";
+import { mockFollow } from "../lib/mock/transcribe";
+import { useUi } from "../stores/ui";
 import { SettingsPage } from "../pages/SettingsPage";
-import { batchNote, gpuNote, modelNote, paceNote, speedNote, transcribeNote } from "../pages/TranscribeSettings";
-import { clearLyricsCache, lyricsSourceLabel } from "../shell/lyrics";
+import { batchNote, modelNote, paceNote, speedNote, transcribeNote } from "../pages/TranscribeSettings";
+import { clearLyricsCache } from "../shell/lyrics";
 import { LyricsEditorHost } from "../shell/LyricsEditor";
 import { useLyricsEditor } from "../stores/lyricsEditor";
 import { usePlayer } from "../stores/player";
@@ -69,42 +73,45 @@ beforeEach(async () => {
 });
 
 describe("Settings", () => {
-  it("is off by default, shows model sizes before downloading, downloads and deletes", async () => {
-    expect(DEFAULT_SETTINGS.transcribeLyrics).toBe(false);
+  it("is on by default on a computer, with no model or processor to pick", async () => {
+    expect(DEFAULT_SETTINGS.transcribeLyrics).toBe(true);
     expect(DEFAULT_SETTINGS.showAutoLyrics).toBe(true);
+    await loadSettings();
     render(<SettingsPage />);
     await waitFor(() => expect(settingRow("transcribeLyrics")).toBeTruthy());
+    expect(settingRow("transcribeLyrics")).toHaveTextContent("Write down lyrics for songs without them");
     const sw = within(settingRow("transcribeLyrics")).getByRole("switch");
     expect(sw).not.toBeChecked();
     // Its own settings (the Lyrics transcription page) wait until it's on.
     expect(settingRow("transcribeUnreleased")).toBeNull();
-    expect(settingRow("transcribeModel")).toBeNull();
     await userEvent.click(sw);
     await waitFor(() => expect(within(settingRow("transcribeUnreleased")).getByRole("button", { name: "Transcribe now" })).toBeInTheDocument());
-    await waitFor(() => expect(within(settingRow("transcribeLyrics")).getByText(/181 MB\) downloads the first time/)).toBeInTheDocument());
-    const download = await within(settingRow("transcribeModel")).findByRole("button", { name: "Download 181 MB" });
-    await userEvent.click(download);
-    await within(settingRow("transcribeModel")).findByRole("button", { name: "Delete model" });
-    expect(useTranscribe.getState().status?.models[0].installed).toBe(true);
-    await userEvent.click(within(settingRow("transcribeModel")).getByRole("button", { name: "Delete model" }));
-    await within(settingRow("transcribeModel")).findByRole("button", { name: "Download 181 MB" });
+    await waitFor(() => expect(within(settingRow("transcribeLyrics")).getByText(/181 MB\) downloads by itself the first time/)).toBeInTheDocument());
+    for (const k of ["transcribeModel", "transcribeGpu", "transcribeProcessor"]) expect(settingRow(k)).toBeNull();
   });
 
   it.each([
     ["download", /download failed\. Check your connection/],
     ["checksum", /didn't match its checksum, so it was deleted/],
     ["disk", /Not enough free space\. The model needs \d+ MB free/],
-  ] as const)("says when the model download fails (%s)", async (kind, text) => {
+  ] as const)("says when the model download fails (%s), and the next try works", async (kind, text) => {
     await turnOn();
     mock.transcribe.failNextDownload = kind;
-    render(<SettingsPage />);
-    await userEvent.click(await within(settingRow("transcribeModel")).findByRole("button", { name: /^Download/ }));
-    const alert = await within(settingRow("transcribeLyrics")).findByRole("alert");
-    expect(alert).toHaveTextContent(text);
+    playing(none);
+    render(
+      <>
+        <LyricsPane />
+        <SettingsPage />
+      </>,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Write down the words" }));
+    // Said plainly in the lyrics view and on the setting.
+    await waitFor(() => expect(screen.getAllByRole("alert").filter((a) => text.test(a.textContent ?? "")).length).toBe(2), { timeout: 3000 });
     expect(useTranscribe.getState().status?.models[0].installed).toBe(false);
     // Trying again works.
-    await userEvent.click(within(settingRow("transcribeModel")).getByRole("button", { name: /^Download/ }));
-    await within(settingRow("transcribeModel")).findByRole("button", { name: "Delete model" });
+    const view = document.querySelector<HTMLElement>(".lyrics-page__empty-wrap")!;
+    await userEvent.click(within(view).getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(useTranscribe.getState().status?.models[0].installed).toBe(true), { timeout: 3000 });
   });
 
   it("runs the unreleased batch with progress and can cancel it", async () => {
@@ -138,71 +145,21 @@ describe("Settings", () => {
     expect(SOURCE_NOTICES.some((n) => n.name.startsWith("Hugging Face"))).toBe(true);
   });
 
-  it("has processor use, the busy pause and away mode, all this device only", async () => {
-    expect(DEFAULT_SETTINGS.transcribeProcessor).toBe("light");
+  it("has the busy pause and away mode, this device only", async () => {
     expect(DEFAULT_SETTINGS.transcribePauseBusy).toBe(true);
     expect(DEFAULT_SETTINGS.transcribeFasterAway).toBe(true);
     await turnOn();
     render(<SettingsPage />);
-    const use = await within(await waitFor(() => settingRow("transcribeProcessor"))).findByRole("combobox", { name: "Processor use" });
-    expect(use).toHaveValue("light");
-    expect(within(use).getAllByRole("option").map((o) => o.textContent)).toEqual(["Light", "Balanced", "Fast"]);
-    await userEvent.selectOptions(use, "fast");
-    await waitFor(async () => expect((await mock.settingsGet()).transcribeProcessor).toBe("fast"));
-    const pause = within(settingRow("transcribePauseBusy")).getByRole("switch", { name: "Pause while the computer is busy" });
+    const pause = within(await waitFor(() => settingRow("transcribePauseBusy"))).getByRole("switch", { name: "Pause while the computer is busy" });
     expect(pause).toBeChecked();
     await userEvent.click(pause);
     await waitFor(async () => expect((await mock.settingsGet()).transcribePauseBusy).toBe(false));
     const away = within(settingRow("transcribeFasterAway")).getByRole("switch", { name: "Work faster while I'm away" });
     expect(away).toBeChecked();
-    for (const key of ["transcribeProcessor", "transcribePauseBusy", "transcribeFasterAway"]) {
+    for (const key of ["transcribePauseBusy", "transcribeFasterAway"]) {
       expect(settingRow(key)).toHaveTextContent("This device only.");
     }
-    // The model picker says Medium is slower and harder on the processor; nothing is picked by default.
-    expect(DEFAULT_SETTINGS.transcribeModel).toBe(null);
-    expect(settingRow("transcribeModel")).toHaveTextContent(/Medium is .*much slower and works the processor much harder/);
-    expect(within(settingRow("transcribeModel")).getByRole("option", { name: "Medium" })).toBeInTheDocument();
-    await mock.settingsSet({ transcribeProcessor: "light", transcribePauseBusy: true });
-  });
-
-  it("defaults new users to Turbo on a graphics card and says which card it uses", async () => {
-    expect(DEFAULT_SETTINGS.transcribeGpu).toBe("auto");
-    mock.transcribe.gpuCard = "NVIDIA GeForce RTX 5090";
-    await turnOn({ transcribeModel: null });
-    render(<SettingsPage />);
-    const row = await waitFor(() => settingRow("transcribeGpu"));
-    const use = within(row).getByRole("combobox", { name: "Use the graphics card" });
-    expect(within(use).getAllByRole("option").map((o) => o.textContent)).toEqual(["Auto", "Off"]);
-    expect(use).toHaveValue("auto");
-    await within(row).findByText("Uses your graphics card (NVIDIA GeForce RTX 5090).");
-    expect(row).toHaveTextContent("This device only.");
-    const model = within(settingRow("transcribeModel")).getByRole("combobox", { name: "Speech model" });
-    await waitFor(() => expect(model).toHaveValue("turbo"));
-    expect(within(model).getByRole("option", { name: "Turbo (best for graphics cards)" })).toBeInTheDocument();
-    expect(settingRow("transcribeModel")).toHaveTextContent("a few seconds per song on your graphics card.");
-    expect(within(settingRow("transcribeModel")).getByRole("button", { name: `Download ${modelSize(574_041_195)}` })).toBeInTheDocument();
-    // Off: the processor, Small by default, and the card named as unused.
-    await userEvent.selectOptions(use, "off");
-    await waitFor(async () => expect((await mock.settingsGet()).transcribeGpu).toBe("off"));
-    await within(row).findByText("Uses the processor. Your graphics card (NVIDIA GeForce RTX 5090) isn't used.");
-    await waitFor(() => expect(model).toHaveValue("small"));
-    expect(within(model).getByRole("option", { name: "Small" })).toBeInTheDocument();
-    await within(settingRow("transcribeModel")).findByText(/a few minutes per song on the processor\./);
-  });
-
-  it("keeps Small on a computer without a graphics card and a model someone picked", async () => {
-    await turnOn({ transcribeModel: null });
-    render(<SettingsPage />);
-    const model = await within(await waitFor(() => settingRow("transcribeModel"))).findByRole("combobox", { name: "Speech model" });
-    await waitFor(() => expect(model).toHaveValue("small"));
-    expect(within(model).getAllByRole("option").map((o) => o.getAttribute("value"))).toEqual(["small", "medium", "turbo"]);
-    await within(settingRow("transcribeGpu")).findByText("Uses the processor: no graphics card that can help was found.");
-    // Picking one sticks, card or not.
-    await userEvent.selectOptions(model, "medium");
-    await waitFor(async () => expect((await mock.settingsGet()).transcribeModel).toBe("medium"));
-    mock.transcribe.gpuCard = "Radeon RX 7800 XT";
-    await mock.settingsSet({ transcribeGpu: "auto" });
-    await waitFor(() => expect(model).toHaveValue("medium"));
+    await mock.settingsSet({ transcribePauseBusy: true });
   });
 
   it("tells each model's speed from this computer's own runs when there are some", () => {
@@ -213,8 +170,6 @@ describe("Settings", () => {
     expect(speedNote({ ...turbo, secsPerSong: 9 }, onCard)).toBe("about 9 seconds per song on your graphics card");
     expect(speedNote({ ...turbo, kind: "small", secsPerSong: 200 }, { ...base, gpu: undefined })).toBe("about 3 minutes per song on the processor");
     expect(speedNote({ ...turbo, secsPerSong: 1 }, onCard)).toBe("about 1 second per song on your graphics card");
-    expect(gpuNote(null, "auto")).toBeUndefined();
-    expect(gpuNote({ ...base, available: false }, "auto")).toBeUndefined();
   });
 
   it("shows a busy pause and the pace of a long run", async () => {
@@ -247,16 +202,7 @@ describe("Settings", () => {
 });
 
 describe("Settings: batch pause, model switch and speed", () => {
-  it("keeps the model picker's labels short and puts size and speed under it", async () => {
-    mock.transcribe.gpuCard = "NVIDIA GeForce RTX 5090";
-    mock.transcribe.speeds = { "medium/gpu": 12 };
-    await turnOn({ transcribeModel: "medium" });
-    render(<SettingsPage />);
-    const model = await within(await waitFor(() => settingRow("transcribeModel"))).findByRole("combobox", { name: "Speech model" });
-    expect(within(model).getAllByRole("option").map((o) => o.textContent)).toEqual(["Small", "Medium", "Turbo (best for graphics cards)"]);
-    await within(settingRow("transcribeModel")).findByText(
-      `${modelSize(539_225_533)}, about 12 seconds per song on your graphics card. Turbo is faster and more accurate on your graphics card.`,
-    );
+  it("says the model's size and speed", () => {
     const base = useTranscribe.getState().status!;
     expect(modelNote({ ...base, gpu: undefined, model: "small" })).toBe(`${modelSize(190_098_681)}, a few minutes per song on the processor.`);
     expect(paceNote(20)).toBe("about 20 seconds per song");
@@ -340,20 +286,30 @@ describe("Lyrics view", () => {
     );
   }
 
-  it("offers to transcribe a live version showing borrowed timing, and the result replaces it", async () => {
-    const live = mock.fx.tracks.find(
-      (t) => mockLyricsKind(t.id) === "lines" && !!mock.fx.albums.find((a) => a.id === t.albumId)?.subformats.includes("live"),
-    )!;
+  it("writes down a song without lyrics as it starts, downloading the model the first time", async () => {
     await turnOn();
-    playing(live);
-    page();
-    await screen.findByText("Timing is from another version");
-    await userEvent.click(await screen.findByRole("button", { name: "Transcribe this song" }));
-    await screen.findByText("Auto-transcribed, may be wrong.", undefined, { timeout: 3000 });
-    expect(screen.queryByText("Timing is from another version")).toBeNull();
+    mockFollow.on = true;
+    try {
+      // The model downloads slowly enough to see the first-time line.
+      mock.transcribe.stepMs = 40;
+      await mock.playContext({ context: { kind: "album", id: none.albumId! }, startTrackId: none.id });
+      const t = usePlayer.getState().state?.track ?? none;
+      playing(t);
+      page();
+      await screen.findByText(FIRST_TIME_TEXT);
+      expect(screen.getByRole("progressbar", { name: FIRST_TIME_TEXT })).toBeInTheDocument();
+      mock.transcribe.stepMs = 5;
+      await screen.findByText(lyricsFrom({ synced: true, lines: [], source: "auto" })!, undefined, { timeout: 5000 });
+      expect(screen.getByText("I walk the long way back to you")).toBeInTheDocument();
+      // No button asked for it.
+      expect(screen.queryByRole("button", { name: /Transcribe|Write down the words/ })).toBeNull();
+    } finally {
+      mockFollow.on = false;
+      await mock.playPause().catch(() => undefined);
+    }
   });
 
-  it("doesn't offer it for a studio song with synced lyrics", async () => {
+  it("doesn't write down a studio song that has synced lyrics, or a live one showing borrowed timing", async () => {
     const studio = mock.fx.tracks.find(
       (t) => mockLyricsKind(t.id) === "lines" && !mock.fx.albums.find((a) => a.id === t.albumId)?.subformats.includes("live") && !/live/i.test(t.title),
     )!;
@@ -361,27 +317,37 @@ describe("Lyrics view", () => {
     playing(studio);
     page();
     await screen.findByLabelText("Lyrics", { selector: ".lyrics__scroll" });
-    expect(screen.queryByRole("button", { name: "Transcribe this song" })).toBeNull();
+    expect(screen.queryByText(WRITING_TEXT)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Write down the words" })).toBeNull();
   });
 
-  it("offers nothing while transcription is off", async () => {
+  it("offers nothing to write down while it's off, only Write your own", async () => {
+    await mock.settingsSet({ transcribeLyrics: false });
+    await loadSettings();
     playing(none);
     page();
     await screen.findByText("No lyrics for this song");
-    expect(screen.queryByRole("button", { name: "Transcribe this song" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Write down the words" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Write your own" })).toBeInTheDocument();
   });
 
-  it("transcribes a song, downloading the model first, and marks the result", async () => {
+  it("shows the progress, then the lyrics with where they came from and Edit lyrics", async () => {
     await turnOn();
+    mock.transcribe.stepMs = 30;
     playing(none);
     page();
-    await screen.findByText(/Downloads the 181 MB speech model first/);
-    await userEvent.click(screen.getByRole("button", { name: "Transcribe this song" }));
-    await screen.findByText(/Downloading the speech model|Transcribing…|Reading the song…/);
-    await screen.findByText("Auto-transcribed, may be wrong.", undefined, { timeout: 3000 });
+    await userEvent.click(await screen.findByRole("button", { name: "Write down the words" }));
+    await screen.findByRole("progressbar");
+    await screen.findByText("Written down by Platter", undefined, { timeout: 5000 });
     expect(screen.getByText("I walk the long way back to you")).toBeInTheDocument();
-    // Edit opens the editor on the transcription.
-    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    // Edit lyrics in the options opens the editor on the transcription.
+    await userEvent.click(screen.getByRole("button", { name: OPTIONS_LABEL }));
+    const edit = useUi.getState().menu?.items.find((i) => i.label === "Edit lyrics");
+    expect(edit).toBeTruthy();
+    act(() => {
+      useUi.setState({ menu: null });
+      edit!.onSelect!();
+    });
     await screen.findByRole("dialog", { name: /lyrics: / });
     expect(mock.own.get(none.id)?.auto).toBe("small");
   });
@@ -392,39 +358,23 @@ describe("Lyrics view", () => {
     playing(none);
     page();
     await screen.findByText("No lyrics for this song");
-    expect(lyricsSourceLabel({ synced: true, lines: [], source: "auto" })).toBe("Auto-transcribed, may be wrong.");
   });
 
-  it("says what the speech helper is doing, and when nothing moves for a while", () => {
+  it("says how far along it is: the model download's share, then the song's", () => {
     const s = useTranscribe.getState().status!;
     const c = { trackId: "1", stage: "transcribing" as const, percent: 40, background: false };
-    expect(stageText(c, s)).toBe("Transcribing… 40%");
-    expect(stageText({ ...c, percent: 0 }, s)).toBe("Transcribing…");
-    expect(stageText({ ...c, stage: "loading", percent: 0 }, s)).toBe("Loading the speech model…");
-    expect(stageText({ ...c, quietSecs: 150 }, s)).toBe("Transcribing… 40%. No progress for 2 minutes. Your computer may be busy; it keeps going.");
-    expect(stageText({ ...c, quietSecs: 70 }, s)).toMatch(/No progress for a minute\./);
-    for (const t of [stageText(c, s), stageText({ ...c, quietSecs: 400 }, s)]) {
-      expect(t).not.toMatch(/Starting|\u2014/);
-    }
+    expect(writingPercent(c, s)).toBe(40);
+    expect(writingPercent({ ...c, percent: 0 }, s)).toBeNull();
+    expect(writingPercent({ ...c, stage: "loading", percent: 0 }, s)).toBeNull();
+    const downloading = { ...s, models: s.models.map((m) => (m.kind === s.model ? { ...m, doneBytes: m.sizeBytes / 4 } : m)) };
+    expect(writingPercent({ ...c, stage: "waitingForModel", percent: 0 }, downloading)).toBe(25);
   });
 
-  it("cancels the song being transcribed and offers it again", async () => {
-    await turnOn();
-    mock.transcribe.stepMs = 5000;
-    playing(other);
-    page();
-    await userEvent.click(await screen.findByRole("button", { name: "Transcribe this song" }));
-    const note = await screen.findByRole("status");
-    await userEvent.click(within(note).getByRole("button", { name: "Cancel" }));
-    await screen.findByRole("button", { name: "Transcribe this song" });
-    expect(useTranscribe.getState().status?.current).toBeUndefined();
-  });
-
-  it("says a song asked for waits for the background song to pause", async () => {
+  it("says a song waiting its turn is being written down", async () => {
     await turnOn();
     playing(other);
     page();
-    await screen.findByRole("button", { name: "Transcribe this song" });
+    await screen.findByRole("button", { name: "Write down the words" });
     const s = useTranscribe.getState().status!;
     act(() =>
       useTranscribe.setState({
@@ -432,8 +382,7 @@ describe("Lyrics view", () => {
       }),
     );
     const note = await screen.findByRole("status");
-    expect(note).toHaveTextContent("Pausing the background song first…");
-    expect(within(note).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(note).toHaveTextContent(WRITING_TEXT);
   });
 
   it("says when transcription failed and offers to try again", async () => {
@@ -441,11 +390,11 @@ describe("Lyrics view", () => {
     mock.transcribe.failNextSong = true;
     playing(other);
     page();
-    await userEvent.click(await screen.findByRole("button", { name: "Transcribe this song" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Write down the words" }));
     const alert = await screen.findByRole("alert", undefined, { timeout: 3000 });
     expect(alert).toHaveTextContent("Transcription failed for this song.");
     await userEvent.click(screen.getByRole("button", { name: "Try again" }));
-    await screen.findByText("Auto-transcribed, may be wrong.", undefined, { timeout: 3000 });
+    await screen.findByText("Written down by Platter", undefined, { timeout: 3000 });
   });
 
   it("says when no words were found", async () => {
@@ -453,19 +402,8 @@ describe("Lyrics view", () => {
     mock.transcribe.silent.add(other.id);
     playing(other);
     page();
-    await userEvent.click(await screen.findByRole("button", { name: "Transcribe this song" }));
-    await screen.findByText("No words were found when this song was transcribed.", undefined, { timeout: 3000 });
-    expect(screen.queryByRole("button", { name: "Transcribe this song" })).toBeNull();
-  });
-
-  it("cancels a song being transcribed", async () => {
-    await turnOn();
-    mock.transcribe.stepMs = 40;
-    playing(other);
-    page();
-    await userEvent.click(await screen.findByRole("button", { name: "Transcribe this song" }));
-    await userEvent.click(await screen.findByRole("button", { name: "Cancel" }));
-    await screen.findByRole("button", { name: "Transcribe this song" });
-    expect(mock.own.has(other.id)).toBe(false);
+    await userEvent.click(await screen.findByRole("button", { name: "Write down the words" }));
+    await screen.findByText(NO_WORDS_TEXT, undefined, { timeout: 3000 });
+    expect(screen.queryByRole("button", { name: "Write down the words" })).toBeNull();
   });
 });

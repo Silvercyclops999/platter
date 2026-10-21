@@ -1,29 +1,18 @@
-import { AudioLines, Image as ImageIcon, PenLine } from "lucide-react";
+import { LocateFixed } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Button } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import { prefersReducedMotion } from "../design/motion";
 import { NEUTRAL_HEADER } from "../lib/color";
 import type { LyricLine, Lyrics, Track } from "../lib/types";
-import { openLyricsEditor, useLyricsEditor } from "../stores/lyricsEditor";
 import { player, usePlayer } from "../stores/player";
-import { openShareCard, useLyricPick } from "../stores/shareCard";
-import { LYRIC_LINES_MAX } from "../lib/shareCard";
-import { trackArtistLine } from "../lib/format";
+import { useLyricPick } from "../stores/shareCard";
 import { useSettings } from "../stores/settings";
-import { LyricExtras, TranslateButton, useLyricExtras, type Extras } from "./lyricExtras";
-import {
-  followTarget,
-  lineState,
-  lyricsSourceLabel,
-  onSeek,
-  timedLines,
-  useLyrics,
-} from "./lyrics";
+import { LyricExtras, useLyricExtras, type Extras } from "./lyricExtras";
+import { followTarget, lineState, onSeek, timedLines, useLyrics } from "./lyrics";
 import { useCoverColors } from "./nowPlaying";
-import { TranscribeOffer } from "./TranscribeOffer";
+import { NoLyrics } from "./TranscribeOffer";
 import { LyricWords, usePlayhead } from "./lyricWords";
-import { LyricsNotice, LyricsTools, tapLine } from "./LyricsTrust";
+import { LyricsFooter, LyricsNotice, tapLine } from "./LyricsTrust";
 import "./lyrics.css";
 import "./lyrics-editor.css";
 
@@ -85,7 +74,7 @@ function SyncedLyrics({
   credit?: string;
   className: string;
   footer?: ReactNode;
-  /** Under the lyrics: the check note, timing stepper, Tap to sync and Wrong lyrics?. */
+  /** Under the lyrics: where they came from and the options menu. */
   tools?: ReactNode;
   /** A line clicked while tapping to sync (true: used, don't seek). */
   onTap?: (line: LyricLine) => boolean;
@@ -248,9 +237,9 @@ function SyncedLyrics({
           {footer}
         </div>
         {!following && (
-          <button type="button" className="lyrics__sync" aria-label="Sync to the current line" onClick={resume}>
-            <AudioLines size={14} aria-hidden="true" />
-            Sync
+          <button type="button" className="lyrics__sync" aria-label="Follow along from the current line" onClick={resume}>
+            <LocateFixed size={14} aria-hidden="true" />
+            Follow along
           </button>
         )}
       </div>
@@ -320,9 +309,8 @@ function PlainLyrics({
  * bright, a little above the middle; click a line to seek there). A hand
  * scroll stops following until Sync. Unsynced lyrics
  * say so at the top and are plain text in one tint: no follow, no seeking.
- * Under them: where they came from, and Edit for lyrics the user wrote.
- * A live version showing lyrics timed to another version says so (and
- * offers to transcribe the song, when transcription is on).
+ * Under them, one quiet row: where they came from and the options menu.
+ * A live version showing lyrics timed to another version says so.
  */
 export function LyricsView({ lyrics, track }: { lyrics: Lyrics; track: Track }) {
   const timed = timedLines(lyrics);
@@ -330,16 +318,8 @@ export function LyricsView({ lyrics, track }: { lyrics: Lyrics; track: Track }) 
   const texts = timed ? timed.map((l) => l.text) : lyrics.lines;
   const borrowed = !!lyrics.borrowedTiming;
   const extras = useLyricExtras(texts);
-  const footer = (
-    <>
-      <TranslateButton extras={extras} />
-      {borrowed && timed && <p className="lyrics__borrowed">{BORROWED_NOTE}</p>}
-      <LyricPickBar track={track} texts={texts} />
-      <LyricsSourceLine lyrics={lyrics} track={track} />
-      {borrowed && <TranscribeOffer trackId={track.id} />}
-    </>
-  );
-  const tools = <LyricsTools lyrics={lyrics} track={track} synced={!!timed} />;
+  const footer = borrowed && timed ? <p className="lyrics__borrowed">{BORROWED_NOTE}</p> : undefined;
+  const tools = <LyricsFooter lyrics={lyrics} track={track} synced={!!timed} texts={texts} extras={extras} />;
   return timed ? (
     <SyncedLyrics
       key={track.id}
@@ -365,116 +345,29 @@ export function LyricsView({ lyrics, track }: { lyrics: Lyrics; track: Track }) 
   );
 }
 
-/**
- * The expanded view's lyrics mode for whatever is playing: the lyrics, a
- * loading placeholder, or "No lyrics for this song" with Add lyrics and the
- * transcribe offer.
- */
-export function LyricsPane() {
-  const track = usePlayer((s) => s.state?.track);
-  const { lyrics, loading, info } = useLyrics(track?.id);
-  const showAdd = useSettings((s) => s.settings?.lyricsShowAdd ?? true);
-
-  if (!track) return <p className="lyrics-page__empty">Nothing playing.</p>;
-  if (loading)
-    return (
-      <div className="lyrics-page__loading" aria-label="Loading lyrics">
-        {[70, 55, 80, 45].map((w, i) => (
-          <Skeleton key={i} width={`${w}%`} height={32} />
-        ))}
-      </div>
-    );
-  if (!lyrics && info?.notice)
-    return (
-      <>
-        <LyricsNotice info={info} track={track} />
-        {info.notice === "noneMatched" && <TranscribeOffer trackId={track.id} />}
-      </>
-    );
-  if (!lyrics)
-    return (
-      <div className="lyrics-page__empty-wrap">
-        <p className="lyrics-page__empty">No lyrics for this song</p>
-        {showAdd && (
-          <Button variant="primary" icon={<PenLine size={16} />} onClick={() => openLyricsEditor(track)}>
-            Add lyrics
-          </Button>
-        )}
-        <TranscribeOffer trackId={track.id} />
-      </div>
-    );
-  return <LyricsView lyrics={lyrics} track={track} />;
-}
-
-/**
- * Share lyrics: a button that starts picking lines (clicks pick instead of
- * seeking), then a bar with how many are picked, Share lyrics and Cancel.
- */
-export function LyricPickBar({ track, texts }: { track: Track; texts: string[] }) {
-  const pick = useLyricPick();
-  const mine = pick.picking && pick.trackId === track.id;
-  // A new song ends picking.
-  useEffect(() => {
-    const p = useLyricPick.getState();
-    if (p.picking && p.trackId !== track.id) p.cancel();
-  }, [track.id]);
-  useEffect(() => () => useLyricPick.getState().cancel(), []);
-  if (!mine)
-    return (
-      <p className="lyrics__share">
-        <button type="button" className="lyrics__source-edit" onClick={() => pick.start(track.id)}>
-          <ImageIcon size={14} aria-hidden="true" /> Share lyrics
-        </button>
-      </p>
-    );
-  const n = pick.picked.length;
+/** The loading placeholder: grey bars where lines go. */
+function LyricsLoading() {
   return (
-    <div className="lyrics__pickbar" role="group" aria-label="Pick lyrics to share">
-      <span className="lyrics__pickcount" aria-live="polite">
-        {n === 0 ? `Pick up to ${LYRIC_LINES_MAX} lines` : `${n} of ${LYRIC_LINES_MAX} lines`}
-      </span>
-      <Button variant="ghost" size="sm" onClick={pick.cancel}>
-        Cancel
-      </Button>
-      <Button
-        variant="primary"
-        size="sm"
-        disabled={n === 0}
-        onClick={() => {
-          const lines = pick.picked.map((i) => texts[i]).filter(Boolean);
-          pick.cancel();
-          openShareCard({
-            kind: "track",
-            id: track.id,
-            title: track.title,
-            subtitle: trackArtistLine(track),
-            thumb: track.thumb,
-            durationMs: track.durationMs,
-            lyrics: lines,
-          });
-        }}
-      >
-        Share lyrics
-      </Button>
+    <div className="lyrics-page__loading" aria-label="Loading lyrics">
+      {[70, 55, 80, 45].map((w, i) => (
+        <Skeleton key={i} width={`${w}%`} height={32} />
+      ))}
     </div>
   );
 }
 
-function LyricsSourceLine({ lyrics, track }: { lyrics: Lyrics; track: Track }) {
-  const label = lyricsSourceLabel(lyrics);
-  const own = useLyricsEditor((s) => s.ownIds.has(track.id));
-  // Your own lyrics or a transcription to fix, or ones you wrote that Plex's are showing over.
-  const mine = lyrics.source === "user" || lyrics.source === "auto";
-  const edit = mine || own;
-  if (!label && !edit) return null;
-  return (
-    <p className="lyrics__source">
-      {label && <span>{label}</span>}
-      {edit && (
-        <button type="button" className="lyrics__source-edit" onClick={() => openLyricsEditor(track)}>
-          {mine ? "Edit" : "Edit your lyrics"}
-        </button>
-      )}
-    </p>
-  );
+/**
+ * The expanded view's lyrics mode for whatever is playing: the lyrics, a
+ * loading placeholder, or, for a song without any, the words being written
+ * down (when this computer can) or "No lyrics for this song".
+ */
+export function LyricsPane() {
+  const track = usePlayer((s) => s.state?.track);
+  const { lyrics, loading, info } = useLyrics(track?.id);
+
+  if (!track) return <p className="lyrics-page__empty">Nothing playing.</p>;
+  if (loading || (!lyrics && info?.notice === "checking")) return <LyricsLoading />;
+  if (!lyrics && info?.notice && info.notice !== "noneMatched") return <LyricsNotice info={info} track={track} />;
+  if (!lyrics) return <NoLyrics track={track} />;
+  return <LyricsView lyrics={lyrics} track={track} />;
 }

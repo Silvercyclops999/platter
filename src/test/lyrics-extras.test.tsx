@@ -2,6 +2,7 @@
  * Pronunciation and translation lines under lyrics, and their settings.
  */
 import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { chooseLyricsOption, lyricsOptions } from "./lyricsOptions";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { backend } from "../lib/backend";
@@ -95,7 +96,7 @@ describe("translation", () => {
     at(plain, 40_000);
     render(<LyricsPane />);
     await screen.findByLabelText("Lyrics", { selector: ".lyrics__scroll" });
-    expect(screen.queryByRole("button", { name: "Translate" })).toBeNull();
+    expect(await lyricsOptions()).not.toContain("Translate");
     expect(tr).not.toHaveBeenCalled();
   });
 
@@ -104,10 +105,10 @@ describe("translation", () => {
     await withSettings({ translationService: "https://tr.example.com", translateTo: "fr" });
     at(plain, 40_000);
     render(<LyricsPane />);
-    await user.click(await screen.findByRole("button", { name: "Translate" }));
+    await chooseLyricsOption("Translate");
     await waitFor(() => expect(view().querySelectorAll(".lyrics__extra--trans").length).toBeGreaterThan(5));
     expect(view().querySelector(".lyrics__extra--trans")!.textContent).toMatch(/^\[fr\] /);
-    await user.click(screen.getByRole("button", { name: "Hide translation" }));
+    await chooseLyricsOption("Hide translation");
     expect(view().querySelector(".lyrics__extra--trans")).toBeNull();
   });
 
@@ -117,16 +118,16 @@ describe("translation", () => {
     const tr = vi.spyOn(backend, "lyricsTranslate");
     at(plain, 40_000);
     const { unmount } = render(<LyricsPane />);
-    await user.click(await screen.findByRole("button", { name: "Translate" }));
+    await chooseLyricsOption("Translate");
     await waitFor(() => expect(view().querySelector(".lyrics__extra--trans")).not.toBeNull());
     unmount();
     render(<LyricsPane />);
-    await user.click(await screen.findByRole("button", { name: "Translate" }));
+    await chooseLyricsOption("Translate");
     await waitFor(() => expect(view().querySelector(".lyrics__extra--trans")).not.toBeNull());
     expect(tr).toHaveBeenCalledTimes(1);
     // Another language is another translation.
     await withSettings({ translationService: "https://tr.example.com", translateTo: "de" });
-    await user.click(await screen.findByRole("button", { name: "Translate" }));
+    await chooseLyricsOption("Translate");
     await waitFor(() => expect(view().querySelector(".lyrics__extra--trans")!.textContent).toMatch(/^\[de\] /));
     expect(tr).toHaveBeenCalledTimes(2);
   });
@@ -137,10 +138,10 @@ describe("translation", () => {
     mock.translateFails = true;
     at(plain, 40_000);
     render(<LyricsPane />);
-    await user.click(await screen.findByRole("button", { name: "Translate" }));
+    await chooseLyricsOption("Translate");
     await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.message)).toContain("Couldn't reach the translation service."));
     expect(document.querySelector(".lyrics__extra--trans")).toBeNull();
-    expect(screen.getByRole("button", { name: "Translate" })).toHaveAttribute("aria-pressed", "false");
+    expect(await lyricsOptions()).toContain("Translate");
   });
 });
 

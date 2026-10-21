@@ -1385,6 +1385,8 @@ pub fn run() {
                 transcriber.set_defer(Arc::new(move || bridge_for_lyrics.lyrics_takes_over()));
                 transcriber.set_pace(initial.transcribe_processor, initial.transcribe_pause_busy, initial.transcribe_faster_away);
                 *live.transcriber.lock() = Some(transcriber.clone());
+                // Songs without lyrics are written down as they play.
+                lyrics::transcribe::commands::follow_playback(transcriber.clone(), player.clone(), player.subscribe_tracking());
                 tauri::async_runtime::spawn({
                     let t = transcriber.clone();
                     async move { t.spawn() }
