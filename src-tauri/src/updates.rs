@@ -30,6 +30,12 @@ const STALE: Duration = Duration::from_secs(60 * 60);
 const LAUNCH_WINDOW: Duration = Duration::from_secs(3 * 60);
 /// How long "Updating Platter" shows before the restart, so it can be put off.
 const NOTICE: Duration = Duration::from_secs(8);
+/// A Not now pressed as the note ends still counts.
+const GRACE: Duration = Duration::from_secs(1);
+/// The version last installed straight after launch, in the app data folder.
+/// If the same version turns up again the install didn't take: it waits for
+/// quit instead, so a bad release can't restart the app on every launch.
+const TRIED_FILE: &str = "update-tried.txt";
 
 pub struct Updates {
     /// A downloaded update waiting to be installed.
@@ -69,10 +75,10 @@ enum Install {
     Ask,
 }
 
-fn install_when(auto: bool, since_launch: Duration, playing: bool, put_off: bool) -> Install {
+fn install_when(auto: bool, since_launch: Duration, playing: bool, put_off: bool, tried_before: bool) -> Install {
     if !auto {
         Install::Ask
-    } else if since_launch <= LAUNCH_WINDOW && !playing && !put_off {
+    } else if since_launch <= LAUNCH_WINDOW && !playing && !put_off && !tried_before {
         Install::Now
     } else {
         Install::OnQuit
@@ -209,19 +215,29 @@ async fn playing(app: &AppHandle) -> bool {
 /// (just launched, nothing playing), or say it's ready.
 async fn downloaded(app: &AppHandle, version: String) {
     let state = app.state::<Updates>();
+    let tried = tried_file(app);
+    let tried_before = tried.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).is_some_and(|v| v.trim() == version);
     let when = install_when(
         state.auto.load(Ordering::Relaxed),
         state.started.elapsed(),
         playing(app).await,
         state.put_off.load(Ordering::Relaxed),
+        tried_before,
     );
     if when != Install::Now {
         return say_ready(app, version);
     }
     let _ = app.emit("update://installing", Installing { version: version.clone(), seconds: NOTICE.as_secs() });
-    tokio::time::sleep(NOTICE).await;
-    // Put off, or music started meanwhile: it waits for quit.
-    if state.put_off.load(Ordering::Relaxed) || playing(app).await {
+    tokio::time::sleep(NOTICE + GRACE).await;
+    // Put off, switched off, or music started meanwhile: it waits for quit.
+    if state.put_off.load(Ordering::Relaxed) || !state.auto.load(Ordering::Relaxed) || playing(app).await {
+        return say_ready(app, version);
+    }
+    if let Some(p) = &tried
+        && let Err(e) = std::fs::write(p, &version)
+    {
+        // Without the note a bad release could restart every launch: ask instead.
+        tracing::warn!("couldn't note the update being installed: {e}");
         return say_ready(app, version);
     }
     if let Err(e) = install_and_restart(app).await {
@@ -229,6 +245,10 @@ async fn downloaded(app: &AppHandle, version: String) {
         let toast = Toast { kind: "error".into(), message: "Couldn't install the update. Platter tries again when you quit.".into() };
         let _ = app.emit(EVENT_TOAST, toast);
     }
+}
+
+fn tried_file(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path().app_data_dir().ok().map(|d| d.join(TRIED_FILE))
 }
 
 /// Flush playback state, install the waiting update and restart into it.
@@ -241,7 +261,12 @@ async fn install_and_restart(app: &AppHandle) -> AppResult<()> {
     if let Some(player) = app.try_state::<crate::audio::player::PlayerHandle>() {
         player.flush().await;
     }
-    install_or_keep(&state.ready, |(update, bytes)| update.install(bytes).map_err(err))?;
+    install_or_keep(&state.ready, |(update, bytes)| {
+        // The Windows installer ends the process itself: clear the tray icon first.
+        #[cfg(windows)]
+        app.cleanup_before_exit();
+        update.install(bytes).map_err(err)
+    })?;
     app.restart();
 }
 
@@ -364,21 +389,28 @@ mod tests {
     #[test]
     fn just_after_launch_with_nothing_playing_it_installs_straight_away() {
         let soon = Duration::from_secs(30);
-        assert_eq!(install_when(true, soon, false, false), Install::Now);
-        assert_eq!(install_when(true, LAUNCH_WINDOW, false, false), Install::Now);
+        assert_eq!(install_when(true, soon, false, false, false), Install::Now);
+        assert_eq!(install_when(true, LAUNCH_WINDOW, false, false, false), Install::Now);
     }
 
     #[test]
     fn music_playing_a_later_find_or_not_now_waits_for_quit() {
         let soon = Duration::from_secs(30);
-        assert_eq!(install_when(true, soon, true, false), Install::OnQuit, "never cuts a song off");
-        assert_eq!(install_when(true, LAUNCH_WINDOW + Duration::from_secs(1), false, false), Install::OnQuit, "hours later");
-        assert_eq!(install_when(true, soon, false, true), Install::OnQuit, "the user said Not now");
+        assert_eq!(install_when(true, soon, true, false, false), Install::OnQuit, "never cuts a song off");
+        assert_eq!(install_when(true, LAUNCH_WINDOW + Duration::from_secs(1), false, false, false), Install::OnQuit, "hours later");
+        assert_eq!(install_when(true, soon, false, true, false), Install::OnQuit, "the user said Not now");
+    }
+
+    #[test]
+    fn an_update_that_did_not_take_never_restarts_the_app_again() {
+        // Installed at the last launch, yet offered again: the install failed
+        // or the release is mislabelled. Restarting would loop every launch.
+        assert_eq!(install_when(true, Duration::from_secs(30), false, false, true), Install::OnQuit);
     }
 
     #[test]
     fn with_update_by_itself_off_it_only_asks() {
-        assert_eq!(install_when(false, Duration::from_secs(30), false, false), Install::Ask);
+        assert_eq!(install_when(false, Duration::from_secs(30), false, false, false), Install::Ask);
         assert!(!install_on_exit(false, None), "quitting doesn't install either");
     }
 

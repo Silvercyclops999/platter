@@ -2253,6 +2253,13 @@ pub fn run() {
             {
                 d.sync.kick();
             }
+            // Quitting from the Dock, logging out or shutting down on a Mac
+            // skips ExitRequested: install a waiting update here too (a
+            // second call finds nothing waiting).
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Exit = event {
+                updates::quitting(app, None);
+            }
             if let tauri::RunEvent::ExitRequested { code, .. } = event {
                 // So a log that ends shows whether the app closed or stopped.
                 tracing::info!("Platter is closing");

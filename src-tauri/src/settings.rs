@@ -4663,6 +4663,7 @@ mod tests {
             media_session: Some(false),
             close_to_tray: Some(true),
             launch_at_login: Some(true),
+            update_by_itself: Some(false),
             ab_loop_handles: Some(false),
             up_next_line: Some(false),
             volume_percent: Some(false),
@@ -4926,6 +4927,7 @@ mod tests {
         assert_eq!(v["mediaSession"], true);
         assert_eq!(v["closeToTray"], false);
         assert_eq!(v["launchAtLogin"], false);
+        assert_eq!(v["updateByItself"], true);
         assert_eq!(v["abLoopHandles"], true);
         assert_eq!(v["upNextLine"], true);
         assert_eq!(v["volumePercent"], true);
