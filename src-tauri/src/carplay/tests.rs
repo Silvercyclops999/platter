@@ -133,9 +133,10 @@ async fn an_artist_opens_popular_then_their_albums_newest_first() {
 /// with the Older releases rows from the first.
 fn artist_pages(db: &crate::db::DbHandle, which: &CarList, room: usize) -> Vec<Vec<CarItem>> {
     let mut pages = vec![db.read(|c| page(c, which, 10.0, 0, room)).unwrap()];
-    while let Some(CarAction::Turn { list, page: next }) = pages.last().unwrap().last().map(|r| r.action.clone()) {
+    while let Some(CarAction::Turn { list, page: next, room: laid }) = pages.last().unwrap().last().map(|r| r.action.clone()) {
         assert_eq!(&list, which, "a page turns to the same artist");
         assert_eq!(next, pages.len(), "Older releases turns to the next page");
+        assert_eq!(laid, room.clamp(LIST_SHORT, LIST_MAX), "a turn carries the room its pages were laid out for");
         pages.push(db.read(|c| page(c, which, 10.0, next, room)).unwrap());
         assert!(pages.len() < 100, "the pages end");
     }
@@ -266,16 +267,18 @@ fn releases_sort_newest_first_with_unreleased_and_undated_last() {
 
 #[test]
 fn names_file_under_their_first_letter_without_accents() {
-    assert_eq!(letter("Abba"), 'A');
-    assert_eq!(letter("élan"), 'E');
-    assert_eq!(letter("\u{201c}Heroes\u{201d}"), 'H', "quotes are skipped");
-    assert_eq!(letter("2Pac"), '#');
-    assert_eq!(letter("坂本龍一"), '#');
-    assert_eq!(letter(""), '#', "a blank name still files somewhere");
+    assert_eq!(filing("Abba").0, 'A');
+    assert_eq!(filing("élan").0, 'E');
+    assert_eq!(filing("\u{201c}Heroes\u{201d}").0, 'H', "quotes are skipped");
+    assert_eq!(filing("2Pac").0, '#');
+    assert_eq!(filing("坂本龍一").0, '#');
+    assert_eq!(filing("").0, '#', "a blank name still files somewhere");
+    assert_eq!(filing("\u{c5}ngel").1, "angel", "sorted without accents or case");
+    assert_eq!(filing("'Til Dawn").1, "til dawn", "nor what comes before the first letter");
 }
 
-fn rows_titled(names: &[&str]) -> Vec<(char, CarItem)> {
-    names.iter().map(|n| (letter(n), info(n, None))).collect()
+fn rows_titled(names: &[&str]) -> Vec<((char, String), CarItem)> {
+    names.iter().map(|n| (filing(n), info(n, None))).collect()
 }
 
 #[test]
@@ -338,6 +341,25 @@ fn every_letter_gets_its_own_row_when_there_is_room() {
 }
 
 #[test]
+fn accented_names_sort_among_the_rest_of_their_letter() {
+    let rows = a_to_z(&CarList::Albums, rows_titled(&["Avalon", "\u{c5}ngel", "abba"]), ("album", "albums"), 0, LIST_SHORT);
+    let titles: Vec<&str> = rows.iter().map(|r| r.title.as_str()).collect();
+    assert_eq!(titles, ["abba", "\u{c5}ngel", "Avalon"]);
+}
+
+#[test]
+fn a_big_letter_does_not_swallow_a_small_one() {
+    // 5 under A, 400 under B, one under each of C to Z and #.
+    let mut all = names("A", 5);
+    all.extend(names("B", 400));
+    all.extend(names("CDEFGHIJKLMNOPQRSTUVWXYZ1", 1));
+    let refs: Vec<&str> = all.iter().map(String::as_str).collect();
+    let index = a_to_z(&CarList::Artists, rows_titled(&refs), ("artist", "artists"), 0, LIST_SHORT);
+    let titles: Vec<&str> = index.iter().map(|r| r.title.as_str()).collect();
+    assert_eq!(titles, ["A", "B", "C to Z and #"], "A keeps a row of its own");
+}
+
+#[test]
 fn a_page_past_the_letters_goes_back_to_them() {
     // The library shrank, or the car gave more room, between two turns.
     let all = names("ABCDEFGHIJKLMN", 3);
@@ -367,7 +389,7 @@ fn page_turns_stay_when_offline() {
         title: "Older releases".into(),
         subtitle: Some("3 more".into()),
         thumb: None,
-        action: CarAction::Turn { list: CarList::Artist { id: "1".into(), name: "A".into() }, page: 1 },
+        action: CarAction::Turn { list: CarList::Artist { id: "1".into(), name: "A".into() }, page: 1, room: LIST_SHORT },
     };
     let kept = Kept::default();
     assert_eq!(offline_rows(vec![turn.clone()], &kept, true), vec![turn.clone()], "turning a page needs no signal");

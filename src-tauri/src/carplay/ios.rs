@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 
 use block2::RcBlock;
 use objc2::rc::Retained;
-use objc2::runtime::{AnyClass, AnyObject, Imp, ProtocolObject, Sel};
+use objc2::runtime::{AnyClass, AnyObject, Bool, Imp, ProtocolObject, Sel};
 use objc2::{AnyThread, ClassType, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send, sel};
 use objc2_car_play::{
     CPInterfaceController, CPListImageRowItem, CPListImageRowItemRowElement, CPListItem, CPListItemAccessoryType, CPListSection, CPListTemplate, CPListTemplateItem,
@@ -23,7 +23,7 @@ use objc2_car_play::{
     CPNowPlayingTemplate, CPNowPlayingTemplateObserver, CPSelectableListItem, CPTabBarTemplate, CPTemplate,
     CPTemplateApplicationScene, CPTemplateApplicationSceneDelegate, CPTemplateApplicationSceneSessionRoleApplication,
 };
-use objc2_foundation::{NSArray, NSData, NSObject, NSObjectProtocol, NSString};
+use objc2_foundation::{NSArray, NSData, NSError, NSObject, NSObjectProtocol, NSString};
 use objc2_ui_kit::{UIScene, UISceneConnectionOptions, UISceneDelegate, UISceneSession};
 use tauri::{AppHandle, Listener, Manager, Wry};
 
@@ -663,19 +663,44 @@ fn toggle_like() {
 /// Screens CarPlay lets an audio app stack, the tab bar included.
 const DEPTH_MAX: usize = 5;
 
-/// Pushes a template, going back to the tabs first when the screens are
-/// already as deep as CarPlay allows (it won't take a deeper one).
+/// A completion block for a push or pop: CarPlay reports a failure to it
+/// instead of throwing (which would end the app).
+fn logged(what: &'static str) -> RcBlock<dyn Fn(Bool, *mut NSError)> {
+    RcBlock::new(move |ok: Bool, _error: *mut NSError| {
+        if !ok.as_bool() {
+            tracing::warn!("CarPlay {what} refused");
+        }
+    })
+}
+
+/// Shows a template. One already in the stack (Now Playing, when a song is
+/// picked in a list opened from it) is gone back to, as CarPlay won't stack
+/// a template twice. When the screens are as deep as CarPlay allows, back to
+/// the tabs first, then the push.
 ///
 /// # Safety
 /// Main thread.
-unsafe fn push(controller: &CPInterfaceController, t: &CPTemplate) {
+unsafe fn push(controller: &Retained<CPInterfaceController>, t: &CPTemplate) {
     // SAFETY: the caller is on the main thread.
-    unsafe {
-        if controller.templates().count() >= DEPTH_MAX {
-            controller.popToRootTemplateAnimated_completion(false, None);
-        }
-        controller.pushTemplate_animated_completion(t, true, None);
+    let stack = unsafe { controller.templates() };
+    if stack.to_vec().iter().any(|s| std::ptr::eq(&**s, t)) {
+        // SAFETY: main thread; `t` is in the stack.
+        unsafe { controller.popToTemplate_animated_completion(t, true, Some(&logged("pop to a screen"))) };
+        return;
     }
+    if stack.count() < DEPTH_MAX {
+        // SAFETY: main thread.
+        unsafe { controller.pushTemplate_animated_completion(t, true, Some(&logged("push"))) };
+        return;
+    }
+    let (c, t) = (controller.clone(), t.retain());
+    // Push once the pop is done, so the two don't cross.
+    let then = RcBlock::new(move |_popped: Bool, _error: *mut NSError| {
+        // SAFETY: CarPlay calls completions on the main thread.
+        unsafe { c.pushTemplate_animated_completion(&t, true, Some(&logged("push"))) };
+    });
+    // SAFETY: main thread.
+    unsafe { controller.popToRootTemplateAnimated_completion(false, Some(&then)) };
 }
 
 /// Now Playing's album button: the playing song's album, opened to its
@@ -690,7 +715,7 @@ fn show_now_album() {
             Ok(Some(list)) => {
                 let _ = app.run_on_main_thread(move || {
                     if let Some(app) = APP.get() {
-                        open_list(app, &list, 0, false);
+                        open_list(app, &list, 0, None);
                     }
                 });
             }
@@ -1061,8 +1086,8 @@ const COVER_PX: u32 = 240;
 fn picked(action: &CarAction) {
     let Some(app) = APP.get() else { return };
     match action {
-        CarAction::Open(list) => open_list(app, list, 0, false),
-        CarAction::Turn { list, page } => open_list(app, list, *page, true),
+        CarAction::Open(list) => open_list(app, list, 0, None),
+        CarAction::Turn { list, page, room } => open_list(app, list, *page, Some(*room)),
         CarAction::Jump(item_id) => {
             let item_id = item_id.clone();
             with_player(move |p| async move { p.queue_jump(item_id).await });
@@ -1110,19 +1135,40 @@ fn picked(action: &CarAction) {
     }
 }
 
+/// A list showing in the car, handed to a background task and back; it is
+/// only touched on the main thread.
+struct ShowingList(Retained<CPListTemplate>);
+// SAFETY: taken on the main thread and only used there again (inside
+// `run_on_main_thread`); the task in between just carries it.
+unsafe impl Send for ShowingList {}
+
 /// Reads a page of a list off the main thread, then shows it there: pushed,
-/// or (`in_place`, another page of the list showing) in place of that one,
-/// so turning pages never goes deeper than the car allows.
-fn open_list(app: &AppHandle<Wry>, which: &CarList, page: usize, in_place: bool) {
+/// or (`turn`: another page of the list showing, laid out for that many
+/// rows) in place of that one, so turning pages never goes deeper than the
+/// car allows.
+fn open_list(app: &AppHandle<Wry>, which: &CarList, page: usize, turn: Option<usize>) {
     let app = app.clone();
     let which = which.clone();
     let offline = REACH.with(Cell::get) == Some(Reach::Unreachable);
+    let mtm = MainThreadMarker::new();
     // Rows the car shows now; some cut lists short while driving. A class
     // property, read on the main thread (list handlers run there).
-    let room = match MainThreadMarker::new() {
+    let room = match (turn, mtm) {
+        (Some(room), _) => room,
         // SAFETY: main thread.
-        Some(mtm) => unsafe { CPListTemplate::maximumItemCount(mtm) },
-        None => super::LIST_SHORT,
+        (None, Some(mtm)) => unsafe { CPListTemplate::maximumItemCount(mtm) },
+        (None, None) => super::LIST_SHORT,
+    };
+    // The list whose Older, Newer, More or letter row was picked: the one
+    // showing now. Only it gets the new page.
+    let showing = match (turn, mtm) {
+        (Some(_), Some(_)) => CAR
+            .with(|c| c.borrow().clone())
+            // SAFETY: main thread.
+            .and_then(|c| unsafe { c.topTemplate() })
+            .and_then(|t| t.downcast::<CPListTemplate>().ok())
+            .map(ShowingList),
+        _ => None,
     };
     tauri::async_runtime::spawn_blocking(move || {
         let db = app.state::<DbHandle>();
@@ -1140,17 +1186,21 @@ fn open_list(app: &AppHandle<Wry>, which: &CarList, page: usize, in_place: bool)
             EXPLICIT.with(|e| *e.borrow_mut() = marks);
             let Some(controller) = CAR.with(|c| c.borrow().clone()) else { return };
             let Some(mtm) = MainThreadMarker::new() else { return };
-            if in_place {
-                // SAFETY: main thread; the list showing is the one whose
-                // Older or Newer row was picked.
-                let top = unsafe { controller.topTemplate() }.and_then(|t| t.downcast::<CPListTemplate>().ok());
-                if let Some(top) = top {
-                    let section = CarSection { header: None, rows: items.iter().cloned().map(CarRow::Item).collect() };
-                    let sections = list_sections(mtm, &[section], false);
-                    // SAFETY: main thread, sections we own.
-                    unsafe { top.updateSections(&NSArray::from_retained_slice(&sections)) };
+            if turn.is_some() {
+                // Gone back from it while the page was read: leave the
+                // list showing now alone.
+                let Some(ShowingList(list)) = showing else { return };
+                // SAFETY: main thread.
+                let top = unsafe { controller.topTemplate() };
+                let list_t: &CPTemplate = &list;
+                if !top.is_some_and(|t| std::ptr::eq(&*t, list_t)) {
                     return;
                 }
+                let section = CarSection { header: None, rows: items.into_iter().map(CarRow::Item).collect() };
+                let sections = list_sections(mtm, &[section], false);
+                // SAFETY: main thread, sections we own.
+                unsafe { list.updateSections(&NSArray::from_retained_slice(&sections)) };
+                return;
             }
             let t = list_template(mtm, which.title(), &items, false);
             // SAFETY: main thread, our template.

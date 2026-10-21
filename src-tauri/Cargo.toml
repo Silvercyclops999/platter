@@ -140,7 +140,7 @@ objc2 = "0.6"
 block2 = "0.6"
 # Main-queue work for Bonjour (other Platters on the Wi-Fi).
 dispatch2 = "0.3"
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSString", "NSDictionary", "NSValue", "NSArray", "NSObject", "NSData", "NSNotification", "NSOperation"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSString", "NSDictionary", "NSValue", "NSArray", "NSObject", "NSData", "NSNotification", "NSOperation", "NSError"] }
 objc2-media-player = { version = "0.3.2", default-features = false, features = ["std", "block2", "MPNowPlayingInfoCenter", "MPRemoteCommandCenter", "MPRemoteCommand", "MPRemoteCommandEvent", "MPMediaItem", "MPNowPlayingInfoLanguageOption"] }
 objc2-ui-kit = { version = "0.3.2", default-features = false, features = ["std", "UIImage", "UIScene", "UISceneDefinitions", "UISceneOptions", "UISceneSession", "UIResponder", "UIApplication"] }
 # CarPlay: the car's screen, built from Apple's templates.

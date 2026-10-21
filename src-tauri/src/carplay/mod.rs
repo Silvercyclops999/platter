@@ -58,7 +58,9 @@ pub enum CarAction {
     Open(CarList),
     /// Show another page of this list in place of the one showing, so a
     /// long list never goes deeper than the car allows.
-    Turn { list: CarList, page: usize },
+    /// `room` is the rows the pages were laid out for, so a page number
+    /// means the same rows when the car's limit changes in between.
+    Turn { list: CarList, page: usize, room: usize },
     /// Play this queue entry (its item id) now: a row in Up next.
     Jump(String),
     /// A message, not a choice: picking it does nothing.
@@ -248,12 +250,12 @@ pub fn page(c: &Connection, which: &CarList, liked_min: f64, page: usize, room: 
         CarList::Playlists => queries::home_playlists(c, LIST_MAX)?.into_iter().map(playlist_item).collect(),
         CarList::Albums => {
             let albums = every(|off| Ok(queries::albums(c, AlbumSort::Name, off, PAGE_READ, None)?.items))?;
-            let rows = albums.into_iter().map(|a| (letter(&a.sort_title), album_item(a))).collect();
+            let rows = albums.into_iter().map(|a| (filing(&a.sort_title), album_item(a))).collect();
             a_to_z(which, rows, ("album", "albums"), page, room.clamp(LIST_SHORT, LIST_MAX))
         }
         CarList::Artists => {
             let artists = every(|off| Ok(queries::artists(c, ArtistSort::Name, off, PAGE_READ)?.items))?;
-            let rows = artists.into_iter().map(|a| (letter(&a.sort_title), artist_item(a))).collect();
+            let rows = artists.into_iter().map(|a| (filing(&a.sort_title), artist_item(a))).collect();
             a_to_z(which, rows, ("artist", "artists"), page, room.clamp(LIST_SHORT, LIST_MAX))
         }
         CarList::Artist { id, .. } => artist(c, which, id, page, room.clamp(LIST_SHORT, LIST_MAX))?,
@@ -277,14 +279,23 @@ fn every<T>(mut read: impl FnMut(u32) -> AppResult<Vec<T>>) -> AppResult<Vec<T>>
     }
 }
 
-/// The letter a name files under: its first letter without accents, or #
-/// for numbers, symbols and other scripts.
-fn letter(sort_title: &str) -> char {
+/// Where a name files: the letter (its first letter without accents, or #
+/// for numbers, symbols and other scripts) and the name to sort by within
+/// it (from that first letter on, without accents or case).
+fn filing(sort_title: &str) -> (char, String) {
     use unicode_normalization::UnicodeNormalization;
-    match sort_title.nfd().find(|c| c.is_alphanumeric()).map(|c| c.to_ascii_uppercase()) {
+    use unicode_normalization::char::is_combining_mark;
+    let key: String = sort_title
+        .nfd()
+        .skip_while(|c| !c.is_alphanumeric())
+        .filter(|c| !is_combining_mark(*c))
+        .flat_map(char::to_lowercase)
+        .collect();
+    let letter = match key.chars().next().map(|c| c.to_ascii_uppercase()) {
         Some(c) if c.is_ascii_uppercase() => c,
         _ => '#',
-    }
+    };
+    (letter, key)
 }
 
 /// A run of letters on an A to Z list, and where its rows are.
@@ -319,10 +330,24 @@ fn letter_runs(letters: &[char], room: usize) -> Vec<Letters> {
             _ => buckets.push((*l, i, i + 1)),
         }
     }
-    let target = if buckets.len() <= room { 1 } else { letters.len().div_ceil(room) };
+    if buckets.len() <= room {
+        return runs_of(&buckets, 1, false);
+    }
+    // A run closes before a letter that would take it past its share, so a
+    // big letter doesn't swallow a small one next to it; when that needs
+    // more rows than the car has, runs just fill to their share.
+    let target = letters.len().div_ceil(room);
+    let tidy = runs_of(&buckets, target, true);
+    if tidy.len() <= room { tidy } else { runs_of(&buckets, target, false) }
+}
+
+fn runs_of(buckets: &[(char, usize, usize)], target: usize, tidy: bool) -> Vec<Letters> {
     let mut runs: Vec<Letters> = Vec::new();
-    for (l, start, end) in buckets {
-        let open = runs.last().is_some_and(|r| r.end - r.start < target);
+    for &(l, start, end) in buckets {
+        let open = runs.last().is_some_and(|r| {
+            let size = r.end - r.start;
+            size < target && (!tidy || size + (end - start) <= target)
+        });
         let run = match runs.last_mut() {
             Some(r) if open => r,
             _ => {
@@ -344,15 +369,15 @@ fn letter_runs(letters: &[char], room: usize) -> Vec<Letters> {
 /// When they don't all fit the car, the first page is a row per run of
 /// letters, and each run has its own pages (All letters first, More last);
 /// every page turns in place.
-fn a_to_z(which: &CarList, mut rows: Vec<(char, CarItem)>, noun: (&str, &str), page: usize, room: usize) -> Vec<CarItem> {
-    // Stable: A to Z as the library sorts names, # after Z.
-    rows.sort_by_key(|(l, _)| if *l == '#' { 26 } else { *l as u8 - b'A' });
+fn a_to_z(which: &CarList, mut rows: Vec<((char, String), CarItem)>, noun: (&str, &str), page: usize, room: usize) -> Vec<CarItem> {
+    // A to Z, # after Z.
+    rows.sort_by(|((a, ka), _), ((b, kb), _)| (*a == '#', a, ka).cmp(&(*b == '#', b, kb)));
     if rows.len() <= room {
         return rows.into_iter().map(|(_, r)| r).collect();
     }
-    let letters: Vec<char> = rows.iter().map(|(l, _)| *l).collect();
+    let letters: Vec<char> = rows.iter().map(|((l, _), _)| *l).collect();
     let runs = letter_runs(&letters, room);
-    let turn = |page| CarAction::Turn { list: which.clone(), page };
+    let turn = |page| CarAction::Turn { list: which.clone(), page, room };
     let count = |n: usize| if n == 1 { format!("1 {}", noun.0) } else { format!("{n} {}", noun.1) };
     // Every page after the first: its run, and its rows.
     let mut pages: Vec<(usize, usize, usize)> = Vec::new();
@@ -394,7 +419,7 @@ fn artist(c: &Connection, which: &CarList, id: &str, page: usize, room: usize) -
     let page = page.min(starts.len() - 1);
     let start = starts[page];
     let end = starts.get(page + 1).copied().unwrap_or(albums.len());
-    let turn = |page| CarAction::Turn { list: which.clone(), page };
+    let turn = |page| CarAction::Turn { list: which.clone(), page, room };
     let head = if page == 0 {
         CarItem { title: "Popular".to_string(), subtitle: None, thumb: None, action: play(ContextKind::Artist, id) }
     } else {
