@@ -45,9 +45,20 @@ fn num(v: &Value, k: &str) -> u64 {
     v.get(k).and_then(Value::as_u64).unwrap_or(0)
 }
 
-/// Deezer reports errors (quota, bad query) inside a 200.
-pub fn is_error(v: &Value) -> bool {
-    v.get("error").is_some()
+/// Deezer reports errors inside a 200. Quota (4) and busy (700) mean
+/// stop for now; the rest (no data, a bad query) are about this request.
+pub fn error(v: &Value) -> Option<DzError> {
+    let e = v.get("error")?;
+    Some(match e.get("code").and_then(Value::as_u64) {
+        Some(4 | 700) => DzError::Busy,
+        _ => DzError::NoData,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DzError {
+    Busy,
+    NoData,
 }
 
 /// The albums in a `search/album` answer.
@@ -111,7 +122,9 @@ fn same_artist(a: &str, b: &str) -> bool {
     if a.is_empty() || b.is_empty() {
         return a == b;
     }
-    a == b || a.contains(&b) || b.contains(&a)
+    // "Rue Ellis" is "Rue Ellis and Mara", but "Future" isn't "Future Islands".
+    let (short, long) = if a.len() <= b.len() { (&a, &b) } else { (&b, &a) };
+    long == short || long.starts_with(&format!("{short} and ")) || long.starts_with(&format!("{short} with "))
 }
 
 /// The search result that is our album: same artist and title (version

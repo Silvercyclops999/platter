@@ -282,8 +282,8 @@ thread_local! {
     static MARKABLE: RefCell<std::collections::VecDeque<(Retained<CPListItem>, CarItem)>> =
         const { RefCell::new(std::collections::VecDeque::new()) };
     static NOW_KEY: RefCell<NowKey> = RefCell::new(NowKey::default());
-    /// Rows to give the explicit mark as they're built (read off the main
-    /// thread with each list).
+    /// Rows to give the explicit mark as the next list is built (read off
+    /// the main thread with it; rows already shown keep theirs).
     static EXPLICIT: RefCell<ExplicitRows> = RefCell::new(ExplicitRows::default());
 }
 
@@ -673,7 +673,7 @@ fn show_up_next() {
             }
         };
         let _ = app.run_on_main_thread(move || {
-            EXPLICIT.with(|e| e.borrow_mut().extend(marks));
+            EXPLICIT.with(|e| *e.borrow_mut() = marks);
             let Some(controller) = CAR.with(|c| c.borrow().clone()) else { return };
             let Some(mtm) = MainThreadMarker::new() else { return };
             let t = list_template(mtm, "Up next", &items, false);
@@ -1077,7 +1077,7 @@ fn open_list(app: &AppHandle<Wry>, which: &CarList) {
         }
         let marks = db.read(|c| super::explicit_rows(c, &items)).unwrap_or_default();
         let _ = app.run_on_main_thread(move || {
-            EXPLICIT.with(|e| e.borrow_mut().extend(marks));
+            EXPLICIT.with(|e| *e.borrow_mut() = marks);
             let Some(controller) = CAR.with(|c| c.borrow().clone()) else { return };
             let Some(mtm) = MainThreadMarker::new() else { return };
             let t = list_template(mtm, which.title(), &items, false);

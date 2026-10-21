@@ -63,7 +63,8 @@ and your own Plex server.
   Deezer's own album id to list its songs. Nothing else goes: no song titles,
   account, server or file details. Unreleased albums are never looked up. The
   answers are kept on that device only, and your files are never changed. You
-  can turn it off with "Find explicit songs online" (Settings > Library).
+  can turn it off with "Find explicit songs online" (Settings > Library);
+  marks already found stay.
 - AcoustID, only if you turn on "Identify songs by sound" in Settings (it is
   off by default). Platter makes an audio fingerprint of a song on your
   computer and sends the fingerprint and the song's length in seconds,

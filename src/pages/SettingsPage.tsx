@@ -3693,7 +3693,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       section: "Library",
       title: "Find explicit songs online",
       description: "Asks Deezer which songs are explicit when the files don't say. Files never change.",
-      more: "When a song's file doesn't say whether it's explicit, Platter looks its album up on Deezer by artist and album name, in the background, and shows an E on the explicit songs. A file's own tag always wins. Unreleased music is never looked up, and your files are never changed.",
+      more: "When a song's file doesn't say whether it's explicit, Platter looks its album up on Deezer by artist and album name, in the background, and shows an E on the explicit songs. A file's own tag always wins. Unreleased music is never looked up, and your files are never changed. Off stops new lookups; marks already found stay.",
       control: (ids) => toggle(s, "explicitLookup", ids),
     },
     {
