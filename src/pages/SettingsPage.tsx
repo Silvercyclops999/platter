@@ -101,7 +101,7 @@ import {
   LidarrUrlField,
   useLidarr,
 } from "./LidarrSettings";
-import { LidarrHomeSides } from "./LidarrHomeSide";
+import { LidarrAwayProblem, useHomeSides } from "./LidarrHomeSide";
 import { LidarrArtistsList, LidarrChangesList, LidarrWaitingList, LidarrWorkStatus } from "./LidarrModes";
 import { LidarrRequestsList } from "./LidarrRequest";
 import { OfficialPrefixField, ShareMapEditor, StagingFolderField, UpgradesList } from "./LidarrUpgrade";
@@ -889,6 +889,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
   const scrobble = useScrobble();
   const ai = useAi();
   const lidarr = useLidarr();
+  const homeSides = useHomeSides();
   const history = usePlayHistory();
   const [removeHistory, setRemoveHistory] = useState<PlayHistorySource | null>(null);
   ensureCaps();
@@ -3102,27 +3103,26 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
           },
         ] satisfies RowDef[])
       : []),
-    // Integrations: Lidarr's home side (a computer at home or the Bridge answers away from home)
+    // Integrations: Lidarr away from home. A line only when it can't be reached.
+    {
+      key: "lidarrAway",
+      section: "Integrations",
+      page: "lidarr",
+      title: "Away from home",
+      description: "Lidarr can't be reached away from home right now.",
+      more: "Away from home, Platter tries Lidarr's home address, then its away address, then a computer of yours at home that has Lidarr set up, then the Bridge. Your devices find each other through your Plex account, so there's nothing to set up.",
+      control: () => null,
+      block: () => <LidarrAwayProblem sides={homeSides} />,
+      shown: !!homeSides?.problem,
+    },
     {
       key: "homeSideLidarr",
       section: "Integrations",
       page: "lidarr",
-      group: "Home side",
       title: "Let my other devices use Lidarr through this computer",
-      description: "Your own paired devices reach Lidarr through this one. The key stays here. This device only.",
-      more: "With Lidarr set up here, your phone and your other paired devices can get albums, see what's missing and send requests through this computer while Platter is open, on your home network or through the sealed relay away from home. Only your own devices signed in to the same account are answered, every request is checked the way the Bridge checks it, and the key never leaves this computer. This device only.",
+      description: "Your other devices reach Lidarr through this one while it's open. This device only.",
+      more: "With Lidarr set up here, your phone and your other devices on the same Plex account can get albums, see what's missing and send requests through this computer while Platter is open, at home or through the sealed relay away from home. Every request is checked the way the Bridge checks it, and the key never leaves this computer. This device only.",
       control: (ids) => toggle(s, "homeSideLidarr", ids),
-    },
-    {
-      key: "lidarrHomeSides",
-      section: "Integrations",
-      page: "lidarr",
-      group: "Home side",
-      title: "Home side",
-      description: "Your devices that let this one use Lidarr away from home, and which answers.",
-      more: "Away from home, Platter tries Lidarr's home address, then its away address, then a computer of yours at home that has Lidarr set up, then the Platter Bridge. A computer answers while Platter is open on it; the Bridge is on all the time.",
-      control: () => null,
-      block: () => <LidarrHomeSides />,
     },
     // Integrations: Platter Bridge. Each benefit's switch, under the card's More once one is paired.
     {

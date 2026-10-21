@@ -325,6 +325,7 @@ export const ADVANCED: ReadonlySet<string> = new Set([
   "aiModel",
   "lidarrAwayUrl",
   "lidarrHeaders",
+  "homeSideLidarr",
   "lidarrScanAfterImport",
   "lidarrFreeStaging",
   "upgradeOfficialPrefix",

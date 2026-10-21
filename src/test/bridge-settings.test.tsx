@@ -12,6 +12,7 @@ import {
   BridgeSettings,
   DOCKER_LINE,
   useBridgeStore,
+  bridgeLabel,
   bridgeMatches,
   bridgeVersionLine,
   envList,
@@ -72,16 +73,11 @@ describe("Settings > Bridge", () => {
     render(<BridgeSettings />);
     const card = await screen.findByTestId("bridge-setup");
     expect(card).toHaveTextContent("Platter works fully without it");
-    // What it does, in this order; only what it does today has words, the rest say Coming.
+    expect(within(card).getByRole("heading", { level: 3 })).toHaveTextContent(/^Bridge$/);
+    // Only what it does today, in order. Nothing that's still coming.
     const benefits = within(within(card).getByRole("list", { name: "What it does for you" })).getAllByRole("listitem");
-    expect(benefits.map((b) => b.querySelector(".bridge-benefit__title")?.textContent)).toEqual([
-      "Lyrics for every song",
-      "Sound analysis on the server",
-      "Downloads ready when you leave",
-      "Lidarr from anywhere",
-      "One listening history",
-    ]);
-    expect(benefits.map((b) => b.textContent?.includes("Coming"))).toEqual([false, true, true, false, true]);
+    expect(benefits.map((b) => b.querySelector(".bridge-benefit__title")?.textContent)).toEqual(["Lyrics for every song", "Lidarr from anywhere"]);
+    expect(card).not.toHaveTextContent("Coming");
     expect(benefits[0]).toHaveTextContent("Your computer never does the heavy work.");
     expect(BENEFITS.filter((b) => b.live).map((b) => b.key)).toEqual(["lyrics", "lidarr"]);
     // Two steps: copy one line (or the Unraid template), start it and sign it in to Plex.
@@ -105,10 +101,15 @@ describe("Settings > Bridge", () => {
     act(() => mock.bridgeFound());
     const row = await screen.findByTestId("bridge-row");
     expect(screen.queryByTestId("bridge-setup")).toBeNull();
-    expect(row).toHaveTextContent("Shed Bridge");
-    expect(row).toHaveTextContent("Answering");
+    // One Bridge is just "Bridge"; its own name waits under Details.
+    expect(within(row).getByRole("heading", { level: 3 })).toHaveTextContent(/^Bridge$/);
+    expect(row).toHaveTextContent("Working");
+    expect(row).not.toHaveTextContent("Shed Bridge");
+    const live = within(within(row).getByRole("list", { name: "What it does for you" })).getAllByRole("listitem");
+    expect(live.map((l) => l.querySelector(".bridge-live__title")?.textContent)).toEqual(["Lyrics", "Lidarr"]);
     expect(within(row).getByTestId("bridge-lyrics")).toHaveTextContent("Works 1 AM to 7 AM. 0 songs done, about 4,602 to go.");
     expect(within(row).getByTestId("bridge-lyrics")).toHaveTextContent("This computer leaves background transcribing to it.");
+    expect(within(row).getByText("Details").closest("details")).not.toHaveAttribute("open");
     expect(within(row).getByTestId("bridge-env")).toHaveTextContent("Set on the Bridge itself: Lidarr's address and Lidarr's key. It uses those, not what this computer sends.");
     expect(within(row).getByTestId("bridge-plex-link")).toHaveTextContent("open plex.tv/link and enter K3QZ");
     expect(within(row).getByTestId("bridge-music-path")).toHaveTextContent("MUSIC_PLEX_PATH to /data/media/Music on the Bridge so it can add albums itself");
@@ -121,10 +122,10 @@ describe("Settings > Bridge", () => {
     act(() => mock.bridgeFound());
     const row = await screen.findByTestId("bridge-row");
     await user.click(within(row).getByRole("button", { name: "Unpair" }));
-    await user.click(within(row).getByRole("button", { name: "Unpair Shed Bridge" }));
+    await user.click(within(row).getByRole("button", { name: "Unpair Bridge" }));
     expect(await screen.findByTestId("bridge-setup")).toBeInTheDocument();
     expect(screen.queryByTestId("bridge-row")).toBeNull();
-    await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.message).join(" ")).toMatch(/It won't link to this device again/));
+    await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.message).join(" ")).toMatch(/^The Bridge was unpaired. It won't link to this device again/));
   });
 
   it("says plainly when the lyrics work is off, can't run, or the Bridge is too old for it", async () => {
@@ -155,6 +156,16 @@ describe("Settings > Bridge", () => {
     mock.bridgeState.bridges = [paired(undefined)];
     render(<BridgeSettings />);
     expect(await screen.findByTestId("bridge-lyrics")).toHaveTextContent("Needs a newer Bridge");
+  });
+
+  it("calls one Bridge just Bridge, and only names them when there's more than one", () => {
+    const a = paired(null);
+    const b = { ...paired(null), id: "b2" };
+    const c = { ...paired(null), id: "b3", name: "Attic" };
+    expect(bridgeLabel(a, [a])).toBeUndefined();
+    expect(bridgeLabel(a, [a, c])).toBe("Shed Bridge");
+    expect(bridgeLabel(c, [a, c])).toBe("Attic");
+    expect([a, b].map((x) => bridgeLabel(x, [a, b]))).toEqual(["Shed Bridge 1", "Shed Bridge 2"]);
   });
 
   it("names the Bridge's own settings plainly", () => {
@@ -230,7 +241,7 @@ describe("Settings > Bridge", () => {
       expect(await within(page).findByRole("switch", { name: "Lyrics for every song" })).toBeChecked();
       const card = within(page).getByTestId("bridge-row");
       await user.click(within(card).getByRole("button", { name: "Unpair" }));
-      await user.click(within(card).getByRole("button", { name: "Unpair Shed Bridge" }));
+      await user.click(within(card).getByRole("button", { name: "Unpair Bridge" }));
       await within(page).findByTestId("bridge-setup");
       await waitFor(() => expect(page.querySelector(".settings__page-blurb")).toHaveTextContent("Not set up"));
       expect(within(page).queryByRole("switch", { name: "Lyrics for every song" })).toBeNull();
@@ -276,7 +287,7 @@ describe("Settings > Bridge", () => {
       pairedAt("0.2.31");
       render(<BridgeSettings />);
       const v = await screen.findByTestId("bridge-version");
-      expect(v).toHaveTextContent("Platter Bridge is newer than this app; update Platter.");
+      expect(v).toHaveTextContent("The Bridge is newer than this app; update Platter.");
       expect(within(v).queryByRole("button")).toBeNull();
     });
 

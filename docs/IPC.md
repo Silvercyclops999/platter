@@ -2874,8 +2874,9 @@ sign-in (another kind of server) Lidarr is whoever set it up on the device.
 `HomeSides = { offering, sides: HomeSide[], problem }`: `offering` is true
 while this device answers for the others, and `problem` holds "Lidarr isn't
 reachable away from home. Turn on a computer at home or add the Bridge."
-when no home side is on, this device doesn't answer itself and has no away
-address. `HomeSide = { kind: "computer" | "bridge", name, words, on, answers }`,
+when there is a home side but none is on, this device doesn't answer itself
+and has no away address. With no home side at all it is null, since nothing
+is broken. Settings shows `problem` and nothing else. `HomeSide = { kind: "computer" | "bridge", name, words, on, answers }`,
 computers first, then Bridges; `answers` marks the first one that's on.
 Read it again on `device-sync://status` and `bridge://changed`.
 

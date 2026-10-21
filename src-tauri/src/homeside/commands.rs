@@ -90,7 +90,8 @@ pub struct HomeSides {
 
 /// The home sides in the order Lidarr tries them: computers at home, then
 /// Bridges. `away_set`: this device has its own away address, so it isn't
-/// stuck without a home side.
+/// stuck without a home side. With no home side at all nothing is broken
+/// (Lidarr just isn't set up anywhere yet), so there's no problem to show.
 pub fn home_sides(computers: Vec<ComputerSide>, bridges: &[BridgeInfo], offering: bool, away_set: bool) -> HomeSides {
     let mut sides: Vec<HomeSide> = computers
         .into_iter()
@@ -105,7 +106,7 @@ pub fn home_sides(computers: Vec<ComputerSide>, bridges: &[BridgeInfo], offering
     sides.extend(bridges.iter().map(|b| HomeSide {
         kind: "bridge",
         name: b.name.clone(),
-        words: if b.online { "Platter Bridge, on all the time".into() } else { "Platter Bridge, not heard from lately".into() },
+        words: if b.online { "The Bridge, on all the time".into() } else { "The Bridge, not heard from lately".into() },
         on: b.online,
         answers: false,
     }));
@@ -114,7 +115,7 @@ pub fn home_sides(computers: Vec<ComputerSide>, bridges: &[BridgeInfo], offering
     }
     let none_on = !sides.iter().any(|s| s.on);
     let words = if bridges.is_empty() { crate::lidarr::HOME_SIDE_OFF } else { crate::lidarr::BRIDGE_QUIET };
-    HomeSides { offering, problem: (none_on && !offering && !away_set).then(|| words.to_string()), sides }
+    HomeSides { offering, problem: (!sides.is_empty() && none_on && !offering && !away_set).then(|| words.to_string()), sides }
 }
 
 /// Settings > Lidarr > Home side.

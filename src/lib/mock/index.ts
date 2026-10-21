@@ -4575,7 +4575,7 @@ export class MockBackend implements Backend {
     return this.delay((): HomeSides => {
       const sides: HomeSides["sides"] = [
         ...this.homeComputers.map((c) => ({ kind: "computer" as const, name: c.name, words: c.on ? "Your computer at home, on now" : "Your computer at home, off or away now", on: c.on, answers: false })),
-        ...this.bridgeState.bridges.map((b) => ({ kind: "bridge" as const, name: b.name, words: b.online ? "Platter Bridge, on all the time" : "Platter Bridge, not heard from lately", on: b.online, answers: false })),
+        ...this.bridgeState.bridges.map((b) => ({ kind: "bridge" as const, name: b.name, words: b.online ? "The Bridge, on all the time" : "The Bridge, not heard from lately", on: b.online, answers: false })),
       ];
       const first = sides.find((s) => s.on);
       if (first) first.answers = true;
@@ -4584,7 +4584,7 @@ export class MockBackend implements Backend {
       const words = this.bridgeState.bridges.length
         ? "Your Bridge isn't answering, so Lidarr can't be reached away from home yet. Platter is linking to it again by itself. If this is still here in a few minutes, check that the Bridge is running on your server."
         : "Lidarr isn't reachable away from home. Turn on a computer at home or add the Bridge.";
-      const problem = !first && !offering && !away ? words : null;
+      const problem = sides.length > 0 && !first && !offering && !away ? words : null;
       return { offering, sides, problem };
     });
   }

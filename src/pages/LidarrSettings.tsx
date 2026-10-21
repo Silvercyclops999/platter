@@ -317,7 +317,7 @@ export function LidarrFindings({ lidarr }: { lidarr: LidarrState }) {
     report.route === "away"
       ? "its away address"
       : report.route === "bridge"
-        ? "your Platter Bridge"
+        ? "your Bridge"
         : report.route === "computer"
           ? "your computer at home"
           : "its home address";

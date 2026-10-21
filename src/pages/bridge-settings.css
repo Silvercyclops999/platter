@@ -21,6 +21,17 @@
 .bridge-card__note code { color: var(--color-text-primary); user-select: all; }
 .bridge-card__actions { display: flex; justify-content: flex-end; }
 
+/* A paired Bridge: one line each for what it does today. */
+.bridge-live { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-2); }
+.bridge-live__item { display: grid; grid-template-columns: 72px 1fr; column-gap: var(--space-3); font-size: var(--font-size-sm); line-height: 1.45; }
+.bridge-live__title { font-weight: var(--font-weight-semibold); color: var(--color-text-primary); }
+.bridge-live__text { color: var(--color-text-secondary); }
+.bridge-card__details { display: flex; flex-direction: column; gap: var(--space-2); font-size: var(--font-size-sm); }
+.bridge-card__details > summary { cursor: pointer; width: max-content; color: var(--color-text-secondary); }
+.bridge-card__details > summary:hover { color: var(--color-text-primary); }
+.bridge-card__details[open] > summary { margin-bottom: var(--space-2); }
+.bridge-card__details > .bridge-card__note + .bridge-card__note { margin-top: var(--space-2); }
+
 /* What it does for you: numbered, in the order the Bridge earns its place. */
 .bridge-benefits { margin: 0; padding: 0; list-style: none; counter-reset: benefit; display: flex; flex-direction: column; }
 .bridge-benefit {

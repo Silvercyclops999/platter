@@ -304,7 +304,7 @@ fn settings_lists_home_sides_in_the_order_they_answer() {
     let pc = |on| ComputerSide { id: "l1".into(), name: "Studio PC".into(), on };
     let bridge = |online| BridgeInfo { auto: false, id: "b1".into(), name: "Shed Bridge".into(), version: "1".into(), paired_at: 1, last_seen: None, online, status: None, music: Default::default() };
     let h = home_sides(vec![pc(true)], &[bridge(true)], false, false);
-    assert_eq!(h.sides.iter().map(|s| (s.words.as_str(), s.answers)).collect::<Vec<_>>(), [("Your computer at home, on now", true), ("Platter Bridge, on all the time", false)]);
+    assert_eq!(h.sides.iter().map(|s| (s.words.as_str(), s.answers)).collect::<Vec<_>>(), [("Your computer at home, on now", true), ("The Bridge, on all the time", false)]);
     assert!(h.problem.is_none());
     let h = home_sides(vec![pc(false)], &[bridge(true)], false, false);
     assert_eq!(h.sides.iter().map(|s| s.answers).collect::<Vec<_>>(), [false, true], "the Bridge answers while the computer is off");
@@ -312,7 +312,7 @@ fn settings_lists_home_sides_in_the_order_they_answer() {
     assert_eq!(h.problem.as_deref(), Some(crate::lidarr::BRIDGE_QUIET), "a Bridge that's there but quiet isn't 'add the Bridge'");
     assert!(h.problem.as_deref().is_some_and(|p| p.starts_with("Your Bridge isn't answering")));
     assert_eq!(home_sides(vec![pc(false)], &[], false, false).problem.as_deref(), Some("Lidarr isn't reachable away from home. Turn on a computer at home or add the Bridge."));
-    assert!(home_sides(vec![], &[], false, false).problem.is_some());
+    assert!(home_sides(vec![], &[], false, false).problem.is_none(), "nothing set up anywhere isn't broken");
     assert!(home_sides(vec![], &[], true, false).problem.is_none(), "this computer is the home side");
     assert!(home_sides(vec![], &[], false, true).problem.is_none(), "an away address of its own");
 }

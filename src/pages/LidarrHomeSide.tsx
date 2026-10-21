@@ -1,8 +1,7 @@
 /**
- * Settings > Lidarr > Home side: which of your own devices let this one use
- * Lidarr away from home (a computer at home with Lidarr set up, the
- * Platter Bridge), which of them answers first, and what to do when none
- * is on. Kept current from device sync and Bridge news.
+ * Settings > Lidarr: a line when Lidarr can't be reached away from home
+ * (no computer at home or Bridge answers), with what's wrong. Kept current
+ * from device sync and Bridge news.
  */
 import { useCallback, useEffect, useState } from "react";
 import { backend } from "../lib/backend";
@@ -30,36 +29,12 @@ export function useHomeSides(): HomeSides | null {
   return sides;
 }
 
-export function LidarrHomeSides() {
-  const h = useHomeSides();
-  if (!h) return null;
+/** What's wrong away from home, and only then (the row is hidden otherwise). */
+export function LidarrAwayProblem({ sides }: { sides: HomeSides | null }) {
+  if (!sides?.problem) return null;
   return (
-    <div className="lidarr-home-sides" data-testid="lidarr-home-sides">
-      {h.offering && <p className="lidarr-home-sides__line">Your other devices use Lidarr through this computer while Platter is open here.</p>}
-      {h.sides.length > 0 ? (
-        <ul className="lidarr-home-sides__list">
-          {h.sides.map((s) => (
-            <li key={`${s.kind}:${s.name}`} className="lidarr-home-sides__side" data-on={s.on ? "true" : "false"}>
-              <span className="lidarr-home-sides__name">{s.name}</span>
-              <span className="lidarr-home-sides__line">
-                {s.words}
-                {s.answers ? ". It answers for this device." : "."}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        !h.offering && (
-          <p className="lidarr-home-sides__line">
-            None yet. A computer at home with Lidarr set up, or the Platter Bridge, lets this device use Lidarr away from home. To add the Bridge, enter the code from its log under Bridge, Add the Bridge.
-          </p>
-        )
-      )}
-      {h.problem && (
-        <p className="lidarr-check__error" role="alert">
-          {h.problem}
-        </p>
-      )}
-    </div>
+    <p className="lidarr-check__error" role="alert" data-testid="lidarr-away-problem">
+      {sides.problem}
+    </p>
   );
 }
