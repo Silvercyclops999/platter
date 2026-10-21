@@ -20,8 +20,10 @@
 //! through Lidarr's full request path: the owner check, the MusicBrainz
 //! guards (title clash with anything in the library, unreleased ones
 //! included, bootleg or promo only) and the whole setup check. Refusals stay
-//! in the Requests list with why. Artists an older build had auto-request on
-//! for become followed ones.
+//! in the Requests list with why. Only one of the user's devices asks for a
+//! release: each claims it first (`lidarr::shared`) and asks on a later pass
+//! once its claim has settled and still wins. Artists an older build had
+//! auto-request on for become followed ones.
 
 pub mod commands;
 #[cfg(test)]
@@ -45,6 +47,7 @@ use crate::identity::fold::fold_artist;
 use crate::lidarr::ArtistMbid;
 use crate::lidarr::mbpick::{self, Group, MbGet, Refusal, Want, clash, library_albums};
 use crate::lidarr::request::{RequestInput, RequestRecord, cover_thumb};
+use crate::lidarr::shared::ClaimState;
 use crate::lidarr::status::RequestState;
 use crate::plex::state::EventSink;
 use crate::social::Notifier;
@@ -207,6 +210,8 @@ pub trait RadarLidarr: Send + Sync {
     fn ready(&self) -> bool;
     fn requests(&self) -> Vec<RequestRecord>;
     async fn request_auto(&self, input: RequestInput) -> AppResult<RequestRecord>;
+    /// Claim getting a release among the user's devices, so only one asks.
+    fn claim(&self, event: &str) -> AppResult<ClaimState>;
 }
 
 #[async_trait]
@@ -219,6 +224,9 @@ impl RadarLidarr for crate::lidarr::Lidarr {
     }
     async fn request_auto(&self, input: RequestInput) -> AppResult<RequestRecord> {
         crate::lidarr::Lidarr::request_auto(self, input).await
+    }
+    fn claim(&self, event: &str) -> AppResult<ClaimState> {
+        crate::lidarr::Lidarr::claim(self, event)
     }
 }
 
@@ -588,6 +596,21 @@ impl Radar {
                 waiting += 1;
                 continue;
             }
+            // One device asks: the others leave it to the claim's holder,
+            // and a new claim waits until it has settled (the next pass).
+            match self.inner.lidarr.claim(&format!("follow:{}", f.release_group_id)) {
+                Ok(ClaimState::Ours) => {}
+                Ok(ClaimState::Theirs(_)) => {
+                    st.auto_tried.push(f.release_group_id.clone());
+                    self.save(st)?;
+                    continue;
+                }
+                Ok(ClaimState::Settling) => continue,
+                Err(e) => {
+                    tracing::debug!("release radar: claim: {e}");
+                    continue;
+                }
+            }
             let input = RequestInput {
                 release_group_id: f.release_group_id.clone(),
                 title: f.title.clone(),
@@ -605,6 +628,28 @@ impl Radar {
             made.push(rec);
         }
         Ok((made, waiting))
+    }
+
+    /// Ask for new albums found earlier that are still to get (a claim
+    /// that has settled since the look, or Lidarr ready again). Says so
+    /// only when something was asked for.
+    pub async fn get_waiting(&self) -> AppResult<Vec<RequestRecord>> {
+        let _one = self.one.lock().await;
+        let s = crate::settings::load(&self.inner.db);
+        if !s.release_radar {
+            return Ok(Vec::new());
+        }
+        let mut st = self.stored();
+        let (made, waiting) = self.auto_request(&s, &mut st, self.now()).await?;
+        if !made.is_empty()
+            && let Some((t, b)) = summary(&made, waiting, s.auto_request_cap)
+        {
+            self.inner.notifier.notify(&t, &b);
+        }
+        if !made.is_empty() {
+            self.inner.events.emit(EVENT_CHANGED, Value::Null);
+        }
+        Ok(made)
     }
 
     /// The page (and the Home shelf).
@@ -667,6 +712,8 @@ pub async fn watch(r: Radar) {
                 Ok(o) => tracing::debug!(new = o.new.len(), auto = o.auto.len(), "release radar"),
                 Err(e) => tracing::debug!("release radar: {e}"),
             }
+        } else if let Err(e) = r.get_waiting().await {
+            tracing::debug!("release radar: {e}");
         }
         tokio::time::sleep(LOOK_EVERY).await;
         crate::platform::foreground::settled().await;

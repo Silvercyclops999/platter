@@ -460,6 +460,12 @@ impl super::Lidarr {
         &self.inner.shared
     }
 
+    /// Claim a piece of work for this device among all of the user's
+    /// devices (see [`super::shared`]): act only on `Ours`.
+    pub fn claim(&self, event: &str) -> crate::error::AppResult<super::shared::ClaimState> {
+        self.inner.shared.claim(event)
+    }
+
     /// Every artist's choices, by key.
     pub fn artist_prefs(&self) -> HashMap<String, ArtistPrefs> {
         self.inner.shared.list::<ArtistPrefs>("artist:").into_iter().collect()
