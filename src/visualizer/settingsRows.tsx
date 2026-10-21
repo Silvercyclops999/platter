@@ -17,8 +17,8 @@ export function visualizerRows(s: Settings | null, phone: boolean): RowDef[] {
       title: phone ? "Open the visualizer when you tap the cover" : "Open the visualizer when you click the cover",
       description: phone ? "Its colours move to the music. Swipe sideways for another style." : "Its colours move to the music. The arrow keys change the style.",
       more: phone
-        ? "Three styles: Grooves, a record in the cover's colours that ripples on the beat; Blur, the cover's colours as soft shapes that swell with the bass; and Bars, a row of bars over the cover. Tap the cover again to close it. It only runs while you can see it."
-        : "Three styles: Grooves, a record in the cover's colours that ripples on the beat; Blur, the cover's colours as soft shapes that swell with the bass; and Bars, a row of bars over the cover. V or the Visualizer button in the expanded view opens it too, and a click on the cover or Escape closes it. It only runs while you can see it.",
+        ? "Four styles: Grooves, a record in the cover's colours that ripples on the beat; Blur, the cover's colours as soft shapes that swell with the bass; Ring, a record with a ring of marks round it that grow with the music; and Cover, just the album art. Tap the cover again to close it. It only runs while you can see it."
+        : "Four styles: Grooves, a record in the cover's colours that ripples on the beat; Blur, the cover's colours as soft shapes that swell with the bass; Ring, a record with a ring of marks round it that grow with the music; and Cover, just the album art. V or the Visualizer button in the expanded view opens it too, and a click on the cover or Escape closes it. It only runs while you can see it.",
       control: (ids) =>
         s ? (
           <Switch checked={s.visualizerCoverTap} onChange={(v) => void updateSettings({ visualizerCoverTap: v })} labelledBy={ids.title} describedBy={ids.desc} />

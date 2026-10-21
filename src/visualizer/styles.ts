@@ -12,7 +12,8 @@ export interface StyleChoice {
 export const STYLES: readonly StyleChoice[] = [
   { id: "grooves", label: "Grooves" },
   { id: "blur", label: "Blur" },
-  { id: "bars", label: "Bars" },
+  // Saved as "bars" from when it was a row of bars.
+  { id: "bars", label: "Ring" },
   { id: "cover", label: "Cover" },
 ];
 
@@ -38,6 +39,6 @@ export const DESKTOP_FPS = 60;
 export const PHONE_FPS = 30;
 /** Paused, the art moves at most this many frames a second. */
 export const PAUSED_FPS = 12;
-/** How many bars Bars draws across the cover. */
-export const PHONE_BARS = 20;
-export const DESKTOP_BARS = 32;
+/** How many bands Ring shows (each twice, mirrored round the rim). */
+export const PHONE_BARS = 32;
+export const DESKTOP_BARS = 40;

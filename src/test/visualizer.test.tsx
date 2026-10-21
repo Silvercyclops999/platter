@@ -62,6 +62,7 @@ function fakeCtx() {
       drawImage: rec("drawImage"),
       roundRect: rec("roundRect"),
       createLinearGradient: () => ({ addColorStop: () => {} }),
+      createRadialGradient: () => ({ addColorStop: () => {} }),
       set globalAlpha(_v: number) {},
       set strokeStyle(v: string) {
         calls.push(`strokeStyle:${v}`);
@@ -188,8 +189,8 @@ afterEach(() => {
 // ------------------------------------------------------------ styles and scales
 
 describe("styles", () => {
-  it("has Grooves, Blur, Bars and Cover, Grooves first and the default; anything older reads as Grooves", () => {
-    expect(STYLES.map((s) => s.label)).toEqual(["Grooves", "Blur", "Bars", "Cover"]);
+  it("has Grooves, Blur, Ring and Cover, Grooves first and the default; anything older reads as Grooves", () => {
+    expect(STYLES.map((s) => s.label)).toEqual(["Grooves", "Blur", "Ring", "Cover"]);
     expect(DEFAULT_STYLE).toBe("grooves");
     expect(DEFAULT_SETTINGS.visualizerStyle).toBe("grooves");
     expect(DEFAULT_SETTINGS.visualizerCoverTap).toBe(true);
@@ -486,27 +487,38 @@ describe("the stage", () => {
       expect(drawArrays.mock.calls.length).toBeGreaterThanOrEqual(5);
     });
 
-  it("draws Bars on a 2D canvas, one rounded bar each, over the cover blurred", async () => {
+  it("draws Ring on a 2D canvas: the record, and a mark round its rim for each band, twice", async () => {
     const run = frames();
-    const rects: number[][] = [];
-    (drawn.ctx as Record<string, unknown>).roundRect = (...a: number[]) => void rects.push(a);
+    const marks: number[][] = [];
+    let strokes = 0;
+    const ctx = drawn.ctx as Record<string, unknown>;
+    let from: number[] = [];
+    ctx.moveTo = (x: number, y: number) => void (from = [x, y]);
+    ctx.lineTo = (x: number, y: number) => void marks.push([...from, x, y]);
+    ctx.stroke = () => void strokes++;
     gl = fakeGl();
     stage({ style: "bars" });
     const s = screen.getByTestId("vis-stage");
     expect(s.querySelector(".vis-stage__backdrop")).not.toBeNull();
     expect(s.querySelector("canvas.vis-stage__bars")).not.toBeNull();
+    // Loud bass, silence above it.
     for (let i = 0; i < 6; i++) {
-      kick(i * 20);
+      act(() => mock.emit("player://spectrum", { t: i * 20, bands: bandsWith(-12, -90), rms: [-20, -20], peak: [-6, -6] }));
       run(1);
     }
-    expect(drawn.calls).toContain("fill");
-    // 32 bars a frame on a computer.
-    expect(rects.length % 32).toBe(0);
-    expect(rects.length).toBeGreaterThan(0);
-    const lastFrame = rects.slice(-32);
-    // The bass bars stand taller than their rest (a bar is never less than its width).
-    expect(Math.max(...lastFrame.map((r) => r[3]))).toBeGreaterThan(lastFrame[0][2]);
+    expect(strokes).toBeGreaterThan(0);
+    // 80 marks a frame on a computer (40 bands, mirrored).
+    expect(marks.length % 80).toBe(0);
+    expect(marks.length).toBeGreaterThan(0);
+    const len = (m: number[]) => Math.hypot(m[2] - m[0], m[3] - m[1]);
+    const last = marks.slice(-80);
+    // The bass marks (top of the ring) reach out further than the quiet ones, and both sides match.
+    expect(len(last[0])).toBeGreaterThan(len(last[39]) + 1);
+    expect(len(last[0])).toBeCloseTo(len(last[79]), 5);
+    // The label turns with the record; the ring itself holds still.
+    expect(parseFloat(coverEl()!.style.getPropertyValue("--vis-spin"))).toBeGreaterThan(0);
   });
+
 
   it("draws with CSS layers after the GPU context is lost, and when there is no WebGL2, still moving", async () => {
     const run = frames();
