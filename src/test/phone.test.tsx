@@ -17,7 +17,7 @@ import { phoneFromAgent, phoneFromUrl, usePhoneForm } from "../phone/form";
 import { CLOSE_FRACTION, SKIP_FRACTION, follow, lockAxis, release } from "../phone/gestures";
 import { anchorTarget, PHONE_ANCHOR } from "../phone/lyricsFollow";
 import { cardWindow } from "../phone/LyricsScreen";
-import { inLibraryLine, topByPlays } from "../phone/pages/Artist";
+import { inLibraryLine } from "../phone/pages/Artist";
 import { PhonePlaylist, topGenres } from "../phone/pages/Playlist";
 import { dockInset } from "../phone/dockInset";
 import { PhoneShell } from "../phone/PhoneShell";
@@ -559,9 +559,8 @@ describe("lyrics", () => {
 });
 
 describe("pages", () => {
-  it("top tracks rank by your plays and the library line counts what you have", () => {
-    const [a, b, c] = tracks();
-    expect(topByPlays([{ ...a, viewCount: 2 }, { ...b, viewCount: 9 }, { ...c, viewCount: 2 }]).map((t) => t.id)).toEqual([b.id, a.id, c.id]);
+  it("the library line counts what you have", () => {
+    const [a, b] = tracks();
     expect(inLibraryLine(1, 12)).toBe("In your library: 1 album, 12 songs");
     expect(topGenres([{ ...a, genres: ["Jazz", "Soul"] }, { ...b, genres: ["Soul"] }])).toEqual(["Soul", "Jazz"]);
   });

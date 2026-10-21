@@ -1,7 +1,7 @@
 /**
  * An artist on the phone: a large photo with the name over it, which the
  * page slides up over as it scrolls; what of theirs is in your library;
- * follow, radio, shuffle and play; top tracks ranked by your own plays;
+ * follow, radio, shuffle and play; top tracks, everyone's or yours;
  * their eras; the discography with the records you can get (Get, through
  * Lidarr); Appears on and Fans also like, each with See all.
  */
@@ -11,34 +11,43 @@ import { Art } from "../../components/Art";
 import { backend } from "../../lib/backend";
 import { isCreditId } from "../../lib/credits";
 import { plural } from "../../lib/format";
-import type { Track } from "../../lib/types";
-import { useLoad } from "../../lib/useLoad";
-import { photoPath, type DiscographyFilter } from "../../pages/artist";
+import type { Settings } from "../../lib/types";
+import { useLoad, useReload } from "../../lib/useLoad";
+import { photoPath, POPULAR_WAIT_MS, type DiscographyFilter } from "../../pages/artist";
 import { useCatalogueFans } from "../../pages/catalogue";
 import { eraRange, showEraCards } from "../../pages/era";
 import { useArtistDiscography } from "../../pages/discographySources";
 import { useGetSpots, useLidarrReady } from "../../pages/lidarrShared";
 import { player, usePlayer } from "../../stores/player";
 import { nav, type Route } from "../../stores/router";
-import { useSettings } from "../../stores/settings";
+import { updateSettings, useSettings } from "../../stores/settings";
 import { setFollow, useSocial } from "../../stores/social";
 import { phone } from "../phoneUi";
 import { BackBar, Carousel, PageFailed, PageLoading, ShelfCard, SongRow } from "./common";
 import { DiscoShelf } from "./DiscoShelf";
-import { CataloguePhoto, PhoneShuffleToggle, PlayPill } from "./kit";
+import { CataloguePhoto, Pills, PhoneShuffleToggle, PlayPill } from "./kit";
 
 /** Top tracks shown at first. */
 export const TOP_TRACKS = 5;
 /** Top tracks after See all. */
 export const TOP_TRACKS_ALL = 20;
 
-/** The artist's songs most played here, most first (ties keep the server's order). */
-export function topByPlays(tracks: Track[], n = TOP_TRACKS): Track[] {
-  return tracks
-    .map((t, i) => ({ t, i }))
-    .sort((a, b) => b.t.viewCount - a.t.viewCount || a.i - b.i)
-    .slice(0, n)
-    .map((x) => x.t);
+type TopRank = "all" | "yours";
+
+const RANKS = [
+  { id: "all", label: "All time" },
+  { id: "yours", label: "Yours" },
+] as const;
+
+/** Whether top tracks rank by everyone's plays: the setting says so and a source for it is on. */
+export function topRank(s: Settings | null): TopRank {
+  return s?.popularSource === "global" && (s.infoListenbrainz || s.infoLastfm) ? "all" : "yours";
+}
+
+/** The settings change a pill makes; All time turns ListenBrainz on when neither source is. */
+export function rankPatch(rank: TopRank, s: Settings | null): Partial<Settings> {
+  if (rank === "yours") return { popularSource: "myPlays" };
+  return s?.infoListenbrainz || s?.infoLastfm ? { popularSource: "global" } : { popularSource: "global", infoListenbrainz: true };
 }
 
 /** "In your library: 4 albums, 52 songs". */
@@ -70,7 +79,11 @@ function Shelf({ title, onAll, children }: { title: string; onAll?: () => void; 
 }
 
 export function PhoneArtist({ id }: { id: string }) {
-  const { data, error, retry } = useLoad(() => backend.artistPage(id), [id]);
+  const { data: loaded, error, retry } = useLoad(() => backend.artistPage(id), [id]);
+  // Asked again when the ranking changes or everyone's list arrives.
+  const { data, reload } = useReload(loaded, () => backend.artistPage(id));
+  const rank = useSettings((s) => topRank(s.settings));
+  const [gaveUp, setGaveUp] = useState(false);
   const ctx = usePlayer((s) => s.state?.queue.context ?? null);
   const status = usePlayer((s) => s.state?.status ?? "idle");
   const following = useSocial((s) => s.followIds.has(id));
@@ -84,6 +97,32 @@ export function PhoneArtist({ id }: { id: string }) {
   const getsNew = useLidarrReady() && followGet;
   const [allTop, setAllTop] = useState(false);
   const hero = useRef<HTMLDivElement>(null);
+  const firstRank = useRef(rank);
+  useEffect(() => {
+    if (rank === firstRank.current) return;
+    firstRank.current = rank;
+    reload();
+  }, [rank, reload]);
+  // Everyone's list comes from the artist's info; until it's here (or a
+  // short wait runs out) the rows are dimmed rather than shown in the wrong order.
+  useEffect(() => {
+    if (rank !== "all") return;
+    let alive = true;
+    setGaveUp(false);
+    backend.artistInfo(id).catch(() => {});
+    const timer = setTimeout(() => alive && setGaveUp(true), POPULAR_WAIT_MS);
+    const done = (e: { id: string }) => {
+      if (e.id !== id) return;
+      setGaveUp(true);
+      reload();
+    };
+    const un = backend.listen("artistinfo://popular", done);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+      un.then((f) => f());
+    };
+  }, [id, rank, reload]);
   // The shelves come a frame after the header, so the page opens at once.
   const [rest, setRest] = useState(false);
   useEffect(() => {
@@ -115,7 +154,8 @@ export function PhoneArtist({ id }: { id: string }) {
   const { artist, sections } = data;
   const albums = sections.flatMap((s) => s.albums);
   const songs = albums.reduce((n, a) => n + a.trackCount, 0);
-  const top = topByPlays(data.popular, allTop ? TOP_TRACKS_ALL : TOP_TRACKS);
+  const top = data.popular.slice(0, allTop ? TOP_TRACKS_ALL : TOP_TRACKS);
+  const waiting = rank === "all" && !!data.popularPending && !gaveUp;
   const here = ctx?.kind === "artist" && ctx.id === artist.id;
   const playing = here && (status === "playing" || status === "loading" || status === "buffering");
   const eras = showEraCards(data.eras, erasOn) ? (data.eras ?? []) : [];
@@ -164,8 +204,8 @@ export function PhoneArtist({ id }: { id: string }) {
                 </button>
               )}
             </div>
-            <p className="ph-section-sub">By your plays</p>
-            <ul className="ph-songs">
+            <Pills label="Rank top tracks by" items={RANKS} value={rank} onChange={(r) => void updateSettings(rankPatch(r, useSettings.getState().settings))} />
+            <ul className={`ph-songs ${waiting ? "ph-songs--waiting" : ""}`} aria-busy={waiting || undefined}>
               {top.map((t, i) => (
                 <SongRow
                   key={t.id}
