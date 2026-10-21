@@ -19,7 +19,7 @@ export function HomeMixes() {
   const list = data ? [...data.madeForYou, ...data.moods, ...data.genres] : [];
   if (!list.length) return null;
   return (
-    <Carousel title="Made for you" onAll={() => nav.go({ name: "mixes" })}>
+    <Carousel title="Your mixes" onAll={() => nav.go({ name: "mixes" })}>
       {list.slice(0, 12).map((m) => (
         <button key={m.id} type="button" className="ph-card-tile ph-mix-tile" aria-label={m.kind === "daylist" ? "daylist" : m.title} onClick={() => openMix(m)}>
           {/* The sleeve is the name: printed once, on the paper. */}

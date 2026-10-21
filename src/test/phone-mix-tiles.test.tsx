@@ -1,5 +1,5 @@
 /**
- * Home's Made for you tiles on the phone are the printed sleeves alone: the
+ * Home's mix tiles on the phone are the printed sleeves alone: the
  * name is on the paper, once, and the tile is named for the reader.
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -21,10 +21,10 @@ afterEach(() => {
   usePhoneForm.setState({ phone: false });
 });
 
-describe("Made for you on the phone", () => {
+describe("Your mixes on the phone", () => {
   it("each tile is its sleeve, naming the mix once", async () => {
     render(<HomeMixes />);
-    const shelf = await screen.findByRole("region", { name: "Made for you" }, { timeout: 4000 });
+    const shelf = await screen.findByRole("region", { name: "Your mixes" }, { timeout: 4000 });
     const tiles = await waitFor(() => {
       const t = [...shelf.querySelectorAll<HTMLElement>(".ph-mix-tile")];
       expect(t.length).toBeGreaterThan(0);

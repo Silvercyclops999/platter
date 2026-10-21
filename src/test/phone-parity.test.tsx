@@ -167,7 +167,7 @@ describe("every page can be reached", () => {
     render(<PhoneShell />);
     await opens("home", "Show all: Recently added", { name: "homeShelf", shelf: "recentlyAdded" });
     act(() => phone.tab("home"));
-    await opens("home", "Show all: Made for you", { name: "mixes" });
+    await opens("home", "Show all: Your mixes", { name: "mixes" });
     for (const [label, name] of [
       ["What's new", "whatsNew"],
       ["Release radar", "releaseRadar"],

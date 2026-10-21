@@ -75,9 +75,8 @@
 .ph-shelf__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .ph-shelf__head .ph-shelf__title { margin: 0; }
 .ph-shelf__all { min-height: 44px; padding: 0 2px; font-size: 13px; font-weight: 600; color: var(--color-text-secondary); }
-.ph-mix-tile { width: 136px; }
-.ph-mix-tile__art { display: block; width: 136px; aspect-ratio: 1; border-radius: 4px; overflow: hidden; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22); }
-.ph-mix-tile__art .mix-art { display: block; width: 100%; height: 100%; }
+.ph-mix-tile { width: 140px; padding: 0; border: 0; background: none; }
+.ph-mix-tile .mix-art { width: 140px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22); }
 .ph-explore { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--ph-line); }
 .ph-explore li { border-bottom: 1px solid var(--ph-line); }
 .ph-explore__row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-height: 56px; padding: 11px 0 !important; text-align: left; }

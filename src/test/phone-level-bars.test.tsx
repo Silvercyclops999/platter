@@ -101,17 +101,16 @@ describe("the playing song's row", () => {
   });
 });
 
-describe("Home's shortcut tiles", () => {
+describe("Home's Spun this week tiles", () => {
   it("the playing record's tile keeps only the accent: no bars", async () => {
-    const home = await backend.home();
-    const album = home.shortcuts.find((i) => i.kind === "album");
-    expect(album).toBeTruthy();
-    if (album?.kind !== "album") return;
-    const t = tracks().find((x) => x.albumId === album.album.id) ?? tracks()[0];
-    play(t, { kind: "album", id: album.album.id, title: album.album.title });
+    const spun = (await backend.homeRecords()).spunThisWeek[0]?.album;
+    expect(spun).toBeTruthy();
+    if (!spun) return;
+    const t = tracks().find((x) => x.albumId === spun.id) ?? tracks()[0];
+    play(t, { kind: "album", id: spun.id, title: spun.title });
     render(<PhonePage route={{ name: "home" }} />);
-    const grid = await screen.findByRole("list", { name: "Recent and pinned" });
-    const tile = within(grid).getByText(album.album.title).closest("button")!;
+    const grid = await screen.findByRole("list", { name: "Spun this week" });
+    const tile = within(grid).getByText(spun.title).closest("button")!;
     expect(tile).toHaveClass("is-playing");
     expect(bars(grid)).toHaveLength(0);
   });
