@@ -162,7 +162,6 @@ export function LineagePage({ id }: { id: string }) {
                   <span className="lineage__date">
                     <Skeleton width={70} height={12} />
                   </span>
-                  <span className="lineage__dot" />
                   <div className="lineage__card">
                     <Skeleton width={48} height={48} />
                     <div className="lineage__text">
@@ -216,7 +215,6 @@ function NodeRow({
       }}
     >
       <span className={`lineage__date ${n.when === null ? "is-unknown" : ""}`}>{nodeDate(n)}</span>
-      <span className="lineage__dot" aria-hidden="true" />
       <div className="lineage__card">
         <IconButton
           label={playing ? `Pause ${n.track.title}` : `Play ${n.track.title}`}

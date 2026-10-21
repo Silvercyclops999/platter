@@ -4,7 +4,7 @@
  * radar, new artists, on this day, the archive, your shelf, the sound map).
  * Each shows only while its feature is on.
  */
-import { MixArt, openMix } from "../../pages/MixCard";
+import { MixArt, openMix, sleeveName } from "../../pages/MixCard";
 import { useMixShelves } from "../../pages/mixShelves";
 import { useShowPhysical } from "../../stores/physical";
 import { nav, type Route } from "../../stores/router";
@@ -21,7 +21,7 @@ export function HomeMixes() {
   return (
     <Carousel title="Your mixes" onAll={() => nav.go({ name: "mixes" })}>
       {list.slice(0, 12).map((m) => (
-        <button key={m.id} type="button" className="ph-card-tile ph-mix-tile" aria-label={m.kind === "daylist" ? "daylist" : m.title} onClick={() => openMix(m)}>
+        <button key={m.id} type="button" className="ph-card-tile ph-mix-tile" aria-label={m.kind === "daylist" ? "daylist" : sleeveName(m)} onClick={() => openMix(m)}>
           {/* The sleeve is the name: printed once, on the paper. */}
           <MixArt mix={m} />
         </button>

@@ -15,15 +15,15 @@
    artists under a brass rule. The same drawing on every look. */
 .mix-art--sleeve {
   container-type: inline-size;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
   box-sizing: border-box;
   padding: 8.5%;
   border-radius: 2px;
   background: #ede6d6;
   color: #1c1712;
 }
+.mix-art__page { display: flex; flex-direction: column; justify-content: space-between; height: 100%; }
+/* A name with nothing under it sits at the foot, as on the car's screen. */
+.mix-art__title:only-child { margin-top: auto; }
 .mix-art__title {
   font-family: var(--font-headings, Georgia, serif);
   font-size: 20cqi;
@@ -52,7 +52,7 @@
    (Sizes inside are of the sleeve less its margins.) */
 @container (max-width: 89px) {
   .mix-art__artists { display: none; }
-  .mix-art--sleeve { justify-content: flex-end; }
+  .mix-art__page { justify-content: flex-end; }
   .mix-art__title { font-size: 26cqi; -webkit-line-clamp: 2; }
 }
 /* The daylist's covers, four to a sleeve, in the mixes list. */

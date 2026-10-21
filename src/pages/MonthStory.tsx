@@ -4,15 +4,13 @@
  * Choir."). No big sentence, no boxes, no labels in capitals.
  */
 import { Skeleton } from "../components/Skeleton";
+import { duration } from "../lib/statsStory";
 import type { StatsOverview } from "../lib/statsTypes";
-import "./profile.css";
+/** "40 min", "1 hr 40 min", "14 hrs" (minutes drop off at ten hours). */
 
 /** "14 hrs", "1 hr", "40 min". */
 export function shortListen(ms: number): string {
-  const m = Math.round(ms / 60_000);
-  if (m < 60) return `${m.toLocaleString()} min`;
-  const h = Math.round(m / 60);
-  return `${h.toLocaleString()} ${h === 1 ? "hr" : "hrs"}`;
+  return duration(ms);
 }
 
 /** The month's line: its time, and the artist who took a quarter of it or more ("mostly"), else the one played most. */

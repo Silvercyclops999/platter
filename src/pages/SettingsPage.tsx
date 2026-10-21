@@ -2004,7 +2004,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       key: "homeShortcuts",
       section: "Appearance",
       title: "Show the shortcut grid",
-      description: "Shows up to 8 things you've played lately or play most at the top of Home.",
+      description: "Shows what you've played lately or play most at the top of Home.",
       control: (ids) => toggle(s, "homeShortcuts", ids),
     },
     {
@@ -3793,8 +3793,8 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       page: "tags",
       group: "Archive",
       title: "Show lineage",
-      description: "Every version of a song on one timeline, with Compare.",
-      more: "Songs with other versions get Lineage in their menu, in Other versions and in Your stats: every version on one timeline, from the first demo to the live takes, with Compare to switch between two at the same moment.",
+      description: "Every version of a song in one list, oldest first, with Compare.",
+      more: "Songs with other versions get Lineage in their menu, in Other versions and in Your stats: every version in one list, from the first demo to the live takes, with Compare to switch between two at the same moment.",
       control: (ids) => toggle(s, "showLineage", ids),
     },
     {

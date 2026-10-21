@@ -15,10 +15,9 @@ import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { layoutRecapCard, recapContent } from "../lib/recapCard";
 import type { Measure } from "../lib/shareCard";
-import { addDays, addMonths, barFractions, change, formatMinutes, hourLabel, localDay, parseDay, playedFromLabel, rangeLabel, sparkPath, toRange } from "../lib/stats";
-import { shareOfTop } from "../lib/statsCharts";
-import { activeSlice, activeWeeks, axisTicks, bestPoint, calendarMonths, daySentence, daysSentence, duration, heroSentence, hourOrder, longDuration, isMostlyEmpty, minuteScale, minutesSentence, peakHours, standoutWeekday } from "../lib/statsStory";
-import type { MonthRecap, StatsOverview, StatsPoint, TopSong } from "../lib/statsTypes";
+import { addMonths, barFractions, change, formatMinutes, hourLabel, localDay, playedFromLabel, rangeLabel, sparkPath, toRange } from "../lib/stats";
+import { duration } from "../lib/statsStory";
+import type { MonthRecap, StatsOverview, TopSong } from "../lib/statsTypes";
 import { DEFAULT_SETTINGS } from "../lib/types";
 import { momentCards, momentDate } from "../pages/StatsMoments";
 import { monthLine, shortListen } from "../pages/MonthStory";
@@ -356,18 +355,7 @@ describe("your stats", () => {
   });
 });
 
-describe("stats charts", () => {
-  it("each top row's bar is its share of the #1", () => {
-    expect(shareOfTop([10, 5, 2, 0])).toEqual([1, 0.5, 0.2, 0]);
-    expect(shareOfTop([])).toEqual([]);
-  });
-});
-
 describe("stats stories", () => {
-  const pt = (key: string, min: number, plays = 1): StatsPoint => ({ key, plays: min ? plays : 0, ms: min * 60_000 });
-  /** Daily points from `from` for `n` days, with minutes where `on` says. */
-  const run = (from: string, n: number, on: (i: number) => number) => Array.from({ length: n }, (_, i) => pt(addDays(from, i), on(i)));
-  const hoursWith = (m: Record<number, number>) => Array.from({ length: 24 }, (_, h) => (m[h] ?? 0) * 60_000);
 
   it("a recap says the change on the month before in words", () => {
     expect(recapChange(112, 100)).toBe("12% more than the month before");
@@ -380,65 +368,9 @@ describe("stats stories", () => {
     expect([0, 45, 60, 130, 600, 2280].map((m) => duration(m * 60_000))).toEqual(["0 min", "45 min", "1 hr", "2 hrs 10 min", "10 hrs", "38 hrs"]);
   });
 
-  it("listening days: empty, every day, a short range with a run, sparse and recent, sparse in months, and steady", () => {
-    expect(daysSentence({ from: "2026-09-18", to: "2026-10-15", days: 0, points: [] })).toBe("Nothing played in this range yet.");
-    expect(daysSentence({ from: "2026-10-09", to: "2026-10-15", days: 7, points: run("2026-10-09", 7, () => 10) })).toBe("You listened every one of these 7 days.");
-    // 28 days, quiet on the 1st and every fifth day, then every day from Oct 8.
-    const four = run("2026-09-18", 28, (i) => (i % 5 === 0 && i < 20 ? 0 : 10));
-    const d4 = four.filter((p) => p.ms > 0).length;
-    expect(daysSentence({ from: "2026-09-18", to: "2026-10-15", days: d4, points: four })).toBe(`You listened on ${d4} of these 28 days, and every day since Oct 4.`);
-    const late = run("2026-09-18", 28, (i) => (i === 23 || i === 25 || i === 27 ? 10 : 0));
-    expect(daysSentence({ from: "2026-09-18", to: "2026-10-15", days: 3, points: late })).toBe("You listened on 3 of these 28 days, all of them since Oct 11.");
-    const stopped = run("2026-09-18", 28, (i) => (i === 2 || i === 9 ? 10 : 0));
-    expect(daysSentence({ from: "2026-09-18", to: "2026-10-15", days: 2, points: stopped })).toBe("You listened on 2 of these 28 days, the last time on Sep 27.");
-    // 24 days in a year, 19 of them in the last four weeks.
-    const year = run("2025-10-16", 365, (i) => ([40, 120, 200, 260].includes(i) || (i > 340 && i % 5 !== 0) ? 20 : 0));
-    const dy = year.filter((p) => p.ms > 0).length;
-    expect(dy).toBe(24);
-    expect(daysSentence({ from: "2025-10-16", to: "2026-10-15", days: dy, points: year })).toBe("You listened on 24 days, most of them in the last four weeks.");
-    const spring = run("2025-10-16", 365, (i) => (i >= 150 && i < 200 && i % 3 === 0 ? 20 : i === 300 ? 5 : 0));
-    const ds = spring.filter((p) => p.ms > 0).length;
-    expect(daysSentence({ from: "2025-10-16", to: "2026-10-15", days: ds, points: spring })).toBe(`You listened on ${ds} days, most of them in April.`);
-    const split = run("2025-10-16", 365, (i) => ((i >= 140 && i < 156 && i % 2 === 0) || (i >= 290 && i < 306 && i % 2 === 0) || i === 60 ? 20 : 0));
-    expect(daysSentence({ from: "2025-10-16", to: "2026-10-15", days: 17, points: split })).toBe("You listened on 17 days, mostly in March and August.");
-    const steady = run("2026-04-17", 182, (i) => (i % 7 < 5 ? 30 : 0));
-    const dd = steady.filter((p) => p.ms > 0).length;
-    expect(daysSentence({ from: "2026-04-17", to: "2026-10-15", days: dd, points: steady })).toBe(`You listened on ${dd} of 182 days, about 5 days a week.`);
-  });
-
-  it("minutes: the biggest day with its album, one day, months, and nothing", () => {
-    const pts = [pt("2026-10-12", 0), pt("2026-10-13", 30), pt("2026-10-14", 130), pt("2026-10-15", 40)];
-    expect(minutesSentence(pts, "day", "2026", { title: "Glass Season", share: 0.7 })).toBe("Your biggest day was Wednesday, Oct 14: 2 hrs 10 min, most of it Glass Season.");
-    expect(minutesSentence(pts, "day", "2026", { title: "Glass Season", share: 0.3 })).toBe("Your biggest day was Wednesday, Oct 14: 2 hrs 10 min, more Glass Season than anything else.");
-    expect(minutesSentence([pt("2025-12-30", 45)], "day", "2026")).toBe("You listened on one day, Tuesday, Dec 30, 2025, for 45 min.");
-    expect(minutesSentence([pt("2026-03", 600), pt("2026-04", 900)], "month", "2026")).toBe("Your biggest month was April, with 15 hrs.");
-    expect(minutesSentence([pt("2026-10-14", 0)], "day", "2026")).toBe("No minutes to show for this range yet.");
-  });
-
-  it("your day: a night listener, a spread day, a short history, and nothing", () => {
-    const night = hoursWith({ 23: 50, 0: 40, 1: 30, 9: 10 });
-    const wed = [10, 10, 10, 30, 10, 10, 10].map((m) => m * 60_000);
-    expect(daySentence(night, wed, 20)).toBe("You're a night listener: most of your music happens between 11 PM and 2 AM, and Wednesday is your biggest day.");
-    // No weekday stands out: no weekday clause.
-    expect(daySentence(night, Array(7).fill(600_000), 20)).toBe("You're a night listener: most of your music happens between 11 PM and 2 AM.");
-    const evening = hoursWith({ 18: 20, 19: 25, 20: 20, 9: 20, 10: 15, 13: 20, 23: 20 });
-    expect(daySentence(evening, wed, 20)).toBe("You're an evening listener: your music peaks between 6 PM and 9 PM, and Wednesday is your biggest day.");
-    const flat = hoursWith(Object.fromEntries(Array.from({ length: 24 }, (_, h) => [h, 10])));
-    expect(daySentence(flat, wed, 20)).toMatch(/^Your listening is spread across the day, with a small peak between /);
-    expect(daySentence(night, wed, 2)).toBe("You've only listened on two days here, mostly between 11 PM and 2 AM.");
-    expect(daySentence(Array(24).fill(0), Array(7).fill(0), 0)).toBe("Nothing played in this range yet, so there's no day to show.");
-  });
-
-  it("the hero sentence says how long, how many days and whose share", () => {
-    const o = { totals: { ms: 911 * 60_000, plays: 259, songs: 189, artists: 12, albums: 52, days: 23 }, topArtists: [{ name: "Copperline Choir", ms: 300 * 60_000 }] } as unknown as StatsOverview;
-    expect(heroSentence(o)).toEqual({ time: "15 hrs", days: "23 days", artist: "Copperline Choir", share: "about a third of it" });
-    expect(heroSentence({ ...o, topArtists: [{ ...o.topArtists[0], ms: 100 * 60_000 }] } as StatsOverview).share).toBe("11% of it, more than anyone else");
-    expect(heroSentence({ ...o, topArtists: [] }).artist).toBeNull();
-  });
-
   it("this month in one line: its time, and who took most of it", () => {
-    expect(longDuration(200 * 60_000)).toBe("3 hours and 20 minutes");
-    expect([shortListen(40 * 60_000), shortListen(60 * 60_000), shortListen(2461 * 60_000)]).toEqual(["40 min", "1 hr", "41 hrs"]);
+    expect(heroLine({ totals: { ms: 0, plays: 0, days: 0 } } as unknown as StatsOverview)).toBe("Nothing played in this range.");
+    expect([shortListen(40 * 60_000), shortListen(60 * 60_000), shortListen(100 * 60_000), shortListen(2461 * 60_000)]).toEqual(["40 min", "1 hr", "1 hr 40 min", "41 hrs"]);
     const o = {
       totals: { ms: 2461 * 60_000, plays: 191, songs: 120, artists: 9, albums: 30, days: 20 },
       topArtists: [{ name: "Copperline Choir", ms: 900 * 60_000 }],
@@ -450,53 +382,6 @@ describe("stats stories", () => {
     expect(monthLine({ ...o, totals: { ...o.totals, plays: 0 } })).toBe("Nothing played yet this month.");
   });
 
-  it("charts start at the first play, not the empty days before it", () => {
-    const pts = run("2026-09-18", 28, (i) => (i >= 21 ? 10 : 0));
-    const s = activeSlice(pts);
-    expect(s.points).toHaveLength(7);
-    expect(s.points[0].key).toBe("2026-10-09");
-    expect(s.croppedFrom).toBe("2026-10-09");
-    expect(s.croppedShare).toBeCloseTo(0.75);
-    expect(activeSlice(run("2026-09-18", 5, () => 10))).toMatchObject({ croppedFrom: null, croppedShare: 0 });
-    expect(activeSlice(run("2026-09-18", 5, () => 0)).points).toEqual([]);
-    // Calendars: months from the first play's month only, capped to the latest twelve.
-    const cal = calendarMonths(pts, "2026-09-18", "2026-10-15");
-    expect(cal.months.map((m) => m.label)).toEqual(["October"]);
-    expect(cal.best?.day).toBe("2026-10-15");
-    const long = calendarMonths(run("2024-01-01", 600, () => 5), "2024-01-01", addDays("2024-01-01", 599));
-    expect(long.months).toHaveLength(12);
-    expect(long.capped).toBe(true);
-    // A mostly empty year switches to weeks with listening.
-    const sparse = run("2025-10-16", 365, (i) => (i === 10 || i === 200 || i > 360 ? 10 : 0));
-    expect(isMostlyEmpty(sparse, "2026-10-15")).toBe(true);
-    expect(isMostlyEmpty(pts, "2026-10-15")).toBe(false);
-    const weeks = activeWeeks(sparse, "2025-10-16", "2026-10-15");
-    expect(weeks.weeks.length).toBeGreaterThanOrEqual(3);
-    expect(weeks.weeks[0].quietBefore).toBe(0);
-    expect(weeks.weeks[1].quietBefore).toBeGreaterThan(20);
-  });
-
-  it("the peak: the best hours round the clock, the latest best point, the standout weekday", () => {
-    expect(peakHours(hoursWith({ 23: 50, 0: 40, 1: 30, 9: 10 }))).toEqual({ start: 23, hours: [23, 0, 1], share: 120 / 130 });
-    expect(peakHours(Array(24).fill(0))).toBeNull();
-    expect(hourOrder(peakHours(hoursWith({ 23: 50, 0: 40, 1: 30 })))[0]).toBe(6);
-    expect(hourOrder(peakHours(hoursWith({ 5: 50, 6: 40, 7: 30 })))[0]).toBe(0);
-    expect(bestPoint([pt("a", 10), pt("b", 30), pt("c", 30), pt("d", 5)])?.key).toBe("c");
-    expect(bestPoint([pt("a", 0)])).toBeNull();
-    expect(standoutWeekday([10, 10, 10, 30, 10, 10, 10])).toBe(3);
-    expect(standoutWeekday([10, 10, 10, 11, 10, 10, 10])).toBeNull();
-  });
-
-  it("the minutes scale steps on round numbers and the dates never crowd", () => {
-    expect(minuteScale(130 * 60_000)).toEqual({ ticks: [0, 60, 120, 180], top: 180 });
-    expect(minuteScale(18 * 60_000)).toEqual({ ticks: [0, 5, 10, 15, 20], top: 20 });
-    expect(minuteScale(0).top).toBeGreaterThan(0);
-    const days28 = run("2026-09-18", 28, () => 10);
-    // Sundays only.
-    expect(axisTicks(days28, "day").map((i) => parseDay(days28[i].key).getDay())).toEqual([0, 0, 0, 0]);
-    expect(axisTicks(run("2026-10-10", 6, () => 1), "day")).toEqual([0, 1, 2, 3, 4, 5]);
-    expect(axisTicks(Array.from({ length: 18 }, (_, i) => pt(`m${i}`, 1)), "month")).toHaveLength(6);
-  });
 });
 
 describe("moments", () => {

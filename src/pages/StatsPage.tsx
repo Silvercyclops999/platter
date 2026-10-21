@@ -184,7 +184,6 @@ export function StatsPage({ tab: openTab, month, friend }: { tab?: StatsTab; mon
   const title = rangeLabel(choice);
   const { data: o, error } = useLoad(() => (range ? backend.statsOverview(range, 50) : new Promise<StatsOverview>(() => {})), [range, attempt]);
   const moments = useLoad(() => (range ? backend.statsMoments(range) : new Promise<StatsMoments>(() => {})), [range, attempt]);
-  const isAll = choice.kind === "all";
   const isYear = choice.kind === "year" || choice.kind === "pickYear";
 
   const pickTab = (t: StatsTab) => {
@@ -243,7 +242,7 @@ export function StatsPage({ tab: openTab, month, friend }: { tab?: StatsTab; mon
     if (!o || !range) return <LoadingBody />;
     return (
       <>
-        <StatsHero o={o} moments={moments.data} title={title} isAll={isAll} />
+        <StatsHero o={o} title={title} />
         <TopLists key={`${range.from}:${range.to}`} o={o} range={range} title={title} />
         <MomentsSection moments={moments.data} rangeTitle={title} isYear={isYear} year={o.to.slice(0, 4)} error={!!moments.error} />
       </>

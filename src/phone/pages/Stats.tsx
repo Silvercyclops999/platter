@@ -79,7 +79,7 @@ function Overview({ o, title, isAll, isYear }: { o: StatsOverview; title: string
   const year = o.to.slice(0, 4);
   return (
     <div className="stats stats--phone">
-      <StatsHero o={o} moments={moments.data} title={title} isAll={isAll} />
+      <StatsHero o={o} title={title} />
 
       {songs.length > 0 && (
         <Section title="Your top songs">

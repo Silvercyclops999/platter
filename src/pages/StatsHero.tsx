@@ -7,7 +7,7 @@ import { Art } from "../components/Art";
 import { TextLink } from "../components/ArtistLinks";
 import { Skeleton } from "../components/Skeleton";
 import { formatPlays, shortDate } from "../lib/stats";
-import type { StatsMoments, StatsOverview } from "../lib/statsTypes";
+import type { StatsOverview } from "../lib/statsTypes";
 import { shortListen } from "./MonthStory";
 import { nav } from "../stores/router";
 import "./ledger.css";
@@ -15,11 +15,12 @@ import "./ledger.css";
 /** "19 hrs over 24 days, 329 plays." */
 export function heroLine(o: StatsOverview): string {
   const t = o.totals;
+  if (t.plays === 0) return "Nothing played in this range.";
   return `${shortListen(t.ms)} over ${t.days.toLocaleString()} ${t.days === 1 ? "day" : "days"}, ${formatPlays(t.plays)}.`;
 }
 
 /** The record behind the range: the album played most, as its sleeve. */
-function TopRecord({ o, named }: { o: StatsOverview; named: string | null }) {
+function TopRecord({ o }: { o: StatsOverview }) {
   const a = o.topAlbums[0];
   if (!a) return null;
   const open = a.albumId ? () => nav.go({ name: "album", id: a.albumId! }) : null;
@@ -38,7 +39,7 @@ function TopRecord({ o, named }: { o: StatsOverview; named: string | null }) {
           <span className="stats-record__title">{a.title}</span>
         )}
         <span className="stats-record__sub">
-          {a.artist !== named && <>{a.artist} </>}
+          {a.artist} 
           <span className="lg-num">{formatPlays(a.plays)}</span>
         </span>
       </figcaption>
@@ -46,7 +47,7 @@ function TopRecord({ o, named }: { o: StatsOverview; named: string | null }) {
   );
 }
 
-export function StatsHero({ o, title }: { o: StatsOverview; moments?: StatsMoments | undefined; title: string; isAll?: boolean }) {
+export function StatsHero({ o, title }: { o: StatsOverview; title: string }) {
   const dates = o.from === o.to ? shortDate(o.from) : `${shortDate(o.from)} to ${shortDate(o.to)}`;
   return (
     <section className="stats-hero" aria-label={`${title} at a glance`} data-shot="hero" data-testid="stats-hero">
@@ -56,7 +57,7 @@ export function StatsHero({ o, title }: { o: StatsOverview; moments?: StatsMomen
         </h2>
         <p className="stats-hero__dates">{dates}</p>
       </div>
-      <TopRecord o={o} named={null} />
+      <TopRecord o={o} />
     </section>
   );
 }

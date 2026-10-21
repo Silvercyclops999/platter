@@ -88,7 +88,6 @@
 /* One plain line in the display face, its dates under it. */
 .stats-hero__line { margin: 0; font-family: var(--font-headings, var(--font-family)); font-size: clamp(26px, 3cqi, 36px); font-weight: 560; line-height: 1.15; letter-spacing: -0.01em; font-variant-numeric: lining-nums; }
 .stats-hero__dates { margin: var(--space-2) 0 0; font-size: var(--font-size-md); color: var(--color-text-muted); }
-.stats-fact__value small { margin-top: 1px; }
 .stats-hero--loading { min-height: 220px; animation: none; }
 .stats-hero--loading .stats-hero__main { display: flex; flex-direction: column; }
 
@@ -167,8 +166,6 @@
 .stats-count { display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--space-4); }
 .stats-count__text { min-width: 150px; text-align: right; font-family: var(--font-readout, var(--font-family)); font-size: var(--font-size-xs); color: var(--color-text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* Each row's plays against the #1's: a hairline with a tick at the end. */
-.stats-share { position: relative; display: block; width: 96px; height: 1px; background: var(--ledger-line); }
-.stats-share__fill { position: absolute; left: 0; top: -1px; display: block; height: 3px; background: var(--ledger-stem); }
 .stats-mark {
   display: inline-block;
   margin-right: var(--space-1);
@@ -350,8 +347,6 @@ button.moment__btn:focus-visible { outline: 2px solid var(--color-focus-ring); o
 .recap__line strong { color: var(--color-text-primary); font-weight: var(--font-weight-semibold); }
 .recap__line .lg-num { color: var(--color-text-primary); }
 .recap__line .stats-mark { margin: 0 0 0 var(--space-1); }
-.recap__days { display: flex; align-items: flex-end; justify-content: space-between; height: 32px; border-bottom: 1px solid var(--ledger-line); }
-.recap__days span { width: 2px; background: var(--ledger-stem); }
 
 /* ---------------------------------------------------------------- off, empty, failed */
 .stats-state { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); padding: var(--space-8) 0; border-top: 1px solid var(--ledger-line); }
@@ -406,10 +401,8 @@ button.moment__btn:focus-visible { outline: 2px solid var(--color-focus-ring); o
   .stats-top { grid-template-columns: minmax(0, 1fr); }
   .stats-feature { display: grid; grid-template-columns: 120px minmax(0, 1fr); column-gap: var(--space-4); align-items: start; }
   .stats-feature__art { grid-row: 1 / span 6; margin: 0; }
-  .stats-share { display: none; }
   .recap { grid-template-columns: 56px minmax(0, 1fr) auto; }
   .recap__sleeve { width: 56px; height: 56px; }
-  .recap__days { display: none; }
 }
 @container stats (max-width: 640px) {
   .stats-hero { grid-template-columns: minmax(0, 1fr); gap: 0; }

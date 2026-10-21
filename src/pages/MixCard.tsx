@@ -33,12 +33,15 @@ export function mixArtists(description: string): string[] {
     .slice(0, 3);
 }
 
+/** The name a mix's sleeve prints. */
+export const sleeveName = (mix: Pick<MixSummary, "kind" | "title">) => (mix.kind === "topSongs" ? "Top Songs" : mix.title);
+
 /**
  * A mix's art: a printed sleeve. Paper, the mix's name in the serif, and
  * its leading artists under a brass rule (or what the mix is, when it
- * isn't made from a few artists). The daylist is a soft gradient
- * instead. `named` false leaves the daylist's name off, for a tile that
- * prints it under the cover.
+ * isn't made from a few artists). The sleeve always carries the name.
+ * The daylist is a soft gradient instead; `named` false leaves its name
+ * off, for a tile that prints it under the cover.
  */
 export function MixArt({ mix, named = true }: { mix: MixSummary; named?: boolean }) {
   if (mix.kind === "daylist") {
@@ -52,16 +55,18 @@ export function MixArt({ mix, named = true }: { mix: MixSummary; named?: boolean
   const artists = mixArtists(mix.description);
   return (
     <span className="mix-art mix-art--sleeve" data-testid="mix-sleeve" aria-hidden="true">
-      <span className="mix-art__title">{mix.kind === "topSongs" ? "Top Songs" : mix.title}</span>
-      {artists.length > 0 ? (
-        <span className="mix-art__artists">
-          {artists.map((n) => (
-            <span key={n}>{n}</span>
-          ))}
-        </span>
-      ) : (
-        mix.description && <span className="mix-art__artists mix-art__artists--about">{mix.description}</span>
-      )}
+      <span className="mix-art__page">
+        <span className="mix-art__title">{sleeveName(mix)}</span>
+        {artists.length > 0 ? (
+          <span className="mix-art__artists">
+            {artists.map((n) => (
+              <span key={n}>{n}</span>
+            ))}
+          </span>
+        ) : (
+          mix.description && <span className="mix-art__artists mix-art__artists--about">{mix.description}</span>
+        )}
+      </span>
     </span>
   );
 }
