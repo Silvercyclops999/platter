@@ -85,7 +85,7 @@ impl SmartRemote for PlexSmart {
         }
         let path = format!("/library/sections/{section_id}/{tag}");
         let bytes = self.plex.client().await?.get_bytes(&path, &[("type", type_of(plex_field).to_string())]).await?;
-        let env: Env<Dirs> = serde_json::from_slice(&bytes).map_err(|e| AppError::Decode(format!("{path}: {e}")))?;
+        let env: Env<Dirs> = crate::web::decode_json(&bytes).map_err(|e| AppError::Decode(format!("{path}: {e}")))?;
         Ok(env.mc.directory.into_iter().map(|d| (d.key, d.title)).collect())
     }
 
@@ -109,7 +109,7 @@ impl SmartRemote for PlexSmart {
         }
         let path = format!("/playlists/{id}");
         let bytes = client.get_bytes(&path, &[]).await?;
-        let env: Env<Metas> = serde_json::from_slice(&bytes).map_err(|e| AppError::Decode(format!("{path}: {e}")))?;
+        let env: Env<Metas> = crate::web::decode_json(&bytes).map_err(|e| AppError::Decode(format!("{path}: {e}")))?;
         env.mc
             .metadata
             .into_iter()

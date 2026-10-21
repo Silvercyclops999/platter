@@ -268,7 +268,7 @@ fn artist_of(m: &Meta) -> String {
 }
 
 fn parse(body: &[u8], what: &str) -> AppResult<Container> {
-    serde_json::from_slice::<Envelope>(body)
+    crate::web::decode_json::<Envelope>(body)
         .map(|e| e.media_container)
         .map_err(|e| AppError::Decode(format!("{what}: {e}")))
 }

@@ -91,7 +91,7 @@ struct AccountRow {
 }
 
 fn container(body: &[u8], what: &str) -> AppResult<Container> {
-    serde_json::from_slice::<Envelope>(body).map(|e| e.media_container).map_err(|e| AppError::Decode(format!("{what}: {e}")))
+    crate::web::decode_json::<Envelope>(body).map(|e| e.media_container).map_err(|e| AppError::Decode(format!("{what}: {e}")))
 }
 
 fn non_empty(s: &str) -> Option<String> {
