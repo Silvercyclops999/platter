@@ -2742,11 +2742,11 @@ The download is followed every 2 seconds through Lidarr's queue. With `lidarrPla
 
 | Command | Args | Returns |
 | --- | --- | --- |
-| `lidarr_tap` | `{ input: TapInput }` | `TapOutcome = { tap: Tap \| null, needs: { kind: "firstTime" \| "refused" \| "requested", reason } \| null }`; `needs` like `lidarr_get` (nothing is sent then). `requested` when the signed-in account doesn't own the server: the tap became a request to its owner (`asks_request`) and Lidarr wasn't reached. `invalid` with the setting off |
+| `lidarr_tap` | `{ input: TapInput }` | `TapOutcome = { tap: Tap \| null, needs: { kind: "firstTime" \| "refused" \| "requested", reason } \| null }`; `needs` like `lidarr_get` (nothing is sent then). `requested` when the signed-in account doesn't own the server: the tap became a request to its owner (`asks_request`) and Lidarr wasn't reached. `invalid` with the setting off, for the owner and anyone else alike. Tapping a song that already came in plays it from the library again |
 | `lidarr_taps` | – | `Tap[]`, the latest 20 |
 | `lidarr_last_get` | – | `LastGet \| null = { title, at, timings }`, the latest tap that reached the library |
 
-`TapInput = { title, artist, artistId?, artistMbid?, album?, releaseGroupId?, isrc?, durationMs?, thumb?, typed? }`. `Tap = { id, title, artist, album, releaseGroupId, thumb, durationMs, phase, progress, message, requestId, timings, wanted, fromDownload }` with `phase` one of `searching`, `downloading`, `waiting`, `importing`, `playing`, `ready`, `failed`; `wanted` marks the one that plays; `timings` is `{ foundMs, downloadedMs, playingMs, inLibraryMs }` after the tap. Every change is sent as the `lidarr://tap` event with the `Tap`.
+`TapInput = { title, artist, artistId?, artistMbid?, album?, releaseGroupId?, isrc?, durationMs?, thumb?, typed? }`. `Tap = { id, title, artist, album, releaseGroupId, thumb, durationMs, phase, progress, message, requestId, timings, wanted, fromDownload }` with `phase` one of `searching`, `downloading`, `waiting`, `importing`, `playing`, `ready`, `failed`; `wanted` marks the one that plays; `timings` is `{ foundMs, downloadedMs, playingMs, inLibraryMs }` after the tap. Every change is sent as the `lidarr://tap` event with the `Tap`. A tap waiting to reach Lidarr is sent again at most every 30 seconds, the quick way like the tap itself. Once Plex is late with a song the tap is looked at once a minute, and an hour after the import it's `failed` with why and stops being followed (Library doctor keeps listing it).
 
 ### Requests from people the server is shared with
 

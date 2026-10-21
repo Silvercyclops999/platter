@@ -11,7 +11,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { MockCatalogue } from "../lib/mock/catalogue";
-import { DEFAULT_SETTINGS, type DoctorFinding, type Tap } from "../lib/types";
+import { DEFAULT_SETTINGS, type DoctorFinding, type Tap, type TapInput } from "../lib/types";
 import { ArtistPage, popularItems } from "../pages/ArtistPage";
 import { DoctorPage } from "../pages/DoctorPage";
 import { lastGetText } from "../pages/LidarrSettings";
@@ -150,6 +150,13 @@ describe("the Getting it line", () => {
     const line = await screen.findByRole("status", { name: /Getting/ });
     expect(line).toHaveTextContent(msg);
     await userEvent.click(within(line).getByRole("button", { name: "OK" }));
+  });
+
+  it("a tap still on its way when a test ends never lands in the next one", async () => {
+    const coming = mock.lidarrTap({ title: "First Frost", artist: "Cold Coast", releaseGroupId: FIRST_FROST } satisfies TapInput);
+    mock.resetTaps();
+    expect((await coming).tap).toBeNull();
+    expect(mock.taps).toHaveLength(0);
   });
 
   it("labels and fills each step", () => {
