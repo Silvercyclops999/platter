@@ -12,7 +12,7 @@ import { DEFAULT_SETTINGS, type Settings } from "../lib/types";
 import { GUIDES, LOOKUPS, guideById } from "../guides/guides";
 import { GuideHost } from "../guides/GuideDialog";
 import { GuideButton } from "../guides/GuideButton";
-import { offerFirstRun } from "../guides/offer";
+import { finishFirstRun } from "../guides/offer";
 import { helpPage } from "../help/pages";
 import { guides, useGuides, type GuideId } from "../stores/guides";
 import { useApp } from "../stores/app";
@@ -197,19 +197,16 @@ describe("each guide's working parts", () => {
 });
 
 describe("first run", () => {
-  it("offers Get started after the first sign-in when guides are on", async () => {
+  it("opens nothing after the first sign-in: the music is just there", async () => {
     render(<GuideHost />);
-    act(() => offerFirstRun());
-    expect(await screen.findByRole("dialog", { name: "Setup guide: Get started" })).toBeInTheDocument();
+    act(() => finishFirstRun());
     await waitFor(async () => expect((await mock.settingsGet()).lookStepDone).toBe(true));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(useGuides.getState().active).toBeNull();
+    expect(useLooks.getState().pick).toBe(false);
   });
 
-  it("offers Pick a look instead when guides are off", async () => {
-    await mock.settingsSet({ showSetupGuides: false });
-    await loadSettings();
-    act(() => offerFirstRun());
-    expect(useGuides.getState().active).toBeNull();
-    expect(useLooks.getState().pick).toBe(true);
-    act(() => useLooks.setState({ pick: false }));
+  it("keeps Get started in the guides for anyone who wants the tour", () => {
+    expect(GUIDES.some((g) => g.id === "firstRun")).toBe(true);
   });
 });

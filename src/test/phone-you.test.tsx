@@ -77,14 +77,18 @@ afterEach(() => {
 });
 
 describe("phone sign-in", () => {
-  it("starts with Plex, waits with the code, and cancels back", async () => {
+  it("starts with Plex, waits with the code as a quiet line, and cancels back", async () => {
     await mock.authSignOut();
     act(() => useApp.getState().setAuth({ state: "signedOut", needsServerPick: false }));
     render(<PhoneSignIn />);
     expect(screen.getByTestId("phone-signin")).toHaveAttribute("data-step", "welcome");
-    expect(screen.getByRole("button", { name: "Use a Jellyfin server" })).toBeInTheDocument();
+    // Plex is the one big button; the other servers wait behind one quiet one.
+    expect(screen.queryByRole("button", { name: "Use a Jellyfin server" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Use another server" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Sign in with Plex" }));
     expect(await screen.findByText("K7QX")).toBeInTheDocument();
+    expect(screen.getByText(/If plex.tv asks for a code/)).toBeInTheDocument();
+    expect(screen.queryByText(/Step 2 of 2/)).toBeNull();
     expect(screen.getByTestId("phone-signin")).toHaveAttribute("data-step", "waiting");
     expect(screen.getByRole("status")).toHaveTextContent("Waiting for you to approve");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -93,6 +97,7 @@ describe("phone sign-in", () => {
 
   it("adds a Jellyfin server in its own screen, with a way back", async () => {
     render(<PhoneSignIn />);
+    fireEvent.click(screen.getByRole("button", { name: "Use another server" }));
     fireEvent.click(screen.getByRole("button", { name: "Use a Jellyfin server" }));
     expect(screen.getByRole("heading", { name: "Add a Jellyfin server" })).toBeInTheDocument();
     expect(screen.getByLabelText(/server address/i)).toBeInTheDocument();
@@ -450,12 +455,25 @@ describe("what the phone says", () => {
 });
 
 describe("the phone's other pages", () => {
-  it("open as phone pages; syncing to a drive says it's on the computer", async () => {
+  it("open as phone pages; Devices points at downloads, not drives", async () => {
     render(<PhoneShell />);
     act(() => useRouter.getState().navigate({ name: "recents" }));
     await waitFor(() => expect(document.querySelector('[data-phone-page="recents"]')).not.toBeNull());
     act(() => useRouter.getState().navigate({ name: "devices" }));
-    expect(await screen.findByText("On your computer")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Downloads on this phone" })).toBeInTheDocument();
+    expect(screen.queryByText(/USB drive/)).toBeNull();
+  });
+});
+
+describe("help on the phone", () => {
+  it("leaves out the pages about things only the computer has, in the list and in search", async () => {
+    render(<PhoneShell />);
+    act(() => useRouter.getState().navigate({ name: "help" }));
+    const list = within(await screen.findByRole("list", { name: "Help pages" }));
+    expect(list.getByText("Getting started")).toBeInTheDocument();
+    for (const t of ["Layouts", "Tag editor", "Stream Deck"]) expect(list.queryByText(t)).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText("Search help"), { target: { value: "stream deck" } });
+    await waitFor(() => expect(screen.queryByText(/^Stream Deck/)).toBeNull());
   });
 });
 

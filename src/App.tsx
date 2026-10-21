@@ -14,7 +14,7 @@ import { connectShare } from "./stores/share";
 import { loadSettings, useSettings } from "./stores/settings";
 import { backend } from "./lib/backend";
 import { useUi } from "./stores/ui";
-import { offerFirstRun } from "./guides/offer";
+import { finishFirstRun } from "./guides/offer";
 import { connectSwitching } from "./stores/switching";
 import { SwitchingScreen } from "./shell/SwitchingScreen";
 import { READY_WAIT_FOR_AUTH_MS, signalReady } from "./lib/firstPaint";
@@ -98,17 +98,17 @@ function MainApp() {
   const signInOpen = useUi((s) => s.signInOpen);
   // A Jellyfin server is enough to use the app without a Plex account.
   const otherServer = !!servers?.some((s) => s.kind !== "plex");
-  // First run: right after signing in for the first time, offer the Get started guide (or "Pick a look").
+  // First run: right after signing in for the first time, the music is just there.
   const sawSignIn = useRef(false);
   if (auth && auth.state !== "signedIn" && !auth.reauthRequired) sawSignIn.current = true;
   useEffect(() => {
     if (auth?.state === "signedIn") useUi.getState().setSignInOpen(false);
     if (auth?.state === "signedIn" && sawSignIn.current) {
       sawSignIn.current = false;
-      // The computer's Get started guide is about windows and layouts; the
-      // phone offers to bring the computer's setup over instead.
-      if (!usePhoneForm.getState().phone) offerFirstRun();
-      else void import("./phone/SyncSetup").then((m) => m.openSyncStep(true));
+      // Nothing opens on top of it; the phone brings the computer's setup
+      // over by itself in the background.
+      if (!usePhoneForm.getState().phone) finishFirstRun();
+      else void import("./phone/SyncSetup").then((m) => m.copyInBackground());
     }
   }, [auth?.state]);
 

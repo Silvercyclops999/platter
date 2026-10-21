@@ -39,7 +39,7 @@ An album that's on two servers shows once and plays from the best copy. [Connect
 
 ## Picking a look
 
-Right after you sign in for the first time, the Get started guide walks you through your libraries, a look, Discord and online look-ups. You can skip it, and open it again any time from Settings, App, Setup guides. With setup guides turned off, Platter offers **Pick a look** instead.
+Right after you sign in for the first time, your music is just there. Your music libraries are already picked and Platter starts in its own look. On a phone, your look, pins and follows come over by themselves from Platter on your computer. For a tour, open the Get started guide from Settings, App, Setup guides: it walks you through your libraries, a look, Discord and online look-ups.
 
 Studio, Studio Black and Sleeve are Platter's own looks. Studio is warm graphite with a brass accent, Studio Black puts it on true black for OLED screens, and Sleeve is cream paper and ink. Classic is the look Platter had before, and Classic light, Midnight, Forest and Sand are there too. Press **Make your own** to build one with a live preview.
 

@@ -26,7 +26,6 @@ import { failText } from "../../lib/errorText";
 import { useState } from "react";
 import { useDeviceSync } from "../../pages/KeepInSyncSettings";
 import type { DeviceSyncDevice } from "../../lib/types";
-import { openSyncStep } from "../SyncSetup";
 import "../sync-setup.css";
 
 const NONE_YET = new Promise<never>(() => {});
@@ -166,8 +165,9 @@ export function syncRowWords(d: DeviceSyncDevice, others: number): { title: stri
 }
 
 /**
- * Keep my devices in sync, on Devices: before a computer is paired, the way
- * to copy from it; after, how the devices are doing, with Sync now.
+ * Keep my devices in sync, on Devices: before another device turns up, one
+ * line saying it will by itself; after, how the devices are doing, with Sync
+ * now.
  */
 export function SyncRow() {
   const [ov, setOv, { failed, reload }] = useDeviceSync();
@@ -193,18 +193,10 @@ export function SyncRow() {
   if (!d)
     return (
       <div className="ph-you__sync" data-testid="you-sync">
-        <button
-          type="button"
-          className="ph-you__sync-text"
-          onClick={() => {
-            tap();
-            openSyncStep(false);
-          }}
-        >
-          <span className="ph-you__sync-title">Copy settings from my computer</span>
-          <span className="ph-you__sync-sub">Your look, pins and follows, the way Platter is set up there</span>
-        </button>
-        <ChevronRight size={18} aria-hidden="true" className="ph-set-link__chev" />
+        <span className="ph-you__sync-text">
+          <span className="ph-you__sync-title">No other devices yet</span>
+          <span className="ph-you__sync-note">Open Platter on your computer with the same Plex account. It shows up here by itself, and your look, pins and follows come over.</span>
+        </span>
       </div>
     );
   const w = syncRowWords(d, ov.devices.length - 1);

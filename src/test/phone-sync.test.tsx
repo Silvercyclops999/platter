@@ -1,7 +1,7 @@
 /**
- * Keep my devices in sync on the phone: Copy from my computer (the setup
- * step after signing in, and from You), its progress and Stop, every way it
- * fails, the status row on You with Sync now, the two device-only rows on
+ * Keep my devices in sync on the phone: the quiet copy from the computer
+ * after the first sign-in and how it fails, the status row on Devices with
+ * Sync now, the two device-only rows on
  * the Sync page, and telling the core when the network changes.
  */
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -17,7 +17,7 @@ import { usePhoneForm } from "../phone/form";
 import { syncRowWords } from "../phone/pages/You";
 import { PhoneShell } from "../phone/PhoneShell";
 import { usePhoneUi } from "../phone/phoneUi";
-import { closeSyncStep, openSyncStep, progressLine } from "../phone/SyncSetup";
+import { copyInBackground } from "../phone/SyncSetup";
 import { useApp } from "../stores/app";
 import { useRouter } from "../stores/router";
 import { loadSettings, useSettings } from "../stores/settings";
@@ -37,7 +37,6 @@ beforeEach(async () => {
   act(() => useApp.setState({ auth: { state: "signedIn", username: "listener", needsServerPick: false } }));
 });
 afterEach(() => {
-  act(() => closeSyncStep());
   usePhoneForm.setState({ phone: false });
   vi.restoreAllMocks();
 });
@@ -58,110 +57,63 @@ async function openYou() {
   return within(await screen.findByTestId("you-sync", {}, { timeout: 3000 }));
 }
 
-const step = () => within(screen.getByTestId("phone-sync-step"));
 
-describe("Copy from my computer", () => {
-  it("before the computer turns up, waits for it with no code, then copies and says what came", async () => {
-    const row = await openYou();
-    fireEvent.click(await row.findByRole("button", { name: /Copy settings from my computer/ }));
-    expect(await screen.findByRole("heading", { name: "Looking for your computer" })).toBeInTheDocument();
-    expect(step().getByRole("status")).toHaveTextContent("Open Platter on your computer, signed in to the same Plex account. This phone finds it by itself.");
-    expect(step().queryByRole("textbox")).toBeNull();
-    // The computer links by itself (same Plex account), and the copy starts.
-    act(() => mock.deviceSync.addDevice("Studio PC"));
-    expect(await screen.findByRole("heading", { name: "In sync with Studio PC" }, { timeout: 3000 })).toBeInTheDocument();
-    const copied = within(step().getByRole("list", { name: "Copied" }));
-    expect(copied.getAllByRole("listitem").map((li) => li.textContent)).toEqual([
-      "Settings48",
-      "Pins and folders12",
-      "Follows and hidden items31",
-      "Lyrics4",
-      "Looks2",
-      "Download choices9",
-      "Imported plays1,840",
-    ]);
+describe("bringing the setup over after the first sign-in", () => {
+  const toasts = () => useToasts.getState().toasts.map((t) => t.message);
+
+  it("copies from the computer by itself, with no screen, and says what came", async () => {
+    mock.deviceSync.addDevice("Studio PC");
+    shell();
+    copyInBackground();
+    await waitFor(() => expect(toasts()).toContain("Brought your setup over from Studio PC"), { timeout: 3000 });
     expect((await backend.settingsGet()).accent).toBe("brass");
-    fireEvent.click(step().getByRole("button", { name: "Done" }));
-    expect(screen.queryByTestId("phone-sync-step")).toBeNull();
-    // Devices now says how the two are doing.
-    await waitFor(() => expect(row.getByText("In sync with Studio PC")).toBeInTheDocument());
-    expect(row.getByRole("button", { name: "Sync now" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("shows where it is, and Stop keeps what came", async () => {
-    mock.deviceSync.addDevice("Studio PC");
-    mock.deviceSync.copyHangs = 2;
-    act(() => openSyncStep(false));
-    shell();
-    await waitFor(() => expect(step().getByRole("status")).toHaveTextContent("Copying your pins and folders… 2 of 7"));
-    expect(step().getByText("Copying from Studio PC")).toBeInTheDocument();
-    expect(step().getByRole("progressbar", { name: "Copied so far" })).toHaveAttribute("aria-valuenow", "1");
-    fireEvent.click(step().getByRole("button", { name: "Stop" }));
-    expect(await screen.findByRole("heading", { name: "Copy stopped" })).toBeInTheDocument();
-    expect(step().getByText(/What came over stays. The rest comes from Studio PC/)).toBeInTheDocument();
-    const copied = within(step().getByRole("list", { name: "Copied" }));
-    expect(copied.getAllByRole("listitem").map((li) => li.textContent)).toEqual(["Settings48", "Pins and foldersNone"]);
+  it("waits for a computer that isn't linked yet, then copies", async () => {
+    const copy = vi.spyOn(backend, "pairCopySettings");
+    copyInBackground();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(copy).not.toHaveBeenCalled();
+    act(() => mock.deviceSync.addDevice("Studio PC"));
+    await waitFor(() => expect(copy).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    await waitFor(() => expect(toasts()).toContain("Brought your setup over from Studio PC"));
   });
 
-  it("says when the computer isn't on this network and the rest follows", async () => {
-    mock.deviceSync.addDevice("Studio PC");
-    mock.deviceSync.copyElsewhere = true;
-    act(() => openSyncStep(false));
-    shell();
-    expect(await screen.findByRole("heading", { name: "In sync with Studio PC" }, { timeout: 3000 })).toBeInTheDocument();
-    expect(step().getByText(/The rest comes over from Studio PC in the background, quickest when both are on the same Wi-Fi/)).toBeInTheDocument();
+  it("stops waiting after a while; everyday sync brings things over later", async () => {
+    const copy = vi.spyOn(backend, "pairCopySettings");
+    copyInBackground(20);
+    await new Promise((r) => setTimeout(r, 60));
+    act(() => mock.deviceSync.addDevice("Studio PC"));
+    await new Promise((r) => setTimeout(r, 60));
+    expect(copy).not.toHaveBeenCalled();
   });
 
-  it("says what's wrong: the computer not answering, mobile data, sync off", async () => {
+  it("stays quiet when the computer doesn't answer or sync is off", async () => {
     mock.deviceSync.addDevice("Studio PC");
     mock.deviceSync.copyFails = true;
-    act(() => openSyncStep(false));
-    shell();
-    expect(await screen.findByRole("heading", { name: "That didn't work" })).toBeInTheDocument();
-    expect(step().getByRole("alert")).toHaveTextContent("Studio PC didn't answer. Open Platter there and try again.");
-    // Fixed: Try again copies.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    copyInBackground();
+    await waitFor(() => expect(warn).toHaveBeenCalledWith("first copy", expect.anything()), { timeout: 3000 });
+    expect(toasts()).toEqual([]);
     mock.deviceSync.copyFails = false;
-    mock.deviceSync.metered = true;
-    fireEvent.click(step().getByRole("button", { name: "Try again" }));
-    await waitFor(() => expect(step().getByRole("alert")).toHaveTextContent("Copying waits for Wi-Fi. Connect to Wi-Fi, or turn off Send big things only on Wi-Fi."));
-    mock.deviceSync.metered = false;
     await backend.settingsSet({ ...DEFAULT_SETTINGS, deviceSync: false });
-    fireEvent.click(step().getByRole("button", { name: "Try again" }));
-    await waitFor(() => expect(step().getByRole("alert")).toHaveTextContent(/Turn on Keep my devices in sync first/));
-    fireEvent.click(step().getByRole("button", { name: "Close" }));
-    expect(screen.queryByTestId("phone-sync-step")).toBeNull();
+    const copy = vi.spyOn(backend, "pairCopySettings");
+    copyInBackground();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(copy).not.toHaveBeenCalled();
+    expect(toasts()).toEqual([]);
   });
+});
 
-  it("on mobile data goes on when Send big things only on Wi-Fi is off", async () => {
-    mock.deviceSync.addDevice("Studio PC");
-    mock.deviceSync.metered = true;
-    await backend.settingsSet({ ...DEFAULT_SETTINGS, deviceSyncWifiOnly: false });
-    act(() => openSyncStep(false));
-    shell();
-    expect(await screen.findByRole("heading", { name: "In sync with Studio PC" }, { timeout: 3000 })).toBeInTheDocument();
-  });
-
-  it("is offered once after signing in, and Start fresh leaves it", async () => {
-    act(() => openSyncStep(true));
-    shell();
-    expect(await screen.findByRole("heading", { name: "Bring your setup over" })).toBeInTheDocument();
-    expect(step().getByText("Your sign-in and keys stay on each device.")).toBeInTheDocument();
-    fireEvent.click(step().getByRole("button", { name: "Start fresh" }));
-    expect(screen.queryByTestId("phone-sync-step")).toBeNull();
-  });
-
-  it("isn't offered after signing in when a computer is paired already", async () => {
-    mock.deviceSync.addDevice("Studio PC");
-    act(() => openSyncStep(true));
-    shell();
-    await screen.findByTestId("phone-shell");
-    await waitFor(() => expect(screen.queryByTestId("phone-sync-step")).toBeNull());
-    await new Promise((r) => setTimeout(r, 20));
-    expect(screen.queryByTestId("phone-sync-step")).toBeNull();
-  });
-
-  it("words its progress line", () => {
-    expect(progressLine({ name: "Studio PC", step: 4, of: 9, label: "Copying your pins" })).toBe("Copying your pins… 4 of 9");
+describe("Devices on the phone", () => {
+  it("says other devices show up by themselves, with no button to press", async () => {
+    const row = await openYou();
+    expect(await row.findByText("No other devices yet")).toBeInTheDocument();
+    expect(row.getByText(/Open Platter on your computer with the same Plex account. It shows up here by itself/)).toBeInTheDocument();
+    expect(row.queryByRole("button")).toBeNull();
+    expect(screen.queryByText(/USB drive/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Downloads on this phone" })).toBeInTheDocument();
   });
 });
 

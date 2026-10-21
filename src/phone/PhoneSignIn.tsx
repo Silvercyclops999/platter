@@ -49,6 +49,8 @@ export function PhoneSignIn({ onBack }: { onBack?: () => void } = {}) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  // Jellyfin and Navidrome sit behind one quiet button, under Plex.
+  const [others, setOthers] = useState(false);
   const pending = auth?.state === "pending" || !!pin;
   const step: SignInStep = other ?? (pending ? "waiting" : "welcome");
 
@@ -128,14 +130,19 @@ export function PhoneSignIn({ onBack }: { onBack?: () => void } = {}) {
                 ? "Plex asked you to sign in again. Music saved on this phone keeps playing in the meantime."
                 : onBack
                   ? "Add your Plex music next to the servers you already have."
-                  : "Play your own library from Plex, Jellyfin or Navidrome. Nothing is installed on your server."}
+                  : "Sign in with Plex and your music is here. Nothing to install on your server."}
             </p>
           </div>
           <div className="ph-signin__actions">
             <button type="button" className="ph-big-btn is-primary" onClick={() => void start()} disabled={busy}>
               Sign in with Plex
             </button>
-            {!onBack && (
+            {!onBack && !others && (
+              <button type="button" className="ph-big-btn is-quiet" onClick={() => setOthers(true)}>
+                Use another server
+              </button>
+            )}
+            {!onBack && others && (
               <>
                 <button type="button" className="ph-big-btn" onClick={() => setOther("jellyfin")}>
                   Use a Jellyfin server
@@ -151,22 +158,21 @@ export function PhoneSignIn({ onBack }: { onBack?: () => void } = {}) {
       ) : (
         <>
           <div className="ph-signin__words">
-            <p className="ph-eyebrow">Step 2 of 2</p>
             <h1 className="ph-title ph-signin__title">Approve Platter on plex.tv</h1>
-            {pin && pin.code.length > 8 ? (
-              <p className="ph-signin__lead">Platter opened plex.tv in your browser. Sign in there, approve Platter, then come back here.</p>
-            ) : (
-              <>
-                <p className="ph-signin__lead">Platter opened plex.tv in your browser. If it asks for a code, enter this one:</p>
-                <p className="ph-code tabular" aria-label={pin ? `Code ${pin.code.split("").join(" ")}` : "Code loading"}>
-                  {pin ? pin.code : " "}
-                </p>
-              </>
-            )}
+            <p className="ph-signin__lead">Platter opened plex.tv in your browser. Sign in there, approve Platter, then come back here.</p>
             <p className="ph-signin__waiting" role="status">
               <span className="ph-signin__pulse" aria-hidden="true" />
               Waiting for you to approve
             </p>
+            {/* A long secure PIN is already in the link; a short code is only typed if plex.tv asks. */}
+            {(!pin || pin.code.length <= 8) && (
+              <p className="ph-signin__code-line">
+                If plex.tv asks for a code, it's{" "}
+                <span className="ph-code tabular" aria-label={pin ? `Code ${pin.code.split("").join(" ")}` : "Code loading"}>
+                  {pin ? pin.code : " "}
+                </span>
+              </p>
+            )}
           </div>
           <div className="ph-signin__actions">
             {pin && (
