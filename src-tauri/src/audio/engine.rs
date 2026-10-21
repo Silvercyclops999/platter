@@ -2733,6 +2733,12 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                 match open_track(&env, &track, via, &ctl.prio) {
                     Ok(o) => {
                         opened = o;
+                        // The copy opened now may not be the one the
+                        // converter was made for (another rate or layout).
+                        conv = match converter(&opened.dec, out_fmt) {
+                            Ok(c) => c,
+                            Err(e) => return fail(&env, key, &track, e),
+                        };
                         if opened.dec.seek_ms(ms).is_err() {
                             // Can't get there: the song ends here (not
                             // played on from its start under the new
