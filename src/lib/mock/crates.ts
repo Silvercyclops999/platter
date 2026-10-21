@@ -60,7 +60,8 @@ export class MockCrates {
         add("era", String(decade), `${decade}s`, a.id);
         add("year", String(a.year), String(a.year), a.id);
       }
-      for (const g of a.genres) add("genre", g.toLowerCase(), g, a.id);
+      // Spaces, hyphens, dots and case aside ("Hip-Hop", "Hip Hop"), as the app does.
+      for (const g of a.genres) add("genre", g.toLowerCase().replace(/[\s\-\u2010\u2011_.]+/g, ""), g, a.id);
     }
     const byId = new Map(this.fx.albums.map((a) => [a.id, a]));
     const order = (x: string, y: string) => {

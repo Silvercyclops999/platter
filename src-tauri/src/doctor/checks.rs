@@ -633,7 +633,7 @@ fn most_common(values: &[String]) -> Option<String> {
         }
     }
     // Stable sort: equal counts keep the order the songs come in.
-    groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    groups.sort_by_key(|g| std::cmp::Reverse(g.1.len()));
     let (_, list) = groups.into_iter().next()?;
     let mut spellings: Vec<(&String, usize)> = Vec::new();
     for v in list {
@@ -642,7 +642,7 @@ fn most_common(values: &[String]) -> Option<String> {
             None => spellings.push((v, 1)),
         }
     }
-    spellings.sort_by(|a, b| b.1.cmp(&a.1));
+    spellings.sort_by_key(|s| std::cmp::Reverse(s.1));
     spellings.first().map(|(s, _)| s.trim().to_string())
 }
 
@@ -751,7 +751,7 @@ fn suggest_album_artist(a: &AlbumRow, read: &[&SongRow], leads: &[(String, usize
         return Some(v);
     }
     let mut leads = leads.to_vec();
-    leads.sort_by(|x, y| y.1.cmp(&x.1));
+    leads.sort_by_key(|l| std::cmp::Reverse(l.1));
     if let Some((name, n)) = leads.first()
         && n * 2 >= songs
     {
@@ -811,7 +811,8 @@ fn halves(a: &AlbumRow, b: &AlbumRow, sa: &[&SongRow], sb: &[&SongRow]) -> bool 
 
 /// What tells one part of a split album apart: "4 songs, from “Intro”".
 fn part_note(songs: &[&SongRow]) -> String {
-    let first = songs.iter().min_by_key(|s| (s.disc, s.number));
+    // Songs without a track number come last.
+    let first = songs.iter().min_by_key(|s| (s.number <= 0, s.disc, s.number));
     match first {
         Some(s) if !s.title.trim().is_empty() => format!("{}, from \u{201c}{}\u{201d}", plural(songs.len(), "song", "songs"), s.title.trim()),
         _ => plural(songs.len(), "song", "songs"),

@@ -9,7 +9,7 @@ import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { Skeleton } from "../components/Skeleton";
 import { backend } from "../lib/backend";
-import { FIELD_LABEL, asksFirst, doctorChanges, fixRequest, type DoctorField } from "../lib/tagEdit";
+import { FIELD_LABEL, asksFirst, doctorChanges, doctorValueProblem, fixRequest, type DoctorField } from "../lib/tagEdit";
 import type { DoctorFinding, TagEditorData } from "../lib/types";
 import { errText } from "../stores/plexEdit";
 import { nav } from "../stores/router";
@@ -103,6 +103,7 @@ function FixForm({ finding, data, onClose }: { finding: DoctorFinding; data: Tag
   const picked = changes.filter((c) => !skip.has(key(c)));
   const files = new Set(picked.map((c) => c.trackId)).size;
   const fields = FIELDS.filter((k) => k in want);
+  const problems = fields.map((k) => [k, doctorValueProblem(k, want[k] ?? "")] as const).filter(([, p]) => p);
   const blocked = data.needsMusicFolder || !data.writable;
 
   const save = async () => {
@@ -112,6 +113,7 @@ function FixForm({ finding, data, onClose }: { finding: DoctorFinding; data: Tag
       toast.info("Set the music folder under Library, Tag editor");
       return;
     }
+    if (problems.length) return;
     if (asksFirst(files, askMany) && askedFor !== files) return setAskedFor(files);
     setSaving(true);
     setProblem(null);
@@ -147,18 +149,42 @@ function FixForm({ finding, data, onClose }: { finding: DoctorFinding; data: Tag
               placeholder={k === "albumArtist" ? "Various Artists" : undefined}
               disabled={!data.writable && !data.needsMusicFolder}
               autoFocus={k === fields[0]}
+              aria-invalid={!!doctorValueProblem(k, want[k] ?? "")}
               onChange={(e) => setWant((w) => ({ ...w, [k]: e.target.value }))}
             />
           </label>
         ))}
       </div>
+      {!blocked &&
+        problems.map(([k, p]) => (
+          <p key={k} className="confirm__error" role="alert">
+            {FIELD_LABEL[k]}: {p}
+          </p>
+        ))}
 
-      {!blocked && changes.length === 0 && (
+      {finding.kind === "albumArtist" &&
+        finding.others.map((o) => (
+          <p key={o.id} className="pe__note doctor-fix__other">
+            {o.title} has the same name under another artist. Give its songs the same album artist too, so Plex puts them together.{" "}
+            <button
+              type="button"
+              className="link"
+              onClick={() => {
+                onClose();
+                useTagEdit.getState().openEditor({ albumId: o.id, trackIds: [], focus: "albumArtist" });
+              }}
+            >
+              Edit its tags
+            </button>
+          </p>
+        ))}
+
+      {!blocked && problems.length === 0 && changes.length === 0 && (
         <p className="pe__note" role="status">
           Every file already has {fields.length === 1 ? "this" : "these"}. Plex catches up after its next scan.
         </p>
       )}
-      {!blocked && changes.length > 0 && (
+      {!blocked && problems.length === 0 && changes.length > 0 && (
         <div className="te-grid-wrap">
           <table className="te-grid te-preview">
             <caption className="sr-only">What changes in each file</caption>
@@ -227,7 +253,7 @@ function FixForm({ finding, data, onClose }: { finding: DoctorFinding; data: Tag
           Edit all tags
         </Button>
         <Button onClick={onClose}>Cancel</Button>
-        <Button variant="primary" type="submit" disabled={saving || (!data.needsMusicFolder && (!data.writable || files === 0))}>
+        <Button variant="primary" type="submit" disabled={saving || (!data.needsMusicFolder && (!data.writable || files === 0 || problems.length > 0))}>
           {data.needsMusicFolder ? "Set up music folder" : saving ? "Saving..." : `Change ${files === 1 ? "1 file" : `${files} files`}`}
         </Button>
       </div>

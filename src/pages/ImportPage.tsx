@@ -231,7 +231,7 @@ export function ImportPage({ view }: { view?: string }) {
   const on = (s?.importSources ?? []).length > 0;
   // Until something is brought over there's no report: the page is Bring
   // music over, the one place to start an import.
-  if (s && !on && view !== "missing" && view !== "played") {
+  if (s && !on && view !== "missing" && view !== "played" && !view?.startsWith("list:")) {
     return (
       <Suspense fallback={null}>
         <BringPage />

@@ -130,10 +130,19 @@ export function doctorChanges(
       const after = (raw ?? "").trim();
       if (!after) continue;
       const before = (f.values[field] ?? "").trim();
-      const same = field === "year" ? before.slice(0, 4) === after : before === after;
+      // A year matches a file's full date in that year ("2019" and "2019-05-31").
+      const same = before === after || (field === "year" && after.length === 4 && before.slice(0, 4) === after);
       if (same) continue;
       changes.push({ trackId: f.trackId, fileName: f.fileName, stamp: f.stamp, field, before: before || null, after, note: null });
     }
   }
   return { changes, kept };
+}
+
+/** Why a doctor fix value can't be written as it is, or null when it can. */
+export function doctorValueProblem(field: DoctorField, value: string): string | null {
+  const v = value.trim();
+  if (!v) return "Enter a value first.";
+  if (field === "year" && !/^\d{4}(-\d{2}(-\d{2})?)?$/.test(v)) return "A year looks like 2019, or a date like 2019-05-31.";
+  return null;
 }

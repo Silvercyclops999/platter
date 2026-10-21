@@ -17,6 +17,7 @@ import type { DoctorFinding, DoctorKind, DoctorSuggestedTags, DoctorReport, Lida
 import { useDoctor } from "../stores/doctor";
 import { errText, runEdit, useCanEdit, usePlexEdit, type EditTarget } from "../stores/plexEdit";
 import { nav } from "../stores/router";
+import { useTagEdit } from "../stores/tagEdit";
 import { updateSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import { useLidarrReady } from "./lidarrShared";
@@ -110,13 +111,22 @@ export function DoctorPage() {
   // Just ignored on this visit: a slim line with Undo stays where each was,
   // so the next finding doesn't slide under the pointer or a toast.
   const [gone, setGone] = useState<Gone[]>([]);
+  const goneRef = useRef(gone);
+  goneRef.current = gone;
+  // The line to focus when it appears: only the one just ignored.
+  const justIgnored = useRef<string | null>(null);
 
   const ignore = async (f: DoctorFinding, on: boolean) => {
-    const list = shownRef.current.filter((x) => x.kind === f.kind);
-    const at = list.findIndex((x) => x.id === f.id);
+    // Its place among the rows as drawn, earlier ignored lines included.
+    const rows = withGone(
+      shownRef.current.filter((x) => x.kind === f.kind),
+      goneRef.current.filter((g) => g.f.kind === f.kind),
+    );
+    const at = rows.findIndex((r) => r.f.id === f.id);
     try {
       await backend.doctorIgnore(f.id, f.kind, f.title, on);
-      if (on) setGone((g) => [...g.filter((x) => x.f.id !== f.id), { f, after: at > 0 ? list[at - 1].id : null }]);
+      if (on) justIgnored.current = f.id;
+      if (on) setGone((g) => [...g.filter((x) => x.f.id !== f.id), { f, after: at > 0 ? rows[at - 1].f.id : null }]);
       else setGone((g) => g.filter((x) => x.f.id !== f.id));
       reload();
     } catch (e) {
@@ -214,7 +224,17 @@ export function DoctorPage() {
             </p>
           )}
           {kinds.map((k) => (
-            <KindSection key={k} kind={k} items={withGone(shown.filter((f) => f.kind === k), gone.filter((g) => g.f.kind === k))} lidarr={lidarr} onIgnore={ignore} onMerge={setMerging} onTags={setTagging} onBetterCopy={betterCopy} />
+            <KindSection key={k} kind={k} items={withGone(shown.filter((f) => f.kind === k), gone.filter((g) => g.f.kind === k))} lidarr={lidarr}
+              onIgnore={ignore}
+              onMerge={setMerging}
+              onTags={setTagging}
+              onBetterCopy={betterCopy}
+              takeFocus={(id) => {
+                if (justIgnored.current !== id) return false;
+                justIgnored.current = null;
+                return true;
+              }}
+            />
           ))}
           {report.ignored.length > 0 && (
             <section className="doctor__ignored" aria-label="Ignored">
@@ -286,6 +306,7 @@ function KindSection({
   onMerge,
   onTags,
   onBetterCopy,
+  takeFocus,
 }: {
   kind: DoctorKind;
   items: Row[];
@@ -294,17 +315,19 @@ function KindSection({
   onMerge: (f: DoctorFinding) => void;
   onTags: (f: DoctorFinding) => void;
   onBetterCopy: (f: DoctorFinding) => void;
+  takeFocus: (id: string) => boolean;
 }) {
   const id = useId();
+  const left = items.filter((r) => !r.gone).length;
   return (
     <section className="doctor__section" aria-labelledby={id}>
       <h2 id={id} className="doctor__section-title">
-        {KIND_LABEL[kind]} <span className="doctor__section-count">{n(items.filter((r) => !r.gone).length)}</span>
+        {KIND_LABEL[kind]} {left > 0 && <span className="doctor__section-count">{n(left)}</span>}
       </h2>
       <ul className="doctor__list">
         {items.map(({ f, gone }) =>
           gone ? (
-            <IgnoredLine key={f.id} f={f} onUndo={() => onIgnore(f, false)} />
+            <IgnoredLine key={f.id} f={f} focus={takeFocus} onUndo={() => onIgnore(f, false)} />
           ) : (
             <FindingRow key={f.id} f={f} lidarr={lidarr} onIgnore={onIgnore} onMerge={onMerge} onTags={onTags} onBetterCopy={onBetterCopy} />
           ),
@@ -314,10 +337,13 @@ function KindSection({
   );
 }
 
-/** Where an ignored finding was: what happened, and Undo (focused, so the keyboard stays put). */
-function IgnoredLine({ f, onUndo }: { f: DoctorFinding; onUndo: () => void }) {
+/** Where an ignored finding was: what happened, and Undo (focused right after Ignore, so the keyboard stays put). */
+function IgnoredLine({ f, focus, onUndo }: { f: DoctorFinding; focus: (id: string) => boolean; onUndo: () => void }) {
   const undo = useRef<HTMLButtonElement>(null);
-  useEffect(() => undo.current?.focus({ preventScroll: true }), []);
+  useEffect(() => {
+    if (focus(f.id)) undo.current?.focus({ preventScroll: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
     <li className="doctor-item doctor-item--gone">
       <p className="doctor-item__gone-text truncate" role="status">
@@ -370,7 +396,8 @@ function FindingRow({
       case "mergeAlbums":
         return onMerge(f);
       case "tags":
-        return onTags(f);
+        // Found before the doctor suggested values: the full editor instead.
+        return f.set ? onTags(f) : useTagEdit.getState().openEditor({ albumId: f.albumId, trackIds: [], focus: f.kind === "albumArtist" ? "albumArtist" : "album" });
       case "suggestedTags":
         return setWhy(true);
       case "openAlbum":
@@ -433,10 +460,12 @@ export function TagTable({ f }: { f: DoctorFinding }) {
     for (const v of vals) c.set(String(v ?? ""), (c.get(String(v ?? "")) ?? 0) + 1);
     return [...c.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
   };
+  // What each song should have: the fix's value, else what most songs say.
+  // (Most songs may lack an album artist; the ones without it are the odd ones.)
   const usual = {
-    album: most(f.table.map((r) => r.album)),
-    albumArtist: most(f.table.map((r) => r.albumArtist)),
-    year: most(f.table.map((r) => r.year)),
+    album: f.set?.album ?? most(f.table.map((r) => r.album)),
+    albumArtist: f.set?.albumArtist ?? most(f.table.map((r) => r.albumArtist)),
+    year: f.set?.year != null ? String(f.set.year) : most(f.table.map((r) => r.year)),
   };
   const text = (v: string | number | null) => (v === null || v === "" ? "" : String(v));
   const odd = (r: DoctorFinding["table"][number]) => text(r.album) !== usual.album || text(r.albumArtist) !== usual.albumArtist || text(r.year) !== usual.year;

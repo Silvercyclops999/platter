@@ -13,7 +13,9 @@ import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import type { DoctorFinding } from "../lib/types";
 import { DEFAULT_SETTINGS } from "../lib/types";
-import { DoctorPage, countLine, fixLabel } from "../pages/DoctorPage";
+import { DoctorPage, countLine, fixLabel, withGone } from "../pages/DoctorPage";
+import { doctorChanges, doctorValueProblem } from "../lib/tagEdit";
+import type { TagEditFile } from "../lib/types";
 import { SettingsPage } from "../pages/SettingsPage";
 import { DoctorNote } from "../shell/Sidebar";
 import { useApp } from "../stores/app";
@@ -64,6 +66,40 @@ describe("helpers", () => {
     expect(fixLabel({ ...f, kind: "duplicate" })).toEqual({ label: "Open album", edit: false });
     expect(fixLabel({ ...f, fix: "cover" }).edit).toBe(true);
     expect(fixLabel({ ...f, fix: "mergeAlbums", others: [{ id: "1", title: "x", thumb: null }] }).label).toBe("Merge into one");
+  });
+});
+
+describe("tag fix helpers", () => {
+  const file = (trackId: string, values: Record<string, string>, stamp: string | null = "s"): TagEditFile =>
+    ({ trackId, albumId: "a", serverPath: null, localPath: null, fileName: `${trackId}.flac`, format: "flac", id3Version: null, values, keys: [], stamp, error: stamp ? null : "Gone", durationMs: 1 }) as TagEditFile;
+
+  it("changes only files and fields that differ; a year matches a date in it; unreadable files are kept", () => {
+    const files = [file("1", { album: "Night Drive", year: "2016-05-31" }), file("2", { album: "Night Drive (Deluxe)", year: "2017" }), file("3", {}, null)];
+    const { changes, kept } = doctorChanges(files, { album: "Night Drive", year: "2016" });
+    expect(changes.map((c) => `${c.trackId}:${c.field}:${c.before}>${c.after}`)).toEqual(["2:album:Night Drive (Deluxe)>Night Drive", "2:year:2017>2016"]);
+    expect(kept).toEqual([{ trackId: "3", fileName: "3.flac", reason: "Gone" }]);
+    // A full date is compared whole.
+    expect(doctorChanges([file("1", { year: "2016-05-31" })], { year: "2016-06-01" }).changes).toHaveLength(1);
+    // An empty value changes nothing.
+    expect(doctorChanges(files, { albumArtist: "  " }).changes).toEqual([]);
+  });
+
+  it("says what's wrong with a value", () => {
+    expect(doctorValueProblem("albumArtist", " ")).toMatch(/Enter a value/);
+    expect(doctorValueProblem("year", "20l6")).toMatch(/2019/);
+    expect(doctorValueProblem("year", "2019-05-31")).toBeNull();
+    expect(doctorValueProblem("album", "Night Drive")).toBeNull();
+  });
+
+  it("puts ignored lines back where they were, in order", () => {
+    const f = (id: string) => ({ id }) as DoctorFinding;
+    const ids = (rows: ReturnType<typeof withGone>) => rows.map((r) => `${r.f.id}${r.gone ? "*" : ""}`);
+    // X, A, B: A ignored after X, then B after A.
+    expect(ids(withGone([f("X")], [{ f: f("A"), after: "X" }, { f: f("B"), after: "A" }]))).toEqual(["X", "A*", "B*"]);
+    // The first two, one after the other.
+    expect(ids(withGone([f("C")], [{ f: f("A"), after: null }, { f: f("B"), after: "A" }]))).toEqual(["A*", "B*", "C"]);
+    // Back in the list: no line.
+    expect(ids(withGone([f("A"), f("C")], [{ f: f("A"), after: null }]))).toEqual(["A", "C"]);
   });
 });
 
@@ -176,6 +212,9 @@ describe("the library doctor page", () => {
     const n = f.table.filter((r) => !r.albumArtist).length;
     expect(await within(dialog).findAllByRole("checkbox")).toHaveLength(n);
     await user.clear(input);
+    // Nothing to write: it says so and won't save.
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Album artist: Enter a value first.");
+    expect(within(dialog).getByRole("button", { name: /^Change/ })).toBeDisabled();
     await user.type(input, "Various Artists");
     // Now every song changes, the one that had an album artist too.
     expect(within(dialog).getAllByRole("checkbox")).toHaveLength(f.table.length);
@@ -240,6 +279,18 @@ describe("the library doctor page", () => {
     expect(line).toHaveTextContent(`Ignored “${title}” on every device.`);
     expect(within(line).getByRole("button", { name: "Undo" })).toHaveFocus();
     expect(useToasts.getState().toasts).toHaveLength(0);
+    // Ignore the next one too: its line goes after the first.
+    const next = within(section(/^Covers/)).getAllByRole("listitem")[1];
+    const nextTitle = within(next).getByRole("heading", { level: 3 }).textContent!;
+    await user.click(within(next).getByRole("button", { name: "Ignore" }));
+    expect(await screen.findByText("13 things to fix")).toBeInTheDocument();
+    const lines = within(section(/^Covers/)).getAllByRole("listitem");
+    expect(lines[0]).toHaveTextContent(title);
+    expect(lines[1]).toHaveTextContent(`Ignored “${nextTitle}”`);
+    // Undo brings that one back in its place.
+    await user.click(within(lines[1]).getByRole("button", { name: "Undo" }));
+    expect(await screen.findByText("14 things to fix")).toBeInTheDocument();
+    expect(within(section(/^Covers/)).getAllByRole("heading", { level: 3 })[0]).toHaveTextContent(nextTitle);
     await user.click(screen.getByRole("button", { name: "Show ignored (1)" }));
     const ignored = screen.getByRole("region", { name: "Ignored" });
     expect(within(ignored).getByText(title)).toBeInTheDocument();
