@@ -18,6 +18,10 @@ import { SongSwipeUnder, useRowSwipe } from "../rowSwipe";
 import { isLiked, setLiked } from "../../stores/likes";
 import { player, usePlayer } from "../../stores/player";
 import { PlayingBars } from "./common";
+import { hasCatalogue, playCatalogueSong, useCatalogueSearch, useTapPlays, type CatalogueResults } from "../../pages/SearchCatalogue";
+import { useLidarrReady } from "../../pages/lidarrShared";
+import { catalogueKind } from "../../lib/format";
+import "../../pages/catalogue.css";
 
 /** Typing settles for this long before the search runs. */
 export const SEARCH_SETTLE_MS = 150;
@@ -90,6 +94,7 @@ export function PhoneSearch() {
     setRecents((r) => (r ?? []).filter((x) => hitInfo(x)?.key !== i.key));
     backend.searchRecentRemove(i.kind, i.id).catch(() => {});
   };
+  const cat = useCatalogueSearch(q, "all");
   const all = res ? phoneResults(res) : [];
   const hits = ofKind(all, kind);
   const kinds = SEARCH_KINDS.filter((k) => k.id === "all" || all.some((h) => hitInfo(h)?.kind === k.id));
@@ -191,6 +196,7 @@ export function PhoneSearch() {
           ) : (
             <p className="ph-rows__note">Nothing in your library matches "{q}".</p>
           )}
+          <PhoneCatalogue c={cat} kind={kind} />
         </section>
       )}
     </div>
@@ -310,6 +316,70 @@ function Browse() {
                   <Art path={g.albums[0].thumb} size={64} sleeve={{ title: g.albums[0].title, artist: g.albums[0].artistTitle }} />
                 </span>
               )}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * Music you don't have, under the library's results: a song plays on tap
+ * when Lidarr can get it (Get where the length would be); an album or an
+ * artist opens its page, with Get there.
+ */
+function PhoneCatalogue({ c, kind }: { c: CatalogueResults | null; kind: SearchKind }) {
+  const tapPlays = useTapPlays(useLidarrReady());
+  if (!c || !hasCatalogue(c)) return null;
+  const songs = kind === "all" || kind === "track" ? c.songs : [];
+  const albums = kind === "all" || kind === "album" ? c.albums : [];
+  const artists = kind === "all" || kind === "artist" ? c.artists.filter((a) => !a.libraryId) : [];
+  if (!songs.length && !albums.length && !artists.length) return null;
+  return (
+    <section aria-label="Not in your library" className="ph-search__catalogue">
+      <h2 className="ph-section-title">Not in your library</h2>
+      <ul className="ph-rows">
+        {songs.map((s) => (
+          <li key={`so-${s.recordingId}`} className="ph-hit">
+            <button
+              type="button"
+              className="ph-row"
+              aria-label={`${s.title}, song by ${s.artist}${tapPlays ? ", a tap gets it and plays it" : ""}`}
+              onClick={() => (tapPlays ? void playCatalogueSong(s) : s.releaseGroupId && nav.go({ name: "catalogueAlbum", id: s.releaseGroupId }))}
+            >
+              <Art path={s.thumb} size={52} kind="album" />
+              <span className="ph-row__text">
+                <span className="ph-row__title">{s.title}</span>
+                <span className="ph-row__sub">{[s.artist, s.album].filter(Boolean).join(" · ")}</span>
+              </span>
+              {tapPlays && (
+                <span className="sr-get-mark" aria-hidden="true">
+                  Get
+                </span>
+              )}
+            </button>
+          </li>
+        ))}
+        {albums.map((a) => (
+          <li key={`al-${a.releaseGroupId}`} className="ph-hit">
+            <button type="button" className="ph-row" onClick={() => nav.go({ name: "catalogueAlbum", id: a.releaseGroupId })}>
+              <Art path={a.thumb} size={52} kind="album" />
+              <span className="ph-row__text">
+                <span className="ph-row__title">{a.title}</span>
+                <span className="ph-row__sub">{[catalogueKind(a), a.artist].filter(Boolean).join(" · ")}</span>
+              </span>
+            </button>
+          </li>
+        ))}
+        {artists.map((a) => (
+          <li key={`ar-${a.mbid}`} className="ph-hit">
+            <button type="button" className="ph-row" onClick={() => nav.go({ name: "catalogueArtist", mbid: a.mbid })}>
+              <Art path={a.photo ?? null} size={52} round kind="artist" monogram={a.name} />
+              <span className="ph-row__text">
+                <span className="ph-row__title">{a.name}</span>
+                <span className="ph-row__sub">Artist</span>
+              </span>
             </button>
           </li>
         ))}

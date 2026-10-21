@@ -7,17 +7,26 @@
 import { Pause, Play } from "lucide-react";
 import type { CSSProperties } from "react";
 import { Art } from "../components/Art";
+import type { Tap } from "../lib/types";
 import { trackArtistLine } from "../lib/format";
 import { useArtColours } from "../lib/useTint";
 import { player, usePlayer } from "../stores/player";
 import { ProgressLine, tap } from "./bits";
 import { OutputButton } from "./DeviceSheet";
 import { phone } from "./phoneUi";
+import { GettingLine } from "../components/GettingLine";
+import { followTaps, getting, useTaps } from "../stores/taps";
+import { useEffect } from "react";
 
 export function MiniPlayer() {
   const track = usePlayer((s) => s.state?.track ?? null);
   const status = usePlayer((s) => s.state?.status ?? "idle");
-  const colours = useArtColours(null, track?.thumb);
+  const tapped = useTaps((s) => s.current);
+  useEffect(() => followTaps(), []);
+  // A tapped song on its way shows here, over what's still playing.
+  const coming = getting(tapped) ? tapped : null;
+  const colours = useArtColours(null, coming ? coming.thumb : track?.thumb);
+  if (coming) return <MiniGetting tap={coming} playing={track?.title ?? null} />;
   if (!track) return null;
   const playing = status === "playing" || status === "loading" || status === "buffering";
   const style = { "--ph-tint": colours?.vivid ?? "var(--color-bg-overlay)" } as CSSProperties;
@@ -47,6 +56,25 @@ export function MiniPlayer() {
         {playing ? <Pause size={24} fill="currentColor" aria-hidden="true" /> : <Play size={24} fill="currentColor" aria-hidden="true" />}
       </button>
       <ProgressLine className="ph-mini__progress" />
+    </div>
+  );
+}
+
+function MiniGetting({ tap: t, playing }: { tap: Tap; playing: string | null }) {
+  return (
+    <div className="ph-mini" data-testid="mini-player">
+      <button type="button" className="ph-mini__open" aria-label={`Getting ${t.title} by ${t.artist}. Open the player`} onClick={phone.openPlayer}>
+        <span className="ph-mini__art">
+          <Art path={t.thumb} size={44} sleeve={{ title: t.album, artist: t.artist }} />
+        </span>
+        <span className="ph-mini__text">
+          <span className="ph-mini__title">{t.title}</span>
+          <span className="ph-mini__artist">
+            <span className="ph-mini__artist-name">{playing ? `${t.artist} · still playing ${playing}` : t.artist}</span>
+          </span>
+        </span>
+      </button>
+      <GettingLine tap={t} />
     </div>
   );
 }

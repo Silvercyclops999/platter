@@ -826,22 +826,7 @@
    the bar stays centred under the transport buttons. */
 .seek .signal-badge { width: 96px; padding: 0 4px; text-align: center; overflow: hidden; text-overflow: ellipsis; }
 .seek:has(.signal-badge)::before { content: ""; flex: none; width: 96px; }
-/* A tapped song on its way: a thin line in place of the seek bar that fills
-   as it comes, with the step in words beside it. */
 .player-bar__sub { font-size: var(--font-size-xs); color: var(--color-text-secondary); }
-.getting-line { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 20px; font-size: var(--font-size-xs); color: var(--color-text-secondary); }
-.getting-line__label { flex: none; min-width: 120px; text-align: right; font-variant-numeric: tabular-nums; }
-.getting-line__track { position: relative; flex: 1; height: 2px; border-radius: 1px; background: var(--color-border); overflow: hidden; }
-.getting-line__fill { position: absolute; inset: 0; background: var(--color-accent); transform-origin: left center; transition: transform var(--motion-long) var(--motion-easing); }
-.getting-line:not(.getting-line--stuck) .getting-line__fill { animation: getting-breathe 1.6s ease-in-out infinite; }
-.getting-line--stuck .getting-line__fill { background: var(--color-text-muted); }
-.getting-line__why { flex: 0 1 auto; max-width: 40%; color: var(--color-text-muted); }
-.getting-line__close { flex: none; padding: 0 var(--space-2); border-radius: var(--radius-pill); color: var(--color-text-primary); font-size: var(--font-size-xs); }
-.getting-line__close:hover { background: var(--color-state-hover); }
-@keyframes getting-breathe { 50% { opacity: 0.6; } }
-@media (prefers-reduced-motion: reduce) {
-  .getting-line__fill { animation: none !important; }
-}
 .player-bar__extras { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-1); min-width: 0; }
 .private-pill {
   display: inline-flex;

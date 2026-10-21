@@ -5,6 +5,8 @@
  * card, sleeve notes and credits. A sideways swipe on the cover skips; a
  * pull down closes, straight down to the tab underneath.
  */
+import { GettingLine } from "../components/GettingLine";
+import { getting, useTaps } from "../stores/taps";
 import { AudioLines, ChevronDown, ListMusic, MicVocal, MoreHorizontal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from "lucide-react";
 import { memo, useDeferredValue, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { Art, preloadArt, sleeveHue } from "../components/Art";
@@ -291,6 +293,7 @@ const PlayerBody = memo(function PlayerBody({ track, screen, art = null, bare = 
           </div>
           <LikeControl track={track} />
         </div>
+        <NowGetting />
         <PhoneSeek />
         <Transport playing={playing} />
         <div className="ph-np__bottom">
@@ -595,5 +598,17 @@ function CreditsCard({ track }: { track: Track }) {
         ))}
       </ul>
     </section>
+  );
+}
+
+/** A tapped song on its way, over the seek bar of what's playing meanwhile. */
+function NowGetting() {
+  const t = useTaps((s) => s.current);
+  if (!getting(t)) return null;
+  return (
+    <div className="ph-np__getting">
+      <span className="ph-np__getting-title">Getting {t.title}</span>
+      <GettingLine tap={t} />
+    </div>
   );
 }
