@@ -33,7 +33,8 @@ describe("a page for something not in the library", () => {
     useRouter.getState().navigate({ name: what, id: "30251" } as never);
     render(page("30251"));
     const status = await screen.findByRole("status");
-    expect(status).toHaveTextContent(`This ${what} isn't in your library`);
+    expect(within(status).getByRole("heading", { name: `This ${what} isn't in your library` })).toBeInTheDocument();
+    expect(status).toHaveTextContent("It may have been removed from your server");
     expect(status).not.toHaveTextContent("30251");
     expect(status).not.toHaveTextContent("Couldn't load");
     await userEvent.click(screen.getByRole("button", { name: "Back" }));

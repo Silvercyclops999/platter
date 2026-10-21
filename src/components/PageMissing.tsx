@@ -1,22 +1,32 @@
+import { Disc3, ListMusic, MicVocal, SearchX } from "lucide-react";
 import type { AppError } from "../lib/types";
 import { nav, useCanGoBack } from "../stores/router";
 import { Button } from "./Button";
 import { LoadError } from "./LoadError";
 
+const ICON: Record<string, typeof SearchX> = { album: Disc3, artist: MicVocal, playlist: ListMusic };
+
 /**
  * A page whose album, artist, playlist (or mix, Blend...) couldn't be
- * loaded. One that isn't here reads "This album isn't in your library" with
- * a way back; other errors show the shared load error with Try again. Never
- * shows a raw id.
+ * loaded. One that isn't here reads "This album isn't in your library", laid
+ * out like the other empty pages (an icon, the line, why, a way back); other
+ * errors show the shared load error with Try again. Never shows a raw id.
  */
 export function PageMissing({ what, error, missing, onRetry }: { what: string; error: AppError; missing?: string; onRetry?: () => void }) {
   const canGoBack = useCanGoBack();
   const back = () => (canGoBack ? nav.back() : nav.go({ name: "home" }));
   if (error.kind !== "notFound") return <LoadError what={`this ${what}`} error={error} onRetry={onRetry} />;
+  const Icon = ICON[what] ?? SearchX;
   return (
-    <div className="page-pad page-error page-missing" role="status">
-      <p className="page-missing__text">{missing ?? `This ${what} isn't in your library`}</p>
-      <Button onClick={back}>{canGoBack ? "Back" : "Go home"}</Button>
+    <div className="page-pad empty-state page-missing" role="status">
+      <Icon size={40} strokeWidth={1.5} aria-hidden="true" />
+      <h1 className="empty-state__title">{missing ?? `This ${what} isn't in your library`}</h1>
+      {!missing && <p className="empty-state__text">It may have been removed from your server, or it's in a library Platter isn't showing.</p>}
+      <div className="empty-state__actions">
+        <Button variant="primary" size="sm" onClick={back}>
+          {canGoBack ? "Back" : "Go home"}
+        </Button>
+      </div>
     </div>
   );
 }
