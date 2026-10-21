@@ -17,11 +17,12 @@ import { photoPath, type DiscographyFilter } from "../../pages/artist";
 import { useCatalogueFans } from "../../pages/catalogue";
 import { eraRange, showEraCards } from "../../pages/era";
 import { useArtistDiscography } from "../../pages/discographySources";
-import { useGetSpots } from "../../pages/lidarrShared";
+import { useGetSpots, useLidarrReady } from "../../pages/lidarrShared";
 import { player, usePlayer } from "../../stores/player";
 import { nav, type Route } from "../../stores/router";
 import { useSettings } from "../../stores/settings";
 import { setFollow, useSocial } from "../../stores/social";
+import { phone } from "../phoneUi";
 import { BackBar, Carousel, PageFailed, PageLoading, ShelfCard, SongRow } from "./common";
 import { DiscoShelf } from "./DiscoShelf";
 import { CataloguePhoto, PhoneShuffleToggle, PlayPill } from "./kit";
@@ -78,6 +79,9 @@ export function PhoneArtist({ id }: { id: string }) {
   const disco = useArtistDiscography(id, data?.artist.title, data?.sections);
   const fans = useCatalogueFans(credited ? null : id, data?.artist.title);
   const lidarrReady = useGetSpots();
+  // Following gets new albums: the Following chip opens a sheet to just show them or unfollow.
+  const followGet = useSettings((s) => s.settings?.followGet !== false);
+  const getsNew = useLidarrReady() && followGet;
   const [allTop, setAllTop] = useState(false);
   const hero = useRef<HTMLDivElement>(null);
   // The shelves come a frame after the header, so the page opens at once.
@@ -136,7 +140,11 @@ export function PhoneArtist({ id }: { id: string }) {
                 className={`ph-chip ph-artist__follow ${following ? "is-on" : ""}`}
                 aria-pressed={following}
                 aria-label={following ? `Following ${artist.title}` : `Follow ${artist.title}`}
-                onClick={() => void setFollow({ id, title: artist.title, thumb: artist.thumb }, !following)}
+                onClick={() =>
+                  following && getsNew
+                    ? phone.push({ kind: "following", artist: { id, title: artist.title, thumb: artist.thumb } })
+                    : void setFollow({ id, title: artist.title, thumb: artist.thumb }, !following)
+                }
               >
                 {following ? "Following" : "Follow"}
               </button>

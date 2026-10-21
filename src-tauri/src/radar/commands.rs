@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tauri::State;
 
-use super::{AutoArtist, Radar, RadarPage};
+use super::{Radar, RadarPage};
 use crate::error::{AppError, AppResult};
 use crate::lidarr::ArtistMbid;
 use crate::lidarr::mbpick::Picker;
@@ -46,18 +46,4 @@ pub async fn release_radar_check(radar: State<'_, Radar>) -> AppResult<RadarPage
     let r = radar.inner().clone();
     r.check().await?;
     blocking(move || r.page()).await
-}
-
-/// Artists with auto-request on.
-#[tauri::command]
-pub async fn radar_auto_artists(radar: State<'_, Radar>) -> AppResult<Vec<AutoArtist>> {
-    let r = radar.inner().clone();
-    blocking(move || Ok(r.auto_artists())).await
-}
-
-/// Turn auto-request on or off for an artist.
-#[tauri::command]
-pub async fn radar_auto_set(radar: State<'_, Radar>, id: String, name: String, on: bool) -> AppResult<Vec<AutoArtist>> {
-    let r = radar.inner().clone();
-    blocking(move || r.set_auto(&id, &name, on)).await
 }

@@ -46,10 +46,10 @@ function RadarAction({ item, lidarrReady, onRequest }: { item: RadarItem; lidarr
   }
   if (item.request && item.request !== "failed") {
     return (
-      <span className={`lidarr-state lidarr-state--${item.request}`} title={item.auto ? "Requested by auto-request" : undefined}>
+      <span className={`lidarr-state lidarr-state--${item.request}`} title={item.auto ? "Got because you follow them" : undefined}>
         {item.request === "queued" ? <Clock size={14} aria-hidden="true" /> : <Download size={14} aria-hidden="true" />}
         {STATE_LABEL[item.request]}
-        {item.auto && <span className="sr-only"> (auto-request)</span>}
+        {item.auto && <span className="sr-only"> (you follow them)</span>}
       </span>
     );
   }

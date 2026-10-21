@@ -49,3 +49,12 @@ export function filterRadar(items: RadarItem[], f: RadarFilter): RadarItem[] {
   if (f === "epsSingles") return items.filter((i) => i.kind !== "album");
   return items;
 }
+
+/** Daily limit choices for new albums from followed artists (same as the core's). */
+export const AUTO_CAP_OPTIONS = [
+  { value: "1", label: "1 a day" },
+  { value: "2", label: "2 a day" },
+  { value: "3", label: "3 a day" },
+  { value: "5", label: "5 a day" },
+  { value: "10", label: "10 a day" },
+] as const;

@@ -3,7 +3,7 @@
  * artists, as if MusicBrainz had them. `?radar=empty` starts with nothing
  * found yet. Test hooks: `setEmpty(on)`, `reset()`.
  */
-import type { AutoArtist, LidarrRequest, RadarItem, RadarPage, Settings } from "../types";
+import type { LidarrRequest, RadarItem, RadarPage, Settings } from "../types";
 import type { Fixtures } from "./fixtures";
 import { coverThumb } from "./lidarr";
 
@@ -22,7 +22,6 @@ export interface RadarHooks {
 export class MockRadar {
   private empty = false;
   private checkedAt: number | null = null;
-  private auto: AutoArtist[] = [];
 
   constructor(
     private fx: Fixtures,
@@ -35,7 +34,6 @@ export class MockRadar {
 
   reset(empty = false) {
     this.empty = empty;
-    this.auto = [];
     this.checkedAt = empty ? null : Math.floor(Date.now() / 1000) - 5 * 3600;
   }
 
@@ -101,17 +99,11 @@ export class MockRadar {
     return this.page();
   }
 
-  autoArtists(): AutoArtist[] {
-    return this.auto.map((a) => ({ ...a }));
-  }
-
-  setAuto(id: string, name: string, on: boolean): AutoArtist[] {
-    if (!id.trim() || !name.trim()) throw { kind: "invalid", message: "Not an artist." };
-    const had = this.auto.some((a) => a.id === id);
-    if (on && !had) this.auto.push({ id, name: name.trim(), enabledAt: Math.floor(Date.now() / 1000) });
-    if (!on && had) this.auto = this.auto.filter((a) => a.id !== id);
-    if (on && !this.hooks.settings().autoRequest) this.hooks.setSettings({ autoRequest: true });
+  /** Someone was followed: with Lidarr ready and new albums got, the radar turns on. */
+  followed() {
+    const s = this.hooks.settings();
+    if (s.releaseRadar || !s.followGet || !this.hooks.lidarrReady()) return;
+    this.hooks.setSettings({ releaseRadar: true });
     this.hooks.emit();
-    return this.autoArtists();
   }
 }

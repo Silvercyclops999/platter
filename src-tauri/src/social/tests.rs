@@ -389,6 +389,21 @@ fn follow_unfollow_and_follow_again_keep_one_entry() {
 }
 
 #[test]
+fn a_follow_can_just_show_new_albums_and_keeps_that_through_the_store() {
+    let r = rig();
+    assert!(r.social.set_just_show("7", true).is_err(), "only a followed artist");
+    r.social.set_follow("7".into(), "Band".into(), None, true).unwrap();
+    let all = r.social.set_just_show("7", true).unwrap();
+    assert!(all[0].just_show);
+    assert!(KvFollows(r.db.clone()).list().unwrap()[0].just_show, "kept");
+    assert_eq!(r.events.last(super::EVENT_FOLLOWS).unwrap()[0]["justShow"], true, "the UI was told");
+    // Following again keeps the choice; the usual follow leaves the field out.
+    assert!(r.social.set_follow("7".into(), "Band".into(), None, true).unwrap()[0].just_show);
+    let all = r.social.set_just_show("7", false).unwrap();
+    assert!(serde_json::to_value(&all[0]).unwrap().get("justShow").is_none());
+}
+
+#[test]
 fn whats_new_splits_new_and_earlier_and_counts_unseen() {
     let r = rig();
     add_album(&r.db, "1", "7", NOW - 10 * 86400);
@@ -449,7 +464,7 @@ fn new_releases_are_announced_once_only_when_on_and_not_private() {
 fn an_album_added_before_the_follow_isnt_announced() {
     let (db, _d) = db();
     add_album(&db, "1", "7", NOW + 10);
-    let follows = vec![FollowedArtist { id: "7".into(), title: "A".into(), thumb: None, followed_at: NOW + 20 }];
+    let follows = vec![FollowedArtist { id: "7".into(), title: "A".into(), thumb: None, followed_at: NOW + 20, just_show: false }];
     let found = db.read(|c| follows::to_announce(c, &follows, NOW)).unwrap();
     assert!(found.albums.is_empty());
     add_album(&db, "2", "7", NOW + 30);

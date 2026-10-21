@@ -7,6 +7,7 @@
 import { create } from "zustand";
 import { backend, type Backend } from "../lib/backend";
 import type { ActivityPanel, AppError, FollowedArtist, ListenOp, ListenView } from "../lib/types";
+import { useSettings } from "./settings";
 import { copyText, toast } from "./toasts";
 import type { MenuItem } from "./ui";
 
@@ -104,8 +105,48 @@ export async function setFollow(artist: { id: string; title: string; thumb?: str
   } catch (e) {
     takeFollows(before);
     toast.error(errText(e) || (on ? "Couldn't follow" : "Couldn't unfollow"));
+    return;
+  }
+  if (on) void sayFollowGets(b);
+}
+
+const FOLLOW_GETS_SAID = "platter.followGetsSaid";
+
+/** The first follow that gets new albums says so, once. */
+async function sayFollowGets(b: Backend) {
+  try {
+    if (localStorage.getItem(FOLLOW_GETS_SAID)) return;
+  } catch {
+    return;
+  }
+  if (useSettings.getState().settings?.followGet === false) return;
+  const ready = await b.lidarrStatus().then(
+    (s) => s.ready,
+    () => false,
+  );
+  if (!ready) return;
+  toast.info("Following. Their new albums will come in by themselves.");
+  try {
+    localStorage.setItem(FOLLOW_GETS_SAID, "1");
+  } catch {
+    // Said again next time; harmless.
   }
 }
+
+/** Get a followed artist's new albums, or just show them. */
+export async function setJustShow(id: string, justShow: boolean, b: Backend = backend): Promise<void> {
+  const before = useSocial.getState().follows;
+  takeFollows(before.map((f) => (f.id === id ? { ...f, justShow: justShow || undefined } : f)));
+  try {
+    takeFollows(await b.followJustShow(id, justShow));
+  } catch (e) {
+    takeFollows(before);
+    toast.error(errText(e) || "Couldn't change that");
+  }
+}
+
+/** Whether a followed artist's new albums only show (false when not followed). */
+export const useJustShow = (id: string) => useSocial((s) => s.follows.some((f) => f.id === id && !!f.justShow));
 
 /** Read friend activity (the panel calls this on open and every minute). */
 export async function loadActivity(fresh = false, b: Backend = backend): Promise<void> {

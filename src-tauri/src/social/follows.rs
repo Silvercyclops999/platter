@@ -40,6 +40,10 @@ pub struct FollowedArtist {
     pub thumb: Option<String>,
     /// Unix seconds.
     pub followed_at: i64,
+    /// Their new albums only show on the release radar; Lidarr isn't asked
+    /// for them. Off (the usual) gets them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub just_show: bool,
 }
 
 /// Where the follow list lives.
@@ -91,6 +95,21 @@ pub fn set_follow(store: &dyn FollowStore, artist: FollowedArtist, on: bool) -> 
         (false, true) => all.retain(|f| f.id != artist.id),
         _ => return Ok(all),
     }
+    store.save(&all)?;
+    Ok(all)
+}
+
+/// Get a followed artist's new albums, or just show them. Not followed is
+/// an error, so the choice never outlives the follow.
+pub fn set_just_show(store: &dyn FollowStore, id: &str, just_show: bool) -> AppResult<Vec<FollowedArtist>> {
+    let mut all = store.list()?;
+    let Some(f) = all.iter_mut().find(|f| f.id == id) else {
+        return Err(AppError::Invalid("Follow the artist first.".into()));
+    };
+    if f.just_show == just_show {
+        return Ok(all);
+    }
+    f.just_show = just_show;
     store.save(&all)?;
     Ok(all)
 }

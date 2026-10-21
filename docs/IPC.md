@@ -2120,7 +2120,8 @@ old layout so the map doesn't flip over.
 | --- | --- | --- |
 | `friend_activity` | `{ fresh: bool \| null }` | `ActivityPanel` (read again after 20 s, or now with `fresh`) |
 | `follows_list` | – | `FollowedArtist[]` |
-| `follow_set` | `{ id, title, thumb: string \| null, on: bool }` | `FollowedArtist[]`, the whole list |
+| `follow_set` | `{ id, title, thumb: string \| null, on: bool }` | `FollowedArtist[]`, the whole list. Following with Lidarr ready and `followGet` on also turns `releaseRadar` on (and sends `settings://changed`) |
+| `follow_just_show` | `{ id, justShow: bool }` | `FollowedArtist[]`; `invalid` when the artist isn't followed |
 | `whats_new` | – | `WhatsNew` |
 | `whats_new_seen` | – | – |
 | `listen_state` | – | `ListenView` |
@@ -2136,7 +2137,7 @@ old layout so the map doesn't flip over.
 
 `FriendActivity = { accountId, name, thumb?, trackId, title, artist, albumId?, album, cover?, at (unix s), now: bool }`
 
-`FollowedArtist = { id, title, thumb?, followedAt (unix s) }`
+`FollowedArtist = { id, title, thumb?, followedAt (unix s), justShow? }`, where `justShow` (left out when false) means the artist's new albums only show on the release radar
 
 `WhatsNew = { following: bool, items: { album: Album, new: bool }[], unseen }`
 
@@ -2729,7 +2730,7 @@ The home address is tried first (for 4 seconds when an away address is set), the
 
 `LidarrRequestInput = { releaseGroupId, title, artist, artistId?, typed? }`.
 `LidarrPreview = { releaseGroupId, title, artist, destination, destinationIsGuess, needsTyped, existing, reachable, route, addsArtist, protected }`; `protected` means it lands in the staging folder and waits there until Platter adds it to the library.
-`LidarrRequest = { id, releaseGroupId, title, artist, artistId, state, destination, lidarrAlbumId, addedArtist, alreadyInLidarr, createdAt, updatedAt, message, notes, auto, protected, grabbed }`, where `grabbed` is `{ line, upgradeNote } | null`: once imported, what Lidarr got ("FLAC, 13 tracks", "MP3 320, Newsletter Edit") and, for a lossy copy under a profile that keeps upgrading, "Lidarr will replace it with FLAC when one turns up.", with `state` one of `queued`, `requested`, `searching`, `downloading`, `imported`, `failed`. `auto` is true for a request auto-request made; one it refused stays as `failed` with why in `message`.
+`LidarrRequest = { id, releaseGroupId, title, artist, artistId, state, destination, lidarrAlbumId, addedArtist, alreadyInLidarr, createdAt, updatedAt, message, notes, auto, protected, grabbed }`, where `grabbed` is `{ line, upgradeNote } | null`: once imported, what Lidarr got ("FLAC, 13 tracks", "MP3 320, Newsletter Edit") and, for a lossy copy under a profile that keeps upgrading, "Lidarr will replace it with FLAC when one turns up.", with `state` one of `queued`, `requested`, `searching`, `downloading`, `imported`, `failed`. `auto` is true for a request made because the artist is followed; one it refused stays as `failed` with why in `message`.
 Requests are kept on this device. Waiting ones are retried every 5 minutes in the background, full check first.
 
 Requests take official studio release groups only (no live, compilation or other secondary type), never an artist on Lidarr's import list exclusions (matched by MusicBrainz id) and, when the user limited an artist to chosen releases, only those. A release group Plex already matched in the library (`mbid`) is never requested. After adding an artist Platter reads its path back: a protected artist's must be inside the staging folder and outside every Plex music folder; then the whole check runs again before anything is searched.
@@ -2938,19 +2939,19 @@ it answers and any request gets a plain refusal.
 
 New official albums, EPs and singles from followed artists and the ten artists played most in the last 90 days. About once a day, when MusicBrainz is on, Platter asks MusicBrainz's release group search for a few artists at a time (by MusicBrainz id, first released in the last 90 days or later), through the shared one-a-second limiter, with answers cached for 18 hours. Only release groups that pass the same rules as a request are kept: at least one official release, album, EP or single, credited to the artist alone, no secondary type. What was found is kept on this device. An artist's first look announces nothing.
 
-Auto-request is per artist (and the `autoRequest` setting for all of them). It asks Lidarr for new albums found after it was turned on for the artist, oldest first, at most `autoRequestCap` a day (refused ones don't count, the rest wait for the next day), through the same path as `lidarr_request` without the typed name: MusicBrainz guards, then the whole setup check. A release asked for once is never asked for again. A summary notification follows.
+Every followed artist is looked at (up to 500), then the ones played most while there are fewer than 60.
+
+Following an artist gets their new albums and EPs, and singles too with `followGetSingles`, unless the follow has `justShow` or `followGet` is off. Only releases found after the artist was followed are asked for, oldest first, at most `autoRequestCap` a day (refused ones don't count, the rest wait for the next day), through the same path as `lidarr_request` without the typed name: the owner check, MusicBrainz guards, then the whole setup check. A release asked for once is never asked for again. A summary notification follows. Artists an older build had auto-request on for become followed artists once, followed when it was turned on.
 
 | Command | Args | Returns |
 | --- | --- | --- |
 | `release_radar` | – | `RadarPage` |
 | `release_radar_check` | – | `RadarPage` after a look now; `network` when MusicBrainz can't be asked |
-| `radar_auto_artists` | – | `{ id, name, enabledAt }[]` |
-| `radar_auto_set` | `{ id, name, on }` | the same list; turning one on also turns the `autoRequest` setting on (and sends `settings://changed`) |
 
 `RadarPage = { shown, items: RadarItem[], checkedAt, checking, lidarrReady, artists }`. `shown` is false while the `releaseRadar` setting is off.
 `RadarItem = { releaseGroupId, title, artist, artistId, kind: "album"|"ep"|"single", date, thumb, libraryAlbumId, request, auto, refusal, new }`, newest first. `libraryAlbumId` is the library album with the same title ("In your library"); `refusal` says why it can't be requested when it shares a title with an album that counts as unreleased (the user's marks included); `request` is the state of a request for it; `new` marks what the latest look found. `thumb` is the Cover Art Archive front cover as an art path.
 
-Event: `radar://changed` (no payload) when a look starts or ends or auto-request changes.
+Event: `radar://changed` (no payload) when a look starts or ends, or following turned the radar on.
 
 ## Discover
 
@@ -4194,8 +4195,9 @@ The rest of the fields, with their defaults:
 | `doctorCoverPx` | 300, 500, 600 (default), 800, 1000 or 1400 | Covers smaller than this on their longest side count as small. |
 | `releaseRadar` | bool, false | The release radar looks for new releases about once a day and shows them on Home and its page. Synced. |
 | `radarNotify` | bool, true | A notification when the release radar finds something new (not in a private session). Synced. |
-| `autoRequest` | bool, false | Auto-request new albums for the artists it's on for. Turning it on for an artist turns this on. This device only. |
-| `autoRequestCap` | 1, 2, 3 (default), 5 or 10 | Most automatic requests a day. This device only. |
+| `followGet` | bool, true | New albums from followed artists are got through Lidarr; off only shows them on the release radar. Synced. |
+| `followGetSingles` | bool, false | Singles from followed artists are got too. Synced. |
+| `autoRequestCap` | 1, 2, 3 (default), 5 or 10 | Most new albums got a day for followed artists. Synced. |
 | `identifyBySound` | bool, false | Fingerprint songs on this computer and look them up on AcoustID (only the fingerprint and length are sent). This device only. |
 | `soundIdScope` | `"untagged"` (default) or `"all"` | Which songs: files with no recording id or ISRC, or every song. This device only. |
 | `subsonicCheckMinutes` | 1, 5 (default), 15, 30 or 60 | Minutes between asking each Subsonic server whether its music changed. This device only. |

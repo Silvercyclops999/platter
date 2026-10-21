@@ -1,7 +1,8 @@
 /**
  * Release radar in the UI: the Home shelf and its page (in your library,
  * can't request and why, Request when Lidarr is ready, type filters, Check
- * now), auto-request from the artist page's menu, and the settings.
+ * now), following that gets new albums (computer menu, phone sheet), and the
+ * settings.
  * MusicBrainz and Lidarr are the browser mock's.
  */
 import { ONLINE_EXTRAS } from "./onlineExtras";
@@ -19,8 +20,8 @@ import { LidarrRequestsList } from "../pages/LidarrRequest";
 import { ReleaseRadarPage } from "../pages/ReleaseRadar";
 import { SettingsPage } from "../pages/SettingsPage";
 import { useApp } from "../stores/app";
-import { useAutoRequest } from "../stores/radar";
 import { useRouter } from "../stores/router";
+import { useSocial } from "../stores/social";
 import { loadSettings, useSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
 
@@ -32,7 +33,8 @@ async function setUp(lidarr: "ready" | "demo" | "none", patch: Record<string, un
   await mock.settingsSet({ ...DEFAULT_SETTINGS, lidarrUrl: lidarr === "none" ? "" : "http://192.168.x.x:8686", ...ONLINE_EXTRAS, ...patch });
   useSettings.setState({ settings: null });
   await loadSettings();
-  useAutoRequest.setState({ artists: [], loaded: false });
+  useSocial.setState({ follows: [], followIds: new Set() });
+  for (const f of await mock.followsList()) await mock.followSet(f, false);
 }
 
 beforeEach(() => {
@@ -172,81 +174,89 @@ describe("the page", () => {
   });
 });
 
-describe("auto-request on the artist page", () => {
+describe("following gets new albums", () => {
   const artist = () => mock.fx.artists[0];
   let lidarrStatus: MockInstance<typeof backend.lidarrStatus>;
   beforeEach(() => {
     lidarrStatus = vi.spyOn(backend, "lidarrStatus");
+    try {
+      localStorage.clear();
+    } catch {
+      // Not there in some runs.
+    }
   });
   afterEach(() => lidarrStatus.mockRestore());
 
-  async function openMenu(user: ReturnType<typeof userEvent.setup>) {
-    await screen.findByRole("heading", { level: 1, name: artist().title });
-    // The menu offers auto-request once Lidarr's status has answered.
+  async function settled() {
     await waitFor(() => expect(lidarrStatus).toHaveBeenCalled());
     await act(() => Promise.allSettled(lidarrStatus.mock.results.map((r) => r.value)));
+  }
+
+  async function openMenu(user: ReturnType<typeof userEvent.setup>) {
+    await screen.findByRole("heading", { level: 1, name: artist().title });
+    await settled();
     await user.click(screen.getByRole("button", { name: `More options for ${artist().title}` }));
     return screen.findByRole("menu");
   }
 
-  it("asks first, then turns it on for the artist and in Settings", async () => {
+  it("follow turns the radar on, says so once, and the menu can just show their albums", async () => {
     const user = userEvent.setup();
-    await setUp("ready");
+    await setUp("ready", { releaseRadar: false });
     render(
       <>
         <ArtistPage id={artist().id} />
         <ContextMenuHost />
       </>,
     );
+    await screen.findByRole("heading", { level: 1, name: artist().title });
+    await settled();
     let menu = await openMenu(user);
-    const item = within(menu).getByRole("menuitemradio", { name: "Auto-request new albums" });
+    expect(within(menu).queryByRole("menuitemradio", { name: "Just show new albums" })).toBeNull();
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: `Follow ${artist().title}` }));
+    await waitFor(async () => expect((await mock.settingsGet()).releaseRadar).toBe(true));
+    await waitFor(() => expect(useToasts.getState().toasts.map((t) => t.message)).toContain("Following. Their new albums will come in by themselves."));
+    menu = await openMenu(user);
+    const item = within(menu).getByRole("menuitemradio", { name: "Just show new albums" });
     expect(item).toHaveAttribute("aria-checked", "false");
     await user.click(item);
-    const dialog = await screen.findByRole("dialog", { name: `Auto-request new albums by ${artist().title}` });
-    expect(within(dialog).getByText(/Up to 3 a day/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/This also turns on auto-request in Settings/)).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "Turn on" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(mock.radar.autoArtists().map((a) => a.id)).toEqual([artist().id]);
-    await waitFor(() => expect(useSettings.getState().settings?.autoRequest).toBe(true));
+    await waitFor(async () => expect((await mock.followsList())[0].justShow).toBe(true));
     menu = await openMenu(user);
-    const on = within(menu).getByRole("menuitemradio", { name: "Auto-request new albums" });
-    expect(on).toHaveAttribute("aria-checked", "true");
-    // Off needs no question.
-    await user.click(on);
-    await waitFor(() => expect(mock.radar.autoArtists()).toEqual([]));
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(within(menu).getByRole("menuitemradio", { name: "Just show new albums" })).toHaveAttribute("aria-checked", "true");
+    // The second follow doesn't say it again.
+    useToasts.setState({ toasts: [] });
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: `Following ${artist().title}` }));
+    await user.click(await screen.findByRole("button", { name: `Follow ${artist().title}` }));
+    await waitFor(async () => expect((await mock.followsList()).length).toBe(1));
+    expect(useToasts.getState().toasts.map((t) => t.message)).not.toContain("Following. Their new albums will come in by themselves.");
   });
 
-  it("isn't offered without a ready Lidarr or with the radar off", async () => {
+  it("without a ready Lidarr, following is only a follow", async () => {
     const user = userEvent.setup();
-    for (const [lidarr, patch] of [
-      ["demo", {}],
-      ["ready", { releaseRadar: false }],
-    ] as const) {
-      await setUp(lidarr, patch);
-      const { unmount } = render(
-        <>
-          <ArtistPage id={artist().id} />
-          <ContextMenuHost />
-        </>,
-      );
-      const menu = await openMenu(user);
-      expect(within(menu).queryByRole("menuitemradio", { name: "Auto-request new albums" })).toBeNull();
-      await user.keyboard("{Escape}");
-      unmount();
-    }
+    await setUp("demo", { releaseRadar: false });
+    render(
+      <>
+        <ArtistPage id={artist().id} />
+        <ContextMenuHost />
+      </>,
+    );
+    await screen.findByRole("heading", { level: 1, name: artist().title });
+    await settled();
+    await user.click(screen.getByRole("button", { name: `Follow ${artist().title}` }));
+    await waitFor(async () => expect((await mock.followsList()).length).toBe(1));
+    expect((await mock.settingsGet()).releaseRadar).toBe(false);
+    const menu = await openMenu(user);
+    expect(within(menu).queryByRole("menuitemradio", { name: "Just show new albums" })).toBeNull();
   });
 });
 
 describe("settings", () => {
-  it("has the radar and its notifications, and auto-request with its limit once Lidarr is ready", async () => {
+  it("has the radar and its notifications, and new albums from follows with their limit once Lidarr is ready", async () => {
     const user = userEvent.setup();
     await setUp("ready");
-    await mock.radarAutoSet(mock.fx.artists[2].id, mock.fx.artists[2].title, true);
-    await loadSettings();
     render(<SettingsPage />);
-    for (const k of ["releaseRadar", "autoRequest", "autoRequestCap", "autoRequestArtists"]) {
+    for (const k of ["releaseRadar", "followGet"]) {
       await waitFor(() => expect(document.querySelector(`[data-setting="${k}"]`)).not.toBeNull());
     }
     // Its notification is one of the Notifications choices.
@@ -254,19 +264,21 @@ describe("settings", () => {
     const radar = document.querySelector('[data-setting="releaseRadar"]') as HTMLElement;
     await user.click(within(radar).getByRole("switch"));
     await waitFor(() => expect(useSettings.getState().settings?.releaseRadar).toBe(false));
-    const list = await screen.findByRole("list", { name: "Artists with auto-request on" });
-    await user.click(within(list).getByRole("button", { name: `Turn off auto-request for ${mock.fx.artists[2].title}` }));
-    await waitFor(() => expect(mock.radar.autoArtists()).toEqual([]));
+    // Get them or just show them; the limit and singles sit under More.
+    const row = document.querySelector('[data-setting="followGet"]') as HTMLElement;
+    expect(within(row).getByRole("combobox")).toHaveTextContent("Get them");
+    await mock.settingsSet({ followGet: false });
+    expect((await mock.settingsGet()).followGet).toBe(false);
     await expect(mock.settingsSet({ autoRequestCap: 4 })).rejects.toBeTruthy();
     await mock.settingsSet({ autoRequestCap: 5 });
     expect((await mock.settingsGet()).autoRequestCap).toBe(5);
   });
 
-  it("keeps auto-request out of sight until Lidarr is ready", async () => {
+  it("keeps new albums from follows out of sight until Lidarr is ready", async () => {
     await setUp("none");
     render(<SettingsPage />);
     await waitFor(() => expect(document.querySelector('[data-setting="releaseRadar"]')).not.toBeNull());
-    expect(document.querySelector('[data-setting="autoRequest"]')).toBeNull();
+    expect(document.querySelector('[data-setting="followGet"]')).toBeNull();
   });
 
   it("marks automatic requests in the Requests list", async () => {
@@ -292,7 +304,7 @@ describe("settings", () => {
       },
     ];
     render(<LidarrRequestsList />);
-    expect(await screen.findByText("Auto-request couldn't request it.")).toBeInTheDocument();
+    expect(await screen.findByText("New from an artist you follow. Lidarr couldn't take it.")).toBeInTheDocument();
     expect(screen.getByText(/only as a bootleg or promo/)).toBeInTheDocument();
   });
 
