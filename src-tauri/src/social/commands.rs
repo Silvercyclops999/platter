@@ -224,22 +224,22 @@ pub async fn follows_list(social: State<'_, Social>) -> AppResult<Vec<FollowedAr
 pub async fn follow_set(
     social: State<'_, Social>,
     radar: State<'_, crate::radar::Radar>,
+    settings: State<'_, crate::settings::SettingsState>,
     id: String,
     title: String,
     thumb: Option<String>,
     on: bool,
 ) -> AppResult<Vec<FollowedArtist>> {
     let s = social.inner().clone();
-    let r = radar.inner().clone();
-    tokio::task::spawn_blocking(move || {
-        let all = s.set_follow(id, title, thumb, on)?;
-        if on {
-            r.followed()?;
-        }
-        Ok(all)
-    })
-    .await
-    .map_err(|e| AppError::Internal(e.to_string()))?
+    let all = tokio::task::spawn_blocking(move || s.set_follow(id, title, thumb, on))
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))??;
+    // The follow is saved either way: a radar that didn't turn on says so
+    // in the log, not as a failed follow.
+    if on && let Err(e) = radar.followed(settings.inner()).await {
+        tracing::warn!("release radar not turned on: {e}");
+    }
+    Ok(all)
 }
 
 /// Get a followed artist's new albums (Lidarr asks for them), or just show them.

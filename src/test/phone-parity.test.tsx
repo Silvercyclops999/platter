@@ -288,9 +288,15 @@ describe("Follow on the phone's artist page", () => {
 
   it("without Lidarr, Following just unfollows", async () => {
     await clearFollows();
+    const status = vi.spyOn(backend, "lidarrStatus");
     render(<PhoneShell />);
     act(() => useRouter.getState().navigate({ name: "artist", id: "100" }));
-    fireEvent.click(await screen.findByRole("button", { name: /^Follow / }, SLOW));
+    const follow = await screen.findByRole("button", { name: /^Follow / }, SLOW);
+    // Lidarr's status has answered (not set up) before the taps.
+    await waitFor(() => expect(status).toHaveBeenCalled());
+    await act(() => Promise.allSettled(status.mock.results.map((r) => r.value)));
+    expect(await status.mock.results[0].value).toMatchObject({ ready: false });
+    fireEvent.click(follow);
     fireEvent.click(await screen.findByRole("button", { name: /^Following / }, SLOW));
     await waitFor(async () => expect(await mock.followsList()).toEqual([]));
     expect(usePhoneUi.getState().sheets).toEqual([]);

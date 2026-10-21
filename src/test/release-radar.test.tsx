@@ -229,6 +229,9 @@ describe("following gets new albums", () => {
     await user.click(screen.getByRole("button", { name: `Following ${artist().title}` }));
     await user.click(await screen.findByRole("button", { name: `Follow ${artist().title}` }));
     await waitFor(async () => expect((await mock.followsList()).length).toBe(1));
+    // Give the follow's toast every chance to come before saying it didn't.
+    await act(() => Promise.allSettled(lidarrStatus.mock.results.map((r) => r.value)));
+    await act(() => new Promise((r) => setTimeout(r, 50)));
     expect(useToasts.getState().toasts.map((t) => t.message)).not.toContain("Following. Their new albums will come in by themselves.");
   });
 
