@@ -28,10 +28,10 @@ export const useStatsDialog = create<StatsDialogStore>()((set) => ({
   close: () => set({ subject: null }),
 }));
 
-/** The stats strip (and "Your stats") is on in Settings. */
-export const statsStripOn = () => useSettings.getState().settings?.statsStrip !== false;
+/** "Your stats" in menus follows the Stats page being on in Settings. */
+export const yourStatsOn = () => useSettings.getState().settings?.statsPage !== false;
 
-/** "Your stats" for a song, artist or album menu, while the strip is on. */
+/** "Your stats" for a song, artist or album menu, while the Stats page is on. */
 export function yourStatsItem(kind: StatsItemKind, id: string, title: string, versions?: number): MenuItem {
-  return { label: "Your stats", icon: BarChart3, when: statsStripOn, onSelect: () => useStatsDialog.getState().open({ kind, id, title, versions }) };
+  return { label: "Your stats", icon: BarChart3, when: yourStatsOn, onSelect: () => useStatsDialog.getState().open({ kind, id, title, versions }) };
 }

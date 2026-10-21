@@ -20,7 +20,6 @@ import { toast } from "../stores/toasts";
 import { useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
 import { daylistGradient } from "./MixCard";
-import { MixStory } from "./MixStory";
 import "./mixes.css";
 import { PageMissing } from "../components/PageMissing";
 import { failText } from "../lib/errorText";
@@ -258,7 +257,6 @@ export function MixPage({ id, seed }: { id?: string; seed?: string }) {
             />
           </div>
         )}
-        {page && mix?.kind !== "topSongs" && <MixStory tracks={page.tracks} familiar={page.familiar} />}
         <TrackList label={mix ? `${mix.title} songs` : "Songs"} showPlays={mix?.kind === "topSongs"}>
           {page
             ? page.tracks.map((t, i) => (

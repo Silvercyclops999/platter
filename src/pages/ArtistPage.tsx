@@ -11,7 +11,7 @@ import { plexEditItem } from "../components/PlexEditMenu";
 import { tagArtistItem } from "../components/TagEditMenu";
 import { bookmarkPageItem, dontPlayArtistItem } from "../stores/curate";
 import { yourStatsItem } from "../stores/stats";
-import { StatsStrip, useItemStats } from "../components/StatsStrip";
+import { useItemStats } from "../components/StatsStrip";
 import { Shelf, ShelfItem } from "../components/Shelf";
 import { Skeleton } from "../components/Skeleton";
 import { TrackList, TrackRow, TrackRowSkeleton } from "../components/TrackRow";
@@ -195,7 +195,6 @@ function ArtistView({ id, era: eraName }: { id: string; era?: string }) {
 
       <div className="detail-body">
         <ActionRow id={id} data={data} playing={isThisPlaying} onPlay={play} credited={credited} />
-        <StatsStrip kind="artist" id={id} />
         {era && <EraFilterChip id={id} era={era} />}
 
         {!data && (

@@ -7,7 +7,6 @@ import { IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
 import { bookmarkPageItem } from "../stores/curate";
 import { yourStatsItem } from "../stores/stats";
-import { StatsStrip } from "../components/StatsStrip";
 import { shareItem } from "../components/ShareMenu";
 import { addToPlaylistItem } from "../components/PlaylistPicker";
 import { plexEditItem } from "../components/PlexEditMenu";
@@ -294,7 +293,6 @@ function LibraryAlbumView({ id, tab }: { id: string; tab?: "sleeve" }) {
             }}
           />
         )}
-        <StatsStrip kind="album" id={id} />
         <FirstHeard albumId={id} />
         {sleeveOn && (
           <Tabs<AlbumPane>

@@ -483,7 +483,7 @@ const ROW_SETTINGS: Record<string, (keyof Settings)[]> = {
   downloadLimit: ["downloadLimitGb"],
   crossfade: ["crossfade", "crossfadeSeconds"],
   // Rows that hold a checklist or one choice over several settings.
-  statsPage: ["statsPage", "statsStrip", "monthlyStats", "statsCompare", "wrappedTopSongs", "topSongsShowPlays"],
+  statsPage: ["statsPage", "monthlyStats", "statsCompare", "wrappedTopSongs", "topSongsShowPlays"],
   showDevices: ["showPlexPlayers", "showCastDevices", "showDlnaDevices", "showAirplayLocked"],
   artistInfoSources: ["infoWikipedia", "infoMusicbrainz", "infoListenbrainz", "infoListenbrainzStats"],
   notifications: ["notifyNewReleases", "radarNotify", "whatsNewAnnouncements", "notifyTrackChange"],

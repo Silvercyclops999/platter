@@ -1,16 +1,14 @@
 /**
  * Your numbers for one song, artist or album: plays, minutes, rank in your
  * all-time top, first and last listen, and a sparkline of plays per month.
- * Shows on artist and album pages under the action row (nothing when you
- * haven't played it, or the strip is off in Settings), and in the "Your
- * stats" dialog for any of the three.
+ * Only in the "Your stats" dialog, opened from a menu: everyday pages carry
+ * no charts.
  */
 import { useEffect, useState } from "react";
 import { backend } from "../lib/backend";
 import { formatMinutes, formatPlays, monthName, playedFromLabel, sparkPath } from "../lib/stats";
 import type { ItemStats, StatsItemKind } from "../lib/statsTypes";
 import { timeAgo } from "../lib/relativeTime";
-import { useSettings } from "../stores/settings";
 import "./stats-strip.css";
 
 const KIND_TOP: Record<StatsItemKind, string> = { song: "songs", artist: "artists", album: "albums" };
@@ -110,16 +108,4 @@ export function useItemStats(kind: StatsItemKind, id: string, on = true): ItemSt
     };
   }, [kind, id, on]);
   return stats;
-}
-
-/** The strip on an artist or album page. */
-export function StatsStrip({ kind, id }: { kind: StatsItemKind; id: string }) {
-  const on = useSettings((s) => s.settings?.statsStrip !== false);
-  const stats = useItemStats(kind, id, on);
-  if (!on || !stats || stats === "error" || stats.plays === 0) return null;
-  return (
-    <section className="stats-strip" aria-label="Your stats" data-testid="stats-strip">
-      <StatsStripView stats={stats} kind={kind} />
-    </section>
-  );
 }

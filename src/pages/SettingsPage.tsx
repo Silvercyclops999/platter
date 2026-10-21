@@ -2305,14 +2305,13 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       section: "Library",
       title: "Show the Stats page",
       description: "Your listening in numbers, counted on this computer.",
-      more: "Your listening in numbers: minutes, top songs, artists, albums and genres for any range of days. Opens from your profile menu and a Stats row in Your Library. The strip shows your plays, minutes and rank under an artist's or album's buttons. Compare shares only a summary of your top artists and songs, never your history. Wrapped is your year in cards from December 1, with a Your Top Songs list for each year with 30 plays or more.",
+      more: "Your listening in numbers: minutes, top songs, artists, albums and genres for any range of days. Opens from your profile menu and a Stats row in Your Library. Your stats in a song's, artist's or album's menu shows your plays, minutes and rank for it. Compare shares only a summary of your top artists and songs, never your history. Wrapped is your year in cards from December 1, with a Your Top Songs list for each year with 30 plays or more.",
       control: (ids) => toggle(s, "statsPage", ids),
       block: () => (
         <Checklist
           s={s}
           label="Also show"
           items={[
-            { key: "statsStrip", label: "A stats strip on song, artist and album pages" },
             { key: "monthlyStats", label: "Monthly recaps" },
             { key: "statsCompare", label: "Compare stats with friends" },
             { key: "wrappedTopSongs", label: "Wrapped and yearly Top Songs" },

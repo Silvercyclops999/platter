@@ -10,7 +10,7 @@ import { act, render, renderHook, screen, waitFor, within } from "@testing-libra
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LikedCover } from "../components/LikedCover";
-import { StatsStrip } from "../components/StatsStrip";
+import { StatsStripView } from "../components/StatsStrip";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { layoutRecapCard, recapContent } from "../lib/recapCard";
@@ -340,45 +340,30 @@ describe("getting to Stats", () => {
   });
 });
 
-describe("stats strip", () => {
+describe("your stats", () => {
   const playedArtist = async () => {
     const o = await backend.statsOverview({ from: null, to: null });
     return o.topArtists[0];
   };
 
-  it("shows plays, rank and a sparkline on a played artist", async () => {
+  it("the dialog's numbers: plays, rank and a sparkline for a played artist", async () => {
     const a = await playedArtist();
-    render(<StatsStrip kind="artist" id={a.artistId!} />);
-    const strip = await screen.findByTestId("stats-strip");
-    expect(within(strip).getByText(`${a.plays.toLocaleString()} plays`)).toBeInTheDocument();
-    expect(
-      within(strip)
-        .getByText(/in your top artists/)
-        .closest("dd"),
-    ).toHaveTextContent("#1 in your top artists");
-    expect(within(strip).getByRole("img", { name: /Plays per month, last 12 months/ })).toBeInTheDocument();
-    expect(within(strip).getByText("First listen")).toBeInTheDocument();
+    const stats = await backend.statsItem("artist", a.artistId!);
+    render(<StatsStripView stats={stats} kind="artist" />);
+    expect(screen.getByText(`${a.plays.toLocaleString()} plays`)).toBeInTheDocument();
+    expect(screen.getByText(/in your top artists/).closest("dd")).toHaveTextContent("#1 in your top artists");
+    expect(screen.getByRole("img", { name: /Plays per month, last 12 months/ })).toBeInTheDocument();
+    expect(screen.getByText("First listen")).toBeInTheDocument();
   });
 
-  it("hides when its setting is off, and so does Your stats in menus", async () => {
+  it("Your stats in menus follows the Stats page setting", async () => {
     const a = await playedArtist();
     const item = yourStatsItem("artist", a.artistId!, a.name);
     expect(item.when?.()).toBe(true);
     item.onSelect?.();
     expect(useStatsDialog.getState().subject).toEqual({ kind: "artist", id: a.artistId, title: a.name });
-    await settings({ statsStrip: false });
+    await settings({ statsPage: false });
     expect(item.when?.()).toBe(false);
-    render(<StatsStrip kind="artist" id={a.artistId!} />);
-    await new Promise((r) => setTimeout(r, 20));
-    expect(screen.queryByTestId("stats-strip")).toBeNull();
-  });
-
-  it("stays hidden for something never played", async () => {
-    const spy = vi.spyOn(backend, "statsItem");
-    render(<StatsStrip kind="album" id="no-such-album" />);
-    await waitFor(() => expect(spy).toHaveBeenCalled());
-    await new Promise((r) => setTimeout(r, 20));
-    expect(screen.queryByTestId("stats-strip")).toBeNull();
   });
 });
 

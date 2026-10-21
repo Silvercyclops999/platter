@@ -9,7 +9,6 @@ import { DEFAULT_SETTINGS, type MixSummary } from "../lib/types";
 import { HomePage } from "../pages/HomePage";
 import { MixArt } from "../pages/MixCard";
 import { MixPage } from "../pages/MixPage";
-import { leadArtists, mixSentence, stripLabel } from "../pages/MixStory";
 import { PlayControls } from "../shell/PlayerBar";
 import { useApp } from "../stores/app";
 import { connectPlayer, usePlayer } from "../stores/player";
@@ -163,23 +162,13 @@ describe("mix page", () => {
   });
 });
 
-describe("a mix in a sentence", () => {
-  const t = (artistTitle: string) => ({ artistTitle });
-  it("counts songs you know and ones you don't, and names who leads", () => {
-    const tracks = [t("Ada"), t("Ada"), t("Bo"), t("Cy"), t("Bo"), t("Ada")];
-    expect(leadArtists(tracks)).toEqual(["Ada", "Bo"]);
-    expect(mixSentence(tracks, [true, true, false, true, false, true])).toBe("4 songs you know well and 2 you've hardly played, led by Ada and Bo.");
-    expect(mixSentence(tracks, tracks.map(() => true))).toBe("6 songs you know well, led by Ada and Bo.");
-    expect(mixSentence([t("Ada")], [false])).toBe("1 song you've hardly played, all by Ada.");
-    expect(mixSentence([], [])).toBe("");
-    expect(stripLabel(1, 4)).toBe("In running order: 1 song you know and 4 you've hardly played.");
-  });
-
-  it("the mix page says it, with the running order when it holds both kinds", async () => {
+describe("a mix page", () => {
+  it("has no sentence about the numbers and no chart: the songs follow the buttons", async () => {
     render(<MixPage id="daylist" />);
-    const story = await screen.findByTestId("mix-story");
-    expect(within(story).getByText(/^\d+ songs? you (know well|'ve hardly played)/)).toHaveTextContent(/, (led|all) by .+\.$/);
-    expect(within(story).getByRole("img", { name: /^In running order: \d+ songs you know and \d+ you've hardly played\.$/ })).toBeInTheDocument();
+    await screen.findAllByRole("row");
+    expect(screen.queryByTestId("mix-story")).toBeNull();
+    expect(screen.queryByText(/you've hardly played/)).toBeNull();
+    expect(document.querySelector("figure")).toBeNull();
   });
 });
 

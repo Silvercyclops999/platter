@@ -242,17 +242,4 @@
 .ph-mixes .mix-row__sleeve { flex: none; width: 56px; height: 56px; }
 .ph-mixes .mix-row__length { min-width: 0; }
 
-/* ---------------------------------------------------------------- a mix in a sentence
-   The sentence, then the running order as thin stems: tall for a song you
-   know, short for one you've hardly played. */
-.mix-story { margin: 0 0 var(--space-6); padding: 0 var(--space-4); }
-.mix-story__sentence { max-width: 36em; }
-.mix-strip { margin: var(--space-4) 0 0; max-width: 720px; }
-.mix-strip__songs { display: flex; align-items: flex-end; justify-content: space-between; gap: 1px; height: 28px; border-bottom: 1px solid var(--ledger-line); }
-.mix-strip__song { flex: 1 1 0; max-width: 3px; height: 35%; background: var(--ledger-stem); }
-.mix-strip__song.is-known { height: 100%; background: var(--ledger-stem-hover); }
-.mix-strip__key { display: flex; justify-content: space-between; gap: var(--space-3); margin-top: var(--space-1); font-size: var(--font-size-xs); color: var(--color-text-muted); }
-.mix-strip__key span:nth-child(2) { text-align: center; }
-.ph-mix .mix-story { margin: 4px 0 20px; padding: 0; }
-.ph-mix .mix-strip__key span:nth-child(2) { display: none; }
 .mix-row { cursor: pointer; }

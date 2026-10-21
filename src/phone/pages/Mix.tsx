@@ -15,7 +15,6 @@ import { useLoad } from "../../lib/useLoad";
 import { useContextState } from "../../pages/cards";
 import { MixArt } from "../../pages/MixCard";
 import { steers } from "../../pages/MixPage";
-import { MixStory } from "../../pages/MixStory";
 import { MixSleeve } from "../../pages/MixesPage";
 import { useCurate } from "../../stores/curate";
 import { player, usePlayer } from "../../stores/player";
@@ -100,7 +99,6 @@ export function PhoneMix({ id, seed }: { id?: string; seed?: string }) {
         }
       />
       {steers(mix.kind) && <Pills label="Steer this mix" items={STEER} value={steer ?? "none"} onChange={(v) => setSteer(v === "none" ? null : v)} />}
-      {mix.kind !== "topSongs" && <MixStory tracks={page.tracks} familiar={page.familiar} />}
       {page.tracks.length ? (
         <ul className="ph-songs" aria-label={`${mix.title} songs`}>
           {page.tracks.map((t, i) => (
