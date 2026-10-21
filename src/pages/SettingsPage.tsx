@@ -1,4 +1,5 @@
 import { useLibraryChips } from "../lib/libraryChips";
+import { AUTO_CAP_OPTIONS } from "../lib/radar";
 import { ChevronLeft, ChevronRight, MoreHorizontal, RotateCcw, Server } from "lucide-react";
 import { Fragment, memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "../components/Button";
@@ -106,7 +107,6 @@ import { LidarrAwayProblem, useHomeSides } from "./LidarrHomeSide";
 import { LidarrArtistsList, LidarrChangesList, LidarrWaitingList, LidarrWorkStatus } from "./LidarrModes";
 import { LidarrRequestsList } from "./LidarrRequest";
 import { OfficialPrefixField, ShareMapEditor, StagingFolderField, UpgradesList } from "./LidarrUpgrade";
-import { AUTO_CAP_OPTIONS, AutoArtistsList } from "./AutoRequestDialog";
 
 /** Minutes between Subsonic change checks the setting offers. */
 const SUBSONIC_CHECK_OPTIONS = [
@@ -642,6 +642,11 @@ function select<T extends string>(
 }
 
 /** Albums a week a Straight away person gets (same as the core's REQUEST_LIMIT_CHOICES). */
+const FOLLOW_GET_OPTIONS: SelectOption<string>[] = [
+  { value: "get", label: "Get them" },
+  { value: "show", label: "Just show them" },
+];
+
 const REQUEST_LIMIT_OPTIONS = [5, 10, 20, 50].map((n) => ({ value: String(n), label: `${n} albums` }));
 
 /** 1 to 50; applies on every valid entry, snaps back on blur if invalid. */
@@ -3307,30 +3312,32 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
             control: (ids) => toggle(s, "showMissingReleases", ids),
           },
           {
-            key: "autoRequest",
+            key: "followGet",
             section: "Integrations",
             page: "lidarr",
-            title: "Auto-request new albums",
-            description: "New official albums from artists you pick are requested on their own. This device only.",
-            more: "For artists you turn it on for (from the artist page's menu), new official albums the release radar finds are requested on their own, after the same setup check as any request. Bootlegs, promos and anything sharing a title with an album in your library are never requested. This device only.",
-            control: (ids) => toggle(s, "autoRequest", ids),
+            title: "New albums from artists you follow",
+            description: "Get them, or just show them on Release radar.",
+            more: "When an artist you follow puts out a new official album or EP, Lidarr gets it with the same checks as any request, and you hear when it's here. Only releases that come out after you follow, never their older albums. Bootlegs, promos, live albums and anything sharing a title with an album in your library, unreleased ones included, are never asked for. An artist's menu can just show theirs.",
+            control: (ids) =>
+              select(s, (x) => (x.followGet === false ? "show" : "get"), FOLLOW_GET_OPTIONS, ids, (v) => updateSettings({ followGet: v === "get" })),
+          },
+          {
+            key: "followGetSingles",
+            section: "Integrations",
+            page: "lidarr",
+            title: "Get singles too",
+            description: "Singles from artists you follow are got as well as albums and EPs.",
+            shown: s?.followGet !== false,
+            control: (ids) => toggle(s, "followGetSingles", ids),
           },
           {
             key: "autoRequestCap",
             section: "Integrations",
             page: "lidarr",
-            title: "Most automatic requests a day",
-            description: "Albums past the limit wait for the next day. A summary notification says what was requested.",
+            title: "Most new albums a day",
+            description: "Albums past the limit wait for the next day. A notification says what's coming.",
+            shown: s?.followGet !== false,
             control: (ids) => select(s, (x) => String(x.autoRequestCap ?? 3), AUTO_CAP_OPTIONS, ids, (v) => updateSettings({ autoRequestCap: Number(v) })),
-          },
-          {
-            key: "autoRequestArtists",
-            section: "Integrations",
-            page: "lidarr",
-            title: "Artists with auto-request",
-            description: "Turning one off stops new requests for that artist. Requests already sent stay in Lidarr.",
-            control: () => null,
-            block: () => <AutoArtistsList />,
           },
           ...(s?.lidarrStagingFolder
             ? ([

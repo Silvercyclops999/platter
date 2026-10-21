@@ -242,7 +242,6 @@ import type {
   LidarrRequestInput,
   LidarrStatus,
   RadarPage,
-  AutoArtist,
   Bookmark,
   HiddenItem,
   HideRequest,
@@ -892,6 +891,8 @@ export interface Backend {
   followsList(): Promise<FollowedArtist[]>;
   /** Follow or unfollow an artist (library or credited); resolves to the whole list. */
   followSet(artist: { id: string; title: string; thumb?: string | null }, on: boolean): Promise<FollowedArtist[]>;
+  /** Get a followed artist's new albums through Lidarr, or just show them; resolves to the whole list. */
+  followJustShow(id: string, justShow: boolean): Promise<FollowedArtist[]>;
   whatsNew(): Promise<WhatsNew>;
   /** What's New was seen: its items stop being new. */
   whatsNewSeen(): Promise<void>;
@@ -1188,10 +1189,6 @@ export interface Backend {
   releaseRadar(): Promise<RadarPage>;
   /** Look now instead of waiting for the daily look. */
   releaseRadarCheck(): Promise<RadarPage>;
-  /** Artists with auto-request on. */
-  radarAutoArtists(): Promise<AutoArtist[]>;
-  /** Turn auto-request on or off for an artist (on also turns auto-request on in Settings). */
-  radarAutoSet(id: string, name: string, on: boolean): Promise<AutoArtist[]>;
 
   // Discover: music that isn't in the library (MusicBrainz and ListenBrainz, paced and cached in the core)
   /** Artists, albums and songs from MusicBrainz the library lacks; `shown` false while off or offline. */
@@ -1741,6 +1738,7 @@ export function createTauriBackend(): Backend {
     pairCopyCancel: () => call("pair_copy_cancel"),
     deviceSyncNetwork: (metered) => call("device_sync_network", { metered }),
     followSet: (artist, on) => call("follow_set", { id: artist.id, title: artist.title, thumb: artist.thumb ?? null, on }),
+    followJustShow: (id, justShow) => call("follow_just_show", { id, justShow }),
     whatsNew: () => call("whats_new"),
     whatsNewSeen: () => call("whats_new_seen"),
     listenState: () => call("listen_state"),
@@ -1943,8 +1941,6 @@ export function createTauriBackend(): Backend {
     musicSharePlexFolders: () => call("music_share_plex_folders"),
     releaseRadar: () => call("release_radar"),
     releaseRadarCheck: () => call("release_radar_check"),
-    radarAutoArtists: () => call("radar_auto_artists"),
-    radarAutoSet: (id, name, on) => call("radar_auto_set", { id, name, on }),
     miniplayerState: () => call("miniplayer_state"),
     miniplayerSet: (open) => call("miniplayer_set", { open }),
     miniplayerGo: (kind, id) => call("miniplayer_go", { kind, id }),

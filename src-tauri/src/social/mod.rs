@@ -176,10 +176,17 @@ impl Social {
 
     /// Follow or unfollow an artist; tells the UI and refreshes the badge.
     pub fn set_follow(&self, id: String, title: String, thumb: Option<String>, on: bool) -> AppResult<Vec<FollowedArtist>> {
-        let artist = FollowedArtist { id, title, thumb, followed_at: self.now() };
+        let artist = FollowedArtist { id, title, thumb, followed_at: self.now(), just_show: false };
         let all = follows::set_follow(self.inner.follows.as_ref(), artist, on)?;
         self.inner.events.emit(EVENT_FOLLOWS, serde_json::to_value(&all).unwrap_or_default());
         self.badge();
+        Ok(all)
+    }
+
+    /// Get a followed artist's new albums, or just show them.
+    pub fn set_just_show(&self, id: &str, just_show: bool) -> AppResult<Vec<FollowedArtist>> {
+        let all = follows::set_just_show(self.inner.follows.as_ref(), id, just_show)?;
+        self.inner.events.emit(EVENT_FOLLOWS, serde_json::to_value(&all).unwrap_or_default());
         Ok(all)
     }
 

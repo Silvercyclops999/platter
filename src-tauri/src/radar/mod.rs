@@ -1,6 +1,6 @@
 //! Release radar: new official albums, EPs and singles from followed
 //! artists and the artists played most, looked up on MusicBrainz about once
-//! a day, plus optional auto-request of new albums through Lidarr.
+//! a day, and new albums by followed artists got through Lidarr.
 //!
 //! The look is light: artists' MusicBrainz ids come from the artist info
 //! cache, and their recent release groups are asked for a few artists at a
@@ -14,11 +14,14 @@
 //! is read. An artist's first look only sets the scene: nothing found then
 //! is announced or requested automatically.
 //!
-//! Auto-request is per artist (and a switch for all of them). It only asks
-//! for new albums found after it was turned on, at most the daily cap a day,
-//! and each goes through Lidarr's full request path: the MusicBrainz guards
-//! (title clash with anything in the library, bootleg or promo only) and the
-//! whole setup check. Refusals stay in the Requests list with why.
+//! Following an artist gets their new albums and EPs (singles too when that's
+//! on), unless the follow is set to just show them. Only releases found
+//! after the follow are asked for, at most the daily cap a day, and each goes
+//! through Lidarr's full request path: the owner check, the MusicBrainz
+//! guards (title clash with anything in the library, unreleased ones
+//! included, bootleg or promo only) and the whole setup check. Refusals stay
+//! in the Requests list with why. Artists an older build had auto-request on
+//! for become followed ones.
 
 pub mod commands;
 #[cfg(test)]
@@ -45,7 +48,7 @@ use crate::lidarr::request::{RequestInput, RequestRecord, cover_thumb};
 use crate::lidarr::status::RequestState;
 use crate::plex::state::EventSink;
 use crate::social::Notifier;
-use crate::social::follows::FollowStore;
+use crate::social::follows::{FollowStore, FollowedArtist};
 
 pub const EVENT_CHANGED: &str = "radar://changed";
 
@@ -58,8 +61,10 @@ pub const CHECK_EVERY: i64 = 20 * 3600;
 pub const MB_TTL: i64 = 18 * 3600;
 /// After a look that failed (offline, MusicBrainz busy), the next try waits this long.
 const RETRY_AFTER: i64 = 3600;
-/// Most artists looked at.
+/// Most artists looked at, unless more are followed.
 pub const MAX_ARTISTS: usize = 60;
+/// Most followed artists looked at (about a minute of MusicBrainz per 60).
+pub const MAX_FOLLOWED: usize = 500;
 /// Artists played most (last 90 days) added to the followed ones.
 pub const TOP_ARTISTS: usize = 10;
 /// Artists per MusicBrainz search.
@@ -68,14 +73,13 @@ pub const BATCH: usize = 8;
 const MAX_PAGES: usize = 2;
 /// Most releases kept.
 pub const MAX_ITEMS: usize = 80;
-/// Daily cap choices for auto-request.
+/// Daily cap choices for new albums got.
 pub const CAP_CHOICES: [u32; 5] = [1, 2, 3, 5, 10];
 pub const DEFAULT_CAP: u32 = 3;
-/// Most artists with auto-request on.
-pub const MAX_AUTO: usize = 200;
 
 const STORE_KEY: &str = "radar.state.v1";
-const AUTO_KEY: &str = "radar.auto.v1";
+/// Where an older build kept the artists it auto-requested for.
+pub const LEGACY_AUTO_KEY: &str = "radar.auto.v1";
 
 // ---------------------------------------------------------------- stored
 
@@ -113,13 +117,13 @@ struct Stored {
     auto_tried: Vec<String>,
 }
 
-/// An artist with auto-request on (this device).
+/// An artist an older build had auto-request on for (this device).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AutoArtist {
-    pub id: String,
-    pub name: String,
-    pub enabled_at: i64,
+struct LegacyAuto {
+    id: String,
+    name: String,
+    enabled_at: i64,
 }
 
 // ---------------------------------------------------------------- what the UI reads
@@ -140,7 +144,7 @@ pub struct RadarItem {
     pub library_album_id: Option<String>,
     /// A request made for it.
     pub request: Option<RequestState>,
-    /// The request was made by auto-request.
+    /// The request was made because the artist is followed.
     pub auto: bool,
     /// Why it can't be requested (it shares a title with an unreleased album).
     pub refusal: Option<String>,
@@ -311,7 +315,7 @@ pub fn notice(found: &[Found]) -> Option<(String, String)> {
     }
 }
 
-/// The summary after auto-request ran: (title, body).
+/// The summary after new albums were asked for: (title, body).
 pub fn summary(made: &[RequestRecord], waiting: usize, cap: u32) -> Option<(String, String)> {
     let sent: Vec<&RequestRecord> = made.iter().filter(|r| r.state != RequestState::Failed).collect();
     let refused = made.len() - sent.len();
@@ -321,24 +325,24 @@ pub fn summary(made: &[RequestRecord], waiting: usize, cap: u32) -> Option<(Stri
     let mut parts: Vec<String> = Vec::new();
     match sent.as_slice() {
         [] => {}
-        [r] => parts.push(format!("Requested {} by {}.", r.title, r.artist)),
+        [r] => parts.push(format!("Getting {} by {}.", r.title, r.artist)),
         many => parts.push(format!(
-            "Requested {} new albums: {}.",
+            "Getting {} new albums: {}.",
             many.len(),
             many.iter().map(|r| r.title.as_str()).collect::<Vec<_>>().join(", ")
         )),
     }
     match refused {
         0 => {}
-        1 => parts.push("1 couldn't be requested. Requests in Settings say why.".into()),
-        n => parts.push(format!("{n} couldn't be requested. Requests in Settings say why.")),
+        1 => parts.push("1 couldn't be asked for. Requests in Settings say why.".into()),
+        n => parts.push(format!("{n} couldn't be asked for. Requests in Settings say why.")),
     }
     match waiting {
         0 => {}
         1 => parts.push(format!("1 more waits for tomorrow (up to {cap} a day).")),
         n => parts.push(format!("{n} more wait for tomorrow (up to {cap} a day).")),
     }
-    Some(("Auto-request".into(), parts.join(" ")))
+    Some(("New from artists you follow".into(), parts.join(" ")))
 }
 
 // ---------------------------------------------------------------- the radar
@@ -361,61 +365,57 @@ impl Radar {
         self.inner.db.write(|c| kv_set(c, STORE_KEY, &json))
     }
 
-    pub fn auto_artists(&self) -> Vec<AutoArtist> {
-        self.inner.db.read(|c| kv_get(c, AUTO_KEY)).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    /// Artists an older build had auto-request on for become followed
+    /// ones (followed when it was turned on), once. Returns how many.
+    pub fn migrate_auto(&self) -> AppResult<usize> {
+        let Some(raw) = self.inner.db.read(|c| kv_get(c, LEGACY_AUTO_KEY))? else { return Ok(0) };
+        let old: Vec<LegacyAuto> = serde_json::from_str(&raw).unwrap_or_default();
+        let mut all = self.inner.follows.list()?;
+        let before = all.len();
+        for a in old {
+            if !a.id.trim().is_empty() && !all.iter().any(|f| f.id == a.id) && all.len() < crate::social::follows::MAX_FOLLOWS {
+                all.push(FollowedArtist { id: a.id, title: a.name, thumb: None, followed_at: a.enabled_at, just_show: false });
+            }
+        }
+        let n = all.len() - before;
+        if n > 0 {
+            self.inner.follows.save(&all)?;
+        }
+        self.inner.db.write(|c| kv_set(c, LEGACY_AUTO_KEY, "[]"))?;
+        Ok(n)
     }
 
-    /// Turn auto-request on or off for an artist. Turning it on also turns
-    /// on auto-request as a whole (the user just asked for it).
-    pub fn set_auto(&self, id: &str, name: &str, on: bool) -> AppResult<Vec<AutoArtist>> {
-        if id.trim().is_empty() || id.len() > 300 || name.trim().is_empty() {
-            return Err(AppError::Invalid("Not an artist.".into()));
+    /// Someone was just followed: with Lidarr ready and new albums got,
+    /// the radar turns on, since it's what finds them.
+    pub fn followed(&self) -> AppResult<()> {
+        let s = crate::settings::try_load(&self.inner.db)?;
+        if s.release_radar || !s.follow_get || !self.inner.lidarr.ready() {
+            return Ok(());
         }
-        let mut all = self.auto_artists();
-        let had = all.iter().any(|a| a.id == id);
-        match (on, had) {
-            (true, false) => {
-                if all.len() >= MAX_AUTO {
-                    return Err(AppError::Invalid(format!("Auto-request can be on for up to {MAX_AUTO} artists.")));
-                }
-                all.push(AutoArtist { id: id.to_string(), name: name.trim().to_string(), enabled_at: self.now() });
-            }
-            (false, true) => all.retain(|a| a.id != id),
-            _ => {}
-        }
-        let json = serde_json::to_string(&all).map_err(|e| AppError::Internal(e.to_string()))?;
-        self.inner.db.write(|c| kv_set(c, AUTO_KEY, &json))?;
-        if on {
-            let s = crate::settings::try_load(&self.inner.db)?;
-            if !s.auto_request {
-                let s = crate::settings::Settings { auto_request: true, ..s };
-                crate::settings::save(&self.inner.db, &s)?;
-                self.inner.events.emit("settings://changed", serde_json::to_value(&s).unwrap_or_default());
-            }
-        }
+        let s = crate::settings::Settings { release_radar: true, ..s };
+        crate::settings::save(&self.inner.db, &s)?;
+        self.inner.events.emit("settings://changed", serde_json::to_value(&s).unwrap_or_default());
         self.inner.events.emit(EVENT_CHANGED, Value::Null);
-        Ok(all)
+        Ok(())
     }
 
-    /// The artists to look at: followed ones, those played most, and any
-    /// with auto-request on. One entry per artist (by folded name).
+    /// The artists to look at: every followed one (up to `MAX_FOLLOWED`),
+    /// then those played most while there's room. One entry per artist (by
+    /// folded name).
     pub fn artists(&self) -> Vec<RadarArtist> {
         let mut out: Vec<RadarArtist> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
-        let mut add = |a: RadarArtist| {
+        let mut add = |a: RadarArtist, cap: usize| {
             let k = fold_artist(&a.name);
-            if !k.is_empty() && seen.insert(k) && out.len() < MAX_ARTISTS {
+            if !k.is_empty() && out.len() < cap && seen.insert(k) {
                 out.push(a);
             }
         };
-        for a in self.auto_artists() {
-            add(RadarArtist { id: Some(a.id), name: a.name });
-        }
         for f in self.inner.follows.list().unwrap_or_default() {
-            add(RadarArtist { id: Some(f.id), name: f.title });
+            add(RadarArtist { id: Some(f.id), name: f.title }, MAX_FOLLOWED);
         }
         for a in self.inner.top.top(TOP_ARTISTS) {
-            add(a);
+            add(a, MAX_ARTISTS);
         }
         out
     }
@@ -458,6 +458,9 @@ impl Radar {
 
     async fn look(&self, s: &crate::settings::Settings) -> AppResult<Outcome> {
         let now = self.now();
+        if let Err(e) = self.migrate_auto() {
+            tracing::debug!("release radar: old auto-request artists: {e}");
+        }
         let mut st = self.stored();
         st.tried_at = Some(now);
         let _ = self.save(&st);
@@ -550,20 +553,22 @@ impl Radar {
         Ok(Outcome { new, auto, waiting })
     }
 
-    /// Ask Lidarr for new albums by artists with auto-request on, up to
-    /// the daily cap. Returns what was made, and how many wait for another day.
+    /// Ask Lidarr for new albums by followed artists (not the ones set to
+    /// just show), up to the daily cap. Returns what was made, and how many
+    /// wait for another day.
     async fn auto_request(&self, s: &crate::settings::Settings, st: &mut Stored, now: i64) -> AppResult<(Vec<RequestRecord>, usize)> {
-        let artists = self.auto_artists();
-        if !s.auto_request || artists.is_empty() || !self.inner.lidarr.ready() {
+        let follows: Vec<FollowedArtist> = self.inner.follows.list()?.into_iter().filter(|f| !f.just_show).collect();
+        if !s.follow_get || follows.is_empty() || !self.inner.lidarr.ready() {
             return Ok((Vec::new(), 0));
         }
-        let on: HashMap<String, &AutoArtist> = artists.iter().map(|a| (fold_artist(&a.name), a)).collect();
+        let on: HashMap<String, &FollowedArtist> = follows.iter().map(|f| (fold_artist(&f.title), f)).collect();
+        let kind_ok = |k: &str| k == "album" || k == "ep" || (k == "single" && s.follow_get_singles);
         let tried: HashSet<String> = st.auto_tried.iter().cloned().collect();
         let mut todo: Vec<Found> = st
             .items
             .iter()
-            .filter(|f| f.kind == "album" && !f.baseline && !tried.contains(&f.release_group_id))
-            .filter(|f| on.get(&fold_artist(&f.artist)).is_some_and(|a| f.found_at > a.enabled_at))
+            .filter(|f| kind_ok(&f.kind) && !f.baseline && !tried.contains(&f.release_group_id))
+            .filter(|f| on.get(&fold_artist(&f.artist)).is_some_and(|a| f.found_at > a.followed_at))
             .cloned()
             .collect();
         todo.sort_by(|a, b| a.date.cmp(&b.date).then(a.title.cmp(&b.title)));

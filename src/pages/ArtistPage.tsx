@@ -27,7 +27,7 @@ import "./catalogue.css";
 import { useSettings } from "../stores/settings";
 import { eraRange, filterByEra, showEraCards } from "./era";
 import { usePins } from "../stores/pins";
-import { setFollow, useSocial } from "../stores/social";
+import { setFollow, setJustShow, useJustShow, useSocial } from "../stores/social";
 import "../shell/social.css";
 import { player, usePlayer } from "../stores/player";
 import { nav, useRouter } from "../stores/router";
@@ -36,8 +36,6 @@ import { usePageBar, useTitleStep } from "./detail";
 import { AboutCard, useArtistInfo } from "./ArtistAbout";
 import { useGetSpots, useLidarrReady } from "./lidarrShared";
 import { useIsGuest } from "../stores/asks";
-import { useAutoOn, useAutoRequest } from "../stores/radar";
-import { AutoRequestDialog } from "./AutoRequestDialog";
 import { GetAlbumsDialog } from "./GetAlbumsDialog";
 import { CatalogueArtistCard, NOT_IN_LIBRARY, dismissArtist, undismissArtist, useCatalogueFans } from "./catalogue";
 import type { CatArtist, CatalogueArtistPage } from "../lib/types";
@@ -307,17 +305,11 @@ function ActionRow({
   const name = artist?.title ?? "artist";
   const following = useSocial((s) => s.followIds.has(id));
   const toggleFollow = () => artist && void setFollow({ id, title: artist.title, thumb: artist.thumb }, !following);
-  // Auto-request: only with the release radar on and Lidarr ready.
-  const radarOn = useSettings((s) => s.settings?.releaseRadar !== false);
+  // Following gets their new albums; this one can just show them instead.
+  const getsNew = useSettings((s) => s.settings?.followGet !== false);
   const lidarrReady = useLidarrReady();
-  const autoOn = useAutoOn(id);
-  const [askAuto, setAskAuto] = useState(false);
-  const toggleAuto = () => {
-    if (!artist) return;
-    if (autoOn) void useAutoRequest.getState().set(id, artist.title, false);
-    else setAskAuto(true);
-  };
-  const autoItem = radarOn && lidarrReady ? [{ label: "Auto-request new albums", checked: autoOn, onSelect: toggleAuto }] : [];
+  const justShow = useJustShow(id);
+  const autoItem = following && getsNew && lidarrReady ? [{ label: "Just show new albums", checked: justShow, onSelect: () => void setJustShow(id, !justShow) }] : [];
   // Get albums: the artist's MusicBrainz id is looked up when it's picked.
   const [getMbid, setGetMbid] = useState<string | null>(null);
   const getAlbums = async () => {
@@ -330,7 +322,6 @@ function ActionRow({
   return (
     <div className="action-row">
       {artist && getMbid && <GetAlbumsDialog mbid={getMbid} name={artist.title} open onClose={() => setGetMbid(null)} />}
-      {artist && askAuto && <AutoRequestDialog id={id} name={artist.title} open onClose={() => setAskAuto(false)} />}
       <IconButton
         label={playing ? `Pause ${name}` : `Play ${name}`}
         variant="accent"

@@ -144,6 +144,16 @@ export class MockSocial {
     return this.list();
   }
 
+  justShow(id: string, justShow: boolean): FollowedArtist[] {
+    const f = this.follows.find((x) => x.id === id);
+    if (!f) throw { kind: "invalid", message: "Follow the artist first." };
+    if (!!f.justShow === justShow) return this.list();
+    if (justShow) f.justShow = true;
+    else delete f.justShow;
+    this.hooks.emitFollows(this.list());
+    return this.list();
+  }
+
   private albumsOf(artistId: string): Album[] {
     return this.fx.albums.filter((a) => a.artistId === artistId);
   }

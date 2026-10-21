@@ -52,7 +52,7 @@ fn pin(kind: &str, id: &str) -> Pin {
 }
 
 fn follow(name: &str) -> FollowedArtist {
-    FollowedArtist { id: String::new(), title: name.into(), thumb: None, followed_at: 1 }
+    FollowedArtist { id: String::new(), title: name.into(), thumb: None, followed_at: 1, just_show: false }
 }
 
 fn file_path(folder: &Path) -> std::path::PathBuf {
@@ -475,8 +475,8 @@ fn follows_move_from_the_old_list_once_and_then_live_in_the_store() {
     let db = DbHandle::open(dir.path().join("lib.db")).unwrap();
     let store = SyncStore::new(db.clone(), "pc");
     let old = vec![
-        FollowedArtist { id: "1".into(), title: "Ana".into(), thumb: None, followed_at: 100 },
-        FollowedArtist { id: "credit:bo".into(), title: "Bo".into(), thumb: None, followed_at: 50 },
+        FollowedArtist { id: "1".into(), title: "Ana".into(), thumb: None, followed_at: 100, just_show: false },
+        FollowedArtist { id: "credit:bo".into(), title: "Bo".into(), thumb: None, followed_at: 50, just_show: false },
     ];
     db.write(|c| kv_set(c, LEGACY_KEY, &serde_json::to_string(&old).unwrap())).unwrap();
     assert_eq!(SyncFollows::migrate(&store, &db).unwrap(), 2);
@@ -488,9 +488,9 @@ fn follows_move_from_the_old_list_once_and_then_live_in_the_store() {
     let e = &store.entries(&["follows"]).unwrap()["follows"]["1"];
     assert_eq!(e.ts, 100_000);
     // Follow and unfollow through the social module's own rules.
-    let new = FollowedArtist { id: "9".into(), title: "Cy".into(), thumb: None, followed_at: 200 };
+    let new = FollowedArtist { id: "9".into(), title: "Cy".into(), thumb: None, followed_at: 200, just_show: false };
     assert_eq!(set_follow(&f, new, true).unwrap().len(), 3);
-    let gone = FollowedArtist { id: "1".into(), title: "Ana".into(), thumb: None, followed_at: 0 };
+    let gone = FollowedArtist { id: "1".into(), title: "Ana".into(), thumb: None, followed_at: 0, just_show: false };
     assert_eq!(set_follow(&f, gone, false).unwrap().len(), 2);
     assert_eq!(store.deleted(&FOLLOWS).unwrap(), ["1"]);
     // Never again, even with an old list back in place.

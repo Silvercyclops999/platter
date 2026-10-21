@@ -15,6 +15,7 @@ use crate::social::follows::FollowedArtist;
 
 const NOW: i64 = 1_800_000_000;
 const HARBOR: &str = "cccccccc-1111-2222-3333-444444444444";
+const COLD: &str = "eeeeeeee-1111-2222-3333-444444444444";
 
 fn id(n: u32) -> String {
     format!("20000000-0000-0000-0000-{n:012}")
@@ -64,6 +65,7 @@ impl ArtistMbid for Mbids {
         match name {
             "Northlight" => Some(ARTIST.into()),
             "Harbor Sound" => Some(HARBOR.into()),
+            "Cold Coast" => Some(COLD.into()),
             n if n.starts_with("Artist ") => Some(format!("dddddddd-0000-0000-0000-{:012}", n[7..].parse::<u32>().unwrap())),
             _ => None,
         }
@@ -190,7 +192,7 @@ fn rig() -> Rig {
     let mb = Arc::new(FakeMb::default());
     mb.route("/release-group?query=", Some(answer(vec![])));
     let follows = Arc::new(Follows::default());
-    follows.save(&[FollowedArtist { id: "ar1".into(), title: "Northlight".into(), thumb: None, followed_at: 1 }]).unwrap();
+    follows.save(&[FollowedArtist { id: "ar1".into(), title: "Northlight".into(), thumb: None, followed_at: 1, just_show: false }]).unwrap();
     let top = Arc::new(Top::default());
     top.0.lock().push(RadarArtist { id: Some("ar2".into()), name: "Harbor Sound".into() });
     let lidarr = Arc::new(FakeLidarr::default());
@@ -394,7 +396,6 @@ async fn many_artists_go_a_few_to_a_search_and_unfollowed_ones_drop_off() {
 fn auto_rig() -> Rig {
     let r = rig();
     r.lidarr.ready.store(true, Ordering::Relaxed);
-    r.radar.set_auto("ar1", "Northlight", true).unwrap();
     r
 }
 
@@ -403,21 +404,57 @@ fn album(n: u32, title: &str, ago: i64) -> Value {
 }
 
 #[tokio::test]
-async fn turning_auto_request_on_for_an_artist_turns_it_on_and_is_remembered() {
+async fn following_with_lidarr_ready_turns_the_radar_on() {
     let r = rig();
-    assert!(!crate::settings::load(&r.db).auto_request);
-    let all = r.radar.set_auto("ar1", "Northlight", true).unwrap();
-    assert_eq!(all.len(), 1);
-    assert_eq!(all[0].enabled_at, NOW);
-    assert!(crate::settings::load(&r.db).auto_request, "asking for it per artist turns auto-request on");
+    r.settings(|s| s.release_radar = false);
+    // No Lidarr: following stays a follow, nothing is sent to MusicBrainz.
+    r.radar.followed().unwrap();
+    assert!(!crate::settings::load(&r.db).release_radar);
+    // Just show: the radar is the user's own choice then.
+    r.lidarr.ready.store(true, Ordering::Relaxed);
+    r.settings(|s| s.follow_get = false);
+    r.radar.followed().unwrap();
+    assert!(!crate::settings::load(&r.db).release_radar);
+    r.settings(|s| s.follow_get = true);
+    r.radar.followed().unwrap();
+    assert!(crate::settings::load(&r.db).release_radar, "the radar is what finds their new albums");
     assert!(r.events.0.lock().iter().any(|e| e == "settings://changed"));
-    assert!(r.radar.set_auto("ar1", "Northlight", false).unwrap().is_empty());
-    assert!(crate::settings::load(&r.db).auto_request, "turning one artist off leaves the switch alone");
-    assert!(r.radar.set_auto("", "x", true).is_err());
 }
 
 #[tokio::test]
-async fn auto_request_only_new_albums_found_after_it_was_turned_on() {
+async fn old_auto_request_artists_become_followed_once() {
+    let r = rig();
+    r.db.write(|c| {
+        crate::db::store::kv_set(
+            c,
+            LEGACY_AUTO_KEY,
+            r#"[{"id":"ar1","name":"Northlight","enabledAt":5},{"id":"ar9","name":"Cold Coast","enabledAt":40},{"id":"","name":"x","enabledAt":1}]"#,
+        )
+    })
+    .unwrap();
+    assert_eq!(r.radar.migrate_auto().unwrap(), 1, "Northlight was followed already; the empty id is dropped");
+    let all = r.follows.list().unwrap();
+    let cc = all.iter().find(|f| f.id == "ar9").unwrap();
+    assert_eq!((cc.title.as_str(), cc.followed_at, cc.just_show), ("Cold Coast", 40, false), "followed when auto-request was turned on");
+    assert_eq!(all.iter().find(|f| f.id == "ar1").unwrap().followed_at, 1, "an earlier follow keeps its date");
+    assert_eq!(r.radar.migrate_auto().unwrap(), 0, "only once");
+}
+
+#[tokio::test]
+async fn every_followed_artist_is_looked_at_and_played_most_only_fill_up() {
+    let r = rig();
+    let many: Vec<FollowedArtist> =
+        (0..70).map(|n| FollowedArtist { id: format!("f{n}"), title: format!("Followed {n}"), thumb: None, followed_at: 1, just_show: false }).collect();
+    r.follows.save(&many).unwrap();
+    let a = r.radar.artists();
+    assert_eq!(a.len(), 70, "past the 60 the played-most list fills to, and Harbor Sound has no room");
+    assert!(a.iter().all(|x| x.name.starts_with("Followed")));
+    r.follows.save(&many[..5]).unwrap();
+    assert_eq!(r.radar.artists().len(), 6, "five followed and one played most");
+}
+
+#[tokio::test]
+async fn following_gets_new_albums_and_eps_found_after_the_follow() {
     let r = auto_rig();
     // The first look only sets the scene, and what was there before isn't new.
     let o = r.radar.check().await.unwrap();
@@ -429,14 +466,15 @@ async fn auto_request_only_new_albums_found_after_it_was_turned_on() {
         Some(answer(vec![
             album(20, "Paper Moon", 1),
             rg(&id(22), "Moon Single", "Single", &[], &days_ago(1), &["Official"], ac(ARTIST, "Northlight")),
+            rg(&id(24), "Moon EP", "EP", &[], &days_ago(2), &["Official"], ac(ARTIST, "Northlight")),
             rg(&id(23), "Harbor Again", "Album", &[], &days_ago(1), &["Official"], ac(HARBOR, "Harbor Sound")),
         ])),
     );
     let o = r.radar.check().await.unwrap();
     let asked: Vec<String> = o.auto.iter().map(|x| x.title.clone()).collect();
-    assert_eq!(asked, vec!["Paper Moon"], "albums only, and only for artists with auto-request on");
-    let summary = r.notes.0.lock().iter().find(|(t, _)| t == "Auto-request").cloned().unwrap();
-    assert_eq!(summary.1, "Requested Paper Moon by Northlight.");
+    assert_eq!(asked, vec!["Moon EP", "Paper Moon"], "albums and EPs, not singles, and only for followed artists");
+    let summary = r.notes.0.lock().iter().find(|(t, _)| t == "New from artists you follow").cloned().unwrap();
+    assert_eq!(summary.1, "Getting 2 new albums: Moon EP, Paper Moon.");
     let item = r.radar.page().unwrap().items.into_iter().find(|i| i.title == "Paper Moon").unwrap();
     assert_eq!(item.request, Some(RequestState::Searching));
     assert!(item.auto);
@@ -444,7 +482,38 @@ async fn auto_request_only_new_albums_found_after_it_was_turned_on() {
     r.later(CHECK_EVERY);
     let o = r.radar.check().await.unwrap();
     assert!(o.auto.is_empty());
-    assert_eq!(r.lidarr.list.lock().len(), 1);
+    assert_eq!(r.lidarr.list.lock().len(), 2);
+}
+
+#[tokio::test]
+async fn singles_too_just_show_and_releases_found_before_the_follow() {
+    let r = auto_rig();
+    r.top.0.lock().push(RadarArtist { id: Some("ar3".into()), name: "Cold Coast".into() });
+    r.radar.check().await.unwrap();
+    r.later(CHECK_EVERY);
+    // Cold Coast is only played a lot: its new album is shown, never got.
+    r.mb.route("/release-group?query=", Some(answer(vec![rg(&id(30), "Tidewater", "Album", &[], &days_ago(1), &["Official"], ac(COLD, "Cold Coast"))])));
+    assert!(r.radar.check().await.unwrap().auto.is_empty(), "not followed");
+    // Following now doesn't reach back to what was found before.
+    let now = *r.now.lock();
+    let mut all = r.follows.list().unwrap();
+    all.push(FollowedArtist { id: "ar3".into(), title: "Cold Coast".into(), thumb: None, followed_at: now, just_show: false });
+    r.follows.save(&all).unwrap();
+    r.later(CHECK_EVERY);
+    assert!(r.radar.check().await.unwrap().auto.is_empty(), "found before the follow");
+    // Singles once Singles too is on; nothing for an artist set to just show.
+    r.settings(|s| s.follow_get_singles = true);
+    crate::social::follows::set_just_show(r.follows.as_ref(), "ar1", true).unwrap();
+    r.later(CHECK_EVERY);
+    r.mb.route(
+        "/release-group?query=",
+        Some(answer(vec![
+            rg(&id(31), "Low Tide", "Single", &[], &days_ago(1), &["Official"], ac(COLD, "Cold Coast")),
+            album(32, "Hidden Away", 1),
+        ])),
+    );
+    let o = r.radar.check().await.unwrap();
+    assert_eq!(o.auto.iter().map(|x| x.title.as_str()).collect::<Vec<_>>(), vec!["Low Tide"]);
 }
 
 #[tokio::test]
@@ -464,10 +533,10 @@ async fn the_daily_cap_holds_refusals_dont_count_and_the_rest_wait_for_tomorrow(
         vec![("A Side".into(), RequestState::Searching), ("Refused Record".into(), RequestState::Failed), ("B Side".into(), RequestState::Searching)]
     );
     assert_eq!(o.waiting, 1);
-    let summary = r.notes.0.lock().iter().find(|(t, _)| t == "Auto-request").cloned().unwrap().1;
+    let summary = r.notes.0.lock().iter().find(|(t, _)| t == "New from artists you follow").cloned().unwrap().1;
     assert_eq!(
         summary,
-        "Requested 2 new albums: A Side, B Side. 1 couldn't be requested. Requests in Settings say why. 1 more waits for tomorrow (up to 2 a day)."
+        "Getting 2 new albums: A Side, B Side. 1 couldn't be asked for. Requests in Settings say why. 1 more waits for tomorrow (up to 2 a day)."
     );
     // Later the same day: the cap is used up.
     let day = (*r.now.lock()).div_euclid(DAY);
@@ -484,14 +553,14 @@ async fn the_daily_cap_holds_refusals_dont_count_and_the_rest_wait_for_tomorrow(
 }
 
 #[tokio::test]
-async fn auto_request_waits_for_the_switch_and_a_ready_lidarr() {
+async fn new_albums_wait_for_the_switch_and_a_ready_lidarr() {
     let r = auto_rig();
     r.radar.check().await.unwrap();
     r.later(CHECK_EVERY);
     r.mb.route("/release-group?query=", Some(answer(vec![album(20, "Paper Moon", 1)])));
-    r.settings(|s| s.auto_request = false);
-    assert!(r.radar.check().await.unwrap().auto.is_empty(), "switched off for everyone");
-    r.settings(|s| s.auto_request = true);
+    r.settings(|s| s.follow_get = false);
+    assert!(r.radar.check().await.unwrap().auto.is_empty(), "just show them, for everyone");
+    r.settings(|s| s.follow_get = true);
     r.lidarr.ready.store(false, Ordering::Relaxed);
     r.later(CHECK_EVERY);
     assert!(r.radar.check().await.unwrap().auto.is_empty(), "Lidarr not set up or its check not green");
@@ -531,7 +600,7 @@ fn summary_texts() {
     assert_eq!(summary(&[], 2, 3).unwrap().1, "2 more wait for tomorrow (up to 3 a day).");
     assert_eq!(
         summary(&[rec("X", RequestState::Failed), rec("Y", RequestState::Failed)], 0, 3).unwrap().1,
-        "2 couldn't be requested. Requests in Settings say why."
+        "2 couldn't be asked for. Requests in Settings say why."
     );
-    assert_eq!(summary(&[rec("Q", RequestState::Queued)], 0, 3).unwrap().1, "Requested Q by Northlight.");
+    assert_eq!(summary(&[rec("Q", RequestState::Queued)], 0, 3).unwrap().1, "Getting Q by Northlight.");
 }

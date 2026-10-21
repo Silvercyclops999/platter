@@ -3611,7 +3611,14 @@ export class MockBackend implements Backend {
     return this.delay(() => this.social.list());
   }
   followSet(artist: { id: string; title: string; thumb?: string | null }, on: boolean) {
-    return this.delay(() => this.social.set(artist, on));
+    return this.delay(() => {
+      const all = this.social.set(artist, on);
+      if (on) this.radar.followed();
+      return all;
+    });
+  }
+  followJustShow(id: string, justShow: boolean) {
+    return this.delay(() => this.social.justShow(id, justShow));
   }
   whatsNew() {
     return this.delay(() => this.social.whatsNew());
@@ -4075,12 +4082,6 @@ export class MockBackend implements Backend {
   }
   releaseRadarCheck() {
     return this.delay(() => this.radar.check());
-  }
-  radarAutoArtists() {
-    return this.delay(() => this.radar.autoArtists());
-  }
-  radarAutoSet(id: string, name: string, on: boolean) {
-    return this.delay(() => this.radar.setAuto(id, name, on));
   }
   lidarrKeySet(key: string | null) {
     return this.delay(() => this.lidarr.setKey(this.settings, key));

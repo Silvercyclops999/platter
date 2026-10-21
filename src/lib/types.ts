@@ -1373,9 +1373,11 @@ export interface Settings {
   releaseRadar: boolean;
   /** A notification when the release radar finds new releases. */
   radarNotify: boolean;
-  /** Auto-request new albums for the artists it's on for (this device). */
-  autoRequest: boolean;
-  /** Most automatic requests a day: 1, 2, 3, 5 or 10 (this device). */
+  /** New albums from followed artists are got through Lidarr (off just shows them). */
+  followGet: boolean;
+  /** Singles from followed artists are got too. */
+  followGetSingles: boolean;
+  /** Most new albums got a day for followed artists: 1, 2, 3, 5 or 10. */
   autoRequestCap: number;
   /** Fingerprint songs on this computer and look them up on AcoustID (this device). */
   identifyBySound: boolean;
@@ -1949,7 +1951,8 @@ export const DEFAULT_SETTINGS: Settings = {
   doctorCoverPx: 600,
   releaseRadar: false,
   radarNotify: true,
-  autoRequest: false,
+  followGet: true,
+  followGetSingles: false,
   autoRequestCap: 3,
   identifyBySound: false,
   soundIdScope: "untagged",
@@ -2596,6 +2599,8 @@ export interface FollowedArtist {
   thumb: string | null;
   /** Unix seconds. */
   followedAt: number;
+  /** Their new albums only show; Lidarr isn't asked for them. */
+  justShow?: boolean;
 }
 
 export interface NewRelease {
@@ -3258,7 +3263,7 @@ export interface LidarrRequest {
   message: string | null;
   /** What Platter did along the way. */
   notes: string[];
-  /** Made by auto-request for a new release. */
+  /** Made because the artist is followed, for a new release. */
   auto: boolean;
   /** For a protected artist: lands in the staging folder and waits there. */
   protected: boolean;
@@ -3453,7 +3458,7 @@ export interface RadarItem {
   /** The library album it matches ("In your library"). */
   libraryAlbumId: string | null;
   request: LidarrRequestState | null;
-  /** The request was made by auto-request. */
+  /** The request was made because the artist is followed. */
   auto: boolean;
   /** Why it can't be requested. */
   refusal: string | null;
@@ -3471,13 +3476,6 @@ export interface RadarPage {
   lidarrReady: boolean;
   /** Artists looked at. */
   artists: number;
-}
-
-/** An artist with auto-request on (this device). */
-export interface AutoArtist {
-  id: string;
-  name: string;
-  enabledAt: number;
 }
 
 /** One official release the library lacks. */
@@ -4691,7 +4689,7 @@ export interface EventMap {
   "follows://changed": FollowedArtist[];
   /** How many What's New items are unseen. */
   "whatsnew://changed": { unseen: number };
-  /** The release radar found something, a look started or ended, or auto-request changed. */
+  /** The release radar found something, or a look started or ended. */
   "radar://changed": null;
   /** A listening session started, changed or ended. */
   "listen://state": ListenView;

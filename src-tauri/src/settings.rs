@@ -961,9 +961,12 @@ pub struct Settings {
     pub release_radar: bool,
     /// A notification when the radar finds new releases.
     pub radar_notify: bool,
-    /// Auto-request new albums for artists it's turned on for (this device).
-    pub auto_request: bool,
-    /// Most automatic requests a day (this device).
+    /// New albums from followed artists are got through Lidarr (off just
+    /// shows them on the radar).
+    pub follow_get: bool,
+    /// Singles from followed artists are got too, not only albums and EPs.
+    pub follow_get_singles: bool,
+    /// Most new albums got a day for followed artists.
     pub auto_request_cap: u32,
     /// Fingerprint songs on this computer and look them up on AcoustID
     /// (only the fingerprint and length are sent). This device only.
@@ -1409,7 +1412,8 @@ impl Default for Settings {
             doctor_cover_px: crate::doctor::DEFAULT_COVER_PX,
             release_radar: false,
             radar_notify: true,
-            auto_request: false,
+            follow_get: true,
+            follow_get_singles: false,
             auto_request_cap: crate::radar::DEFAULT_CAP,
             identify_by_sound: false,
             sound_id_scope: crate::soundid::Scope::Untagged,
@@ -1653,6 +1657,9 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "doctorCoverPx",
     "releaseRadar",
     "radarNotify",
+    "followGet",
+    "followGetSingles",
+    "autoRequestCap",
     "saveQueueOnServer",
     "catalogueSearch",
     "fansAlsoLikeCatalogue",
@@ -1781,8 +1788,6 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "carplayResume",
     "carplayOfflineDownloads",
     "notifyNewReleases",
-    "autoRequest",
-    "autoRequestCap",
     "identifyBySound",
     "soundIdScope",
     "discordListenAlong",
@@ -2074,7 +2079,8 @@ pub struct SettingsPatch {
     pub doctor_cover_px: Option<u32>,
     pub release_radar: Option<bool>,
     pub radar_notify: Option<bool>,
-    pub auto_request: Option<bool>,
+    pub follow_get: Option<bool>,
+    pub follow_get_singles: Option<bool>,
     pub auto_request_cap: Option<u32>,
     pub identify_by_sound: Option<bool>,
     pub sound_id_scope: Option<crate::soundid::Scope>,
@@ -2460,7 +2466,8 @@ impl Settings {
         }
         set(&mut self.release_radar, p.release_radar);
         set(&mut self.radar_notify, p.radar_notify);
-        set(&mut self.auto_request, p.auto_request);
+        set(&mut self.follow_get, p.follow_get);
+        set(&mut self.follow_get_singles, p.follow_get_singles);
         set(&mut self.identify_by_sound, p.identify_by_sound);
         set(&mut self.sound_id_scope, p.sound_id_scope);
         if let Some(cap) = p.auto_request_cap {
@@ -3894,7 +3901,6 @@ mod tests {
             "actAsPlexPlayer",
             // Write to the server.
             "saveQueueOnServer",
-            "autoRequest",
             // Send something to another service or other people.
             "discordStatus",
             "discordUploadArt",
@@ -5478,14 +5484,17 @@ mod tests {
     fn release_radar_settings_defaults_choices_and_where_they_live() {
         let s = Settings::default();
         assert!(!s.release_radar && s.radar_notify, "the radar asks MusicBrainz, so it starts off; its notifications follow it");
-        assert!(!s.auto_request, "auto-request starts off");
+        // Following is the ask: a followed artist's new albums are got unless
+        // the user says just show them. Nothing is asked for without a follow.
+        assert!(s.follow_get && !s.follow_get_singles, "albums and EPs of followed artists, not singles");
         assert_eq!(s.auto_request_cap, 3);
-        assert!(SYNCED_SETTINGS.contains(&"releaseRadar") && SYNCED_SETTINGS.contains(&"radarNotify"));
-        assert!(DEVICE_SETTINGS.contains(&"autoRequest") && DEVICE_SETTINGS.contains(&"autoRequestCap"), "requests are per device");
+        for k in ["releaseRadar", "radarNotify", "followGet", "followGetSingles", "autoRequestCap"] {
+            assert!(SYNCED_SETTINGS.contains(&k), "{k} is synced");
+        }
         let mut s = s;
-        s.apply(&serde_json::from_str(r#"{"releaseRadar":false,"radarNotify":false,"autoRequest":true,"autoRequestCap":5}"#).unwrap())
+        s.apply(&serde_json::from_str(r#"{"releaseRadar":false,"radarNotify":false,"followGet":false,"followGetSingles":true,"autoRequestCap":5}"#).unwrap())
             .unwrap();
-        assert!(!s.release_radar && !s.radar_notify && s.auto_request);
+        assert!(!s.release_radar && !s.radar_notify && !s.follow_get && s.follow_get_singles);
         assert_eq!(s.auto_request_cap, 5);
         assert!(s.apply(&serde_json::from_str(r#"{"autoRequestCap":4}"#).unwrap()).is_err());
         assert_eq!(s.auto_request_cap, 5, "a refused limit keeps the old one");

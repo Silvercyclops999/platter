@@ -10,6 +10,7 @@ import {
   Bookmark,
   Check,
   Disc3,
+  Eye,
   GitBranch,
   GripVertical,
   Heart,
@@ -30,6 +31,7 @@ import {
   Pencil,
   Sparkles,
   Trash2,
+  UserMinus,
   UserRound,
   UsersRound,
   Blend as BlendIcon,
@@ -69,7 +71,7 @@ import { CUSTOM_MAX, CUSTOM_MIN, SLEEP_CHOICES, cancelSleep, sleepLabel, startSl
 import { Dialog } from "../components/Dialog";
 import { RECENT_LIMIT } from "../shell/QueuePanel";
 import { PersonFace, addedBy } from "../shell/ListenStrip";
-import { useSocial } from "../stores/social";
+import { setFollow, setJustShow, useJustShow, useSocial } from "../stores/social";
 import { SwipeUnder, useRowSwipe } from "./rowSwipe";
 
 /** How long a closed sheet takes to slide away (0 drops it at once). */
@@ -152,6 +154,8 @@ const SheetFor = memo(function SheetFor({ sheet }: { sheet: Sheet }) {
       return <CreateSheet />;
     case "signal":
       return <SignalSheet />;
+    case "following":
+      return <FollowingSheet artist={sheet.artist} />;
   }
 });
 
@@ -835,6 +839,36 @@ async function queueList(p: Playlist) {
   } catch {
     useToasts.getState().push({ kind: "error", message: `Couldn't add ${p.title} to the queue` }, 4000);
   }
+}
+
+/** A followed artist whose new albums Lidarr gets: just show them instead, or unfollow. */
+function FollowingSheet({ artist }: { artist: { id: string; title: string; thumb: string | null } }) {
+  const justShow = useJustShow(artist.id);
+  const act = (f: () => unknown) => () => {
+    tap("selection");
+    phone.closeSheets();
+    void f();
+  };
+  const head = (
+    <div className="ph-track-head">
+      <Art path={artist.thumb} size={56} kind="artist" monogram={artist.title} />
+      <span className="ph-row__text">
+        <span className="ph-row__title">Following {artist.title}</span>
+        <span className="ph-row__sub">{justShow ? "New albums show on Release radar." : "New albums come in by themselves."}</span>
+      </span>
+    </div>
+  );
+  const items: Action[] = [
+    justShow
+      ? { label: "Get new albums", icon: ArrowDownToLine, run: act(() => setJustShow(artist.id, false)) }
+      : { label: "Just show new albums", icon: Eye, run: act(() => setJustShow(artist.id, true)) },
+    { label: "Unfollow", icon: UserMinus, run: act(() => setFollow(artist, false)) },
+  ];
+  return (
+    <SheetFrame title={`Following ${artist.title}`} onClose={phone.pop} head={head}>
+      <ActionList items={items} />
+    </SheetFrame>
+  );
 }
 
 function PlaylistSheet({ playlist }: { playlist: Playlist }) {

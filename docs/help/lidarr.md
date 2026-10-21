@@ -55,9 +55,9 @@ With a staging folder set, an album's menu has **Find a better copy**. When the 
 
 With **Show missing official releases** on, artist pages list official releases you don't have in their discography, with **Get**. Which kinds show (albums, singles and EPs, live albums, compilations) follows **Album kinds for Get albums**. Your first request asks you to type the album's name. If Lidarr can't be reached, the request waits and sends later. **Requests** shows where each one stands.
 
-## Auto requests
+## New albums from artists you follow
 
-Turn on **Auto-request new albums**, then choose it from an artist page's menu. New official albums the release radar finds are requested by themselves, up to **Most automatic requests a day**. Bootlegs and promos never are.
+Follow an artist and their new albums and EPs come in by themselves, up to **Most new albums a day**, and you get a notification when each one is here. Only what comes out after you follow, never their older albums. Bootlegs, promos, live albums and anything sharing a title with an album you have, unreleased ones included, are never asked for. To follow someone without getting everything, pick **Just show new albums** in their menu (on the phone, tap **Following**). **Get singles too** adds singles.
 
 ## Bring in my listening
 

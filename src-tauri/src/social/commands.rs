@@ -223,13 +223,30 @@ pub async fn follows_list(social: State<'_, Social>) -> AppResult<Vec<FollowedAr
 #[tauri::command]
 pub async fn follow_set(
     social: State<'_, Social>,
+    radar: State<'_, crate::radar::Radar>,
     id: String,
     title: String,
     thumb: Option<String>,
     on: bool,
 ) -> AppResult<Vec<FollowedArtist>> {
     let s = social.inner().clone();
-    tokio::task::spawn_blocking(move || s.set_follow(id, title, thumb, on))
+    let r = radar.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        let all = s.set_follow(id, title, thumb, on)?;
+        if on {
+            r.followed()?;
+        }
+        Ok(all)
+    })
+    .await
+    .map_err(|e| AppError::Internal(e.to_string()))?
+}
+
+/// Get a followed artist's new albums (Lidarr asks for them), or just show them.
+#[tauri::command]
+pub async fn follow_just_show(social: State<'_, Social>, id: String, just_show: bool) -> AppResult<Vec<FollowedArtist>> {
+    let s = social.inner().clone();
+    tokio::task::spawn_blocking(move || s.set_just_show(&id, just_show))
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?
 }

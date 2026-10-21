@@ -33,6 +33,7 @@ import { useApp } from "../stores/app";
 import { refreshRequests, resetRequests } from "../stores/requests";
 import { useRouter, type Route } from "../stores/router";
 import { loadSettings, useSettings } from "../stores/settings";
+import { useSocial } from "../stores/social";
 import { useToasts } from "../stores/toasts";
 import type { LibEntry, LibSort } from "../stores/library";
 
@@ -251,6 +252,48 @@ describe("every page can be reached", () => {
     fireEvent.click(await screen.findByRole("button", { name: "More" }));
     fireEvent.click(await screen.findByRole("button", { name: "Versions (3)" }));
     expect(usePhoneUi.getState().sheets.slice(-1)[0]).toEqual({ kind: "versions", track: t });
+  });
+});
+
+describe("Follow on the phone's artist page", () => {
+  async function clearFollows() {
+    for (const f of await mock.followsList()) await mock.followSet(f, false);
+    useSocial.setState({ follows: [], followIds: new Set() });
+  }
+
+  it("follow gets new albums; Following opens a sheet to just show them or unfollow", async () => {
+    await setUp({ releaseRadar: false }, true);
+    await clearFollows();
+    const status = vi.spyOn(backend, "lidarrStatus");
+    render(<PhoneShell />);
+    act(() => useRouter.getState().navigate({ name: "artist", id: "100" }));
+    const follow = await screen.findByRole("button", { name: /^Follow / }, SLOW);
+    // The chip knows Lidarr is ready once its status has answered.
+    await waitFor(() => expect(status).toHaveBeenCalled());
+    await act(() => Promise.allSettled(status.mock.results.map((r) => r.value)));
+    fireEvent.click(follow);
+    await waitFor(async () => expect((await mock.followsList()).map((f) => f.id)).toEqual(["100"]));
+    await waitFor(async () => expect((await mock.settingsGet()).releaseRadar).toBe(true), SLOW);
+    // Lidarr is ready, so Following opens the sheet instead of unfollowing.
+    fireEvent.click(await screen.findByRole("button", { name: /^Following / }, SLOW));
+    expect(usePhoneUi.getState().sheets.map((x) => x.kind)).toEqual(["following"]);
+    expect(await screen.findByText("New albums come in by themselves.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Just show new albums" }));
+    await waitFor(async () => expect((await mock.followsList())[0].justShow).toBe(true));
+    act(() => phone.push({ kind: "following", artist: { id: "100", title: "x", thumb: null } }));
+    expect(await screen.findByText("New albums show on Release radar.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Unfollow" }));
+    await waitFor(async () => expect(await mock.followsList()).toEqual([]));
+  });
+
+  it("without Lidarr, Following just unfollows", async () => {
+    await clearFollows();
+    render(<PhoneShell />);
+    act(() => useRouter.getState().navigate({ name: "artist", id: "100" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Follow / }, SLOW));
+    fireEvent.click(await screen.findByRole("button", { name: /^Following / }, SLOW));
+    await waitFor(async () => expect(await mock.followsList()).toEqual([]));
+    expect(usePhoneUi.getState().sheets).toEqual([]);
   });
 });
 

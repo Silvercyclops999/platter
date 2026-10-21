@@ -38,7 +38,9 @@ export type Sheet =
   | { kind: "librarySort" }
   | { kind: "create" }
   /** What happens to the sound between the file and the output. */
-  | { kind: "signal" };
+  | { kind: "signal" }
+  /** A followed artist: get their new albums or just show them, or unfollow. */
+  | { kind: "following"; artist: { id: string; title: string; thumb: string | null } };
 
 interface PhoneUi {
   tab: PhoneTab;
