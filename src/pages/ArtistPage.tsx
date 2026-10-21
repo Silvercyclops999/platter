@@ -19,7 +19,10 @@ import { artUrl, backend } from "../lib/backend";
 import { isCreditId } from "../lib/credits";
 import { useLoad, useReload } from "../lib/useLoad";
 import { useArtTint } from "../lib/useTint";
-import type { Album, Artist, ArtistPage as ArtistPageData, Era } from "../lib/types";
+import type { Album, Artist, ArtistPage as ArtistPageData, Era, PopularElsewhere, Track } from "../lib/types";
+import { tapToPlay } from "../stores/taps";
+import { useTapPlays } from "./SearchCatalogue";
+import "./catalogue.css";
 import { useSettings } from "../stores/settings";
 import { eraRange, filterByEra, showEraCards } from "./era";
 import { usePins } from "../stores/pins";
@@ -467,37 +470,104 @@ function PopularSkeleton() {
   );
 }
 
+type PopularItem = { own: Track } | { get: PopularElsewhere };
+
+/**
+ * Popular as the world plays it: the library's songs, and with tap to get
+ * on, the artist's top songs you don't have, each where it ranks.
+ */
+export function popularItems(own: Track[], elsewhere: PopularElsewhere[] | undefined, tap: boolean): PopularItem[] {
+  const out: PopularItem[] = [];
+  const more = tap ? (elsewhere ?? []) : [];
+  let j = 0;
+  own.forEach((t, i) => {
+    while (j < more.length && more[j].after <= i) out.push({ get: more[j++] });
+    out.push({ own: t });
+  });
+  while (j < more.length) out.push({ get: more[j++] });
+  return out;
+}
+
 function PopularSection({ id, data }: { id: string; data: ArtistPageData }) {
   const [more, setMore] = useState(false);
   const nowTrackId = usePlayer((s) => s.state?.track?.id);
   const status = usePlayer((s) => s.state?.status);
   const headingId = useId();
-  const shown = data.popular.slice(0, more ? POPULAR_MORE : POPULAR_FIRST);
+  const tap = useTapPlays(useLidarrReady());
+  const items = popularItems(data.popular, data.popularElsewhere, tap);
+  const shown = items.slice(0, more ? POPULAR_MORE : POPULAR_FIRST);
   return (
     <section className="detail-section artist-popular" aria-labelledby={headingId}>
       <h2 id={headingId} className="section-title">
         Popular
       </h2>
       <TrackList label="Popular songs" header={false}>
-        {shown.map((t, i) => (
-          <TrackRow
-            key={t.id}
-            track={t}
-            index={i + 1}
-            showArt
-            showArtist={!!t.trackArtist || t.artistId !== id}
-            active={t.id === nowTrackId}
-            playing={t.id === nowTrackId && status === "playing"}
-            onPlay={() => player.playArtist(id, t.id)}
-          />
-        ))}
+        {shown.map((item, i) => {
+          if ("get" in item) return <PopularGetRow key={`get-${item.get.title}`} song={item.get} artist={data.artist.title} index={i + 1} />;
+          const t = item.own;
+          return (
+            <TrackRow
+              key={t.id}
+              track={t}
+              index={i + 1}
+              showArt
+              showArtist={!!t.trackArtist || t.artistId !== id}
+              active={t.id === nowTrackId}
+              playing={t.id === nowTrackId && status === "playing"}
+              onPlay={() => player.playArtist(id, t.id)}
+            />
+          );
+        })}
       </TrackList>
-      {data.popular.length > POPULAR_FIRST && (
+      {items.length > POPULAR_FIRST && (
         <button type="button" className="see-more" onClick={() => setMore((v) => !v)} aria-expanded={more}>
           {more ? "Show less" : "See more"}
         </button>
       )}
     </section>
+  );
+}
+
+/** A popular song the library doesn't have: Get where the length would be, and a tap gets and plays it. */
+function PopularGetRow({ song, artist, index }: { song: PopularElsewhere; artist: string; index: number }) {
+  const play = () => void tapToPlay({ title: song.title, artist, album: song.release });
+  return (
+    <div
+      role="row"
+      tabIndex={0}
+      aria-label={`${song.title} by ${artist}, not in your library, a tap gets it and plays it`}
+      className="track-row is-missing track-row--get"
+      onDoubleClick={play}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") play();
+      }}
+    >
+      <div className="track-row__num" role="gridcell">
+        <span className="track-row__index tabular">{index}</span>
+        <button type="button" tabIndex={-1} className="track-row__play" aria-label={`Get and play ${song.title}`} onClick={play}>
+          <Play size={14} fill="currentColor" aria-hidden="true" />
+        </button>
+      </div>
+      <div className="track-row__main" role="gridcell">
+        <span className="track-row__art">
+          <Art path={null} sleeve={{ title: song.release ?? song.title, artist }} size={40} />
+        </span>
+        <div className="track-row__text">
+          <button type="button" tabIndex={-1} className="track-row__title track-row__get-title truncate" onClick={play}>
+            {song.title}
+          </button>
+        </div>
+      </div>
+      <div className="track-row__album truncate" role="gridcell">
+        {song.release ?? ""}
+      </div>
+      <div className="track-row__badges" role="gridcell" />
+      <div className="track-row__end" role="gridcell">
+        <span className="sr-get-mark" aria-hidden="true">
+          Get
+        </span>
+      </div>
+    </div>
   );
 }
 

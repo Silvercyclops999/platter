@@ -247,6 +247,10 @@ pub struct ArtistPage {
     /// rather than plays order that reshuffles when the list lands.
     #[serde(default)]
     pub popular_pending: bool,
+    /// Songs on the artist's global top list the library doesn't have, for
+    /// Popular to offer with Get.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub popular_elsewhere: Vec<super::popular::PopularElsewhere>,
     /// The artist's eras (ARCHIVE_ERA), oldest first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub eras: Vec<crate::archive::eras::Era>,

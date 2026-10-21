@@ -468,6 +468,8 @@ export interface ArtistPage {
    * moment passes, instead of plays order that reshuffles.
    */
   popularPending?: boolean;
+  /** Songs on the artist's global top list the library doesn't have (docs/IPC.md `artist_page`). */
+  popularElsewhere?: PopularElsewhere[];
   /** The artist's eras, oldest first. */
   eras?: Era[];
 }
@@ -3065,6 +3067,13 @@ export interface LidarrGetOutcome {
   record: LidarrRequest | null;
   /** `firstTime`: the first request ever is confirmed by typing the album's name; `refused`: a check said no. */
   needs: { kind: "firstTime" | "refused"; reason: string } | null;
+}
+
+/** A top song the library doesn't have: it shows after `after` of Popular's songs. */
+export interface PopularElsewhere {
+  title: string;
+  release: string | null;
+  after: number;
 }
 
 /** What a tapped song shows in place of the seek bar while it comes. */

@@ -44,6 +44,7 @@ export function filterByEra(page: ArtistPage, era: Era | null): ArtistPage {
   return {
     ...page,
     popular: page.popular.filter((t) => tracks.has(t.id)),
+    popularElsewhere: [],
     sections: page.sections.map((s) => ({ ...s, albums: s.albums.filter((a) => albums.has(a.id)) })).filter((s) => s.albums.length),
     appearsOn: page.appearsOn.filter((a) => albums.has(a.id)),
   };

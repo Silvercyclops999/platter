@@ -265,7 +265,7 @@ with each server's tag, kind and name and never a token or password.
 | `albums` | `{ sort: "name"|"artist"|"year"|"recent"|"plays", offset, limit, section?: ReleaseSection }` | `Page<Album>` |
 | `playlists` | – | `Playlist[]` |
 | `library_items` | – | `LibraryItem[]` (every playlist, album and artist, unordered) |
-| `artist_page` | `{ id }` | `ArtistPage { artist, popular: Track[], sections: { section, albums: Album[] }[], plays, about?, similar: Artist[], appearsOn: Album[], popularPending }` |
+| `artist_page` | `{ id }` | `ArtistPage { artist, popular: Track[], sections: { section, albums: Album[] }[], plays, about?, similar: Artist[], appearsOn: Album[], popularPending, popularElsewhere }` |
 | `album_page` | `{ id }` | `AlbumPage { album, tracks: Track[], totalDurationMs, moreByArtist: Album[], artistThumb?, released?, studio? }` (`released` is YYYY-MM-DD and `studio` the label, both from Plex when it has them) |
 | `recent_tracks` | `{ limit?: number }` | `Track[]` played on this device (the listen log), newest first, repeats kept; limit defaults to 50 and caps at 200 |
 | `recents` | `{ limit?: number }` | `RecentsEntry[]` for the Recents page, newest first (see below) |
@@ -342,7 +342,11 @@ list, the whole list is in plays order. `popularPending` is true while
 fetched for the artist yet; the page then shows placeholder rows until
 `artistinfo://changed` brings the list, `artistinfo://popular` says the fetch
 finished without one, or 1.5 s pass. `appearsOn` lists albums by others whose
-tracks credit the artist, newest first.
+tracks credit the artist, newest first. `popularElsewhere` is `{ title, release, after }[]`: up to 10 songs on the
+global list the library has no copy of (hidden ones included, so they aren't
+offered again), in list order, each to show after `after` of the Popular
+songs. With tap to get on, Popular shows them with Get, and a tap goes to
+`lidarr_tap`.
 
 Every name in a track line that has no library artist gets a credited
 artist page with the id `credit:<name in lower case>` (while the
