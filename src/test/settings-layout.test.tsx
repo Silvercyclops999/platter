@@ -130,7 +130,7 @@ describe("More", () => {
       Playback: 5,
       Sound: 5,
       Library: 6,
-      "Downloads and devices": 5,
+      "Downloads and devices": 4,
       Appearance: 5,
       Lyrics: 3,
       Integrations: 0,

@@ -1,11 +1,12 @@
 /**
  * Help on the phone, as a page of its own: the list of help pages with a
  * search, or one page. The same bundled pages as the computer's help panel,
- * so it works offline.
+ * so it works offline, less the pages about things only the computer has.
  */
 import { ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { HelpView } from "../../help/HelpView";
+import { COMPUTER_ONLY_HELP } from "../../help/order";
 import { HELP_PAGES, helpPage, searchHelp } from "../../help/pages";
 import "../../help/help.css";
 import { nav } from "../../stores/router";
@@ -29,8 +30,9 @@ export function PhoneHelp({ slug, anchor }: { slug?: string; anchor?: string }) 
       </PageFrame>
     );
 
-  const hits = query.trim() ? searchHelp(query) : null;
-  const list = hits ?? HELP_PAGES.map((p) => ({ slug: p.slug, title: p.title, snippet: p.summary, anchor: undefined as string | undefined, page: undefined as string | undefined }));
+  const onPhone = (slug: string) => !(COMPUTER_ONLY_HELP as readonly string[]).includes(slug);
+  const hits = query.trim() ? searchHelp(query).filter((h) => onPhone(h.slug)) : null;
+  const list = hits ?? HELP_PAGES.filter((p) => onPhone(p.slug)).map((p) => ({ slug: p.slug, title: p.title, snippet: p.summary, anchor: undefined as string | undefined, page: undefined as string | undefined }));
   return (
     <PageFrame name="help" title="Help" lede="Short pages on every part of Platter. They work offline.">
       <label className="ph-field ph-set-search">

@@ -78,13 +78,12 @@ describe("transitions and loudness", () => {
 });
 
 describe("equalizer", () => {
-  it("is greyed out until it's turned on", async () => {
+  it("is just its switch until it's turned on, then shows the curve", async () => {
     render(<SettingsPage />);
-    expect(band("125 Hz")).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByRole("combobox", { name: "Preset" })).toBeDisabled();
-    expect(screen.getByText("Turn on the equalizer to change the curve.")).toBeInTheDocument();
+    expect(screen.queryByRole("slider", { name: "125 Hz" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Preset" })).toBeNull();
     await userEvent.click(screen.getByRole("switch", { name: "Use the equalizer" }));
-    expect(band("125 Hz")).not.toHaveAttribute("aria-disabled");
+    expect(await screen.findByRole("slider", { name: "125 Hz" })).not.toHaveAttribute("aria-disabled");
     expect(screen.getAllByRole("slider").filter((s) => /Hz$/.test(s.getAttribute("aria-label") ?? ""))).toHaveLength(10);
   });
 

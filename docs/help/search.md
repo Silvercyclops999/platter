@@ -1,6 +1,6 @@
 # Search
 
-How to find music in your library with the search box, the filters, recent searches and the command palette.
+How to find music in your library with the search box, the filters and recent searches.
 
 ## Searching your library
 
