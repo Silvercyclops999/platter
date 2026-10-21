@@ -75,6 +75,8 @@ enum Behaviour {
     /// Runs with fewer threads than this block until cancelled (a long
     /// background song); runs with more give these words.
     BlockBelow(usize, Vec<Segment>),
+    /// Words that depend on what's heard.
+    Hearing(Arc<dyn Fn(&[f32]) -> Vec<Segment> + Send + Sync>),
 }
 
 struct FakeRecognizer {
@@ -139,6 +141,7 @@ impl Recognizer for FakeRecognizer {
                 Err(RecognizeError::Cancelled)
             }
             Behaviour::Crash => Err(RecognizeError::Crashed),
+            Behaviour::Hearing(f) => Ok(f(pcm)),
             Behaviour::BlockBelow(n, s) => {
                 if threads >= n {
                     return Ok(s);
@@ -157,11 +160,16 @@ impl Recognizer for FakeRecognizer {
 
 /// Two seconds of a 44.1 kHz stereo tone as a WAV file.
 fn wav() -> Vec<u8> {
+    wav_secs(2)
+}
+
+/// `secs` seconds of a 44.1 kHz stereo tone as a WAV file.
+fn wav_secs(secs: usize) -> Vec<u8> {
     let mut cur = std::io::Cursor::new(Vec::new());
     {
         let spec = hound::WavSpec { channels: 2, sample_rate: 44_100, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
         let mut w = hound::WavWriter::new(&mut cur, spec).unwrap();
-        for i in 0..88_200 {
+        for i in 0..secs * 44_100 {
             let s = ((i as f32 * 440.0 * std::f32::consts::TAU / 44_100.0).sin() * 8000.0) as i16;
             w.write_sample(s).unwrap();
             w.write_sample(s).unwrap();
@@ -178,6 +186,8 @@ struct FakeSongs {
     read_ids: Mutex<Vec<String>>,
     /// Reads wait while this is set (playback has the connection).
     hold: AtomicBool,
+    /// The songs' length in seconds (2 when not set).
+    secs: AtomicUsize,
 }
 
 #[async_trait]
@@ -194,7 +204,8 @@ impl SongReader for FakeSongs {
         if self.unreadable.load(Ordering::Relaxed) {
             return Ok(SongAudio { bytes: b"not audio at all".to_vec(), hint: None });
         }
-        Ok(SongAudio { bytes: wav(), hint: Some("wav".into()) })
+        let secs = self.secs.load(Ordering::SeqCst);
+        Ok(SongAudio { bytes: if secs == 0 { wav() } else { wav_secs(secs) }, hint: Some("wav".into()) })
     }
     fn yielding(&self) -> bool {
         self.hold.load(Ordering::SeqCst)
@@ -404,6 +415,7 @@ fn fx_full(fetch: Arc<FakeFetch>, over: Option<Arc<dyn Recognizer>>, gpu: Arc<gp
         reads: AtomicUsize::new(0),
         read_ids: Mutex::new(Vec::new()),
         hold: AtomicBool::new(false),
+        secs: AtomicUsize::new(0),
     });
     let other = Arc::new(FakeOther::default());
     let cond = Arc::new(FakeConditions::default());
@@ -1403,6 +1415,89 @@ async fn a_line_found_where_the_voice_is_quiet_is_left_out() {
     let own = f.db.read(|c| user::get(c, "801")).unwrap().unwrap();
     assert!(own.text.contains("Hello") && own.text.contains("Second"), "{}", own.text);
     assert!(!own.text.contains("Banana"), "nobody sang there: {}", own.text);
+}
+
+/// What the fake separator hands back for a song of `secs`: a steady voice
+/// (nothing quiet to hush), told apart from the mix by its first sample.
+fn steady_voice(secs: usize) -> Vec<f32> {
+    vec![0.1; secs * RATE as usize]
+}
+
+/// Lines a minute apart over `n` minutes' worth, from `at` ms.
+fn many_lines(n: usize) -> Vec<Segment> {
+    (0..n).map(|i| words(&format!("line number {i}"), 2_000 + i as u32 * 6_000)).collect()
+}
+
+#[tokio::test]
+async fn few_words_from_the_voice_alone_are_heard_again_from_the_whole_mix() {
+    let f = fx_voice();
+    install(&f).await;
+    f.voice_models.download(voice::Voice::Demucs, &*f.fetch, &AtomicBool::new(false), &|_, _| {}).await.unwrap();
+    f.songs.secs.store(70, Ordering::SeqCst);
+    *f.sep.voice.lock() = Some(steady_voice(70));
+    // The voice gives one line; the whole mix gives the song.
+    *f.rec.behaviour.lock() =
+        Behaviour::Hearing(Arc::new(|pcm: &[f32]| if pcm[0] == 0.1 { vec![words("only this", 2_000)] } else { many_lines(10) }));
+    transcribe(&f, "801").await;
+    assert_eq!(f.rec.runs.load(Ordering::SeqCst), 2, "heard twice");
+    let own = f.db.read(|c| user::get(c, "801")).unwrap().unwrap();
+    assert_eq!(own.text.matches("Line ").count(), 10, "{}", own.text);
+    assert!(!own.text.contains("Only"), "{}", own.text);
+    assert_eq!(*f.events.done.lock(), vec![("801".to_string(), true)]);
+    let heard = f.db.read(|c| Ok(c.query_row("SELECT heard FROM lyrics_auto_heard WHERE track_id = '801'", [], |r| r.get::<_, i64>(0))?)).unwrap();
+    assert_eq!(heard, store::HEARD_VOICE, "as good as it gets: not done again");
+}
+
+#[tokio::test]
+async fn when_the_whole_mix_gives_no_more_the_voices_words_stay() {
+    let f = fx_voice();
+    install(&f).await;
+    f.voice_models.download(voice::Voice::Demucs, &*f.fetch, &AtomicBool::new(false), &|_, _| {}).await.unwrap();
+    f.songs.secs.store(70, Ordering::SeqCst);
+    *f.sep.voice.lock() = Some(steady_voice(70));
+    *f.rec.behaviour.lock() = Behaviour::Hearing(Arc::new(|pcm: &[f32]| if pcm[0] == 0.1 { vec![words("only this", 2_000)] } else { Vec::new() }));
+    transcribe(&f, "801").await;
+    assert_eq!(f.rec.runs.load(Ordering::SeqCst), 2);
+    let own = f.db.read(|c| user::get(c, "801")).unwrap().unwrap();
+    assert!(own.text.contains("Only"), "{}", own.text);
+}
+
+#[tokio::test]
+async fn enough_words_from_the_voice_or_a_short_song_are_heard_once() {
+    let f = fx_voice();
+    install(&f).await;
+    f.voice_models.download(voice::Voice::Demucs, &*f.fetch, &AtomicBool::new(false), &|_, _| {}).await.unwrap();
+    f.songs.secs.store(70, Ordering::SeqCst);
+    *f.sep.voice.lock() = Some(steady_voice(70));
+    *f.rec.behaviour.lock() = Behaviour::Words(many_lines(10));
+    transcribe(&f, "801").await;
+    assert_eq!(f.rec.runs.load(Ordering::SeqCst), 1, "plenty of words");
+    // A short song with few words (an intro, a skit) is what it is.
+    f.songs.secs.store(30, Ordering::SeqCst);
+    *f.sep.voice.lock() = Some(steady_voice(30));
+    *f.rec.behaviour.lock() = Behaviour::Words(vec![words("only this", 2_000)]);
+    transcribe(&f, "802").await;
+    assert_eq!(f.rec.runs.load(Ordering::SeqCst), 2, "802 heard once");
+}
+
+#[tokio::test]
+async fn a_second_hearing_that_fails_leaves_the_song_to_try_again() {
+    let f = fx_voice();
+    install(&f).await;
+    f.voice_models.download(voice::Voice::Demucs, &*f.fetch, &AtomicBool::new(false), &|_, _| {}).await.unwrap();
+    f.songs.secs.store(70, Ordering::SeqCst);
+    *f.sep.voice.lock() = Some(steady_voice(70));
+    // The voice gives one line, then the helper stops on the whole mix.
+    let rec = f.rec.clone();
+    *f.rec.behaviour.lock() = Behaviour::Hearing(Arc::new(move |_: &[f32]| {
+        *rec.behaviour.lock() = Behaviour::Crash;
+        vec![words("only this", 2_000)]
+    }));
+    f.t.transcribe_track("801").unwrap();
+    until(&f.t, "801 tried twice", |s| idle(s) && s.error.is_some()).await;
+    assert_eq!(f.rec.runs.load(Ordering::SeqCst), 2);
+    assert!(!f.db.read(|c| store::done(c, "801")).unwrap(), "not written down: it's tried again later");
+    assert!(f.events.done.lock().is_empty());
 }
 
 #[tokio::test]

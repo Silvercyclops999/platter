@@ -384,7 +384,16 @@ enum Held {
     /// Decoded, its voice not separated yet.
     Song(audio::Decoded),
     /// What the speech model hears, and whether it's the voice alone.
-    Heard(Arc<Vec<f32>>, bool),
+    Heard(Heard),
+}
+
+/// What the speech model hears: the voice alone (with the whole mix kept
+/// for a second try) or the whole mix.
+#[derive(Clone)]
+struct Heard {
+    pcm: Arc<Vec<f32>>,
+    voiced: bool,
+    mix: Option<Arc<Vec<f32>>>,
 }
 
 /// The parts the service works with.
@@ -420,6 +429,15 @@ const REDO_BATCH: usize = 25;
 const VOICE_RETRY: Duration = Duration::from_secs(10 * 60);
 /// Of the transcribing percent, the part the voice separation takes.
 const VOICE_SHARE: u8 = 30;
+/// A song this long that gives fewer lines than [`FEW_LINES`] gives few
+/// words: heard from the voice alone, it's heard again from the whole mix.
+const FEW_WORDS_SECONDS: usize = 60;
+const FEW_LINES: usize = 5;
+
+/// Whether a transcription of `seconds` with `lines` lines found few words.
+fn few_words(lines: usize, seconds: usize) -> bool {
+    seconds >= FEW_WORDS_SECONDS && lines < FEW_LINES
+}
 
 struct Inner {
     deps: Deps,
@@ -1694,17 +1712,18 @@ impl Transcriber {
             if st.held.as_ref().is_some_and(|h| h.0 == id) { st.held.take().map(|h| h.1) } else { None }
         };
         let song = match held {
-            Some(Held::Heard(p, voiced)) => Ok((p, voiced)),
+            Some(Held::Heard(h)) => Ok(h),
             Some(Held::Song(d)) => self.hear(job, d, cancel).await,
             None => match self.read_song(job, cancel).await {
                 Ok(d) => self.hear(job, d, cancel).await,
                 Err(o) => Err(o),
             },
         };
-        let (pcm, voiced) = match song {
-            Ok(p) => p,
+        let heard_as = match song {
+            Ok(h) => h,
             Err(o) => return o,
         };
+        let (pcm, voiced) = (heard_as.pcm.clone(), heard_as.voiced);
         self.set_stage(Stage::Transcribing, 0);
         // More threads because nobody's at the computer: back to fewer the
         // moment someone is (the song starts again). On the graphics card
@@ -1722,44 +1741,89 @@ impl Transcriber {
             });
             engine::Hints::for_song(kind, song.as_ref().map(|s| s.0.as_str()), song.as_ref().and_then(|s| s.1.as_deref()))
         };
-        let res = {
-            let rec = d.recognizer.clone();
-            let (cancel, pcm, hints) = (cancel.clone(), pcm.clone(), hints.clone());
-            let progress = self.helper_steps(if voiced { VOICE_SHARE } else { 0 }, 100);
-            tokio::task::spawn_blocking(move || rec.transcribe(&model_path, kind, &pcm, threads, &hints, cancel, progress)).await
-        };
-        let segments = match res {
-            Ok(Ok(s)) => {
-                d.speeds.record(kind, on_gpu, pcm.len() as f64 / audio::RATE as f64, started.elapsed());
-                // The voice's quiet parts were hushed: lines found there are made up.
-                let s = if voiced { quiet::drop_made_up(s, &quiet::spans(&pcm)) } else { s };
-                lines::keep_sure(s, &hints.prompt)
-            }
-            Ok(Err(RecognizeError::Cancelled)) => {
+        let segments = match self.recognize(&id, &model_path, kind, &heard_as, threads, &hints, cancel).await {
+            Ok(segments) => segments,
+            Err(o) => {
                 // Stopped for a song asked for: keep the audio for later.
-                if !job.now {
-                    self.inner.st.lock().held = Some((id.clone(), Held::Heard(pcm, voiced)));
+                if matches!(o, Outcome::Cancelled) && !job.now {
+                    self.inner.st.lock().held = Some((id.clone(), Held::Heard(heard_as)));
                 }
-                return Outcome::Cancelled;
+                return o;
             }
-            Ok(Err(RecognizeError::Crashed)) => {
-                self.fail(&id, "The speech model stopped unexpectedly on this song.");
-                return Outcome::Failed;
+        };
+        // Few words from the voice alone: the separation or the hushing may
+        // have lost the singing, so the whole mix is heard too, and the one
+        // with more lines is kept.
+        let found = lines::to_lines(&segments).len();
+        let segments = match heard_as.mix.clone().filter(|_| few_words(found, seconds)) {
+            Some(mix) => {
+                tracing::info!(lines = found, seconds, "few words from the voice alone: hearing the whole mix too");
+                let again = Heard { pcm: mix, voiced: false, mix: None };
+                match self.recognize(&id, &model_path, kind, &again, threads, &hints, cancel).await {
+                    Ok(from_mix) if lines::to_lines(&from_mix).len() > found => from_mix,
+                    Ok(_) => segments,
+                    Err(o) => {
+                        if matches!(o, Outcome::Cancelled) && !job.now {
+                            self.inner.st.lock().held = Some((id.clone(), Held::Heard(heard_as)));
+                        }
+                        return o;
+                    }
+                }
             }
-            Ok(Err(RecognizeError::Failed(m))) => {
-                tracing::warn!("transcription failed: {m}");
-                self.fail(&id, "Transcription failed for this song.");
-                return Outcome::Failed;
-            }
-            Err(e) => {
-                tracing::warn!("transcription task failed: {e}");
-                self.fail(&id, "Transcription failed for this song.");
-                return Outcome::Failed;
-            }
+            None => segments,
         };
         // A song too long to separate is as good as it gets here.
         let heard = if voiced || self.voice_model().is_some() { store::HEARD_VOICE } else { store::HEARD_MIX };
         self.finish_song(job, kind, segments, seconds, started, threads, heard, cancel).await
+    }
+
+    /// The words the speech model hears in `heard`, with lines found where
+    /// the voice was quiet and unsure ones left out. A cancel is
+    /// [`Outcome::Cancelled`] (the caller keeps the audio); other trouble
+    /// is said and failed.
+    #[allow(clippy::too_many_arguments)]
+    async fn recognize(
+        &self,
+        id: &str,
+        model_path: &std::path::Path,
+        kind: ModelKind,
+        heard: &Heard,
+        threads: usize,
+        hints: &engine::Hints,
+        cancel: &Stop,
+    ) -> Result<Vec<lines::Segment>, Outcome> {
+        let d = &self.inner.deps;
+        let (pcm, voiced) = (heard.pcm.clone(), heard.voiced);
+        let started = Instant::now();
+        let res = {
+            let rec = d.recognizer.clone();
+            let (cancel, pcm, hints, model_path) = (cancel.clone(), pcm.clone(), hints.clone(), model_path.to_path_buf());
+            let progress = self.helper_steps(if voiced { VOICE_SHARE } else { 0 }, 100);
+            tokio::task::spawn_blocking(move || rec.transcribe(&model_path, kind, &pcm, threads, &hints, cancel, progress)).await
+        };
+        match res {
+            Ok(Ok(s)) => {
+                d.speeds.record(kind, d.gpu.active().is_some(), pcm.len() as f64 / audio::RATE as f64, started.elapsed());
+                // The voice's quiet parts were hushed: lines found there are made up.
+                let s = if voiced { quiet::drop_made_up(s, &quiet::spans(&pcm)) } else { s };
+                Ok(lines::keep_sure(s, &hints.prompt))
+            }
+            Ok(Err(RecognizeError::Cancelled)) => Err(Outcome::Cancelled),
+            Ok(Err(RecognizeError::Crashed)) => {
+                self.fail(id, "The speech model stopped unexpectedly on this song.");
+                Err(Outcome::Failed)
+            }
+            Ok(Err(RecognizeError::Failed(m))) => {
+                tracing::warn!("transcription failed: {m}");
+                self.fail(id, "Transcription failed for this song.");
+                Err(Outcome::Failed)
+            }
+            Err(e) => {
+                tracing::warn!("transcription task failed: {e}");
+                self.fail(id, "Transcription failed for this song.");
+                Err(Outcome::Failed)
+            }
+        }
     }
 
     /// Reads and decodes a song (in stereo too when its voice will be separated).
@@ -1818,11 +1882,13 @@ impl Transcriber {
     /// for that and can still be separated, else its whole mix. Trouble
     /// separating means the mix (and the rest of the session skips it); a
     /// cancel keeps the decoded song for later.
-    async fn hear(&self, job: &Job, song: audio::Decoded, cancel: &Stop) -> Result<(Arc<Vec<f32>>, bool), Outcome> {
+    async fn hear(&self, job: &Job, song: audio::Decoded, cancel: &Stop) -> Result<Heard, Outcome> {
         let sep = self.inner.deps.voice.as_ref().map(|v| v.separator.clone());
         let (Some(sep), Some(weights), true) = (sep, self.voice_model(), song.stereo.is_some()) else {
-            return Ok((Arc::new(song.speech), false));
+            return Ok(Heard { pcm: Arc::new(song.speech), voiced: false, mix: None });
         };
+        // Kept for a second try when the voice alone gives few words.
+        let mix = Arc::new(song.speech.clone());
         self.set_stage(Stage::Transcribing, 0);
         let progress = self.helper_steps(0, VOICE_SHARE);
         let stop = cancel.clone();
@@ -1837,7 +1903,7 @@ impl Transcriber {
                     let q = quiet::spans(&pcm);
                     quiet::hush(&mut pcm, &q);
                 }
-                Ok((Arc::new(pcm), voiced))
+                Ok(Heard { pcm: Arc::new(pcm), voiced, mix: voiced.then_some(mix) })
             }
             Ok(Err(song)) => {
                 if !job.now {
