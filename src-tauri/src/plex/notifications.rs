@@ -279,9 +279,17 @@ async fn run_once(
     for (k, v) in client.auth_headers()?.iter() {
         req.headers_mut().insert(k.clone(), v.clone());
     }
-    let (mut ws, _) = tokio_tungstenite::connect_async(req)
+    let failed = || AppError::Network("notification socket failed to connect".into());
+    let host = match url.host() {
+        Some(url::Host::Domain(d)) => d.to_owned(),
+        Some(url::Host::Ipv4(a)) => a.to_string(),
+        Some(url::Host::Ipv6(a)) => a.to_string(),
+        None => return Err(failed()),
+    };
+    let tcp = super::direct::connect(&host, url.port_or_known_default().unwrap_or(32400))
         .await
-        .map_err(|_| AppError::Network("notification socket failed to connect".into()))?;
+        .map_err(|_| failed())?;
+    let (mut ws, _) = tokio_tungstenite::client_async_tls(req, tcp).await.map_err(|_| failed())?;
     let _ = tx.send(PlexEvent::Connected).await;
     loop {
         tokio::select! {

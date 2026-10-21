@@ -8,6 +8,7 @@
 //! - [`keystore`]: the per-run keychain cache and the macOS single-item layout.
 //! - [`auth`]: plex.tv PIN flow, user and resources calls.
 //! - [`discovery`]: server list, connection race (local > remote > relay), disk cache.
+//! - [`direct`]: plex.direct names reached without DNS.
 //! - [`client`]: `PlexClient`, the typed Plex Media Server API.
 //! - [`notifications`]: server websocket events + reconnect backoff.
 //! - [`health`]: pure health state machine behind the `health` command.
@@ -19,6 +20,7 @@ pub mod auth;
 pub mod client;
 pub mod commands;
 pub mod details;
+pub mod direct;
 pub mod discovery;
 pub mod edit;
 pub mod health;

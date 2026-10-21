@@ -674,6 +674,29 @@ mod tests {
         );
     }
 
+    /// A network whose DNS answers nothing (rebind protection, a filter):
+    /// the plex.direct connection still wins, by the address in its name.
+    #[tokio::test]
+    async fn plex_direct_answers_when_dns_gives_nothing() {
+        use crate::plex::direct::Resolver;
+        use reqwest::dns::Addrs;
+        let local = identity_server(0, "m").await;
+        let port = url::Url::parse(&local.uri()).unwrap().port().unwrap();
+        let no_dns = Resolver::with_lookup(|_| Box::pin(async { Ok(Box::new(std::iter::empty()) as Addrs) }));
+        let http = reqwest::Client::builder()
+            .default_headers(ClientIdentity::with_id("t").headers().unwrap())
+            .no_proxy()
+            .dns_resolver(no_dns)
+            .build()
+            .unwrap();
+        let conns = [Connection {
+            uri: format!("http://127-0-0-1.example.plex.direct:{port}"),
+            kind: ConnectionKind::Local,
+        }];
+        let p = race(&http, &conns, Some("m"), RaceConfig::default()).await.unwrap();
+        assert_eq!(p.kind, ConnectionKind::Local);
+    }
+
     #[tokio::test]
     async fn relay_only_when_nothing_else_answers() {
         let relay = identity_server(50, "m").await;

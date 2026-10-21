@@ -169,6 +169,7 @@ impl PlexState {
         let tv = PlexTv::with_base(identity.clone(), plex_tv_base)?;
         let probe_http = reqwest::Client::builder()
             .default_headers(identity.headers()?)
+            .dns_resolver(super::direct::Resolver::system())
             .connect_timeout(race_cfg.timeout)
             .build()
             .map_err(|e| AppError::Internal(format!("http client: {e}")))?;

@@ -71,6 +71,7 @@ impl Default for HttpConfig {
 /// Builds the HTTP client used for streaming and pre-caching.
 pub fn http_client() -> reqwest::Client {
     reqwest::Client::builder()
+        .dns_resolver(crate::plex::direct::Resolver::system())
         .connect_timeout(Duration::from_secs(5))
         // A pulled cable/Wi-Fi otherwise stalls a body read forever.
         .read_timeout(Duration::from_secs(8))

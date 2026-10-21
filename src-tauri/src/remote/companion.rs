@@ -231,6 +231,7 @@ impl Companion {
 pub fn http_client(identity: &crate::plex::identity::ClientIdentity, timeout: Duration) -> AppResult<reqwest::Client> {
     reqwest::Client::builder()
         .default_headers(identity.headers()?)
+        .dns_resolver(crate::plex::direct::Resolver::system())
         .connect_timeout(timeout.min(Duration::from_secs(4)))
         .timeout(timeout)
         .build()

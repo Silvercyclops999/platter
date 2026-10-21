@@ -107,6 +107,15 @@ Status comes back as standard media status messages.
 ## Findings log
 Anything surprising goes here as it's tested (date, endpoint, what happened).
 
+### 2026-10-21: plex.direct names on a network whose DNS drops them
+- A Mac on a network with rebind protection got no answer for every saved
+  `*.plex.direct` connection, so the server looked offline. A public resolver
+  answered with the address the name spells. Platter still asks DNS first,
+  but when it gets nothing, an error, 0.0.0.0 or no answer within 1.5 s, it
+  reads the address from the name (`10-0-0-5.<hash>.plex.direct` is 10.0.0.5,
+  IPv6 uses `-` for `:`). TLS still checks the certificate against the full
+  name.
+
 ### 2026-10-19: a library whose audio playlists are all smart (read-only)
 - `GET /playlists?playlistType=audio` on a real server answered 8 playlists,
   every one with `smart: true` (leafCount 1 to 1439). None of them takes songs

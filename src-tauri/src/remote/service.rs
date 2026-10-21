@@ -505,6 +505,7 @@ impl RemoteService {
                 mirror: Mutex::default(),
                 peer_http: reqwest::Client::builder()
                     .no_proxy()
+                    .dns_resolver(crate::plex::direct::Resolver::system())
                     // Another device answers itself; a redirect is never followed.
                     .redirect(reqwest::redirect::Policy::none())
                     .connect_timeout(PEER_PROBE)

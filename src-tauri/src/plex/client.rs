@@ -881,6 +881,7 @@ impl PlexClient {
         headers.insert("x-plex-token", token.header_value()?);
         let http = reqwest::Client::builder()
             .default_headers(headers)
+            .dns_resolver(super::direct::Resolver::system())
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(30))
             // The token rides on every request: never to another host.
