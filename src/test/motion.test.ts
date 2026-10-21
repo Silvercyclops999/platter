@@ -119,6 +119,21 @@ describe("overlay scrollbars", () => {
     }
   });
 
+  it("a scroller marked off (the lyrics, which follow the song) never shows one", () => {
+    const stop = installOverlayScrollbars(window);
+    const el = document.createElement("div");
+    el.setAttribute("data-scrollbar", "off");
+    document.body.appendChild(el);
+    try {
+      el.dispatchEvent(new Event("scroll"));
+      expect(el).not.toHaveClass("sb-on");
+      expect(document.querySelector(".sb-thumb")).toBeNull();
+    } finally {
+      stop();
+      el.remove();
+    }
+  });
+
   it("native bars take no width; the drawn thumb fades", () => {
     expect(globalCss).toMatch(/\* \{ scrollbar-width: none; \}/);
     expect(globalCss).toMatch(/::-webkit-scrollbar \{ width: 0; height: 0; \}/);

@@ -312,6 +312,19 @@ describe("modes", () => {
     expect(document.querySelector(".lyrics__line.is-current, [aria-current]")).toBeNull();
   });
 
+  it("keeps the header to the title, artist and album; Signal path is in More options", async () => {
+    play(synced);
+    render(<FullWindow />);
+    act(() => fullWindow.open("lyrics"));
+    await screen.findByLabelText("Lyrics", { selector: ".lyrics__scroll" });
+    const v = view()!;
+    expect(within(v).queryByRole("button", { name: "Signal path" })).toBeNull();
+    expect(within(v).queryByRole("button", { name: "Edit lyrics" })).toBeNull();
+    fireEvent.click(within(v).getByRole("button", { name: "More options" }));
+    expect(useUi.getState().menu?.items.map((i) => i.label)).toContain("Signal path");
+    act(() => useUi.setState({ menu: null }));
+  });
+
   it("a song without lyrics: the toggle is off, and lyrics mode offers Write your own", async () => {
     play(none);
     render(<FullWindow />);

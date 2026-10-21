@@ -1,4 +1,4 @@
-import { AudioLines, Disc3, Ellipsis, Maximize, MicVocal, Minimize, Minimize2, PenLine, RefreshCcw, UserRound } from "lucide-react";
+import { AudioLines, Disc3, Ellipsis, Maximize, MicVocal, Minimize, Minimize2, RefreshCcw, UserRound } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { Art } from "../components/Art";
 import { ArtistLinks, TextLink } from "../components/ArtistLinks";
@@ -7,7 +7,6 @@ import { openContextMenu } from "../components/ContextMenu";
 import { trackMenuItems } from "../components/TrackRow";
 import type { Track } from "../lib/types";
 import { fullWindow, useFullWindow, type FullWindowMode } from "../stores/fullWindow";
-import { openLyricsEditor, useLyricsEditor } from "../stores/lyricsEditor";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
@@ -19,7 +18,7 @@ import { SEEK_KEY_STEP } from "./PlayerBar";
 import { Turntable } from "./Turntable";
 import { useDeckLyrics } from "./deckLyrics";
 import { useFlipPause } from "./useFlipPause";
-import { SignalLink } from "./SignalPath";
+import { openSignal } from "../stores/signalPath";
 import { VOLUME_KEY_STEP } from "./useShortcuts";
 import { StylePicker, VisualizerView, useShownStyle } from "../visualizer/VisualizerView";
 import { ArtStage } from "../visualizer/ArtStage";
@@ -126,7 +125,6 @@ function Meta({ track, className = "" }: { track: Track; className?: string }) {
       <div className="fw__album truncate">
         <TextLink onActivate={() => nav.go({ name: "album", id: track.albumId })}>{track.albumTitle}</TextLink>
       </div>
-      <SignalLink className="fw__signal" />
     </div>
   );
 }
@@ -208,7 +206,10 @@ function FullWindowView() {
 
   const hasLyrics = !!lyrics || actionableNotice(lyricsInfo);
   const noLyrics = !!track && !lyricsLoading && !hasLyrics;
-  const ownLyrics = useLyricsEditor((s) => !!track && s.ownIds.has(track.id));
+  // The signal path opens from the player bar's badge, and from here.
+  const signalOn = useSettings((s) => s.settings?.signalPathBadge !== false);
+  const remote = usePlayer((s) => !!s.remote);
+  const signalItem = signalOn && !remote ? [{ label: "Signal path", icon: AudioLines, separator: true, onSelect: () => openSignal() }] : [];
   const artistPhoto = details?.artist ? details.artist.art || details.artist.thumb : null;
   // A song whose artist has no image shows its artwork; the mode stays for the next song.
   // The visualizer with its button turned off shows the artwork too.
@@ -353,15 +354,6 @@ function FullWindowView() {
       <header className="fw__top fw__chrome" inert={bare || undefined}>
         <ContextName />
         <div className="fw__actions">
-          {/* Add lyrics lives in the empty state; the pencil edits lyrics you wrote. */}
-          {track && shown === "lyrics" && ownLyrics && (
-            <IconButton
-              label="Edit lyrics"
-              tooltipPlacement="bottom"
-              icon={<PenLine size={18} />}
-              onClick={() => openLyricsEditor(track)}
-            />
-          )}
           <div className="fw__modes" role="group" aria-label="Show">
             <ModeToggle mode="artwork" current={mode} label="Artwork" icon={<Disc3 size={18} />} />
             <ModeToggle mode="artist" current={mode} label="Artist image" off={!artistPhoto} offTip="No artist image" icon={<UserRound size={18} />} />
@@ -375,7 +367,7 @@ function FullWindowView() {
               tooltip={`More options for ${track.title}`}
               tooltipPlacement="bottom"
               icon={<Ellipsis size={20} />}
-              onClick={(e) => openContextMenu(`Options for ${track.title}`, trackMenuItems(track), e.currentTarget)}
+              onClick={(e) => openContextMenu(`Options for ${track.title}`, [...trackMenuItems(track), ...signalItem], e.currentTarget)}
             />
           )}
           <IconButton

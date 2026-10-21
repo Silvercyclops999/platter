@@ -172,6 +172,7 @@ function SyncedLyrics({
         <div
           ref={scroller}
           className="lyrics__scroll"
+          data-scrollbar="off"
           tabIndex={0}
           aria-label="Lyrics"
           onWheel={pause}
@@ -270,7 +271,7 @@ function PlainLyrics({
   return (
     <div className={`lyrics lyrics--plain ${className}`}>
       <div className="lyrics__body">
-        <div className="lyrics__scroll" tabIndex={0} aria-label="Lyrics">
+        <div className="lyrics__scroll" data-scrollbar="off" tabIndex={0} aria-label="Lyrics">
           <div className="lyrics__lines">
             <p className="lyrics__unsynced">{note}</p>
             {lines.map((l, i) =>
