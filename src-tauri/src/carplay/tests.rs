@@ -1088,3 +1088,49 @@ mod pictures {
         assert!(matches!(picture_for(m), Some(CarPicture::Mix { ref artists, .. }) if artists == &["Motte", "Saltglass"]));
     }
 }
+
+#[tokio::test]
+async fn a_playlist_made_here_opens_by_its_old_id_and_rows_match_what_plays() {
+    let (db, _dir) = synced(2, 2).await;
+    let ids: Vec<String> = db
+        .read(|c| {
+            let album: String = c.query_row("SELECT id FROM albums ORDER BY id LIMIT 1", [], |r| r.get(0))?;
+            Ok(queries::album_tracks(c, &album)?.into_iter().map(|t| t.id).collect())
+        })
+        .unwrap();
+    // Made here, then created in Plex under a new id; a song in it twice,
+    // and one the library no longer has between them.
+    let local = db
+        .write(|c| {
+            let p = crate::db::playlists::create_local(c, "Drive")?;
+            let rows = vec![ids[0].clone(), "gone".to_string(), ids[1].clone(), ids[0].clone()];
+            crate::db::playlists::add(c, &p.id, &rows, &crate::db::playlists::Place::End)?;
+            crate::db::playlists::adopt(c, &p.id, "9001")?;
+            Ok(p.id)
+        })
+        .unwrap();
+    let rows = db.read(|c| list(c, &CarList::Songs { kind: ContextKind::Playlist, id: local.clone(), title: "Drive".into() }, 10.0)).unwrap();
+    let played = db.read(|c| Ok(queries::playlist_page(c, &local)?.tracks)).unwrap();
+    let songs: Vec<(&str, usize)> = rows
+        .iter()
+        .filter_map(|r| match &r.action {
+            CarAction::PlayFrom { track_id, index, .. } => Some((track_id.as_str(), *index)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(songs.len(), played.len(), "every song shows");
+    for (track, index) in songs {
+        assert_eq!(played[index].id, track, "row {index} is that song in what plays");
+    }
+}
+
+#[test]
+fn a_like_that_fails_puts_the_heart_back_unless_the_car_moved_on() {
+    // Tapped to like, the like failed, still on that song: back to not liked.
+    assert!(like_goes_back(Some("t1"), true, "t1", true));
+    // Another song showing now.
+    assert!(!like_goes_back(Some("t2"), true, "t1", true));
+    assert!(!like_goes_back(None, true, "t1", true));
+    // Tapped again since: that tap's state stands.
+    assert!(!like_goes_back(Some("t1"), false, "t1", true));
+}

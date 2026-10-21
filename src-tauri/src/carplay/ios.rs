@@ -655,8 +655,17 @@ fn toggle_like() {
     }
     show_buttons();
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = likes.set(vec![track], !liked).await {
+        if let Err(e) = likes.set(vec![track.clone()], !liked).await {
             tracing::warn!("CarPlay like failed: {e}");
+            // It didn't go through: the heart goes back.
+            let _ = app.run_on_main_thread(move || {
+                if let Some(s) = SHOWN.lock().as_mut()
+                    && super::like_goes_back(s.track.as_deref(), s.liked, &track, !liked)
+                {
+                    s.liked = liked;
+                }
+                show_buttons();
+            });
         }
     });
 }
