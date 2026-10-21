@@ -120,12 +120,17 @@ interface Rows {
   error: unknown;
 }
 
-/** The table's rows for `q`: pages load as `want` asks for them, and start over when `q` or the library changes. */
+/**
+ * The table's rows for `q`: pages load as `want` asks for them. A new order
+ * or find starts over; the library changing (a play count, a sync) asks
+ * again but keeps the rows on screen until the new ones arrive.
+ */
 function useSongRows(q: SongsQuery) {
   const [rows, setRows] = useState<Rows>({ total: null, totalMs: 0, pages: new Map(), error: null });
   const asked = useRef(new Set<number>());
   const gen = useRef(0);
   const [version, setVersion] = useState(0);
+  const shownFor = useRef("");
 
   const want = useCallback(
     (page: number) => {
@@ -135,11 +140,11 @@ function useSongRows(q: SongsQuery) {
       backend.songsPage(q, page * PAGE, PAGE).then(
         (p) => {
           if (g !== gen.current) return;
-          setRows((r) => ({ total: p.total, totalMs: p.totalMs, pages: new Map(r.pages).set(page, p.rows), error: null }));
+          setRows((r) => ({ total: p.total ?? r.total, totalMs: p.totalMs ?? r.totalMs, pages: new Map(r.pages).set(page, p.rows), error: null }));
         },
         (e) => {
           if (g !== gen.current) return;
-          asked.current.delete(page);
+          // It stays asked, so it isn't asked again and again; Try again starts over.
           setRows((r) => ({ ...r, error: e }));
         },
       );
@@ -152,8 +157,13 @@ function useSongRows(q: SongsQuery) {
   useLayoutEffect(() => {
     gen.current++;
     asked.current = new Set();
-    setRows((r) => ({ total: r.total, totalMs: r.totalMs, pages: new Map(), error: null }));
+    const key = JSON.stringify([q.sort, q.desc, q.find]);
+    if (key !== shownFor.current) {
+      shownFor.current = key;
+      setRows((r) => ({ total: r.total, totalMs: r.totalMs, pages: new Map(), error: null }));
+    } else setRows((r) => ({ ...r, error: null }));
     want(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [want]);
 
   // New songs, a sync or a changed view: start over where you are.
@@ -234,31 +244,35 @@ export function SongsPage() {
   const toggle = () => (isThis ? player.toggle() : play());
   usePageBar("Songs", playingHere, toggle);
 
-  // Selection by row number, with the anchor for Shift ranges.
-  const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set());
+  // Selection by song (so a refresh that moves rows keeps the same songs), with the row anchor for Shift ranges.
+  const [selected, setSelected] = useState<ReadonlyMap<string, SongRow>>(() => new Map());
   const [focus, setFocus] = useState(0);
   const anchor = useRef(0);
   useEffect(() => {
-    setSelected(new Set());
+    setSelected(new Map());
     setFocus(0);
   }, [q]);
 
   const root = useRef<HTMLDivElement>(null);
+  const [rowsEl, setRowsEl] = useState<HTMLDivElement | null>(null);
   const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
   const [offset, setOffset] = useState(0);
+  // Rows are placed from where the first one starts (below the sticky header).
   useLayoutEffect(() => {
-    const el = root.current;
+    const el = rowsEl;
     if (!el) return;
     const sc = el.closest<HTMLElement>(".main__scroll") ?? (document.scrollingElement as HTMLElement | null);
     setScrollEl(sc);
     const measure = () => sc && setOffset(el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop);
     measure();
-    if (typeof ResizeObserver === "undefined") return;
+    if (typeof ResizeObserver === "undefined" || !sc) return;
     const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    if (sc) ro.observe(sc);
+    ro.observe(sc);
+    // A line appearing above the table ("Some songs didn't load") moves where the rows start.
+    const content = sc.firstElementChild;
+    if (content && content !== el) ro.observe(content);
     return () => ro.disconnect();
-  }, [total === null]);
+  }, [rowsEl]);
 
   const count = total ?? 0;
   const v = useVirtualizer({
@@ -273,29 +287,39 @@ export function SongsPage() {
   const items = v.getVirtualItems();
   // Ask for the pages the rows on screen are in.
   useEffect(() => {
-    for (const it of items) if (!rowAt(it.index)) want(Math.floor(it.index / PAGE));
+    for (const it of items) want(Math.floor(it.index / PAGE));
   });
 
   const template = ["minmax(200px, 3fr)", ...columns.map((c) => WIDTH[c])].join(" ");
 
+  /** Loaded rows from a to b, by song. */
+  const span = (a: number, b: number) => {
+    const out = new Map<string, SongRow>();
+    for (let k = a; k <= b; k++) {
+      const r = rowAt(k);
+      if (r) out.set(r.track.id, r);
+    }
+    return out;
+  };
   const pick = (i: number, e: MouseEvent | KeyboardEvent) => {
     setFocus(i);
+    const row = rowAt(i);
     if (e.shiftKey) {
-      const [a, b] = [Math.min(anchor.current, i), Math.max(anchor.current, i)];
-      setSelected(new Set(Array.from({ length: b - a + 1 }, (_, k) => a + k).filter((k) => rowAt(k))));
+      setSelected(span(Math.min(anchor.current, i), Math.max(anchor.current, i)));
       return;
     }
     anchor.current = i;
+    if (!row) return;
     if (e.ctrlKey || e.metaKey) {
       setSelected((s) => {
-        const n = new Set(s);
-        if (n.has(i)) n.delete(i);
-        else n.add(i);
+        const n = new Map(s);
+        if (n.has(row.track.id)) n.delete(row.track.id);
+        else n.set(row.track.id, row);
         return n;
       });
-    } else setSelected(new Set([i]));
+    } else setSelected(new Map([[row.track.id, row]]));
   };
-  const chosen = () => [...selected].sort((a, b) => a - b).map(rowAt).filter((r): r is SongRow => !!r);
+  const chosen = () => [...selected.values()];
 
   const moveTo = (i: number, e: KeyboardEvent) => {
     const to = Math.max(0, Math.min(count - 1, i));
@@ -319,7 +343,7 @@ export function SongsPage() {
       }
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
       e.preventDefault();
-      setSelected(new Set(Array.from({ length: count }, (_, k) => k).filter((k) => rowAt(k))));
+      setSelected(span(0, count - 1));
     }
   };
 
@@ -367,22 +391,37 @@ export function SongsPage() {
     body = <p className="songs__none">{found ? `No songs match "${found}"` : "No songs in your library yet."}</p>;
   } else {
     body = (
-      <div style={{ height: total === null ? ROW_H * 8 : v.getTotalSize(), position: "relative" }} role="rowgroup">
+      <div ref={setRowsEl} style={{ height: total === null ? ROW_H * 8 : v.getTotalSize(), position: "relative" }} role="rowgroup">
         {(total === null ? Array.from({ length: 8 }, (_, i) => ({ index: i, start: i * ROW_H + offset, key: i })) : items).map((it) => {
           const r = total === null ? undefined : rowAt(it.index);
           const style = { position: "absolute" as const, top: 0, left: 0, width: "100%", height: ROW_H, transform: `translateY(${it.start - offset}px)`, gridTemplateColumns: template };
           if (!r) {
+            // Still loading, but a row keys can land on (End, Page Down).
+            const real = total !== null;
             return (
-              <div key={it.key} role="row" aria-rowindex={it.index + 2} aria-busy="true" className="songs__row songs__row--wait" style={style}>
+              <div
+                key={it.key}
+                role="row"
+                data-row={real ? it.index : undefined}
+                aria-rowindex={it.index + 2}
+                aria-busy="true"
+                tabIndex={real ? (focus === it.index ? 0 : -1) : undefined}
+                onFocus={real ? () => setFocus(it.index) : undefined}
+                className="songs__row songs__row--wait"
+                style={style}
+              >
                 <div role="gridcell" className="songs__cell songs__cell--title">
                   <Skeleton width={32} height={32} />
                   <Skeleton width={`${40 + ((it.index * 17) % 40)}%`} height={11} />
                 </div>
+                {columns.map((c) => (
+                  <div key={c} role="gridcell" className={`songs__cell songs__cell--${c}`} />
+                ))}
               </div>
             );
           }
           const t = r.track;
-          const on = selected.has(it.index);
+          const on = selected.has(t.id);
           const now = t.id === nowId;
           return (
             <div
@@ -400,14 +439,14 @@ export function SongsPage() {
               onDoubleClick={() => play(t.id)}
               onContextMenu={(e) => {
                 e.preventDefault();
-                if (!selected.has(it.index)) pick(it.index, e);
+                if (!selected.has(t.id)) pick(it.index, e);
                 openContextMenu(`Options for ${t.title}`, trackMenuItems(t), e);
               }}
               draggable={songDrags}
               onDragStart={
                 songDrags
                   ? (e) => {
-                      const many = selected.has(it.index) ? chosen().map((x) => x.track) : [t];
+                      const many = selected.has(t.id) ? chosen().map((x) => x.track) : [t];
                       void startSongDrag(e, tracksDrag(many));
                     }
                   : undefined

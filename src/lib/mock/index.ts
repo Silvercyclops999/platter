@@ -3428,7 +3428,10 @@ export class MockBackend implements Backend {
   songsPage(query: SongsQuery, offset: number, limit: number) {
     return this.delay(() => {
       const all = this.songRows(query);
-      return { rows: all.slice(offset, offset + Math.min(500, Math.max(1, limit))), total: all.length, totalMs: all.reduce((n, r) => n + r.track.durationMs, 0) };
+      const rows = all.slice(offset, offset + Math.min(500, Math.max(1, limit)));
+      // The totals come with the first page only.
+      if (offset > 0) return { rows, total: null, totalMs: null };
+      return { rows, total: all.length, totalMs: all.reduce((n, r) => n + r.track.durationMs, 0) };
     });
   }
   songsPlayIds(query: SongsQuery, startTrackId?: string) {

@@ -70,9 +70,9 @@ pub struct SongRow {
 #[serde(rename_all = "camelCase")]
 pub struct SongsPage {
     pub rows: Vec<SongRow>,
-    /// Songs in view, and their running time.
-    pub total: u64,
-    pub total_ms: u64,
+    /// Songs in view, and their running time (with the first page only).
+    pub total: Option<u64>,
+    pub total_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -116,24 +116,38 @@ fn order(q: &SongsQuery) -> String {
     format!("{empty}{key} {dir}, {then}")
 }
 
+/// Songs that are fan or AI edits, read the way every other list reads the flags.
+fn edit_ids(c: &Connection) -> AppResult<Vec<String>> {
+    let mut st = c.prepare_cached(
+        "SELECT t.id, f.flags FROM tracks t JOIN file_tags f ON f.part_key = t.part_key AND f.status = 'ok'
+         WHERE lower(f.flags) LIKE '%edit%'",
+    )?;
+    let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))?;
+    let mut out = Vec::new();
+    for r in rows {
+        let (id, flags) = r?;
+        if crate::tags::is_edit(flags.as_deref()) {
+            out.push(id);
+        }
+    }
+    Ok(out)
+}
+
 /// The rows in view, and the values the `?` marks in it take.
-fn filter(q: &SongsQuery, view: TagView, server: &ServerView, hidden: &HiddenSet) -> (String, Vec<String>) {
+fn filter(c: &Connection, q: &SongsQuery, view: TagView, server: &ServerView, hidden: &HiddenSet) -> AppResult<(String, Vec<String>)> {
     let mut sql = format!(
         "{} AND {} AND t.id NOT IN (SELECT value FROM json_each(?)) AND t.artist_id NOT IN (SELECT value FROM json_each(?))",
         crate::tags::store::visible_clause(view),
         server.clause("al", "album"),
     );
+    let mut left_out: Vec<String> = hidden.tracks.iter().cloned().collect();
+    if !view.show_edits {
+        left_out.extend(edit_ids(c)?);
+    }
     let mut args = vec![
-        serde_json::to_string(&hidden.tracks).unwrap_or_else(|_| "[]".into()),
+        serde_json::to_string(&left_out).unwrap_or_else(|_| "[]".into()),
         serde_json::to_string(&hidden.artists).unwrap_or_else(|_| "[]".into()),
     ];
-    if !view.show_edits {
-        sql.push_str(
-            " AND NOT EXISTS (SELECT 1 FROM file_tags f WHERE f.part_key = t.part_key AND f.status = 'ok'
-                AND (',' || lower(replace(coalesce(f.flags, ''), ' ', '')) || ',' LIKE '%,fanedit,%'
-                     OR ',' || lower(replace(coalesce(f.flags, ''), ' ', '')) || ',' LIKE '%,aiedit,%'))",
-        );
-    }
     for word in q.find.split_whitespace().take(8) {
         let like = format!("%{}%", word.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
         sql.push_str(
@@ -142,7 +156,7 @@ fn filter(q: &SongsQuery, view: TagView, server: &ServerView, hidden: &HiddenSet
         );
         args.extend(std::iter::repeat_n(like, 4));
     }
-    (sql, args)
+    Ok((sql, args))
 }
 
 const FROM: &str = "FROM tracks t JOIN albums al ON al.id = t.album_id";
@@ -157,22 +171,32 @@ pub fn page(
     server: &ServerView,
     hidden: &HiddenSet,
 ) -> AppResult<SongsPage> {
-    let (wh, args) = filter(q, view, server, hidden);
+    let (wh, args) = filter(c, q, view, server, hidden)?;
     let limit = limit.clamp(1, MAX_PAGE);
+    // The order is found on keys alone; only the page's own rows are read whole.
+    let order = order(q);
     let sql = format!(
-        "SELECT {TRACK_COLS}, al.year, al.added_at {FROM} WHERE {wh} ORDER BY {} LIMIT {limit} OFFSET {offset}",
-        order(q)
+        "SELECT {TRACK_COLS}, al.year, al.added_at {FROM}
+         WHERE t.pk IN (SELECT t.pk {FROM} WHERE {wh} ORDER BY {order} LIMIT ? OFFSET ?)
+         ORDER BY {order}"
     );
+    let mut page_args: Vec<rusqlite::types::Value> = args.iter().cloned().map(Into::into).collect();
+    page_args.push(i64::from(limit).into());
+    page_args.push(i64::from(offset).into());
     let mut st = c.prepare_cached(&sql)?;
     let rows = st
-        .query_map(params_from_iter(args.iter()), |r| {
+        .query_map(params_from_iter(page_args.iter()), |r| {
             Ok(SongRow { track: row_track(r)?, year: r.get(TRACK_NCOLS)?, added_at: r.get(TRACK_NCOLS + 1)? })
         })?
         .collect::<Result<Vec<_>, _>>()?;
+    // The totals come with the first page; later pages keep them.
+    if offset > 0 {
+        return Ok(SongsPage { rows, total: None, total_ms: None });
+    }
     let (total, total_ms): (i64, i64) = c
         .prepare_cached(&format!("SELECT count(*), coalesce(sum(t.duration_ms), 0) {FROM} WHERE {wh}"))?
         .query_row(params_from_iter(args.iter()), |r| Ok((r.get(0)?, r.get(1)?)))?;
-    Ok(SongsPage { rows, total: total as u64, total_ms: total_ms as u64 })
+    Ok(SongsPage { rows, total: Some(total as u64), total_ms: Some(total_ms as u64) })
 }
 
 /// The ids to play from `start`: the table's order around it, at most
@@ -186,7 +210,7 @@ pub fn play_ids(
     server: &ServerView,
     hidden: &HiddenSet,
 ) -> AppResult<Vec<String>> {
-    let (wh, args) = filter(q, view, server, hidden);
+    let (wh, args) = filter(c, q, view, server, hidden)?;
     let mut st = c.prepare_cached(&format!("SELECT t.id {FROM} WHERE {wh} ORDER BY {}", order(q)))?;
     let ids: Vec<String> = st.query_map(params_from_iter(args.iter()), |r| r.get(0))?.collect::<Result<_, _>>()?;
     let at = start.and_then(|s| ids.iter().position(|i| i == s)).unwrap_or(0);
@@ -302,9 +326,13 @@ mod tests {
         let q = SongsQuery::default();
         let p = page(&c, &q, 2, 3, TagView::default(), &ServerView::All, &HiddenSet::default()).unwrap();
         assert_eq!(p.rows.iter().map(|r| r.track.id.as_str()).collect::<Vec<_>>(), ["a3", "b1", "b2"]);
-        assert_eq!((p.total, p.total_ms), (6, 21_000));
+        // Later pages leave the totals to the first.
+        assert_eq!((p.total, p.total_ms), (None, None));
         assert_eq!(p.rows[1].year, Some(1999));
         assert_eq!(p.rows[1].added_at, 100);
+        let first = page(&c, &q, 0, 3, TagView::default(), &ServerView::All, &HiddenSet::default()).unwrap();
+        assert_eq!(first.rows.iter().map(|r| r.track.id.as_str()).collect::<Vec<_>>(), ["a1", "a2", "a3"]);
+        assert_eq!((first.total, first.total_ms), (Some(6), Some(21_000)));
     }
 
     #[test]
@@ -317,7 +345,7 @@ mod tests {
         };
         assert_eq!(find("GLOW").0, ["b1"]);
         assert_eq!(find("bravo").0, ["b1", "b2"]);
-        assert_eq!(find("bravo haze"), (vec!["b2".to_string()], 1));
+        assert_eq!(find("bravo haze"), (vec!["b2".to_string()], Some(1)));
         assert_eq!(find("zed").0, ["c1"]);
         // Wildcards are plain letters.
         assert!(find("%").0.is_empty());
@@ -339,10 +367,24 @@ mod tests {
         let p = page(&c, &q, 0, 50, TagView::default(), &ServerView::All, &hidden).unwrap();
         let got: Vec<_> = p.rows.iter().map(|r| r.track.id.as_str()).collect();
         assert_eq!(got, ["a1", "a3"]);
-        assert_eq!(p.total, 2);
+        assert_eq!(p.total, Some(2));
         let shown = TagView { show_edits: true, ..TagView::default() };
         let p = page(&c, &q, 0, 50, shown, &ServerView::All, &hidden).unwrap();
         assert_eq!(p.rows.iter().map(|r| r.track.id.as_str()).collect::<Vec<_>>(), ["a1", "a3", "c1"]);
+    }
+
+    #[test]
+    fn edits_are_read_as_every_other_list_reads_them() {
+        let c = db();
+        c.execute(
+            "INSERT INTO file_tags (part_key, status, flags, scanned_at) VALUES ('/p/a1', 'ok', 'live,\taiedit', 1), ('/p/a2', 'ok', 'fan edit', 1)",
+            [],
+        )
+        .unwrap();
+        assert!(crate::tags::is_edit(Some("live,\taiedit")) && !crate::tags::is_edit(Some("fan edit")));
+        let p = page(&c, &SongsQuery::default(), 0, 50, TagView::default(), &ServerView::All, &HiddenSet::default()).unwrap();
+        let got: Vec<_> = p.rows.iter().map(|r| r.track.id.as_str()).collect();
+        assert_eq!(got, ["a2", "a3", "b1", "b2", "c1"]);
     }
 
     #[test]

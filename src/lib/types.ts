@@ -69,9 +69,9 @@ export interface SongRow {
 }
 export interface SongsPage {
   rows: SongRow[];
-  /** Songs in view, and their running time. */
-  total: number;
-  totalMs: number;
+  /** Songs in view, and their running time (with the first page only; null on later pages). */
+  total: number | null;
+  totalMs: number | null;
 }
 
 export interface Track {
