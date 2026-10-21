@@ -1,10 +1,9 @@
-/* Song lineage: the versions in a sentence, a vertical timeline of them on a
-   hairline (ink dots, the version you're on in the accent, unreleased ones
-   hollow), and the Compare panel. */
+/* Song lineage: a plain list of the versions, oldest first, each with its
+   date, ruled like the rest of the app (no timeline, no dots), and the
+   Compare panel. */
 
 .lineage-page .action-row { flex-wrap: wrap; }
 .lineage-page__hint { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
-.lineage-page__lead { margin: var(--space-2) var(--space-4) var(--space-8); max-width: 32em; }
 .lineage-off { display: grid; gap: var(--space-3); justify-items: start; max-width: 520px; color: var(--color-text-secondary); }
 .lineage-off__title { margin: 0; font-size: var(--font-size-xl); color: var(--color-text-primary); }
 
@@ -223,3 +222,10 @@
 .ph-lineage .ph-lineage__tags { gap: 4px 10px; align-items: baseline; }
 .ph-lineage .ph-lineage__era { padding: 0; border-radius: 0; background: none; color: var(--color-text-primary); font-size: 12px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
 .ph-lineage .ph-row__title .ph-x__tag.is-accent { padding: 0; margin-left: 4px; border-radius: 0; background: none; font-family: var(--font-readout, var(--font-family)); font-size: 12px; letter-spacing: 0; text-transform: none; }
+
+/* No timeline: the rule and the dots go, the date sits before each row. */
+.lineage::before { display: none; }
+.lineage__dot { display: none; }
+.lineage__node { grid-template-columns: var(--lineage-date) minmax(0, 1fr); }
+.ph-lineage .ph-lineage__list { padding-left: 0; border-left: 0; }
+.ph-lineage .ph-lineage__node::before { display: none; }

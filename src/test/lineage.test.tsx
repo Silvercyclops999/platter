@@ -127,8 +127,8 @@ describe("lineage view", () => {
     expect(within(rows[2]).getByText("This one")).toBeInTheDocument();
     expect(within(rows[6]).getByText("Date unknown")).toBeInTheDocument();
     expect(screen.getByText("• 7 versions")).toBeInTheDocument();
-    // The sentence over the timeline says how many and what they are, oldest first.
-    expect(screen.getByTestId("lineage-lead")).toHaveTextContent(/ has 7 versions( from \d{4} to \d{4}|, all from \d{4})?: .+ and .+\.$/);
+    // A plain list of versions, oldest first: no sentence over it.
+    expect(screen.queryByTestId("lineage-lead")).toBeNull();
   });
 
   it("every node plays", async () => {
