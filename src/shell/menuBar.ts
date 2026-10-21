@@ -20,6 +20,7 @@ import { useUi } from "../stores/ui";
 import { SHORTCUTS, type ShortcutDef } from "./shortcuts";
 import { checkForUpdates } from "./TopBar";
 import { filterLibrary, toggleSidebar, VOLUME_KEY_STEP } from "./useShortcuts";
+import { openPageFind } from "./pageFind";
 
 export interface MenuAction {
   run: () => void;
@@ -57,7 +58,7 @@ export const MENU_ACTIONS: Record<string, MenuAction> = {
     shortcut: "filterLibrary",
     run: () => {
       useUi.getState().setPaletteOpen(false);
-      filterLibrary();
+      if (!openPageFind()) filterLibrary();
     },
   },
   playPause: { run: () => player.toggle() },

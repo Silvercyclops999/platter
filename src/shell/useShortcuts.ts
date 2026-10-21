@@ -5,7 +5,9 @@ import { useSettings } from "../stores/settings";
 import { player, usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
 import { createPlaylist } from "../stores/playlists";
-import { bookmarkNowPlaying } from "../stores/curate";
+import { bookmarkNowPlaying, newSmartPlaylist } from "../stores/curate";
+import { goToPlaying } from "./goToPlaying";
+import { openPageFind } from "./pageFind";
 import { besideView, rightView, useUi } from "../stores/ui";
 import { useFullWindow } from "../stores/fullWindow";
 import { keyRight, keySidebar, rightRoom, sidebarRoom, solveLayout } from "./layout";
@@ -123,6 +125,7 @@ const ALT_SHIFT: Record<string, () => void> = {
   KeyN: () => useUi.getState().toggleNowPlaying(),
   KeyD: () => useUi.getState().toggleOutput(),
   KeyP: () => void createPlaylist(),
+  KeyO: () => newSmartPlaylist(),
   KeyM: bookmarkNowPlaying,
   KeyL: toggleSidebar,
   KeyR: toggleRightPanel,
@@ -197,7 +200,7 @@ export function useShortcuts() {
       if (isMod(e) && !e.shiftKey && !e.altKey && key === "f") {
         e.preventDefault();
         ui.setPaletteOpen(false);
-        filterLibrary();
+        if (!openPageFind()) filterLibrary();
         return;
       }
       // Ctrl/⌘+R would reload the window; it toggles repeat instead.
@@ -211,6 +214,11 @@ export function useShortcuts() {
       }
       if (isMod(e) && !e.shiftKey && !e.altKey && key === "r") {
         if (!e.repeat) player.cycleRepeatNow();
+        return;
+      }
+      if (isMod(e) && e.shiftKey && !e.altKey && key === "j") {
+        e.preventDefault();
+        if (!e.repeat) goToPlaying();
         return;
       }
       if (isMod(e) && !e.shiftKey && !e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {

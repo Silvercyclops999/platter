@@ -106,6 +106,13 @@ describe("helpers", () => {
     expect(sortRows(rows, "custom").map((r) => r.itemId)).toEqual(["1", "2"]);
     expect(sortRows(rows, "title").map((r) => r.itemId)).toEqual(["2", "1"]);
     expect(sortRows(rows, "duration").map((r) => r.itemId)).toEqual(["1", "2"]);
+    const played = [
+      { itemId: "1", track: { ...x, viewCount: 0, lastViewedAt: null } },
+      { itemId: "2", track: { ...y, viewCount: 9, lastViewedAt: 100 } },
+      { itemId: "3", track: { ...x, viewCount: 3, lastViewedAt: 500 } },
+    ];
+    expect(sortRows(played, "plays").map((r) => r.itemId)).toEqual(["2", "3", "1"]);
+    expect(sortRows(played, "recent").map((r) => r.itemId)).toEqual(["3", "2", "1"]);
   });
 
   it("the picker lists editable playlists, most recently changed first", () => {

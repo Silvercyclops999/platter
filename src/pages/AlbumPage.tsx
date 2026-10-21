@@ -8,7 +8,7 @@ import { openContextMenu } from "../components/ContextMenu";
 import { bookmarkPageItem } from "../stores/curate";
 import { yourStatsItem } from "../stores/stats";
 import { shareItem } from "../components/ShareMenu";
-import { addToPlaylistItem } from "../components/PlaylistPicker";
+import { addToPlaylistItems } from "../components/PlaylistPicker";
 import { plexEditItem } from "../components/PlexEditMenu";
 import { tagAlbumItems } from "../components/TagEditMenu";
 import { CoverPopup } from "../components/CoverPopup";
@@ -221,7 +221,7 @@ function LibraryAlbumView({ id, tab }: { id: string; tab?: "sleeve" }) {
                 [
                   ...(sideList ?? []).map((s) => ({ label: `Play side ${s.label}`, onSelect: () => void player.playSide(album.id, s.trackIds) })),
                   { label: "Add to queue", onSelect: () => void player.addToQueue(data!.tracks, album.thumb) },
-                  addToPlaylistItem(() => data?.tracks.map((t) => t.id) ?? []),
+                  ...addToPlaylistItems(() => data?.tracks.map((t) => t.id) ?? []),
                   ...downloadMenuItems({ kind: "album", id: album.id, title: album.title }),
                   sendToDeviceItem({ kind: "album", id: album.id, title: album.title }),
                   { label: "Go to artist", onSelect: () => nav.go({ name: "artist", id: album.artistId }) },

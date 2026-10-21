@@ -55,10 +55,41 @@ import { AudioLines } from "lucide-react";
 import { followTaps, getting, useTaps } from "../stores/taps";
 import { GettingLine } from "../components/GettingLine";
 import type { Tap } from "../lib/types";
+import { toggleSeekEnd, useSeekEnd } from "../stores/seekTime";
 
 /** Seek bar keys: arrows move 5 s, Page Up/Down 25 s. */
 export const SEEK_KEY_STEP = 5_000;
 export const SEEK_PAGE_STEP = 25_000;
+
+/**
+ * The time after the seek bar: time left, or the song's length. Clicking it
+ * switches, remembered on this device. A song of unknown length shows its
+ * length side only.
+ */
+function SeekEndTime({ durationMs, shownMs }: { durationMs: number; shownMs: number }) {
+  const end = useSeekEnd((s) => s.end);
+  if (durationMs <= 0) {
+    return (
+      <span className="seek__time seek__time--end tabular" aria-hidden="true">
+        {formatDuration(0)}
+      </span>
+    );
+  }
+  const left = end === "left";
+  const text = left ? `-${formatDuration(Math.max(0, durationMs - shownMs))}` : formatDuration(durationMs);
+  return (
+    <button
+      type="button"
+      className="seek__time seek__time--end seek__time--switch tabular"
+      // The visible time leads the name, so it can be said to voice control.
+      aria-label={left ? `${text}, time left. Show the song's length` : `${text}, song length. Show the time left`}
+      title={left ? "Show the song's length" : "Show the time left"}
+      onClick={toggleSeekEnd}
+    >
+      {text}
+    </button>
+  );
+}
 
 /**
  * The seek line with its times and format plate. `strip` is the transport
@@ -141,9 +172,7 @@ export function SeekBar({ strip = false }: { strip?: boolean } = {}) {
           <LoopLayer loop={loop} pendingA={pendingA} durationMs={durationMs} onChange={setLoop} onClear={clearLoop} />
         )}
       </div>
-      <span className="seek__time seek__time--end tabular" aria-hidden="true">
-        -{formatDuration(Math.max(0, durationMs - shown))}
-      </span>
+      <SeekEndTime durationMs={durationMs} shownMs={shown} />
       {/* The format sits on the time line, not floating in the right group. */}
       <span className="player-bar__fold">
         <SignalBadge />

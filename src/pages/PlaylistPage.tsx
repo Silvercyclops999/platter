@@ -1,6 +1,6 @@
-import { ArrowDownUp, Ellipsis, ListMusic, Pause, Pencil, Play, UserPlus } from "lucide-react";
+import { ArrowDownUp, Ellipsis, ListMusic, Pause, Pencil, Play, Search, UserPlus } from "lucide-react";
 import { PageMissing } from "../components/PageMissing";
-import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
 import { Art } from "../components/Art";
 import { IconButton } from "../components/Button";
 import { ContextShuffleButton } from "../components/ShuffleButton";
@@ -9,7 +9,7 @@ import { bookmarkPageItem, editSmartPlaylist } from "../stores/curate";
 import { shareItem } from "../components/ShareMenu";
 import { DownloadButton } from "../components/DownloadButton";
 import { downloadMenuItems } from "../stores/downloads";
-import { addToPlaylistItem, playlistEditItems } from "../components/PlaylistPicker";
+import { addToPlaylistItems, playlistEditItems } from "../components/PlaylistPicker";
 import { Skeleton } from "../components/Skeleton";
 import { TrackList, TrackRow, TrackRowSkeleton, likeItem, queueable, trackMenuItems } from "../components/TrackRow";
 import { backend } from "../lib/backend";
@@ -35,9 +35,12 @@ import { PlaylistFinder } from "./PlaylistFinder";
 import { GapMarker, MixPill, MixToggle, SORT_LOCKED, bpmNote, mixMenuItem, sortLockedLabel, useAutomixView, useMix, useMixSwitch, useShuffleAsk } from "./PlaylistMix";
 import { Tooltip } from "../components/Tooltip";
 import "./playlist.css";
+import "./liked.css";
+import { matchesFind } from "./liked";
+import { usePageFind, usePageReveal } from "../shell/pageFind";
 import { failText } from "../lib/errorText";
 
-export type PlaylistSort = "custom" | "title" | "artist" | "album" | "addedBy" | "duration";
+export type PlaylistSort = "custom" | "title" | "artist" | "album" | "addedBy" | "duration" | "plays" | "recent";
 export const SORT_LABEL: Record<PlaylistSort, string> = {
   custom: "Custom order",
   title: "Title",
@@ -45,6 +48,8 @@ export const SORT_LABEL: Record<PlaylistSort, string> = {
   album: "Album",
   addedBy: "Added by",
   duration: "Duration",
+  plays: "Most played",
+  recent: "Recently played",
 };
 /** "Added by" only sorts a shared playlist. */
 export const sortsFor = (shared: boolean) => (Object.keys(SORT_LABEL) as PlaylistSort[]).filter((s) => shared || s !== "addedBy");
@@ -67,6 +72,9 @@ export function sortRows<R extends Row>(rows: R[], sort: PlaylistSort, who: (r: 
     artist: (a, b) => cmp(trackArtistLine(a.track), trackArtistLine(b.track)) || cmp(a.track.albumTitle, b.track.albumTitle),
     album: (a, b) => cmp(a.track.albumTitle, b.track.albumTitle) || a.track.discNumber - b.track.discNumber || a.track.trackNumber - b.track.trackNumber,
     duration: (a, b) => a.track.durationMs - b.track.durationMs,
+    // Most first; never played goes last.
+    plays: (a, b) => b.track.viewCount - a.track.viewCount,
+    recent: (a, b) => (b.track.lastViewedAt ?? -1) - (a.track.lastViewedAt ?? -1),
   };
   return [...rows].sort(by[sort]);
 }
@@ -155,17 +163,42 @@ export function PlaylistPage({ id }: { id: string }) {
     () => (shown ? shown.tracks.map((track, i) => ({ track, itemId: shown.itemIds[i] ?? `${track.id}-${i}` })) : []),
     [shown],
   );
-  const view = useMemo(() => sortRows(rows, sort === "addedBy" && !shared ? "custom" : sort, (r) => info?.addedBy[r.itemId]?.name ?? ""), [rows, sort, shared, info]);
+  const sorted = useMemo(() => sortRows(rows, sort === "addedBy" && !shared ? "custom" : sort, (r) => info?.addedBy[r.itemId]?.name ?? ""), [rows, sort, shared, info]);
+  // Find in this playlist (Ctrl/Cmd+F): narrows the rows as you type.
+  const [findOpen, setFindOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const findRef = useRef<HTMLInputElement>(null);
+  const [findFor, setFindFor] = useState(id);
+  if (findFor !== id) {
+    setFindFor(id);
+    setFindOpen(false);
+    setQuery("");
+  }
+  const finding = !!query.trim();
+  const view = useMemo(() => (finding ? sorted.filter((r) => matchesFind(r.track, query)) : sorted), [sorted, finding, query]);
+  const openFind = useCallback(() => {
+    setFindOpen(true);
+    findRef.current?.focus();
+  }, []);
+  usePageFind(shown && shown.tracks.length ? openFind : null);
+  // Back to the playing song: a finder hiding it is cleared.
+  const reveal = useCallback(
+    (trackId: string) => {
+      if (finding && !view.some((r) => r.track.id === trackId)) setQuery("");
+    },
+    [finding, view],
+  );
+  usePageReveal(reveal);
   const order = rows.map((r) => r.itemId);
-  // Sorted on screen: play in the order shown, not the playlist's own.
+  // Sorted or narrowed on screen: play in the order shown, not the playlist's own.
   const sortedIds = () => (view === rows ? undefined : view.map((r) => r.track.id));
   const have = useMemo(() => new Set(rows.map((r) => r.track.id)), [rows]);
-  const canDrag = own && sort === "custom" && rows.length > 1;
+  const canDrag = own && sort === "custom" && rows.length > 1 && !finding;
   // Mix: on here, its switch (asking first when sorted), shuffle asking
   // first, and the rows' tempo and transitions.
   const mixSwitch = useMixSwitch(id, sort !== "custom", () => setSort("custom"));
   const shuffleAsk = useShuffleAsk();
-  const mixIds = useMemo(() => (mixed ? view.map((r) => r.track.id) : []), [mixed, view]);
+  const mixIds = useMemo(() => (mixed ? sorted.map((r) => r.track.id) : []), [mixed, sorted]);
   const automix = useAutomixView(id, mixed, mixIds);
 
   // Deleted on another device while open: say so and go Home.
@@ -216,7 +249,7 @@ export function PlaylistPage({ id }: { id: string }) {
     if (e.altKey && e.shiftKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
       e.preventDefault();
       e.stopPropagation();
-      if (sort !== "custom") return;
+      if (sort !== "custom" || finding) return;
       const ids = selection();
       if (ids.length) move(ids, stepAfter(order, ids, e.key === "ArrowUp" ? -1 : 1));
       return;
@@ -269,7 +302,7 @@ export function PlaylistPage({ id }: { id: string }) {
     { label: "Add to queue", onSelect: () => void player.addToQueue(queueable(trackIds, tracks)) },
     likeItem(() => tracks),
     ...(own ? [{ label: "Remove from this playlist", onSelect: () => removeNow(keys) }] : []),
-    addToPlaylistItem(() => trackIds),
+    ...addToPlaylistItems(() => trackIds),
   ];
 
   const pageMenu = (el: HTMLElement) =>
@@ -402,6 +435,38 @@ export function PlaylistPage({ id }: { id: string }) {
             disabled={!pl}
             onClick={(e) => pageMenu(e.currentTarget)}
           />
+          {!empty && pl && (
+            <div className={`liked-find pl-find ${findOpen ? "is-open" : ""}`}>
+              {findOpen ? (
+                <>
+                  <Search size={16} aria-hidden="true" className="liked-find__icon" />
+                  <input
+                    ref={findRef}
+                    autoFocus
+                    type="search"
+                    className="liked-find__input"
+                    aria-label={`Find in ${pl.title}`}
+                    placeholder={`Find in ${pl.title}`}
+                    value={query}
+                    spellCheck={false}
+                    autoComplete="off"
+                    onChange={(e) => setQuery(e.target.value)}
+                    onBlur={() => !query && setFindOpen(false)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (query) setQuery("");
+                        else setFindOpen(false);
+                      }
+                    }}
+                  />
+                </>
+              ) : (
+                <IconButton label={`Find in ${pl.title}`} icon={<Search size={18} />} onClick={openFind} />
+              )}
+            </div>
+          )}
           {!empty &&
             pl &&
             (mixed ? (
@@ -459,12 +524,13 @@ export function PlaylistPage({ id }: { id: string }) {
                       />
                     );
                     const next = view[i + 1];
-                    const gap = mixed && next ? automix?.gaps[i] : undefined;
+                    const gap = mixed && next && !finding ? automix?.gaps[i] : undefined;
                     if (!gap || gap.fromId !== r.track.id || gap.toId !== next.track.id) return [row];
                     return [row, <GapMarker key={`gap-${r.itemId}`} playlistId={id} gap={gap} from={r.track.title} to={next.track.title} />];
                   })
                 : Array.from({ length: 8 }, (_, i) => <TrackRowSkeleton key={i} showArt />)}
             </TrackList>
+            {shown && finding && view.length === 0 && <p className="pl-find__none">{`Nothing in this playlist matches "${query.trim()}"`}</p>}
           </div>
         )}
         {own && pl && <BringWaiting playlistId={id} />}

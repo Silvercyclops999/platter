@@ -10,7 +10,7 @@ import { Art } from "../components/Art";
 import { Button, IconButton } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
 import { Dialog } from "../components/Dialog";
-import { addToPlaylistItem } from "../components/PlaylistPicker";
+import { addToPlaylistItems } from "../components/PlaylistPicker";
 import { Skeleton, SkeletonLines } from "../components/Skeleton";
 import { Tooltip } from "../components/Tooltip";
 import { trackMenuItems } from "../components/TrackRow";
@@ -314,7 +314,7 @@ export function ListView({ id }: { id: string }) {
       `${list.name} options`,
       [
         { label: "Add to queue", onSelect: queue },
-        ...(ids.length ? [addToPlaylistItem(() => ids)] : []),
+        ...(ids.length ? addToPlaylistItems(() => ids) : []),
         { label: list.liked ? "Like matched songs" : "Save as playlist", disabled: !ids.length, onSelect: () => setAsk(true) },
       ],
       at,

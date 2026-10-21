@@ -1,11 +1,11 @@
-import { Plus, UserPlus, Users } from "lucide-react";
+import { ListPlus, Plus, UserPlus, Users } from "lucide-react";
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { backend } from "../lib/backend";
 import type { Playlist, SharedSummary } from "../lib/types";
 import { useApp } from "../stores/app";
 import { openCircleDialog, sharedNow, useCircle } from "../stores/circle";
 import { useSettings } from "../stores/settings";
-import { addToPlaylist, askDelete, createPlaylist, duplicatePlaylist, editDetails } from "../stores/playlists";
+import { addToPlaylist, askDelete, createPlaylist, duplicatePlaylist, editDetails, lastPlaylistId } from "../stores/playlists";
 import type { MenuItem, SubmenuContext } from "../stores/ui";
 import { Art } from "./Art";
 
@@ -107,7 +107,7 @@ export function playlistEditItems(p: Playlist): MenuItem[] {
     ...collabItems(p),
     { label: "Edit details", onSelect: () => editDetails(p) },
     { label: "Delete", onSelect: () => askDelete(p) },
-    addToPlaylistItem(playlistSongs(p.id), { label: "Add to other playlist", exclude: p.id }),
+    ...addToPlaylistItems(playlistSongs(p.id), { label: "Add to other playlist", exclude: p.id }),
   ];
 }
 
@@ -118,6 +118,27 @@ export function collabItems(p: Pick<Playlist, "id" | "title">): MenuItem[] {
   return [
     { label: "Invite collaborators", icon: UserPlus, onSelect: () => openCircleDialog({ kind: "invite", playlistId: p.id, title: p.title }) },
     ...(shared ? [{ label: "Playlist permissions", icon: Users, onSelect: () => openCircleDialog({ kind: "permissions", playlistId: p.id }) }] : []),
+  ];
+}
+
+/**
+ * "Add to <the playlist you last added to>" in one click, when it's still
+ * there and can take songs, then the entry that opens the picker.
+ */
+export function addToPlaylistItems(songs: () => Promise<string[]> | string[], opts: { label?: string; exclude?: string } = {}): MenuItem[] {
+  const picker = addToPlaylistItem(songs, opts);
+  const id = lastPlaylistId();
+  if (!id) return [picker];
+  const all = [...(useApp.getState().playlists ?? []), ...collaboratorPlaylists(useCircle.getState().view.playlists)];
+  const last = editablePlaylists(all, "", opts.exclude).find((p) => p.id === id);
+  if (!last) return [picker];
+  return [
+    {
+      label: `Add to ${last.title}`,
+      icon: ListPlus,
+      onSelect: () => void Promise.resolve(songs()).then((ids) => (ids.length ? addToPlaylist(last, ids) : undefined)),
+    },
+    picker,
   ];
 }
 
