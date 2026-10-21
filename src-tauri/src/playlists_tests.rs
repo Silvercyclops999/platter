@@ -29,6 +29,8 @@ struct FakePlex {
     create_gate: Mutex<Option<Arc<tokio::sync::Notify>>>,
     /// A new playlist gets only this many of its songs (a later part lost).
     create_keeps: Mutex<Option<usize>>,
+    /// The next create lands, but its answer is lost (a timeout).
+    lose_create_answer: Mutex<bool>,
 }
 
 impl FakePlex {
@@ -109,8 +111,19 @@ impl PlaylistRemote for FakePlex {
         let id = self.id();
         let keep = self.create_keeps.lock().take().unwrap_or(track_ids.len());
         let rows: Vec<(String, String)> = track_ids.iter().take(keep).map(|t| (t.clone(), self.id())).collect();
-        self.lists.lock().insert(id.clone(), (playlist(&id, title, rows.len()), rows));
+        let mut made = playlist(&id, title, rows.len());
+        made.updated_at = Some(crate::db::queries::now_s());
+        self.lists.lock().insert(id.clone(), (made, rows));
+        if std::mem::take(&mut *self.lose_create_answer.lock()) {
+            return Err(AppError::Network("Timed out.".into()));
+        }
         Ok(id)
+    }
+    async fn find_made(&self, title: &str, track_ids: &[String], at: i64) -> AppResult<Option<String>> {
+        let l = self.lists.lock();
+        Ok(l.iter()
+            .find(|(_, (p, rows))| p.title == title && made_near(p.updated_at, at) && starts_with(&entries(rows), track_ids))
+            .map(|(id, _)| id.clone()))
     }
     async fn add(&self, id: &str, track_ids: &[String]) -> AppResult<()> {
         self.write(format!("add {id} {}", track_ids.join(",")))?;
@@ -322,6 +335,139 @@ async fn songs_added_while_plex_makes_the_playlist_are_sent_after() {
     assert_eq!(r.plex.tracks(&pid), ["2", "3"]);
     assert_eq!(r.local_tracks(&pid), ["2", "3"]);
     assert_eq!(r.queued(), 0);
+}
+
+/// A new playlist whose create is held at Plex until the returned gate opens.
+async fn creating(r: &Rig, title: &str, tracks: &[&str]) -> (Playlist, Arc<tokio::sync::Notify>, tokio::task::JoinHandle<()>) {
+    let p = r.pl.create(Some(title.into()), s(tracks)).await.unwrap();
+    let gate = Arc::new(tokio::sync::Notify::new());
+    *r.plex.create_gate.lock() = Some(gate.clone());
+    let replay = {
+        let pl = r.pl.clone();
+        tokio::spawn(async move { pl.replay().await })
+    };
+    while r.plex.calls().is_empty() {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    (p, gate, replay)
+}
+
+#[tokio::test]
+async fn a_playlist_deleted_while_plex_makes_it_is_deleted_there_too() {
+    let r = rig();
+    let (p, gate, replay) = creating(&r, "Oops", &["1", "2"]).await;
+    r.pl.delete(p.id.clone()).await.unwrap();
+    gate.notify_one();
+    replay.await.unwrap();
+    r.pl.replay().await;
+    assert!(r.plex.lists.lock().is_empty(), "no playlist left in Plex: {:?}", r.plex.calls());
+    assert!(r.db.read(|c| local::playlist(c, &p.id)).unwrap().is_none());
+    assert_eq!(r.queued(), 0);
+}
+
+#[tokio::test]
+async fn a_rename_while_plex_makes_the_playlist_reaches_plex() {
+    let r = rig();
+    let (p, gate, replay) = creating(&r, "Draft", &["1", "2"]).await;
+    r.pl.update(p.id.clone(), Some("Final".into()), Some("Notes".into())).await.unwrap();
+    gate.notify_one();
+    replay.await.unwrap();
+    r.pl.replay().await;
+    let pid = r.page(&p.id).playlist.id;
+    assert_eq!(r.plex.title(&pid), "Final");
+    assert_eq!(r.plex.lists.lock()[&pid].0.summary.as_deref(), Some("Notes"));
+    assert_eq!(r.page(&pid).playlist.title, "Final", "reading Plex back keeps the new name");
+    assert_eq!(r.queued(), 0);
+}
+
+#[tokio::test]
+async fn a_reorder_while_plex_makes_the_playlist_reaches_plex() {
+    let r = rig();
+    let (p, gate, replay) = creating(&r, "Order", &["1", "2", "3"]).await;
+    let ids = r.page(&p.id).item_ids;
+    r.pl.move_items(p.id.clone(), vec![ids[2].clone()], None).await.unwrap();
+    r.pl.add(p.id.clone(), s(&["4"]), Place::After(ids[2].clone())).await.unwrap();
+    assert_eq!(r.local_tracks(&p.id), ["3", "4", "1", "2"]);
+    gate.notify_one();
+    replay.await.unwrap();
+    r.pl.replay().await;
+    let pid = r.page(&p.id).playlist.id;
+    assert_eq!(r.plex.tracks(&pid), ["3", "4", "1", "2"]);
+    assert_eq!(r.local_tracks(&pid), ["3", "4", "1", "2"]);
+    assert_eq!(r.queued(), 0);
+}
+
+#[tokio::test]
+async fn a_create_that_landed_without_an_answer_is_not_made_twice() {
+    let r = rig();
+    let p = r.pl.create(Some("Once".into()), s(&["1", "2"])).await.unwrap();
+    *r.plex.lose_create_answer.lock() = true;
+    r.pl.replay().await;
+    assert_eq!(r.queued(), 1, "kept: no clear answer");
+    r.pl.replay().await;
+    assert_eq!(r.plex.lists.lock().len(), 1, "one playlist in Plex: {:?}", r.plex.calls());
+    let pid = r.page(&p.id).playlist.id;
+    assert!(!local::is_local(&pid));
+    assert_eq!(r.plex.tracks(&pid), ["1", "2"]);
+    assert_eq!(r.queued(), 0);
+}
+
+#[tokio::test]
+async fn deleting_a_playlist_whose_create_got_no_answer_deletes_what_it_made() {
+    let r = rig();
+    let p = r.pl.create(Some("Gone".into()), s(&["1", "2"])).await.unwrap();
+    *r.plex.lose_create_answer.lock() = true;
+    r.pl.replay().await;
+    assert_eq!(r.plex.lists.lock().len(), 1, "it landed in Plex");
+    r.pl.delete(p.id.clone()).await.unwrap();
+    r.pl.replay().await;
+    assert!(r.plex.lists.lock().is_empty(), "no playlist left in Plex: {:?}", r.plex.calls());
+    assert_eq!(r.queued(), 0);
+}
+
+#[tokio::test]
+async fn a_rename_and_a_removed_song_after_a_lost_create_still_make_one_playlist() {
+    let r = rig();
+    let p = r.pl.create(Some("First".into()), s(&["1", "2", "3"])).await.unwrap();
+    *r.plex.lose_create_answer.lock() = true;
+    r.pl.replay().await;
+    r.pl.update(p.id.clone(), Some("Second".into()), None).await.unwrap();
+    let first = r.page(&p.id).item_ids[0].clone();
+    r.pl.remove(p.id.clone(), vec![first]).await.unwrap();
+    r.pl.replay().await;
+    r.pl.replay().await;
+    assert_eq!(r.plex.lists.lock().len(), 1, "one playlist in Plex: {:?}", r.plex.calls());
+    let pid = r.page(&p.id).playlist.id;
+    assert_eq!(r.plex.title(&pid), "Second");
+    assert_eq!(r.plex.tracks(&pid), ["2", "3"]);
+    assert_eq!(r.local_tracks(&pid), ["2", "3"]);
+    assert_eq!(r.queued(), 0);
+}
+
+#[tokio::test]
+async fn a_lost_create_never_takes_over_a_playlist_of_your_own() {
+    let r = rig();
+    // Yours, by the same name and starting with the same songs, last
+    // changed long ago.
+    r.existing("77", "Gym", &["1", "2"]);
+    let p = r.pl.create(Some("Gym".into()), s(&["1", "2"])).await.unwrap();
+    *r.plex.fail_next.lock() = Some(AppError::Network("Timed out.".into()));
+    r.pl.replay().await;
+    r.pl.replay().await;
+    let pid = r.page(&p.id).playlist.id;
+    assert_ne!(pid, "77");
+    assert_eq!(r.plex.lists.lock().len(), 2);
+    assert_eq!(r.plex.tracks("77"), ["1", "2"], "yours is untouched");
+}
+
+#[test]
+fn a_lost_create_is_looked_for_only_near_when_it_went_out() {
+    let at = 1_800_000_000;
+    assert!(made_near(Some(at + 30), at));
+    assert!(made_near(Some(at - 5 * 60), at), "the server's clock a little behind");
+    assert!(!made_near(Some(at - 2 * 60 * 60), at), "changed long before");
+    assert!(!made_near(Some(at + 2 * 24 * 60 * 60), at), "changed days after");
+    assert!(!made_near(None, at));
 }
 
 #[tokio::test]

@@ -359,6 +359,11 @@ pub fn map_id(c: &Connection, local_id: &str, plex_id: &str) -> AppResult<()> {
 pub enum Op {
     /// Create the local-only playlist in Plex as it is when this replays.
     Create,
+    /// A create sent at `at` (unix seconds) without a clear answer: it may
+    /// have landed, so the next try looks for it (by the title and songs it
+    /// went with) before making another.
+    #[serde(rename_all = "camelCase")]
+    CreateSent { at: i64, title: String, track_ids: Vec<String> },
     /// Append songs; `item_ids` are the local ids the new rows got here.
     #[serde(rename_all = "camelCase")]
     Add {
@@ -443,14 +448,21 @@ pub fn drop_ops_after_create(c: &Connection, playlist_id: &str) -> AppResult<()>
     Ok(())
 }
 
-/// Marks a queued add as sent, before it goes out: if no clear answer comes
-/// back, the next try looks before adding again.
+/// Marks a queued add or create as sent, before it goes out: if no clear
+/// answer comes back, the next try looks before sending again.
 pub fn mark_sent(c: &Connection, seq: i64) -> AppResult<()> {
-    let json: Option<String> = c.query_row("SELECT op FROM playlist_ops WHERE seq = ?1", [seq], |r| r.get(0)).optional()?;
-    let Some(json) = json else { return Ok(()) };
+    let row: Option<(String, String)> =
+        c.query_row("SELECT playlist_id, op FROM playlist_ops WHERE seq = ?1", [seq], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+    let Some((pid, json)) = row else { return Ok(()) };
     let mut op: Op = serde_json::from_str(&json).map_err(|e| AppError::Internal(e.to_string()))?;
-    if let Op::Add { sent, .. } = &mut op {
-        *sent = true;
+    match &mut op {
+        Op::Add { sent, .. } => *sent = true,
+        Op::Create => {
+            let title = playlist(c, &pid)?.map(|p| p.title).unwrap_or_default();
+            let track_ids = items(c, &pid)?.into_iter().map(|i| i.track_id).collect();
+            op = Op::CreateSent { at: now_s(), title, track_ids };
+        }
+        _ => {}
     }
     let json = serde_json::to_string(&op).map_err(|e| AppError::Internal(e.to_string()))?;
     c.execute("UPDATE playlist_ops SET op = ?2 WHERE seq = ?1", params![seq, json])?;
