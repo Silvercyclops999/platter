@@ -4090,6 +4090,13 @@ export class MockBackend implements Backend {
   /** Taps in the mock: the song is searched, downloaded and lands in a few seconds. */
   taps: Tap[] = [];
   lastGet: LastGet | null = null;
+  private tapTimers: ReturnType<typeof setTimeout>[] = [];
+  /** Test hook: forget every tap and stop the ones still coming. */
+  resetTaps() {
+    this.tapTimers.forEach(clearTimeout);
+    this.tapTimers = [];
+    this.taps.length = 0;
+  }
   lidarrTap(input: TapInput) {
     return this.delay((): TapOutcome => {
       if (!this.settings.lidarrTapToGet) throw { kind: "invalid", message: "Getting songs with a tap is off. Turn it on in Settings > Lidarr > More." };
@@ -4128,10 +4135,12 @@ export class MockBackend implements Backend {
   }
   private followTap(tap: Tap, t0: number) {
     const step = (ms: number, f: () => void) =>
-      setTimeout(() => {
-        f();
-        this.emit("lidarr://tap", { ...tap });
-      }, ms);
+      this.tapTimers.push(
+        setTimeout(() => {
+          f();
+          this.emit("lidarr://tap", { ...tap });
+        }, ms),
+      );
     step(700, () => {
       tap.phase = "downloading";
       tap.progress = 0;
