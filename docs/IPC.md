@@ -2843,7 +2843,13 @@ A file swaps when it and the new file carry the same ISRC, or when all of these 
 `UpgradeRecord` is a `LidarrRequest` plus `{ albumId, fromQuality, swaps: SwapRun[], failure: UpgradeFailure|null }`; `SwapRun = { id, at, backupDir, files, undone, summary }`.
 `UpgradeOffer = { upgradeId, albumId, title, artist, status, message, summary, from, to, upgrade: OfferSong[], kept: OfferSong[], askEach, askReason, ask, backupDir, lastSwap, failure, failureMessage }` with `status` one of `waiting`, `needsMapping`, `unreachable`, `ready`, `nothing`, `swapped`, and `OfferSong = { trackId, title, disc, track, from, to, reason, keep, by: "isrc"|"sound"|null }`. `askEach` is true when anything in the album's folders is kept for a reason other than "the new copy isn't better"; the swap then asks per song whatever `upgradesAsk` says.
 `UpgradeFailure` is `{ kind }` with `noMapping`, `shareUnreachable { path }`, `changed { name }`, `stagingMissing { name }`, `fileLocked { name }`, `nameTaken { name }`, `tagCopyFailed { name, why }`, `backupNotWritable { path }`, `backupInLibrary { path }`, `moveFailed { name }`, `rescanFailed`, `plexUnreachable` or `backupMissing { name }`. Each leaves the old files in place.
-With `upgradesAsk` off, the background loop swaps imported upgrades on its own when the album doesn't need asking per song.
+With `betterCopies` on and `upgradesAsk` off (both the defaults), the background loop swaps imported upgrades on its own when the album doesn't need asking per song. With `betterCopies` off, every swap waits for the user.
+
+With `betterCopies` on (the default, synced), the same loop asks for better copies of the whole library about once a day for all the owner's devices, from a device with the share mapping only. Albums below `betterCopiesAim` (`lossless` or `hiRes`) are asked for lowest quality first, at most 25 a day, each at most weekly, through the staging path above. An album is skipped whole when the album or any one of its songs is unreleased (its tags, the archive's marks, a demo, leak or build), when its artist is managed by Lidarr (Lidarr's own profile upgrades those) or excluded, or when a swap on it was undone. Without a confirmed release, Platter confirms one only when exactly one official release has the same title and the same tracklist (same songs in order, lengths within 3 s); otherwise the album waits for the user. The 25 asks and 40 MusicBrainz lookups a day are counted for all the owner's devices, and only one device ever asks for an album: the first to claim it. Swaps on their own follow extra rules: at most 10 albums a day for all devices, nothing for 24 hours after a failed swap or any undo, never an album undone before (kept in the shared store), and the album is read again right before the swap so a song marked unreleased since keeps the whole album as it is. The first 7 days after better copies' first pass only log `Would swap ...` to the changes log; turning better copies off resets that week. With `betterCopies` off, per-artist "Look for better copies" (`lidarr_hunt`) runs as before.
+
+| Command | Args | Returns |
+|---|---|---|
+| `better_copies_status` | – | `BetterCopiesStatus = { practiceUntil: number \| null, paused: bool }`: the practice week's end (unix seconds) while it runs, and whether swaps wait for the next day. |
 
 ### Platter Bridge
 Optional: the home side on a server (docs/BRIDGE.md). Settings > Bridge.
@@ -4219,6 +4225,9 @@ The rest of the fields, with their defaults:
 | `followGet` | bool, true | New albums from followed artists are got through Lidarr; off only shows them on the release radar. Synced. |
 | `followGetSingles` | bool, false | Singles from followed artists are got too. Synced. |
 | `autoRequestCap` | 1, 2, 3 (default), 5 or 10 | Most new albums got a day for followed artists. Synced. |
+| `betterCopies` | bool, true | Better copies of the whole library's released albums, swapped in under the upgrade rules. Synced. |
+| `betterCopiesAim` | `lossless` (default) or `hiRes` | What better copies aim for. Synced. |
+| `upgradesAsk` | bool, false | Ask before each upgrade swap; off swaps on their own. Synced. |
 | `identifyBySound` | bool, false | Fingerprint songs on this computer and look them up on AcoustID (only the fingerprint and length are sent). This device only. |
 | `soundIdScope` | `"untagged"` (default) or `"all"` | Which songs: files with no recording id or ISRC, or every song. This device only. |
 | `subsonicCheckMinutes` | 1, 5 (default), 15, 30 or 60 | Minutes between asking each Subsonic server whether its music changed. This device only. |

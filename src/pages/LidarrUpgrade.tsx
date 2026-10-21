@@ -11,7 +11,7 @@ import { Dialog } from "../components/Dialog";
 import { Select } from "../components/Select";
 import { Skeleton } from "../components/Skeleton";
 import { backend } from "../lib/backend";
-import type { AlbumUpgrade, AppError, OfferSong, ShareMap, UpgradeCandidates, UpgradeConfirmed, UpgradeOffer, UpgradeRecord, UpgradeUnder } from "../lib/types";
+import type { AlbumUpgrade, AppError, BetterCopiesStatus, OfferSong, ShareMap, UpgradeCandidates, UpgradeConfirmed, UpgradeOffer, UpgradeRecord, UpgradeUnder } from "../lib/types";
 import { nav } from "../stores/router";
 import { updateSettings, useSettings } from "../stores/settings";
 import { toast, useToasts } from "../stores/toasts";
@@ -555,6 +555,27 @@ export function StagingFolderField({ ids }: { ids: Ids }) {
       }}
     />
   );
+}
+
+/** Better copies' practice week, or a pause after a failed or undone swap. */
+export function BetterCopiesNote() {
+  const [st, setSt] = useState<BetterCopiesStatus | null>(null);
+  useEffect(() => {
+    let live = true;
+    backend.betterCopiesStatus().then(
+      (x) => live && setSt(x),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (st?.paused) return <>Paused for a day: a swap failed or was undone.</>;
+  if (st?.practiceUntil) {
+    const day = new Date(st.practiceUntil * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    return <>Practice week until {day}: nothing is swapped yet. The changes log lists what would be.</>;
+  }
+  return null;
 }
 
 /** The prefix a provenance note starts with when it names an official source. */

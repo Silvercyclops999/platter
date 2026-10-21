@@ -30,7 +30,8 @@ const lossy = () =>
 
 async function setUp(demo: UpgradeDemo | undefined, patch: Record<string, unknown> = {}) {
   mock.lidarr.reset("ready");
-  await mock.settingsSet({ ...DEFAULT_SETTINGS, lidarrUrl: "http://10.20.30.40:8686", lidarrStagingFolder: MOCK_STAGING, ...patch });
+  // Asking before each swap, as these tests walk through the dialog.
+  await mock.settingsSet({ ...DEFAULT_SETTINGS, lidarrUrl: "http://10.20.30.40:8686", lidarrStagingFolder: MOCK_STAGING, upgradesAsk: true, ...patch });
   mock.upgrades.reset(demo);
   // The demo's album: the one with the upgrade.
   if (demo) {
@@ -204,6 +205,25 @@ describe("Settings > Lidarr upgrades", () => {
     await waitFor(() => expect(document.querySelector('[data-setting="upgradesAsk"]')).not.toBeNull());
     expect(document.querySelector('[data-setting="upgradeOfficialPrefix"]')).not.toBeNull();
     expect(document.querySelector('[data-setting="lidarrUpgrades"]')).not.toBeNull();
+  });
+
+  it("has Better copies on, with Aim for under More, and says when it's practising or paused", async () => {
+    const user = userEvent.setup();
+    await setUp(undefined, { upgradesAsk: false });
+    mock.betterStatus = { practiceUntil: 1_800_604_800, paused: false };
+    render(<SettingsPage />);
+    const row = await screen.findByRole("switch", { name: "Better copies" });
+    expect(row).toBeChecked();
+    expect(await screen.findByText(/^Practice week until .*: nothing is swapped yet\./)).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Ask before each swap" })).not.toBeChecked();
+    expect(document.querySelector('[data-setting="betterCopiesAim"]')).not.toBeNull();
+    await user.click(row);
+    await waitFor(async () => expect((await mock.settingsGet()).betterCopies).toBe(false));
+    await waitFor(() => expect(document.querySelector('[data-setting="betterCopiesAim"]')).toBeNull());
+    mock.betterStatus = { practiceUntil: null, paused: true };
+    await user.click(row);
+    expect(await screen.findByText("Paused for a day: a swap failed or was undone.")).toBeInTheDocument();
+    mock.betterStatus = { practiceUntil: null, paused: false };
   });
 
   it("keeps the share mapping on this computer and refuses a backup folder inside the music", async () => {

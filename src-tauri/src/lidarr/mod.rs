@@ -10,6 +10,7 @@ pub mod changes;
 pub mod check;
 pub mod catchup;
 pub mod commands;
+pub mod better;
 pub mod hunt;
 pub mod lookup;
 pub mod homeside;

@@ -17,7 +17,7 @@ import type {
   LidarrTarget,
   LidarrWork,
 } from "../lib/types";
-import { updateSettings } from "../stores/settings";
+import { updateSettings, useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import "./lidarr-modes.css";
 
@@ -247,8 +247,23 @@ export function LidarrWorkStatus() {
 
 const MODE_LABEL: Record<LidarrModeSetting, string> = { auto: "Auto", managed: "Managed", protected: "Protected" };
 
+/** Better copies aim for hi-res: Lidarr needs a profile that stops at FLAC 24bit. */
+export function HiResProfileButton() {
+  const [proposal, setProposal] = useState<LidarrProposal | null>(null);
+  return (
+    <>
+      <Button size="sm" variant="ghost" onClick={() => void backend.lidarrHiresPreview().then(setProposal, (e) => toast.info(errText(e)))}>
+        Add the Platter Hi-Res profile
+      </Button>
+      <ChangeDialog proposal={proposal} onClose={() => setProposal(null)} />
+    </>
+  );
+}
+
 /** Every artist with its mode and why; switch either way (Managed asks twice). */
 export function LidarrArtistsList() {
+  // Better copies for the whole library stand in for each artist's own.
+  const wholeLibrary = useSettings((s) => s.settings?.betterCopies !== false);
   const [modes, setModes] = useState<LidarrArtistMode[] | null>(null);
   const [prefs, setPrefs] = useState<Record<string, LidarrArtistPrefs>>({});
   const [managing, setManaging] = useState<{ artist: LidarrArtistMode; step: 1 | 2 } | null>(null);
@@ -324,10 +339,12 @@ export function LidarrArtistsList() {
                     />{" "}
                     Add new official albums automatically
                   </label>
-                  <label>
-                    <input type="checkbox" checked={!!p?.hunt} onChange={(e) => void choose(a, { hunt: e.target.checked })} /> Look for better copies
-                  </label>
-                  {p?.hunt && (
+                  {!wholeLibrary && (
+                    <label>
+                      <input type="checkbox" checked={!!p?.hunt} onChange={(e) => void choose(a, { hunt: e.target.checked })} /> Look for better copies
+                    </label>
+                  )}
+                  {!wholeLibrary && p?.hunt && (
                     <select
                       className="setting-select"
                       aria-label={`Better copies for ${a.name}`}
@@ -338,7 +355,7 @@ export function LidarrArtistsList() {
                       <option value="hiRes">Hi-res 24-bit</option>
                     </select>
                   )}
-                  {p?.hunt && p.target === "hiRes" && (
+                  {!wholeLibrary && p?.hunt && p.target === "hiRes" && (
                     <Button size="sm" variant="ghost" onClick={() => void backend.lidarrHiresPreview().then(setProposal, (e) => toast.info(errText(e)))}>
                       Add the Platter Hi-Res profile
                     </Button>

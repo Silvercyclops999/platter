@@ -331,12 +331,17 @@ struct Song {
 pub(super) struct AlbumFiles {
     pub(super) title: String,
     pub(super) artist: String,
-    artist_id: String,
+    pub(super) artist_id: String,
     pub(super) unreleased: bool,
     songs: Vec<Song>,
 }
 
 impl AlbumFiles {
+    /// Nothing in the album is unreleased: not the album, not one song.
+    pub(super) fn all_released(&self) -> bool {
+        !self.unreleased && self.songs.iter().all(|s| !s.unreleased)
+    }
+
     /// The lowest quality among released songs.
     pub(super) fn current(&self) -> Option<(Rank, String)> {
         self.songs.iter().filter(|s| !s.unreleased).min_by_key(|s| s.rank).map(|s| (s.rank, s.rank.label(s.codec.as_deref())))
@@ -498,6 +503,11 @@ impl Upgrades {
         self.records().into_iter().find(|r| r.request.id == id).ok_or_else(|| AppError::NotFound("That upgrade isn't on this computer any more.".into()))
     }
 
+    /// Files can be swapped from this device (the phone never swaps).
+    pub(super) fn can_swap_here(&self) -> bool {
+        self.inner.hosts.host().is_some()
+    }
+
     fn staging(&self) -> String {
         crate::settings::load(&self.inner.db).lidarr_staging_folder
     }
@@ -575,6 +585,12 @@ impl Upgrades {
 
     async fn request_locked(&self, album_id: &str) -> AppResult<UpgradeRecord> {
         self.request_aimed(album_id, None).await
+    }
+
+    /// [`Self::request_aimed`] one at a time with swaps, undos and requests.
+    pub(super) async fn request_aimed_one(&self, album_id: &str, floor: Option<Rank>) -> AppResult<UpgradeRecord> {
+        let _one = self.lock.lock().await;
+        self.request_aimed(album_id, floor).await
     }
 
     /// [`Self::request`], asking Lidarr for at least `floor` (a profile
@@ -929,6 +945,10 @@ impl Upgrades {
         if let Some(s) = r.swaps.iter_mut().find(|s| s.id == run.id) {
             s.undone = true;
         }
+        // Something swapped wasn't wanted: no more swaps on their own for a
+        // day, and this album stays as it is.
+        self.pause_better();
+        self.keep_as_is(&r.album_id);
         r.failure = None;
         if !rescanned {
             r.request.notes.push("The old files are back. Plex didn't take the rescan, so it shows them after its next scan.".into());
@@ -939,31 +959,62 @@ impl Upgrades {
     }
 
     /// Swap on its own what the rules allow, for upgrades Lidarr has
-    /// imported, when "ask before each swap" is off.
+    /// imported, with better copies on and "ask before each swap" off. The
+    /// first week only lists what would be swapped; then at most
+    /// [`super::better::DAY_SWAPS`] albums a day for all the user's devices,
+    /// nothing for a day after a failure or an undo, and never an album
+    /// holding anything unreleased or undone before.
     pub async fn auto_swap(&self) -> usize {
-        if crate::settings::load(&self.inner.db).upgrades_ask {
+        let s = crate::settings::load(&self.inner.db);
+        // With better copies off, every swap waits for a person.
+        if !s.better_copies {
+            self.reset_better();
+            return 0;
+        }
+        if s.upgrades_ask || self.better_paused() {
             return 0;
         }
         let mut n = 0;
         let ready: Vec<UpgradeRecord> =
             self.records().into_iter().filter(|r| r.request.state == RequestState::Imported && r.swaps.is_empty() && r.failure.is_none()).collect();
-        let practice = self.inner.lidarr.practice_active();
+        let practice = self.inner.lidarr.practice_active() || self.better_practice();
         for r in ready {
+            if self.swapped_today() >= super::better::DAY_SWAPS {
+                break;
+            }
+            if self.kept_as_is(&r.album_id) {
+                continue;
+            }
             let Ok(o) = self.offer(&r.request.id).await else { continue };
-            if o.status == OfferStatus::Ready && !o.ask_each && !o.upgrade.is_empty() {
-                if practice {
-                    // Practice mode: say what would have been swapped, once.
-                    if self.inner.lidarr.practice_noted(&format!("swap:{}", r.request.id)) {
-                        let _ = self.inner.lidarr.log_practice(
-                            &format!("Would swap {} songs on {} by {}", o.upgrade.len(), r.request.title, r.request.artist),
-                            "Current copies",
-                            "Better copies from staging",
-                        );
-                    }
-                    continue;
+            if o.status != OfferStatus::Ready || o.ask_each || o.upgrade.is_empty() {
+                continue;
+            }
+            // Read once more: a song marked unreleased since keeps the whole album as it is.
+            let released = self.album(&r.album_id).await.is_ok_and(|a| a.all_released());
+            if !released || o.kept.iter().any(|k| k.keep == Some(Keep::Unreleased)) {
+                continue;
+            }
+            if practice {
+                // Practice: say what would have been swapped, once.
+                if self.inner.lidarr.practice_noted(&format!("swap:{}", r.request.id)) {
+                    let _ = self.inner.lidarr.log_practice(
+                        &format!("Would swap {} songs on {} by {}", o.upgrade.len(), r.request.title, r.request.artist),
+                        "Current copies",
+                        "Better copies from staging",
+                    );
                 }
-                if self.swap(&r.request.id, None).await.is_ok() {
+                continue;
+            }
+            match self.swap(&r.request.id, None).await {
+                Ok(_) => {
                     n += 1;
+                    self.count_swap();
+                }
+                Err(e) => {
+                    // Any doubt stops swaps on their own for a day.
+                    tracing::warn!("upgrades: {} by {} not swapped: {e}", r.request.title, r.request.artist);
+                    self.pause_better();
+                    break;
                 }
             }
         }
@@ -1152,9 +1203,14 @@ pub async fn watch(u: Upgrades) {
     tokio::time::sleep(Duration::from_secs(45)).await;
     let mut last_hunt: Option<std::time::Instant> = None;
     loop {
-        // "Look for better copies" for protected artists, once a day (each
-        // album at most weekly).
-        if last_hunt.is_none_or(|t| t.elapsed() > Duration::from_secs(86_400)) {
+        // Better copies for the whole library (once a day for all the
+        // user's devices), or with it off "Look for better copies" for
+        // protected artists, once a day. Each album at most weekly.
+        if crate::settings::load(u.inner_db()).better_copies {
+            if let Err(e) = u.better_copies().await {
+                tracing::debug!("better copies: {e}");
+            }
+        } else if last_hunt.is_none_or(|t| t.elapsed() > Duration::from_secs(86_400)) {
             last_hunt = Some(std::time::Instant::now());
             if let Err(e) = u.hunt().await {
                 tracing::debug!("better copies: {e}");

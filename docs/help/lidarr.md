@@ -49,7 +49,11 @@ For the first week after setup, Platter only writes down what it would add or sw
 
 ## Upgrades
 
-With a staging folder set, an album's menu has **Find a better copy**. When the copy arrives, the album page shows what would change. Swaps run on this computer, so fill in **Where this computer reaches your music** first. Replaced files go to a _to_delete folder Plex ignores, never deleted, and **Undo** puts them back. **Upgrades: ask before each swap** decides if Platter waits for you.
+With a staging folder set, an album's menu has **Find a better copy**. When the copy arrives, the album page shows what would change. Swaps run on this computer, so fill in **Where this computer reaches your music** first. Replaced files go to a _to_delete folder Plex ignores, never deleted, and **Undo** puts them back. **Ask before each swap** decides if Platter waits for you.
+
+## Better copies
+
+With **Better copies** on, Platter finds better copies of your released albums by itself, a few a day, lowest quality first, up to **Aim for**. They download into the staging folder, and each song swaps in only when it's proven the same recording. An album with anything unreleased in it, even one song, is never touched. For the first week Platter only lists what it would swap in the changes log. After that at most 10 albums swap a day, and a swap that fails or that you undo stops swaps for a day. An album you undo stays as it is. Albums Lidarr got for you get better copies from Lidarr itself.
 
 ## Requests
 

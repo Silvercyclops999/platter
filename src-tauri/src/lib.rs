@@ -2186,6 +2186,7 @@ pub fn run() {
             lidarr::commands::lidarr_staged_add,
             lidarr::commands::lidarr_staged_undo,
             lidarr::commands::lidarr_hunt,
+            lidarr::commands::better_copies_status,
             lidarr::commands::music_share_get,
             lidarr::commands::music_share_set,
             lidarr::commands::music_share_plex_folders,
