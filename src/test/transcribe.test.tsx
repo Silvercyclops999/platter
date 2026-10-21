@@ -104,13 +104,16 @@ describe("Settings", () => {
         <SettingsPage />
       </>,
     );
-    await userEvent.click(await screen.findByRole("button", { name: "Write down the words" }));
+    // Looked for in the lyrics view's buttons only: role queries over the
+    // whole Settings page take seconds on a loaded machine.
+    const offer = () => document.querySelector<HTMLElement>(".lyrics-page__empty-actions") ?? document.createElement("div");
+    await userEvent.click(await waitFor(() => within(offer()).getByRole("button", { name: "Write down the words" })));
     // Said plainly in the lyrics view and on the setting.
-    await waitFor(() => expect(screen.queryAllByRole("alert").filter((a) => text.test(a.textContent ?? "")).length).toBe(2), { timeout: 3000 });
+    const said = () => [...document.querySelectorAll('[role="alert"]')].filter((a) => text.test(a.textContent ?? "")).length;
+    await waitFor(() => expect(said()).toBe(2), { timeout: 5000 });
     expect(useTranscribe.getState().status?.models[0].installed).toBe(false);
     // Trying again works.
-    const view = document.querySelector<HTMLElement>(".lyrics-page__empty-wrap")!;
-    await userEvent.click(within(view).getByRole("button", { name: "Try again" }));
+    await userEvent.click(within(offer()).getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(useTranscribe.getState().status?.models[0].installed).toBe(true), { timeout: 3000 });
   });
 
