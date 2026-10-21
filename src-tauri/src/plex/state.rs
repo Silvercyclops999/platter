@@ -74,6 +74,26 @@ struct Current {
     client: Option<PlexClient>,
 }
 
+/// Whether the signed-in account owns the server it uses, or None when
+/// signed out. Until the server answers (Plex still being looked for, or
+/// out of reach), the server picked last time counts: its owner stays its
+/// owner, and someone it's only shared with stays refused.
+fn owner_of(s: &Session) -> Option<bool> {
+    s.account.as_ref()?;
+    if let Some(c) = &s.current {
+        return Some(c.server.owned);
+    }
+    let picked = s.cache.selected.as_deref();
+    let owned = picked.and_then(|id| {
+        s.servers
+            .iter()
+            .find(|x| x.machine_id == id)
+            .map(|x| x.owned)
+            .or_else(|| s.cache.servers.iter().find(|x| x.machine_id == id).map(|x| x.owned))
+    });
+    Some(owned.unwrap_or(false))
+}
+
 #[derive(Debug, Default)]
 struct Session {
     account: Option<Token>,
@@ -540,8 +560,7 @@ impl PlexState {
     /// The signed-in account owns the connected server (only the owner
     /// gets music through Lidarr, and links to Bridges).
     pub async fn owns_current_server(&self) -> bool {
-        let s = self.inner.session.read().await;
-        s.account.is_some() && s.current.as_ref().is_some_and(|c| c.server.owned)
+        owner_of(&*self.inner.session.read().await).unwrap_or(false)
     }
 
     /// The connected server's machine id, the token used for it, and
@@ -564,7 +583,7 @@ impl PlexState {
                 n => Some(n == 2),
             };
         };
-        let owns = s.account.as_ref().map(|_| s.current.as_ref().is_some_and(|c| c.server.owned));
+        let owns = owner_of(&s);
         self.inner.owner.store(owns.map_or(0, |o| if o { 2 } else { 1 }), Relaxed);
         owns
     }
@@ -1778,6 +1797,29 @@ mod tests {
             let _w = st.inner.session.write().await;
             assert_eq!(st.owns_current_server_now(), Some(owned));
         }
+    }
+
+    #[tokio::test]
+    async fn the_owner_stays_the_owner_while_plex_is_out_of_reach() {
+        let dir = tempfile::tempdir().unwrap();
+        let (st, _rec) = state(dir.path(), "http://127.0.0.1:9", Arc::new(MemoryStore::new()));
+        let cached = |id: &str, owned: bool| discovery::CachedServer { machine_id: id.into(), name: id.into(), owned, version: None, connections: Vec::new(), last_uri: None, last_kind: None };
+        {
+            // Signed in, the server picked last time known, nothing connected yet.
+            let mut s = st.inner.session.write().await;
+            s.account = Some(Token::new(ACCT).unwrap());
+            s.cache.servers = vec![cached("mine", true), cached("theirs", false)];
+            s.cache.selected = Some("mine".into());
+        }
+        assert_eq!(st.owns_current_server_now(), Some(true));
+        assert!(st.owns_current_server().await);
+        // Someone the server is only shared with is still refused.
+        st.inner.session.write().await.cache.selected = Some("theirs".into());
+        assert_eq!(st.owns_current_server_now(), Some(false));
+        assert!(!st.owns_current_server().await);
+        // No server picked yet: nobody's.
+        st.inner.session.write().await.cache.selected = None;
+        assert_eq!(st.owns_current_server_now(), Some(false));
     }
 
     #[tokio::test]
