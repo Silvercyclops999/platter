@@ -1,4 +1,4 @@
-import { Copy, Link, RefreshCw, UserMinus, UsersRound, X } from "lucide-react";
+import { Copy, Link, RefreshCw, UserMinus, UsersRound } from "lucide-react";
 import { HelpButton } from "../help/HelpButton";
 import { useEffect, useRef, useState } from "react";
 import { Button, IconButton } from "../components/Button";
@@ -272,39 +272,19 @@ export function InviteDialog() {
   );
 }
 
-const CARD_KEY = "platter.session-card.v1"; // gitleaks:allow (localStorage key name, not a secret)
-
-function cardDismissed(): boolean {
-  try {
-    return localStorage.getItem(CARD_KEY) === "dismissed";
-  } catch {
-    return false;
-  }
-}
-
 /**
- * "Listen along" in the queue panel (dismissable) and the device picker:
- * starts a listening session on what's playing. Hidden while in one.
+ * "Listen along" in the device picker: starts a listening session on
+ * what's playing. Hidden while in one.
  */
-export function SessionCard({ dismissable = false }: { dismissable?: boolean }) {
+export function SessionCard() {
   const role = useSocial((s) => s.listen.role);
-  const [hidden, setHidden] = useState(() => dismissable && cardDismissed());
-  if (!listenAlong.enabled || role !== "none" || hidden) return null;
-  const dismiss = () => {
-    setHidden(true);
-    try {
-      localStorage.setItem(CARD_KEY, "dismissed");
-    } catch {
-      /* this session only */
-    }
-  };
+  if (!listenAlong.enabled || role !== "none") return null;
   return (
     <div className="session-card" role="group" aria-labelledby="session-card-title">
       <div className="session-card__head">
         <div id="session-card-title" className="session-card__title">
           Listen along
         </div>
-        {dismissable && <IconButton size="sm" label="Dismiss" icon={<X size={16} />} onClick={dismiss} />}
       </div>
       <p className="session-card__text">
         Start a listening session and people can listen with you, from anywhere, from your Plex library or their own. They add songs, and can play, pause

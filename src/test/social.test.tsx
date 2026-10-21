@@ -260,7 +260,7 @@ const join = (link = MOCK_INVITE) =>
   });
 
 describe("listening sessions", () => {
-  it("the host starts from the queue card, gets a one-time invite with a QR code, sees who joins, removes them, and ends it", async () => {
+  it("the host starts from the Listen along card, gets a one-time invite with a QR code, sees who joins, removes them, and ends it", async () => {
     const copied: string[] = [];
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText: (t: string) => (copied.push(t), Promise.resolve()) },
@@ -268,7 +268,7 @@ describe("listening sessions", () => {
     });
     render(
       <>
-        <SessionCard dismissable />
+        <SessionCard />
         <ListenStrip />
       </>,
     );
@@ -317,15 +317,6 @@ describe("listening sessions", () => {
     await userEvent.click(screen.getByRole("button", { name: "End session" }));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Listening session" })).toBeNull());
     expect(toasts()).toContain("Listening session ended");
-  });
-
-  it("the queue card can be dismissed for good", async () => {
-    const { unmount } = render(<SessionCard dismissable />);
-    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(screen.queryByRole("group", { name: "Listen along" })).toBeNull();
-    unmount();
-    render(<SessionCard dismissable />);
-    expect(screen.queryByRole("group", { name: "Listen along" })).toBeNull();
   });
 
   it("an invite link joins, and a host that goes away, ends it or removes you is said so", async () => {

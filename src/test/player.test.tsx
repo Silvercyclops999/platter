@@ -96,6 +96,8 @@ describe("QueuePanel", () => {
     const user1 = screen.getByRole("region", { name: "Next in queue" });
     expect(within(user1).getByText(other.title)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear queue" })).toBeInTheDocument();
+    // No Listen along card between Now playing and the queue: it lives in the device picker.
+    expect(screen.queryByRole("group", { name: "Listen along" })).not.toBeInTheDocument();
 
     const next = screen.getByRole("region", { name: `Next from: ${album.title}` });
     expect(body(within(next).getAllByRole("row"))).toHaveLength(tracks.length - 2);
