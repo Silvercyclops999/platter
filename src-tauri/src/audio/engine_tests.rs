@@ -696,6 +696,21 @@ async fn fully_streamed_track_is_saved_to_cache() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stream_the_server_capped_is_not_kept_as_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Arc::new(super::cache::DiskCache::new(dir.path(), 50 << 20).unwrap());
+    let mut r = rig_with(RATE, cfg(), Some(cache.clone())).await;
+    r.server.add("/t/a", Route { body: wav_tone(RATE, 2, 20_000, 440.0, 0.5), ..Default::default() });
+    let mut tr = t("a");
+    tr.codec = Some("flac".into());
+    r.resolver.capped.lock().insert("a".into());
+    r.engine.load(tr.clone(), "ia".into(), 0, true).unwrap();
+    collect_until(&mut r.events, is_drained, Duration::from_secs(10)).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!cache.contains(&super::cache::cache_key(&tr)), "an MP3 of a FLAC isn't the FLAC");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn precacher_downloads_wanted_tracks_in_order() {
     let dir = tempfile::tempdir().unwrap();
     let cache = Arc::new(super::cache::DiskCache::new(dir.path(), 50 << 20).unwrap());

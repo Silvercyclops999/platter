@@ -404,11 +404,14 @@ impl TrackResolver for FakeResolver {
         if self.unreachable.lock().contains(&track.id) {
             return Err(AppError::Network("server unreachable".into()));
         }
+        // A capped stream says the format it was turned into (the test
+        // files are all WAV).
+        let capped = self.capped.lock().contains(&track.id);
         Ok(StreamSource {
             url: format!("{}/t/{}", self.base, track.id),
             headers: vec![("X-Plex-Token".into(), "test-token".into())],
             size: None,
-            codec_hint: None,
+            codec_hint: capped.then(|| "wav".into()),
         })
     }
     async fn transcode(&self, track: &Track) -> AppResult<StreamSource> {

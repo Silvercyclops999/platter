@@ -2264,19 +2264,23 @@ fn open_from(
         stats: Some(stats.clone()),
         origin,
         from: SourceFrom::Server,
+        // A stream the server capped (an MP3 of a FLAC, away from home) is
+        // not the file, so it isn't kept as the file.
+        cache_from: (origin == Origin::Stream && !capped_stream(track, given.as_deref())).then_some(stats),
         codec: given,
-        cache_from: (origin == Origin::Stream).then_some(stats),
     })
 }
 
-/// What the signal path shows about an opened track. A stream whose format
-/// isn't the file's is a transcode the server chose (a quality cap).
-fn source_info(track: &Track, o: &Opened, fallback: bool, audio: Option<TrackAudio>) -> SourceInfo {
+/// A stream whose format isn't the file's: a transcode the server chose (a
+/// quality cap).
+fn capped_stream(track: &Track, given: Option<&str>) -> bool {
     let low = |c: Option<&str>| c.map(str::to_ascii_lowercase);
-    let capped = o.origin == Origin::Stream
-        && o.codec.is_some()
-        && track.codec.is_some()
-        && low(o.codec.as_deref()) != low(track.codec.as_deref());
+    given.is_some() && track.codec.is_some() && low(given) != low(track.codec.as_deref())
+}
+
+/// What the signal path shows about an opened track.
+fn source_info(track: &Track, o: &Opened, fallback: bool, audio: Option<TrackAudio>) -> SourceInfo {
+    let capped = o.origin == Origin::Stream && capped_stream(track, o.codec.as_deref());
     SourceInfo {
         from: o.from,
         transcoded: fallback || o.origin == Origin::Transcode || capped,
