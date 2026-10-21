@@ -94,7 +94,8 @@ describe("search", () => {
     const parts = mock.catalogue.parts.filter((p) => p.includes(":low tide:"));
     expect([...parts].sort()).toEqual(["albums:low tide:lidarr", "artists:low tide:lidarr", "songs:low tide:musicBrainz"]);
     expect(parts.indexOf("songs:low tide:musicBrainz"), "songs come from MusicBrainz, later").toBe(2);
-    expect(await within(list).findByRole("button", { name: /^Get the album, Low Tide Radio/ }, SLOW)).toBeInTheDocument();
+    // A song you don't have plays on tap, so its row says Get.
+    expect(await within(list).findByLabelText(/^Low Tide Radio, Song.*a tap gets it and plays it$/, {}, SLOW)).toBeInTheDocument();
   });
 
   it("weaves one catalogue row after every few library rows", () => {
