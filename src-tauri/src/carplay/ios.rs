@@ -351,7 +351,7 @@ fn refresh_like(app: &AppHandle<Wry>, track: Option<String>) {
 }
 
 /// Whether the library can be shown: signed in, and the server in reach.
-fn reach(app: &AppHandle<Wry>) -> Reach {
+pub(super) fn reach(app: &AppHandle<Wry>) -> Reach {
     let Some(plex) = app.try_state::<PlexState>() else { return Reach::Online };
     let others = app
         .try_state::<Backends>()

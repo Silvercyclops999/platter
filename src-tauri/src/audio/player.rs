@@ -786,12 +786,17 @@ impl PlayerHandle {
 
     /// Queue a whole context (an album, a playlist...) at the end of the queue.
     pub async fn queue_context(&self, context: PlayContext) -> AppResult<()> {
+        self.queue_context_at(context, AddAt::End).await
+    }
+
+    /// Queue a whole context next or at the end ("play Donda next").
+    pub async fn queue_context_at(&self, context: PlayContext, at: AddAt) -> AppResult<()> {
         let resolved = self.lookup.context(&context).await?;
         if resolved.tracks.is_empty() {
             return Err(AppError::Invalid("nothing to play".into()));
         }
         let (tracks, _) = self.keep_playable(resolved.tracks, None).await?;
-        self.call(|r| Cmd::QueueAdd(tracks, AddAt::End, r)).await
+        self.call(|r| Cmd::QueueAdd(tracks, at, r)).await
     }
 
     /// While only music on this computer can play, leaves the rest out (and

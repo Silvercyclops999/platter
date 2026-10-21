@@ -1133,6 +1133,8 @@ export interface Settings {
   carplayResume: boolean;
   /** CarPlay: with no signal, lists show only what's downloaded. This device only. */
   carplayOfflineDownloads: boolean;
+  /** Telling Siri "I don't like this song" also hides it (off: only skips). Synced. */
+  siriDislikeHides: boolean;
   /** A tap or click on the cover in now playing opens the visualizer. Synced. */
   visualizerCoverTap: boolean;
   /** The visualizer's last style, remembered. Synced. */
@@ -1814,6 +1816,7 @@ export const DEFAULT_SETTINGS: Settings = {
   phoneHaptics: true,
   carplayResume: true,
   carplayOfflineDownloads: true,
+  siriDislikeHides: true,
   visualizerCoverTap: true,
   visualizerStyle: "grooves",
   deviceFormat: "original",

@@ -23,6 +23,7 @@ import { dockInset } from "../phone/dockInset";
 import { PhoneShell } from "../phone/PhoneShell";
 import { CLOSE_MS } from "../phone/NowPlaying";
 import { phone, usePhoneUi } from "../phone/phoneUi";
+import { SIRI_PHRASES } from "../phone/phoneSettings";
 import { dropIndex } from "../phone/Sheets";
 import { cancelSleep, due, sleepLabel, startSleep, useSleep } from "../phone/sleepTimer";
 import { plateText, remaining } from "../phone/bits";
@@ -615,6 +616,19 @@ describe("phone settings", () => {
       expect(s.carplayResume).toBe(false);
       expect(s.carplayOfflineDownloads).toBe(false);
     });
+  });
+
+  it("Siri has a row of things to say and a dislike choice that hides by default", async () => {
+    render(<SettingsPage section="Downloads and devices" />);
+    expect(await screen.findByText("Ask Siri")).toBeInTheDocument();
+    for (const said of ["on Platter", "Kanye West on shuffle", "play more like this", "I like this song", "Runaway next"]) {
+      expect(SIRI_PHRASES).toContain(said);
+    }
+    const row = document.querySelector('[data-setting="siriDislikeHides"]') as HTMLElement;
+    expect(within(row).getByText("When you tell Siri you don't like a song")).toBeInTheDocument();
+    expect(within(row).getByText("Hide it and skip")).toBeInTheDocument();
+    await backend.settingsSet({ siriDislikeHides: false });
+    expect((await backend.settingsGet()).siriDislikeHides).toBe(false);
   });
 
   it("keeps only the offered counts of recent songs", async () => {
