@@ -46,7 +46,7 @@ export function EraPage({ artistId, name }: { artistId: string; name: string }) 
   const ids = data ? data.groups.flatMap((g) => g.tracks.map((t) => t.id)) : [];
   const nowId = usePlayer((s) => s.state?.track?.id);
   const status = usePlayer((s) => s.state?.status);
-  const playingHere = usePlayer((s) => s.state?.queue.context?.kind === "tracks" && !!nowId && ids.includes(nowId) && s.state?.status === "playing");
+  const playingHere = usePlayer((s) => s.state?.queue.context?.kind === "tracks" && s.state.queue.context.id !== "albums" && !!nowId && ids.includes(nowId) && s.state?.status === "playing");
   const play = () => (playingHere ? player.toggle() : void player.playTracks(ids));
   usePageBar(era ? `${era.name} era` : undefined, playingHere, play);
   const { header, column, step, compact } = useTitleStep(era?.name);

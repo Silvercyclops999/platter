@@ -29,7 +29,7 @@ fn visible(c: &Connection, id: &str, view: TagView, server: &ServerView) -> AppR
         crate::tags::store::visible_clause(view),
         server.clause("al", "album")
     );
-    Ok(c.query_row(&sql, [id], |_| Ok(())).optional()?.is_some())
+    Ok(c.prepare_cached(&sql)?.query_row([id], |_| Ok(())).optional()?.is_some())
 }
 
 /// Every album in view, in random order.
@@ -45,13 +45,16 @@ fn all_albums(c: &Connection, view: TagView, server: &ServerView) -> AppResult<V
 
 /// The songs to play: `album_ids` (every album in view when empty) in a
 /// random order, each in disc and track order, hidden songs and artists
-/// left out, at most [`MAX_ALBUMS`] albums with songs left.
+/// left out, at most [`MAX_ALBUMS`] albums with songs left. While only
+/// music on this computer can play, `playable` holds what can, and albums
+/// with none of it are passed over (the player skips the rest and says so).
 pub fn songs(
     c: &Connection,
     album_ids: &[String],
     view: TagView,
     server: &ServerView,
     hidden: &HiddenSet,
+    playable: Option<&HashSet<String>>,
     rng: &mut impl rand::Rng,
 ) -> AppResult<Vec<String>> {
     let order = if album_ids.is_empty() {
@@ -75,7 +78,7 @@ pub fn songs(
         let mut tracks = queries::album_tracks(c, &id)?;
         tracks.retain(|t| !hidden.hides(&t.id, &t.artist_id));
         crate::tags::store::drop_hidden(c, &mut tracks, view)?;
-        if tracks.is_empty() {
+        if tracks.is_empty() || playable.is_some_and(|ok| !tracks.iter().any(|t| ok.contains(&t.id))) {
             continue;
         }
         albums += 1;
@@ -89,13 +92,21 @@ pub fn songs(
 pub async fn album_shuffle_tracks(
     db: State<'_, DbHandle>,
     hidden: State<'_, crate::hidden::Hidden>,
+    backends: State<'_, crate::backend::Backends>,
+    cache: State<'_, crate::monitor::cached::AudioCacheDir>,
+    downloads: State<'_, crate::downloads::Downloads>,
     album_ids: Vec<String>,
 ) -> AppResult<Vec<String>> {
     let view = db.tag_view();
     let server = db.server_view();
     let hidden = hidden.ids().get();
+    let local = crate::audio::source::LocalFiles(std::sync::Arc::new(downloads.inner().clone()));
+    let playable = crate::bridge::OfflinePlay::new(cache.0.clone())
+        .with_downloads(local)
+        .playable(backends.cached_only())
+        .await;
     let ids = db
-        .read_async(move |c| songs(c, &album_ids, view, &server, &hidden, &mut rand::rng()))
+        .read_async(move |c| songs(c, &album_ids, view, &server, &hidden, playable.as_ref(), &mut rand::rng()))
         .await?;
     if ids.is_empty() {
         return Err(AppError::Invalid(NOTHING.into()));
@@ -141,7 +152,7 @@ mod tests {
 
     fn run(c: &Connection, albums: &[String], hidden: &HiddenSet, seed: u64) -> Vec<String> {
         let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-        songs(c, albums, TagView::default(), &ServerView::All, hidden, &mut rng).unwrap()
+        songs(c, albums, TagView::default(), &ServerView::All, hidden, None, &mut rng).unwrap()
     }
 
     /// The albums in play order, one entry per run of songs.
@@ -215,7 +226,7 @@ mod tests {
         c.execute("UPDATE albums SET id = ?1 || ':' || id WHERE id IN ('a1', 'a2')", [tag]).unwrap();
         c.execute("UPDATE tracks SET album_id = ?1 || ':' || album_id WHERE album_id IN ('a1', 'a2')", [tag]).unwrap();
         let mut rng = rand::rngs::StdRng::seed_from_u64(5);
-        let got = songs(&c, &[], TagView::default(), &ServerView::Server(tag.into()), &HiddenSet::default(), &mut rng).unwrap();
+        let got = songs(&c, &[], TagView::default(), &ServerView::Server(tag.into()), &HiddenSet::default(), None, &mut rng).unwrap();
         let mut order = runs(&got);
         order.sort();
         assert_eq!(order, ids(&["a1", "a2"]));
@@ -240,5 +251,21 @@ mod tests {
         }
         assert_eq!(runs(&run(&c, &all, &HiddenSet::default(), 9)).len(), MAX_ALBUMS);
         assert_eq!(runs(&run(&c, &[], &HiddenSet::default(), 9)).len(), MAX_ALBUMS);
+    }
+
+    #[test]
+    fn offline_plays_only_albums_on_this_computer() {
+        let c = db();
+        // a2 has one song stored (the player skips the other two and says
+        // so); a5 has all three; the rest have none.
+        let ok: HashSet<String> = ids(&["a2-3", "a5-1", "a5-2", "a5-3"]).into_iter().collect();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(3);
+        let got = songs(&c, &[], TagView::default(), &ServerView::All, &HiddenSet::default(), Some(&ok), &mut rng).unwrap();
+        let mut order = runs(&got);
+        order.sort();
+        assert_eq!(order, ids(&["a2", "a5"]));
+        // Nothing stored: nothing to play.
+        let none = HashSet::new();
+        assert!(songs(&c, &[], TagView::default(), &ServerView::All, &HiddenSet::default(), Some(&none), &mut rng).unwrap().is_empty());
     }
 }

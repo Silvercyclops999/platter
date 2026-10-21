@@ -10,7 +10,7 @@ import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS } from "../lib/types";
 import { CratePage } from "../pages/CratesPage";
-import { player } from "../stores/player";
+import { player, usePlayer } from "../stores/player";
 import { loadSettings, useSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
 import { MENU_ACTIONS } from "../shell/menuBar";
@@ -69,6 +69,23 @@ describe("playing them", () => {
     expect(args.shuffle).toBe(false);
     expect(args.startTrackId).toBe(args.context.trackIds![0]);
     expect((await mock.playerState()).queue.context?.title).toBe("Albums on shuffle");
+  });
+
+  it("on another device, turns the list's shuffle off before sending it", async () => {
+    const order: string[] = [];
+    vi.spyOn(backend, "setContextShuffle").mockImplementation(async (id, on) => void order.push(`shuffle ${id} ${on}`));
+    vi.spyOn(backend, "remotePlayContext").mockImplementation(async (args) => {
+      order.push(`play ${args.context.id}`);
+      return { session: usePlayer.getState().remote, stoppedOn: null };
+    });
+    const remote = { deviceId: "d1" } as unknown as NonNullable<ReturnType<typeof usePlayer.getState>["remote"]>;
+    usePlayer.setState({ remote });
+    try {
+      await player.shuffleAlbums(mock.fx.albums.slice(0, 2).map((a) => a.id));
+    } finally {
+      usePlayer.setState({ remote: null });
+    }
+    expect(order).toEqual(["shuffle albums false", "play albums"]);
   });
 
   it("says so when there's nothing to play, and plays nothing", async () => {
