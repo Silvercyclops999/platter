@@ -10,6 +10,10 @@
 //! - liked: rated at or above the liked rating;
 //! - tags: Plex genres, styles and moods of the track and its album.
 //!
+//! Intros, skits, interludes and other very short tracks stay out of every
+//! mix and radio (see [`filler_shape`]), unless the user likes one or plays
+//! it on its own (not as part of playing its album).
+//!
 //! Co-listening comes from the local listen log: songs (and their artists)
 //! played near each other in one listening session.
 
@@ -25,6 +29,12 @@ use super::MixOptions;
 const SESSION_GAP_MS: i64 = crate::db::history::SESSION_GAP_MS;
 /// Plays this close together in a session count as listened together.
 const CO_WINDOW: usize = 4;
+/// Shorter than this is a snippet, not a song for a mix.
+const FILLER_MS: u64 = 60_000;
+/// An intro, outro or interlude by name, shorter than this.
+const FILLER_NAMED_MS: u64 = 150_000;
+/// Plays on its own that bring a filler track back into mixes.
+const FILLER_SOLO_PLAYS: u32 = 3;
 /// A Plex history entry this close to a local play of the same song is that
 /// play reported to Plex, not another one.
 const SAME_PLAY_MS: i64 = 10 * 60 * 1000;
@@ -60,8 +70,10 @@ pub struct TrackRow {
     /// Newest play, unix ms.
     pub last_played_ms: Option<i64>,
     /// May go in a mix (not hidden by the explicit filter, fan edit setting,
-    /// exclusions, the unreleased setting or Hide).
+    /// exclusions, the unreleased setting or Hide, and not filler).
     pub eligible: bool,
+    /// An intro, skit or snippet the user doesn't play on its own.
+    pub filler: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -124,6 +136,7 @@ pub struct RawAlbum {
 #[derive(Debug, Default, Clone)]
 pub struct RawTrack {
     pub id: String,
+    pub title: String,
     pub artist_id: String,
     pub album_id: String,
     pub track_number: u32,
@@ -208,7 +221,7 @@ pub fn read_raw(c: &Connection) -> AppResult<Raw> {
     {
         let mut st = c.prepare(
             "SELECT t.id, t.artist_id, t.album_id, t.track_number, t.duration_ms, t.genres, t.user_rating,
-                    t.view_count, t.last_viewed_at, f.explicit, f.flags, coalesce(f.version, f.release)
+                    t.view_count, t.last_viewed_at, f.explicit, f.flags, coalesce(f.version, f.release), t.title
              FROM tracks t LEFT JOIN file_tags f ON f.part_key = t.part_key AND f.status = 'ok'",
         )?;
         let mut rows = st.query([])?;
@@ -226,6 +239,7 @@ pub fn read_raw(c: &Connection) -> AppResult<Raw> {
             };
             raw.tracks.push(RawTrack {
                 id,
+                title: r.get(12)?,
                 artist_id: r.get(1)?,
                 album_id: r.get(2)?,
                 track_number: r.get(3)?,
@@ -278,6 +292,25 @@ pub fn read_raw(c: &Connection) -> AppResult<Raw> {
 
 fn fold(s: &str) -> String {
     s.trim().to_lowercase()
+}
+
+/// Whether a track looks like an intro, skit or snippet rather than a song:
+/// under a minute, "Skit" in the title, or an intro, outro, interlude,
+/// prelude or segue by name that runs under two and a half minutes. Plex
+/// has no mark for these, so the title and length are what there is. An
+/// unknown length (0) never counts as short.
+pub fn filler_shape(title: &str, duration_ms: u64) -> bool {
+    if duration_ms > 0 && duration_ms < FILLER_MS {
+        return true;
+    }
+    let folded = crate::identity::fold::fold_text(title);
+    let words: Vec<&str> = folded.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    let has = |list: &[&str]| words.iter().any(|w| list.contains(w));
+    if has(&["skit", "skits"]) {
+        return true;
+    }
+    let short = duration_ms == 0 || duration_ms < FILLER_NAMED_MS;
+    short && has(&["intro", "introduction", "outro", "interlude", "prelude", "segue"])
 }
 
 impl Lib {
@@ -386,9 +419,17 @@ impl Lib {
                 skips: 0,
                 last_played_ms: t.last_viewed_at.map(|s| s * 1000),
                 eligible,
+                filler: filler_shape(&t.title, t.duration_ms),
             });
         }
         lib.read_plays(raw.listens, raw.history);
+        let solo = lib.solo_plays();
+        for (tr, n) in lib.tracks.iter_mut().zip(solo) {
+            if tr.filler && (tr.liked || n >= FILLER_SOLO_PLAYS) {
+                tr.filler = false;
+            }
+            tr.eligible &= !tr.filler;
+        }
         lib.by_artist = vec![Vec::new(); lib.artists.len()];
         lib.by_tag = vec![Vec::new(); lib.tags.len()];
         for (i, t) in lib.tracks.iter().enumerate() {
@@ -462,6 +503,26 @@ impl Lib {
             tr.plays = tr.plays.max(n);
         }
         self.plays = events;
+    }
+
+    /// Plays of each track on its own: not next to a play of another song
+    /// from its album in the same listening session.
+    fn solo_plays(&self) -> Vec<u32> {
+        let mut out = vec![0u32; self.tracks.len()];
+        let played: Vec<&PlayEvent> = self.plays.iter().filter(|e| !e.skipped).collect();
+        let album_run = |a: &PlayEvent, b: &PlayEvent| {
+            a.track != b.track
+                && (a.at_ms - b.at_ms).abs() <= SESSION_GAP_MS
+                && self.tracks[a.track as usize].album == self.tracks[b.track as usize].album
+        };
+        for (i, e) in played.iter().enumerate() {
+            let before = i.checked_sub(1).is_some_and(|j| album_run(e, played[j]));
+            let after = played.get(i + 1).is_some_and(|n| album_run(e, n));
+            if !before && !after {
+                out[e.track as usize] += 1;
+            }
+        }
+        out
     }
 
     /// How much the user likes a track: plays and likes for it, quick skips

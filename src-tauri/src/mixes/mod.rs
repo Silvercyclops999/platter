@@ -128,11 +128,15 @@ impl Default for MixOptions {
     }
 }
 
+/// Goes up when the engine picks songs differently, so mixes made the old
+/// way are made again (2: intros and skits left out).
+const PICKS: u32 = 2;
+
 impl MixOptions {
     /// Changes when anything that shapes the mixes changes (stored with them).
     pub fn fingerprint(&self) -> String {
         format!(
-            "{:?}|{:?}|{:?}|{:?}|{}|{}|{}|{}",
+            "{PICKS}|{:?}|{:?}|{:?}|{:?}|{}|{}|{}|{}",
             self.variety,
             self.exclude_artists,
             self.exclude_genres,
