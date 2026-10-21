@@ -19,6 +19,7 @@ import type { MenuItem } from "../stores/ui";
 import { nav } from "../stores/router";
 import { useRequestFor } from "../stores/requests";
 import { useSettings } from "../stores/settings";
+import { useIsGuest } from "../stores/asks";
 import { tapToPlay } from "../stores/taps";
 import { toast } from "../stores/toasts";
 import { addToMissing, catalogueKind, dismissArtist, useOnline } from "./catalogue";
@@ -266,11 +267,12 @@ function RowArt({ row, box, size }: { row: Row; box: RefObject<HTMLElement | nul
 
 /** Get (albums) or "Get the album" (songs). */
 function RowGet({ row, lidarrReady }: { row: Row; lidarrReady: boolean }) {
+  const guest = useIsGuest();
   if (row.album) {
     const a = row.album;
     return (
       <GetButton
-        album={{ releaseGroupId: a.releaseGroupId, title: a.title, artist: a.artist, artistMbid: a.artistMbid }}
+        album={{ releaseGroupId: a.releaseGroupId, title: a.title, artist: a.artist, artistMbid: a.artistMbid, thumb: a.thumb }}
         known={a.request}
         libraryAlbumId={a.libraryAlbumId}
         refusal={a.refusal}
@@ -281,7 +283,7 @@ function RowGet({ row, lidarrReady }: { row: Row; lidarrReady: boolean }) {
   if (row.tapPlays) {
     return (
       <span className="sr-get-mark" aria-hidden="true">
-        Get
+        {guest ? "Request" : "Get"}
       </span>
     );
   }
@@ -289,7 +291,7 @@ function RowGet({ row, lidarrReady }: { row: Row; lidarrReady: boolean }) {
     const s = row.song;
     return (
       <GetButton
-        album={{ releaseGroupId: s.releaseGroupId!, title: s.album!, artist: s.artist, artistMbid: s.artistMbid }}
+        album={{ releaseGroupId: s.releaseGroupId!, title: s.album!, artist: s.artist, artistMbid: s.artistMbid, thumb: s.thumb }}
         lidarrReady={lidarrReady}
         idleLabel="Get the album"
       />

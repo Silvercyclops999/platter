@@ -332,3 +332,7 @@
 /* Library with Downloads picked: the way to manage them, above the list. */
 .ph-library__manage { margin: 0 0 8px; }
 .ph-library__doctor { margin: 16px 0 0; }
+
+/* Requests on What's new: No and Get it, or where one stands. */
+.ph-ask__actions { flex: none; display: flex; align-items: center; gap: 6px; }
+.ph-ask__actions .lidarr-state { min-height: 32px; font-size: 13px; }

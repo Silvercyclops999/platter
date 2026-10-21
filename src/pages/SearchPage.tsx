@@ -22,7 +22,7 @@ import { otherVersionsText } from "./era";
 import { TopSongsResults, useTopSongsFound } from "./TopSongsResults";
 import { CatalogueList, CatalogueRow, CatalogueSkeleton, CatalogueTopResult, catalogueRows, useTapPlays, foldName, hasCatalogue, useCatalogueSearch, type CatalogueResults } from "./SearchCatalogue";
 import { CatalogueAlbumCard, CatalogueArtistCard } from "./catalogue";
-import { useLidarrReady } from "./lidarrShared";
+import { useGetSpots } from "./lidarrShared";
 import type { HelpHit } from "../help/pages";
 import { help } from "../stores/help";
 import "./search.css";
@@ -313,7 +313,7 @@ export function SearchPage({ query }: { query: string }) {
   const topSongs = useTopSongsFound(q);
   // Music you don't have, in with the library's results as it arrives.
   const cat = useCatalogueSearch(q, filter);
-  const lidarrReady = useLidarrReady();
+  const lidarrReady = useGetSpots();
   const tapPlays = useTapPlays(lidarrReady);
 
   // Each request gets a sequence number and only the newest one may update

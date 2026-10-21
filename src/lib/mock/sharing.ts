@@ -54,8 +54,8 @@ export class MockSharing {
     this.labelled = 0;
     this.invites = [];
     this.people = [
-      { id: "4001", name: "robin_listens", libraries: ["Music"], allowDownloads: false, unreleasedHidden: true, pending: false, lastSeenAt: now - 2 * 3600 },
-      { id: "4002", name: "jules@example.com", libraries: ["Live Tapes"], allowDownloads: true, unreleasedHidden: false, pending: true, lastSeenAt: null },
+      { id: "4001", userId: "71", name: "robin_listens", libraries: ["Music"], allowDownloads: false, unreleasedHidden: true, pending: false, lastSeenAt: now - 2 * 3600 },
+      { id: "4002", userId: "72", name: "jules@example.com", libraries: ["Live Tapes"], allowDownloads: true, unreleasedHidden: false, pending: true, lastSeenAt: null },
     ];
   }
 
@@ -101,7 +101,8 @@ export class MockSharing {
     this.people = [
       ...this.people.filter((p) => p.name !== who),
       {
-        id: String(this.nextId++),
+        id: String(this.nextId),
+        userId: String(this.nextId++ + 1000),
         name: who,
         libraries: chosen.map((l) => l.title),
         allowDownloads: options.allowDownloads,

@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { backend } from "../lib/backend";
 import type { LidarrMissing, LidarrRequestState } from "../lib/types";
+import { useCanRequest } from "../stores/asks";
 import { useSettings } from "../stores/settings";
 
 export const STATE_LABEL: Record<LidarrRequestState, string> = {
@@ -73,4 +74,15 @@ export function useLidarrReady(): boolean {
     };
   }, [home, away, version]);
   return ready;
+}
+
+/**
+ * True when music you don't have shows Get (the owner, with Lidarr ready)
+ * or Request (someone the server is shared with, when the owner lets them).
+ * The buttons themselves pick which.
+ */
+export function useGetSpots(): boolean {
+  const ready = useLidarrReady();
+  const asking = useCanRequest();
+  return ready || asking;
 }

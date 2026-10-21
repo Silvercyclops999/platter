@@ -80,13 +80,19 @@ const errText = (e: unknown) => (e && typeof e === "object" && "message" in e ? 
 /**
  * Tap a song the library doesn't have. Resolves with the outcome; `needs`
  * means the caller shows the request dialog (the very first request, or a
- * check said no).
+ * check said no). On a server someone shares with you, the tap requests it
+ * from the owner instead, and that's said here.
  */
 export async function tapToPlay(input: TapInput): Promise<TapOutcome | null> {
   followTaps();
   try {
     const out = await backend.lidarrTap(input);
     if (out.tap) show(out.tap);
+    if (out.needs?.kind === "requested") {
+      // Someone the server is shared with: the tap asked its owner.
+      toast.info(`Requested ${input.album ?? input.title}. You'll hear when it's here`);
+      return { ...out, needs: null };
+    }
     return out;
   } catch (e) {
     toast.error(errText(e) || `Couldn't get ${input.title}. Try again in a moment`);

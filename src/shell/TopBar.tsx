@@ -12,6 +12,7 @@ import { help } from "../stores/help";
 import { toast, useToasts } from "../stores/toasts";
 import { offlineCallout } from "./bannerView";
 import { useUi } from "../stores/ui";
+import { followAsks, loadIncoming, useAsks, waiting } from "../stores/asks";
 import { useSocial } from "../stores/social";
 import { useCap } from "../stores/caps";
 import "./social.css";
@@ -378,13 +379,20 @@ export function WhatsNewButton() {
   const on = useCurrentEntry().route.name === "whatsNew";
   const announce = useSettings((s) => s.settings?.whatsNewAnnouncements !== false);
   const unseen = useSocial((s) => s.unseen);
-  const dot = announce && unseen > 0;
+  // Requests waiting for your yes always show (people are waiting on them).
+  const asked = useAsks((s) => (s.incoming ?? []).filter(waiting).length);
+  useEffect(() => {
+    followAsks();
+    void loadIncoming();
+  }, []);
+  const dot = (announce && unseen > 0) || asked > 0;
+  const said = [announce && unseen > 0 ? `${unseen} new` : null, asked > 0 ? `${asked} ${asked === 1 ? "request" : "requests"} waiting` : null].filter(Boolean).join(", ");
   return (
     <Tooltip label="What's New" placement="bottom">
       <button
         type="button"
         className={`topbar__social ${on ? "is-active" : ""}`}
-        aria-label={dot ? `What's New, ${unseen} new` : "What's New"}
+        aria-label={dot ? `What's New, ${said}` : "What's New"}
         aria-current={on ? "page" : undefined}
         onClick={() => nav.go({ name: "whatsNew" })}
       >

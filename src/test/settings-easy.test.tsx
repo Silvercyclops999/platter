@@ -36,6 +36,7 @@ afterEach(() => {
  * there's none: kept by the core, or set by a control on another screen).
  */
 const NOT_A_ROW: Record<string, string> = {
+  requestRules: "sharePeople",
   volume: "the player bar",
   lyricsShowAdd: "decided by the app: Write your own is always there",
   transcribeModel: "decided by the app from the graphics card",

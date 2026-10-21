@@ -34,7 +34,7 @@ import {
   type SectionId,
 } from "./discography";
 import { useArtistDiscography } from "./discographySources";
-import { useLidarrReady } from "./lidarrShared";
+import { useGetSpots } from "./lidarrShared";
 import "./discography.css";
 import { LoadError } from "../components/LoadError";
 
@@ -100,7 +100,7 @@ function DiscographyView({
   // Choices show at once, before Settings has them.
   const [mine, setMine] = useState<Partial<DiscographyPrefs>>({});
   const prefs = { ...saved, ...mine };
-  const lidarrReady = useLidarrReady();
+  const lidarrReady = useGetSpots();
   const choose = (p: Partial<DiscographyPrefs>) => {
     setMine((m) => ({ ...m, ...p }));
     void updateSettings(prefsPatch(p));

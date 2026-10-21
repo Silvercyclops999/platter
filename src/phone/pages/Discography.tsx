@@ -16,7 +16,7 @@ import { useContextState } from "../../pages/cards";
 import { CatalogueAction, openAlbum } from "../../pages/catalogue";
 import { SORT_LABEL, discographyGroups, discographyPrefs, prefsPatch, releaseLine, typeOptions, validType, type DiscographyType, type SectionId } from "../../pages/discography";
 import { useArtistDiscography } from "../../pages/discographySources";
-import { useLidarrReady } from "../../pages/lidarrShared";
+import { useGetSpots } from "../../pages/lidarrShared";
 import { player } from "../../stores/player";
 import { nav } from "../../stores/router";
 import { updateSettings, useSettings } from "../../stores/settings";
@@ -55,7 +55,7 @@ export function PhoneDiscographyView({
   const [type, setType] = useState<DiscographyType>(startType ?? "all");
   const saved = discographyPrefs(useSettings((s) => s.settings));
   const [sort, setSort] = useState(saved.sort);
-  const lidarrReady = useLidarrReady();
+  const lidarrReady = useGetSpots();
   const shown = entries ? validType(entries, type) : type;
   const groups = entries ? discographyGroups(entries, shown, sort, saved.reverse) : null;
   const flipSort = () => {

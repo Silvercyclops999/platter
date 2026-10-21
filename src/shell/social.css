@@ -109,6 +109,9 @@
 .release-row__artist:hover { text-decoration: underline; color: var(--color-text-primary); }
 .release-row__meta { font-size: var(--font-size-sm); color: var(--color-text-secondary); }
 .release-row__actions { flex: none; display: flex; align-items: center; gap: var(--space-2); }
+/* Requests: what people asked for, and why one waits or can't be got. */
+.ask-row__note { max-width: 100%; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.ask-row .release-row__meta { max-width: 100%; }
 
 /* ---------------------------------------------------------------- Follow pill */
 .follow-pill {

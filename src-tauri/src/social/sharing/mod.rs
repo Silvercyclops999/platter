@@ -175,6 +175,8 @@ pub enum ShareStatus {
 #[serde(rename_all = "camelCase")]
 pub struct PersonWithAccess {
     pub id: String,
+    /// Their Plex user id (what the requests choice is kept by).
+    pub user_id: String,
     pub name: String,
     /// The library names they see.
     pub libraries: Vec<String>,
@@ -464,11 +466,25 @@ impl Sharing {
                 pending: s.pending,
                 last_seen_at: seen.iter().find(|l| l.user_id == s.user_id && l.machine_id == server.machine_id).and_then(|l| l.at),
                 id: s.id,
+                user_id: s.user_id,
                 name: s.name,
             })
             .collect();
         out.sort_by(|a, b| b.last_seen_at.cmp(&a.last_seen_at).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
         Ok(out)
+    }
+
+    /// Everyone who has accepted my server, with the access token Plex gave
+    /// them for it (for requests: each person's channels come from it).
+    pub async fn request_people(&self) -> AppResult<Vec<crate::asks::Person>> {
+        let server = self.owned_server().await?;
+        let token = self.token().await?;
+        let shares: Vec<SharedWith> = self.inner.host.tv().shares(&token, &server.machine_id).await?;
+        Ok(shares
+            .into_iter()
+            .filter(|s| !s.pending)
+            .filter_map(|s| Some(crate::asks::Person { token: s.access_token?, user_id: s.user_id, name: s.name }))
+            .collect())
     }
 
     /// Take someone's access away.

@@ -1,6 +1,7 @@
 pub mod analysis;
 pub mod archive;
 pub mod artistinfo;
+pub mod asks;
 pub mod audio;
 pub mod backend;
 pub mod carplay;
@@ -916,6 +917,7 @@ pub fn run() {
                 }),
             );
             tauri::async_runtime::spawn(taps.clone().run());
+            let asks_taps = taps.clone();
             app.manage(taps);
             // Bring in my listening: albums from Played a lot, a few a day.
             let bring_in = {
@@ -995,6 +997,7 @@ pub fn run() {
             app.manage(bridge_desktop);
             let radar_lidarr = lidarr_service.clone();
             let discover_lidarr = lidarr_service.clone();
+            let asks_lidarr = lidarr_service.clone();
             app.manage(lidarr_service);
             let smart_service = smart::Smart::new(smart::SmartDeps {
                 db: db.clone(),
@@ -1098,6 +1101,31 @@ pub fn run() {
                     retry: std::time::Duration::from_secs(2),
                 },
             ));
+            // Requests from people the server is shared with (they ask, the
+            // owner says yes; only the owner's Platter reaches Lidarr).
+            {
+                let requests = asks::Asks::new(
+                    Arc::new(asks::live::LiveAsksHost {
+                        plex: plex.clone(),
+                        lidarr: asks_lidarr.clone(),
+                        sharing: sharing.clone(),
+                        db: db.clone(),
+                        events: Arc::new(plex::state::TauriSink(app.handle().clone())),
+                        notifier: Arc::new(social::commands::OsNotifier(app.handle().clone())),
+                    }),
+                    db.clone(),
+                    Arc::new(social::listen::relay::Ntfy::new().map_err(error::AppError::Internal)?),
+                    live.social.listen.relay.clone(),
+                    social::listen::DEFAULT_RELAY.into(),
+                );
+                tauri::async_runtime::spawn(requests.clone().run());
+                for ev in ["settings://changed", plex::types::EVENT_AUTH_CHANGED] {
+                    let r = requests.clone();
+                    app.listen_any(ev, move |_| r.poke());
+                }
+                asks_taps.set_requests(requests.clone());
+                app.manage(requests);
+            }
             // Listen along goes through a relay (ntfy), never computer to computer.
             let listen_name = social::commands::ListenName::default();
             let listen = social::listen::ListenAlong::new(social::listen::ListenDeps {
@@ -2089,6 +2117,11 @@ pub fn run() {
             lidarr::commands::lidarr_request,
             lidarr::commands::lidarr_get,
             lidarr::commands::lidarr_tap,
+            asks::commands::asks_view,
+            asks::commands::asks_request,
+            asks::commands::asks_cancel,
+            asks::commands::asks_incoming,
+            asks::commands::asks_answer,
             lidarr::commands::lidarr_taps,
             lidarr::commands::lidarr_last_get,
             lidarr::commands::lidarr_search_again,

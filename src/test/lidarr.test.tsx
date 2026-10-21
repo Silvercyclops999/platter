@@ -54,7 +54,7 @@ describe("Lidarr settings", () => {
     expect(row("lidarrKey")).not.toBeNull();
     expect(row("lidarrCheck")).toBeNull();
     expect(row("lidarrHeaders")).toBeNull();
-    expect(screen.queryByRole("button", { name: /request/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^request/i })).toBeNull();
 
     const url = screen.getByRole("textbox", { name: "Lidarr address at home" });
     await userEvent.type(url, "http://192.168.x.x:8686/{Enter}");

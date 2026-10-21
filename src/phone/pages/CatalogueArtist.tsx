@@ -11,7 +11,8 @@ import { useLoad } from "../../lib/useLoad";
 import { catalogueEntries } from "../../pages/artist";
 import { dismissArtist, undismissArtist } from "../../pages/catalogue";
 import { GetAlbumsDialog } from "../../pages/GetAlbumsDialog";
-import { useLidarrReady } from "../../pages/lidarrShared";
+import { useGetSpots, useLidarrReady } from "../../pages/lidarrShared";
+import { useIsGuest } from "../../stores/asks";
 import { nav, useRouter } from "../../stores/router";
 import { useSettings } from "../../stores/settings";
 import { PageFailed, PageLoading } from "./common";
@@ -22,6 +23,8 @@ export function PhoneCatalogueArtist({ mbid }: { mbid: string }) {
   const [version, setVersion] = useState(0);
   const { data, error, retry } = useLoad(() => backend.catalogueArtist(mbid), [mbid, version]);
   const lidarrReady = useLidarrReady();
+  const spots = useGetSpots();
+  const guest = useIsGuest();
   const [getting, setGetting] = useState(false);
   const dismissed = useSettings((s) => s.settings?.dismissedArtists?.some((d) => d.mbid === mbid)) ?? false;
   const libraryId = data?.artist.libraryId;
@@ -53,14 +56,14 @@ export function PhoneCatalogueArtist({ mbid }: { mbid: string }) {
           {dismissed ? "Hidden from suggestions" : "Not interested"}
         </button>
       </div>
-      {!lidarrReady && <p className="ph-x__note">Set up Lidarr in Settings to get albums, or buy them from a store.</p>}
+      {!lidarrReady && !guest && <p className="ph-x__note">Set up Lidarr in Settings to get albums, or buy them from a store.</p>}
       {getting && <GetAlbumsDialog mbid={artist.mbid} name={artist.name} open onClose={() => setGetting(false)} />}
       {data.sections.length === 0 ? (
         <p className="ph-x__note">MusicBrainz has no official albums for this artist yet.</p>
       ) : (
         <DiscoShelf
           entries={catalogueEntries(data.sections, data.popular)}
-          lidarrReady={lidarrReady}
+          lidarrReady={spots}
           onChanged={reload}
           onShowAll={(f) => nav.go({ name: "discography", id: artist.mbid, catalogue: true, ...(f === "popular" ? {} : { type: f }) })}
         />

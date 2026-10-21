@@ -11,7 +11,8 @@ import { catalogueKind, formatDuration, formatLongDuration, plural } from "../..
 import { STORE_LINKS } from "../../lib/importStrings";
 import { useLoad } from "../../lib/useLoad";
 import { CatalogueAction, addToMissing, openStore, removeFromMissing } from "../../pages/catalogue";
-import { useLidarrReady } from "../../pages/lidarrShared";
+import { useGetSpots } from "../../pages/lidarrShared";
+import { useIsGuest } from "../../stores/asks";
 import { nav, useRouter } from "../../stores/router";
 import { PageFailed, PageLoading } from "./common";
 import { Hero, PageFrame } from "./kit";
@@ -19,7 +20,8 @@ import { Hero, PageFrame } from "./kit";
 export function PhoneCatalogueAlbum({ id }: { id: string }) {
   const [version, setVersion] = useState(0);
   const { data, error, retry } = useLoad(() => backend.catalogueAlbum(id), [id, version]);
-  const lidarrReady = useLidarrReady();
+  const lidarrReady = useGetSpots();
+  const guest = useIsGuest();
   const [busy, setBusy] = useState(false);
   const owned = data?.album.libraryAlbumId;
   useEffect(() => {
@@ -56,7 +58,7 @@ export function PhoneCatalogueAlbum({ id }: { id: string }) {
           {album.inMissing ? "On your Missing list" : "Add to Missing"}
         </button>
       </div>
-      {album.refusal ? <p className="ph-x__note">{album.refusal}</p> : !lidarrReady && <p className="ph-x__note">Set up Lidarr in Settings to get it.</p>}
+      {album.refusal ? <p className="ph-x__note">{album.refusal}</p> : !lidarrReady && !guest && <p className="ph-x__note">Set up Lidarr in Settings to get it.</p>}
       <section className="ph-x__section" aria-label={`Buy ${album.title}`}>
         <h2 className="ph-label">Buy or find it</h2>
         <div className="ph-x__pill-row">

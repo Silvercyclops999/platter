@@ -1409,6 +1409,14 @@ export interface Settings {
   askBeforeGet: boolean;
   /** Tapping a song you don't have gets it through Lidarr and plays it when it's here. */
   lidarrTapToGet: boolean;
+  /** "Let people you share with request music": they see Request where you see Get (owner). */
+  requestsFromOthers: boolean;
+  /** Per person "Getting music": anyone not listed asks first. */
+  requestRules: RequestRule[];
+  /** Albums a week a "Straight away" person gets without a yes. */
+  requestWeeklyLimit: number;
+  /** A second request from the same person within a few minutes doesn't notify again (this device). */
+  requestGroupNotices: boolean;
   /** A tapped song's copy is the fastest good one (usenet first, well seeded torrents next). */
   lidarrPreferFastest: boolean;
   /** A tapped song plays from the finished download, before Lidarr moves it in, when this device can open it. */
@@ -1967,6 +1975,10 @@ export const DEFAULT_SETTINGS: Settings = {
   catalogueSource: "lidarr",
   askBeforeGet: false,
   lidarrTapToGet: true,
+  requestsFromOthers: true,
+  requestRules: [],
+  requestWeeklyLimit: 20,
+  requestGroupNotices: true,
   lidarrPreferFastest: true,
   lidarrPlayArriving: true,
   getAlbumsKinds: ["studio"],
@@ -3063,6 +3075,78 @@ export interface LidarrBatchItem {
 
 export type LidarrRequestState = "queued" | "requested" | "searching" | "downloading" | "importing" | "imported" | "failed" | "notFound";
 
+/** What the owner lets one person the server is shared with do. */
+export type RequestRuleKind = "off" | "ask" | "straight";
+
+export interface RequestRule {
+  /** Their Plex user id. */
+  userId: string;
+  rule: RequestRuleKind;
+}
+
+/** Where one request stands. */
+export type AskState = "sending" | "requested" | "getting" | "ready" | "declined" | "notFound" | "refused" | "failed" | "cancelled";
+
+/** What was asked for: an album, or a song (which comes with its album). */
+export interface AskItem {
+  releaseGroupId?: string | null;
+  title: string;
+  artist: string;
+  artistMbid?: string | null;
+  /** For a song: the album it's on, when known. */
+  album?: string | null;
+  song?: boolean;
+  isrc?: string | null;
+  /** Cover art as a web address (never a server path). */
+  thumb?: string | null;
+}
+
+/** One of my requests, on a server someone shares with me. */
+export interface MyAsk {
+  id: string;
+  item: AskItem;
+  state: AskState;
+  progress: number | null;
+  note: string | null;
+  createdAt: number;
+  updatedAt: number;
+  /** The owner's Platter has it. */
+  seen: boolean;
+}
+
+/** A request someone made of me (the owner). */
+export interface IncomingAsk {
+  id: string;
+  personId: string;
+  personName: string;
+  item: AskItem;
+  releaseGroupId: string | null;
+  state: AskState;
+  progress: number | null;
+  note: string | null;
+  createdAt: number;
+  updatedAt: number;
+  /** It went through without a yes (Straight away, or already coming). */
+  byItself: boolean;
+}
+
+/** `asks_view`: the asking side for the connected server. */
+export interface AsksView {
+  /** Signed in as someone the server is shared with (not its owner). */
+  guest: boolean;
+  /** Request shows where Get would. */
+  canRequest: boolean;
+  straightAway: boolean;
+  mine: MyAsk[];
+}
+
+/** `asks_answer`. */
+export interface AskAnswered {
+  incoming: IncomingAsk;
+  /** The owner's own first request ever is confirmed by typing the album's name, or a check said no. */
+  needs: { kind: "firstTime" | "refused"; reason: string } | null;
+}
+
 /** `lidarr_get`: the request one-click Get made, or why it needs the user. */
 export interface LidarrGetOutcome {
   record: LidarrRequest | null;
@@ -3124,7 +3208,8 @@ export interface TapInput {
 
 export interface TapOutcome {
   tap: Tap | null;
-  needs: { kind: "firstTime" | "refused"; reason: string } | null;
+  /** `requested`: signed in as someone the server is shared with, so the tap asked the owner. */
+  needs: { kind: "firstTime" | "refused" | "requested"; reason: string } | null;
 }
 
 /** How long the last get took (Settings > Lidarr > More). */
@@ -3590,6 +3675,8 @@ export type ShareStatus =
 /** Someone with access to your server. */
 export interface PersonWithAccess {
   id: string;
+  /** Their Plex user id (what the requests choice is kept by). */
+  userId: string;
   name: string;
   libraries: string[];
   allowDownloads: boolean;
@@ -4521,6 +4608,8 @@ export interface EventMap {
   "library://changed": null;
   /** A tapped song moved on (lidarr_tap). */
   "lidarr://tap": Tap;
+  "asks://mine": Record<string, never>;
+  "asks://incoming": IncomingAsk[];
   /** Listening diary entries changed on this device. */
   "diary://changed": null;
   /** One artist's page data changed outside a sync (similar artists fetched). */

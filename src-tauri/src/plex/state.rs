@@ -543,6 +543,16 @@ impl PlexState {
         s.account.is_some() && s.current.as_ref().is_some_and(|c| c.server.owned)
     }
 
+    /// The connected server's machine id, the token used for it, and
+    /// whether the signed-in account owns it. None when signed out of Plex
+    /// or not connected.
+    pub async fn current_access(&self) -> Option<(String, Token, bool)> {
+        let s = self.inner.session.read().await;
+        s.account.as_ref()?;
+        let c = s.current.as_ref()?;
+        Some((c.server.machine_id.clone(), c.token.clone(), c.server.owned))
+    }
+
     /// The same without waiting, or None when not signed in to Plex. While
     /// the session is being changed, the answer from the last time.
     pub fn owns_current_server_now(&self) -> Option<bool> {

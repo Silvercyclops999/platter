@@ -4,7 +4,8 @@
  * few seconds in which it can be undone; the button then follows the
  * request as Lidarr works on it. The request dialog opens only for the very
  * first request (its name is typed once), when a check says no (with why),
- * or every time when "Ask before each Get" is on.
+ * or every time when "Ask before each Get" is on. Someone the server is
+ * shared with sees Request instead (RequestButton.tsx).
  */
 import { Check, CircleAlert, Clock, Download, LoaderCircle, RotateCw, Search } from "lucide-react";
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
@@ -12,9 +13,11 @@ import { Button } from "../components/Button";
 import { backend } from "../lib/backend";
 import type { AppError, LidarrGetOutcome, LidarrRequestInput, LidarrRequestState } from "../lib/types";
 import { nav } from "../stores/router";
+import { useIsGuest } from "../stores/asks";
 import { upsertRequest, useRequestFor } from "../stores/requests";
 import { useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
+import { RequestButton } from "./RequestButton";
 import "./lidarr-request.css";
 
 const LidarrRequestDialog = lazy(() => import("./LidarrRequest").then((m) => ({ default: m.LidarrRequestDialog })));
@@ -70,19 +73,11 @@ export interface GetTarget {
   artist: string;
   artistMbid?: string | null;
   artistId?: string | null;
+  /** Cover art (kept with a request on this device). */
+  thumb?: string | null;
 }
 
-export function GetButton({
-  album,
-  known = null,
-  libraryAlbumId = null,
-  refusal = null,
-  lidarrReady,
-  size = "sm",
-  onChanged,
-  idleLabel = "Get",
-  compact = false,
-}: {
+type GetButtonProps = {
   album: GetTarget;
   /** The request state the list came with (the live one wins). */
   known?: LidarrRequestState | null;
@@ -96,7 +91,19 @@ export function GetButton({
   idleLabel?: string;
   /** On a card: short state labels that fit its width, the full one as a tooltip. */
   compact?: boolean;
-}) {
+};
+
+/**
+ * Get for the server's owner; Request (asks the owner) for someone the
+ * server is shared with.
+ */
+export function GetButton(props: GetButtonProps) {
+  const guest = useIsGuest();
+  if (guest) return <RequestButton album={props.album} libraryAlbumId={props.libraryAlbumId} size={props.size} idleLabel={props.idleLabel} compact={props.compact} />;
+  return <OwnerGetButton {...props} />;
+}
+
+function OwnerGetButton({ album, known = null, libraryAlbumId = null, refusal = null, lidarrReady, size = "sm", onChanged, idleLabel = "Get", compact = false }: GetButtonProps) {
   const rec = useRequestFor(album.releaseGroupId);
   const askFirst = useSettings((s) => s.settings?.askBeforeGet === true);
   const [phase, setPhase] = useState<"idle" | "undo" | "checking">("idle");

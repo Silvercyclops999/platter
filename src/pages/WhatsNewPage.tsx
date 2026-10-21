@@ -14,6 +14,7 @@ import { isFollowing, setFollow, startSessionItem } from "../stores/social";
 import { useContextState } from "./cards";
 import "../shell/social.css";
 import { LoadError } from "../components/LoadError";
+import { RequestsGroup } from "./AskRows";
 
 /** "Album", "EP", "Single". */
 export function releaseType(a: Pick<Album, "format">): string {
@@ -143,6 +144,7 @@ export function WhatsNewPage() {
           Nothing new yet. When an artist you follow gets new music in your library, it shows up here.
         </p>
       )}
+      <RequestsGroup />
       {data && (
         <>
           <Group title="New" items={data.items.filter((i) => i.new)} />

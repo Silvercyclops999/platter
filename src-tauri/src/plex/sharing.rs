@@ -8,7 +8,9 @@
 //! server"), which answer XML. Every share Platter makes lists music
 //! sections only; [`PlexTv::share_server`] refuses anything else, so a movie
 //! or photo library is never shared from here. Tokens in the answers
-//! (`accessToken`, `authToken`) are dropped while reading and never kept.
+//! (`accessToken`, `authToken`) are dropped while reading, except a share's
+//! `accessToken`, which is kept as a [`Token`] (never shown, sent or
+//! logged) because it is the secret the person's requests are sealed with.
 //!
 //! Album labels (the server side of "Hide my unreleased music") are read and
 //! written on the Plex server, not plex.tv: [`PlexClient::labels`] and
@@ -37,6 +39,8 @@ struct El {
     name: String,
     attrs: HashMap<String, String>,
     parent: Option<usize>,
+    /// A `SharedServer`'s `accessToken` (the only token kept).
+    share_token: Option<Token>,
 }
 
 impl El {
@@ -81,15 +85,19 @@ fn parse(xml: &str) -> AppResult<Vec<El>> {
         let Some(e) = start else { continue };
         let name = e.name().0.to_string();
         let mut attrs = HashMap::new();
+        let mut share_token = None;
         for a in e.attributes().flatten() {
             let k = a.key.0.to_string();
             if secret_attr(&k) {
+                if name == "SharedServer" && k == "accessToken" {
+                    share_token = a.normalized_value(quick_xml::XmlVersion::Implicit1_0).ok().and_then(|v| Token::new(v.into_owned()).ok());
+                }
                 continue;
             }
             let v = a.normalized_value(quick_xml::XmlVersion::Implicit1_0).map(|v| v.into_owned()).unwrap_or_default();
             attrs.insert(k, v);
         }
-        out.push(El { name, attrs, parent: stack.last().copied() });
+        out.push(El { name, attrs, parent: stack.last().copied(), share_token });
         if !empty {
             stack.push(out.len() - 1);
         }
@@ -148,6 +156,10 @@ pub struct SharedWith {
     pub filter_music: String,
     /// Still waiting for them to accept.
     pub pending: bool,
+    /// Their access token for the server. Only ever used to derive the
+    /// channels their requests come on; never sent, shown or logged.
+    #[serde(skip)]
+    pub access_token: Option<Token>,
 }
 
 /// An invite this account received.
@@ -350,6 +362,7 @@ impl PlexTv {
                     allow_downloads: e.flag("allowSync"),
                     filter_music: e.s("filterMusic"),
                     pending: e.get("acceptedAt").is_none_or(|a| a == "0"),
+                    access_token: e.share_token.clone(),
                 }
             })
             .filter(|s| ok_num(&s.id))
@@ -625,6 +638,9 @@ mod tests {
         assert!(!got[0].pending && got[1].pending && got[1].allow_downloads);
         assert_eq!(got[1].name, "jules@example.com");
         assert!(!format!("{got:?}").contains("fake-friend-token"));
+        assert_eq!(got[0].access_token.as_ref().map(Token::expose), Some("fake-friend-token"));
+        assert!(got[1].access_token.is_none());
+        assert!(!serde_json::to_string(&got).unwrap().contains("fake-friend-token"));
         tv(&s).unshare(&token(), MACHINE, "5001").await.unwrap();
         assert!(tv(&s).unshare(&token(), MACHINE, "../x").await.is_err());
     }

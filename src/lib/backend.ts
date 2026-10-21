@@ -53,6 +53,11 @@ import type {
   AlbumPage,
   AlbumsArgs,
   AppError,
+  AskAnswered,
+  AskItem,
+  AsksView,
+  IncomingAsk,
+  MyAsk,
   AppInfo,
   ArtCacheInfo,
   Artist,
@@ -1097,6 +1102,16 @@ export interface Backend {
   lidarrTap(input: TapInput): Promise<TapOutcome>;
   /** Taps on this device, newest first. */
   lidarrTaps(): Promise<Tap[]>;
+  /** On a server someone shares with you: whether Request shows, and your requests. */
+  asksView(): Promise<AsksView>;
+  /** Request an album (or a song, with its album) from the server's owner. */
+  asksRequest(item: AskItem): Promise<MyAsk>;
+  /** Take a request back before the owner answers. */
+  asksCancel(id: string): Promise<void>;
+  /** The owner's side: requests people made, newest first. */
+  asksIncoming(): Promise<IncomingAsk[]>;
+  /** The owner's yes (through Get, with every check) or no. */
+  asksAnswer(id: string, yes: boolean): Promise<AskAnswered>;
   /** How long the last get took, step by step. */
   lidarrLastGet(): Promise<LastGet | null>;
   /** "Search again" for an album nothing turned up for (one AlbumSearch; the schedule starts over). */
@@ -1876,6 +1891,11 @@ export function createTauriBackend(): Backend {
     lidarrGet: (input) => call("lidarr_get", { input }),
     lidarrTap: (input) => call("lidarr_tap", { input }),
     lidarrTaps: () => call("lidarr_taps"),
+    asksView: () => call("asks_view"),
+    asksRequest: (item) => call("asks_request", { item }),
+    asksCancel: (id) => call("asks_cancel", { id }),
+    asksIncoming: () => call("asks_incoming"),
+    asksAnswer: (id, yes) => call("asks_answer", { id, yes }),
     lidarrLastGet: () => call("lidarr_last_get"),
     lidarrSearchAgain: (id) => call("lidarr_search_again", { id }),
     getAlbumsUnqueue: (releaseGroupIds) => call("get_albums_unqueue", { releaseGroupIds }),

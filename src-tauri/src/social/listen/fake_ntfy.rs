@@ -176,8 +176,8 @@ async fn conn(st: Arc<St>, mut sock: TcpStream) {
     if let Some(since) = since {
         let old: Vec<Stored> = {
             let msgs = st.msgs.lock();
-            // "all": everything still held.
-            let from = if since == "all" { Some(0) } else { msgs.iter().position(|m| m.id == since).map(|i| i + 1) };
+            // "all", or a duration like "12h": everything still held.
+            let from = if since == "all" || since.ends_with('h') { Some(0) } else { msgs.iter().position(|m| m.id == since).map(|i| i + 1) };
             match from {
                 Some(i) => msgs[i..].iter().filter(|m| topics.contains(&m.topic)).cloned().collect(),
                 None => Vec::new(),

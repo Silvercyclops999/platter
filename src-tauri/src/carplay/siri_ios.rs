@@ -169,7 +169,8 @@ fn tap_catalogue(app: &AppHandle<Wry>, ask: &SiriAsk, query: &str) -> bool {
         let part = discover.search_part(&query, "songs").await?;
         let Some(input) = super::siri::tap_for(&ask, &part.songs) else { return Ok(false) };
         let out = taps.tap(input).await?;
-        Ok::<bool, crate::error::AppError>(out.tap.is_some())
+        // Someone the server is shared with: the tap became a request to its owner.
+        Ok::<bool, crate::error::AppError>(out.tap.is_some() || out.needs.as_ref().is_some_and(|n| n.kind == "requested"))
     };
     match tauri::async_runtime::block_on(async { tokio::time::timeout(std::time::Duration::from_secs(8), run).await }) {
         Ok(Ok(true)) => {

@@ -34,7 +34,8 @@ import { nav, useRouter } from "../stores/router";
 import { AlbumCard, ArtistCard, useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
 import { AboutCard, useArtistInfo } from "./ArtistAbout";
-import { useLidarrReady } from "./lidarrShared";
+import { useGetSpots, useLidarrReady } from "./lidarrShared";
+import { useIsGuest } from "../stores/asks";
 import { useAutoOn, useAutoRequest } from "../stores/radar";
 import { AutoRequestDialog } from "./AutoRequestDialog";
 import { GetAlbumsDialog } from "./GetAlbumsDialog";
@@ -118,7 +119,7 @@ function ArtistView({ id, era: eraName }: { id: string; era?: string }) {
   // Releases you can get, and for an artist the server has no albums (or
   // photo) for, the catalogue's photo.
   const disco = useArtistDiscography(id, artist?.title, data?.sections);
-  const lidarrReady = useLidarrReady();
+  const lidarrReady = useGetSpots();
   const photo = artist ? (photoPath(artist, info) ?? disco.photo) : null;
   const banner = artist ? bannerPath(artist, info) : null;
   const variant = artist ? headerVariant(artist, banner) : "photo";
@@ -505,7 +506,7 @@ function PopularSection({ id, data }: { id: string; data: ArtistPageData }) {
   const nowTrackId = usePlayer((s) => s.state?.track?.id);
   const status = usePlayer((s) => s.state?.status);
   const headingId = useId();
-  const tap = useTapPlays(useLidarrReady());
+  const tap = useTapPlays(useGetSpots());
   const items = popularItems(data.popular, data.popularElsewhere, tap);
   const shown = items.slice(0, more ? POPULAR_MORE : POPULAR_FIRST);
   return (
@@ -626,6 +627,8 @@ function CatalogueArtistView({ mbid }: { mbid: string }) {
   const [version, setVersion] = useState(0);
   const { data, error, retry } = useLoad(() => backend.catalogueArtist(mbid), [mbid, version]);
   const lidarrReady = useLidarrReady();
+  const spots = useGetSpots();
+  const guest = useIsGuest();
   const [getting, setGetting] = useState(false);
   const dismissed = useSettings((s) => s.settings?.dismissedArtists?.some((d) => d.mbid === mbid)) ?? false;
   const { header, column, step, compact } = useTitleStep(data?.artist.name);
@@ -715,7 +718,7 @@ function CatalogueArtistView({ mbid }: { mbid: string }) {
               )
             }
           />
-          {!lidarrReady && data && <span className="cat-actions__note">Set up Lidarr in Settings to get albums, or buy them from a store.</span>}
+          {!lidarrReady && !guest && data && <span className="cat-actions__note">Set up Lidarr in Settings to get albums, or buy them from a store.</span>}
         </div>
         {artist && getting && <GetAlbumsDialog mbid={artist.mbid} name={artist.name} open onClose={() => setGetting(false)} />}
         {!data && <Shelf title="Discography" loading />}
@@ -723,7 +726,7 @@ function CatalogueArtistView({ mbid }: { mbid: string }) {
         {data && data.sections.length > 0 && (
           <DiscographyShelf
             entries={catalogueEntries(data.sections, data.popular)}
-            lidarrReady={lidarrReady}
+            lidarrReady={spots}
             onChanged={reload}
             onShowAll={(f) => nav.go(discographyRoute(data.artist.mbid, f, true))}
           />

@@ -19,7 +19,7 @@ import { isLiked, setLiked } from "../../stores/likes";
 import { player, usePlayer } from "../../stores/player";
 import { PlayingBars } from "./common";
 import { hasCatalogue, playCatalogueSong, useCatalogueSearch, useTapPlays, type CatalogueResults } from "../../pages/SearchCatalogue";
-import { useLidarrReady } from "../../pages/lidarrShared";
+import { useGetSpots } from "../../pages/lidarrShared";
 import { catalogueKind } from "../../lib/format";
 import "../../pages/catalogue.css";
 
@@ -330,7 +330,7 @@ function Browse() {
  * artist opens its page, with Get there.
  */
 function PhoneCatalogue({ c, kind }: { c: CatalogueResults | null; kind: SearchKind }) {
-  const tapPlays = useTapPlays(useLidarrReady());
+  const tapPlays = useTapPlays(useGetSpots());
   if (!c || !hasCatalogue(c)) return null;
   const songs = kind === "all" || kind === "track" ? c.songs : [];
   const albums = kind === "all" || kind === "album" ? c.albums : [];

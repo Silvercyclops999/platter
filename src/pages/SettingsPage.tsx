@@ -641,6 +641,9 @@ function select<T extends string>(
   return <Select value={value(s)} options={options} onChange={onChange} labelledBy={ids.title} describedBy={ids.desc} />;
 }
 
+/** Albums a week a Straight away person gets (same as the core's REQUEST_LIMIT_CHOICES). */
+const REQUEST_LIMIT_OPTIONS = [5, 10, 20, 50].map((n) => ({ value: String(n), label: `${n} albums` }));
+
 /** 1 to 50; applies on every valid entry, snaps back on blur if invalid. */
 function PrecacheField({ value, ids }: { value: number; ids: { title: string; desc: string } }) {
   const [text, setText] = useState(String(value));
@@ -2778,6 +2781,26 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       control: (ids) => toggle(s, "shareAllowDownloads", ids),
     },
     {
+      key: "requestWeeklyLimit",
+      section: "Sharing and friends",
+      group: "Share my music",
+      title: "Albums a week for Straight away",
+      description: "Past this, their requests wait for your yes.",
+      more: "Someone set to Straight away gets this many albums a week without asking. After that their requests wait on What's New for your yes, like everyone else's.",
+      shown: s?.requestsFromOthers !== false,
+      control: (ids) => select(s, (x) => String(x.requestWeeklyLimit ?? 20), REQUEST_LIMIT_OPTIONS, ids, (v) => updateSettings({ requestWeeklyLimit: Number(v) })),
+    },
+    {
+      key: "requestGroupNotices",
+      section: "Sharing and friends",
+      group: "Share my music",
+      title: "Group request notifications",
+      description: "A few requests from one person in a row notify you once.",
+      more: "When someone requests a few albums within a few minutes, you get one notification for the first. They all wait on What's New. On this device only.",
+      shown: s?.requestsFromOthers !== false,
+      control: (ids) => toggle(s, "requestGroupNotices", ids),
+    },
+    {
       key: "shareAcceptInvites",
       section: "Sharing and friends",
       group: "Invites to you",
@@ -3247,6 +3270,15 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
             more: "Once the download is finished, the song plays straight from it on this computer, which needs Where this computer reaches your music. When Plex has its own copy, playback moves over at the same spot. Off waits for Plex.",
             shown: s?.lidarrTapToGet !== false,
             control: (ids) => toggle(s, "lidarrPlayArriving", ids),
+          },
+          {
+            key: "requestsFromOthers",
+            section: "Integrations",
+            page: "lidarr",
+            title: "Let people you share with request music",
+            description: "They see Request where you see Get. You say yes or no.",
+            more: "Someone your server is shared with sees Request on music it doesn't have. You get a notification and it waits on What's New for your yes, which sends it through Get with every check. Choose per person in Sharing and friends, People with access. Off hides Request for everyone.",
+            control: (ids) => toggle(s, "requestsFromOthers", ids),
           },
           {
             key: "lidarrChanges",

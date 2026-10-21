@@ -430,3 +430,60 @@ async fn someone_who_doesnt_own_the_server_cant_get_a_song() {
     assert!(t.taps.list().is_empty(), "no tap is followed");
     assert!(t.r.web.writes().is_empty(), "nothing goes to Lidarr");
 }
+
+/// The asking side of requests, for someone the server is shared with.
+struct Guest;
+
+#[async_trait]
+impl crate::asks::AsksHost for Guest {
+    async fn role(&self) -> crate::asks::Role {
+        crate::asks::Role::Guest { machine_id: "demo-machine-0001".into(), token: crate::plex::token::Token::new("friend-token").unwrap() }
+    }
+    async fn people(&self) -> AppResult<Vec<crate::asks::Person>> {
+        Ok(Vec::new())
+    }
+    fn lidarr_usable(&self) -> bool {
+        false
+    }
+    async fn pick(&self, _: &crate::asks::wire::AskItem) -> Result<String, String> {
+        Err("not here".into())
+    }
+    async fn protected(&self, _: &super::request::RequestInput) -> Option<bool> {
+        Some(false)
+    }
+    async fn get(&self, _: super::request::RequestInput) -> AppResult<super::request::GetOutcome> {
+        panic!("the asking side never gets anything itself")
+    }
+    fn record(&self, _: &str) -> Option<super::request::RequestRecord> {
+        None
+    }
+    fn settings(&self) -> crate::asks::AskSettings {
+        crate::asks::AskSettings { on: true, rules: Vec::new(), weekly_limit: 20, group_notices: true }
+    }
+    fn notify(&self, _: &str, _: &str) {}
+    fn emit(&self, _: &str, _: serde_json::Value) {}
+    fn now_ms(&self) -> u64 {
+        crate::remote::peer::auth::now_ms()
+    }
+}
+
+#[tokio::test]
+async fn someone_who_doesnt_own_the_server_requests_instead_and_lidarr_never_hears() {
+    let t = setup().await;
+    t.r.lidarr.set_owner(false);
+    let dir = tempfile::tempdir().unwrap();
+    let db = crate::db::DbHandle::open(dir.path().join("a.db")).unwrap();
+    let relays = Arc::new(crate::social::listen::relay::Ntfy::new().unwrap());
+    let asks = crate::asks::Asks::new(Arc::new(Guest), db, relays, Arc::new(parking_lot::RwLock::new(String::new())), "http://127.0.0.1:9".into());
+    t.taps.set_requests(asks.clone());
+    let out = t.taps.tap(TapInput { thumb: Some("/library/metadata/1/thumb".into()), ..tap_in() }).await.unwrap();
+    assert!(out.tap.is_none());
+    assert_eq!(out.needs.map(|n| (n.kind, n.reason)), Some(("requested".to_string(), super::tap::REQUESTED_NOTE.to_string())));
+    let mine = asks.view().await.mine;
+    assert_eq!(mine.len(), 1);
+    assert_eq!((mine[0].item.title.as_str(), mine[0].item.album.as_deref(), mine[0].item.song), ("Dawn", Some("Second Wind"), true));
+    // A server path is never sent along.
+    assert!(mine[0].item.thumb.is_none());
+    assert!(t.taps.list().is_empty());
+    assert!(writes(&t.r.web).is_empty());
+}

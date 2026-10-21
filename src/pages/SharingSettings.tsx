@@ -3,7 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import { Button, IconButton } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { Skeleton } from "../components/Skeleton";
-import type { PersonWithAccess } from "../lib/types";
+import { Select, type SelectOption } from "../components/Select";
+import type { PersonWithAccess, RequestRuleKind } from "../lib/types";
+import { RULE_LABEL, ruleFor, setRule } from "./AskRows";
 import { InviteCallout, unreleasedLabel } from "../shell/ShareMusic";
 import { PersonFace } from "../shell/ListenStrip";
 import { updateSettings, useSettings } from "../stores/settings";
@@ -19,8 +21,17 @@ export function ShareMyMusic({ ids }: { ids: { title: string; desc: string } }) 
   );
 }
 
+/** "Getting music": what one person may do when your server doesn't have something. */
+const RULE_OPTIONS: SelectOption<RequestRuleKind>[] = [
+  { value: "ask", label: RULE_LABEL.ask },
+  { value: "straight", label: RULE_LABEL.straight },
+  { value: "off", label: RULE_LABEL.off },
+];
+
 function PersonRow({ p }: { p: PersonWithAccess }) {
   const [asking, setAsking] = useState(false);
+  const requests = useSettings((s) => s.settings?.requestsFromOthers !== false);
+  const rule = useSettings((s) => ruleFor(s.settings, p.userId));
   const notNow = useRef<HTMLButtonElement>(null);
   return (
     <li className="share-person">
@@ -46,6 +57,14 @@ function PersonRow({ p }: { p: PersonWithAccess }) {
           {p.pending && <span className="share-tag share-tag--pending">Pending</span>}
         </span>
       </span>
+      {requests && !p.pending && p.userId && (
+        <Select<RequestRuleKind>
+          value={rule}
+          options={RULE_OPTIONS}
+          onChange={(v) => void setRule(p.userId, v)}
+          label={`Getting music for ${p.name}`}
+        />
+      )}
       <IconButton size="sm" label={`Remove ${p.name}'s access`} icon={<UserMinus size={16} />} onClick={() => setAsking(true)} />
       <Dialog open={asking} onClose={() => setAsking(false)} label={`Remove ${p.name}'s access?`} className="confirm" initialFocus={notNow}>
         <h2 className="confirm__title">Remove {p.name}'s access?</h2>

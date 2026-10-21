@@ -2267,7 +2267,7 @@ of music libraries only.
 | --- | --- | --- |
 | `sharing_overview` | – | `{ serverName, owner, plexPass: bool \| null, libraries: { id, title, unreleased: number \| null, default }[] }`, music libraries only; `unreleased` is null for one Platter hasn't read |
 | `sharing_share` | `{ invitee, options: { libraries, hideUnreleased, allowDownloads } }` | `ShareStatus`: `{ status: "invited", hidden }`, `{ status: "alreadyShared" }`, `{ status: "needsPlexPass", withUnreleased: string[], others: string[] }`, `{ status: "unknownUser" \| "refused" \| "plexDown", message }`; `invalid` for anything but music libraries on a server you own |
-| `sharing_people` | – | `{ id, name, libraries, allowDownloads, unreleasedHidden, pending, lastSeenAt }[]` |
+| `sharing_people` | – | `{ id, userId, name, libraries, allowDownloads, unreleasedHidden, pending, lastSeenAt }[]` |
 | `sharing_remove` | `{ id }` | – |
 | `sharing_link` | `{ options }` | `{ link, qr, expiresAt }`: `platter://share/<token>` (the invite token), one person, once |
 | `sharing_open_link` | `{ link }` | `{ status: "asked" \| "invited" \| "alreadyShared", host } \| { status: "failed", message }` |
@@ -2735,11 +2735,31 @@ The download is followed every 2 seconds through Lidarr's queue. With `lidarrPla
 
 | Command | Args | Returns |
 | --- | --- | --- |
-| `lidarr_tap` | `{ input: TapInput }` | `TapOutcome = { tap: Tap \| null, needs: { kind: "firstTime" \| "refused", reason } \| null }`; `needs` like `lidarr_get` (nothing is sent then). `invalid` with the setting off |
+| `lidarr_tap` | `{ input: TapInput }` | `TapOutcome = { tap: Tap \| null, needs: { kind: "firstTime" \| "refused" \| "requested", reason } \| null }`; `needs` like `lidarr_get` (nothing is sent then). `requested` when the signed-in account doesn't own the server: the tap became a request to its owner (`asks_request`) and Lidarr wasn't reached. `invalid` with the setting off |
 | `lidarr_taps` | – | `Tap[]`, the latest 20 |
 | `lidarr_last_get` | – | `LastGet \| null = { title, at, timings }`, the latest tap that reached the library |
 
 `TapInput = { title, artist, artistId?, artistMbid?, album?, releaseGroupId?, isrc?, durationMs?, thumb?, typed? }`. `Tap = { id, title, artist, album, releaseGroupId, thumb, durationMs, phase, progress, message, requestId, timings, wanted, fromDownload }` with `phase` one of `searching`, `downloading`, `waiting`, `importing`, `playing`, `ready`, `failed`; `wanted` marks the one that plays; `timings` is `{ foundMs, downloadedMs, playingMs, inLibraryMs }` after the tap. Every change is sent as the `lidarr://tap` event with the `Tap`.
+
+### Requests from people the server is shared with
+
+Only the server's owner gets music through Lidarr (`Lidarr::is_owner`, from Plex's `owned` flag for the connected server). Anyone else signed in to it sees Request where the owner sees Get, and a request goes to the owner's Platter (`asks/`). The owner says yes or no; a yes goes through `lidarr_get` on the owner's device with every check that has, so the asking side never reaches Lidarr.
+
+There's no code to enter. Plex gives each person an access token for the server, which their Platter streams with and which plex.tv lists for the owner next to the share (`/api/servers/{machine}/shared_servers`). Both sides derive the same key from it (HMAC with the server's machine id) and two relay topics from that key, one for the person's messages and one for the owner's answers. The token itself is never sent, shown or logged. Messages go through the listen along relay (`listenRelay`), sealed, and a message that doesn't open on a person's own topic is dropped. The owner's side ignores any cover address a person sends and shows the release group's own cover.
+
+The asking side keeps its requests and sends again any the owner's Platter hasn't seen, so a request made while the owner's computer is off arrives when it's back. Now and then it also sends the open ones again and the owner's Platter answers with where each stands, so an answer missed while away arrives. Every owner device listens, and a yes on one shows on the others. Only a device that can use Lidarr answers; one that can't only lists requests. A request sent more than 2 minutes before a device started listening is the relay catching it up, and is only listed there, since another device may have answered it. One person's messages are answered up to 60 an hour. The owner's side checks each request again: a person set to Can't ask or with 10 requests already waiting is refused with why, and a refused request isn't kept; the release group is picked on MusicBrainz by the owner's Platter, not taken from the request; something already coming joins it without a yes; a protected artist is refused on yes, and a yes waits when Lidarr can't be reached to check that. Someone set to Straight away gets up to `requestWeeklyLimit` albums a week without a yes; past that their requests wait like everyone else's. The owner's own first request ever still waits for the typed name.
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `asks_view` | – | `AsksView = { guest, canRequest, straightAway, mine: MyAsk[] }` for the connected server; `guest` is true when it's shared with you, `canRequest` once the owner's Platter said you may |
+| `asks_request` | `{ item: AskItem }` | `MyAsk`. The same album asked for again is the first request. `invalid` for the owner, with requests off for you, or with 10 waiting |
+| `asks_cancel` | `{ id }` | –. Only before it's on its way, else `invalid` |
+| `asks_incoming` | – | `IncomingAsk[]`, newest first (the owner's side) |
+| `asks_answer` | `{ id, yes }` | `{ incoming: IncomingAsk, needs }`; `needs` like `lidarr_get` (`firstTime` waits for the typed name, then answer yes again). `invalid` when not the owner |
+
+`AskItem = { releaseGroupId?, title, artist, artistMbid?, album?, song?, isrc?, thumb? }`. `MyAsk = { id, item, state, progress, note, createdAt, updatedAt, seen }` and `IncomingAsk = { id, personId, personName, item, releaseGroupId, state, progress, note, createdAt, updatedAt, byItself }`, with `state` one of `sending`, `requested`, `getting`, `ready`, `declined`, `notFound`, `refused`, `failed`, `cancelled` and times in milliseconds. `asks://mine` (no payload) says the asking side changed; `asks://incoming` carries the owner's whole list. The owner gets a notification for each request (one per person every 3 minutes with `requestGroupNotices` on) and the person gets one when it's on the server.
+
+Settings: `requestsFromOthers` (on), `requestRules` (`{ userId, rule: "off" | "ask" | "straight" }[]`; anyone not listed asks first) and `requestWeeklyLimit` (5, 10, 20 or 50; 20) are synced. `requestGroupNotices` (on) is this device's.
 
 ### Managed and protected artists
 

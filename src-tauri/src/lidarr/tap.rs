@@ -202,7 +202,13 @@ pub struct Taps {
     list: Arc<Mutex<Vec<Tap>>>,
     /// One follow at a time.
     following: Arc<tokio::sync::Mutex<()>>,
+    /// Where a tap goes when this device isn't the server owner's: a
+    /// request to the owner.
+    requests: Arc<Mutex<Option<crate::asks::Asks>>>,
 }
+
+/// What a tap says when it became a request to the server's owner.
+pub const REQUESTED_NOTE: &str = "Requested. You'll hear when it's here.";
 
 /// Folded for comparing names: letters and digits, lower case.
 pub fn fold(s: &str) -> String {
@@ -372,7 +378,12 @@ fn song_folder(imported: &[String], title: &str) -> Option<String> {
 
 impl Taps {
     pub fn new(lidarr: Lidarr, host: Arc<dyn TapHost>) -> Self {
-        Self { lidarr, host, list: Default::default(), following: Default::default() }
+        Self { lidarr, host, list: Default::default(), following: Default::default(), requests: Default::default() }
+    }
+
+    /// Taps by someone who doesn't own the server become requests.
+    pub fn set_requests(&self, asks: crate::asks::Asks) {
+        *self.requests.lock() = Some(asks);
     }
 
     pub fn list(&self) -> Vec<Tap> {
@@ -386,7 +397,22 @@ impl Taps {
     /// A song was tapped.
     pub async fn tap(&self, input: TapInput) -> AppResult<TapOutcome> {
         if !self.lidarr.is_owner() {
-            return Err(AppError::Invalid(crate::lidarr::NOT_OWNER.into()));
+            // Only the owner reaches Lidarr; anyone else's tap asks the owner.
+            let Some(asks) = self.requests.lock().clone() else {
+                return Err(AppError::Invalid(super::NOT_OWNER.into()));
+            };
+            let item = crate::asks::wire::AskItem {
+                release_group_id: input.release_group_id,
+                title: input.title,
+                artist: input.artist,
+                artist_mbid: input.artist_mbid,
+                album: input.album,
+                song: true,
+                isrc: input.isrc,
+                thumb: input.thumb.filter(|t| t.starts_with("https://") || t.starts_with("/ext/https://")),
+            };
+            asks.request(item).await?;
+            return Ok(TapOutcome { tap: None, needs: Some(GetNeeds { kind: "requested".into(), reason: REQUESTED_NOTE.into() }) });
         }
         if !self.settings().lidarr_tap_to_get {
             return Err(AppError::Invalid("Getting songs with a tap is off. Turn it on in Settings > Lidarr > More.".into()));

@@ -51,6 +51,7 @@ import type {
   CompareSide,
   LidarrPickInput,
   LidarrRequestInput,
+  AskItem,
   CataloguePartKind,
   QueuedGet,
   LidarrFixAction,
@@ -196,6 +197,7 @@ import { buildRecents, seedListens, type MockListen } from "./recents";
 import { MockPlaylists } from "./playlists";
 import { MockRemote } from "./remote";
 import { MockShare, mockQr } from "./share";
+import { type AsksDemo, MockAsks, isAsksDemo } from "./asks";
 import { isDiscordDemo, MockDiscord, type DiscordDemo } from "./discord";
 import { MockFileTags } from "./fileTags";
 import { MockThemes, checkThemePatch } from "./themes";
@@ -270,6 +272,8 @@ export interface MockOptions {
   theme?: Settings["theme"];
   /** What the faked Lidarr looks like (?lidarr=clear). */
   lidarr?: LidarrDemo;
+  /** Requests: signed in as someone the server is shared with (?asks=guest), or the owner with requests waiting (?asks=owner). */
+  asks?: AsksDemo;
   /** Start with a Lidarr upgrade offered on the first album (?upgrades=ready); sets Lidarr up too. */
   upgrades?: UpgradeDemo;
   /** The release radar has found nothing yet (?radar=empty). */
@@ -389,6 +393,7 @@ export function optionsFromUrl(search: string): MockOptions {
     emptyLibrary: p.get("library") === "empty",
     longTitles: p.get("titles") === "long",
     missingArt: p.get("art") === "missing",
+    asks: isAsksDemo(p.get("asks")) ? (p.get("asks") as AsksDemo) : undefined,
     listenDemo: p.get("listen") === "cantHear" || p.get("listen") === "invited" ? (p.get("listen") as "cantHear" | "invited") : undefined,
   };
 }
@@ -432,6 +437,8 @@ export class MockBackend implements Backend {
   readonly remote: MockRemote;
   /** Sharing (test hooks: openLink, failNext). */
   readonly share: MockShare;
+  /** Requests (test hooks: ownerAnswers, arrive, incomingArrives). */
+  readonly asks: MockAsks;
   /** Discord status (test hooks: setConnected, setAvailable, failUpload). */
   readonly discord: MockDiscord;
   /** File tags: badges, editions, filters and the scan. */
@@ -616,6 +623,14 @@ export class MockBackend implements Backend {
     this.listens = seedListens(this.fx, this.likes.ids());
     this.stats = new MockStats(this.fx, this.opts.statsEmpty ? [] : seedStatsHistory(this.fx, Date.now(), this.opts.statsSparse), () => this.listens, () => this.settings);
     this.friends = this.opts.statsEmpty ? [] : [mockFriendSummary(this.fx, new Set(this.stats.plays().map((p) => p.trackId)))];
+    this.asks = new MockAsks(this.opts.asks ?? null, {
+      get: (item, releaseGroupId) =>
+        this.lidarr.get(this.settings, { releaseGroupId, title: item.song && item.album ? item.album : item.title, artist: item.artist, artistId: null, artistMbid: item.artistMbid ?? null } as LidarrRequestInput, Math.floor(Date.now() / 1000)),
+      emitMine: () => this.later(0, () => this.emit("asks://mine", {})),
+      emitIncoming: (all) => this.later(0, () => this.emit("asks://incoming", all)),
+      notify: (message) => this.emit("toast", { kind: "info", message }),
+      later: (ms, fn) => this.later(ms, fn),
+    });
     this.share = new MockShare(
       this.fx,
       () => this.settings,
@@ -4049,7 +4064,8 @@ export class MockBackend implements Backend {
     return this.delay(() => this.scrobble.check());
   }
   lidarrStatus() {
-    return this.delay(() => this.lidarr.status(this.settings));
+    // Someone the server is shared with never uses Lidarr from here.
+    return this.delay(() => (this.asks.mode === "guest" ? { ...this.lidarr.status(this.settings), ready: false, notOwner: true } : this.lidarr.status(this.settings)));
   }
   releaseRadar() {
     return this.delay(() => this.radar.page());
@@ -4099,6 +4115,11 @@ export class MockBackend implements Backend {
   }
   lidarrTap(input: TapInput) {
     return this.delay((): TapOutcome => {
+      if (this.asks.mode === "guest") {
+        const thumb = input.thumb?.startsWith("/ext/https://") ? input.thumb : null;
+        this.asks.request({ releaseGroupId: input.releaseGroupId ?? null, title: input.title, artist: input.artist, artistMbid: input.artistMbid ?? null, album: input.album ?? null, song: true, thumb });
+        return { tap: null, needs: { kind: "requested", reason: "Requested. You'll hear when it's here." } };
+      }
       if (!this.settings.lidarrTapToGet) throw { kind: "invalid", message: "Getting songs with a tap is off. Turn it on in Settings > Lidarr > More." };
       const same = this.taps.find((t) => t.phase !== "failed" && t.releaseGroupId === (input.releaseGroupId ?? "") && t.title === input.title);
       this.taps.forEach((t) => (t.wanted = t === same));
@@ -4162,6 +4183,21 @@ export class MockBackend implements Backend {
   }
   lidarrTaps() {
     return this.delay(() => this.taps.map((t) => ({ ...t })));
+  }
+  asksView() {
+    return this.delay(() => this.asks.view());
+  }
+  asksRequest(item: AskItem) {
+    return this.delay(() => this.asks.request(item));
+  }
+  asksCancel(id: string) {
+    return this.delay(() => this.asks.cancel(id));
+  }
+  asksIncoming() {
+    return this.delay(() => this.asks.incomingList());
+  }
+  asksAnswer(id: string, yes: boolean) {
+    return this.delay(() => this.asks.answer(id, yes));
   }
   lidarrLastGet() {
     return this.delay(() => this.lastGet);

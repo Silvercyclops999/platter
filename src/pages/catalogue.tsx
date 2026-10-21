@@ -121,7 +121,7 @@ export function CatalogueAction({
 }) {
   return (
     <GetButton
-      album={{ releaseGroupId: album.releaseGroupId, title: album.title, artist: album.artist, artistMbid: album.artistMbid, artistId: artistLibraryId ?? null }}
+      album={{ releaseGroupId: album.releaseGroupId, title: album.title, artist: album.artist, artistMbid: album.artistMbid, artistId: artistLibraryId ?? null, thumb: album.thumb }}
       known={album.request}
       libraryAlbumId={album.libraryAlbumId}
       refusal={album.refusal}

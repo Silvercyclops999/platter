@@ -17,7 +17,7 @@ import { photoPath, type DiscographyFilter } from "../../pages/artist";
 import { useCatalogueFans } from "../../pages/catalogue";
 import { eraRange, showEraCards } from "../../pages/era";
 import { useArtistDiscography } from "../../pages/discographySources";
-import { useLidarrReady } from "../../pages/lidarrShared";
+import { useGetSpots } from "../../pages/lidarrShared";
 import { player, usePlayer } from "../../stores/player";
 import { nav, type Route } from "../../stores/router";
 import { useSettings } from "../../stores/settings";
@@ -77,7 +77,7 @@ export function PhoneArtist({ id }: { id: string }) {
   const credited = isCreditId(id);
   const disco = useArtistDiscography(id, data?.artist.title, data?.sections);
   const fans = useCatalogueFans(credited ? null : id, data?.artist.title);
-  const lidarrReady = useLidarrReady();
+  const lidarrReady = useGetSpots();
   const [allTop, setAllTop] = useState(false);
   const hero = useRef<HTMLDivElement>(null);
   // The shelves come a frame after the header, so the page opens at once.

@@ -11,6 +11,91 @@ import { MoreHorizontal } from "lucide-react";
 import { nav } from "../../stores/router";
 import { PageFailed } from "./common";
 import { Empty, GhostRows, PageFrame, Row } from "./kit";
+import type { IncomingAsk, MyAsk } from "../../lib/types";
+import { StatePill, askAlbum, askArt, askWhat, useAnswer, useRequestLists } from "../../pages/AskRows";
+import { cancelAsk, waiting } from "../../stores/asks";
+
+function IncomingPhoneRow({ a }: { a: IncomingAsk }) {
+  const { busy, yes, no, confirmEl } = useAnswer(a);
+  const album = askAlbum(a.item);
+  return (
+    <>
+      <Row
+        art={<Art path={askArt(a.item)} size={64} sleeve={{ title: album, artist: a.item.artist }} />}
+        title={askWhat(a.item)}
+        sub={a.note ?? `From ${a.personName} · ${a.item.artist}`}
+        onOpen={a.releaseGroupId ? () => nav.go({ name: "catalogueAlbum", id: a.releaseGroupId! }) : undefined}
+        end={
+          waiting(a) ? (
+            <span className="ph-ask__actions">
+              <button type="button" className="ph-pill" disabled={busy} onClick={() => void no()} aria-label={`No thanks to ${a.personName}'s request for ${album}`}>
+                No
+              </button>
+              <button type="button" className="ph-pill is-primary" disabled={busy} onClick={() => void yes()} aria-label={`Get ${album} for ${a.personName}`}>
+                Get it
+              </button>
+            </span>
+          ) : (
+            <StatePill state={a.state} progress={a.progress} note={a.note} />
+          )
+        }
+      />
+      {confirmEl}
+    </>
+  );
+}
+
+function MyPhoneRow({ a }: { a: MyAsk }) {
+  const album = askAlbum(a.item);
+  const open = a.state === "sending" || a.state === "requested";
+  return (
+    <Row
+      art={<Art path={askArt(a.item)} size={64} sleeve={{ title: album, artist: a.item.artist }} />}
+      title={askWhat(a.item)}
+      sub={a.note ?? a.item.artist}
+      onOpen={a.item.releaseGroupId ? () => nav.go({ name: "catalogueAlbum", id: a.item.releaseGroupId! }) : undefined}
+      end={
+        <span className="ph-ask__actions">
+          <StatePill state={a.state} progress={a.progress} note={a.note} />
+          {open && (
+            <button type="button" className="ph-pill" onClick={() => void cancelAsk(a)} aria-label={`Take back your request for ${album}`}>
+              Take back
+            </button>
+          )}
+        </span>
+      }
+    />
+  );
+}
+
+/** Requests: what people asked you for (the owner), or your own. */
+function PhoneRequests() {
+  const { theirs, mine } = useRequestLists();
+  return (
+    <>
+      {theirs.length > 0 && (
+        <section className="ph-x__section" aria-label="Requested">
+          <h2 className="ph-section-title">Requested</h2>
+          <ul className="ph-rows">
+            {theirs.map((a) => (
+              <IncomingPhoneRow key={a.id} a={a} />
+            ))}
+          </ul>
+        </section>
+      )}
+      {mine.length > 0 && (
+        <section className="ph-x__section" aria-label="Your requests">
+          <h2 className="ph-section-title">Your requests</h2>
+          <ul className="ph-rows">
+            {mine.map((a) => (
+              <MyPhoneRow key={a.id} a={a} />
+            ))}
+          </ul>
+        </section>
+      )}
+    </>
+  );
+}
 
 function Group({ title, items }: { title: string; items: NewRelease[] }) {
   if (!items.length) return null;
@@ -66,6 +151,7 @@ export function PhoneWhatsNew() {
       title="What's new"
       lede={data && !data.following ? "New in your library. Follow artists to see only their releases here." : "The latest releases from artists you follow."}
     >
+      <PhoneRequests />
       {error && !data ? (
         <PageFailed what="What's new" retry={() => setAttempt((n) => n + 1)} />
       ) : !data ? (

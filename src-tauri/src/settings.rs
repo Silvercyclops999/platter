@@ -1033,6 +1033,17 @@ pub struct Settings {
     /// A tapped song plays from the finished download, before Lidarr moves
     /// it into the library, when this device can open the file.
     pub lidarr_play_arriving: bool,
+    /// People the server is shared with may request music the server
+    /// doesn't have (the owner says yes, or it goes straight through).
+    pub requests_from_others: bool,
+    /// What each person may do, by Plex user id: `off`, `ask` (the
+    /// default for anyone not listed) or `straight`.
+    pub request_rules: Vec<RequestRule>,
+    /// Albums a week a Straight away person gets without a yes.
+    pub request_weekly_limit: u32,
+    /// A second request from the same person within a few minutes doesn't
+    /// notify again.
+    pub request_group_notices: bool,
     /// The kinds "Get albums" offers ticked: `studio`, `ep`, `live`, `compilation`.
     pub get_albums_kinds: Vec<String>,
     /// The discography chip an artist page opens on (the last one picked):
@@ -1453,6 +1464,10 @@ impl Default for Settings {
             lidarr_tap_to_get: true,
             lidarr_prefer_fastest: true,
             lidarr_play_arriving: true,
+            requests_from_others: true,
+            request_rules: Vec::new(),
+            request_weekly_limit: 20,
+            request_group_notices: true,
             get_albums_kinds: crate::discover::DEFAULT_GET_KINDS.iter().map(|k| k.to_string()).collect(),
             discography_chip: "popular".into(),
             discography_sort: "date".into(),
@@ -1490,6 +1505,33 @@ impl Default for Settings {
 /// (camelCase names, as on the wire). Everything else is this device only.
 /// Every setting is in exactly one of this list, [`DEVICE_SETTINGS`] and
 /// [`FORM_FACTOR_ONLY`] (a test checks).
+/// What one person the server is shared with may do with requests.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RequestRule {
+    /// Their Plex user id.
+    pub user_id: String,
+    pub rule: crate::asks::Rule,
+}
+
+/// The weekly limits offered for Straight away.
+pub const REQUEST_LIMIT_CHOICES: &[u32] = &[5, 10, 20, 50];
+
+/// One rule per person, real ids only, and nobody listed with the default.
+pub fn tidy_request_rules(list: &[RequestRule]) -> Vec<RequestRule> {
+    let mut out: Vec<RequestRule> = Vec::new();
+    for r in list.iter().rev() {
+        let id = r.user_id.trim();
+        if id.is_empty() || id.len() > 20 || !id.bytes().all(|b| b.is_ascii_digit()) || out.iter().any(|o| o.user_id == id) {
+            continue;
+        }
+        out.push(RequestRule { user_id: id.to_string(), rule: r.rule });
+    }
+    out.retain(|r| r.rule != crate::asks::Rule::Ask);
+    out.reverse();
+    out
+}
+
 pub const SYNCED_SETTINGS: &[&str] = &[
     // Platter Bridge: its work is for every device.
     "bridgeLyrics",
@@ -1659,6 +1701,9 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "lidarrTapToGet",
     "lidarrPreferFastest",
     "lidarrPlayArriving",
+    "requestsFromOthers",
+    "requestRules",
+    "requestWeeklyLimit",
     "getAlbumsKinds",
     "showPhysicalCollection",
     "shelfMissingList",
@@ -1690,6 +1735,7 @@ pub const FORM_FACTOR_ONLY: &[&str] = &["layout", "homeShortcuts"];
 
 /// Settings kept on this device only.
 pub const DEVICE_SETTINGS: &[&str] = &[
+    "requestGroupNotices",
     "discographyChip",
     "discographySort",
     "discographyReverse",
@@ -2087,6 +2133,10 @@ pub struct SettingsPatch {
     pub lidarr_tap_to_get: Option<bool>,
     pub lidarr_prefer_fastest: Option<bool>,
     pub lidarr_play_arriving: Option<bool>,
+    pub requests_from_others: Option<bool>,
+    pub request_rules: Option<Vec<RequestRule>>,
+    pub request_weekly_limit: Option<u32>,
+    pub request_group_notices: Option<bool>,
     pub get_albums_kinds: Option<Vec<String>>,
     pub discography_chip: Option<String>,
     pub discography_sort: Option<String>,
@@ -2491,6 +2541,17 @@ impl Settings {
         set(&mut self.lidarr_tap_to_get, p.lidarr_tap_to_get);
         set(&mut self.lidarr_prefer_fastest, p.lidarr_prefer_fastest);
         set(&mut self.lidarr_play_arriving, p.lidarr_play_arriving);
+        set(&mut self.requests_from_others, p.requests_from_others);
+        set(&mut self.request_group_notices, p.request_group_notices);
+        if let Some(r) = &p.request_rules {
+            self.request_rules = tidy_request_rules(r);
+        }
+        if let Some(n) = p.request_weekly_limit {
+            if !REQUEST_LIMIT_CHOICES.contains(&n) {
+                return Err(AppError::Invalid("Pick one of the limits offered.".into()));
+            }
+            self.request_weekly_limit = n;
+        }
         if let Some(k) = &p.get_albums_kinds {
             self.get_albums_kinds = crate::discover::clean_kinds(k);
         }
@@ -2706,6 +2767,10 @@ impl Settings {
         if !DAYLIST_HOURS.contains(&self.daylist_hours) {
             self.daylist_hours = 3;
         }
+        if !REQUEST_LIMIT_CHOICES.contains(&self.request_weekly_limit) {
+            self.request_weekly_limit = 20;
+        }
+        self.request_rules = tidy_request_rules(&self.request_rules);
         if !crate::doctor::COVER_PX_CHOICES.contains(&self.doctor_cover_px) {
             self.doctor_cover_px = crate::doctor::DEFAULT_COVER_PX;
         }
@@ -5834,6 +5899,19 @@ mod tests {
         assert_eq!(MobileQuality::Auto.cap_kbps(false, 256), Some(320));
         assert_eq!(MobileQuality::Original.cap_kbps(true, 4600), None);
         assert_eq!(MobileQuality::Kbps128.cap_kbps(true, 900), Some(128));
+    }
+
+    #[test]
+    fn request_rules_keep_one_real_rule_per_person() {
+        use crate::asks::Rule;
+        let r = |u: &str, rule| RequestRule { user_id: u.into(), rule };
+        let got = tidy_request_rules(&[r("101", Rule::Off), r(" 102 ", Rule::Straight), r("101", Rule::Straight), r("103", Rule::Ask), r("x9", Rule::Off), r("", Rule::Off)]);
+        assert_eq!(got, vec![r("102", Rule::Straight), r("101", Rule::Straight)]);
+        let mut s = Settings::default();
+        assert!(s.requests_from_others && s.request_group_notices && s.request_weekly_limit == 20);
+        s.apply(&SettingsPatch { request_weekly_limit: Some(7), ..Default::default() }).unwrap_err();
+        s.apply(&SettingsPatch { request_weekly_limit: Some(50), request_rules: Some(vec![r("101", Rule::Off)]), ..Default::default() }).unwrap();
+        assert_eq!((s.request_weekly_limit, s.request_rules.len()), (50, 1));
     }
 
     #[test]
