@@ -158,6 +158,7 @@ export function TopSongsPage({ year }: { year: number | null }) {
             label={isContext && playing ? `Pause ${title}` : `Play ${title}`}
             variant="accent"
             size="xl"
+            text={isContext && playing ? "Pause" : "Play"}
             disabled={!ids.length}
             icon={isContext && playing ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
             onClick={toggle}

@@ -32,6 +32,8 @@ export interface IconButtonProps extends Base {
   pressed?: boolean;
   /** Focusable but inert (e.g. Phase 3 features); explains itself via tooltip. */
   softDisabled?: boolean;
+  /** A short word beside the glyph. Platter's own looks show it, making the button a pill; Classic keeps the round button. */
+  text?: string;
 }
 
 export function IconButton({
@@ -43,6 +45,7 @@ export function IconButton({
   variant = "plain",
   pressed,
   softDisabled,
+  text,
   className = "",
   onClick,
   type = "button",
@@ -54,11 +57,16 @@ export function IconButton({
       aria-label={label}
       aria-pressed={pressed}
       aria-disabled={softDisabled || undefined}
-      className={`icon-btn icon-btn--${size} icon-btn--${variant} ${pressed ? "is-active" : ""} ${className}`}
+      className={`icon-btn icon-btn--${size} icon-btn--${variant} ${text ? "icon-btn--text" : ""} ${pressed ? "is-active" : ""} ${className}`}
       onClick={softDisabled ? (e) => e.preventDefault() : onClick}
       {...rest}
     >
       <span aria-hidden="true" className="icon-btn__glyph">{icon}</span>
+      {text && (
+        <span aria-hidden="true" className="icon-btn__text">
+          {text}
+        </span>
+      )}
     </button>
   );
   if (tooltip === false) return btn;

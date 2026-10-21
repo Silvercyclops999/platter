@@ -151,6 +151,7 @@ export function BlendPage({ id }: { id: string }) {
             label={playing ? `Pause ${summary?.title ?? "Blend"}` : `Play ${summary?.title ?? "Blend"}`}
             variant="accent"
             size="xl"
+            text={playing ? "Pause" : "Play"}
             disabled={!rows.length}
             icon={playing ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
             onClick={() => play()}

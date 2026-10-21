@@ -5,7 +5,7 @@
  * their eras; the discography with the records you can get (Get, through
  * Lidarr); Appears on and Fans also like, each with See all.
  */
-import { Pause, Play, Radio } from "lucide-react";
+import { Radio } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Art } from "../../components/Art";
 import { backend } from "../../lib/backend";
@@ -24,7 +24,7 @@ import { useSettings } from "../../stores/settings";
 import { setFollow, useSocial } from "../../stores/social";
 import { BackBar, Carousel, PageFailed, PageLoading, ShelfCard, SongRow } from "./common";
 import { DiscoShelf } from "./DiscoShelf";
-import { CataloguePhoto, PhoneShuffleToggle } from "./kit";
+import { CataloguePhoto, PhoneShuffleToggle, PlayPill } from "./kit";
 
 /** Top tracks shown at first. */
 export const TOP_TRACKS = 5;
@@ -126,6 +126,10 @@ export function PhoneArtist({ id }: { id: string }) {
         <p className="ph-artist__lib tabular">{inLibraryLine(albums.length, songs)}</p>
         <div className="ph-actions">
           <div className="ph-actions__left">
+            <PlayPill playing={playing} label={playing ? "Pause" : `Play ${artist.title}`} onClick={() => (here ? void player.toggle() : void player.playArtist(artist.id))} />
+            <PhoneShuffleToggle id={artist.id} kind="artist" name={artist.title} />
+          </div>
+          <div className="ph-actions__right">
             {!credited && (
               <button
                 type="button"
@@ -139,17 +143,6 @@ export function PhoneArtist({ id }: { id: string }) {
             )}
             <button type="button" className="ph-icon-btn" aria-label={`${artist.title} radio`} onClick={() => nav.go({ name: "radio", seed: `artist:${artist.id}` })}>
               <Radio size={22} aria-hidden="true" />
-            </button>
-          </div>
-          <div className="ph-actions__right">
-            <PhoneShuffleToggle id={artist.id} kind="artist" name={artist.title} />
-            <button
-              type="button"
-              className="ph-play ph-play--page"
-              aria-label={playing ? "Pause" : `Play ${artist.title}`}
-              onClick={() => (here ? void player.toggle() : void player.playArtist(artist.id))}
-            >
-              {playing ? <Pause size={28} fill="currentColor" aria-hidden="true" /> : <Play size={28} fill="currentColor" aria-hidden="true" />}
             </button>
           </div>
         </div>

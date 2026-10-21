@@ -116,7 +116,7 @@ export function ChipRow({ label, className = "", scroll = false, children }: { l
 }
 
 /** Whether a sideways scroller has more to show before and after what's visible. */
-function useScrollEdges(ref: React.RefObject<HTMLElement | null>, on: boolean) {
+export function useScrollEdges(ref: React.RefObject<HTMLElement | null>, on: boolean) {
   const [edges, setEdges] = useState({ start: false, end: false });
   const update = () => {
     const el = ref.current;

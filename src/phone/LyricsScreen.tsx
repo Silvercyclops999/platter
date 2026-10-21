@@ -21,8 +21,12 @@ import { tap } from "./bits";
 import { useLyricFollow } from "./lyricsFollow";
 import { phone, usePhoneUi } from "./phoneUi";
 import { PhoneSeek } from "./NowPlaying";
-import { holdLightStatusBar } from "./statusBar";
+import { holdStatusBar, mixIsDark } from "./statusBar";
 
+
+/** The full-screen lyrics' background: this share of the cover's colour over this near black (phone.css .ph-lyrics). */
+export const LYRICS_TINT = 0.62;
+export const LYRICS_GROUND = "#121010";
 
 /** Lines the card shows around the current one. */
 export const CARD_LINES = 4;
@@ -88,10 +92,12 @@ export function LyricsScreen() {
 }
 
 function LyricsFull({ track }: { track: Track }) {
-  // Full-screen lyrics are dark on every look: light status bar text while they show.
-  useEffect(() => holdLightStatusBar(), []);
   const { lyrics } = useLyrics(track.id);
   const colours = useArtColours(null, track.thumb);
+  // The status bar's text suits the lyrics' own background: light over a dark
+  // cover colour, dark over a pale one (a beige cover gives a light page).
+  const lightText = mixIsDark(colours?.vivid ?? null, LYRICS_TINT, LYRICS_GROUND) || !colours;
+  useEffect(() => holdStatusBar(lightText), [lightText]);
   const status = usePlayer((s) => s.state?.status ?? "idle");
   const playing = status === "playing" || status === "loading" || status === "buffering";
   const timed = timedLines(lyrics);

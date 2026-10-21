@@ -129,7 +129,8 @@ function LibraryAlbumView({ id, tab }: { id: string; tab?: "sleeve" }) {
   return (
     <div className="detail">
       <header ref={header} className={`detail-header ${compact ? "detail-header--compact" : ""}`}>
-        <div className="detail-header__art">
+        <div className={`detail-header__art ${album ? "detail-header__art--record" : ""}`}>
+          {album && <span className="detail-header__record record-disc" aria-hidden="true" />}
           {album ? (
             <button
               ref={coverBtn}
@@ -195,6 +196,7 @@ function LibraryAlbumView({ id, tab }: { id: string; tab?: "sleeve" }) {
             label={isThisPlaying ? `Pause ${album?.title ?? "album"}` : `Play ${album?.title ?? "album"}`}
             variant="accent"
             size="xl"
+            text={isThisPlaying ? "Pause" : "Play"}
             disabled={!album}
             icon={isThisPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
             onClick={play}
@@ -202,6 +204,7 @@ function LibraryAlbumView({ id, tab }: { id: string; tab?: "sleeve" }) {
           <IconButton
             label={shuffle ? "Disable shuffle" : "Enable shuffle"}
             size="lg"
+            text="Shuffle"
             pressed={shuffle}
             icon={<Shuffle size={22} />}
             onClick={() => player.setContextShuffle(id, !shuffle)}

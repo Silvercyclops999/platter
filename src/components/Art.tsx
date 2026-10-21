@@ -1,4 +1,4 @@
-import { Disc3, ListMusic, User } from "lucide-react";
+import { User } from "lucide-react";
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { prefersReducedMotion } from "../design/motion";
 import { phoneArtPixelSize } from "../lib/artSize";
@@ -202,9 +202,21 @@ export function initials(name: string): string {
     .join("");
 }
 
-/** What stands in when there's no picture, or it failed: a printed sleeve, initials or an icon. */
+/** Platter's P, the mark a plain paper sleeve carries when a record or playlist has no cover. */
+export const P_MARK_PATH = "M296 876V456A240 240 0 1 1 408 659.02V876Z M616 456A80 80 0 1 0 456 456A80 80 0 1 0 616 456Z";
+
+function PaperSleeve() {
+  return (
+    <span className="art__fallback art__paper" aria-hidden="true" data-testid="paper-sleeve">
+      <svg className="art__paper-mark" viewBox="296 216 480 660">
+        <path fillRule="evenodd" d={P_MARK_PATH} />
+      </svg>
+    </span>
+  );
+}
+
+/** What stands in when there's no picture, or it failed: a printed sleeve, initials, a paper sleeve, or (for a person) a figure. */
 function NoPicture({ sleeve, kind, round, monogram, cssSize, size, fluid }: { sleeve?: SleeveText | null; kind: string; round?: boolean; monogram?: string; cssSize: number; size: number; fluid?: boolean }) {
-  const Fallback = kind === "artist" ? User : kind === "playlist" ? ListMusic : Disc3;
   if (sleeve && kind === "album" && !round) return <FallbackSleeve text={sleeve} size={cssSize} fluid={!!fluid} />;
   if (monogram && initials(monogram))
     return (
@@ -212,9 +224,10 @@ function NoPicture({ sleeve, kind, round, monogram, cssSize, size, fluid }: { sl
         {initials(monogram)}
       </span>
     );
+  if (kind !== "artist" && !round) return <PaperSleeve />;
   return (
     <span className="art__fallback" aria-hidden="true">
-      <Fallback size={fluid ? 40 : Math.max(16, Math.round(size * 0.38))} strokeWidth={1.5} />
+      <User size={fluid ? 40 : Math.max(16, Math.round(size * 0.38))} strokeWidth={1.5} />
     </span>
   );
 }

@@ -336,6 +336,7 @@ function ActionRow({
         label={playing ? `Pause ${name}` : `Play ${name}`}
         variant="accent"
         size="xl"
+        text={playing ? "Pause" : "Play"}
         disabled={!artist}
         icon={playing ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
         onClick={onPlay}
@@ -343,6 +344,7 @@ function ActionRow({
       <IconButton
         label={shuffle ? "Disable shuffle" : "Enable shuffle"}
         size="lg"
+        text="Shuffle"
         pressed={shuffle}
         icon={<Shuffle size={22} />}
         onClick={() => player.setContextShuffle(id, !shuffle)}

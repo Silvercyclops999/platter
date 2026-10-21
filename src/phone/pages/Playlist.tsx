@@ -3,7 +3,7 @@
  * starts sooner, genre pills from the songs' own genres that narrow the
  * list in place, and the songs, each with the shared song sheet.
  */
-import { MoreHorizontal, Pause, Play } from "lucide-react";
+import { MoreHorizontal } from "lucide-react";
 import { Art } from "../../components/Art";
 import { LikedCover } from "../../components/LikedCover";
 import { phone } from "../phoneUi";
@@ -16,7 +16,7 @@ import { useLoad } from "../../lib/useLoad";
 import { player, usePlayer } from "../../stores/player";
 import { BackBar, PageFailed, PageLoading, SongRow, countLine } from "./common";
 import { tap } from "../bits";
-import { PhoneShuffleToggle } from "./kit";
+import { PhoneShuffleToggle, PlayPill } from "./kit";
 
 /** Genre pills shown. */
 export const GENRE_PILLS = 6;
@@ -109,23 +109,16 @@ function SongList({
       </header>
       <div className="ph-actions">
         <div className="ph-actions__left">
+          <PlayPill playing={playing} label={playing ? "Pause" : `Play ${title}`} onClick={() => (here && !genre ? void player.toggle() : play(undefined, undefined, ids))} />
+          <PhoneShuffleToggle id={contextId} kind={contextKind} name={title} />
+        </div>
+        <div className="ph-actions__right">
           {download}
           {playlist && (
             <button type="button" className="ph-icon-btn" aria-label={`More for ${title}`} onClick={() => phone.push({ kind: "playlist", playlist })}>
               <MoreHorizontal size={24} aria-hidden="true" />
             </button>
           )}
-        </div>
-        <div className="ph-actions__right">
-          <PhoneShuffleToggle id={contextId} kind={contextKind} name={title} />
-          <button
-            type="button"
-            className="ph-play ph-play--page"
-            aria-label={playing ? "Pause" : `Play ${title}`}
-            onClick={() => (here && !genre ? void player.toggle() : play(undefined, undefined, ids))}
-          >
-            {playing ? <Pause size={28} fill="currentColor" aria-hidden="true" /> : <Play size={28} fill="currentColor" aria-hidden="true" />}
-          </button>
         </div>
       </div>
       {genres.length > 1 && (

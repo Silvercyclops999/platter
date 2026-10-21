@@ -230,6 +230,7 @@ export function MixPage({ id, seed }: { id?: string; seed?: string }) {
             label={isContext && playing ? `Pause ${mix?.title ?? "mix"}` : `Play ${mix?.title ?? "mix"}`}
             variant="accent"
             size="xl"
+            text={isContext && playing ? "Pause" : "Play"}
             disabled={!page?.tracks.length}
             icon={isContext && playing ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
             onClick={toggle}
@@ -237,6 +238,7 @@ export function MixPage({ id, seed }: { id?: string; seed?: string }) {
           <IconButton
             label={shuffle ? "Disable shuffle" : "Enable shuffle"}
             size="lg"
+            text="Shuffle"
             pressed={shuffle}
             icon={<Shuffle size={22} />}
             onClick={() => player.setContextShuffle(key, !shuffle)}

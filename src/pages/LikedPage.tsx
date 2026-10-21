@@ -209,6 +209,7 @@ export function LikedPage() {
                 label={isThisPlaying ? `Pause ${TITLE}` : `Play ${TITLE}`}
                 variant="accent"
                 size="xl"
+                text={isThisPlaying ? "Pause" : "Play"}
                 disabled={!data}
                 icon={isThisPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
                 onClick={play}

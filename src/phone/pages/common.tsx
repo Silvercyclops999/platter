@@ -32,6 +32,8 @@ export function BackBar({ title, after = 160, right }: { title?: string; after?:
     const check = () => {
       frame = 0;
       setTitled(page.scrollTop > after);
+      // Until something scrolls under the clock, the status bar shows the page itself (phone.css).
+      page.classList.toggle("is-scrolled", page.scrollTop > 2);
     };
     const onScroll = () => {
       if (!frame) frame = requestAnimationFrame(check);

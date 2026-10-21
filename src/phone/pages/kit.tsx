@@ -240,24 +240,23 @@ export function PlayRow({
 }) {
   return (
     <div className="ph-actions">
-      <div className="ph-actions__left">{left}</div>
-      <div className="ph-actions__right">
+      <div className="ph-actions__left">
+        <PlayPill playing={playing} label={playing ? `Pause ${name}` : `Play ${name}`} disabled={disabled} onClick={onPlay} />
         {onShuffle && (
           <button
             type="button"
-            className={`ph-icon-btn ${shuffleOn ? "is-on" : ""}`}
+            className={`ph-icon-btn ph-pill-btn ${shuffleOn ? "is-on" : ""}`}
             aria-label={`Shuffle ${name}`}
             aria-pressed={shuffleOn}
             disabled={disabled}
             onClick={onShuffle}
           >
-            <Shuffle size={24} aria-hidden="true" />
+            <Shuffle size={16} aria-hidden="true" />
+            <span aria-hidden="true">Shuffle</span>
           </button>
         )}
-        <button type="button" className="ph-play ph-play--page" aria-label={playing ? `Pause ${name}` : `Play ${name}`} disabled={disabled} onClick={onPlay}>
-          {playing ? <Pause size={28} fill="currentColor" aria-hidden="true" /> : <Play size={28} fill="currentColor" aria-hidden="true" />}
-        </button>
       </div>
+      <div className="ph-actions__right">{left}</div>
     </div>
   );
 }
@@ -336,12 +335,23 @@ export function PhoneShuffleToggle({ id, kind, name }: { id: string; kind: PlayC
   return (
     <button
       type="button"
-      className={`ph-icon-btn ${mode !== "off" ? "is-on" : ""}`}
+      className={`ph-icon-btn ph-pill-btn ${mode !== "off" ? "is-on" : ""}`}
       aria-label={label}
       aria-pressed={mode !== "off"}
       onClick={() => void player.cycleContextShuffle(id, kind, smartAllowed)}
     >
-      <Shuffle size={24} aria-hidden="true" />
+      <Shuffle size={16} aria-hidden="true" />
+      <span aria-hidden="true">{mode === "smart" ? "Smart shuffle" : "Shuffle"}</span>
+    </button>
+  );
+}
+
+/** Play as a brass pill with its word, the first thing under a page's header. */
+export function PlayPill({ playing, label, disabled, onClick }: { playing: boolean; label: string; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button type="button" className="ph-play ph-play--page" aria-label={label} disabled={disabled} onClick={onClick}>
+      {playing ? <Pause size={16} fill="currentColor" aria-hidden="true" /> : <Play size={16} fill="currentColor" aria-hidden="true" />}
+      <span aria-hidden="true">{playing ? "Pause" : "Play"}</span>
     </button>
   );
 }

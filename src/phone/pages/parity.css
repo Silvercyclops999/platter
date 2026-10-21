@@ -107,7 +107,7 @@
 .ph-artist .ph-backbar:not(.is-titled) .ph-backbar__back { background: rgba(14, 12, 10, 0.42) !important; color: #fffaf0; backdrop-filter: blur(8px); }
 
 /* ---------------------------------------------------------------- the album page */
-.ph-album__era { display: block; min-height: 44px; margin: 4px auto 0; padding: 0 12px; font-size: 13px; font-weight: 700; color: var(--color-accent); }
+.ph-album__era { display: block; min-height: 44px; margin: 4px 0 0; padding: 0; font-size: 13px; font-weight: 700; color: var(--color-accent); }
 .ph-album__upgrade:empty { display: none; }
 .ph-album__upgrade { margin: 4px 0 8px; }
 .ph-people-card { margin: 16px 0 0 !important; }

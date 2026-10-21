@@ -42,6 +42,7 @@ export function ContextShuffleButton({
       label={label}
       tooltip={label}
       size="lg"
+      text={mode === "smart" ? "Smart shuffle" : "Shuffle"}
       pressed={mode !== "off"}
       icon={<ShuffleIcon smart={mode === "smart"} size={22} />}
       onClick={() => (mode === "off" && beforeShuffle ? beforeShuffle(go) : go())}

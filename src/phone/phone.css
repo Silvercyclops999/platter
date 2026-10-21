@@ -125,7 +125,10 @@
   color: var(--color-text-on-accent) !important;
   box-shadow: 0 6px 18px color-mix(in srgb, #000 28%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
-.ph-play--page { width: 56px; height: 56px; }
+/* Under a page's header, Play is a brass pill with its word. */
+.ph-play--page { display: inline-flex; align-items: center; gap: 8px; width: auto; height: 44px; padding: 0 20px 0 16px; border-radius: 999px; font-size: 15px; font-weight: 600; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2); }
+.ph-pill-btn { display: inline-flex; align-items: center; gap: 8px; width: auto; height: 44px; padding: 0 16px; border-radius: 999px; font-size: 15px; font-weight: 600; color: var(--color-text-primary); box-shadow: inset 0 0 0 1px var(--color-border); }
+.ph-pill-btn.is-on { color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }
 .ph-play--small { width: 56px; height: 56px; }
 .ph-play--row { width: 40px; height: 40px; box-shadow: none; }
 
@@ -225,6 +228,8 @@
 /* The level bars before a playing song's title, on rows without a number. */
 .ph-row__title > .ph-eq { margin-right: 7px; vertical-align: 1px; }
 .ph-row__sub { display: block; font-size: 13px; line-height: 1.3; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* On an album the artist line goes when it only repeats the album's artist. */
+.ph-row__sub:empty { display: none; }
 .ph-row .art, .ph-song .art, .ph-lib-row .art, .ph-queue .art { border-radius: 4px; flex: none; }
 
 /* ---------------------------------------------------------------- tabs and dock */
@@ -265,7 +270,8 @@
 .ph-tab svg { transition: transform var(--ph-quick) var(--ph-ease); }
 /* The tab you're on is lit brass, icon and word together. */
 
-/* The mini player: dark, tinted from the cover, white text on every look. */
+/* The mini player: a raised panel in the look's own colours (never the
+   cover's), with the progress line in brass along its top edge. */
 .ph-mini {
   position: relative;
   display: flex;
@@ -276,21 +282,20 @@
   padding: 0 6px 0 10px;
   border-radius: 10px;
   overflow: hidden;
-  background: color-mix(in srgb, var(--ph-tint) 52%, #12100e);
-  color: #f6f1e8;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-raised2);
+  color: var(--color-text-primary);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32), inset 0 1px 0 color-mix(in srgb, var(--color-ink) 7%, transparent);
 }
 .ph-mini__open { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; height: 100%; }
 .ph-mini__art { flex: none; border-radius: 5px; overflow: hidden; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35); }
 .ph-mini__text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .ph-mini__title { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ph-mini__artist { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; color: rgba(246, 241, 232, 0.72); }
+.ph-mini__artist { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; color: var(--color-text-secondary); }
 .ph-mini__artist-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.ph-mini .plate { --plate-bg: rgba(0, 0, 0, 0.28); --plate-edge: rgba(255, 255, 255, 0.18); --plate-text: rgba(246, 241, 232, 0.82); --plate-hi: transparent; }
-.ph-mini .ph-icon-btn, .ph-mini .ph-output { color: #f6f1e8; }
+.ph-mini .ph-icon-btn, .ph-mini .ph-output { color: var(--color-text-primary); }
 .ph-mini__play { width: 48px; height: 48px; }
-.ph-mini__progress { position: absolute; left: 10px; right: 10px; bottom: 0; height: 2px; background: rgba(255, 255, 255, 0.16); border-radius: 1px; overflow: hidden; }
-.ph-mini__progress-fill { position: absolute; inset: 0; background: rgba(255, 255, 255, 0.86); transform-origin: left center; transition: transform 250ms linear; }
+.ph-mini__progress { position: absolute; left: 0; right: 0; top: 0; height: 2px; background: color-mix(in srgb, var(--color-ink) 8%, transparent); overflow: hidden; }
+.ph-mini__progress-fill { position: absolute; inset: 0; background: var(--color-playing, var(--color-accent)); transform-origin: left center; transition: transform 250ms linear; }
 
 .ph-output { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; min-width: 44px; justify-content: center; color: var(--color-text-secondary); font-size: 13px; font-weight: 600; }
 .ph-output.is-remote { color: var(--color-accent) !important; }
@@ -802,17 +807,20 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 .ph-backbar__back { color: var(--color-text-primary); background: color-mix(in srgb, var(--color-bg-base) 40%, transparent) !important; }
 .ph-backbar__title { text-align: center; font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; transition: opacity 200ms; }
 .ph-backbar.is-titled .ph-backbar__title { opacity: 1; }
-/* The cover's colour washes the top of the page and scrolls away with it. */
-.ph-album { background: linear-gradient(180deg, color-mix(in srgb, var(--ph-tint) 38%, var(--color-bg-base)) 0, var(--color-bg-base) 420px); background-attachment: local; }
-.ph-album__head { display: flex; flex-direction: column; align-items: center; text-align: center; padding-top: 4px; }
-.ph-album__cover { width: 56%; max-width: 280px; border-radius: 4px; overflow: hidden; box-shadow: 0 18px 40px rgba(0, 0, 0, 0.4); }
+/* A tenth of the cover's colour at the top of the page, scrolling away with it. */
+.ph-album { background: linear-gradient(180deg, color-mix(in srgb, var(--ph-tint) 10%, var(--color-bg-base)) 0, var(--color-bg-base) 420px); background-attachment: local; }
+/* The sleeve: the cover on the left with its record half out to the right. */
+.ph-album__head { display: flex; flex-direction: column; align-items: flex-start; text-align: left; padding-top: 4px; }
+.ph-album__sleeve { position: relative; width: min(88%, 380px); --record-label: var(--ph-tint); }
+.ph-album__record { top: 3.4%; right: 0; width: 70%; aspect-ratio: 1; }
+.ph-album__cover { position: relative; z-index: 1; width: 75%; border-radius: 2px; overflow: hidden; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4), 0 18px 40px rgba(0, 0, 0, 0.4); }
 .ph-album__cover .art { width: 100%; height: auto; aspect-ratio: 1; }
-.ph-album__title { margin: 20px 0 6px; font-family: var(--ph-title-font); font-size: 24px; line-height: 1.15; font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.ph-album__artist { font-size: 15px; font-weight: 600; min-height: 44px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center !important; }
+.ph-album__title { margin: 20px 0 2px; font-family: var(--ph-title-font); font-size: 30px; line-height: 1.15; font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ph-album__artist { font-size: 15px; font-weight: 600; min-height: 44px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left !important; padding: 0; }
 .ph-album__facts { display: flex; align-items: center; gap: 8px; margin: 2px 0 0; font-size: 13px; color: var(--color-text-secondary); }
 .ph-actions { display: flex; align-items: center; justify-content: space-between; margin: 16px 0 8px; }
 .ph-actions__left, .ph-actions__right { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.ph-actions__right { gap: 10px; }
+.ph-actions__left { gap: 10px; }
 .ph-songs { list-style: none; margin: 0; padding: 0; }
 .ph-song { display: flex; align-items: center; height: 64px; }
 .ph-song__main { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; height: 100%; }
@@ -1152,7 +1160,7 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 .ph-backbar.is-titled .ph-backbar__back { background: none !important; }
 :root[data-theme-base="light"] .ph-artist__name { text-shadow: none; }
 /* Plates on the dark mini player and Home card read light on every look. */
-.ph-mini .plate, .ph-now .plate { --plate-lit: #e2c68c; }
+.ph-now .plate { --plate-lit: #e2c68c; }
 /* Settings pieces built for a wide window, folded to one column. */
 .settings--phone .library-source__head { flex-wrap: wrap; row-gap: 2px; }
 .settings--phone .library-source__name { flex: 1; min-width: 0; }
@@ -1246,18 +1254,19 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 .phone.is-cover-flying .ph-dock .ph-mini { opacity: 0; transition: none; }
 
 
-/* The mini player and Home's card take their colour from the cover in both
-   looks: a deep tint on the dark look, a pale one with ink on the light. */
-.ph-mini { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32), inset 0 0 0 0.5px rgba(255, 255, 255, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.1); }
-:root[data-theme-base="light"] .phone :is(.ph-mini, .ph-now) {
+/* Home's card takes its colour from the cover in both looks: a deep tint on
+   the dark look, a pale one with ink on the light. The mini player doesn't. */
+.ph-mini { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32), inset 0 0 0 0.5px color-mix(in srgb, var(--color-ink) 12%, transparent), inset 0 1px 0 color-mix(in srgb, var(--color-ink) 8%, transparent); }
+:root[data-theme-base="light"] .phone .ph-mini { box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12), inset 0 0 0 0.5px rgba(0, 0, 0, 0.08); }
+:root[data-theme-base="light"] .phone .ph-now {
   background: color-mix(in srgb, var(--ph-tint) 20%, var(--color-bg-raised));
   color: var(--color-text-primary);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12), inset 0 0 0 0.5px rgba(0, 0, 0, 0.08);
 }
-:root[data-theme-base="light"] .phone :is(.ph-mini__artist, .ph-now__artist, .ph-now__eyebrow) { color: var(--color-text-secondary); }
-:root[data-theme-base="light"] .phone :is(.ph-mini, .ph-now) :is(.ph-icon-btn, .ph-output) { color: var(--color-text-primary); }
-:root[data-theme-base="light"] .phone :is(.ph-mini__progress, .ph-now__progress) { background: rgba(0, 0, 0, 0.1); }
-:root[data-theme-base="light"] .phone :is(.ph-mini__progress-fill, .ph-now__progress-fill) { background: var(--color-text-primary); }
+:root[data-theme-base="light"] .phone :is(.ph-now__artist, .ph-now__eyebrow) { color: var(--color-text-secondary); }
+:root[data-theme-base="light"] .phone .ph-now :is(.ph-icon-btn, .ph-output) { color: var(--color-text-primary); }
+:root[data-theme-base="light"] .phone .ph-now__progress { background: rgba(0, 0, 0, 0.1); }
+:root[data-theme-base="light"] .phone .ph-now__progress-fill { background: var(--color-text-primary); }
 
 /* A real bar behind the status bar: pages scroll under it, never through the clock. */
 .ph-stack::after {
@@ -1273,6 +1282,9 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
   backdrop-filter: blur(16px) saturate(1.4);
   pointer-events: none;
 }
+/* An album page at rest reaches up under the clock: its tinted top shows
+   through until the page scrolls. */
+.ph-stack:not([data-moving]):has(> .ph-layer:not(.is-under, .is-parked) .ph-album:not(.is-scrolled))::after { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
 /* Inputs take a caret and a selection even though the rest of the phone doesn't. */
 .phone :is(input, textarea, [contenteditable="true"]) { -webkit-user-select: text; user-select: text; }
 :root[data-reduced-motion="true"] .ph-sheet-layer.is-closing:not([data-sliding-out]) .ph-sheet { opacity: 0; transition: opacity 120ms ease-out; }

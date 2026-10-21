@@ -33,7 +33,7 @@ import { PhoneSearch } from "./pages/Search";
 import { PhoneYou } from "./pages/You";
 import { notchFromUrl } from "./form";
 import { followDock } from "./dockInset";
-import { lightTextHeld, onLightHoldChange } from "./statusBar";
+import { heldStatusBar, onLightHoldChange } from "./statusBar";
 
 import { installTapGuard } from "./gestures";
 import { TABS, phone, tabOf, usePhoneUi, type PhoneTab } from "./phoneUi";
@@ -184,8 +184,9 @@ export function statusBarDark(base: string | undefined): boolean {
 export function followStatusBar(root: HTMLElement = document.documentElement): () => void {
   let last: boolean | null = null;
   const tell = () => {
-    // A dark full-screen view (Wrapped, lyrics, now playing on dark art) asks for light text meanwhile.
-    const dark = !lightTextHeld() && statusBarDark(root.dataset.themeBase);
+    // A full-screen view (Wrapped, lyrics, now playing over art) asks for the text that suits it meanwhile.
+    const held = heldStatusBar();
+    const dark = held === null ? statusBarDark(root.dataset.themeBase) : !held;
     if (dark === last) return;
     last = dark;
     try {

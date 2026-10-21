@@ -174,6 +174,7 @@ export function LineagePage({ id }: { id: string }) {
             label={playingHere ? "Pause" : "Play every version"}
             variant="accent"
             size="xl"
+            text={playingHere ? "Pause" : "Play"}
             disabled={!data}
             icon={playingHere ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
             onClick={play}

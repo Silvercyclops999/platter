@@ -196,6 +196,7 @@ export function SharedPlaylistPage({ id }: { id: string }) {
             label={playing ? `Pause ${s?.title ?? "playlist"}` : `Play ${s?.title ?? "playlist"}`}
             variant="accent"
             size="xl"
+            text={playing ? "Pause" : "Play"}
             disabled={!playable.length}
             icon={playing ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
             onClick={() => play()}

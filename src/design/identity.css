@@ -95,14 +95,11 @@
 :root[data-identity] .track-list__head { box-shadow: 0 1px 0 var(--engrave-light); }
 
 /* ---------------------------------------------------------------- Album header: the sleeve */
-/* No colour band: a quiet tint from the cover on the panel and the cover
-   itself, large, with a real shadow. */
+/* No colour band: the panel takes at most a tenth of the cover's colour, and
+   the cover sits large with a real shadow and its record half pulled out. */
 :root[data-identity] .detail-header {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--tint-shade) 55%, var(--color-bg-raised)) 0%, color-mix(in srgb, var(--tint-shade) 28%, var(--color-bg-raised)) 100%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tint) 10%, var(--color-bg-raised)) 0%, color-mix(in srgb, var(--tint) 4%, var(--color-bg-raised)) 100%);
   box-shadow: inset 0 -1px 0 var(--engrave-dark), 0 1px 0 var(--engrave-light);
-}
-:root[data-identity="sleeve"] .detail-header {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--tint) 16%, var(--color-bg-raised)) 0%, color-mix(in srgb, var(--tint) 7%, var(--color-bg-raised)) 100%);
 }
 :root[data-identity] .detail-header ~ .detail-body { background: none; }
 :root[data-identity] .detail-header__art .art {
@@ -116,6 +113,54 @@
   box-shadow: 0 1px 2px rgba(43, 33, 23, 0.22), 0 6px 14px rgba(43, 33, 23, 0.14), 0 20px 38px rgba(43, 33, 23, 0.18);
   outline-color: rgba(43, 33, 23, 0.12);
 }
+/* The record: black vinyl with its grooves, the label in the cover's colour,
+   slid out to the right of the sleeve once when the page opens. The phone's
+   album page uses the same record. */
+.record-disc { display: none; }
+:root[data-identity] .record-disc {
+  display: block;
+  position: absolute;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, var(--color-bg-base) 0 1.8%, color-mix(in srgb, var(--record-label, var(--tint)) 88%, #000) 2.2% 15%, var(--record-label, var(--tint)) 15.5% 30%, transparent 30.5%),
+    conic-gradient(from 20deg, transparent, rgba(255, 255, 255, 0.07) 8%, transparent 18% 50%, rgba(255, 255, 255, 0.05) 58%, transparent 68%),
+    repeating-radial-gradient(circle, #121110 0 3px, #1b1917 3px 4px),
+    #0c0b0a;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 10px 24px rgba(0, 0, 0, 0.4);
+  animation: record-out 520ms var(--motion-easing) both;
+}
+:root[data-identity="sleeve"] .record-disc { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06), 0 8px 18px rgba(43, 33, 23, 0.28); }
+@keyframes record-out {
+  from { transform: translateX(-38%) rotate(-40deg); }
+}
+:root[data-reduced-motion="true"] .record-disc { animation: none; }
+:root[data-identity] .detail-header__art--record { --sleeve: 232px; position: relative; padding-right: calc(var(--sleeve) * 0.4); }
+:root[data-identity] .detail-header--compact .detail-header__art--record { --sleeve: 130px; }
+:root[data-identity] .detail-header__art--record > :not(.record-disc) { position: relative; z-index: 1; }
+:root[data-identity] .detail-header__record {
+  top: calc(var(--sleeve) * 0.03);
+  right: 0;
+  width: calc(var(--sleeve) * 0.94);
+  height: calc(var(--sleeve) * 0.94);
+}
+/* Play and Shuffle as pills: brass for Play, an engraved outline for the rest. */
+:root[data-identity] .icon-btn--text {
+  width: auto;
+  height: 40px;
+  gap: var(--space-2);
+  padding: 0 20px 0 var(--space-4);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+:root[data-identity] .action-row .icon-btn--text.icon-btn--xl { width: auto; height: 44px; }
+:root[data-identity] .icon-btn--text .icon-btn__text { display: inline; }
+:root[data-identity] .icon-btn--text .icon-btn__glyph svg { width: 16px; height: 16px; }
+:root[data-identity] .icon-btn--text.icon-btn--plain { color: var(--color-text-primary); box-shadow: inset 0 0 0 1px var(--color-border); }
+:root[data-identity] .icon-btn--text.icon-btn--plain:hover:not([aria-disabled="true"]) { background: var(--color-state-hover); }
+:root[data-identity] .icon-btn--text.is-active { color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }
+:root[data-identity] .icon-btn--text.is-active::after { display: none; }
+:root[data-identity] .icon-btn--text:hover:not([aria-disabled="true"]) { transform: none; }
+:root[data-identity] .icon-btn--text .nudge-right { transform: none; }
 
 /* ---------------------------------------------------------------- Artist banner */
 /* The artist's art stays, a little shorter, and settles into the panel

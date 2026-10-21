@@ -158,7 +158,7 @@ function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof use
             <li key={`${e.kind}:${e.id}`}>
               <button type="button" className={`ph-card-tile ph-card-tile--fluid ${e.kind === "artist" ? "is-round" : ""}`} onClick={() => openEntry(e)}>
                 {e.liked || e.bookmarks || e.stats ? (
-                  <LikedCover size={160} icon={e.liked ? "heart" : e.bookmarks ? "bookmark" : "stats"} />
+                  <LikedCover fluid icon={e.liked ? "heart" : e.bookmarks ? "bookmark" : "stats"} />
                 ) : (
                   <Art
                     path={e.thumb}
