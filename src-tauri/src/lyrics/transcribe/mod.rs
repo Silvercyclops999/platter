@@ -15,6 +15,8 @@
 //! - [`gpu`]    the graphics card: finding one, the setting, the check's route
 //! - [`speed`]  how fast each model has been here, per device
 //! - [`pace`]   threads, the busy pause and the breather between songs
+//! - [`voice`]  the singing separated from the music first, on a graphics card
+//! - [`quiet`]  the separated voice's quiet parts, hushed and checked
 //! - [`lines`]  timed words to lyric lines and LRC
 //! - [`store`]  the `lyrics_auto` table
 //! - [`commands`] Tauri commands, events and the app's side of the traits
@@ -27,6 +29,7 @@ pub mod helper;
 pub mod lines;
 pub mod model;
 pub mod pace;
+pub mod quiet;
 pub mod speed;
 pub mod store;
 pub mod voice;
@@ -1677,6 +1680,8 @@ impl Transcriber {
         let segments = match res {
             Ok(Ok(s)) => {
                 d.speeds.record(kind, on_gpu, pcm.len() as f64 / audio::RATE as f64, started.elapsed());
+                // The voice's quiet parts were hushed: lines found there are made up.
+                let s = if voiced { quiet::drop_made_up(s, &quiet::spans(&pcm)) } else { s };
                 lines::keep_sure(s, &hints.prompt)
             }
             Ok(Err(RecognizeError::Cancelled)) => {
@@ -1770,11 +1775,16 @@ impl Transcriber {
         let stop = cancel.clone();
         let res = tokio::task::spawn_blocking(move || voice::voice_or_mix(Some((&*sep, &weights)), song, &stop, progress)).await;
         match res {
-            Ok(Ok((pcm, heard))) => {
+            Ok(Ok((mut pcm, heard))) => {
                 if heard == voice::Heard::MixAfterTrouble {
                     self.inner.voice.off.store(true, Ordering::Relaxed);
                 }
-                Ok((Arc::new(pcm), heard == voice::Heard::Voice))
+                let voiced = heard == voice::Heard::Voice;
+                if voiced {
+                    let q = quiet::spans(&pcm);
+                    quiet::hush(&mut pcm, &q);
+                }
+                Ok((Arc::new(pcm), voiced))
             }
             Ok(Err(song)) => {
                 if !job.now {

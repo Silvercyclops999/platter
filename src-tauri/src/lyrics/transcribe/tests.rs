@@ -251,6 +251,8 @@ struct FakeSeparator {
     fail: AtomicBool,
     /// The next run waits until it's stopped.
     block_once: AtomicBool,
+    /// The voice handed back (else a steady one of [`VOICE_LEN`]).
+    voice: Mutex<Option<Vec<f32>>>,
 }
 
 /// The fake voice's length, so the recognizer's input shows it was heard.
@@ -271,7 +273,7 @@ impl voice::Separator for FakeSeparator {
         if self.fail.load(Ordering::SeqCst) {
             return Err(voice::VoiceError::Crashed);
         }
-        Ok(vec![0.1; VOICE_LEN])
+        Ok(self.voice.lock().clone().unwrap_or_else(|| vec![0.1; VOICE_LEN]))
     }
 }
 
@@ -1389,6 +1391,21 @@ async fn a_batch_song_that_gives_way_while_separating_keeps_its_audio() {
 }
 
 #[tokio::test]
+async fn a_line_found_where_the_voice_is_quiet_is_left_out() {
+    let f = fx_voice();
+    install(&f).await;
+    f.voice_models.download(voice::Voice::Demucs, &*f.fetch, &AtomicBool::new(false), &|_, _| {}).await.unwrap();
+    // Singing for 2 s, the band bleeding through for 3 s, singing for 2 s.
+    let part = |amp: f32, secs: usize| (0..secs * RATE as usize).map(move |i| (i as f32 * 0.05).sin() * amp);
+    *f.sep.voice.lock() = Some(part(0.3, 2).chain(part(0.002, 3)).chain(part(0.3, 2)).collect());
+    *f.rec.behaviour.lock() = Behaviour::Words(vec![words("hello there", 500), words("banana river", 3000), words("second line", 5500)]);
+    transcribe(&f, "801").await;
+    let own = f.db.read(|c| user::get(c, "801")).unwrap().unwrap();
+    assert!(own.text.contains("Hello") && own.text.contains("Second"), "{}", own.text);
+    assert!(!own.text.contains("Banana"), "nobody sang there: {}", own.text);
+}
+
+#[tokio::test]
 async fn without_a_graphics_card_the_voice_isnt_separated() {
     let f = fx_voice();
     install(&f).await;
@@ -2037,9 +2054,12 @@ fn real_voice_before_after() {
             Some(Err(e)) => println!("   separation failed: {e:?}"),
             None => println!("   too long to separate"),
         }
-        for (what, pcm) in heard {
+        for (what, mut pcm) in heard {
+            let q = if what == "voice" { quiet::spans(&pcm) } else { Vec::new() };
+            quiet::hush(&mut pcm, &q);
             let started = std::time::Instant::now();
             let segs = rec.transcribe(Path::new(&model), kind, &pcm, 4, &hints, Stop::new(), Arc::new(|_| {})).unwrap();
+            let segs = quiet::drop_made_up(segs, &q);
             let kept = lines::to_lines(&lines::keep_sure(segs, &hints.prompt));
             let extra = if what == "voice" { format!(" (+{:.1} s separating)", separated_in.as_secs_f32()) } else { String::new() };
             println!("-- {what}: {} lines in {:.1} s{extra}", kept.len(), started.elapsed().as_secs_f32());
