@@ -1876,7 +1876,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       section: "Appearance",
       title: "Theme",
       description: "Studio, Studio Black or Sleeve. The older themes are under More looks.",
-      more: "Studio is warm graphite with a brass accent, Studio Black puts it on true black for OLED screens, and Sleeve is warm paper and ink. The phone and the computer use the same three. Under More looks: Classic, the look Platter had before, with Classic light, Midnight, Forest and Sand.",
+      more: "Studio is warm graphite with a brass accent, Studio Black puts it on true black for OLED screens, and Sleeve is warm paper and ink. Under More looks: Classic, the look Platter had before, with Classic light, Midnight, Forest and Sand.",
       note: themeNote(s) ?? followNote(s, theme.name),
       control: (ids) => (s ? <ThemeSelect s={s} ids={ids} /> : loading),
     },

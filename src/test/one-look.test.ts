@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import phoneCss from "../phone/phone.css?raw";
 import identityCss from "../design/identity.css?raw";
+import tokensCss from "../design/tokens.css?raw";
 import { BUILTIN_THEMES } from "../design/themes";
 import { contrastAgainst } from "../design/looks/contrast";
 
@@ -29,5 +30,14 @@ describe("one look on the phone and the computer", () => {
     const rule = phoneCss.match(/\.ph-chip\.is-on\s*\{([^}]*)\}/)?.[1] ?? "";
     expect(rule).toMatch(/background:\s*var\(--color-accent\)/);
     expect(rule).toMatch(/color:\s*var\(--color-text-on-accent\)/);
+  });
+
+  it("views over artwork on Sleeve take Studio's own colours", () => {
+    // tokens.css copies Studio's values for the dark views on Sleeve; this keeps the copy honest.
+    const block = tokensCss.match(/:root\[data-identity="sleeve"\] :is\(\.fw[^{]*\{([^}]*)\}/)?.[1] ?? "";
+    const studio = BUILTIN_THEMES.studio.tokens;
+    const set = [...block.matchAll(/--(color-[a-z0-9-]+):\s*([^;]+);/g)];
+    expect(set.length).toBeGreaterThan(10);
+    for (const [, name, value] of set) if (studio[name]) expect(value.trim().toUpperCase(), name).toBe(studio[name].toUpperCase());
   });
 });

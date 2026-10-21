@@ -383,6 +383,8 @@ describe("ready-made looks and first run", () => {
     expect(screen.getAllByRole("radio").map((c) => c.getAttribute("aria-label"))).toEqual(["Studio", "Studio Black", "Sleeve"]);
     await user.click(screen.getByRole("button", { name: "More looks" }));
     expect(screen.queryByRole("button", { name: "More looks" })).toBeNull();
+    // The button leaves, so focus lands on the first look it brought in.
+    expect(screen.getByRole("radio", { name: "Classic" })).toHaveFocus();
     const cards = screen.getAllByRole("radio");
     expect(cards.map((c) => c.getAttribute("aria-label"))).toEqual([
       "Studio",
@@ -410,6 +412,11 @@ describe("ready-made looks and first run", () => {
     await act(() => updateSettings({ theme: "midnight", followSystem: false, themeFile: null }));
     render(<LookCards />);
     expect(screen.getByRole("radio", { name: "Midnight" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByRole("button", { name: "More looks" })).toBeNull();
+    // Picking one of the three keeps the others showing (and the focused card in place).
+    await userEvent.setup().click(screen.getByRole("radio", { name: "Studio" }));
+    await waitFor(() => expect(useSettings.getState().settings?.theme).toBe("studio"));
+    expect(screen.getByRole("radio", { name: "Midnight" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "More looks" })).toBeNull();
   });
 

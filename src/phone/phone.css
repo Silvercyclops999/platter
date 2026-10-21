@@ -525,7 +525,7 @@
 /* The panel keeps its print on the phone's clean light look too: hairline cut, top light, and on Sleeve the paper. */
 :root[data-identity] .phone .sleeve__liner { box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 60%, transparent), 0 0 0 1px var(--engrave-dark, var(--ph-line)); }
 :root[data-identity="sleeve"] .phone .sleeve__liner {
-  background-color: color-mix(in srgb, var(--ph-tint, #e9e1d0) 6%, #f6f2ea);
+  background-color: color-mix(in srgb, var(--ph-tint, #e9e1d0) 6%, var(--color-bg-raised));
   background-image: var(--paper-grain-print, none);
   box-shadow: inset 0 1px 0 #fff, 0 1px 2px rgba(43, 33, 23, 0.06), 0 0 0 1px var(--engrave-dark);
 }

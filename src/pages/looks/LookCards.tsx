@@ -3,7 +3,7 @@
  * click; and the "Pick a look" step offered on first run (skippable).
  */
 import { Check } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/Button";
 import { Dialog } from "../../components/Dialog";
 import { readyLooks, type ReadyLook } from "../../design/looks/readymade";
@@ -26,10 +26,26 @@ export function LookCards({ labelledBy }: { labelledBy?: string }) {
   // A look in use that isn't one of the three keeps its card showing.
   const inUseElsewhere = all.some((r) => !FRONT_LOOKS.includes(r.id) && isReadyLookInUse(r, s));
   const [more, setMore] = useState(false);
+  // Once the other looks are showing they stay, even after picking one of the three.
+  useEffect(() => {
+    if (inUseElsewhere) setMore(true);
+  }, [inUseElsewhere]);
+  const grid = useRef<HTMLDivElement>(null);
+  const focusNext = useRef(false);
   const list = more || inUseElsewhere ? [...front, ...all.filter((r) => !FRONT_LOOKS.includes(r.id))] : front;
+  // More looks leaves the page once pressed, so focus goes to the first card it brought in.
+  useEffect(() => {
+    if (!more || !focusNext.current) return;
+    focusNext.current = false;
+    grid.current?.querySelectorAll<HTMLButtonElement>(".look-card")[front.length]?.focus();
+  }, [more, front.length]);
+  const showMore = () => {
+    focusNext.current = true;
+    setMore(true);
+  };
   return (
     <>
-      <div className="look-cards" role="radiogroup" aria-label={labelledBy ? undefined : "Ready-made looks"} aria-labelledby={labelledBy}>
+      <div ref={grid} className="look-cards" role="radiogroup" aria-label={labelledBy ? undefined : "Ready-made looks"} aria-labelledby={labelledBy}>
         {list.map((r) => {
           const on = isReadyLookInUse(r, s);
           const own = r.source.kind === "file" ? r.source.look.layout : undefined;
@@ -45,7 +61,7 @@ export function LookCards({ labelledBy }: { labelledBy?: string }) {
         })}
       </div>
       {list.length < all.length && (
-        <Button size="sm" variant="secondary" className="look-cards__more" onClick={() => setMore(true)}>
+        <Button size="sm" variant="secondary" className="look-cards__more" onClick={showMore}>
           More looks
         </Button>
       )}
@@ -62,6 +78,11 @@ export function PickLookDialog() {
   const open = useLooks((s) => s.pick);
   const builderOn = useSettings((s) => s.settings?.showLookBuilder !== false);
   const [more, setMore] = useState(false);
+  const layouts = useRef<HTMLElement>(null);
+  // As with More looks, focus moves to the first layout the button brought in.
+  useEffect(() => {
+    if (more) layouts.current?.querySelectorAll<HTMLElement>('.frame-cards [role="radio"]')[FIRST_RUN_FRAMES.length]?.focus();
+  }, [more]);
   const skip = () => {
     void updateSettings(skipPatch(useSettings.getState().settings, useTheme.getState().systemDark));
     looks.closePick();
@@ -71,7 +92,7 @@ export function PickLookDialog() {
       <div className="pick-look__body">
         <h2 className="pick-look__title">Pick a layout and a look</h2>
         <p className="pick-look__lead">The layout places things and the look paints them. You can change either any time in Settings, under Appearance.</p>
-        <section className="pick-look__section">
+        <section ref={layouts} className="pick-look__section">
           <h3 className="pick-look__heading" id="pick-layout-title">
             Layout
           </h3>
