@@ -5,7 +5,7 @@ import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
 import { Skeleton } from "../components/Skeleton";
 import { backend } from "../lib/backend";
-import type { AppError, LidarrFinding, LidarrReport, LidarrStatus } from "../lib/types";
+import type { AppError, LastGet, LidarrFinding, LidarrReport, LidarrStatus } from "../lib/types";
 import { updateSettings, useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import "./artist-info-settings.css";
@@ -380,4 +380,34 @@ export function LidarrFindings({ lidarr }: { lidarr: LidarrState }) {
       </Dialog>
     </div>
   );
+}
+
+const secs = (ms: number | null | undefined) => (ms == null ? null : `${Math.max(1, Math.round(ms / 1000))} s`);
+
+/** "Last get: found 4 s, downloaded 31 s, playing at 38 s", from the latest tap that came through. */
+export function lastGetText(g: LastGet | null): string | null {
+  if (!g) return null;
+  const t = g.timings;
+  const parts = [
+    secs(t.foundMs) && `found ${secs(t.foundMs)}`,
+    secs(t.downloadedMs) && `downloaded ${secs(t.downloadedMs)}`,
+    secs(t.playingMs) && `playing at ${secs(t.playingMs)}`,
+  ].filter(Boolean);
+  return parts.length ? `Last get: ${parts.join(", ")}.` : null;
+}
+
+export function LastGetLine() {
+  const [g, setG] = useState<LastGet | null>(null);
+  useEffect(() => {
+    let live = true;
+    backend
+      .lidarrLastGet()
+      .then((v) => live && setG(v))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+  const text = lastGetText(g);
+  return text ? <span title={g?.title}>{text}</span> : null;
 }
