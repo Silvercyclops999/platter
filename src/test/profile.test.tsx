@@ -213,7 +213,9 @@ describe("Stats tabs", () => {
   it("Overview doesn't repeat the top song and artist above the top lists", async () => {
     render(<StatsPage />);
     const hero = await screen.findByTestId("stats-hero");
-    expect(within(hero).getAllByRole("listitem").map((li) => li.firstChild?.textContent)).toEqual(["Longest streak", "New artists found"]);
+    // One line of totals; no facts, figures or charts.
+    expect(within(hero).getByTestId("hero-sentence")).toHaveTextContent(/plays\.$/);
+    expect(within(hero).queryAllByRole("listitem")).toHaveLength(0);
     // The only cover beside the sentence is the record played most.
     expect(hero.querySelectorAll(".art")).toHaveLength(1);
     expect(within(hero).getByTestId("stats-record")).toHaveTextContent(/^Played most/);
