@@ -45,6 +45,7 @@ import { useLayout } from "../stores/theme";
 import { keepSuggestion, playingSuggestion, removeSuggestion } from "../stores/smartShuffle";
 import { useUi } from "../stores/ui";
 import { LoopChip, LoopLayer, PlayerSubline, VolumeReadout } from "./PlayerExtras";
+import { SleepButton } from "./SleepButton";
 import { actionableNotice, useLyrics } from "./lyrics";
 import { normalizeLoop } from "./playerRules";
 import { HifiMark } from "./HifiMark";
@@ -534,6 +535,8 @@ export function PlayerBar() {
 
       <div className="player-bar__extras">
         <PrivateSession />
+        {/* The sleep timer leads the group; the expanded view button stays last. */}
+        <SleepButton />
         {/* The Layout option picks which buttons show, and their order. The
             hi-fi mark stays beside the device button. */}
         {!buttons.includes("devices") && <HifiMark />}

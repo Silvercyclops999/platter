@@ -25,7 +25,7 @@ import { CLOSE_MS } from "../phone/NowPlaying";
 import { phone, usePhoneUi } from "../phone/phoneUi";
 import { SIRI_PHRASES } from "../phone/phoneSettings";
 import { dropIndex } from "../phone/Sheets";
-import { cancelSleep, due, sleepLabel, startSleep, useSleep } from "../phone/sleepTimer";
+import { cancelSleep, sleepLabel, startSleep, useSleep } from "../stores/sleep";
 import { plateText, remaining } from "../phone/bits";
 import { useDownloads } from "../stores/downloads";
 import { useFileTags } from "../stores/fileTags";
@@ -465,52 +465,34 @@ describe("queue and sleep timer", () => {
     expect(move).toHaveBeenCalledWith("q1", 2);
   });
 
-  it("the timer is due at its time, at a song's end, or at the album's last song's end", () => {
-    const [a, b] = tracks();
-    play(a, { positionMs: 10_000 });
-    expect(due({ kind: "minutes", minutes: 5, endsAt: 100_000 }, 0)).toBe(false);
-    expect(due({ kind: "minutes", minutes: 5, endsAt: 100_000 }, 99_000)).toBe(true);
-    expect(due({ kind: "track", trackId: a.id }, 0)).toBe(false);
-    play(a, { positionMs: a.durationMs - 1000 });
-    expect(due({ kind: "track", trackId: a.id }, 0)).toBe(true);
-    // Not the album's last song: plays on.
-    expect(due({ kind: "album", albumId: a.albumId }, 0)).toBe(b.albumId !== a.albumId);
-    expect(sleepLabel({ kind: "minutes", minutes: 90, endsAt: 90 * 60_000 }, 0)).toBe("1 h 30 min");
+  it("the timer's line says what it's set to", () => {
+    expect(sleepLabel({ kind: "minutes", minutes: 90, endsAtMs: 90 * 60_000 }, 0)).toBe("1 h 30 min");
+    expect(sleepLabel({ kind: "minutes", minutes: 5, endsAtMs: 5 * 60_000 }, 61_000)).toBe("4 min");
+    expect(sleepLabel({ kind: "track", trackId: "t" })).toBe("End of song");
+    expect(sleepLabel({ kind: "album", albumId: "a" })).toBe("End of album");
     expect(sleepLabel(null)).toBe("Sleep timer");
   });
 
-  it("the sleep timer fades out and pauses, then puts the volume back", async () => {
-    vi.useFakeTimers();
+  it("the core keeps the timer: set, cleared, and told when it runs out", async () => {
     play(tracks()[0], { status: "playing" });
-    const pause = vi.spyOn(player, "pause").mockImplementation(() => Promise.resolve());
-    const vol = vi.spyOn(player, "setVolume").mockImplementation(() => Promise.resolve());
-    startSleep({ kind: "minutes", minutes: 5 }, Date.now());
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5 * 60_000 + 1000);
-    });
-    expect(pause).toHaveBeenCalledTimes(1);
-    expect(vol.mock.calls.slice(-1)[0]?.[0]).toBe(0.5);
+    const set = vi.spyOn(backend, "sleepSet");
+    await startSleep({ kind: "track" });
+    expect(set).toHaveBeenCalledWith({ kind: "track" });
+    expect(useSleep.getState().timer).toMatchObject({ kind: "track" });
+    await cancelSleep();
+    expect(useSleep.getState().timer).toBeNull();
+    vi.spyOn(backend, "sleepSet").mockRejectedValueOnce({ kind: "invalid", message: "Nothing is playing." });
+    await startSleep({ kind: "album" });
     expect(useSleep.getState().timer).toBeNull();
   });
 
-  it("turned off mid-fade, the music plays on at its own level", async () => {
-    vi.useFakeTimers();
+  it("turned off mid-fade, the core puts the volume back (audio/sleep.rs covers the fade)", async () => {
     play(tracks()[0], { status: "playing" });
-    const pause = vi.spyOn(player, "pause").mockImplementation(() => Promise.resolve());
-    const vol = vi.spyOn(player, "setVolume").mockImplementation(() => Promise.resolve());
-    startSleep({ kind: "minutes", minutes: 5 }, Date.now());
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5 * 60_000 - 3000);
-    });
-    expect(useSleep.getState().fading).toBe(true);
-    expect(vol.mock.calls.slice(-1)[0]?.[0]).toBeLessThan(0.5);
-    act(() => cancelSleep());
-    expect(vol.mock.calls.slice(-1)[0]?.[0]).toBe(0.5);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(10_000);
-    });
-    expect(pause).not.toHaveBeenCalled();
-    expect(vol.mock.calls.slice(-1)[0]?.[0]).toBe(0.5);
+    const cancel = vi.spyOn(backend, "sleepCancel");
+    await startSleep({ kind: "minutes", minutes: 5 });
+    await cancelSleep();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(useSleep.getState().timer).toBeNull();
   });
 });
 

@@ -98,6 +98,8 @@ import type {
   SubsonicCreds,
   ServerLibrary,
   EventMap,
+  SleepChoice,
+  SleepTimerView,
   EventName,
   Health,
   HomeUsers,
@@ -679,6 +681,12 @@ export interface Backend {
   creditPage(name: string): Promise<CreditPage | null>;
   /** Every crate of one kind, biggest first (eras and years newest first); empty while Show crates is off. */
   crates(kind: CrateKind): Promise<CrateList>;
+  /** The sleep timer running on this device, or null. */
+  sleepGet(): Promise<SleepTimerView | null>;
+  /** Start (or replace) the sleep timer; `invalid` with nothing playing (song or album) or a length out of range. */
+  sleepSet(choice: SleepChoice): Promise<SleepTimerView>;
+  /** Stop the sleep timer (a fade under way stops and the volume goes back). */
+  sleepCancel(): Promise<void>;
   /** One crate with all its albums; null when there's no such crate. */
   cratePage(kind: CrateKind, key: string): Promise<CratePage | null>;
   /** Shuffle albums: the songs of these albums (every album when empty) in a random album order, each album in track order; `invalid` when none can play. */
@@ -1602,6 +1610,9 @@ export function createTauriBackend(): Backend {
     songCredits: (id) => call("song_credits", { id }),
     creditPage: (name) => call("credit_page", { name }),
     crates: (kind) => call("crates", { kind }),
+    sleepGet: () => call("sleep_get"),
+    sleepSet: (choice) => call("sleep_set", { choice }),
+    sleepCancel: () => call("sleep_cancel"),
     cratePage: (kind, key) => call("crate_page", { kind, key }),
     albumShuffleTracks: (albumIds) => call("album_shuffle_tracks", { albumIds }),
     albumCrates: (id) => call("album_crates", { id }),

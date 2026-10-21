@@ -1468,6 +1468,25 @@ lists files left as they are with the reason. `IsrcRelease` is `{ source:
 lookup errors with `network` ("MusicBrainz and Deezer couldn't be reached.
 Nothing was changed; try again later.") when neither answers.
 
+## Sleep timer
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `sleep_get` | – | `SleepTimer \| null` |
+| `sleep_set` | `{ choice: { kind: "minutes", minutes } \| { kind: "track" } \| { kind: "album" } }` | `SleepTimer`, or `invalid` with nothing playing (song or album) or minutes outside 1 to 720 |
+| `sleep_cancel` | – | – |
+
+Event `sleep://changed` carries the `SleepTimer` or null whenever it is set, turned off or runs out.
+`SleepTimer = { kind: "minutes", minutes, endsAtMs } | { kind: "track", trackId } | { kind: "album", albumId }`.
+
+The core keeps the time, so the timer runs with the window hidden or the phone locked. When it is due it fades
+the volume to nothing over six seconds, pauses, and sets the volume back. A timer in minutes starts its fade six
+seconds before `endsAtMs`. An end of song timer is due when its song is six seconds from its end, or another song
+started. An end of album timer is due when the album's last song (the song after it is from another album, or
+there is none) is six seconds from its end, or a song from another album started. Paused already when it falls
+due, it just clears. Setting a timer replaces the one running; turning it off during the fade sets the volume
+back and playback carries on. The timer belongs to this device, is never synced and is gone when Platter quits.
+
 ## Now playing
 | Command | Args | Returns |
 | --- | --- | --- |

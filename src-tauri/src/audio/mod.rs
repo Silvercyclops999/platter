@@ -31,6 +31,7 @@ pub mod persist;
 pub mod player;
 pub mod queue;
 pub mod signal;
+pub mod sleep;
 pub mod source;
 pub mod visual;
 

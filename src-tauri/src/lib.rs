@@ -1714,6 +1714,12 @@ pub fn run() {
             ));
             app.manage(art);
             app.manage(artist_info);
+            // The sleep timer keeps time here, so it runs with the window hidden or the phone locked.
+            app.manage(audio::sleep::Sleep::new(
+                Arc::new(player.clone()),
+                Arc::new(plex::state::TauriSink(app.handle().clone())),
+                Arc::new(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)),
+            ));
             app.manage(player);
             #[cfg(target_os = "ios")]
             carplay::ios::attach(app.handle());
@@ -1856,6 +1862,9 @@ pub fn run() {
             db::commands::search_recent_remove,
             db::commands::search_recents_clear,
             audio::commands::play_context,
+            audio::sleep::sleep_get,
+            audio::sleep::sleep_set,
+            audio::sleep::sleep_cancel,
             audio::commands::play_toggle,
             audio::commands::play_pause,
             audio::commands::play_resume,
