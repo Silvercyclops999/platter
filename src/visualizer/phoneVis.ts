@@ -24,5 +24,3 @@ export function setPhoneVis(open: boolean) {
     /* storage unavailable: this session only */
   }
 }
-
-export const togglePhoneVis = () => setPhoneVis(!usePhoneVis.getState().open);

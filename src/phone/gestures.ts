@@ -70,6 +70,8 @@ export interface ArtRelease {
   vy: number;
   /** Where the art or the screen sat when the finger lifted (follow()). */
   at: { x: number; y: number };
+  /** The press was taken away (by the system), not lifted. */
+  cancelled?: boolean;
 }
 
 /**
@@ -119,7 +121,7 @@ export function useArtGestures(opts: {
       const dx = e.clientX - g.x0;
       const dy = e.clientY - g.y0;
       const outcome = cancelled ? "snap" : release({ axis: g.axis, dx, dy, vx: g.v.x, vy: g.v.y, width, height });
-      o.current.done(outcome, { axis: g.axis, dx, dy, vx: g.v.x, vy: g.v.y, at: follow(g.axis, dx, dy) });
+      o.current.done(outcome, { axis: g.axis, dx, dy, vx: g.v.x, vy: g.v.y, at: follow(g.axis, dx, dy), cancelled });
     };
     return {
       onPointerDown,

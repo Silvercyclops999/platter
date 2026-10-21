@@ -35,7 +35,6 @@ import { SearchBox } from "./SearchBox";
 import { SignalPanel } from "./SignalPath";
 import { useSourceKeys } from "./sourceKeys";
 import { StripExtras } from "./TransportStrip";
-import { DeckMeters, useDeckMeters } from "../visualizer/places";
 import { Volume1, Volume2, VolumeX } from "lucide-react";
 import "./deck.css";
 
@@ -261,15 +260,13 @@ function DeckDisplay() {
 export function DeckFaceplate() {
   const track = usePlayer((s) => s.state?.track);
   const volume = useLayout().playerButtons.includes("volume");
-  const meters = useDeckMeters();
   const nowText = track ? `Now playing: ${track.title} by ${trackArtistLine(track)}` : null;
   return (
     <aside className="deck-face" aria-label="Player" data-testid="deck-faceplate">
       <NowPlayingAnnouncer text={nowText} />
-      <div className={`deck-face__body ${meters ? "has-meters" : ""}`}>
+      <div className="deck-face__body">
         <DeckWindow />
         <DeckDisplay />
-        <DeckMeters />
         <div className="deck-keys">
           <PlayControls />
         </div>

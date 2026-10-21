@@ -1,0 +1,257 @@
+/* ---------------------------------------------------------------- Visualizer
+   The stage fills its view behind everything else on it: the phone's whole
+   now playing screen, or the computer's expanded view. A dark scrim at the
+   top and the bottom keeps the song and the controls readable; with the
+   controls hidden the scrims go too and the art has the screen. The sharp
+   cover is the view's own element on top, breathing with the beat. */
+
+.vis-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  background: var(--vis-base, #0b0a09);
+  pointer-events: none;
+  contain: strict;
+  animation: vis-in 600ms var(--motion-easing, ease) both;
+}
+@keyframes vis-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.vis-stage__gl { position: absolute; inset: 0; }
+.vis-stage__canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.vis-stage__canvas[hidden] { display: none; }
+
+/* Bars (and the CSS layers): the cover itself, soft and dim, fills the view. */
+.vis-stage__backdrop {
+  position: absolute;
+  inset: -12%;
+  filter: blur(44px) saturate(1.2) brightness(0.42);
+  transition: opacity 600ms var(--motion-easing, ease);
+}
+.vis-stage__backdrop > *,
+.vis-stage__backdrop .art { width: 100%; height: 100%; border-radius: 0; }
+.vis-stage__backdrop img { width: 100%; height: 100%; object-fit: cover; }
+
+.vis-stage__scrim {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  transition: opacity 420ms var(--motion-easing, ease);
+}
+.vis-stage__scrim--top {
+  top: 0;
+  height: 22%;
+  background: linear-gradient(180deg, rgba(4, 3, 3, 0.55) 0%, rgba(4, 3, 3, 0.25) 50%, rgba(4, 3, 3, 0) 100%);
+}
+.vis-stage__scrim--bottom {
+  bottom: 0;
+  height: 48%;
+  background: linear-gradient(0deg, rgba(4, 3, 3, 0.84) 0%, rgba(4, 3, 3, 0.58) 45%, rgba(4, 3, 3, 0) 100%);
+}
+.is-bare .vis-stage__scrim { opacity: 0; }
+
+/* Why the art holds still: one quiet line over the cover's place. */
+.vis-stage__line {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--vis-cy, 40%) - var(--vis-side, 200px) / 2 - 34px);
+  translate: -50% 0;
+  width: max-content;
+  max-width: calc(100% - 48px);
+  margin: 0;
+  color: rgba(246, 241, 232, 0.62);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* The style's name, for a moment after opening or a change, over the cover's lower edge. */
+.vis-name {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  bottom: 28px;
+  translate: -50% 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px 9px;
+  border-radius: 14px;
+  background: rgba(10, 9, 8, 0.5);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  color: #f6f1e8;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-shadow: none;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 260ms var(--motion-easing, ease), translate 260ms var(--motion-easing, ease);
+}
+.vis-name.is-on { opacity: 1; translate: -50% 0; }
+.vis-name__dots { display: flex; gap: 5px; }
+.vis-name__dots i { width: 5px; height: 5px; border-radius: 50%; background: rgba(246, 241, 232, 0.32); }
+.vis-name__dots i.is-on { background: #f6f1e8; }
+:root[data-reduced-motion="true"] .vis-name { transition: none; }
+
+/* Without WebGL: the cover's colours as fields the compositor moves (transform only),
+   and for Grooves fine rings round the cover. */
+.vis-css { position: absolute; inset: 0; }
+.vis-css__field {
+  position: absolute;
+  left: var(--vis-cx, 50%);
+  top: var(--vis-cy, 40%);
+  width: 110vmax;
+  max-width: 1400px;
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--c), transparent);
+  opacity: 0.5;
+  will-change: transform;
+}
+.vis-css__field--0 { --c: var(--vis-c0, #7a5a3a); }
+.vis-css__field--1 { --c: var(--vis-c1, #3a4a6a); width: 90vmax; }
+.vis-css__field--2 { --c: var(--vis-c2, #6a3a4a); width: 80vmax; }
+.vis-css__field--3 { --c: var(--vis-c3, #8a7a6a); width: 64vmax; }
+.vis-css__grooves {
+  position: absolute;
+  left: var(--vis-cx, 50%);
+  top: var(--vis-cy, 40%);
+  width: calc(var(--vis-side, 200px) * 3.4);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  border-radius: 50%;
+  background:
+    repeating-radial-gradient(circle, rgba(255, 255, 255, 0.05) 0 1px, rgba(0, 0, 0, 0.18) 1px 3px),
+    conic-gradient(from 225deg, transparent 0deg, color-mix(in srgb, var(--vis-c0, #7a5a3a) 45%, transparent) 30deg, transparent 70deg, transparent 180deg, color-mix(in srgb, var(--vis-c0, #7a5a3a) 45%, transparent) 210deg, transparent 250deg),
+    var(--vis-base, #0b0a09);
+  z-index: 1;
+}
+
+/* ---- the sharp cover over the art, wherever it sits */
+.vis-cover {
+  position: relative;
+  transform: scale(var(--vis-breath, 1)) rotate(var(--vis-spin, 0deg)) !important;
+  transition: none !important;
+  will-change: transform;
+}
+/* Grooves: the cover is the record's label, round, with its spindle hole. */
+.vis-cover--grooves {
+  border-radius: 50% !important;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 0 0 5px rgba(255, 255, 255, 0.025), 0 12px 32px rgba(0, 0, 0, 0.5) !important;
+}
+.vis-cover--grooves .art,
+.vis-cover--grooves img { border-radius: 50% !important; }
+.vis-cover--grooves::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3.4%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  translate: -50% -50%;
+  background: #0a0908;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+/* Blur: small, sharp and lifted off the colours. */
+.vis-cover--blur { box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5), 0 6px 18px rgba(0, 0, 0, 0.32), 0 0 0 0.5px rgba(255, 255, 255, 0.16) !important; }
+/* Bars: the cover keeps its place (the bars stand in it) but isn't drawn. */
+.vis-cover--bars { opacity: 0; box-shadow: none !important; }
+
+/* ---- the phone: the art takes the whole now playing screen */
+.ph-np.is-art { background: #0b0a09; }
+.ph-np.is-art .ph-np__player {
+  --color-text-primary: #f6f1e8;
+  --color-text-secondary: rgba(246, 241, 232, 0.76);
+  --color-text-muted: rgba(246, 241, 232, 0.58);
+  color: #f6f1e8;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.35);
+}
+/* The cards under the player read on the dark art too. */
+.ph-np.is-art .ph-upnext {
+  --color-text-primary: #f6f1e8;
+  --color-text-secondary: rgba(246, 241, 232, 0.72);
+  --color-text-muted: rgba(246, 241, 232, 0.55);
+  color: #f6f1e8;
+}
+.ph-np.is-art .ph-upnext__row { background: rgba(255, 255, 255, 0.07) !important; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+/* The top bar takes the art's scrim instead of the tint band. */
+.ph-np.is-art .ph-np__top { background: none; }
+/* Over the art the cover gives it room: the label smallest, Bars the widest. */
+.ph-np.is-art--grooves .ph-np__cover { width: min(52%, 224px); }
+.ph-np.is-art--blur .ph-np__cover { width: min(66%, 290px, max(200px, calc(100dvh - var(--ph-safe-top) - var(--ph-safe-bottom) - 470px))); }
+.ph-np.is-art--bars .ph-np__cover { width: min(100%, 400px, max(220px, calc(100dvh - var(--ph-safe-top) - var(--ph-safe-bottom) - 460px))); }
+.ph-np.is-art .ph-np__art { position: relative; }
+/* The cover opens and closes the visualizer with a tap. */
+.ph-np__art[role="button"] { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.ph-np__art[role="button"]:focus-visible { outline: none; }
+.ph-np__art[role="button"]:focus-visible .ph-np__slide--cur .ph-np__cover { outline: 2px solid var(--color-focus-ring, #fff); outline-offset: 4px; }
+/* The controls fade on a tap; the cover stays. */
+.ph-np.is-art .ph-np__top,
+.ph-np.is-art .ph-np__deck { transition: opacity 320ms var(--motion-easing, ease); }
+.ph-np.is-bare .ph-np__top,
+.ph-np.is-bare .ph-np__deck { opacity: 0; pointer-events: none; }
+/* The way back with the controls hidden: quiet, but always there to press or reach. */
+.ph-np__show {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  bottom: calc(20px + var(--ph-safe-bottom, 0px));
+  translate: -50% 0;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0.5px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(14, 12, 10, 0.34);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  color: rgba(246, 241, 232, 0.66);
+  font-size: 13px;
+  font-weight: 600;
+  animation: vis-in 420ms var(--motion-easing, ease) 200ms both;
+}
+.ph-np__show:focus-visible { outline: 2px solid var(--color-focus-ring, #fff); outline-offset: 2px; color: #fffaf0; }
+
+/* ---- the computer: the expanded view, the same */
+.fw--art .fw__bg,
+.fw--art .fw__shade { display: none; }
+.fw--art .fw__stage { flex-direction: column; gap: var(--space-4); }
+.fw .fw__now--art {
+  align-items: center;
+  gap: var(--space-5);
+  width: min(500px, calc(100vh - var(--fw-player-bar) - var(--fw-top-bar) - 280px), 100%);
+  text-align: center;
+  animation: none;
+}
+.fw__now--art .fw__meta { width: 100%; align-items: center; }
+.fw__now--art .fw__artists { justify-content: center; }
+.fw__now--art .fw__cover { cursor: pointer; }
+/* Bars get a wide stage of their own where the cover would be. */
+.fw.fw--art-bars .fw__now--art { width: min(760px, 100%); }
+.fw--art-bars .fw__now--art .fw__cover { aspect-ratio: 2 / 1; }
+.fw__art-slot { position: relative; display: flex; justify-content: center; width: 100%; }
+.fw--art-grooves .fw__now--art .fw__cover { width: 58%; }
+.fw--art-grooves .fw__art-slot { margin-bottom: var(--space-8); }
+.fw--art-blur .fw__now--art .fw__cover { width: 72%; }
+.fw--art-blur .fw__art-slot { margin-bottom: var(--space-4); }
+.fw__art-meta { width: 100%; }
+.fw__now:not(.fw__now--art) .fw__cover.is-tappable { cursor: pointer; }
+/* Hidden controls fade, then leave the tab order too (the bars with them). */
+.fw.is-bare .fw__chrome {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transition: opacity var(--motion-medium) var(--motion-easing), visibility 0s linear var(--motion-medium);
+}
+html.fw-bare .topbar > *,
+html.fw-bare .player-bar {
+  visibility: hidden;
+  transition: opacity var(--motion-medium) var(--motion-easing), visibility 0s linear var(--motion-medium);
+}

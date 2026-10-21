@@ -6,7 +6,6 @@
  * Imperative and allocation free per frame: the views keep one of these and
  * step it from their animation frames, never through React state.
  */
-import type { VisualizerIntensity } from "../lib/types";
 import { BANDS, bandCentre, follow } from "./scale";
 
 /** Bands whose centre sits in [lo, hi) Hz. */
@@ -44,11 +43,11 @@ function mean(bands: ArrayLike<number>, [a, b]: [number, number]): number {
   return b > a ? s / (b - a) : 0;
 }
 
-/** How each intensity moves: how far the art reacts, and how long a beat's pulse lasts. */
-export const INTENSITY: Record<VisualizerIntensity, { gain: number; pulse: number; pulseMs: number; releaseMs: number }> = {
-  calm: { gain: 0.6, pulse: 0.6, pulseMs: 260, releaseMs: 320 },
-  lively: { gain: 1, pulse: 1, pulseMs: 180, releaseMs: 170 },
-};
+/**
+ * How the styles move: how far they react, how long a beat's pulse lasts,
+ * and how slowly the energies settle after rising (they rise in tens of ms).
+ */
+export const MOTION = { gain: 0.9, pulse: 0.9, pulseMs: 220, releaseMs: 260 } as const;
 
 /** Beats closer together than this are one beat. */
 export const BEAT_MIN_GAP_MS = 200;
@@ -113,8 +112,8 @@ export class MusicSignals {
    * frames stopped: everything falls back to rest), `frameKey` tells a new
    * frame from the same one drawn again, `nowMs` is the stage's clock.
    */
-  step(bands: ArrayLike<number> | null, frameKey: unknown, dtMs: number, nowMs: number, intensity: VisualizerIntensity = "calm"): void {
-    const how = INTENSITY[intensity];
+  step(bands: ArrayLike<number> | null, frameKey: unknown, dtMs: number, nowMs: number): void {
+    const how = MOTION;
     const dt = Math.max(0, Math.min(250, dtMs));
     if (bands && frameKey !== this.lastFrame) {
       this.lastFrame = frameKey;

@@ -14,15 +14,16 @@
  * distance. Nothing here redraws while a finger moves: the moves are
  * transforms written straight to the row or the screen.
  */
-import { memo, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { Art } from "../components/Art";
 import type { PlayerState, Track } from "../lib/types";
 import { nextInQueue } from "../shell/nowPlaying";
 import { player, usePlayer } from "../stores/player";
 import { tap } from "./bits";
-import { useArtGestures, type Axis, type Outcome } from "./gestures";
+import { TAP_SLOP_PX, useArtGestures, type Axis, type Outcome } from "./gestures";
 import { EASE, reduced, release as dropAnimations, run } from "./motion";
-import type { ArtStyle } from "../visualizer/styles";
+import type { VisualizerStyle } from "../lib/types";
+import { VisName } from "../visualizer/Stage";
 
 /** Now playing's cover is asked for at this CSS size (the phone's ladder caps it at 1200 px). */
 export const NP_ART_CSS = 400;
@@ -61,7 +62,18 @@ export function settleMs(left: number, speed: number): number {
   return Math.round(Math.min(SKIP_SETTLE_MAX_MS, Math.max(160, Math.abs(left) / Math.max(Math.abs(speed), 0.9))));
 }
 
-export const CoverDeck = memo(function CoverDeck({ screen, onClose, art: artStyle = null }: { screen: RefObject<HTMLElement | null>; onClose: () => void; art?: ArtStyle | null }) {
+interface DeckProps {
+  screen: RefObject<HTMLElement | null>;
+  onClose: () => void;
+  /** The visualizer's style while it shows: a sideways swipe then changes the style instead of the song. */
+  art?: VisualizerStyle | null;
+  /** A tap on the cover (opens or closes the visualizer). */
+  onTap?: () => void;
+  /** A sideways swipe while the visualizer shows: 1 for the next style, -1 for the one before. */
+  onStyleSwipe?: (step: 1 | -1) => void;
+}
+
+export const CoverDeck = memo(function CoverDeck({ screen, onClose, art: artStyle = null, onTap, onStyleSwipe }: DeckProps) {
   const cur = usePlayer((s) => s.state?.track ?? null);
   const next = usePlayer((s) => nextInQueue(s.state?.queue)?.track ?? null);
   const prev = usePlayer((s) => previousCover(s.state, s.positionMs));
@@ -75,6 +87,10 @@ export const CoverDeck = memo(function CoverDeck({ screen, onClose, art: artStyl
   const settle = useRef<{ cancel: () => void } | null>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const tapRef = useRef(onTap);
+  tapRef.current = onTap;
+  const styleSwipe = useRef(onStyleSwipe);
+  styleSwipe.current = onStyleSwipe;
 
   // A cover that is paused sits a little smaller, but only once the row is still and the pause is real.
   const [shrunk, setShrunk] = useState(!playing);
@@ -116,6 +132,8 @@ export const CoverDeck = memo(function CoverDeck({ screen, onClose, art: artStyl
       busy.current = true;
     },
     place: (at: { x: number; y: number }, axis: Axis) => {
+      // Over the visualizer the cover stays put; letting go changes the style.
+      if (axis === "x" && styleSwipe.current) return;
       if (axis === "x") {
         const el = strip.current;
         if (!el) return;
@@ -133,6 +151,17 @@ export const CoverDeck = memo(function CoverDeck({ screen, onClose, art: artStyl
       busy.current = false;
       const el = strip.current;
       const sec = screen.current;
+      if (!g.axis && !g.cancelled && Math.hypot(g.dx, g.dy) < TAP_SLOP_PX) {
+        tapRef.current?.();
+        return;
+      }
+      if (g.axis === "x" && styleSwipe.current) {
+        if (outcome === "next" || outcome === "previous") {
+          tap("selection");
+          styleSwipe.current(outcome === "next" ? 1 : -1);
+        }
+        return;
+      }
       if (g.axis === "y") {
         if (!sec) return;
         if (outcome === "close") {
@@ -184,21 +213,37 @@ export const CoverDeck = memo(function CoverDeck({ screen, onClose, art: artStyl
   });
 
   return (
-    <div ref={art} className="ph-np__art" data-testid="np-art" {...handlers}>
+    <div
+      ref={art}
+      className="ph-np__art"
+      data-testid="np-art"
+      {...handlers}
+      {...(onTap && {
+        role: "button",
+        tabIndex: 0,
+        "aria-label": artStyle ? "Close the visualizer" : "Open the visualizer",
+        onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          onTap();
+        },
+      })}
+    >
       <div ref={strip} className="ph-np__deck-row" data-testid="np-deck">
         <Slide cover={deck.prev} side="prev" shrunk={shrunk} art={artStyle} />
         <Slide cover={deck.cur} side="cur" shrunk={shrunk} art={artStyle} />
         <Slide cover={deck.next} side="next" shrunk={shrunk} art={artStyle} />
       </div>
+      {artStyle && <VisName style={artStyle} />}
     </div>
   );
 });
 
-function Slide({ cover, side, shrunk, art }: { cover: Cover; side: "prev" | "cur" | "next"; shrunk: boolean; art: ArtStyle | null }) {
+function Slide({ cover, side, shrunk, art }: { cover: Cover; side: "prev" | "cur" | "next"; shrunk: boolean; art: VisualizerStyle | null }) {
   return (
     <div className={`ph-np__slide ph-np__slide--${side}`} aria-hidden={side !== "cur" || undefined}>
       {cover && (
-        <div className={`ph-np__cover ${shrunk ? "" : "is-playing"} ${art ? `art-cover art-cover--${art}` : ""}`}>
+        <div className={`ph-np__cover ${shrunk ? "" : "is-playing"} ${art ? `vis-cover vis-cover--${art}` : ""}`}>
           <Art path={cover.thumb} fluid requestSize={NP_ART_CSS} sleeve={{ title: cover.albumTitle, artist: cover.artistTitle }} />
         </div>
       )}

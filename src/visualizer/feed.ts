@@ -1,6 +1,6 @@
 /**
- * One feed of visualizer frames for every view that shows one (the expanded
- * view, the panel strip, the Deck's meters, the phone). While at least one
+ * One feed of visualizer frames for every view that shows one (the
+ * computer's expanded view, the phone's now playing). While at least one
  * is mounted and the page can be seen, the core is asked to watch, and the
  * watch is renewed every second; the page hidden or the last view gone ends
  * it straight away. Frames go into a plain variable the views read from
@@ -10,7 +10,6 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import { backend, type Unlisten } from "../lib/backend";
 import type { SpectrumFrame } from "../lib/types";
-import { useSettings } from "../stores/settings";
 import { RENEW_MS } from "./scale";
 
 export interface Want {
@@ -68,7 +67,8 @@ function combined(): Want | null {
 }
 
 const hidden = () => typeof document !== "undefined" && (document.visibilityState === "hidden" || document.hidden === true);
-const batteryPause = () => useSettings.getState().settings?.visualizerBatteryPause !== false;
+/** The core rests the visualizer on battery (a phone: in Low Power Mode). */
+const batteryPause = () => true;
 
 async function renew() {
   const want = combined();

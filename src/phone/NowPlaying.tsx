@@ -7,7 +7,7 @@
  */
 import { GettingLine } from "../components/GettingLine";
 import { getting, useTaps } from "../stores/taps";
-import { AudioLines, ChevronDown, ListMusic, MicVocal, MoreHorizontal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from "lucide-react";
+import { ChevronDown, ListMusic, MicVocal, MoreHorizontal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from "lucide-react";
 import { memo, useDeferredValue, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { Art, preloadArt, sleeveHue } from "../components/Art";
 import { contextRoute, nextInQueue } from "../shell/nowPlaying";
@@ -30,12 +30,10 @@ import { LyricsCard } from "./LyricsScreen";
 import { NP_OPEN_MS, flyCover } from "./motion";
 import { phone, usePhoneUi } from "./phoneUi";
 import type { HapticKind } from "../lib/backend";
-import { useSettings } from "../stores/settings";
-import { StylePicker, VisualizerView, useShownStyle } from "../visualizer/VisualizerView";
-import { togglePhoneVis, usePhoneVis } from "../visualizer/phoneVis";
-import { ArtStage } from "../visualizer/ArtStage";
-import { useReducedMotion } from "../visualizer/draw";
-import { isArtStyle, visFps, type ArtStyle } from "../visualizer/styles";
+import { setPhoneVis, usePhoneVis } from "../visualizer/phoneVis";
+import { Stage } from "../visualizer/Stage";
+import { stepVisStyle, useCoverTap, useVisStyle } from "../visualizer/useVis";
+import type { VisualizerStyle } from "../lib/types";
 
 /** The close slides straight down in this long. */
 export const CLOSE_MS = 300;
@@ -116,12 +114,18 @@ export function NowPlaying() {
  * changes only this; everything on it (PlayerBody) stays as it is drawn, so
  * the first frame of the close is one class.
  */
-/** The art style now playing shows full screen, or null (the visualizer is off, or an instrument shows). */
-export function usePhoneArt(): ArtStyle | null {
-  const visButton = useSettings((s) => s.settings?.visualizerButton !== false);
+/** The visualizer style now playing shows full screen, or null while it is closed. */
+export function usePhoneArt(): VisualizerStyle | null {
+  const coverTap = useCoverTap();
   const open = usePhoneVis((s) => s.open);
-  const style = useShownStyle();
-  return open && visButton && isArtStyle(style) ? style : null;
+  const style = useVisStyle();
+  return open && coverTap ? style : null;
+}
+
+/** A tap on the cover: the visualizer opens, or closes. */
+function toggleVisualizer() {
+  tap("selection");
+  setPhoneVis(!usePhoneVis.getState().open);
 }
 
 /** The sharp cover the art gathers round: the deck's current one. */
@@ -163,12 +167,9 @@ function Player({ track, closing }: { track: Track; closing: boolean }) {
   );
 }
 
-function PhoneArtStage({ art, screen }: { art: ArtStyle; screen: RefObject<HTMLElement | null> }) {
-  const reduced = useReducedMotion();
-  const fps = visFps(useSettings((s) => s.settings?.visualizerFps), true, reduced);
-  const intensity = useSettings((s) => s.settings?.visualizerIntensity ?? "calm");
+function PhoneArtStage({ art, screen }: { art: VisualizerStyle; screen: RefObject<HTMLElement | null> }) {
   const [cover] = useState(() => currentCover(screen));
-  return <ArtStage style={art} fps={fps} reduced={reduced} intensity={intensity} phone cover={cover} />;
+  return <Stage style={art} phone cover={cover} />;
 }
 
 /**
@@ -217,13 +218,13 @@ function ShowControls({ screen, onShow }: { screen: RefObject<HTMLElement | null
   );
 }
 
-/** Presses that are the controls' own, not a tap on the art. */
-const ON_A_CONTROL = "button, a, input, select, textarea, [role=slider], [role=button], [role=switch], .ph-seek";
+/** Presses that are the controls' own (or the cover's), not a tap on the art. */
+const ON_A_CONTROL = "button, a, input, select, textarea, [role=slider], [role=button], [role=switch], .ph-seek, .ph-np__art";
 
 interface BodyProps {
   track: Track;
   screen: RefObject<HTMLElement | null>;
-  art?: ArtStyle | null;
+  art?: VisualizerStyle | null;
   bare?: boolean;
   onBare?: (bare: boolean) => void;
 }
@@ -235,9 +236,8 @@ const PlayerBody = memo(function PlayerBody({ track, screen, art = null, bare = 
   const playing = status === "playing" || status === "loading" || status === "buffering";
   // The cards under the player follow a new song a moment later, in pieces that give way to the screen.
   const below = useDeferredValue(track);
-  // The visualizer in the cover's place, when its button is on.
-  const visButton = useSettings((s) => s.settings?.visualizerButton !== false);
-  const vis = usePhoneVis((s) => s.open) && visButton;
+  // A tap on the cover opens the visualizer (and closes it); a sideways swipe over it changes the style.
+  const coverTap = useCoverTap();
   const scroller = useRef<HTMLDivElement>(null);
   useScrolled(scroller);
   return (
@@ -260,18 +260,13 @@ const PlayerBody = memo(function PlayerBody({ track, screen, art = null, bare = 
             <MoreHorizontal size={24} aria-hidden="true" />
           </button>
         </header>
-        {vis && !art ? (
-          <div className="ph-np__art ph-np__art--vis" data-testid="np-visualizer">
-            <VisualizerView phone />
-          </div>
-        ) : (
-          <CoverDeck screen={screen} onClose={phone.closePlayer} art={art} />
-        )}
-        {art && (
-          <div className="ph-np__styles" inert={bare || undefined} data-testid="np-art-styles">
-            <StylePicker />
-          </div>
-        )}
+        <CoverDeck
+          screen={screen}
+          onClose={phone.closePlayer}
+          art={art}
+          onTap={coverTap ? toggleVisualizer : undefined}
+          onStyleSwipe={art ? stepVisStyle : undefined}
+        />
         <div className="ph-np__deck" inert={bare || undefined}>
         <div className="ph-np__meta">
           <div className="ph-np__names">
@@ -302,20 +297,6 @@ const PlayerBody = memo(function PlayerBody({ track, screen, art = null, bare = 
             <SignalPlate track={track} />
           </div>
           <div className="ph-np__right">
-          {visButton && (
-            <button
-              type="button"
-              className={`ph-icon-btn ${vis ? "is-on" : ""}`}
-              aria-label="Visualizer"
-              aria-pressed={vis}
-              onClick={() => {
-                tap("selection");
-                togglePhoneVis();
-              }}
-            >
-              <AudioLines size={22} aria-hidden="true" />
-            </button>
-          )}
           <button
             type="button"
             className="ph-icon-btn"
