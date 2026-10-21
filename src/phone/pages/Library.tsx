@@ -2,7 +2,8 @@
  * The library on the phone: one mixed list with four pills (Playlists,
  * Albums, Artists, Downloads), the current sort as a label (it opens a
  * sheet), a list or grid toggle, pinned items at the top, and small glyphs
- * for pinned and downloaded. Downloads also leads to managing them.
+ * for pinned and downloaded. Downloads also leads to managing them. While
+ * the library doctor has something to fix, a quiet row at the end leads to it.
  */
 import { ArrowUpDown, ChevronRight, LayoutGrid, List, Plus, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
@@ -11,6 +12,8 @@ import { LikedCover } from "../../components/LikedCover";
 import { KIND_LABEL, SORT_LABEL, useLibraryView, type LibEntry, type LibKind } from "../../stores/library";
 import { openEntry, useLibraryLoader, useLibraryModel } from "../../shell/useLibrary";
 import { useApp } from "../../stores/app";
+import { useDoctorCount } from "../../stores/doctor";
+import { useSettings } from "../../stores/settings";
 import type { DownloadKind } from "../../lib/types";
 import { RowGlyphs, tap } from "../bits";
 import { letterOf, phoneRows, phoneSubtitle } from "../libraryRows";
@@ -178,6 +181,7 @@ function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof use
           ))}
         </ul>
       )}
+      {!model.loading && model.filter === "all" && !model.downloaded.on && <DoctorRow />}
       {!model.loading && rows.length === 0 && (
         <div className="ph-empty">
           <p className="ph-empty__title">{model.downloaded.on ? "Nothing downloaded yet" : "Nothing here yet"}</p>
@@ -187,6 +191,26 @@ function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof use
         </div>
       )}
     </>
+  );
+}
+
+/** The library doctor, at the end of the list while it has something to fix. */
+function DoctorRow() {
+  const on = useSettings((s) => s.settings?.libraryDoctor !== false);
+  const count = useDoctorCount();
+  if (!on || count <= 0) return null;
+  return (
+    <ul className="ph-set-list ph-library__doctor" aria-label="Library doctor">
+      <li>
+        <button type="button" className="ph-set-link" onClick={() => (tap(), nav.go({ name: "doctor" }))}>
+          <span className="ph-set-link__text">
+            <span className="ph-set-link__title">Library doctor</span>
+            <span className="ph-set-link__sub">{count === 1 ? "1 thing to fix" : `${count} things to fix`}</span>
+          </span>
+          <ChevronRight size={18} aria-hidden="true" className="ph-set-link__chev" />
+        </button>
+      </li>
+    </ul>
   );
 }
 

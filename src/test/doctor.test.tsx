@@ -18,6 +18,8 @@ import { doctorChanges, doctorValueProblem } from "../lib/tagEdit";
 import type { TagEditFile } from "../lib/types";
 import { SettingsPage } from "../pages/SettingsPage";
 import { DoctorNote } from "../shell/Sidebar";
+import { usePhoneForm } from "../phone/form";
+import { PhoneLibrary } from "../phone/pages/Library";
 import { useApp } from "../stores/app";
 import { badgeText } from "../stores/doctor";
 import { reloadEditAccess, usePlexEdit } from "../stores/plexEdit";
@@ -422,6 +424,30 @@ describe("where it opens from", () => {
     expect(within(item).getByText("15")).toBeInTheDocument();
     await user.click(item);
     expect(lastRoute()).toEqual({ name: "doctor" });
+  });
+
+  it("the phone's Library ends with a row that opens it", async () => {
+    const user = userEvent.setup();
+    render(<PhoneLibrary />);
+    const row = await screen.findByRole("button", { name: /Library doctor\s*15 things to fix/ });
+    await user.click(row);
+    expect(lastRoute()).toEqual({ name: "doctor" });
+  });
+
+  it("on the phone, tag findings point to the computer and keep Ignore and Why", async () => {
+    usePhoneForm.setState({ phone: true });
+    try {
+      render(<DoctorPage />);
+      const item = await waitFor(() => screen.getAllByRole("listitem").find((li) => li.getAttribute("data-kind") === "albumArtist")!);
+      expect(within(item).queryByRole("button", { name: "Fix the tags" })).toBeNull();
+      expect(within(item).getByText(/Fix the tags from Library doctor on your computer/)).toBeInTheDocument();
+      expect(within(item).getByRole("button", { name: "Ignore" })).toBeInTheDocument();
+      // Covers are fixed through the server, so the phone keeps that button.
+      const cover = screen.getAllByRole("listitem").find((li) => li.getAttribute("data-kind") === "cover")!;
+      expect(within(cover).getByRole("button", { name: "Change cover" })).toBeInTheDocument();
+    } finally {
+      usePhoneForm.setState({ phone: false });
+    }
   });
 
   it("the line stays away while the doctor is off", async () => {

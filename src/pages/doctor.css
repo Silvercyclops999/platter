@@ -48,6 +48,7 @@
 .doctor-item__meta { margin: 0; font-size: var(--font-size-md); color: var(--color-text-secondary); min-width: 0; }
 .doctor-item__link { color: inherit; text-align: left; }
 .doctor-item__text { margin: var(--space-1) 0 0; font-size: var(--font-size-md); line-height: 1.5; color: var(--color-text-secondary); max-width: 72ch; }
+.doctor-item__elsewhere { margin: var(--space-2) 0 0; color: var(--color-text-secondary); font-size: var(--font-size-sm); }
 .doctor-item__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-3); }
 .doctor-item__why { margin-left: var(--space-2); font-size: var(--font-size-md); color: var(--color-text-secondary); }
 .doctor-item__why[aria-expanded="true"] { color: var(--color-text-primary); }

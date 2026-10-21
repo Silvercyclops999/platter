@@ -14,6 +14,7 @@ import { ChipRow } from "../components/Tabs";
 import { backend } from "../lib/backend";
 import { timeAgo } from "../lib/relativeTime";
 import type { DoctorFinding, DoctorKind, DoctorSuggestedTags, DoctorReport, LidarrRequestInput } from "../lib/types";
+import { usePhoneForm } from "../phone/form";
 import { useDoctor } from "../stores/doctor";
 import { errText, runEdit, useCanEdit, usePlexEdit, type EditTarget } from "../stores/plexEdit";
 import { nav } from "../stores/router";
@@ -385,6 +386,8 @@ function FindingRow({
   const { label, edit } = fixLabel(f);
   // Without editing rights the album is the next best place to go.
   const fixable = !edit || canEdit || rightsPending;
+  // Tags are written into the music folder, which only a computer has.
+  const onComputer = usePhoneForm((s) => s.phone) && f.fix === "tags";
 
   const fix = () => {
     if (!fixable) return nav.go({ name: "album", id: f.albumId });
@@ -420,10 +423,13 @@ function FindingRow({
           </button>
         </p>
         <p className="doctor-item__text">{f.text}</p>
+        {onComputer && <p className="doctor-item__elsewhere">Fix the tags from Library doctor on your computer. It writes them into your music folder.</p>}
         <div className="doctor-item__actions">
-          <Button variant="primary" size="sm" onClick={fix}>
-            {fixable ? label : "Open album"}
-          </Button>
+          {!onComputer && (
+            <Button variant="primary" size="sm" onClick={fix}>
+              {fixable ? label : "Open album"}
+            </Button>
+          )}
           {f.kind === "lowQuality" && lidarr && (
             <Button variant="secondary" size="sm" onClick={() => onBetterCopy(f)}>
               Find a better copy
