@@ -272,7 +272,7 @@ pub fn find_song(at: &Path, title: &str) -> Option<PathBuf> {
         let r = raw(p);
         let once = without_number(&r);
         let digits_off = fold(&r).trim_start_matches(|c: char| c.is_ascii_digit()).to_string();
-        [fold(&r), fold(once), fold(without_number(once)), digits_off].iter().any(|n| *n == want)
+        [fold(&r), fold(once), fold(without_number(once)), digits_off].contains(&want)
     });
     if let Some(p) = exact {
         return Some(p.clone());
