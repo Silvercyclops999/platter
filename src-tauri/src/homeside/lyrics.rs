@@ -19,7 +19,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -235,13 +235,16 @@ pub fn counts(c: &Connection, have: &HashSet<String>, now: i64) -> AppResult<(us
     Ok((done.max(0) as usize, next_songs(c, have, now, 0)?.len()))
 }
 
-/// The transcriber's news, kept for the status line; songs that failed are
-/// marked to try again later, so a bad file doesn't come back every night.
+/// Hears the transcriber's news: songs that failed are marked to try again
+/// later, so a bad file doesn't come back every night.
 struct Recorder {
     db: DbHandle,
-    last: Mutex<Option<TranscribeStatus>>,
     clock: Clock,
     marked: Mutex<Option<String>>,
+    /// The counts need reading again (a mark landed, or a batch went in).
+    stale: Arc<AtomicBool>,
+    /// Marks still being written: counts read meanwhile may be behind.
+    marking: Arc<AtomicUsize>,
 }
 
 impl TranscribeEvents for Recorder {
@@ -257,9 +260,16 @@ impl TranscribeEvents for Recorder {
                 *m = Some(id.clone());
                 let until = format!("retry:{}", (self.clock)() + RETRY_S);
                 let (db, id, message) = (self.db.clone(), id.clone(), f.message.clone());
-                let write = move || match db.write(|c| mark(c, &id, &until)) {
-                    Err(e) => tracing::warn!("Lyrics: couldn't note a song to try again later: {e}"),
-                    Ok(()) => tracing::info!("Lyrics: a song couldn't be transcribed ({message}). It's tried again in a week."),
+                let (stale, marking) = (self.stale.clone(), self.marking.clone());
+                marking.fetch_add(1, Ordering::SeqCst);
+                let write = move || {
+                    match db.write(|c| mark(c, &id, &until)) {
+                        Err(e) => tracing::warn!("Lyrics: couldn't note a song to try again later: {e}"),
+                        Ok(()) => tracing::info!("Lyrics: a song couldn't be transcribed ({message}). It's tried again in a week."),
+                    }
+                    // The song isn't left any more: count again.
+                    stale.store(true, Ordering::SeqCst);
+                    marking.fetch_sub(1, Ordering::SeqCst);
                 };
                 match tokio::runtime::Handle::try_current() {
                     Ok(rt) => drop(rt.spawn_blocking(write)),
@@ -270,7 +280,6 @@ impl TranscribeEvents for Recorder {
             // No failure said now (the queue moved on): the next one is new.
             *self.marked.lock() = None;
         }
-        *self.last.lock() = Some(s.clone());
     }
     fn done(&self, _track_id: &str, _found: bool) {}
 }
@@ -302,8 +311,6 @@ pub struct BridgeLyrics {
     have: RwLock<HashMap<String, HashSet<String>>>,
     /// Every computer's list together (rebuilt when one changes).
     have_all: RwLock<Arc<HashSet<String>>>,
-    /// The counts need reading again.
-    counts_stale: AtomicBool,
     music: bool,
     root: MusicRoot,
     rec: Arc<Recorder>,
@@ -325,7 +332,13 @@ impl BridgeLyrics {
         let kept: Opts = d.db.read(|c| kv_get(c, OPTS_KEY)).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
         let opts = Arc::new(RwLock::new(kept));
         d.lrclib.store(kept.lrclib, Ordering::Relaxed);
-        let rec = Arc::new(Recorder { db: d.db.clone(), last: Mutex::default(), clock: d.clock.clone(), marked: Mutex::default() });
+        let rec = Arc::new(Recorder {
+            db: d.db.clone(),
+            clock: d.clock.clone(),
+            marked: Mutex::default(),
+            stale: Arc::new(AtomicBool::new(true)),
+            marking: Arc::default(),
+        });
         // The Light budget at the lowest priority, the busy pause on, never "faster while away".
         d.pacer.set_options(pace::ProcessorUse::Light, true, false);
         let t = Transcriber::new(Deps {
@@ -364,7 +377,6 @@ impl BridgeLyrics {
             opts,
             have: RwLock::new(have),
             have_all: RwLock::new(Arc::new(all)),
-            counts_stale: AtomicBool::new(true),
             music: d.music,
             root: d.root,
             rec,
@@ -441,7 +453,7 @@ impl BridgeLyrics {
     fn rebuild_have(&self) {
         let all: HashSet<String> = self.have.read().values().flat_map(|s| s.iter().cloned()).collect();
         *self.have_all.write() = Arc::new(all);
-        self.counts_stale.store(true, Ordering::SeqCst);
+        self.rec.stale.store(true, Ordering::SeqCst);
     }
 
     fn have_all(&self) -> Arc<HashSet<String>> {
@@ -513,7 +525,7 @@ impl BridgeLyrics {
         if ids.is_empty() {
             return 0;
         }
-        self.counts_stale.store(true, Ordering::SeqCst);
+        self.rec.stale.store(true, Ordering::SeqCst);
         match self.t.transcribe_background(ids) {
             Ok(n) => n,
             Err(e) => {
@@ -527,15 +539,20 @@ impl BridgeLyrics {
     /// old or something changed (each tick).
     async fn refresh_counts(&self) {
         let fresh = self.counts.lock().is_some_and(|(at, _, _)| at.elapsed() < COUNTS_FOR);
-        if fresh && !self.counts_stale.load(Ordering::SeqCst) {
+        if fresh && !self.rec.stale.load(Ordering::SeqCst) {
             return;
         }
-        self.counts_stale.store(false, Ordering::SeqCst);
+        self.rec.stale.store(false, Ordering::SeqCst);
+        // A mark still being written may not be in this count: read again next time.
+        let marking = self.rec.marking.load(Ordering::SeqCst) > 0;
         let have = self.have_all();
         let now = (self.clock)();
         match self.db.read_async(move |c| counts(c, &have, now)).await {
             Ok((d, l)) => *self.counts.lock() = Some((Instant::now(), d, l)),
             Err(e) => tracing::warn!("Lyrics: couldn't count the songs: {e}"),
+        }
+        if marking {
+            self.rec.stale.store(true, Ordering::SeqCst);
         }
     }
 
@@ -555,7 +572,8 @@ impl BridgeLyrics {
     /// The line for Settings > Bridge on the computers.
     pub fn line(&self) -> LyricsLine {
         let o = self.opts();
-        let s = self.rec.last.lock().clone().unwrap_or_else(|| self.status());
+        // Asked of the queue now: news from two threads can arrive out of order.
+        let s = self.status();
         let mut line = LyricsLine { hours: o.hours, ..Default::default() };
         if !o.on {
             line.state = LyricsState::Off;
