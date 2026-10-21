@@ -137,8 +137,8 @@ fn daily_mixes_are_mostly_favourites_with_some_fresh_songs() {
         }
     }
     for i in 0..60 {
-        big.tracks.push(RawTrack { id: format!("rx{i}"), artist_id: "r2".into(), album_id: "r2-al0".into(), duration_ms: 1, ..Default::default() });
-        big.tracks.push(RawTrack { id: format!("ry{i}"), artist_id: "r0".into(), album_id: "r0-al1".into(), view_count: 6, duration_ms: 1, ..Default::default() });
+        big.tracks.push(RawTrack { id: format!("rx{i}"), artist_id: "r2".into(), album_id: "r2-al0".into(), duration_ms: 200_000, ..Default::default() });
+        big.tracks.push(RawTrack { id: format!("ry{i}"), artist_id: "r0".into(), album_id: "r0-al1".into(), view_count: 6, duration_ms: 200_000, ..Default::default() });
     }
     let lib = lib_of(big, &opts());
     let taste = Taste::new(&lib);
@@ -511,10 +511,10 @@ pub(crate) fn fill_db(db: &crate::db::DbHandle, raw: &Raw) {
             let mut tr = tx.prepare(
                 "INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, track_number, duration_ms,
                    part_key, view_count, last_viewed_at, thumb)
-                 VALUES (?1, ?1, ?2, ?2, ?3, '', ?4, ?5, '/p/' || ?1, ?6, ?7, '/cover/' || ?2)",
+                 VALUES (?1, coalesce(nullif(?8, ''), ?1), ?2, ?2, ?3, '', ?4, ?5, '/p/' || ?1, ?6, ?7, '/cover/' || ?2)",
             )?;
             for t in &raw.tracks {
-                tr.execute(rusqlite::params![t.id, t.album_id, t.artist_id, t.track_number, t.duration_ms as i64, t.view_count, t.last_viewed_at])?;
+                tr.execute(rusqlite::params![t.id, t.album_id, t.artist_id, t.track_number, t.duration_ms as i64, t.view_count, t.last_viewed_at, t.title])?;
             }
             let mut ll = tx.prepare("INSERT INTO listen_log (rating_key, started_at, skipped, completed) VALUES (?1, ?2, ?3, 1)")?;
             for (id, at, skipped) in &raw.listens {
@@ -782,4 +782,149 @@ async fn background_checks_wait_for_the_time_zone() {
     let again = MixService::new(db.clone());
     assert!(!again.ensure_fresh_in_background(NOW + 60_000).await.unwrap(), "nothing due, but not refused either");
     assert!(db.read(store::count).unwrap() > 0);
+}
+
+// ------------------------------------------------------------------ intros and skits
+
+#[test]
+fn intros_skits_and_snippets_look_like_filler() {
+    use super::library::filler_shape;
+    let s = 1000;
+    for (title, ms) in [
+        ("Intro", 45 * s),
+        ("Skit", 190 * s),
+        ("Mom's Voicemail (Skit)", 75 * s),
+        ("Interlude", 120 * s),
+        ("Outro (feat. Someone)", 90 * s),
+        ("Prelude", 100 * s),
+        ("Introduction", 80 * s),
+        ("Pt. 2 - Skit", 240 * s),
+        ("INTRO", 0),
+        ("Song", 40 * s),
+        ("Introspection", 50 * s),
+    ] {
+        assert!(filler_shape(title, ms), "{title} {ms}");
+    }
+    for (title, ms) in [
+        ("Song", 200 * s),
+        ("Song", 0),
+        ("Song", 60 * s),
+        ("Tune Number 9 (Interlude)", 189 * s),
+        ("Intro to Love", 210 * s),
+        ("Introspection", 200 * s),
+        ("Skitzo Dancer", 220 * s),
+        ("Interlude", 150 * s),
+    ] {
+        assert!(!filler_shape(title, ms), "{title} {ms}");
+    }
+}
+
+/// [`raw`] with an intro, a skit and an interlude on r0's first album, all
+/// played as part of the album, plus a liked skit and an intro played on its
+/// own a few times on r1's album.
+fn raw_with_skits() -> Raw {
+    let mut r = raw();
+    let add = |r: &mut Raw, id: &str, album: &str, title: &str, ms: u64, n: u32| {
+        r.tracks.push(RawTrack {
+            id: id.into(),
+            title: title.into(),
+            artist_id: album[..2].into(),
+            album_id: album.into(),
+            track_number: n,
+            duration_ms: ms,
+            view_count: 8,
+            last_viewed_at: Some((NOW - 2 * DAY) / 1000),
+            ..Default::default()
+        });
+    };
+    add(&mut r, "s-intro", "r0-al0", "Intro", 40_000, 11);
+    add(&mut r, "s-skit", "r0-al0", "Studio Talk (Skit)", 95_000, 12);
+    add(&mut r, "s-inter", "r0-al0", "Interlude", 110_000, 13);
+    add(&mut r, "s-snip", "j0-al0", "Untitled", 30_000, 11);
+    add(&mut r, "s-liked", "r1-al0", "Skit", 70_000, 11);
+    add(&mut r, "s-alone", "r1-al0", "Intro", 50_000, 12);
+    r.tracks.last_mut().unwrap().view_count = 0;
+    r.tracks.iter_mut().find(|t| t.id == "s-liked").unwrap().rating = Some(10.0);
+    // Album plays: each one between two songs of its album.
+    for d in 1..15i64 {
+        let at = NOW - d * DAY + 3 * HOUR;
+        for (k, id) in ["r0-al0-t0", "s-intro", "s-skit", "s-inter", "r0-al0-t1"].iter().enumerate() {
+            r.listens.push((id.to_string(), at + k as i64 * 2 * 60_000, false));
+        }
+        r.listens.push(("j0-al0-t0".into(), at + 2 * HOUR, false));
+        r.listens.push(("s-snip".into(), at + 2 * HOUR + 4 * 60_000, false));
+    }
+    // The intro on its own: a separate session each time, three days.
+    for d in 1..4i64 {
+        r.listens.push(("s-alone".into(), NOW - d * DAY - 5 * HOUR, false));
+    }
+    r
+}
+
+const FILLER: [&str; 4] = ["s-intro", "s-skit", "s-inter", "s-snip"];
+
+#[test]
+fn intros_and_skits_played_with_their_album_stay_out_of_every_mix_and_radio() {
+    let lib = lib_of(raw_with_skits(), &opts());
+    for id in FILLER {
+        let t = &lib.tracks[lib.index[id] as usize];
+        assert!(t.filler && !t.eligible, "{id}");
+        assert!(t.plays >= 8, "{id} is played a lot, but only with its album");
+    }
+    let all = engine::generate_all(&lib, &ctx());
+    assert!(all.iter().any(|m| m.kind == MixKind::Daily));
+    assert!(all.iter().any(|m| m.kind == MixKind::OnRepeat));
+    assert!(all.iter().any(|m| m.kind == MixKind::TopSongs));
+    for m in &all {
+        for (t, _) in &m.tracks {
+            let id = &lib.tracks[*t as usize].id;
+            assert!(!FILLER.contains(&id.as_str()), "{} has {id}", m.title);
+        }
+    }
+    let taste = Taste::new(&lib);
+    for seed in [Seed::Track("r0-al0-t0".into()), Seed::Artist("r0".into()), Seed::Tracks(vec!["r0-al0-t1".into()])] {
+        for t in radio::batch(&lib, &taste, &seed, &HashSet::new(), 40, 5, true, radio::LEAN_PLAIN) {
+            let id = &lib.tracks[t as usize].id;
+            assert!(!FILLER.contains(&id.as_str()), "radio has {id}");
+        }
+    }
+}
+
+#[test]
+fn a_liked_skit_or_an_intro_played_on_its_own_stays_in() {
+    let lib = lib_of(raw_with_skits(), &opts());
+    for id in ["s-liked", "s-alone"] {
+        let t = &lib.tracks[lib.index[id] as usize];
+        assert!(!t.filler && t.eligible, "{id}");
+    }
+    // The one played on its own three times makes On Repeat like any song.
+    let on_repeat = engine::on_repeat(&lib, &ctx()).unwrap();
+    assert!(on_repeat.tracks.iter().any(|(t, _)| lib.tracks[*t as usize].id == "s-alone"));
+    // Twice isn't enough yet.
+    let mut r = raw_with_skits();
+    r.listens.retain(|l| !(l.0 == "s-alone" && l.1 < NOW - 3 * DAY));
+    let lib = lib_of(r, &opts());
+    assert!(lib.tracks[lib.index["s-alone"] as usize].filler);
+}
+
+#[test]
+fn skits_from_the_cache_are_left_out_by_title() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = crate::db::DbHandle::open(dir.path().join("m.db")).unwrap();
+    fill_db(&db, &raw_with_skits());
+    let s = MixService::new(db.clone());
+    s.ensure_fresh_blocking(NOW).unwrap();
+    let lib = s.lib().unwrap();
+    assert!(lib.tracks[lib.index["s-skit"] as usize].filler, "read the title from the cache");
+    let in_mixes: HashSet<String> = db
+        .read(|c| {
+            let mut st = c.prepare("SELECT track_id FROM mix_tracks")?;
+            let ids = st.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<_, _>>()?;
+            Ok(ids)
+        })
+        .unwrap();
+    assert!(!in_mixes.is_empty());
+    for id in FILLER {
+        assert!(!in_mixes.contains(id), "{id}");
+    }
 }
