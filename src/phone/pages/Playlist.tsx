@@ -286,7 +286,7 @@ function SongList({
             playing={playing}
             label={playing ? "Pause" : `Play ${title}`}
             disabled={!tracks.length}
-            onClick={() => (here && !genre ? void player.toggle() : play(undefined, undefined, ids))}
+            onClick={() => (playing || (here && !genre) ? void player.toggle() : play(undefined, undefined, ids))}
           />
           {shuffle === "once" ? <ShuffleOnce ids={rows.map((r) => r.t.id)} play={(order) => play(order[0], undefined, order)} /> : shuffle}
         </div>

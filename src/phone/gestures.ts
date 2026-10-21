@@ -15,6 +15,8 @@ export const CLOSE_FRACTION = 0.25;
 export const FLICK_SPEED = 0.6;
 /** A flick still has to travel this far, so a tap never skips. */
 export const FLICK_MIN_PX = 24;
+/** A finger that held still this long before lifting has no speed left: no flick. */
+export const FLICK_WINDOW_MS = 100;
 /** The finger has to move this far before the gesture picks a direction. */
 export const AXIS_LOCK_PX = 10;
 /** Pulling up gives this much (rubber band), then stops. */
@@ -120,8 +122,10 @@ export function useArtGestures(opts: {
       const { width, height } = o.current.size();
       const dx = e.clientX - g.x0;
       const dy = e.clientY - g.y0;
-      const outcome = cancelled ? "snap" : release({ axis: g.axis, dx, dy, vx: g.v.x, vy: g.v.y, width, height });
-      o.current.done(outcome, { axis: g.axis, dx, dy, vx: g.v.x, vy: g.v.y, at: follow(g.axis, dx, dy), cancelled });
+      // The speed of the last move, unless the finger stopped after it.
+      const v = now() - g.last.t > FLICK_WINDOW_MS ? { x: 0, y: 0 } : g.v;
+      const outcome = cancelled ? "snap" : release({ axis: g.axis, dx, dy, vx: v.x, vy: v.y, width, height });
+      o.current.done(outcome, { axis: g.axis, dx, dy, vx: v.x, vy: v.y, at: follow(g.axis, dx, dy), cancelled });
     };
     return {
       onPointerDown,
