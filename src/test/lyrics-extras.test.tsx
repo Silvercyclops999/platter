@@ -101,7 +101,6 @@ describe("translation", () => {
   });
 
   it("Translate shows the translation under each line and hides it again", async () => {
-    const user = userEvent.setup();
     await withSettings({ translationService: "https://tr.example.com", translateTo: "fr" });
     at(plain, 40_000);
     render(<LyricsPane />);
@@ -113,7 +112,6 @@ describe("translation", () => {
   });
 
   it("keeps a song's translation: Hide then Translate, or coming back, doesn't ask again", async () => {
-    const user = userEvent.setup();
     await withSettings({ translationService: "https://tr.example.com", translateTo: "fr" });
     const tr = vi.spyOn(backend, "lyricsTranslate");
     at(plain, 40_000);
@@ -133,7 +131,6 @@ describe("translation", () => {
   });
 
   it("a service that can't be reached says so and leaves the lyrics as they are", async () => {
-    const user = userEvent.setup();
     await withSettings({ translationService: "https://tr.example.com" });
     mock.translateFails = true;
     at(plain, 40_000);

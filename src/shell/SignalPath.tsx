@@ -172,19 +172,6 @@ export function SignalBadge() {
   );
 }
 
-/** Expanded view: a quiet text button that opens the signal path. */
-export function SignalLink({ className }: { className?: string }) {
-  const on = useSettings((s) => s.settings?.signalPathBadge !== false);
-  const track = usePlayer((s) => s.state?.track ?? null);
-  const remote = usePlayer((s) => !!s.remote);
-  if (!on || !track || remote) return null;
-  return (
-    <button type="button" className={`signal-link ${className ?? ""}`} aria-haspopup="dialog" {...{ [OPENER]: "" }} onClick={() => openSignal()}>
-      Signal path
-    </button>
-  );
-}
-
 function Plate({ stage }: { stage: Stage }) {
   return (
     <li className={`signal-plate ${stage.off ? "is-off" : ""}`}>

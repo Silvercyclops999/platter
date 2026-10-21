@@ -10,6 +10,9 @@
  * toast and tooltip (`layer` in tokens.ts). A scroller inside one of those
  * floating layers gets its thumb one step above that layer instead.
  *
+ * A scroller marked `data-scrollbar="off"` never shows one (the lyrics,
+ * which scroll by themselves as the song plays).
+ *
  * Two passive document listeners serve every scroller. A shown scroller also
  * gets `.sb-on` (and keeps `.sb` once seen) for styles that want to follow.
  */
@@ -159,6 +162,7 @@ function startDrag(el: Element, thumb: HTMLElement, e: PointerEvent): void {
 
 /** Show `el`'s scrollbar and (re)start its idle timer. */
 export function showScrollbar(el: Element, idleMs = SCROLLBAR_IDLE_MS): void {
+  if (el.getAttribute("data-scrollbar") === "off") return;
   if (!el.classList.contains("sb")) el.classList.add("sb");
   el.classList.add("sb-on");
   if (el.ownerDocument?.body) {
