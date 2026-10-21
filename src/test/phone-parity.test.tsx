@@ -381,6 +381,11 @@ describe("the Library tour fixes", () => {
     for (const sort of ["recents", "added", "alpha", "creator"] as LibSort[]) expect(phoneRows(list, sort)[0].title).toBe("Liked Songs");
   });
 
+  it("pinned rows stay at the top, in pin order, under A to Z", () => {
+    const list = [e({ title: "Liked Songs", liked: true, pinned: true }), e({ id: "z", title: "Zebra Mix", pinned: true }), e({ id: "m", title: "Mango", pinned: true }), e({ id: "a", title: "Apple" })];
+    expect(phoneRows(list, "alpha").map((r) => r.title)).toEqual(["Liked Songs", "Zebra Mix", "Mango", "Apple"]);
+  });
+
   it("A to Z goes by the name as written, ignoring a leading The", () => {
     const rows = phoneRows(
       [e({ kind: "artist", title: "Tyler, The Creator", sortTitle: "Tyler, The Creator" }), e({ kind: "artist", title: "Kanye West", sortTitle: "West Kanye" }), e({ kind: "artist", title: "The Kills", sortTitle: "Kills" }), e({ kind: "artist", title: "James Blake", sortTitle: "Blake James" })],
