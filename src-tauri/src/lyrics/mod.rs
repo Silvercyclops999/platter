@@ -963,7 +963,7 @@ impl LyricsService {
         let resp = match self.inner.limiter.get(self.inner.http.as_ref(), &lrclib::get_url(q), &[]).await {
             Ok(r) => r,
             Err(e) => {
-                tracing::debug!(kind = e.kind(), "lyrics lookup failed");
+                tracing::info!(kind = e.kind(), "lyrics lookup failed");
                 return Ok(None);
             }
         };
@@ -971,16 +971,23 @@ impl LyricsService {
             200 => match lrclib::parse_get(&resp.body) {
                 Ok(r) => r,
                 Err(e) => {
-                    tracing::debug!(kind = e.kind(), "lyrics reply unreadable");
+                    tracing::info!(kind = e.kind(), "lyrics reply unreadable");
                     return Ok(None);
                 }
             },
             404 => None,
             s => {
-                tracing::debug!(status = s, "lyrics lookup answered with an error");
+                tracing::info!(status = s, "lyrics lookup answered with an error");
                 return Ok(None);
             }
         };
+        // Asked, not cached: what came back (no titles).
+        tracing::info!(
+            found = rec.is_some(),
+            synced = rec.as_ref().is_some_and(|r| r.synced()),
+            instrumental = rec.as_ref().is_some_and(|r| r.instrumental),
+            "lyrics looked up online"
+        );
         let body = rec.as_ref().and_then(|r| serde_json::to_string(r).ok());
         self.remember(&key, body).await?;
         Ok(Some(rec))
@@ -995,21 +1002,22 @@ impl LyricsService {
         let resp = match self.inner.limiter.get(self.inner.http.as_ref(), &lrclib::search_url(q), &[]).await {
             Ok(r) => r,
             Err(e) => {
-                tracing::debug!(kind = e.kind(), "lyrics search failed");
+                tracing::info!(kind = e.kind(), "lyrics search failed");
                 return Ok(None);
             }
         };
         if !resp.ok() {
-            tracing::debug!(status = resp.status, "lyrics search answered with an error");
+            tracing::info!(status = resp.status, "lyrics search answered with an error");
             return Ok(None);
         }
         let hits = match lrclib::search_hits(q, &resp.body) {
             Ok(h) => h,
             Err(e) => {
-                tracing::debug!(kind = e.kind(), "lyrics search reply unreadable");
+                tracing::info!(kind = e.kind(), "lyrics search reply unreadable");
                 return Ok(None);
             }
         };
+        tracing::info!(hits = hits.len(), synced = hits.iter().filter(|r| r.synced()).count(), "lyrics searched online");
         let body = (!hits.is_empty()).then(|| serde_json::to_string(&hits).ok()).flatten();
         self.remember(&key, body).await?;
         Ok(Some(hits))
