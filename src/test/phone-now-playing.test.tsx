@@ -83,10 +83,10 @@ describe("phone now playing", () => {
     expect(again.querySelector(".ph-np__album")).toBeNull();
   });
 
-  it("From links back to the album, playlist or artist it plays from", async () => {
+  it("Playing from links back to the album, playlist or artist it plays from", async () => {
     const t = tracks()[0];
     const np = await open(t);
-    fireEvent.click(within(np).getByRole("button", { name: /^From / }));
+    fireEvent.click(within(np).getByRole("button", { name: /Playing from/ }));
     expect(last(useRouter.getState().entries)?.route).toEqual({ name: "album", id: t.albumId });
   });
 

@@ -116,15 +116,10 @@
 .album-side__rule { height: 1px; background: color-mix(in srgb, var(--color-ink) 10%, transparent); }
 .album-side__meta { font-size: var(--font-size-xs); font-variant-numeric: tabular-nums; }
 
-/* Platter's own looks: "Side A" in the serif's italic, as it's printed on a
-   label, and the rule is an engraved line. */
+/* Platter's own looks: the label is cut into the panel and the rule is an
+   engraved line, like the markings on a deck. */
 :root[data-identity] .album-side__label {
   font-family: var(--font-headings, var(--font-family));
-  font-size: 16px;
-  font-style: italic;
-  font-weight: var(--font-weight-regular);
-  letter-spacing: 0;
-  text-transform: none;
   color: var(--color-text-secondary);
   text-shadow: 0 1px 0 var(--engrave-light);
 }

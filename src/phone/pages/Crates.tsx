@@ -3,7 +3,7 @@
  * eras and genres. They live in Library under the Crates pill; a crate opens
  * its own page of records.
  */
-import { Shuffle } from "lucide-react";
+import { Play, Shuffle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Art } from "../../components/Art";
 import { backend } from "../../lib/backend";
@@ -13,7 +13,6 @@ import { CRATE_PLATE, CRATE_TABS, CRATE_TAB_LABEL, crateLine, records } from "..
 import { player } from "../../stores/player";
 import { nav } from "../../stores/router";
 import { BackBar, PageFailed, PageLoading, ShelfCard } from "./common";
-import { PlayPill } from "./kit";
 import { tap } from "../bits";
 
 const NOTE_KEY = "platter.phone.cratesNoteSeen";
@@ -143,14 +142,15 @@ export function PhoneCrate({ kind, crateKey }: { kind: CrateKind; crateKey: stri
       <h1 className="ph-title ph-title--page">{data.name}</h1>
       <div className="ph-actions">
         <div className="ph-actions__left">
-          <PlayPill playing={false} label={`Play ${data.name}`} onClick={() => void player.playTracks(data.trackIds)} />
-          <button type="button" className="ph-icon-btn ph-pill-btn" aria-label={`Shuffle ${data.name}`} onClick={() => void player.playTracks(shuffled(data.trackIds))}>
-            <Shuffle size={16} aria-hidden="true" />
-            <span aria-hidden="true">Shuffle</span>
-          </button>
+          <p className="ph-section-sub tabular">{records(data.albums.length)}</p>
         </div>
         <div className="ph-actions__right">
-          <p className="ph-section-sub tabular">{records(data.albums.length)}</p>
+          <button type="button" className="ph-icon-btn" aria-label={`Shuffle ${data.name}`} onClick={() => void player.playTracks(shuffled(data.trackIds))}>
+            <Shuffle size={24} aria-hidden="true" />
+          </button>
+          <button type="button" className="ph-play ph-play--page" aria-label={`Play ${data.name}`} onClick={() => void player.playTracks(data.trackIds)}>
+            <Play size={28} fill="currentColor" aria-hidden="true" />
+          </button>
         </div>
       </div>
       <ul className="ph-lib-grid">

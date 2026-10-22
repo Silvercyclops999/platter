@@ -1,5 +1,7 @@
 import { Pause, Play } from "lucide-react";
-import { type CSSProperties } from "react";
+import { type CSSProperties, useState } from "react";
+import { Art } from "../components/Art";
+import { artUrl } from "../lib/backend";
 import type { MixSummary } from "../lib/types";
 import { player } from "../stores/player";
 import { nav } from "../stores/router";
@@ -22,28 +24,15 @@ export function openMix(mix: Pick<MixSummary, "id" | "kind">) {
   else nav.go({ name: "mix", id: mix.id });
 }
 
-/** The leading artists from a mix's "A, B, C and more" line, at most three. */
-export function mixArtists(description: string): string[] {
-  const m = /^(?:with )?(.+) and more$/.exec(description.trim());
-  if (!m) return [];
-  return m[1]
-    .split(", ")
-    .map((n) => n.trim())
-    .filter(Boolean)
-    .slice(0, 3);
-}
-
-/** The name a mix's sleeve prints. */
-export const sleeveName = (mix: Pick<MixSummary, "kind" | "title">) => (mix.kind === "topSongs" ? "Top Songs" : mix.title);
-
 /**
- * A mix's art: a printed sleeve. Paper, the mix's name in the serif, and
- * its leading artists under a brass rule (or what the mix is, when it
- * isn't made from a few artists). The sleeve always carries the name.
- * The daylist is a soft gradient instead; `named` false leaves its name
- * off, for a tile that prints it under the cover.
+ * A mix's art: the leading artist's photo, toned, with a coloured strip
+ * holding the mix's name (a cover collage when there's no photo). The
+ * daylist is a soft gradient instead. `named` false leaves the name off
+ * the art, for a tile that prints it under the cover.
  */
-export function MixArt({ mix, named = true }: { mix: MixSummary; named?: boolean }) {
+export function MixArt({ mix, size = 200, named = true }: { mix: MixSummary; size?: number; named?: boolean }) {
+  // A photo that fails to load falls back to the cover collage.
+  const [failedPhoto, setFailedPhoto] = useState<string | null>(null);
   if (mix.kind === "daylist") {
     const [a, b] = daylistGradient(new Date().getHours());
     return (
@@ -52,21 +41,31 @@ export function MixArt({ mix, named = true }: { mix: MixSummary; named?: boolean
       </span>
     );
   }
-  const artists = mixArtists(mix.description);
+  const photo = mix.kind === "topSongs" || mix.art === failedPhoto ? null : mix.art;
+  const covers = mix.covers ?? [];
   return (
-    <span className="mix-art mix-art--sleeve" data-testid="mix-sleeve" aria-hidden="true">
-      <span className="mix-art__page">
-        <span className="mix-art__title">{sleeveName(mix)}</span>
-        {artists.length > 0 ? (
-          <span className="mix-art__artists">
-            {artists.map((n) => (
-              <span key={n}>{n}</span>
-            ))}
-          </span>
-        ) : (
-          mix.description && <span className="mix-art__artists mix-art__artists--about">{mix.description}</span>
-        )}
-      </span>
+    <span className="mix-art" style={{ "--mix-color": mix.color } as CSSProperties} aria-hidden="true">
+      {photo ? (
+        <img
+          className="mix-art__photo"
+          src={artUrl(photo, size)}
+          alt=""
+          loading="lazy"
+          draggable={false}
+          onError={() => setFailedPhoto(photo)}
+        />
+      ) : (
+        <span className="mix-art__collage">
+          {Array.from({ length: 4 }, (_, i) => (
+            <Art key={i} path={covers[i % Math.max(1, covers.length)] ?? null} fluid requestSize={size / 2} kind="album" />
+          ))}
+        </span>
+      )}
+      {named && (
+        <span className="mix-art__strip">
+          <span className="mix-art__name">{mix.kind === "topSongs" ? "Top Songs" : mix.title}</span>
+        </span>
+      )}
     </span>
   );
 }

@@ -61,7 +61,7 @@ export function playingFrom(ctx: { kind: string; title?: string | null } | null 
 
 export { NP_ART_CSS };
 /** How much of the cover's colour tints the top of now playing (phone.css .ph-np). */
-export const NP_TOP_TINT = 0.2;
+export const NP_TOP_TINT = 0.46;
 
 /**
  * How big the title is set: a short one large, a long one smaller so it
@@ -332,18 +332,15 @@ const PlayerBody = memo(function PlayerBody({ track, screen, art = null, bare = 
 });
 
 /**
- * Where it plays from, in one line ("From Slow Ghosts"): a link back to it
- * when it is a page. The queue and autoplay say so plainly.
+ * "Playing from" and where: a link back to it when it is a page.
  */
 function PlayingFrom({ ctx, source }: { ctx: QueueContextInfo | null; source?: string }) {
   const name = playingFrom(ctx, source);
-  const plain = source === "autoplay" || source === "user" || !ctx;
-  const route = plain ? null : contextRoute(ctx);
-  const inner = plain ? (
-    <span className="ph-np__from-name">{name}</span>
-  ) : (
+  const route = source === "autoplay" || source === "user" ? null : contextRoute(ctx);
+  const inner = (
     <>
-      <span className="ph-np__from-label">From</span> <span className="ph-np__from-name">{name}</span>
+      <span className="ph-np__from-label">Playing from</span>
+      <span className="ph-np__from-name">{name}</span>
     </>
   );
   if (!route) return <div className="ph-np__from">{inner}</div>;

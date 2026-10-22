@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextMenuHost } from "../components/ContextMenu";
@@ -7,7 +7,7 @@ import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS, type MixSummary } from "../lib/types";
 import { HomePage } from "../pages/HomePage";
-import { MixArt, mixArtists } from "../pages/MixCard";
+import { MixArt } from "../pages/MixCard";
 import { MixSleeve } from "../pages/MixesPage";
 import { MixPage } from "../pages/MixPage";
 import { PlayControls } from "../shell/PlayerBar";
@@ -64,43 +64,27 @@ describe("home mix shelves", () => {
 });
 
 describe("mix art", () => {
-  const mix: MixSummary = {
-    id: "daily:1",
-    kind: "daily",
-    title: "Daily Mix 1",
-    description: "Copperline Choir, Motte, Vesper Lowe, Saltglass and more",
-    color: "#336699",
-    art: "0a1b2c3d:/library/metadata/5/thumb/1",
-    covers: ["0a1b2c3d:/library/metadata/6/thumb/1"],
-    artistIds: [],
-    tag: null,
-    trackCount: 10,
-    durationMs: 1,
-    nextUpdateAt: null,
-  };
-
-  it("is a printed sleeve: the name, then three leading artists, no photo or collage", () => {
+  it("a photo that fails to load falls back to the cover collage", () => {
+    const mix: MixSummary = {
+      id: "daily:1",
+      kind: "daily",
+      title: "Daily Mix 1",
+      description: "",
+      color: "#336699",
+      art: "0a1b2c3d:/library/metadata/5/thumb/1",
+      covers: ["0a1b2c3d:/library/metadata/6/thumb/1"],
+      artistIds: [],
+      tag: null,
+      trackCount: 10,
+      durationMs: 1,
+      nextUpdateAt: null,
+    };
     const { container } = render(<MixArt mix={mix} />);
-    const sleeve = container.querySelector(".mix-art--sleeve")!;
-    expect(sleeve.querySelector(".mix-art__title")?.textContent).toBe("Daily Mix 1");
-    expect([...sleeve.querySelectorAll(".mix-art__artists > span")].map((n) => n.textContent)).toEqual(["Copperline Choir", "Motte", "Vesper Lowe"]);
-    expect(container.querySelector("img, .mix-art__collage, .art")).toBeNull();
-  });
-
-  it("reads the artists from either kind of line; a plain line prints as it is", () => {
-    expect(mixArtists("with Motte, Saltglass and more")).toEqual(["Motte", "Saltglass"]);
-    expect(mixArtists("Motte and more")).toEqual(["Motte"]);
-    expect(mixArtists("Slow songs for late at night")).toEqual([]);
-    const { container } = render(<MixArt mix={{ ...mix, description: "" }} />);
-    expect(container.querySelector(".mix-art__artists")).toBeNull();
-    const about = render(<MixArt mix={{ ...mix, description: "Slow songs for late at night" }} />);
-    expect(about.container.querySelector(".mix-art__artists--about")?.textContent).toBe("Slow songs for late at night");
-  });
-
-  it("the daylist keeps its gradient", () => {
-    const { container } = render(<MixArt mix={{ ...mix, kind: "daylist" }} />);
-    expect(container.querySelector(".mix-art--daylist")).not.toBeNull();
-    expect(container.querySelector(".mix-art--sleeve")).toBeNull();
+    const photo = container.querySelector("img.mix-art__photo");
+    expect(photo).not.toBeNull();
+    fireEvent.error(photo!);
+    expect(container.querySelector("img.mix-art__photo")).toBeNull();
+    expect(container.querySelector(".mix-art__collage")).not.toBeNull();
   });
 });
 
@@ -125,15 +109,13 @@ describe("a mix's picture in the list", () => {
     const { container } = render(<MixSleeve mix={mix} size={56} />);
     expect(pictures(container)).toHaveLength(1);
     expect(container.querySelector(".mix-art__collage")).toBeNull();
-    expect(container.querySelector(".mix-art--sleeve, .mix-art__title")).toBeNull();
+    expect(container.querySelector(".mix-art__strip")).toBeNull();
   });
 
-  it("without a photo is four of its covers, and without covers plain paper", () => {
+  it("without a photo is four of its covers", () => {
     const collage = render(<MixSleeve mix={{ ...mix, art: null }} size={56} />);
     expect(collage.container.querySelectorAll(".mix-art__collage .art")).toHaveLength(4);
-    const paper = render(<MixSleeve mix={{ ...mix, art: null, covers: [] }} size={56} />);
-    expect(paper.container.querySelector('[data-testid="paper-sleeve"]')).not.toBeNull();
-    expect(paper.container.textContent).toBe("");
+    expect(collage.container.textContent).toBe("");
   });
 
   it("Top Songs shows its covers, not one artist", () => {

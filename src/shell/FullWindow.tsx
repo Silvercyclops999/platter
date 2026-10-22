@@ -147,16 +147,15 @@ function ModeToggle({ mode, current, label, off, offTip, icon }: { mode: FullWin
   );
 }
 
-/** Where it plays from, in one line ("From Slow Ghosts"), linking back to it when it's a page. */
+/** What's playing from (album, playlist, artist, Liked Songs), linking back to it when it's a page. */
 function ContextName() {
   const ctx = usePlayer((s) => s.state?.queue.context);
   const track = usePlayer((s) => s.state?.track);
-  const title = ctx?.title || (ctx?.kind === "album" ? track?.albumTitle : null) || (ctx?.kind === "liked" ? "Liked Songs" : null);
+  const title = ctx?.title || (ctx?.kind === "album" ? track?.albumTitle : null) || (ctx?.kind === "liked" ? "Liked Songs" : null) || "Now playing";
   const route = contextRoute(ctx);
-  if (!title) return <span className="fw__context truncate">Now playing</span>;
   return (
     <span className="fw__context truncate">
-      <span className="fw__context-label">From</span> {route ? <TextLink onActivate={() => nav.go(route)}>{title}</TextLink> : title}
+      {route ? <TextLink onActivate={() => nav.go(route)}>{title}</TextLink> : title}
     </span>
   );
 }

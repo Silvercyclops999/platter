@@ -7,8 +7,7 @@ import { MoreHorizontal, Search as SearchIcon, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Art } from "../../components/Art";
 import { backend } from "../../lib/backend";
-import type { Album, CatArtist, SearchHit, SearchResults, Track } from "../../lib/types";
-import { headerColorsFromServer } from "../../lib/color";
+import type { CatArtist, SearchHit, SearchResults, Track } from "../../lib/types";
 import { useSettings } from "../../stores/settings";
 import { hitInfo, hitOf, lyricQuote, mixedHits, openHit, rememberHit, subtitleWithType } from "../../shell/searchModel";
 import { useLoad } from "../../lib/useLoad";
@@ -18,7 +17,7 @@ import { RowGlyphs, tap } from "../bits";
 import { SongSwipeUnder, useRowSwipe } from "../rowSwipe";
 import { isLiked, setLiked } from "../../stores/likes";
 import { player, usePlayer } from "../../stores/player";
-import { PlayingBars, countLine } from "./common";
+import { PlayingBars } from "./common";
 import { catalogueTop, hasCatalogue, hasCatalogueRows, nameMatches, playCatalogueSong, useCatalogueSearch, useTapPlays, type CatalogueResults } from "../../pages/SearchCatalogue";
 import { useArtistPhoto } from "../../lib/artistPhotos";
 import { useGetSpots } from "../../pages/lidarrShared";
@@ -324,26 +323,7 @@ function HitRow({
   );
 }
 
-/** Spine heights in a crate divider, so the records stand a little uneven. */
-const SPINES = [44, 40, 46, 42, 38];
-
-/** Spine colours for a record whose cover colour isn't known yet: old cloth bindings. */
-const CLOTH = ["#7b2b33", "#2f6e4a", "#3c3586", "#b07a3a", "#1f3f6e", "#6a4b8e", "#8f5a2b"];
-
-/** A record's spine colour: its cover's, or a cloth colour picked by its id. */
-export function spineColour(a: Album): string {
-  const own = headerColorsFromServer(a.tint)?.vivid;
-  if (own) return own;
-  let h = 0;
-  for (const c of a.id) h = (h * 31 + c.charCodeAt(0)) | 0;
-  return CLOTH[Math.abs(h) % CLOTH.length];
-}
-
-/**
- * With nothing typed: the library's genres to browse, as crate dividers.
- * A tab with the genre's name, how many records, and the spines of the
- * records inside in their cover colours.
- */
+/** With nothing typed: the library's genres to browse, as crates. */
 function Browse() {
   const { data } = useLoad(() => backend.crates("genre"), []);
   const genres = (data?.crates ?? []).slice(0, 8);
@@ -351,21 +331,19 @@ function Browse() {
   return (
     <section aria-labelledby="ph-browse">
       <h2 id="ph-browse" className="ph-section-title">
-        Browse the crates
+        Browse your genres
       </h2>
       <ul className="ph-browse">
         {genres.map((g) => (
           <li key={g.key}>
-            <button type="button" className="ph-divider" data-testid="crate-divider" onClick={() => nav.go({ name: "crate", kind: g.kind, key: g.key })}>
-              <span className="ph-divider__tab">{g.name}</span>
-              <span className="ph-divider__body">
-                <span className="ph-divider__count">{countLine(g.count, "record")}</span>
-                <span className="ph-divider__spines" aria-hidden="true">
-                  {g.albums.slice(0, SPINES.length).map((a, i) => (
-                    <span key={a.id} style={{ height: SPINES[i], background: spineColour(a) }} />
-                  ))}
+            <button type="button" className="ph-browse__tile" onClick={() => nav.go({ name: "crate", kind: g.kind, key: g.key })}>
+              <span className="ph-browse__name">{g.name}</span>
+              <span className="ph-browse__count tabular">{g.count.toLocaleString()}</span>
+              {g.albums[0] && (
+                <span className="ph-browse__art" aria-hidden="true">
+                  <Art path={g.albums[0].thumb} size={64} sleeve={{ title: g.albums[0].title, artist: g.albums[0].artistTitle }} />
                 </span>
-              </span>
+              )}
             </button>
           </li>
         ))}

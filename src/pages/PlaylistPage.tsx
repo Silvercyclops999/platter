@@ -348,8 +348,7 @@ export function PlaylistPage({ id }: { id: string }) {
   return (
     <div className="detail">
       <header ref={header} className={`detail-header ${compact ? "detail-header--compact" : ""}`}>
-        <div className={`detail-header__art ${pl ? "detail-header__art--record" : ""}`}>
-          {pl && <span className="detail-header__record record-disc" aria-hidden="true" />}
+        <div className="detail-header__art">
           {pl ? (
             own && canCover ? (
               <button type="button" className="cover-button pl-cover" aria-label="Edit details: choose a cover" onClick={() => editDetails(pl)}>
@@ -411,7 +410,6 @@ export function PlaylistPage({ id }: { id: string }) {
                 label={isThisPlaying ? `Pause ${pl?.title ?? "playlist"}` : `Play ${pl?.title ?? "playlist"}`}
                 variant="accent"
                 size="xl"
-                text={isThisPlaying ? "Pause" : "Play"}
                 disabled={!pl}
                 icon={isThisPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
                 onClick={play}

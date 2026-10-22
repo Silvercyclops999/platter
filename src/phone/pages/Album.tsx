@@ -3,13 +3,13 @@
  * artist and year; download, more, shuffle and a large play;
  * then the songs, each with the downloaded mark before its artist line.
  */
-import { ChevronDown, MoreHorizontal } from "lucide-react";
+import { ChevronDown, MoreHorizontal, Pause, Play } from "lucide-react";
 import { useState, type CSSProperties } from "react";
 import { Art } from "../../components/Art";
 import { discGroups } from "../../pages/album";
 import { PhoneDownload } from "../PhoneDownload";
 import { backend } from "../../lib/backend";
-import { formatLongDuration, releaseTypeLabel, trackArtistLine } from "../../lib/format";
+import { formatLongDuration, releaseTypeLabel } from "../../lib/format";
 import { useLoad } from "../../lib/useLoad";
 import { useArtColours } from "../../lib/useTint";
 import { player, usePlayer } from "../../stores/player";
@@ -21,7 +21,7 @@ import { UpgradeCard, useAlbumUpgrade } from "../../pages/LidarrUpgrade";
 import { useSleeveNotes } from "../../lib/useSleeveNotes";
 import { RoleLines, SongBySong, songsWithCredits } from "../../pages/SleeveNotes";
 import { tap } from "../bits";
-import { PhoneShuffleToggle, PlayPill } from "./kit";
+import { PhoneShuffleToggle } from "./kit";
 
 
 
@@ -90,11 +90,8 @@ export function PhoneAlbum({ id }: { id: string }) {
     <div className="ph-page ph-album" style={{ "--ph-tint": colours?.vivid ?? "var(--color-bg-overlay)" } as CSSProperties}>
       <BackBar title={album.title} after={320} />
       <header className="ph-album__head">
-        <div className="ph-album__sleeve">
-          <span className="ph-album__record record-disc" aria-hidden="true" />
-          <div className="ph-album__cover">
-            <Art path={album.thumb} fluid requestSize={480} tint={album.tint} sleeve={{ title: album.title, artist: album.artistTitle }} />
-          </div>
+        <div className="ph-album__cover">
+          <Art path={album.thumb} fluid requestSize={480} tint={album.tint} sleeve={{ title: album.title, artist: album.artistTitle }} />
         </div>
         <h1 className="ph-album__title">{album.title}</h1>
         <button type="button" className="ph-album__artist" onClick={() => nav.go({ name: "artist", id: album.artistId })}>
@@ -111,13 +108,20 @@ export function PhoneAlbum({ id }: { id: string }) {
       )}
       <div className="ph-actions">
         <div className="ph-actions__left">
-          <PlayPill playing={playing} label={playing ? "Pause" : `Play ${album.title}`} onClick={() => (here ? void player.toggle() : void player.playAlbum(album.id))} />
-          <PhoneShuffleToggle id={album.id} kind="album" name={album.title} />
-        </div>
-        <div className="ph-actions__right">
           <PhoneDownload kind="album" id={album.id} title={album.title} trackIds={() => tracks.map((t) => t.id)} />
           <button type="button" className="ph-icon-btn" aria-label={`More for ${album.title}`} onClick={() => phone.push({ kind: "album", album })}>
             <MoreHorizontal size={24} aria-hidden="true" />
+          </button>
+        </div>
+        <div className="ph-actions__right">
+          <PhoneShuffleToggle id={album.id} kind="album" name={album.title} />
+          <button
+            type="button"
+            className="ph-play ph-play--page"
+            aria-label={playing ? "Pause" : `Play ${album.title}`}
+            onClick={() => (here ? void player.toggle() : void player.playAlbum(album.id))}
+          >
+            {playing ? <Pause size={28} fill="currentColor" aria-hidden="true" /> : <Play size={28} fill="currentColor" aria-hidden="true" />}
           </button>
         </div>
       </div>
@@ -134,14 +138,7 @@ export function PhoneAlbum({ id }: { id: string }) {
           )}
           <ul className="ph-songs" aria-label={g.disc !== null ? `Disc ${g.disc} songs` : "Songs"}>
             {g.tracks.map((t) => (
-              <SongRow
-                key={t.id}
-                track={t}
-                index={t.trackNumber}
-                art={false}
-                sub={trackArtistLine(t) === album.artistTitle ? "" : undefined}
-                onPlay={() => void player.playAlbum(album.id, t.id)}
-              />
+              <SongRow key={t.id} track={t} index={t.trackNumber} art={false} onPlay={() => void player.playAlbum(album.id, t.id)} />
             ))}
           </ul>
         </section>
