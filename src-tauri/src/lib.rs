@@ -40,6 +40,7 @@ pub mod notify;
 pub mod physical;
 pub mod platform;
 pub mod playhistory;
+pub mod playlistfile;
 pub mod playlists;
 pub mod plex;
 pub mod plexedit;
@@ -1775,6 +1776,7 @@ pub fn run() {
             lyrics::commands::lyrics_own_delete,
             lyrics::commands::lyrics_own_ids,
             lyrics::commands::lyrics_export,
+            playlistfile::playlist_save_file,
             lyrics::commands::lyrics_candidates,
             lyrics::commands::lyrics_check_status,
             lyrics::commands::lyrics_choose,

@@ -1763,6 +1763,8 @@ export class MockBackend implements Backend {
   /** Files "saved" by Export .lrc (null result: the save dialog was cancelled). */
   exported: { text: string; fileName: string }[] = [];
   exportCancels = false;
+  /** Playlist files saved through the save dialog. */
+  playlistFiles: { title: string; trackIds: string[] }[] = [];
 
   /** Lyrics choices per song (the core keeps them in SQLite and the sync file). */
   lyricsChoices = new Map<string, { pick?: string; offsetMs: number }>();
@@ -1929,6 +1931,14 @@ export class MockBackend implements Backend {
       if (!this.settings.translationService) throw { kind: "invalid", message: "Set a translation service in Settings first." };
       if (this.translateFails) throw { kind: "network", message: "Couldn't reach the translation service." };
       return lines.map((l) => (l.trim() ? `[${this.settings.translateTo}] ${l}` : ""));
+    });
+  }
+  playlistSaveFile(title: string, trackIds: string[]) {
+    return this.delay(() => {
+      if (!trackIds.length) throw { kind: "invalid", message: "This playlist has no songs to save." };
+      if (this.exportCancels) return null;
+      this.playlistFiles.push({ title, trackIds });
+      return `${title.replace(/[<>:"/\\|?*]/g, "_").trim() || "Playlist"}.m3u8`;
     });
   }
   lyricsExport(text: string, fileName: string) {

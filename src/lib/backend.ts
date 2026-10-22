@@ -507,6 +507,8 @@ export interface Backend {
   ownLyricsIds(): Promise<string[]>;
   /** Save lyrics as an .lrc file through a save dialog. The saved file's name, or null when cancelled. */
   lyricsExport(text: string, fileName: string): Promise<string | null>;
+  /** Save songs as a playlist file (.m3u8) or a text list wherever the user picks. The saved file's name, or null when cancelled. */
+  playlistSaveFile(title: string, trackIds: string[]): Promise<string | null>;
   /** Every set of lyrics found for the song, with what the check said ("Wrong lyrics?"). */
   lyricsCandidates(trackId: string): Promise<LyricsCandidates>;
   /** Where the song's lyrics check is, while there is one. */
@@ -1521,6 +1523,7 @@ export function createTauriBackend(): Backend {
     ownLyricsDelete: (trackId) => call("lyrics_own_delete", { trackId }),
     ownLyricsIds: () => call("lyrics_own_ids"),
     lyricsExport: (text, fileName) => call("lyrics_export", { text, fileName }),
+    playlistSaveFile: (title, trackIds) => call("playlist_save_file", { title, trackIds }),
     lyricsCandidates: (trackId) => call("lyrics_candidates", { trackId }),
     lyricsCheckStatus: (trackId) => call("lyrics_check_status", { trackId }),
     lyricsChoose: (trackId, pick) => call("lyrics_choose", { trackId, pick }),

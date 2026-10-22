@@ -11,6 +11,7 @@ import type { SmartPage, SmartRule, SmartRules } from "../lib/types";
 import { useLoad } from "../lib/useLoad";
 import { bookmarkPageItem, deleteSmartPlaylist, editSmartPlaylist } from "../stores/curate";
 import { player, usePlayer } from "../stores/player";
+import { savePlaylistFile } from "../stores/playlists";
 import "../components/smart-editor.css";
 import { PageMissing } from "../components/PageMissing";
 
@@ -96,6 +97,7 @@ export function SmartPlaylistPage({ id }: { id: string }) {
       [
         { label: "Edit rules", onSelect: () => void editSmartPlaylist(pl.id, pl.title) },
         { label: "Add to queue", disabled: !ids.length, onSelect: () => void player.addToQueue(data!.tracks) },
+        ...(ids.length ? [{ label: "Save as a file", onSelect: () => void savePlaylistFile(pl.title, ids) }] : []),
         bookmarkPageItem("smart", pl.id, pl.title),
         { label: "Delete", separator: true, onSelect: () => void deleteSmartPlaylist(pl.id) },
       ],

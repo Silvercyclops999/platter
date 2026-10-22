@@ -12,7 +12,7 @@ import { useLibraryView } from "./library";
 import { nav, useRouter } from "./router";
 import { useSettings } from "./settings";
 import { toast, useToasts } from "./toasts";
-import { failText } from "../lib/errorText";
+import { errorMessage, failText } from "../lib/errorText";
 
 export interface DuplicateAsk {
   playlist: Playlist;
@@ -232,6 +232,16 @@ export async function duplicatePlaylist(p: Playlist): Promise<void> {
     toast.info(`Made ${copy.title}`);
   } catch (e) {
     toast.error(failText(`Couldn't copy ${p.title}`, e));
+  }
+}
+
+/** Save the songs as a playlist file or a text list where the user picks; a failed write says why. */
+export async function savePlaylistFile(title: string, trackIds: string[]): Promise<void> {
+  try {
+    const name = await backend.playlistSaveFile(title, trackIds);
+    if (name) toast.info(`Saved ${name}`);
+  } catch (e) {
+    toast.error(errorMessage(e) || "Couldn't save the playlist file");
   }
 }
 
