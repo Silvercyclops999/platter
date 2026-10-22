@@ -102,7 +102,7 @@ fn waves_setting_is_kept_tidy() {
 
 #[test]
 fn guards_pause_on_a_full_queue_or_little_space() {
-    let ok = Gauges { queue: 20, free: Some(51_000_000_000) };
+    let ok = Gauges { queue: 20, stuck: 0, free: Some(51_000_000_000) };
     assert_eq!(waves::guard(&ok, 20, 50), None);
     assert!(waves::guard(&Gauges { queue: 21, ..ok }, 20, 50).unwrap().contains("queue has 21 items"));
     assert!(waves::guard(&Gauges { free: Some(49_000_000_000), ..ok }, 20, 50).unwrap().contains("Only 49 GB"));
@@ -271,4 +271,22 @@ async fn without_lidarr_here_it_waits_for_the_bridge_instead_of_pausing() {
     t.r.lidarr.set_bridge_linked(Arc::new(|| false));
     let out = t.w.pass().await.unwrap();
     assert!(out.paused.as_deref().unwrap().contains("Lidarr isn't set up"));
+}
+
+#[tokio::test]
+async fn stuck_downloads_dont_count_toward_the_queue_pause() {
+    let t = setup(false, json!({})).await;
+    // Past the limit with real downloads: it pauses and says how many are stuck.
+    t.r.web.st.lock().queue_total = 21;
+    t.r.web.st.lock().queue_stuck = 4;
+    let out = t.w.pass().await.unwrap();
+    let why = out.paused.unwrap();
+    assert!(why.contains("queue has 21 items on their way (4 more are stuck in Lidarr and don't count)"), "{why}");
+    // 30 downloads whose import failed sit in Lidarr's queue and nothing
+    // is on its way: it goes ahead.
+    t.r.web.st.lock().queue_total = 0;
+    t.r.web.st.lock().queue_stuck = 30;
+    let out = t.w.pass().await.unwrap();
+    assert_eq!(out.paused, None, "{out:?}");
+    assert!(!out.requested.is_empty(), "{out:?}");
 }

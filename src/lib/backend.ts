@@ -1191,6 +1191,8 @@ export interface Backend {
   lidarrHiresPreview(): Promise<LidarrProposal>;
   lidarrChangeApply(id: string): Promise<LidarrChange>;
   lidarrChanges(): Promise<LidarrChange[]>;
+  /** Where getting albums is at: a line or two for the top of the Changes log. */
+  lidarrStage(): Promise<string[]>;
   lidarrChangePutBack(id: string): Promise<LidarrChange>;
   lidarrRematchPreview(folder: string): Promise<LidarrRematchPlan>;
   lidarrRematchApply(folder: string, releaseId: number | null): Promise<LidarrRematchPlan>;
@@ -1958,6 +1960,7 @@ export function createTauriBackend(): Backend {
     lidarrHiresPreview: () => call("lidarr_hires_preview"),
     lidarrChangeApply: (id) => call("lidarr_change_apply", { id }),
     lidarrChanges: () => call("lidarr_changes"),
+    lidarrStage: () => call("lidarr_stage"),
     lidarrChangePutBack: (id) => call("lidarr_change_put_back", { id }),
     lidarrRematchPreview: (folder) => call("lidarr_rematch_preview", { folder }),
     lidarrRematchApply: (folder, releaseId) => call("lidarr_rematch_apply", { folder, releaseId }),

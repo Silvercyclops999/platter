@@ -120,6 +120,22 @@ describe("Managed and protected artists", () => {
     expect(within(changes).queryByRole("button", { name: "Put it back" })).toBeNull();
   });
 
+  it("the changes log opens with where getting albums is at", async () => {
+    mock.lidarrMock.stage = [
+      "Looking up 40 albums on MusicBrainz, up to 50 every 10 minutes.",
+      "Get albums is paused: Lidarr's queue has 23 items on their way. It carries on once it's down to 20. 12 albums waiting to be asked for.",
+    ];
+    render(<SettingsPage />);
+    const changes = await waitFor(() => {
+      const r = row("lidarrChanges");
+      expect(r).not.toBeNull();
+      return r!;
+    });
+    await within(changes).findByText("Looking up 40 albums on MusicBrainz, up to 50 every 10 minutes.");
+    expect(within(changes).getByText(/Get albums is paused: Lidarr's queue has 23 items/)).toBeTruthy();
+    expect(within(changes).getByText("Platter hasn't changed anything in Lidarr.")).toBeTruthy();
+  });
+
   it("a waiting album shows its names and tags, is added on yes, and Undo asks about Plex's trash", async () => {
     render(<SettingsPage />);
     const waiting = await waitFor(() => {

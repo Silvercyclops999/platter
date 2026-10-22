@@ -522,15 +522,36 @@ export function LidarrWaitingList() {
 /** Every change Platter made to Lidarr, with "Put it back" where it can. */
 export function LidarrChangesList() {
   const [list, setList] = useState<LidarrChange[] | null>(null);
+  const [stage, setStage] = useState<string[]>([]);
   const [back, setBack] = useState<LidarrChange | null>(null);
   const load = useCallback(() => {
     backend.lidarrChanges().then(setList, () => setList([]));
+    backend.lidarrStage().then(setStage, () => setStage([]));
   }, []);
   useReload(load);
+  // Lookups and the queue move on their own: read where it's at now and then.
+  useEffect(() => {
+    const t = window.setInterval(() => backend.lidarrStage().then(setStage, () => {}), 30_000);
+    return () => window.clearInterval(t);
+  }, []);
   if (!list) return <Skeleton height={56} radius="card" />;
-  if (!list.length) return <p className="lidarr-work__note">Platter hasn't changed anything in Lidarr.</p>;
+  const now = stage.length > 0 && (
+    <div className="lidarr-changes__now" aria-live="polite">
+      {stage.map((line) => (
+        <p key={line}>{line}</p>
+      ))}
+    </div>
+  );
+  if (!list.length)
+    return (
+      <>
+        {now}
+        <p className="lidarr-work__note">Platter hasn't changed anything in Lidarr.</p>
+      </>
+    );
   return (
     <>
+      {now}
       <ul className="lidarr-changes">
         {list.slice(0, 50).map((c) => (
           <li key={c.id} className={`lidarr-changes__item${c.practice ? " is-practice" : ""}`}>

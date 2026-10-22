@@ -255,6 +255,9 @@ pub struct CheckReport {
     pub checked_at: i64,
     /// Which address answered.
     pub route: Option<Route>,
+    /// The root folder new Managed artists go into, or None when Platter
+    /// can't tell which one Plex scans (then it adds no new artist).
+    pub library_root: Option<String>,
 }
 
 /// Inputs besides the two snapshots.
@@ -541,6 +544,51 @@ pub fn evaluate(plex: &PlexIndex, lidarr: &LidarrSnapshot, ctx: &CheckContext) -
             _ => {}
         }
     }
+    // ---- Where new Managed artists go.
+    let library_root = match library_root(&verdicts, &is_staging, plex_known) {
+        LibraryRoot::Seen(r) => {
+            ok.push(Finding::new("libraryRoot", Level::Ok, format!("New artists go into {}", root_name(r)), "Your Plex music library scans it.", None));
+            Some(r.path.clone())
+        }
+        LibraryRoot::Only(r) => {
+            ok.push(Finding::new("libraryRoot", Level::Ok, format!("New artists go into {}", root_name(r)), "It's Lidarr's only root folder besides the staging folder.", None));
+            Some(r.path.clone())
+        }
+        LibraryRoot::Guess(r) => {
+            ok.push(Finding::new(
+                "libraryRoot",
+                Level::Ok,
+                format!("New artists go into {}", root_name(r)),
+                "Platter couldn't see your Plex folders, so it goes by Lidarr's first root folder that isn't the staging folder.",
+                None,
+            ));
+            Some(r.path.clone())
+        }
+        LibraryRoot::Closed(r) => {
+            amber.push(Finding::new(
+                "libraryRootClosed",
+                Level::Amber,
+                format!("Lidarr can't open {}, the folder your Plex library scans", root_name(r)),
+                "Platter won't add new artists to Lidarr until it can, rather than put them somewhere else. Albums by artists Lidarr already has still work.",
+                Some("Check the folder in Lidarr's Settings > Media Management > Root Folders (on a server, that its drive or share is mounted), then check again.".into()),
+            ));
+            None
+        }
+        LibraryRoot::Unclear(names) => {
+            amber.push(Finding::new(
+                "libraryRootUnclear",
+                Level::Amber,
+                "Platter can't tell which root folder your Plex library scans",
+                format!(
+                    "Lidarr has {} and Plex doesn't show any of them, so Platter won't add new artists to Lidarr. Albums by artists Lidarr already has still work.",
+                    list_names(&names, 3)
+                ),
+                Some("If one of them is a staging folder, set it in Platter's settings. Otherwise give Lidarr and Plex the same path for your music, then check again.".into()),
+            ));
+            None
+        }
+        LibraryRoot::None => None,
+    };
     if !separate.is_empty() {
         ok.push(Finding::new(
             "rootSeparate",
@@ -941,6 +989,33 @@ pub fn evaluate(plex: &PlexIndex, lidarr: &LidarrSnapshot, ctx: &CheckContext) -
         ));
     }
 
+    // ---- Artists Lidarr adds new albums for on its own. Platter never
+    // changes them; this only shows it.
+    let auto_new: Vec<String> = lidarr
+        .artists
+        .iter()
+        .filter(|a| a.monitored && a.monitor_new_items.as_deref().is_some_and(|m| !m.trim().is_empty() && !m.trim().eq_ignore_ascii_case("none")))
+        .map(|a| a.artist_name.clone())
+        .collect();
+    if !auto_new.is_empty() {
+        ok.push(Finding::new(
+            "artistsMonitorNew",
+            Level::Ok,
+            if auto_new.len() == 1 {
+                "1 artist in Lidarr gets new albums automatically".to_string()
+            } else {
+                format!("{} artists in Lidarr get new albums automatically", auto_new.len())
+            },
+            format!(
+                "Lidarr downloads new albums by {} as they come out, without Platter. Platter leaves {} as {} set.",
+                list_names(&auto_new, 3),
+                if auto_new.len() == 1 { "it" } else { "them" },
+                if auto_new.len() == 1 { "it's" } else { "they're" }
+            ),
+            Some("To stop that, edit the artist in Lidarr and set Monitor new albums to None.".into()),
+        ));
+    }
+
     if !lidarr.exclusions.is_empty() {
         let names: Vec<String> = lidarr.exclusions.iter().map(|e| if e.artist_name.trim().is_empty() { e.foreign_id.clone() } else { e.artist_name.clone() }).collect();
         ok.push(Finding::new(
@@ -967,9 +1042,50 @@ pub fn evaluate(plex: &PlexIndex, lidarr: &LidarrSnapshot, ctx: &CheckContext) -
             protected_count: ctx.protected.len(),
             checked_at: ctx.now,
             route: ctx.route,
+            library_root,
         },
         wanted,
     )
+}
+
+enum LibraryRoot<'a> {
+    /// Plex scans it.
+    Seen(&'a RootFolder),
+    /// The only candidate, Plex not seen scanning it.
+    Only(&'a RootFolder),
+    /// Plex can't be read: Lidarr's lowest id, as before.
+    Guess(&'a RootFolder),
+    /// Plex scans it, but Lidarr can't open it right now.
+    Closed(&'a RootFolder),
+    /// Several candidates and Plex scans none of them that Platter can see.
+    Unclear(Vec<String>),
+    None,
+}
+
+/// The root folder new Managed artists go into: never the staging folder.
+/// Of the rest, one Plex scans by its path first, then one holding the same
+/// files as a Plex folder, then one holding only the same folder names; the
+/// lowest id among equals. A staging folder Platter wasn't told about holds
+/// artist folders Plex has too, so the path counts most. When the folder
+/// Plex scans can't be opened by Lidarr, nothing else stands in for it.
+fn library_root<'a>(verdicts: &[(&'a RootFolder, RootVerdict)], is_staging: &dyn Fn(&RootFolder) -> bool, plex_known: bool) -> LibraryRoot<'a> {
+    let rank = |v: &RootVerdict| match v {
+        RootVerdict::ByPath(Relation::Same | Relation::Inside, _) => Some(0),
+        RootVerdict::Overlap { confirmed: true, .. } => Some(1),
+        RootVerdict::Overlap { .. } => Some(2),
+        _ => None,
+    };
+    let others: Vec<&(&RootFolder, RootVerdict)> = verdicts.iter().filter(|(r, _)| !is_staging(r)).collect();
+    if let Some((r, _)) = others.iter().filter_map(|x| rank(&x.1).map(|k| (x, k))).min_by_key(|((r, _), k)| (*k, r.id)).map(|(x, _)| *x) {
+        return if r.accessible { LibraryRoot::Seen(r) } else { LibraryRoot::Closed(r) };
+    }
+    let candidates: Vec<&&(&RootFolder, RootVerdict)> = others.iter().filter(|(r, _)| r.accessible).collect();
+    match candidates.as_slice() {
+        [] => LibraryRoot::None,
+        [(r, _)] => LibraryRoot::Only(r),
+        _ if !plex_known => candidates.iter().min_by_key(|(r, _)| r.id).map_or(LibraryRoot::None, |(r, _)| LibraryRoot::Guess(r)),
+        many => LibraryRoot::Unclear(many.iter().map(|(r, _)| root_name(r)).collect()),
+    }
 }
 
 /// Managed albums with unmatched files in their folders (or in a disc

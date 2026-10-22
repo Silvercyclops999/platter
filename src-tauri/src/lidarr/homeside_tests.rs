@@ -172,7 +172,7 @@ fn the_last_check_through_a_home_side_counts_with_no_address_here() {
     pc.store(true, Ordering::SeqCst);
     assert_eq!(r.lidarr.check_key(), "homeside");
     // A check that passed through the computer makes Request show.
-    let last = super::LastCheck { passed: true, managed_ok: Some(true), checked_at: 1, url: "homeside".into(), roots: vec![] };
+    let last = super::LastCheck { passed: true, managed_ok: Some(true), checked_at: 1, url: "homeside".into(), roots: vec![], library_root: None };
     r.db.write(|c| crate::db::store::kv_set(c, "lidarr.lastCheck", &serde_json::to_string(&last).unwrap())).unwrap();
     assert!(r.lidarr.status().ready);
     // The computer off: no longer ready.
@@ -256,7 +256,7 @@ fn a_phone_reaching_lidarr_only_through_the_bridge_checks_it_by_itself() {
     assert!(claim());
     // It ran and didn't pass: not again for a day.
     r.lidarr.auto_check_done(true);
-    let failed = super::LastCheck { passed: false, managed_ok: Some(false), checked_at: *r.now.lock(), url: "homeside".into(), roots: vec![] };
+    let failed = super::LastCheck { passed: false, managed_ok: Some(false), checked_at: *r.now.lock(), url: "homeside".into(), roots: vec![], library_root: None };
     r.db.write(|c| crate::db::store::kv_set(c, "lidarr.lastCheck", &serde_json::to_string(&failed).unwrap())).unwrap();
     *r.now.lock() += super::AUTO_CHECK_AGAIN_S;
     assert!(!claim());

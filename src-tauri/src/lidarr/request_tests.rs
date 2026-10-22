@@ -94,10 +94,15 @@ pub(super) struct State {
     pub(super) refresh_polls: usize,
     /// Lidarr also has the staging root.
     pub(super) staging: bool,
+    /// Lidarr's roots are the staging folder (the lowest id) and a folder
+    /// inside Plex's music folder, instead of the usual ones.
+    pub(super) staging_first: bool,
     /// Artists on the import list exclusions (MusicBrainz ids).
     pub(super) exclusions: Vec<String>,
-    /// Items in the whole download queue.
+    /// Items on their way in the whole download queue.
     pub(super) queue_total: u64,
+    /// Items stuck in the queue after a failed import, on top of those.
+    pub(super) queue_stuck: u64,
     /// Free bytes on the root folder, when Lidarr says.
     pub(super) free_space: Option<i64>,
     /// Lidarr moves an album to its other edition after this many reads of it.
@@ -149,6 +154,12 @@ impl FakeLidarr {
                 // Red for everyone: Lidarr has no root folder to download into.
                 if st.red {
                     return (200, json!([]));
+                }
+                if st.staging_first {
+                    return (200, json!([
+                        {"id": 2, "path": STAGING, "accessible": true, "defaultQualityProfileId": 2, "defaultMetadataProfileId": 3, "freeSpace": st.free_space},
+                        {"id": 3, "path": "/data/media/music/Lidarr", "accessible": true, "defaultQualityProfileId": 2, "defaultMetadataProfileId": 3, "freeSpace": st.free_space}
+                    ]));
                 }
                 let p = ROOT;
                 let mut roots = vec![json!({"id": 1, "path": p, "accessible": true, "unmappedFolders": [{"name": "Elsewhere", "path": format!("{p}/Elsewhere")}],
@@ -213,7 +224,10 @@ impl FakeLidarr {
                 }
             }
             (Method::Get, "/queue/details") => (200, Value::Array(st.queue.clone())),
-            (Method::Get, "/queue") => (200, json!({"page": 1, "pageSize": 1, "totalRecords": st.queue_total, "records": []})),
+            (Method::Get, "/queue") => {
+                let stuck: Vec<Value> = (0..st.queue_stuck).map(|i| json!({"id": 900 + i, "status": "completed", "trackedDownloadStatus": "warning", "trackedDownloadState": "importFailed"})).collect();
+                (200, json!({"page": 1, "pageSize": 500, "totalRecords": st.queue_total + st.queue_stuck, "records": stuck}))
+            }
             (Method::Get, "/history") => (200, json!({"records": st.history.clone()})),
             (Method::Post, "/artist") => {
                 let b: Value = serde_json::from_str(body).unwrap();
@@ -847,6 +861,21 @@ fn protect(r: &Rig) {
     r.lidarr.save_prefs(ARTIST, &ArtistPrefs { mode: ModeSetting::Protected, ..Default::default() }).unwrap();
     let s = crate::settings::Settings { lidarr_staging_folder: STAGING.into(), ..crate::settings::load(&r.db) };
     crate::settings::save(&r.db, &s).unwrap();
+}
+
+#[tokio::test]
+async fn a_new_artist_never_lands_in_a_staging_folder_with_the_lowest_id() {
+    // Lidarr's staging folder has id 2 and the library folder id 3, and
+    // Platter wasn't told which one is staging.
+    let r = rig();
+    r.web.st.lock().staging_first = true;
+    let rec = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
+    assert_eq!(rec.state, RequestState::Searching, "{:?}", rec.message);
+    let writes = r.web.writes();
+    let add: Value = serde_json::from_str(&writes[0].2).unwrap();
+    assert_eq!(add["rootFolderPath"], "/data/media/music/Lidarr", "the folder Plex scans");
+    assert_eq!(rec.destination.as_deref(), Some("/data/media/music/Lidarr/Northlight"));
+    assert_only_allowed_writes(&r.web);
 }
 
 #[tokio::test]

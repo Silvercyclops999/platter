@@ -529,10 +529,13 @@ impl Lidarr {
         // Managed artists download into a library root, never the staging
         // folder; protected artists only ever into the staging folder.
         let to_staging = protected || matches!(dest, Dest::Staging { .. });
-        let root = if to_staging {
+        // The check picked the library root: one Plex scans, never the
+        // staging folder (see `check::library_root`).
+        let mut root = if to_staging {
             c.snap.roots.iter().find(|r| r.accessible && is_staging(r)).cloned()
         } else {
-            c.snap.roots.iter().filter(|r| r.accessible && !is_staging(r)).min_by_key(|r| r.id).cloned()
+            let pick = c.report.library_root.as_deref().map(NormPath::parse);
+            c.snap.roots.iter().find(|r| r.accessible && !is_staging(r) && pick.as_ref().is_some_and(|p| NormPath::parse(&r.path) == *p)).cloned()
         };
         if to_staging && root.is_none() {
             return Err(AppError::Invalid("Lidarr doesn't have the staging folder as a root folder it can open. Check it in Lidarr, then run the setup check again.".into()));
@@ -558,10 +561,23 @@ impl Lidarr {
             Some(a) => (a, true),
             None => (looked, false),
         };
+        // An artist Lidarr has keeps its own root folder (a quick add names it).
+        if in_lidarr && !to_staging {
+            let ap = NormPath::parse(&artist.path);
+            if let Some(r) = c.snap.roots.iter().find(|r| r.accessible && !is_staging(r) && !ap.is_empty() && ap.starts_with(&NormPath::parse(&r.path))) {
+                root = Some(r.clone());
+            }
+        }
         let destination = if in_lidarr {
             artist.path.clone()
         } else {
-            let root = root.as_ref().ok_or_else(|| AppError::Invalid("Lidarr has no root folder to download into. Add a separate one in Lidarr first.".into()))?;
+            let root = root.as_ref().ok_or_else(|| {
+                AppError::Invalid(if c.snap.roots.iter().any(|r| r.accessible && !is_staging(r)) {
+                    format!("Platter can't tell which of Lidarr's root folders your Plex library scans, so it didn't add {}. The setup check says more.", artist.artist_name)
+                } else {
+                    "Lidarr has no root folder to download into. Add a separate one in Lidarr first.".into()
+                })
+            })?;
             let folder = artist.folder.clone().filter(|f| !f.trim().is_empty()).unwrap_or_else(|| artist.artist_name.clone());
             join_folder(&root.path, &folder)
         };
@@ -578,7 +594,7 @@ impl Lidarr {
     fn guessed_destination(&self, artist: &str) -> Option<String> {
         let staging = self.staging_norm();
         self.last_check()
-            .and_then(|l| l.roots.into_iter().find(|r| staging.as_ref().is_none_or(|s| NormPath::parse(r) != *s)))
+            .and_then(|l| l.library_root.or_else(|| l.roots.into_iter().find(|r| staging.as_ref().is_none_or(|s| NormPath::parse(r) != *s))))
             .map(|r| join_folder(&r, artist))
     }
 

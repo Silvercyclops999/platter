@@ -2198,6 +2198,7 @@ pub fn run() {
             lidarr::commands::lidarr_hires_preview,
             lidarr::commands::lidarr_change_apply,
             lidarr::commands::lidarr_changes,
+            lidarr::commands::lidarr_stage,
             lidarr::commands::lidarr_change_put_back,
             lidarr::commands::lidarr_rematch_preview,
             lidarr::commands::lidarr_rematch_apply,

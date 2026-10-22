@@ -209,3 +209,37 @@ async fn lidarr_out_of_reach_asks_for_nothing_and_carries_on_later() {
     assert!(out.requested.contains(&"Second Wind".to_string()), "{out:?}");
     assert_only_allowed_writes(&t.r.web);
 }
+
+#[tokio::test]
+async fn the_changes_log_says_where_bringing_over_is_at() {
+    let stage = |t: &Setup, looking_up: usize| t.w.stage(looking_up).unwrap();
+    let t = setup(false).await;
+    let file = t.r._dir.path().join("my_data.zip");
+    std::fs::write(&file, download()).unwrap();
+    t.bring.read(file).await.unwrap();
+    t.bring.get(None).await.unwrap();
+    let n = t.bring.looking_up().await.unwrap();
+    assert_eq!(stage(&t, n), ["Looking up 3 albums on MusicBrainz, up to 50 every 10 minutes."]);
+    t.bring.pick_pending().await.unwrap();
+    assert_eq!(t.bring.looking_up().await.unwrap(), 0);
+    assert_eq!(stage(&t, 0), ["1 album waiting to be asked for. Up to 10 go every 10 minutes, 30 a day."]);
+    // Lidarr's queue is full: paused, and why.
+    t.r.web.st.lock().queue_total = 25;
+    t.w.pass().await.unwrap();
+    assert_eq!(
+        stage(&t, 0),
+        ["Get albums is paused: Lidarr's queue has 25 items on their way. It carries on once it's down to 20. 1 album waiting to be asked for."]
+    );
+    t.r.web.st.lock().queue_total = 0;
+    t.w.pass().await.unwrap();
+    assert!(stage(&t, 0).is_empty(), "nothing left to do: nothing to say");
+
+    // Practice mode says so.
+    let t = setup(true).await;
+    let file = t.r._dir.path().join("my_data.zip");
+    std::fs::write(&file, download()).unwrap();
+    t.bring.read(file).await.unwrap();
+    t.bring.get(None).await.unwrap();
+    t.bring.pick_pending().await.unwrap();
+    assert_eq!(stage(&t, 0), ["Practice mode: 1 album waiting to be asked for. Nothing goes to Lidarr; each one is listed here as \"Would request\"."]);
+}
