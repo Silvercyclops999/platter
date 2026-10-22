@@ -56,6 +56,7 @@ const NOT_A_ROW: Record<string, string> = {
   eqOutputs: "eqEnabled",
   eqFallback: "eqEnabled",
   eqLastOutput: "kept by the core",
+  headphoneDeclined: "kept by the core",
   serverView: "libraries",
   musicFolderServer: "musicFolder",
   downloadLimitGb: "downloadLimit",

@@ -59,7 +59,7 @@ import { useApp } from "../stores/app";
 import { useCreditRows } from "./creditRows";
 import { NowPlayingAnnouncer, PlayControls, SeekBar } from "./PlayerBar";
 import { SearchBox } from "./SearchBox";
-import { SignalPanel, stages, useStreamLabel } from "./SignalPath";
+import { SignalPanel, stages, useStreamLabel, useTunedFor } from "./SignalPath";
 import { StatusDot } from "./StatusDot";
 import { StripExtras } from "./TransportStrip";
 import { openEntry, useLibraryLoader } from "./useLibrary";
@@ -790,6 +790,7 @@ function Facts({ rows }: { rows: [string, ReactNode][] }) {
 function Signal({ track, playing }: { track: Track; playing: boolean }) {
   const path = useSignal((s) => s.path);
   const stream = useStreamLabel();
+  const tunedFor = useTunedFor();
   const current = playing && path?.trackId === track.id ? path : null;
   if (!current) {
     const q = qualityLabel(track);
@@ -800,7 +801,7 @@ function Signal({ track, playing }: { track: Track; playing: boolean }) {
       </>
     );
   }
-  return <Facts rows={stages(current, stream).map((s) => [s.name, s.detail ? `${s.value}, ${s.detail.charAt(0).toLowerCase()}${s.detail.slice(1)}` : s.value])} />;
+  return <Facts rows={stages(current, stream, tunedFor).map((s) => [s.name, s.detail ? `${s.value}, ${s.detail.charAt(0).toLowerCase()}${s.detail.slice(1)}` : s.value])} />;
 }
 
 function Credits({ track }: { track: Track }) {

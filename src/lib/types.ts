@@ -999,6 +999,10 @@ export interface Settings {
   eqLastOutput?: string | null;
   /** Headphone correction per output device. Read only: use headphoneCorrectionSet. */
   headphoneCorrection: DeviceCorrection[];
+  /** Tune for my headphones: known headphones get their correction when they start playing. This device only. */
+  tuneHeadphones: boolean;
+  /** Output devices whose correction was turned off by hand, so it isn't picked again. Read only. */
+  headphoneDeclined?: string[];
   /** Output devices that play bit-perfect. Read only: use bitPerfectSet. */
   bitPerfectOutputs: BitPerfectOutput[];
   /** Share menus find public links for released music (iTunes Search and song.link). */
@@ -1757,6 +1761,8 @@ export const DEFAULT_SETTINGS: Settings = {
   eqFallback: null,
   eqLastOutput: null,
   headphoneCorrection: [],
+  tuneHeadphones: true,
+  headphoneDeclined: [],
   bitPerfectOutputs: [],
   sharePublicLinks: false,
   shareCardQr: true,
@@ -4333,6 +4339,21 @@ export interface DeviceCorrection extends HeadphoneEntry {
   deviceName: string;
   preampDb: number;
   filters: PeqFilter[];
+  /** Picked by Platter when the headphones connected, not by hand. */
+  auto?: boolean;
+}
+
+/** The output in use and the headphones it most likely is (`headphone_detect`). */
+export interface HeadphoneGuess {
+  outputName: string;
+  /** Best matches first; empty for a speaker or an unknown model. */
+  matches: HeadphoneEntry[];
+}
+
+/** `audio://tuned`: Platter tuned the output in use for its headphones. */
+export interface Tuned {
+  deviceId: string;
+  name: string;
 }
 
 /** An output device that plays bit-perfect. */
@@ -4652,6 +4673,8 @@ export interface EventMap {
   "remote://players": RemotePlayer[];
   /** This phone's sound moved to another output (iPhone only). */
   "audio://route": AudioRoute | null;
+  /** Platter tuned the output in use for the headphones it is (Tune for my headphones). */
+  "audio://tuned": Tuned;
   "health://changed": Health;
   toast: ToastEvent;
   /** An update is downloaded. `onQuit`: it installs when Platter quits. */

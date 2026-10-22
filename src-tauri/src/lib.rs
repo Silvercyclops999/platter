@@ -801,11 +801,13 @@ pub fn run() {
                 async move { s.spawn() }
             });
             app.manage(tag_scanner);
-            app.manage(audio::autoeq::Fetcher::new(cache_dir.join("headphone-profiles")));
+            let profiles = audio::autoeq::Fetcher::new(cache_dir.join("headphone-profiles"));
+            app.manage(profiles.clone());
             tauri::async_runtime::spawn(audio::commands::follow_output(
                 app.handle().clone(),
                 player.clone(),
                 app_settings.clone(),
+                profiles,
             ));
             os.start(app.handle(), player.clone(), art.clone(), cache_dir.join("now-playing"), live.platform.clone(), db.clone());
             // The listening diary: albums played start to finish, kept here

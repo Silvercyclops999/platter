@@ -1,5 +1,10 @@
-/** Words for bit-perfect output, shared by Settings, the player bar and the device picker. */
-import type { Exclusive } from "./types";
+/** Words for bit-perfect output and headphone correction, shared by Settings, the player bar and the device picker. */
+import type { DeviceCorrection, Exclusive, OutputDevice, Settings } from "./types";
+
+/** The correction `d` uses; one Platter picked counts only while Tune for my headphones is on. */
+export function bindingFor(s: Settings | null | undefined, d: OutputDevice | null | undefined): DeviceCorrection | undefined {
+  return d && s ? s.headphoneCorrection?.find((c) => c.deviceId === d.id && (!c.auto || s.tuneHeadphones !== false)) : undefined;
+}
 
 /** "96 kHz", "44.1 kHz". */
 export function formatRate(rate: number): string {

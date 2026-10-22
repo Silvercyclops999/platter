@@ -197,6 +197,7 @@ enum Cmd {
     /// The output stream may be dead (the media services were reset):
     /// rebuild it now if playing, else before the next sound.
     OutputStale,
+    RouteChanged,
     /// Try the output again after a reopen failed while playing (the retry
     /// generation it was set for).
     OutputRetry(u64),
@@ -661,6 +662,10 @@ impl PlayerHandle {
     /// the user played or paused meanwhile).
     pub fn headphones(&self, back: bool) {
         let _ = self.tx.send(Cmd::Interruption { began: !back, resume: back, stale: false });
+    }
+    /// The phone's audio route changed: say where the sound goes now.
+    pub fn route_changed(&self) {
+        let _ = self.tx.send(Cmd::RouteChanged);
     }
     /// The media services were reset: rebuild the stream.
     pub fn output_stale(&self) {
@@ -1954,6 +1959,10 @@ impl Actor {
             }
             Cmd::Interruption { began, resume, stale } => self.on_interruption(began, resume, stale),
             Cmd::OutputRetry(generation) => self.retry_output(generation),
+            Cmd::RouteChanged => {
+                let state = self.engine.output_state();
+                self.emit_output(&state);
+            }
             Cmd::OutputStale => {
                 self.output_stale = true;
                 if self.is_active()

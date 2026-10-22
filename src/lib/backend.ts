@@ -128,6 +128,7 @@ import type {
   SignalPath,
   AudioRoute,
   HeadphoneEntry,
+  HeadphoneGuess,
   Page,
   PinInfo,
   PlayContextArgs,
@@ -637,6 +638,8 @@ export interface Backend {
   eqUseForOutput(on: boolean): Promise<Settings>;
   /** Where this phone's sound goes now; null off iPhone. */
   audioRoute(): Promise<AudioRoute | null>;
+  /** The output in use and the headphones it most likely is, best first. */
+  headphoneDetect(): Promise<HeadphoneGuess>;
   /** Headphones in the bundled correction index matching `query` (at most 50). */
   headphoneSearch(query: string): Promise<HeadphoneEntry[]>;
   /** Uses a headphone's correction whenever the output in use plays (null turns it off there). Fetches the profile once. */
@@ -1582,6 +1585,7 @@ export function createTauriBackend(): Backend {
     eqProfileDelete: (name) => call("eq_profile_delete", { name }),
     eqUseForOutput: (on) => call("eq_use_for_output", { on }),
     audioRoute: () => call("audio_route"),
+    headphoneDetect: () => call("headphone_detect"),
     headphoneSearch: (query) => call("headphone_search", { query }),
     headphoneCorrectionSet: (path) => call("headphone_correction_set", { path }),
     headphoneCorrectionCompare: (bypass) => call("headphone_correction_compare", { bypass }),

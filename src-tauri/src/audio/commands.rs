@@ -272,18 +272,25 @@ pub const EV_SETTINGS: &str = "settings://changed";
 
 /// Switches the EQ to the profile bound to the output device in use, now
 /// and whenever the device changes, and tells the UI (`settings://changed`).
-pub async fn follow_output<R: tauri::Runtime>(app: tauri::AppHandle<R>, player: PlayerHandle, settings: SettingsState) {
+/// Headphones that can be tuned get their correction too (`audio://tuned`).
+pub async fn follow_output<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    player: PlayerHandle,
+    settings: SettingsState,
+    fetcher: super::autoeq::Fetcher,
+) {
     use tauri::Emitter;
     use tokio::sync::broadcast::error::RecvError;
     let mut rx = player.subscribe_output();
     let mut last: Option<Option<String>> = None;
+    let mut device = None;
     let mut next = player.output_state().await.ok();
     loop {
         if let Some(state) = next.take() {
             let id = state.current.as_ref().map(|d| d.id.clone());
             if last.as_ref() != Some(&id) {
                 last = Some(id);
-                let device = state.current.clone();
+                device = state.current.clone();
                 let changed = settings
                     .modify(|s| {
                         let before = s.eq_last_output.clone();
@@ -304,14 +311,57 @@ pub async fn follow_output<R: tauri::Runtime>(app: tauri::AppHandle<R>, player: 
                     }
                     Err(e) => tracing::warn!("EQ output switch failed: {e}"),
                 }
+                tune(&app, &player, &settings, &fetcher, device.clone());
             }
         }
-        match rx.recv().await {
-            Ok(state) => next = Some(state),
-            Err(RecvError::Lagged(_)) => next = player.output_state().await.ok(),
-            Err(RecvError::Closed) => return,
+        tokio::select! {
+            r = rx.recv() => match r {
+                Ok(state) => next = Some(state),
+                Err(RecvError::Lagged(_)) => next = player.output_state().await.ok(),
+                Err(RecvError::Closed) => return,
+            },
+            // Tune for my headphones was turned on: the output in use may be headphones.
+            () = super::hifi::RETUNE.notified() => tune(&app, &player, &settings, &fetcher, device.clone()),
         }
     }
+}
+
+/// Tunes `device` for its headphones when Platter may and knows the model:
+/// fetches the profile (or takes it from disk) in the background and binds
+/// it if the sound is still going there. A failed fetch leaves it as it was
+/// and is tried again the next time those headphones play.
+fn tune<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    player: &PlayerHandle,
+    settings: &SettingsState,
+    fetcher: &super::autoeq::Fetcher,
+    device: Option<super::output::OutputDevice>,
+) {
+    use tauri::Emitter;
+    let (app, player, settings, fetcher) = (app.clone(), player.clone(), settings.clone(), fetcher.clone());
+    tauri::async_runtime::spawn(async move {
+        let Some(device) = device else { return };
+        let Ok(s) = settings.get().await else { return };
+        let Some(entry) = super::hifi::auto_pick(&s, &device) else { return };
+        let parsed = match fetcher.profile(&entry.path).await {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::info!("headphone profile for {} not fetched: {e}", entry.name);
+                return;
+            }
+        };
+        let name = entry.name.clone();
+        match settings.modify(|s| Ok(super::hifi::bind_auto(s, &device, (entry, parsed)))).await {
+            Ok(Some(s)) => {
+                tracing::info!("tuned for {name}");
+                let _ = player.set_dsp(s.dsp()).await;
+                let _ = app.emit(EV_SETTINGS, &s);
+                let _ = app.emit(super::hifi::EV_TUNED, super::hifi::Tuned { device_id: device.id.clone(), name });
+            }
+            Ok(None) => {}
+            Err(e) => tracing::warn!("headphone tuning not saved: {e}"),
+        }
+    });
 }
 
 /// The battery state for the visualizer: read from a cached value, so the

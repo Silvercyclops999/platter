@@ -26,6 +26,9 @@ pub struct DeviceCorrection {
     pub path: String,
     pub preamp_db: f32,
     pub filters: Vec<PeqFilter>,
+    /// Picked by Platter when the headphones connected, not by hand.
+    #[serde(default)]
+    pub auto: bool,
 }
 
 /// An output device that plays bit-perfect.
@@ -36,12 +39,16 @@ pub struct BitPerfectOutput {
     pub device_name: String,
 }
 
+/// The correction `device_id` uses (None: none set, or no device). One
+/// Platter picked by itself counts only while Tune for my headphones is on.
+pub fn binding_for<'a>(s: &'a Settings, device_id: Option<&str>) -> Option<&'a DeviceCorrection> {
+    let id = device_id?;
+    s.headphone_correction.iter().find(|c| c.device_id == id && (!c.auto || s.tune_headphones))
+}
+
 /// The correction for `device_id` (None: none set, or no device).
 pub fn correction_for(s: &Settings, device_id: Option<&str>) -> Option<Correction> {
-    let id = device_id?;
-    s.headphone_correction
-        .iter()
-        .find(|c| c.device_id == id)
+    binding_for(s, device_id)
         .filter(|c| !c.filters.is_empty())
         .map(|c| Correction::new(c.preamp_db, &c.filters))
 }
@@ -51,9 +58,19 @@ pub fn bit_perfect_ids(s: &Settings) -> Vec<String> {
     s.bit_perfect_outputs.iter().map(|b| b.device_id.clone()).collect()
 }
 
-/// Binds a profile to `device` (None removes its correction). Returns
-/// whether anything changed.
+/// Binds a profile to `device` by hand (None removes its correction).
+/// Turning it off also stops Platter picking one for that device again;
+/// picking one lets it. Returns whether anything changed.
 pub fn set_correction(s: &mut Settings, device: &OutputDevice, profile: Option<(Entry, Parsed)>) -> bool {
+    let declined_before = s.headphone_declined.clone();
+    s.headphone_declined.retain(|id| *id != device.id);
+    if profile.is_none() {
+        s.headphone_declined.push(device.id.clone());
+    }
+    bind(s, device, profile, false) || s.headphone_declined != declined_before
+}
+
+fn bind(s: &mut Settings, device: &OutputDevice, profile: Option<(Entry, Parsed)>, auto: bool) -> bool {
     let before = s.headphone_correction.clone();
     s.headphone_correction.retain(|c| c.device_id != device.id);
     if let Some((e, p)) = profile {
@@ -66,9 +83,68 @@ pub fn set_correction(s: &mut Settings, device: &OutputDevice, profile: Option<(
             path: e.path,
             preamp_db: p.preamp_db,
             filters: p.filters,
+            auto,
         });
     }
     s.headphone_correction != before
+}
+
+/// Whether Platter may tune `device` by itself: headphones (by the phone's
+/// route, or by a computer output's name) never set by hand and never
+/// turned off there. The phone's speaker, the car, AirPlay and the like
+/// never are.
+pub fn may_tune(s: &Settings, device: &OutputDevice) -> bool {
+    if !s.tune_headphones || device.id.starts_with(super::netsink::NET_PREFIX) {
+        return false;
+    }
+    if let Some(rest) = device.id.strip_prefix(ROUTE_PREFIX) {
+        let kind = rest.split(':').next().unwrap_or("");
+        if !TUNED_ROUTES.contains(&kind) {
+            return false;
+        }
+    }
+    !s.headphone_correction.iter().any(|c| c.device_id == device.id) && !s.headphone_declined.contains(&device.id)
+}
+
+/// Phone routes that can be headphones (a Bluetooth speaker or car stereo
+/// isn't in the headphone list, so its name finds nothing).
+const TUNED_ROUTES: [&str; 3] = ["headphones", "bluetooth", "usb"];
+
+/// Ids of the phone's audio routes: `route:<kind>:<the port's own id>`.
+pub const ROUTE_PREFIX: &str = "route:";
+
+/// The headphones `device` is, when Platter may tune it and knows the model.
+pub fn auto_pick(s: &Settings, device: &OutputDevice) -> Option<Entry> {
+    if !may_tune(s, device) {
+        return None;
+    }
+    autoeq::model_match(&headphone_query(&device.name))
+}
+
+/// Binds a profile Platter picked, unless meanwhile the sound moved to
+/// another output, the switch went off, or one was set by hand. Returns
+/// whether it was bound.
+pub fn bind_auto(s: &mut Settings, device: &OutputDevice, profile: (Entry, Parsed)) -> bool {
+    if s.eq_last_output.as_deref() != Some(device.id.as_str()) || !may_tune(s, device) {
+        return false;
+    }
+    bind(s, device, Some(profile), true)
+}
+
+/// Woken when Tune for my headphones is turned on, so the output in use is
+/// looked at again.
+pub static RETUNE: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// Said when Platter tuned the output in use for its headphones.
+pub const EV_TUNED: &str = "audio://tuned";
+
+/// The `audio://tuned` payload.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Tuned {
+    pub device_id: String,
+    /// The headphone, as the index names it.
+    pub name: String,
 }
 
 /// Turns bit-perfect output on or off for `device`. Returns whether
@@ -103,9 +179,15 @@ pub fn headphone_query(output_name: &str) -> String {
         Some(i) if !name[..i].contains(' ') => &name[i + 3..],
         _ => &name[..],
     };
+    // Windows says "Headphones (2- WH-1000XM5 Stereo)": the brackets and
+    // the "2-" go, and so does a "(2)" for a second one.
     const NOISE: [&str; 6] = ["bluetooth", "stereo", "hands-free", "headphones", "(2)", "(3)"];
+    let numbered = |w: &str| w.strip_suffix('-').is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+    let noise = |w: &str| NOISE.contains(&w.to_ascii_lowercase().as_str());
     name.split_whitespace()
-        .filter(|w| !NOISE.contains(&w.to_ascii_lowercase().as_str()))
+        .filter(|w| !noise(w))
+        .map(|w| w.trim_matches(['(', ')']))
+        .filter(|w| !w.is_empty() && !numbered(w) && !noise(w))
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -236,6 +318,151 @@ mod tests {
         assert_eq!(correction_for(&s, Some("hp")), None);
     }
 
+    fn named(id: &str, name: &str) -> OutputDevice {
+        OutputDevice { id: id.into(), name: name.into(), is_default: true }
+    }
+
+    fn playing_on(s: &mut Settings, d: &OutputDevice) {
+        s.eq_last_output = Some(d.id.clone());
+    }
+
+    #[test]
+    fn headphones_are_known_by_their_model() {
+        let s = Settings::default();
+        let pods = named("route:bluetooth:AA-tacl", "Adam\u{2019}s AirPods Pro");
+        assert_eq!(auto_pick(&s, &pods).unwrap().name, "Apple AirPods Pro");
+        let xm5 = named("{0.0.0.00000000}.{x}", "Headphones (2- WH-1000XM5 Stereo)");
+        assert_eq!(auto_pick(&s, &xm5).unwrap().name, "Sony WH-1000XM5");
+    }
+
+    #[test]
+    fn the_most_trusted_measurement_wins() {
+        // HD 650 was measured by several people; oratory1990 comes first.
+        let e = autoeq::model_match("Sennheiser HD 650").unwrap();
+        assert!(e.source.starts_with("oratory1990"), "{}", e.source);
+    }
+
+    #[test]
+    fn an_unknown_or_blank_name_tunes_nothing() {
+        let s = Settings::default();
+        for name in ["", "Adam's Phones", "Speakers (Realtek(R) Audio)", "MacBook Pro Speakers", "Living Room"] {
+            assert_eq!(auto_pick(&s, &named("dev", name)), None, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_name_that_fits_several_models_tunes_nothing() {
+        // "AirPods" starts many models but is none of them exactly.
+        assert_eq!(autoeq::model_match("AirPods"), None);
+        assert_eq!(autoeq::model_match("Apple"), None);
+        assert!(!autoeq::search("AirPods", 5).is_empty());
+    }
+
+    #[test]
+    fn the_speaker_the_car_and_airplay_are_never_tuned() {
+        let s = Settings::default();
+        for id in ["route:speaker:Speaker", "route:car:c1", "route:airplay:tv", "route:receiver:r", "net:cast:1"] {
+            assert!(!may_tune(&s, &named(id, "AirPods Pro")), "{id}");
+            assert_eq!(auto_pick(&s, &named(id, "AirPods Pro")), None, "{id}");
+        }
+        for id in ["route:bluetooth:b", "route:headphones:w", "route:usb:u", "cpal-device"] {
+            assert!(may_tune(&s, &named(id, "AirPods Pro")), "{id}");
+        }
+    }
+
+    #[test]
+    fn a_picked_correction_plays_only_on_its_headphones() {
+        let mut s = Settings::default();
+        let pods = named("route:bluetooth:AA", "AirPods Pro");
+        let speaker = named("route:speaker:Speaker", "Speaker");
+        playing_on(&mut s, &pods);
+        assert!(bind_auto(&mut s, &pods, profile("Apple AirPods Pro", 3.0)));
+        assert!(s.headphone_correction[0].auto);
+        assert!(s.dsp().correction.is_some());
+        playing_on(&mut s, &speaker);
+        assert!(s.dsp().correction.is_none());
+        // Once picked, it isn't picked again.
+        playing_on(&mut s, &pods);
+        assert!(!may_tune(&s, &pods));
+        assert!(!bind_auto(&mut s, &pods, profile("Apple AirPods Pro", 3.0)));
+    }
+
+    #[test]
+    fn a_profile_landing_after_the_sound_moved_is_dropped() {
+        let mut s = Settings::default();
+        let pods = named("route:bluetooth:AA", "AirPods Pro");
+        playing_on(&mut s, &named("route:speaker:Speaker", "Speaker"));
+        assert!(!bind_auto(&mut s, &pods, profile("Apple AirPods Pro", 3.0)));
+        assert!(s.headphone_correction.is_empty());
+    }
+
+    #[test]
+    fn a_failed_fetch_leaves_it_to_try_again() {
+        // Nothing is bound or declined, so the next time they play it's picked again.
+        let s = Settings::default();
+        let pods = named("route:bluetooth:AA", "AirPods Pro");
+        assert!(auto_pick(&s, &pods).is_some());
+        assert!(auto_pick(&s, &pods).is_some());
+    }
+
+    #[test]
+    fn turning_it_off_by_hand_is_kept() {
+        let mut s = Settings::default();
+        let pods = named("route:bluetooth:AA", "AirPods Pro");
+        playing_on(&mut s, &pods);
+        bind_auto(&mut s, &pods, profile("Apple AirPods Pro", 3.0));
+        // Undo, or the switch off in Settings.
+        assert!(set_correction(&mut s, &pods, None));
+        assert!(s.headphone_correction.is_empty());
+        assert_eq!(auto_pick(&s, &pods), None);
+        assert!(!bind_auto(&mut s, &pods, profile("Apple AirPods Pro", 3.0)));
+        // Picking one by hand lets it be theirs (and not Platter's).
+        assert!(set_correction(&mut s, &pods, Some(profile("Apple AirPods Pro 2", 2.0))));
+        assert!(s.headphone_declined.is_empty());
+        assert!(!s.headphone_correction[0].auto);
+    }
+
+    #[test]
+    fn a_hand_picked_correction_is_never_replaced() {
+        let mut s = Settings::default();
+        let pods = named("route:bluetooth:AA", "AirPods Pro");
+        playing_on(&mut s, &pods);
+        set_correction(&mut s, &pods, Some(profile("Apple AirPods Pro 2", 2.0)));
+        assert_eq!(auto_pick(&s, &pods), None);
+        assert!(!bind_auto(&mut s, &pods, profile("Apple AirPods Pro", 3.0)));
+        assert_eq!(s.headphone_correction[0].name, "Apple AirPods Pro 2");
+    }
+
+    #[test]
+    fn the_switch_off_stops_picked_ones_but_not_hand_picked_ones() {
+        let mut s = Settings::default();
+        let pods = named("route:bluetooth:AA", "AirPods Pro");
+        let hd = named("usb-dac", "HD 650");
+        playing_on(&mut s, &pods);
+        bind_auto(&mut s, &pods, profile("Apple AirPods Pro", 3.0));
+        set_correction(&mut s, &hd, Some(profile("Sennheiser HD 650", 2.0)));
+        s.tune_headphones = false;
+        assert!(s.dsp().correction.is_none());
+        assert_eq!(auto_pick(&s, &named("route:bluetooth:BB", "AirPods Max")), None);
+        playing_on(&mut s, &hd);
+        assert!(s.dsp().correction.is_some());
+        // On again: the picked one comes back.
+        s.tune_headphones = true;
+        playing_on(&mut s, &pods);
+        assert!(s.dsp().correction.is_some());
+    }
+
+    #[test]
+    fn older_saved_corrections_read_as_hand_picked() {
+        let mut s = Settings::default();
+        set_correction(&mut s, &dev("hp"), Some(profile("Phones A", 4.0)));
+        let mut v = serde_json::to_value(&s).unwrap();
+        v["headphoneCorrection"][0].as_object_mut().unwrap().remove("auto");
+        let back: Settings = serde_json::from_value(v).unwrap();
+        assert!(!back.headphone_correction[0].auto);
+        assert!(back.tune_headphones);
+    }
+
     #[test]
     fn output_names_come_down_to_the_model() {
         assert_eq!(headphone_query("Adam\u{2019}s AirPods Pro"), "AirPods Pro");
@@ -244,6 +471,8 @@ mod tests {
         assert_eq!(headphone_query("Sennheiser HD 650"), "Sennheiser HD 650");
         assert_eq!(headphone_query("Living Room's Speaker Set"), "Living Room's Speaker Set");
         assert_eq!(headphone_query(""), "");
+        assert_eq!(headphone_query("Headphones (2- WH-1000XM5 Stereo)"), "WH-1000XM5");
+        assert_eq!(headphone_query("AirPods Pro (2)"), "AirPods Pro");
         assert!(super::autoeq::search(&headphone_query("Adam's AirPods Pro"), 5).iter().any(|e| e.name.contains("AirPods Pro")));
     }
 

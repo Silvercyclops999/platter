@@ -2652,6 +2652,15 @@ export class MockBackend implements Backend {
     this.emit("output://changed", s);
     this.emitSignal();
     if (eq.outputChanged(this.settings, s.current)) this.emit("settings://changed", { ...this.settings, volume: this.volume });
+    this.tune(s.current);
+  }
+  /** Tune for my headphones: known headphones get their correction, and the UI hears about it. */
+  private tune(device: OutputDevice | null) {
+    const name = hifi.autoTune(this.settings, device);
+    if (!name || !device) return;
+    this.emit("settings://changed", { ...this.settings, volume: this.volume });
+    this.emit("audio://tuned", { deviceId: device.id, name });
+    this.emitSignal();
   }
   /** Test/demo hook: an output device is unplugged. If it was the chosen
    *  one, the core pauses, falls back to the system default and says so. */
@@ -3077,6 +3086,8 @@ export class MockBackend implements Backend {
       this.artUsed = Math.min(this.artUsed, next.artCacheMb * 1024 * 1024);
       if (typeof patch.volume === "number") this.volume = Math.min(1, Math.max(0, patch.volume));
       if (patch.readFileTags !== undefined) this.tags.settingsChanged();
+      // Switched on: the headphones playing now may be tuned.
+      if (patch.tuneHeadphones === true) this.later(0, () => this.tune(this.outputState().current));
       // Sound settings change the signal path.
       this.later(0, () => this.emitSignal());
       const mixKeys = ["mixVariety", "mixExcludeArtists", "mixExcludeGenres", "mixExcludeAlbums", "mixUnreleased", "daylistHours", "explicitContent", "showFanEdits"];
@@ -3139,6 +3150,16 @@ export class MockBackend implements Backend {
   emitRoute(route: AudioRoute | null) {
     this.route = route;
     this.emit("audio://route", route);
+  }
+  headphoneDetect() {
+    return this.delay(() => {
+      const d = this.outputState().current;
+      const name = d && !d.id.startsWith("net:") ? d.name : "";
+      const exact = hifi.modelMatch(name);
+      const words = name.replace(/\(\d\)|\b(bluetooth|stereo|headphones)\b|[()]/gi, " ").trim();
+      const near = words ? hifi.search(words.split(/\s+/)[0]).filter((h) => h.path !== exact?.path) : [];
+      return { outputName: name, matches: [...(exact ? [exact] : []), ...near].slice(0, 5) };
+    });
   }
   headphoneSearch(query: string) {
     return this.delay(() => hifi.search(query));

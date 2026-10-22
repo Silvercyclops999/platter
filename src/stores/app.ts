@@ -5,14 +5,30 @@
 import { create } from "zustand";
 import { backend, type Backend } from "../lib/backend";
 import { buildArtistLookup, type ArtistLookup } from "../lib/credits";
-import type { ArtistName, AuthStatus, Health, Playlist, SavedServer, SyncStatus } from "../lib/types";
+import type { ArtistName, AuthStatus, Health, Playlist, SavedServer, SyncStatus, Tuned } from "../lib/types";
 import { watchMixed } from "./mixed";
 import { outputLostMessage, useOutput } from "./output";
 import { useSignal } from "./signalPath";
 import { loadSettings, useSettings } from "./settings";
-import { useToasts } from "./toasts";
+import { toast, UNDO_MS, useToasts } from "./toasts";
 import { loadPins } from "./pins";
 import { loadFolders, onStoreChanged } from "./folders";
+
+/**
+ * Platter tuned the headphones that just started playing. Undo turns the
+ * correction off for them, and it isn't picked for them again.
+ */
+export function tunedToast(t: Tuned, b: Backend) {
+  const undo = () => {
+    // The sound moved on meanwhile: the correction belongs to those headphones, not these.
+    if (useOutput.getState().state?.current?.id !== t.deviceId) return;
+    b.headphoneCorrectionSet(null).then(
+      (s) => useSettings.getState().setLocal(s),
+      () => toast.error("Couldn't undo that"),
+    );
+  };
+  useToasts.getState().push({ kind: "info", message: `Tuned for ${t.name}`, action: { label: "Undo", run: undo } }, UNDO_MS);
+}
 
 export interface AppStore {
   auth: AuthStatus | null;
@@ -143,6 +159,7 @@ export function connectApp(b: Backend = backend): () => void {
   // Pins and folders changed (here, or another device through the sync file).
   keep(b.listen("syncstore://changed", (c) => onStoreChanged(c, b)));
   keep(b.listen("output://lost", (l) => useToasts.getState().push({ kind: "info", message: outputLostMessage(l.device) }, 6000)));
+  keep(b.listen("audio://tuned", (t) => tunedToast(t, b)));
   keep(
     b.listen("update://ready", (u) =>
       useToasts.getState().push(

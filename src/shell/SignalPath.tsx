@@ -9,9 +9,10 @@ import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { PlateButton } from "../components/Plate";
 import { qualityLabel } from "../lib/format";
-import { formatRate } from "../lib/hifi";
+import { bindingFor, formatRate } from "../lib/hifi";
 import type { SignalPath } from "../lib/types";
 import { useApp } from "../stores/app";
+import { useOutput } from "../stores/output";
 import { usePlayer } from "../stores/player";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
@@ -65,7 +66,8 @@ function sourceFrom(p: SignalPath): string {
   return "The original file, from your server";
 }
 
-export function stages(p: SignalPath, stream: string | null): Stage[] {
+/** `tunedFor`: the headphones whose correction plays, by name. */
+export function stages(p: SignalPath, stream: string | null, tunedFor?: string | null): Stage[] {
   const s = p.source;
   const out: Stage[] = [];
   if (s) {
@@ -88,7 +90,7 @@ export function stages(p: SignalPath, stream: string | null): Stage[] {
     off: !l.on || l.gainDb === 0,
   });
   const e = p.eq;
-  const eqParts = [e.correction ? "Headphone correction" : null, e.eq ? "Equalizer" : null].filter(Boolean);
+  const eqParts = [e.correction ? (tunedFor ? `Tuned for ${tunedFor}` : "Headphone correction") : null, e.eq ? "Equalizer" : null].filter(Boolean);
   const eqDetail = [
     e.correctionPreampDb !== null && e.correction ? `correction preamp ${db(e.correctionPreampDb)}` : null,
     e.preampDb ? `preamp ${db(e.preampDb)}` : null,
@@ -195,9 +197,10 @@ function Arrow() {
  * shared with the phone's sheet. `onSetting` opens the setting that would fix it.
  */
 export function SignalBody({ path, stream, onSetting }: { path: SignalPath | null; stream: string | null; onSetting: (row: string) => void }) {
+  const tunedFor = useTunedFor();
   if (!path) return <p className="signal-panel__empty">Looking at the signal path…</p>;
   if (path.verdict.kind === "idle") return <p className="signal-panel__empty">Nothing playing. Play something to see its signal path.</p>;
-  const list = stages(path, stream);
+  const list = stages(path, stream, tunedFor);
   return (
     <>
       <ol className="signal-chain" aria-label="From the file to your speakers">
@@ -218,6 +221,13 @@ export function SignalBody({ path, stream, onSetting }: { path: SignalPath | nul
       )}
     </>
   );
+}
+
+/** The headphones whose correction plays on the output in use, by name. */
+export function useTunedFor(): string | null {
+  const settings = useSettings((s) => s.settings);
+  const device = useOutput((s) => s.state?.current);
+  return bindingFor(settings, device)?.name ?? null;
 }
 
 /** The panel; mounted once, shown while the store says it's open. */
