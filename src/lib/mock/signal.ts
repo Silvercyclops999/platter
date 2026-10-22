@@ -4,6 +4,7 @@
  * settings, and a shared device that runs at 48 kHz.
  */
 import type { Exclusive, OutputDevice, Settings, SignalPath, Track } from "../types";
+import { correctionFor } from "./hifi";
 
 /** The mock's shared output rate. */
 export const MOCK_DEVICE_RATE = 48_000;
@@ -30,7 +31,7 @@ export function mockSignalPath(i: MockSignalInput): SignalPath {
   const bitPerfect = i.exclusive.state === "on";
   const leveling = bitPerfect ? "off" : s.leveling;
   const eqOn = !bitPerfect && s.eqEnabled;
-  const corr = bitPerfect ? undefined : s.headphoneCorrection.find((c) => c.deviceId === i.device?.id);
+  const corr = bitPerfect ? undefined : correctionFor(s, i.device?.id);
   const preampDb = bitPerfect ? 0 : s.preampDb;
   const outRate = i.exclusive.state === "on" ? i.exclusive.rate : MOCK_DEVICE_RATE;
   const volume = i.muted ? 0 : i.volume;

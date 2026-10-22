@@ -57,11 +57,33 @@ function bind(s: Settings, device: OutputDevice, entry: HeadphoneEntry | null, a
   if (entry) s.headphoneCorrection = [...s.headphoneCorrection, { ...entry, deviceId: device.id, deviceName: device.name, ...profile(entry), auto }];
 }
 
-/** The model a name is, exactly ("Kestrel Buds Pro"), not one it starts ("Kestrel"). */
+/** The output's name cut down to the model, as the core does ("Headphones (2- X Stereo)" is "X"). */
+export function headphoneQuery(name: string): string {
+  const noise = ["bluetooth", "stereo", "hands-free", "headphones", "(2)", "(3)"];
+  return name
+    .replace(/^[^\s']+['\u2019]s /, "")
+    .split(/\s+/)
+    .filter((w) => !noise.includes(w.toLowerCase()))
+    .map((w) => w.replace(/^[()]+|[()]+$/g, ""))
+    .filter((w) => w && !/^\d+-$/.test(w) && !noise.includes(w.toLowerCase()))
+    .join(" ");
+}
+
+/**
+ * The model a name is, exactly, maker in front or not ("Studio 600" is
+ * "Aurora Studio 600"); not one it starts ("Kestrel"), and not one with a
+ * later generation the name can't tell apart ("X Pro" and "X Pro 2").
+ */
 export function modelMatch(name: string): HeadphoneEntry | null {
-  const q = fold(name.replace(/^\S+['\u2019]s /, "").replace(/\(\d\)|\b(bluetooth|stereo|headphones)\b|[()]/gi, " ").replace(/\s+/g, " ").trim());
-  const hits = q ? MOCK_HEADPHONES.filter((h) => fold(h.name) === q) : [];
-  return hits[0] ?? null;
+  const q = fold(headphoneQuery(name));
+  if (!q) return null;
+  const isModel = (n: string) => n === q || (n.endsWith(` ${q}`) && !n.slice(0, -q.length - 1).includes(" "));
+  const hits = MOCK_HEADPHONES.filter((h) => isModel(fold(h.name)));
+  const first = hits[0];
+  if (!first || hits.some((h) => fold(h.name) !== fold(first.name))) return null;
+  const f = fold(first.name);
+  if (MOCK_HEADPHONES.some((h) => fold(h.name).startsWith(f) && /^\s*\d/.test(fold(h.name).slice(f.length)))) return null;
+  return first;
 }
 
 const TUNED_ROUTES = ["headphones", "bluetooth", "usb"];
@@ -69,13 +91,15 @@ const TUNED_ROUTES = ["headphones", "bluetooth", "usb"];
 /** Headphones, never set by hand or turned off there, with the switch on. */
 export function mayTune(s: Settings, device: OutputDevice): boolean {
   if (!s.tuneHeadphones || device.id.startsWith("net:")) return false;
+  if (s.bitPerfectOutputs.some((b) => b.deviceId === device.id)) return false;
   if (device.id.startsWith("route:") && !TUNED_ROUTES.includes(device.id.split(":")[1])) return false;
   return !s.headphoneCorrection.some((c) => c.deviceId === device.id) && !(s.headphoneDeclined ?? []).includes(device.id);
 }
 
 /** Tunes `device` when Platter may and knows its model; returns the headphone's name. */
 export function autoTune(s: Settings, device: OutputDevice | null): string | null {
-  if (!device || !mayTune(s, device)) return null;
+  // The sound moved on: the EQ follows the output it's on now.
+  if (!device || !mayTune(s, device) || s.eqLastOutput !== device.id) return null;
   const entry = modelMatch(device.name);
   if (!entry) return null;
   bind(s, device, entry, true);

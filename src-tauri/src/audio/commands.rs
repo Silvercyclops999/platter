@@ -352,8 +352,11 @@ fn tune<R: tauri::Runtime>(
         };
         let name = entry.name.clone();
         match settings.modify(|s| Ok(super::hifi::bind_auto(s, &device, (entry, parsed)))).await {
-            Ok(Some(s)) => {
+            Ok(Some(_)) => {
                 tracing::info!("tuned for {name}");
+                // Read again: the output may have moved on since, and its
+                // settings are the ones to play.
+                let Ok(s) = settings.get().await else { return };
                 let _ = player.set_dsp(s.dsp()).await;
                 let _ = app.emit(EV_SETTINGS, &s);
                 let _ = app.emit(super::hifi::EV_TUNED, super::hifi::Tuned { device_id: device.id.clone(), name });

@@ -7,7 +7,7 @@ import { AudioWaveform, Headphones } from "lucide-react";
 import { useEffect } from "react";
 import { Tooltip } from "../components/Tooltip";
 import type { Exclusive, Settings } from "../lib/types";
-import { exclusiveText, formatRate } from "../lib/hifi";
+import { bindingFor, exclusiveText, formatRate } from "../lib/hifi";
 import { loadOutput, useOutput } from "../stores/output";
 import { useSettings } from "../stores/settings";
 import { useUi } from "../stores/ui";
@@ -33,7 +33,7 @@ function useHifi(): Hifi | null {
   if (!s || !any || !d) return null;
   const exclusive = state?.exclusive;
   const wanted = (s.bitPerfectOutputs ?? []).some((b) => b.deviceId === d.id);
-  const c = (s.headphoneCorrection ?? []).find((x) => x.deviceId === d.id);
+  const c = bindingFor(s, d);
   const correction = c && exclusive?.state !== "on" ? c.name : null;
   if (!wanted && !correction) return null;
   return { exclusive, correction, wanted };

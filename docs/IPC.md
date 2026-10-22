@@ -4281,7 +4281,7 @@ art cache, never as a server URL.
 | `eq_use_for_output` | `{ on }` → `Settings`. Binds the selected preset or profile to the output device in use (`on: false` unbinds it). A custom curve has to be saved first (`invalid`). |
 | `headphone_detect` | – → `{ outputName, matches }`. The output in use (on a phone, the headphones on the audio route) and the headphones it most likely is, best first; `matches` is empty for a speaker or an unknown name. |
 | `headphone_search` | `{ query }` → `HeadphoneEntry[]` (at most 50). Headphones in the bundled correction index whose name has every word of `query`, ignoring case and accents. |
-| `headphone_correction_set` | `{ path: string \| null }` → `Settings`. Uses that headphone's correction whenever the output device in use plays; null turns it off there. The profile is fetched the first time (`network`, `notFound`, `decode` errors) and kept on disk. |
+| `headphone_correction_set` | `{ path: string \| null, deviceId?: string }` → `Settings`. Uses that headphone's correction whenever the output device in use plays; null turns it off there (and Platter won't pick one there again). With `deviceId`, an `invalid` error when another device is in use (Undo on "Tuned for"). The profile is fetched the first time (`network`, `notFound`, `decode` errors) and kept on disk. |
 | `headphone_correction_compare` | `{ bypass }` → –. Plays without the correction while true, to compare. Not saved. |
 | `bit_perfect_set` | `{ on }` → `Settings`. Bit-perfect output on or off for the output device in use; the stream reopens at once, keeping position and play state. |
 

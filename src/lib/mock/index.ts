@@ -3164,10 +3164,11 @@ export class MockBackend implements Backend {
   headphoneSearch(query: string) {
     return this.delay(() => hifi.search(query));
   }
-  headphoneCorrectionSet(path: string | null) {
+  headphoneCorrectionSet(path: string | null, deviceId?: string) {
     return this.changeEq((s) => {
       const d = this.outputState().current;
       if (!d) throw { kind: "notFound", message: "No output device on this computer is in use." };
+      if (deviceId && deviceId !== d.id) throw { kind: "invalid", message: "Those headphones aren't playing any more." };
       const entry = path === null ? null : hifi.MOCK_HEADPHONES.find((h) => h.path === path);
       if (entry === undefined) throw { kind: "notFound", message: `headphone ${path}` };
       hifi.setCorrection(s, d, entry);

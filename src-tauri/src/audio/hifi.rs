@@ -103,7 +103,10 @@ pub fn may_tune(s: &Settings, device: &OutputDevice) -> bool {
             return false;
         }
     }
-    !s.headphone_correction.iter().any(|c| c.device_id == device.id) && !s.headphone_declined.contains(&device.id)
+    // Bit-perfect plays the file untouched: a correction there would do nothing.
+    !s.headphone_correction.iter().any(|c| c.device_id == device.id)
+        && !s.headphone_declined.contains(&device.id)
+        && !s.bit_perfect_outputs.iter().any(|b| b.device_id == device.id)
 }
 
 /// Phone routes that can be headphones (a Bluetooth speaker or car stereo
@@ -227,15 +230,20 @@ pub async fn headphone_search(query: String) -> AppResult<Vec<Entry>> {
 
 /// Uses the profile at `path` (from `headphone_search`) whenever the
 /// output device in use plays; `path: null` turns correction off for it.
-/// The profile is fetched the first time and kept on disk.
+/// The profile is fetched the first time and kept on disk. With
+/// `device_id` (Undo on "Tuned for"), only while that device is in use.
 #[tauri::command]
 pub async fn headphone_correction_set(
     settings: State<'_, SettingsState>,
     player: State<'_, PlayerHandle>,
     fetcher: State<'_, Fetcher>,
     path: Option<String>,
+    device_id: Option<String>,
 ) -> AppResult<Settings> {
     let device = current_device(&player).await?;
+    if device_id.is_some_and(|id| id != device.id) {
+        return Err(AppError::Invalid("Those headphones aren't playing any more.".into()));
+    }
     let profile = match path {
         Some(p) => {
             let entry = autoeq::find(&p).ok_or_else(|| AppError::NotFound(format!("headphone {p}")))?;
@@ -329,8 +337,8 @@ mod tests {
     #[test]
     fn headphones_are_known_by_their_model() {
         let s = Settings::default();
-        let pods = named("route:bluetooth:AA-tacl", "Adam\u{2019}s AirPods Pro");
-        assert_eq!(auto_pick(&s, &pods).unwrap().name, "Apple AirPods Pro");
+        let pods = named("route:bluetooth:AA-tacl", "Adam\u{2019}s AirPods Max");
+        assert_eq!(auto_pick(&s, &pods).unwrap().name, "Apple AirPods Max");
         let xm5 = named("{0.0.0.00000000}.{x}", "Headphones (2- WH-1000XM5 Stereo)");
         assert_eq!(auto_pick(&s, &xm5).unwrap().name, "Sony WH-1000XM5");
     }
@@ -355,6 +363,9 @@ mod tests {
         // "AirPods" starts many models but is none of them exactly.
         assert_eq!(autoeq::model_match("AirPods"), None);
         assert_eq!(autoeq::model_match("Apple"), None);
+        // The phone calls AirPods Pro 2 "AirPods Pro" too: which one can't be told.
+        assert_eq!(autoeq::model_match("AirPods Pro"), None);
+        assert_eq!(autoeq::model_match("AirPods Pro 2").unwrap().name.to_lowercase(), "apple airpods pro 2");
         assert!(!autoeq::search("AirPods", 5).is_empty());
     }
 
@@ -397,12 +408,26 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_fetch_leaves_it_to_try_again() {
-        // Nothing is bound or declined, so the next time they play it's picked again.
+    fn bit_perfect_headphones_are_left_alone() {
+        let mut s = Settings::default();
+        let dac = named("usb-dac", "Sennheiser HD 650");
+        assert!(may_tune(&s, &dac));
+        set_bit_perfect(&mut s, &dac, true);
+        assert!(!may_tune(&s, &dac));
+    }
+
+    #[tokio::test]
+    async fn a_failed_fetch_leaves_it_to_try_again() {
         let s = Settings::default();
-        let pods = named("route:bluetooth:AA", "AirPods Pro");
-        assert!(auto_pick(&s, &pods).is_some());
-        assert!(auto_pick(&s, &pods).is_some());
+        let max = named("route:bluetooth:AA", "Adam's AirPods Max");
+        let entry = auto_pick(&s, &max).unwrap();
+        // Offline (here: a host profiles never come from), so nothing is fetched.
+        let dir = tempfile::tempdir().unwrap();
+        let fetcher = Fetcher::with_base(dir.path().into(), "https://10.1.2.3/", autoeq::ALLOWED_HOSTS);
+        assert!(fetcher.profile(&entry.path).await.is_err());
+        // Nothing was bound or declined, so the next time they play it's picked again.
+        assert!(s.headphone_correction.is_empty() && s.headphone_declined.is_empty());
+        assert_eq!(auto_pick(&s, &max), Some(entry));
     }
 
     #[test]
