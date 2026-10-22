@@ -6,6 +6,9 @@
 //! evicted first. Concurrent requests for the same key share one fetch.
 //! When the disk is full, the cache evicts and retries once; if that fails
 //! the store errors (the image is still served to the caller).
+//! An image that is all one colour (a blank white poster a server holds) is
+//! no picture: it's answered as not found, so the app draws its own sleeve,
+//! and remembered that way so it isn't fetched again.
 
 use std::collections::HashMap;
 use std::io::ErrorKind;
@@ -34,6 +37,34 @@ const MAX_DIM: u32 = 1600;
 const MAX_PATH_LEN: usize = 2048;
 /// A cover that takes longer than this to come from the server is logged.
 const SLOW_FETCH: std::time::Duration = std::time::Duration::from_millis(1500);
+/// What's kept for an image that is all one colour.
+const BLANK: &str = "x-platter/blank";
+/// Only images this small for their size are looked at closely: a picture
+/// of anything takes far more bytes per pixel than a blank one.
+const BLANK_MAX_BYTES_PER_PIXEL: f64 = 0.15;
+/// How far a pixel may stray from the first (JPEG noise) and still be the same colour.
+const BLANK_TOLERANCE: i16 = 12;
+
+/// Whether an image is all one colour (or all see-through).
+pub fn is_blank(bytes: &[u8]) -> bool {
+    let reader = || image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok();
+    let Some((w, h)) = reader().and_then(|r| r.into_dimensions().ok()) else { return false };
+    let px = f64::from(w) * f64::from(h);
+    if px < 1.0 || bytes.len() as f64 / px > BLANK_MAX_BYTES_PER_PIXEL {
+        return false;
+    }
+    let Some(img) = reader().and_then(|r| r.decode().ok()) else { return false };
+    let img = img.to_rgba8();
+    let mut px = img.pixels();
+    let Some(first) = px.next().map(|p| p.0) else { return false };
+    let near = |p: [u8; 4]| {
+        if first[3] == 0 && p[3] == 0 {
+            return true;
+        }
+        p.iter().zip(first).all(|(a, b)| (i16::from(*a) - i16::from(b)).abs() <= BLANK_TOLERANCE)
+    };
+    px.all(|p| near(p.0))
+}
 
 type SharedFetch = Shared<BoxFuture<'static, Result<ArtBytes, Arc<AppError>>>>;
 
@@ -344,10 +375,14 @@ impl ArtCache {
         // Worked out here, not on the blocking thread, so the key always
         // sees the legacy server tag.
         let key = cache_key(path, w, h);
-        if let Some(hit) = self.lookup_async(&key).await? {
-            return Ok(hit);
+        let art = match self.lookup_async(&key).await? {
+            Some(hit) => hit,
+            None => self.join_or_fetch(path, w, h, key).await?,
+        };
+        if art.content_type == BLANK {
+            return Err(AppError::NotFound(format!("blank image: {path:.64}")));
         }
-        self.join_or_fetch(path, w, h, key).await
+        Ok(art)
     }
 
     async fn lookup_async(&self, key: &str) -> AppResult<Option<ArtBytes>> {
@@ -398,10 +433,17 @@ impl ArtCache {
             art.content_type = sniff_content_type(&art.bytes).to_owned();
         }
         let me = self.clone();
-        let a = art.clone();
-        let stored = tokio::task::spawn_blocking(move || me.store_key(&key, &a))
-            .await
-            .map_err(|e| AppError::Internal(format!("art task: {e}")))?;
+        let mut a = art;
+        let (stored, a) = tokio::task::spawn_blocking(move || {
+            if is_blank(&a.bytes) {
+                tracing::debug!(path = %crate::sid::key(&path).chars().take(64).collect::<String>(), "art is all one colour; no picture");
+                a = ArtBytes { bytes: Bytes::new(), content_type: BLANK.into() };
+            }
+            (me.store_key(&key, &a), a)
+        })
+        .await
+        .map_err(|e| AppError::Internal(format!("art task: {e}")))?;
+        let art = a;
         if let Err(e) = stored {
             // Serve the image anyway; only caching failed.
             tracing::warn!("art cache store failed: {e}");
@@ -551,6 +593,49 @@ mod tests {
         let e = c.get_or_fetch("/missing", 1, 1).await.unwrap_err();
         assert_eq!(e.kind(), "notFound");
         assert!(c.get_or_fetch("relative", 1, 1).await.is_err());
+    }
+
+    fn encoded(img: image::RgbaImage, f: image::ImageFormat) -> Vec<u8> {
+        let mut out = Vec::new();
+        let img = if f == image::ImageFormat::Jpeg { image::DynamicImage::ImageRgb8(image::DynamicImage::ImageRgba8(img).to_rgb8()) } else { image::DynamicImage::ImageRgba8(img) };
+        img.write_to(&mut std::io::Cursor::new(&mut out), f).unwrap();
+        out
+    }
+
+    struct Pictures(AtomicUsize);
+
+    #[async_trait::async_trait]
+    impl ArtFetcher for Pictures {
+        async fn fetch(&self, path: &str, w: u32, h: u32) -> AppResult<ArtBytes> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            let img = match path {
+                "/white" => image::RgbaImage::from_pixel(w, h, image::Rgba([255, 255, 255, 255])),
+                "/clear" => image::RgbaImage::from_pixel(w, h, image::Rgba([10, 20, 30, 0])),
+                // White with a small black word in a corner.
+                "/word" => image::RgbaImage::from_fn(w, h, |x, y| if (10..30).contains(&x) && (10..14).contains(&y) { image::Rgba([0, 0, 0, 255]) } else { image::Rgba([255, 255, 255, 255]) }),
+                _ => image::RgbaImage::from_fn(w, h, |x, y| image::Rgba([(x * 7 % 255) as u8, (y * 13 % 255) as u8, ((x ^ y) % 255) as u8, 255])),
+            };
+            let f = if path == "/clear" { image::ImageFormat::Png } else { image::ImageFormat::Jpeg };
+            Ok(ArtBytes { bytes: Bytes::from(encoded(img, f)), content_type: String::new() })
+        }
+    }
+
+    #[tokio::test]
+    async fn an_image_all_one_colour_is_no_picture_and_is_not_fetched_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = Arc::new(Pictures(AtomicUsize::new(0)));
+        let c = ArtCache::open(dir.path(), DEFAULT_CAP_BYTES, f.clone()).unwrap();
+        for blank in ["/white", "/clear"] {
+            let e = c.get_or_fetch(blank, 300, 300).await.unwrap_err();
+            assert_eq!(e.kind(), "notFound", "{blank}");
+        }
+        assert_eq!(f.0.load(Ordering::SeqCst), 2);
+        assert_eq!(c.get_or_fetch("/white", 300, 300).await.unwrap_err().kind(), "notFound");
+        assert_eq!(f.0.load(Ordering::SeqCst), 2, "remembered as blank");
+        // A picture, even a nearly blank one, is a picture.
+        assert!(c.get_or_fetch("/word", 300, 300).await.is_ok());
+        assert!(c.get_or_fetch("/cover", 300, 300).await.is_ok());
+        assert!(!is_blank(b"not an image"));
     }
 
     #[tokio::test]
