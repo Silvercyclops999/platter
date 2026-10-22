@@ -244,10 +244,18 @@ fn a_phone_reaching_lidarr_only_through_the_bridge_checks_it_by_itself() {
     assert!(!r.lidarr.status().home_quiet);
     assert!(claim());
     assert!(!claim(), "not twice while the first runs");
-    // It didn't finish: tried again a while later.
+    // It didn't finish: tried again a while later, then less and less often.
+    r.lidarr.auto_check_done(false);
+    assert!(!claim());
+    *r.now.lock() += super::AUTO_CHECK_AGAIN_S;
+    assert!(claim());
+    r.lidarr.auto_check_done(false);
+    *r.now.lock() += super::AUTO_CHECK_AGAIN_S;
+    assert!(!claim(), "the wait doubles (kept in the database, so a restart of the app waits too)");
     *r.now.lock() += super::AUTO_CHECK_AGAIN_S;
     assert!(claim());
     // It ran and didn't pass: not again for a day.
+    r.lidarr.auto_check_done(true);
     let failed = super::LastCheck { passed: false, managed_ok: Some(false), checked_at: *r.now.lock(), url: "homeside".into(), roots: vec![] };
     r.db.write(|c| crate::db::store::kv_set(c, "lidarr.lastCheck", &serde_json::to_string(&failed).unwrap())).unwrap();
     *r.now.lock() += super::AUTO_CHECK_AGAIN_S;

@@ -98,12 +98,14 @@ export const HOME_UNREACHABLE = "Getting music is paused: Platter can't reach yo
 
 /**
  * The line a page shows where Get would be, or null: none while Lidarr is
- * ready or reachable (its check runs by itself, and Get shows when it
- * passes); a pause while home can't be reached; `setUp` only when there's
- * no Lidarr anywhere.
+ * ready, or reached only through a home side (its check runs by itself, and
+ * Get shows when it passes); a pause while home can't be reached; `setUp`
+ * otherwise (nothing set up, or set up here with a check that didn't pass).
  */
 export function lidarrNote(s: LidarrStatus | null, setUp: string): string | null {
-  if (!s || s.ready || lidarrReachable(s)) return null;
+  if (!s || s.ready) return null;
+  const here = (s.urlSet || s.awaySet) && s.hasKey && !s.moved;
+  if (!s.notOwner && !here && s.homeSide) return null;
   return s.homeQuiet ? HOME_UNREACHABLE : setUp;
 }
 

@@ -19,7 +19,7 @@ import { SongSwipeUnder, useRowSwipe } from "../rowSwipe";
 import { isLiked, setLiked } from "../../stores/likes";
 import { player, usePlayer } from "../../stores/player";
 import { PlayingBars, countLine } from "./common";
-import { catalogueTop, hasCatalogue, playCatalogueSong, useCatalogueSearch, useTapPlays, type CatalogueResults } from "../../pages/SearchCatalogue";
+import { catalogueTop, hasCatalogue, hasCatalogueRows, playCatalogueSong, useCatalogueSearch, useTapPlays, type CatalogueResults } from "../../pages/SearchCatalogue";
 import { useArtistPhoto } from "../../lib/artistPhotos";
 import { useGetSpots } from "../../pages/lidarrShared";
 import { catalogueKind } from "../../lib/format";
@@ -105,8 +105,9 @@ export function PhoneSearch() {
   const hits = ofKind(all, shown);
   // An artist you don't have, named exactly, is the top result (unless the
   // library has something named exactly).
-  const catTop = shown === "all" || shown === "artist" ? catalogueTop(q, cat, all[0]) : null;
-  const nothingAnywhere = !hits.length && !catTop && !hasCatalogue(cat) && !cat?.pending.length;
+  const catTop = shown === "all" || shown === "artist" ? catalogueTop(q, cat, res?.top, all[0]) : null;
+  const nothingAnywhere = !hits.length && !catTop && !hasCatalogueRows(cat) && !cat?.pending.length;
+  const getSpots = useGetSpots();
   return (
     <div className="ph-page ph-search">
       <h1 className="ph-title">Search</h1>
@@ -191,7 +192,7 @@ export function PhoneSearch() {
         <section aria-label="Results" className="ph-search__results">
           {(catTop || hits.length > 0) && (
             <ul className="ph-rows">
-              {catTop && <CatalogueArtistRow artist={catTop} />}
+              {catTop && <CatalogueArtistRow artist={catTop} get={getSpots} />}
               {hits.map((h) => {
                 const versions = h.track ? versionsCount(h.track, res) : 0;
                 return (
@@ -210,7 +211,7 @@ export function PhoneSearch() {
             </ul>
           )}
           {nothingAnywhere && <p className="ph-rows__note">Nothing in your library matches "{q}".</p>}
-          <PhoneCatalogue c={cat} kind={shown} skipArtist={catTop?.mbid} />
+          <PhoneCatalogue c={cat} kind={shown} skipArtist={catTop?.mbid} getSpots={getSpots} />
         </section>
       )}
     </div>
@@ -357,8 +358,7 @@ function Browse() {
 }
 
 /** An artist you don't have, as a result row: their photo, and their page (Get albums) a tap away. */
-function CatalogueArtistRow({ artist }: { artist: CatArtist }) {
-  const get = useGetSpots();
+function CatalogueArtistRow({ artist, get }: { artist: CatArtist; get: boolean }) {
   const box = useRef<HTMLLIElement>(null);
   const { photo } = useArtistPhoto(box, artist.mbid, artist.name, artist.photo);
   return (
@@ -385,8 +385,8 @@ function CatalogueArtistRow({ artist }: { artist: CatArtist }) {
  * then records; an album or an artist opens its page, with Get there. The
  * artist shown as the top result isn't listed again.
  */
-function PhoneCatalogue({ c, kind, skipArtist }: { c: CatalogueResults | null; kind: SearchKind; skipArtist?: string }) {
-  const tapPlays = useTapPlays(useGetSpots());
+function PhoneCatalogue({ c, kind, skipArtist, getSpots }: { c: CatalogueResults | null; kind: SearchKind; skipArtist?: string; getSpots: boolean }) {
+  const tapPlays = useTapPlays(getSpots);
   if (!c || !hasCatalogue(c)) return null;
   const songs = kind === "all" || kind === "track" ? c.songs : [];
   const albums = kind === "all" || kind === "album" ? c.albums : [];
@@ -397,7 +397,7 @@ function PhoneCatalogue({ c, kind, skipArtist }: { c: CatalogueResults | null; k
       <h2 className="ph-section-title">Not in your library</h2>
       <ul className="ph-rows">
         {artists.map((a) => (
-          <CatalogueArtistRow key={`ar-${a.mbid}`} artist={a} />
+          <CatalogueArtistRow key={`ar-${a.mbid}`} artist={a} get={getSpots} />
         ))}
         {songs.map((s) => (
           <li key={`so-${s.recordingId}`} className="ph-hit">

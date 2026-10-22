@@ -249,8 +249,22 @@ impl LidarrStatus {
 }
 
 /// How long after a setup check that started by itself and didn't finish
-/// another is tried (seconds).
+/// another is tried (seconds), doubling after each one up to
+/// [`AUTO_CHECK_MOST_S`]: each check asks Lidarr a lot, through the relay
+/// from a phone.
 pub const AUTO_CHECK_AGAIN_S: i64 = 15 * 60;
+pub const AUTO_CHECK_MOST_S: i64 = 6 * 3600;
+/// Where the last setup check started by itself is kept, so a phone app
+/// started again doesn't start another at once.
+const AUTO_CHECK_KEY: &str = "lidarr.autoCheck";
+
+/// The last setup check started by itself: when, and how many in a row
+/// didn't finish.
+#[derive(Debug, Clone, Copy, Default, Serialize, serde::Deserialize)]
+struct AutoCheck {
+    at: i64,
+    unfinished: u32,
+}
 /// How long after one that ran and didn't pass (seconds): it needs a change
 /// in Lidarr first, and each check asks Lidarr and Plex a lot.
 pub const AUTO_RECHECK_FAILED_S: i64 = 24 * 3600;
@@ -281,8 +295,8 @@ pub struct Lidarr {
     hosts: Arc<parking_lot::RwLock<Option<Arc<dyn upgrade::Hosts>>>>,
     /// Platter Bridge: bridge mode, and the route through a paired Bridge.
     home: Arc<homeside::Hooks>,
-    /// When the last setup check started by itself began (unix seconds).
-    auto_check: Arc<parking_lot::Mutex<Option<i64>>>,
+    /// A setup check started by itself is running.
+    auto_check: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// The address as a key for stored confirmations (and, from the home
@@ -570,26 +584,52 @@ impl Lidarr {
     /// Lidarr can be asked from here but no setup check has passed for it
     /// (a phone that reaches it only through the Bridge never opens that
     /// part of Settings). With `st` from [`Self::status`] just now: true
-    /// when a check should start by itself now, and
-    /// it's counted as started. One that didn't finish is tried again after
-    /// [`AUTO_CHECK_AGAIN_S`]; one that ran and didn't pass, after a day.
+    /// when a check should start by itself now, and it's counted as
+    /// started; [`Self::auto_check_done`] follows. Never two at once. One
+    /// that didn't finish is tried again after [`AUTO_CHECK_AGAIN_S`],
+    /// doubling; one that ran and didn't pass, after a day.
     pub fn claim_auto_check(&self, st: &LidarrStatus) -> bool {
-        if self.bridge_mode() {
-            return false;
-        }
-        if st.ready || !st.usable() {
+        use std::sync::atomic::Ordering;
+        if self.bridge_mode() || st.ready || !st.usable() {
             return false;
         }
         let now = (self.inner.clock)();
         if self.last_check().is_some_and(|l| now - l.checked_at < AUTO_RECHECK_FAILED_S) {
             return false;
         }
-        let mut at = self.auto_check.lock();
-        if at.is_some_and(|t| now - t < AUTO_CHECK_AGAIN_S) {
+        let last: AutoCheck = self
+            .inner
+            .db
+            .read(|c| kv_get(c, AUTO_CHECK_KEY))
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        let wait = if last.unfinished == 0 { 0 } else { (AUTO_CHECK_AGAIN_S << (last.unfinished - 1).min(8)).min(AUTO_CHECK_MOST_S) };
+        if now - last.at < wait {
             return false;
         }
-        *at = Some(now);
+        if self.auto_check.swap(true, Ordering::SeqCst) {
+            return false;
+        }
+        // Counted as unfinished until it's done.
+        let next = AutoCheck { at: now, unfinished: last.unfinished.saturating_add(1) };
+        if let Ok(json) = serde_json::to_string(&next) {
+            let _ = self.inner.db.write(|c| kv_set(c, AUTO_CHECK_KEY, &json));
+        }
         true
+    }
+
+    /// A setup check started by itself ended; `finished`: it ran (passed or
+    /// not), rather than failing to reach Lidarr or Plex.
+    pub fn auto_check_done(&self, finished: bool) {
+        if finished {
+            let done = AutoCheck { at: (self.inner.clock)(), unfinished: 0 };
+            if let Ok(json) = serde_json::to_string(&done) {
+                let _ = self.inner.db.write(|c| kv_set(c, AUTO_CHECK_KEY, &json));
+            }
+        }
+        self.auto_check.store(false, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// The last check's outcome on this device, when it was for the

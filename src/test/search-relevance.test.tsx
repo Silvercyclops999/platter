@@ -13,7 +13,7 @@ import type { MockBackend } from "../lib/mock";
 import { MockCatalogue } from "../lib/mock/catalogue";
 import { DEFAULT_SETTINGS, type SearchResults, type Track } from "../lib/types";
 import { resetCatalogueCache } from "../pages/SearchCatalogue";
-import { HOME_UNREACHABLE } from "../pages/lidarrShared";
+import { HOME_UNREACHABLE, lidarrNote } from "../pages/lidarrShared";
 import { resetArtistPhotos } from "../lib/artistPhotos";
 import { usePhoneForm } from "../phone/form";
 import { PhoneSearch } from "../phone/pages/Search";
@@ -86,14 +86,17 @@ describe("an artist you don't have", () => {
   });
 
   it("stays below a library result named exactly", async () => {
+    // A loosely matching library artist leads the phone's list; the song named exactly is the top result.
     const song = { ...mock.fx.tracks[0], id: "x2", title: "Cold Coast" } as Track;
-    vi.spyOn(mock, "search").mockResolvedValue({ songs: [song], artists: [], albums: [], playlists: [], top: { kind: "track", track: song }, tookMs: 1, source: "local" } as SearchResults);
+    const loose = { ...mock.fx.artists[0], id: "a-loose", title: "Coastal Cold Front" };
+    vi.spyOn(mock, "search").mockResolvedValue({ songs: [song], artists: [loose], albums: [], playlists: [], top: { kind: "track", track: song }, tookMs: 1, source: "local" } as SearchResults);
     search("cold coast");
     const rest = await screen.findByRole("region", { name: "Not in your library" }, SLOW);
     await within(rest).findByRole("button", { name: "Cold Coast, artist, not in your library" }, SLOW);
     const results = screen.getByRole("region", { name: "Results" });
-    expect(within(within(results).getAllByRole("listitem")[0]).getByText("Cold Coast", { selector: ".ph-row__title" })).toBeInTheDocument();
-    expect(within(results).getAllByRole("listitem")[0].closest("section[aria-label='Not in your library']")).toBeNull();
+    const first = within(results).getAllByRole("listitem")[0];
+    expect(within(first).getByText("Coastal Cold Front")).toBeInTheDocument();
+    expect(first.closest("section[aria-label='Not in your library']")).toBeNull();
   });
 });
 
@@ -147,5 +150,20 @@ describe("Lidarr through the Bridge on a phone", () => {
     expect(screen.queryByRole("button", { name: "Get albums" })).toBeNull();
     await act(() => new Promise((r) => setTimeout(r, 400)));
     expect(mock.lidarr.autoChecked).toBe(false);
+  });
+});
+
+describe("the line where Get would be", () => {
+  const base = { urlSet: false, awaySet: false, hasKey: false, headerNames: [], unencrypted: [], ready: false };
+  it("says to set up only when Lidarr isn't reached, or its check here didn't pass", () => {
+    expect(lidarrNote(null, "set up")).toBeNull();
+    expect(lidarrNote({ ...base, ready: true }, "set up")).toBeNull();
+    // Through the Bridge, its check running by itself: nothing yet.
+    expect(lidarrNote({ ...base, homeSide: true }, "set up")).toBeNull();
+    // Set up here with a key, but the check didn't pass (or the key isn't sent there).
+    expect(lidarrNote({ ...base, urlSet: true, hasKey: true }, "set up")).toBe("set up");
+    expect(lidarrNote({ ...base, urlSet: true, hasKey: true, moved: "moved" }, "set up")).toBe("set up");
+    expect(lidarrNote({ ...base, homeQuiet: true }, "set up")).toBe(HOME_UNREACHABLE);
+    expect(lidarrNote(base, "set up")).toBe("set up");
   });
 });

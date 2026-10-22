@@ -30,10 +30,12 @@ pub async fn lidarr_status(app: tauri::AppHandle, lidarr: State<'_, Lidarr>) -> 
     if start {
         let l = lidarr.inner().clone();
         tauri::async_runtime::spawn(async move {
-            match l.check().await {
+            let r = l.check().await;
+            match &r {
                 Ok(r) => tracing::info!(passed = r.passed, "Lidarr's setup check ran by itself"),
                 Err(e) => tracing::info!("Lidarr's setup check by itself didn't finish: {e}"),
             }
+            l.auto_check_done(r.is_ok());
             use tauri::Emitter;
             let _ = app.emit(EVENT_CHANGED, ());
         });

@@ -1597,6 +1597,11 @@ async fn search_with_a_word_left_out_matches_the_rest_whole() {
     // A whole word is still found with an unknown one left out.
     let r = search::search(&t.db, "zebra runaway", SearchFilter::Songs, None).unwrap();
     assert_eq!(song_titles(&r), vec!["Runaway"]);
+    // The last word may still be half typed, as the start of a title's word.
+    let r = search::search(&t.db, "zebra runaw", SearchFilter::Songs, None).unwrap();
+    assert_eq!(song_titles(&r), vec!["Runaway"]);
+    let r = search::search(&t.db, "zebra highl", SearchFilter::Songs, None).unwrap();
+    assert_eq!(song_titles(&r), vec!["Highlights"]);
 }
 
 #[tokio::test]
