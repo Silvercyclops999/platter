@@ -674,7 +674,12 @@ impl Taps {
             } else if clears && rec.state != RequestState::Failed {
                 t.phase = TapPhase::Searching;
                 t.progress = None;
-                t.message = Some(format!("The copy Lidarr got couldn't be imported ({lower}). Platter is clearing it and looking for another."));
+                // A clear that didn't go out yet says so, as the request does.
+                t.message = rec
+                    .message
+                    .clone()
+                    .filter(|_| rec.clear_fails > 0)
+                    .or_else(|| Some(format!("The copy Lidarr got couldn't be imported ({lower}). Platter is clearing it and looking for another.")));
             } else {
                 t.phase = TapPhase::Failed;
                 t.message = rec

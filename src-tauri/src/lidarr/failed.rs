@@ -41,8 +41,8 @@ pub fn without_cleared(queue: &[QueueItem], cleared: &[String]) -> Vec<QueueItem
 
 /// A download Lidarr couldn't import is this request's to clear only when
 /// Platter added the album and Lidarr got the download after the request
-/// (its time in the queue, or its grab in history). One the user started
-/// before, or one Lidarr can't tell apart, is never touched.
+/// went out (its time in the queue, or its grab in history). One the user
+/// started before, or one Lidarr can't tell apart, is never touched.
 pub fn ours(r: &RequestRecord, q: &QueueItem, history: &[HistoryItem]) -> bool {
     if r.already_in_lidarr || q.id.is_none() {
         return false;
@@ -55,7 +55,9 @@ pub fn ours(r: &RequestRecord, q: &QueueItem, history: &[HistoryItem]) -> bool {
             .filter_map(|h| unix_s(&h.date))
             .min()
     };
-    q.added.as_deref().and_then(unix_s).or_else(grabbed).is_some_and(|t| t >= r.created_at - CLOCK_SLACK_S)
+    // A request that waited here went out with its first search.
+    let sent = r.searched_at.unwrap_or(r.created_at).max(r.created_at);
+    q.added.as_deref().and_then(unix_s).or_else(grabbed).is_some_and(|t| t >= sent - CLOCK_SLACK_S)
 }
 
 /// Lidarr's reason, in lower case for the middle of a sentence.
