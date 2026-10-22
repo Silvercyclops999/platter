@@ -622,17 +622,38 @@ impl Discover {
         let started = std::time::Instant::now();
         let fresh = if lidarr {
             match self.lidarr_part(&q, part).await {
-                Ok(p) => p,
+                // Lidarr's metadata service sometimes answers with nothing.
+                Ok(p) if p.artists.is_empty() && p.albums.is_empty() && p.in_library.is_empty() => {
+                    tracing::info!(part, "catalogue search through Lidarr found nothing; asking MusicBrainz");
+                    self.mb_part(&q, part).await
+                }
+                Ok(p) => Ok(p),
                 Err(e) => {
-                    tracing::debug!("catalogue search through Lidarr: {e}; asking MusicBrainz");
-                    self.mb_part(&q, part).await?
+                    tracing::info!(part, "catalogue search through Lidarr: {e}; asking MusicBrainz");
+                    self.mb_part(&q, part).await
                 }
             }
         } else {
-            self.mb_part(&q, part).await?
+            self.mb_part(&q, part).await
+        };
+        let fresh = match fresh {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(part, ms = started.elapsed().as_millis() as u64, "catalogue search failed: {e}");
+                return Err(e);
+            }
         };
         let fresh = if part == "artists" { self.named_loosely(&q, fresh).await } else { fresh };
-        tracing::debug!(part, source = %fresh.source, ms = started.elapsed().as_millis() as u64, "catalogue search");
+        tracing::info!(
+            part,
+            source = %fresh.source,
+            artists = fresh.artists.len(),
+            albums = fresh.albums.len(),
+            songs = fresh.songs.len(),
+            in_library = fresh.in_library.len(),
+            ms = started.elapsed().as_millis() as u64,
+            "catalogue search"
+        );
         let mut cache = self.searches.lock();
         if cache.len() >= SEARCH_KEPT {
             cache.retain(|_, (at, _)| now - *at < SEARCH_TTL);

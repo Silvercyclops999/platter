@@ -96,18 +96,27 @@ export function lidarrReachable(s: LidarrStatus): boolean {
 /** Said where Get would be while Lidarr is set up at home but nothing reaches it from here. */
 export const HOME_UNREACHABLE = "Getting music is paused: Platter can't reach your home right now. It comes back by itself.";
 
+/** Said where Get would be while the Bridge's first setup check of Lidarr runs. */
+export const HOME_CHECKING = "Getting music starts in a moment, once Platter has checked your Lidarr. Nothing to set up.";
+
+/** Said where Get would be when Lidarr's setup check found something that stops getting music. */
+export const CHECK_FAILED = "Getting music is off: your Lidarr setup check found a problem. Open Settings > Lidarr on your computer to see it.";
+
 /**
- * The line a page shows where Get would be, or null: none while Lidarr is
- * ready, or reached only through a home side (its check runs by itself, and
- * Get shows when it passes); a pause while home can't be reached; `setUp`
+ * The line a page shows where Get would be, or null while Lidarr is ready.
+ * Never nothing when Get can't show: a pause while home can't be reached,
+ * the check still to run or not passed through a home side, `setUp`
  * otherwise (nothing set up, or set up here with a check that didn't pass).
  */
 export function lidarrNote(s: LidarrStatus | null, setUp: string): string | null {
   if (!s || s.ready) return null;
   const here = (s.urlSet || s.awaySet) && s.hasKey && !s.moved;
-  if (!s.notOwner && !here && s.homeSide) return null;
+  if (!s.notOwner && !here && s.homeSide) return s.checkFailed ? CHECK_FAILED : HOME_CHECKING;
   return s.homeQuiet ? HOME_UNREACHABLE : setUp;
 }
+
+/** What a phone says where Get would be when Lidarr isn't reached at all (there's nothing to set up on a phone). */
+export const PHONE_SET_UP = "Getting music needs Lidarr, set up once on your computer or with a Bridge.";
 
 /** [`lidarrNote`] for a page that asks for nothing else. */
 export function useLidarrNote(setUp: string): string | null {
