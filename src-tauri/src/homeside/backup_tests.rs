@@ -336,8 +336,16 @@ async fn background_work_leaves_the_main_relay_to_requests_when_the_other_end_he
     super::tests::until("on the backup it was heard on", || counts() == (2, 3, 2)).await;
     desk.wire.send(&desk.link, &answer(1)).await.unwrap();
     super::tests::until("the answer on all three", || counts() == (3, 4, 3)).await;
-    // That backup takes nothing: the main relay still carries it.
+    // Heard on both: still only one copy, on the first.
+    set("0.2.38", &[&b1, &b2]);
+    desk.wire.send(&desk.link, &entries()).await.unwrap();
+    super::tests::until("on the first backup only", || counts() == (3, 5, 3)).await;
+    // The first takes nothing: the other backup carries it.
     b1.set_limited(true);
+    desk.wire.send(&desk.link, &entries()).await.unwrap();
+    super::tests::until("on the other backup", || counts() == (3, 5, 4)).await;
+    // No backup takes it: the main relay still does.
+    b2.set_limited(true);
     desk.wire.send(&desk.link, &entries()).await.unwrap();
     super::tests::until("on the main relay", || main.published().len() == 4).await;
     drop(bridge);

@@ -69,8 +69,9 @@ impl From<RelayError> for RelayHealth {
 #[async_trait]
 pub trait Relay: Send + Sync {
     async fn publish(&self, topic: &str, body: &str) -> Result<(), RelayError>;
-    /// Whether background work may publish this many messages now. Always
-    /// yes, except on ntfy.sh (see [`Allowance`]).
+    /// Whether background work may publish this many messages now, taking
+    /// the room for them if so. Always yes, except on the public relays
+    /// (see [`Allowance`] and [`Burst`]).
     fn room_for(&self, _messages: usize) -> bool {
         true
     }
@@ -119,6 +120,27 @@ impl NtfyRelay {
     fn paced(&self) -> bool {
         self.base == super::DEFAULT_RELAY || super::BACKUP_RELAYS.contains(&self.base.as_str())
     }
+
+    /// Wait for room in this relay's run of requests (see [`Burst`]), so a
+    /// lot at once (say every link starting up) goes spread out instead of
+    /// being turned away. False when it would wait too long.
+    async fn turn(&self) -> bool {
+        if !self.paced() {
+            return true;
+        }
+        let give_up = Instant::now() + BURST_WAIT_MOST;
+        loop {
+            let now = Instant::now();
+            let wait = match pace_entry(&mut PACE.lock(), &self.base).burst.take(now) {
+                Ok(()) => return true,
+                Err(wait) => wait,
+            };
+            if now + wait > give_up {
+                return false;
+            }
+            tokio::time::sleep(wait).await;
+        }
+    }
 }
 
 fn status_err(code: u16) -> RelayError {
@@ -129,6 +151,11 @@ fn status_err(code: u16) -> RelayError {
 /// again, up to [`COOL_MAX`].
 pub const COOL_FIRST: Duration = if cfg!(test) { Duration::from_millis(300) } else { Duration::from_secs(15 * 60) };
 pub const COOL_MAX: Duration = if cfg!(test) { Duration::from_secs(1) } else { Duration::from_secs(2 * 3600) };
+
+/// The same for the backup relays. They have messages to spare all day, so
+/// a no from one is about too many at once: a short pause is enough.
+pub const BACKUP_COOL_FIRST: Duration = if cfg!(test) { Duration::from_millis(100) } else { Duration::from_secs(10) };
+pub const BACKUP_COOL_MAX: Duration = if cfg!(test) { Duration::from_millis(400) } else { Duration::from_secs(2 * 60) };
 
 /// After the relay turned a message away (it answers 429), nothing more is
 /// published there until the wait is over: every try counts against the
@@ -147,6 +174,15 @@ impl Cool {
     /// The relay said no: wait, longer each time in a row.
     pub fn turned_away(&mut self, now: Instant) {
         self.wait(now, COOL_FIRST, COOL_MAX);
+    }
+
+    /// [`Cool::turned_away`] for this relay: a backup only pauses briefly.
+    pub fn turned_away_by(&mut self, base: &str, now: Instant) {
+        if super::BACKUP_RELAYS.contains(&base) {
+            self.wait(now, BACKUP_COOL_FIRST, BACKUP_COOL_MAX);
+        } else {
+            self.turned_away(now);
+        }
     }
 
     /// Wait `first`, then twice as long each time in a row, up to `most`.
@@ -176,9 +212,77 @@ pub const ALLOWANCE_PER_HOUR: f64 = 4.0;
 
 /// The same for the backup relays. They allow an address about 17,000
 /// messages in 12 hours (1,440 an hour), so four devices at one home at
-/// this pace use about a third of it.
-pub const BACKUP_ALLOWANCE_MOST: f64 = 240.0;
+/// this pace use about a third of it. What may go at once stays small:
+/// [`Burst`] is what really limits a run of messages there.
+pub const BACKUP_ALLOWANCE_MOST: f64 = 40.0;
 pub const BACKUP_ALLOWANCE_PER_HOUR: f64 = 120.0;
+
+/// Requests (publishes and listens) one device may make to a public relay
+/// in a row, and how often one more comes back. The relays let an address
+/// make about 60 in a row and then one every 5 seconds, and every device
+/// at a home shares that, so one device keeps to a third of the run and
+/// a slower pace.
+pub const BURST_MOST: f64 = 20.0;
+pub const BURST_EVERY: Duration = if cfg!(test) { Duration::from_millis(50) } else { Duration::from_secs(6) };
+/// What background work leaves for requests and answers.
+pub const BURST_KEEP: f64 = 5.0;
+/// How long a request waits for its turn before giving up on that relay
+/// (any other relays carry on).
+pub const BURST_WAIT_MOST: Duration = if cfg!(test) { Duration::from_millis(500) } else { Duration::from_secs(30) };
+
+/// The run of requests this device may still make to one relay right now.
+/// Requests and answers wait their turn; background work only goes when
+/// it leaves [`BURST_KEEP`] for them, and otherwise waits for a later round.
+#[derive(Debug)]
+pub struct Burst {
+    left: f64,
+    at: Option<Instant>,
+}
+
+impl Default for Burst {
+    fn default() -> Self {
+        Self { left: BURST_MOST, at: None }
+    }
+}
+
+impl Burst {
+    fn fill(&mut self, now: Instant) {
+        if let Some(at) = self.at {
+            let back = now.saturating_duration_since(at).as_secs_f64() / BURST_EVERY.as_secs_f64();
+            self.left = (self.left + back).min(BURST_MOST);
+        }
+        self.at = Some(now);
+    }
+
+    /// One request: taken, or how long until there's room for it.
+    pub fn take(&mut self, now: Instant) -> Result<(), Duration> {
+        self.fill(now);
+        if self.left >= 1.0 {
+            self.left -= 1.0;
+            Ok(())
+        } else {
+            Err(BURST_EVERY.mul_f64(1.0 - self.left))
+        }
+    }
+
+    /// Whether background work can make `n` requests now and still leave
+    /// [`BURST_KEEP`]. A message too big for that goes once the run is full.
+    pub fn fits(&mut self, n: usize, now: Instant) -> bool {
+        self.fill(now);
+        self.left >= (n as f64 + BURST_KEEP).min(BURST_MOST)
+    }
+
+    /// Take `n` requests that [`Burst::fits`] said there was room for.
+    pub fn take_n(&mut self, n: usize) {
+        self.left -= n as f64;
+    }
+
+    /// The relay said too many at once: start again from nothing.
+    pub fn emptied(&mut self, now: Instant) {
+        self.fill(now);
+        self.left = self.left.min(0.0);
+    }
+}
 
 /// What background work (synced changes, shared Lidarr state, lyrics) may
 /// still publish to a public relay from this device. What doesn't fit
@@ -225,12 +329,20 @@ impl Allowance {
     }
 }
 
-fn pace_entry<'a>(pace: &'a mut HashMap<String, (Cool, Allowance)>, base: &str) -> &'a mut (Cool, Allowance) {
-    pace.entry(base.to_string()).or_insert_with(|| (Cool::default(), Allowance::for_relay(base)))
+/// One relay's pace: its wait after a no, this device's background
+/// allowance and its run of requests there.
+struct Pace {
+    cool: Cool,
+    allowance: Allowance,
+    burst: Burst,
 }
 
-/// Per relay address: its wait and this device's allowance there.
-static PACE: LazyLock<parking_lot::Mutex<HashMap<String, (Cool, Allowance)>>> = LazyLock::new(Default::default);
+fn pace_entry<'a>(pace: &'a mut HashMap<String, Pace>, base: &str) -> &'a mut Pace {
+    pace.entry(base.to_string()).or_insert_with(|| Pace { cool: Cool::default(), allowance: Allowance::for_relay(base), burst: Burst::default() })
+}
+
+/// Per relay address.
+static PACE: LazyLock<parking_lot::Mutex<HashMap<String, Pace>>> = LazyLock::new(Default::default);
 
 /// What this device published in the hour so far, by kind, for the log.
 #[derive(Default)]
@@ -246,17 +358,24 @@ struct Meter {
 static METER: LazyLock<parking_lot::Mutex<Meter>> = LazyLock::new(Default::default);
 
 tokio::task_local! {
-    /// What's being published, for the hourly count (set with [`as_kind`]).
-    static KIND: &'static str;
+    /// What's being published, for the hourly count, and whether it's
+    /// background work whose requests [`Relay::room_for`] already took
+    /// (set with [`as_kind`]).
+    static KIND: (&'static str, bool);
 }
 
 /// Publish under a kind name, so the hourly count can say what went.
-pub async fn as_kind<F: std::future::Future>(kind: &'static str, f: F) -> F::Output {
-    KIND.scope(kind, f).await
+/// `paid`: background work that [`Relay::room_for`] made room for.
+pub async fn as_kind<F: std::future::Future>(kind: &'static str, paid: bool, f: F) -> F::Output {
+    KIND.scope((kind, paid), f).await
 }
 
 fn kind_now() -> &'static str {
-    KIND.try_with(|k| *k).unwrap_or("other")
+    KIND.try_with(|k| k.0).unwrap_or("other")
+}
+
+fn paid_now() -> bool {
+    KIND.try_with(|k| k.1).unwrap_or(false)
 }
 
 /// What a count is about: `n` messages of a kind went, were held back to
@@ -362,7 +481,11 @@ impl Relay for NtfyRelay {
         if !ok_topic(topic) {
             return Err(RelayError::Refused(400));
         }
-        if PACE.lock().get(&self.base).is_some_and(|(c, _)| c.waiting(Instant::now())) {
+        if PACE.lock().get(&self.base).is_some_and(|p| p.cool.waiting(Instant::now())) {
+            note(kind_now(), 1, Counted::Held);
+            return Err(RelayError::Limited);
+        }
+        if !paid_now() && !self.turn().await {
             note(kind_now(), 1, Counted::Held);
             return Err(RelayError::Limited);
         }
@@ -379,15 +502,17 @@ impl Relay for NtfyRelay {
         let code = resp.status().as_u16();
         let res = if resp.status().is_success() { Ok(()) } else { Err(status_err(code)) };
         let mut pace = PACE.lock();
-        let (cool, _) = pace_entry(&mut pace, &self.base);
+        let p = pace_entry(&mut pace, &self.base);
         match res {
             Ok(()) => {
-                cool.went();
+                p.cool.went();
                 drop(pace);
                 note_at(Some(host(&self.base)), kind_now(), 1, Counted::Sent);
             }
             Err(RelayError::Limited) => {
-                cool.turned_away(Instant::now());
+                let now = Instant::now();
+                p.cool.turned_away_by(&self.base, now);
+                p.burst.emptied(now);
                 drop(pace);
                 tracing::info!("relay {}: it's turning messages away; nothing more goes to it for a while (any other relays carry on)", host(&self.base));
                 note_at(Some(host(&self.base)), kind_now(), 1, Counted::TurnedAway);
@@ -401,12 +526,22 @@ impl Relay for NtfyRelay {
         if !self.paced() {
             return true;
         }
-        pace_entry(&mut PACE.lock(), &self.base).1.take(messages, Instant::now())
+        let now = Instant::now();
+        let mut pace = PACE.lock();
+        let p = pace_entry(&mut pace, &self.base);
+        if !p.burst.fits(messages, now) || !p.allowance.take(messages, now) {
+            return false;
+        }
+        p.burst.take_n(messages);
+        true
     }
 
     async fn subscribe(&self, topics: &[String], since: Option<&str>) -> Result<mpsc::Receiver<RelayEvent>, RelayError> {
         if topics.is_empty() || !topics.iter().all(|t| ok_topic(t)) {
             return Err(RelayError::Refused(400));
+        }
+        if !self.turn().await {
+            return Err(RelayError::Limited);
         }
         let mut req = self.http.get(format!("{}/{}/json", self.base, topics.join(",")));
         if let Some(id) = since.filter(|s| ok_topic(s)) {

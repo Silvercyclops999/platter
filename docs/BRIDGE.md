@@ -271,13 +271,19 @@ changes, shared Lidarr state, lyrics) to a small allowance an hour, and
 what doesn't fit waits for your home network or goes a little later.
 Requests and answers always go. The Bridge sends a heartbeat every hour,
 and devices that aren't on the same network check in through the relay
-every few hours. If the relay says no anyway, nothing more goes to it for
-a while instead of trying again at once. A relay that can't be reached at
-all is left alone for a minute, then longer each time, up to half an hour,
-while the other two carry everything. Each of the three has its own
+every few hours. Every relay also lets one address make only so many
+requests in a row (about 60, then one every 5 seconds), so each device
+makes at most 20 in a row to a relay and then one every 6 seconds. When a
+lot is due at once, like every link starting up, it goes spread out, and
+background work always leaves a few for requests and answers. If ntfy.sh
+says no anyway, nothing more goes to it for a while instead of trying
+again at once. A backup that says no is paused for 10 seconds, then
+longer each time in a row, up to 2 minutes. A relay that can't be reached
+at all is left alone for a minute, then longer each time, up to half an
+hour, while the other two carry everything. Each of the three has its own
 allowance. Once both ends run a build that listens on all three,
-background work goes only to the two backups, so ntfy.sh's daily
-allowance is kept for requests and answers. Shared Lidarr state goes
+background work goes to one backup only (the other if that one says no),
+so ntfy.sh's daily allowance is kept for requests and answers. Shared Lidarr state goes
 before lyrics, and lyrics go a few songs per message, so they trickle in
 steadily instead of waiting for room for one big message. If you run your own ntfy server, only it and its own limits
 apply.

@@ -1355,3 +1355,51 @@ async fn a_long_guest_move_counts_each_step_and_is_all_or_nothing() {
     assert_eq!(h.player.user(), before);
     assert_eq!(h.player.log.lock().iter().filter(|l| l.starts_with("move ")).count(), super::MOVE_SPAN, "one sequence ran");
 }
+
+#[test]
+fn a_run_of_requests_to_one_relay_goes_spread_out() {
+    let t0 = std::time::Instant::now();
+    let mut b = relay::Burst::default();
+    for _ in 0..relay::BURST_MOST as usize {
+        assert!(b.take(t0).is_ok());
+    }
+    // The run is used up: the next waits about one turn.
+    let wait = b.take(t0).unwrap_err();
+    assert!(wait > std::time::Duration::ZERO && wait <= relay::BURST_EVERY);
+    assert!(b.take(t0 + relay::BURST_EVERY).is_ok());
+    assert!(b.take(t0 + relay::BURST_EVERY).is_err());
+}
+
+#[test]
+fn background_work_leaves_room_for_requests_and_answers() {
+    let t0 = std::time::Instant::now();
+    let mut b = relay::Burst::default();
+    let keep = relay::BURST_KEEP as usize;
+    let most = relay::BURST_MOST as usize;
+    assert!(b.fits(most - keep, t0));
+    b.take_n(most - keep);
+    // Only what's kept is left: background waits, a request still goes.
+    assert!(!b.fits(1, t0));
+    assert!(b.take(t0).is_ok());
+    // A message too big for the run goes once it's full.
+    let full = t0 + relay::BURST_EVERY * (most as u32 + 1);
+    assert!(b.fits(most + 10, full));
+    // Turned away: nothing left until it comes back.
+    b.emptied(full);
+    assert!(b.take(full).is_err());
+}
+
+#[test]
+fn a_backup_relay_that_says_no_is_only_paused_briefly() {
+    let t0 = std::time::Instant::now();
+    let mut backup = relay::Cool::default();
+    backup.turned_away_by(crate::social::listen::BACKUP_RELAYS[0], t0);
+    let mut main = relay::Cool::default();
+    main.turned_away_by(crate::social::listen::DEFAULT_RELAY, t0);
+    assert!(!backup.waiting(t0 + relay::BACKUP_COOL_FIRST));
+    assert!(main.waiting(t0 + relay::BACKUP_COOL_FIRST));
+    for _ in 0..10 {
+        backup.turned_away_by(crate::social::listen::BACKUP_RELAYS[0], t0);
+    }
+    assert!(!backup.waiting(t0 + relay::BACKUP_COOL_MAX));
+}

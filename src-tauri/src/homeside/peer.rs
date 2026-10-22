@@ -112,18 +112,21 @@ impl Wire {
         let force = up.is_empty();
         let tries = if force { all } else { up };
         let bodies = Arc::new(bodies);
-        // Background work rides the backups the other end was heard on,
-        // when it runs a build that listens on them, and leaves the main
-        // relay's daily allowance to requests and answers. If none of those
-        // takes it, the main relay still does.
+        // Background work rides one backup the other end was heard on, when
+        // it runs a build that listens on them, and leaves the main relay's
+        // daily allowance to requests and answers. It's always the first
+        // that takes it, so a run of it stays in order on one relay. If no
+        // backup takes it, the main relay still does.
         if background(msg) && tries.first() == Some(&link.relay) && self.backups.iter().any(|(p, _)| p == &link.relay) {
             let heard = self.links.get(&link.id).filter(|p| hears_backups(&p.version)).map(|p| heard_on(&p)).unwrap_or_default();
             let backups: Vec<String> = tries[1..].iter().filter(|b| heard.contains(*b)).cloned().collect();
             if !backups.is_empty() {
-                match self.publish_on(link, &topic, kind, &bodies, backups, force, true).await {
-                    Ok(()) => return Ok(()),
-                    Err(_) => return self.publish_on(link, &topic, kind, &bodies, vec![link.relay.clone()], force, true).await.map_err(|e| AppError::Network(relay_error(e))),
+                for b in backups {
+                    if self.publish_on(link, &topic, kind, &bodies, vec![b], force, true).await.is_ok() {
+                        return Ok(());
+                    }
                 }
+                return self.publish_on(link, &topic, kind, &bodies, vec![link.relay.clone()], force, true).await.map_err(|e| AppError::Network(relay_error(e)));
             }
         }
         self.publish_on(link, &topic, kind, &bodies, tries, force, background(msg)).await.map_err(|e| AppError::Network(relay_error(e)))
@@ -144,7 +147,7 @@ impl Wire {
                 continue;
             }
             let (done, result) = tokio::sync::oneshot::channel();
-            let job = Job { topic: topic.to_string(), bodies: bodies.clone(), kind, force, done };
+            let job = Job { topic: topic.to_string(), bodies: bodies.clone(), kind, force, paid: paced, done };
             if self.queue(&link.id, &base, relay).send(job).is_ok() {
                 going.push(result);
             }
@@ -259,6 +262,8 @@ struct Job {
     kind: &'static str,
     /// Every relay was marked down, so it's tried anyway.
     force: bool,
+    /// Background work the relay already made room for.
+    paid: bool,
     done: tokio::sync::oneshot::Sender<Result<(), RelayError>>,
 }
 
@@ -271,7 +276,7 @@ async fn publisher(relay: Arc<dyn Relay>, base: String, down: DownMap, mut jobs:
         let res = if skip {
             Err(RelayError::Unreachable)
         } else {
-            let res = relay::as_kind(job.kind, publish_all(&*relay, &job.topic, &job.bodies)).await;
+            let res = relay::as_kind(job.kind, job.paid, publish_all(&*relay, &job.topic, &job.bodies)).await;
             match res {
                 Ok(()) => mark(&down, &base, true),
                 Err(RelayError::Refused(400) | RelayError::Limited) => {}
