@@ -8,6 +8,7 @@ import { useState, type CSSProperties } from "react";
 import { Art } from "../../components/Art";
 import { discGroups } from "../../pages/album";
 import { PhoneDownload } from "../PhoneDownload";
+import { ListDownloadingFor } from "../DownloadMark";
 import { backend } from "../../lib/backend";
 import { formatLongDuration, releaseTypeLabel } from "../../lib/format";
 import { useLoad } from "../../lib/useLoad";
@@ -128,21 +129,23 @@ export function PhoneAlbum({ id }: { id: string }) {
       <div className="ph-get ph-album__upgrade">
         <UpgradeCard upgrade={upgrade} onChanged={upgrade.reload} />
       </div>
-      {discGroups(tracks).map((g) => (
-        <section key={g.disc ?? "all"} className="ph-disc-group" aria-label={g.disc !== null ? `Disc ${g.disc}` : undefined}>
-          {g.disc !== null && (
-            <h2 className="ph-disc-head">
-              <span>Disc {g.disc}</span>
-              <span className="ph-disc-head__count tabular">{countLine(g.tracks.length, "song")}</span>
-            </h2>
-          )}
-          <ul className="ph-songs" aria-label={g.disc !== null ? `Disc ${g.disc} songs` : "Songs"}>
-            {g.tracks.map((t) => (
-              <SongRow key={t.id} track={t} index={t.trackNumber} art={false} onPlay={() => void player.playAlbum(album.id, t.id)} />
-            ))}
-          </ul>
-        </section>
-      ))}
+      <ListDownloadingFor item={{ kind: "album", id: album.id }}>
+        {discGroups(tracks).map((g) => (
+          <section key={g.disc ?? "all"} className="ph-disc-group" aria-label={g.disc !== null ? `Disc ${g.disc}` : undefined}>
+            {g.disc !== null && (
+              <h2 className="ph-disc-head">
+                <span>Disc {g.disc}</span>
+                <span className="ph-disc-head__count tabular">{countLine(g.tracks.length, "song")}</span>
+              </h2>
+            )}
+            <ul className="ph-songs" aria-label={g.disc !== null ? `Disc ${g.disc} songs` : "Songs"}>
+              {g.tracks.map((t) => (
+                <SongRow key={t.id} track={t} index={t.trackNumber} art={false} onPlay={() => void player.playAlbum(album.id, t.id)} />
+              ))}
+            </ul>
+          </section>
+        ))}
+      </ListDownloadingFor>
       <p className="ph-foot tabular">
         {countLine(tracks.length, "song")}, {formatLongDuration(data.totalDurationMs)}
       </p>

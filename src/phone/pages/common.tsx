@@ -107,7 +107,8 @@ export function SongRow({
   return (
     <li ref={swipe.ref} className={`ph-song ${swipe.className} ${unplayable ? "is-unplayable" : ""}`} aria-disabled={unplayable || undefined} {...swipe.props}>
       <SongSwipeUnder trackId={track.id} queue={!unplayable} />
-      <button type="button" className="ph-song__main" onClick={onPlay} aria-current={playing ? "true" : undefined}>
+      {/* A song that can't play now takes the press and does nothing. */}
+      <button type="button" className="ph-song__main" onClick={unplayable ? undefined : onPlay} aria-current={playing ? "true" : undefined}>
         {index !== undefined && (
           <span className={`ph-song__num tabular ${playing ? "is-playing" : ""}`}>{playing ? <PlayingBars /> : index}</span>
         )}
@@ -187,10 +188,16 @@ export function ShelfCard({
   round,
   kind,
   tint,
+  marks,
+  art,
   onOpen,
 }: {
   title: string;
+  /** A cover of its own in place of the picture (a mix's sleeve). */
+  art?: ReactNode;
   sub?: string;
+  /** Glyphs before the grey line (a download mark). */
+  marks?: ReactNode;
   /** The cover's colour, shown until it loads. */
   tint?: string | null;
   /** Printed on the sleeve when a record has no cover (defaults to `sub`). */
@@ -202,9 +209,14 @@ export function ShelfCard({
 }) {
   return (
     <button type="button" className={`ph-card-tile ${round ? "is-round" : ""}`} onClick={onOpen}>
-      <Art path={thumb} size={round ? 112 : 136} round={round} kind={kind} tint={tint} sleeve={kind === "album" ? { title, artist: artist ?? sub } : undefined} monogram={kind === "artist" ? title : undefined} />
+      {art ?? <Art path={thumb} size={round ? 112 : 136} round={round} kind={kind} tint={tint} sleeve={kind === "album" ? { title, artist: artist ?? sub } : undefined} monogram={kind === "artist" ? title : undefined} />}
       <span className="ph-card-tile__title">{title}</span>
-      {sub && <span className="ph-card-tile__sub">{sub}</span>}
+      {(sub || marks) && (
+        <span className="ph-card-tile__sub">
+          {marks}
+          {sub}
+        </span>
+      )}
     </button>
   );
 }

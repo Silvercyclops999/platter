@@ -2264,6 +2264,8 @@ export interface DownloadStatus {
   usedBytes: number;
   limitBytes: number;
   freeBytes?: number | null;
+  /** The size of the disk holding the folder. */
+  totalBytes?: number | null;
   folder: string;
   paused?: DownloadPause | null;
   /** Songs waiting to be fetched. */

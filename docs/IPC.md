@@ -1993,7 +1993,7 @@ busy, when cancelled, or when the offer no longer holds.
 | `downloads_remove_all` | – | bytes freed (number) |
 | `downloads_choose_folder` | – | the new folder, or null when the picker was cancelled |
 
-`DownloadStatus = { items: DownloadItem[], usedBytes, limitBytes, freeBytes?, folder, paused?: "offline"|"notHome"|"full"|"noSpace", queued, current?: { trackId, received, total? } }`
+`DownloadStatus = { items: DownloadItem[], usedBytes, limitBytes, freeBytes?, totalBytes?, folder, paused?: "offline"|"notHome"|"full"|"noSpace", queued, current?: { trackId, received, total? } }`
 
 `DownloadItem = { kind, id, title, state: "queued"|"downloading"|"downloaded"|"error", total, done, failed, missing, progress (0 to 1), bytes, error? }`
 

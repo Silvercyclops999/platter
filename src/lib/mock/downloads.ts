@@ -50,6 +50,7 @@ export class MockDownloads {
   connection: "local" | "remote" | "relay" = "local";
   folder = "C:\\Users\\listener\\AppData\\Roaming\\Platter\\downloads";
   freeBytes = 182 * GB;
+  totalBytes = 256 * GB;
   /** Bytes counted as used on top of the files (fills storage in tests and demos). */
   usedOffset = 0;
 
@@ -145,6 +146,7 @@ export class MockDownloads {
       usedBytes: this.usedBytes(),
       limitBytes: this.limitBytes(),
       freeBytes: this.freeBytes,
+      totalBytes: this.totalBytes,
       folder: this.folder,
       paused: this.paused,
       queued: [...this.files.values()].filter((f) => f.state === "queued").length,
