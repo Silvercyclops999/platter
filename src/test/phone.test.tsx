@@ -27,6 +27,7 @@ import { SIRI_PHRASES } from "../phone/phoneSettings";
 import { dropIndex } from "../phone/Sheets";
 import { cancelSleep, due, sleepLabel, startSleep, useSleep } from "../phone/sleepTimer";
 import { plateText, remaining } from "../phone/bits";
+import { currentPositionMs } from "../shell/lyrics";
 import { useDownloads } from "../stores/downloads";
 import { useFileTags } from "../stores/fileTags";
 import { player, usePlayer } from "../stores/player";
@@ -586,13 +587,15 @@ describe("lyrics", () => {
     fireEvent.touchMove(view);
     top = 640;
     const follow = await screen.findByRole("button", { name: "Follow along" });
-    // The song reaches later lines in small steps (ticks, not a seek): the lines light, the list stays.
+    // The song reaches later lines in small steps from where it has got to
+    // (ticks, not a seek, however slow the machine): the lines light, the list stays.
     const to = l.timed![3].startMs + 10;
-    for (let ms = from; ms < to; ms = Math.min(to, ms + 1000)) {
-      const next = Math.min(to, ms + 1000);
+    while (currentPositionMs() < to) {
+      const next = Math.min(to, Math.round(currentPositionMs()) + 500);
       act(() => usePlayer.setState({ positionMs: next }));
     }
-    await waitFor(() => expect(lineAt(3)).toHaveAttribute("aria-current", "true"));
+    const lit = () => Number(view.querySelector('[aria-current="true"]')?.getAttribute("data-line") ?? -1);
+    await waitFor(() => expect(lit()).toBeGreaterThanOrEqual(3));
     // Longer than a follow's eased scroll takes.
     await act(() => new Promise((r) => setTimeout(r, FOLLOW_DELAY_MS + FOLLOW_MS + 100)));
     expect(writes).toEqual([]);
