@@ -172,6 +172,20 @@ describe("phone settings screens", () => {
     expect(lastRoute()).toEqual({ name: "settings", section: "Playback" });
   });
 
+  it("Go offline is a quick switch above the sections, and turns offline on and off", async () => {
+    useRouter.getState().reset({ name: "settings" });
+    render(<SettingsPage />);
+    const quick = await screen.findByRole("list", { name: "Quick switches" });
+    expect(quick.compareDocumentPosition(screen.getByRole("list", { name: "Settings sections" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const sw = await within(quick).findByRole("switch", { name: "Go offline" });
+    expect(sw).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(sw);
+    await waitFor(() => expect(useSettings.getState().settings?.goOffline).toBe(true));
+    expect(within(quick).getByText("On. Only downloaded music plays.")).toBeInTheDocument();
+    fireEvent.click(within(quick).getByRole("switch", { name: "Go offline" }));
+    await waitFor(() => expect(useSettings.getState().settings?.goOffline).toBe(false));
+  });
+
   it("search finds rows from every section", async () => {
     render(<SettingsPage />);
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "crossfade" } });

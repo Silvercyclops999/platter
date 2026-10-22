@@ -1079,6 +1079,7 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 .ph-set-link__sub { font-size: 13px; line-height: 1.35; color: var(--color-text-secondary); }
 .ph-set-link__state { font-family: var(--font-family); font-size: 12px; color: var(--color-text-muted); }
 .ph-set-link__state.is-on { color: var(--color-accent); }
+.ph-set-quick { margin-bottom: 16px; }
 .ph-set-link__chev { flex: none; color: var(--color-text-muted); }
 .ph-set-list--pages { margin: 20px 0 8px; }
 .ph-set-search { margin-bottom: 16px; }
