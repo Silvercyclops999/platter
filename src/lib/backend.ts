@@ -649,7 +649,7 @@ export interface Backend {
   /** Headphones in the bundled correction index matching `query` (at most 50). */
   headphoneSearch(query: string): Promise<HeadphoneEntry[]>;
   /** Uses a headphone's correction whenever the output in use plays (null turns it off there). Fetches the profile once. */
-  headphoneCorrectionSet(path: string | null): Promise<Settings>;
+  headphoneCorrectionSet(path: string | null, deviceId?: string): Promise<Settings>;
   /** A/B: plays without the correction while true. Not saved. */
   headphoneCorrectionCompare(bypass: boolean): Promise<void>;
   /** Bit-perfect output on or off for the output in use. */
@@ -1604,7 +1604,7 @@ export function createTauriBackend(): Backend {
     audioRoute: () => call("audio_route"),
     headphoneDetect: () => call("headphone_detect"),
     headphoneSearch: (query) => call("headphone_search", { query }),
-    headphoneCorrectionSet: (path) => call("headphone_correction_set", { path }),
+    headphoneCorrectionSet: (path, deviceId) => call("headphone_correction_set", { path, deviceId: deviceId ?? null }),
     headphoneCorrectionCompare: (bypass) => call("headphone_correction_compare", { bypass }),
     bitPerfectSet: (on) => call("bit_perfect_set", { on }),
     artCacheInfo: () => call("art_cache_info"),

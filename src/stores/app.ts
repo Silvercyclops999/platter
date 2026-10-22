@@ -19,14 +19,12 @@ import { loadFolders, onStoreChanged } from "./folders";
  * correction off for them, and it isn't picked for them again.
  */
 export function tunedToast(t: Tuned, b: Backend) {
-  const undo = () => {
-    // The sound moved on meanwhile: the correction belongs to those headphones, not these.
-    if (useOutput.getState().state?.current?.id !== t.deviceId) return;
-    b.headphoneCorrectionSet(null).then(
+  // Only for those headphones: the core says so when the sound moved on.
+  const undo = () =>
+    void b.headphoneCorrectionSet(null, t.deviceId).then(
       (s) => useSettings.getState().setLocal(s),
-      () => toast.error("Couldn't undo that"),
+      (e: { message?: string }) => toast.error(`Couldn't undo that${e?.message ? `: ${e.message}` : ""}`),
     );
-  };
   useToasts.getState().push({ kind: "info", message: `Tuned for ${t.name}`, action: { label: "Undo", run: undo } }, UNDO_MS);
 }
 

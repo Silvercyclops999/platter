@@ -153,6 +153,12 @@ pub fn model_match(name: &str) -> Option<Entry> {
     if hits.iter().any(|r| r.lower != first.lower) {
         return None;
     }
+    // A later generation the system names the same ("AirPods Pro" for
+    // "AirPods Pro 2"): which one it is can't be told.
+    let later = |r: &Row| r.lower.strip_prefix(first.lower.as_str()).is_some_and(|rest| rest.trim_start().starts_with(|c: char| c.is_ascii_digit()));
+    if i.rows.iter().any(later) {
+        return None;
+    }
     let rank = |r: &Row| SOURCE_ORDER.iter().position(|s| i.dirs[r.dir].1.starts_with(s)).unwrap_or(SOURCE_ORDER.len());
     hits.into_iter().min_by_key(|r| rank(r)).map(|r| entry(i, r))
 }

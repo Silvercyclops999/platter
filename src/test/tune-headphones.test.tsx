@@ -80,9 +80,10 @@ describe("tune for my headphones", () => {
     await playOn(AURORA.id);
     tunedToast({ deviceId: AURORA.id, name: "Aurora Studio 600" }, backend);
     await playOn("mock:speakers");
-    const spy = vi.spyOn(backend, "headphoneCorrectionSet");
-    lastToast().action!.run();
-    expect(spy).not.toHaveBeenCalled();
+    await act(async () => lastToast().action!.run());
+    await vi.waitFor(() => expect(lastToast().message).toBe("Couldn't undo that: Those headphones aren't playing any more."));
+    expect(useSettings.getState().settings?.headphoneCorrection).toEqual([expect.objectContaining({ deviceId: AURORA.id })]);
+    expect(useSettings.getState().settings?.headphoneDeclined ?? []).not.toContain(AURORA.id);
   });
 
   it("speakers and names that aren't one model are left alone", async () => {
@@ -129,6 +130,23 @@ describe("tune for my headphones", () => {
     const eq = (tuned: string | null) => stages({ ...emptyPath(), ...p }, null, tuned).find((s) => s.name === "EQ")!.value;
     expect(eq("Aurora Studio 600")).toBe("Tuned for Aurora Studio 600");
     expect(eq(null)).toBe("Headphone correction");
+  });
+
+  it("names are cut down to the model like the core does, maker in front or not", async () => {
+    mock.plugOutput({ id: "mock:studio", name: "Headphones (2- Studio 600 Stereo)", isDefault: false });
+    await playOn("mock:studio");
+    expect(useSettings.getState().settings?.headphoneCorrection).toEqual([expect.objectContaining({ name: "Aurora Studio 600", auto: true })]);
+  });
+
+  it("bit-perfect headphones are left alone", async () => {
+    mock.plugOutput(AURORA);
+    await backend.outputSelect(AURORA.id);
+    await backend.headphoneCorrectionSet(null);
+    await backend.settingsSet({ headphoneDeclined: [] });
+    await backend.bitPerfectSet(true);
+    await playOn("mock:speakers");
+    await playOn(AURORA.id);
+    expect(useSettings.getState().settings?.headphoneCorrection).toEqual([]);
   });
 
   it("the phone has no bit-perfect row (the system mixes every app's sound)", () => {
