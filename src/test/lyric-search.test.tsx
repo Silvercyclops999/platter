@@ -69,6 +69,8 @@ describe("lyric search", () => {
 
   it("reads queries the way the core does", () => {
     expect(lyricQuery("river light")).toBeNull();
+    expect(lyricQuery("don't stop")).toBeNull();
+    expect(lyricQuery('"a')).toBeNull();
     expect(lyricQuery('"river"')).toEqual({ words: ["river"], prefix: false });
     expect(lyricQuery("the river to")).toEqual({ words: ["the", "river", "to"], prefix: true });
     expect(mockLyricSearch("the light away", [["1", RIVER]])).toEqual([{ trackId: "1", line: "And the river took the light / Away from us tonight" }]);

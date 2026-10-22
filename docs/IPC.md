@@ -3527,8 +3527,10 @@ needs three or more words, or words in quotes. Songs found this way come
 after the songs found by name, up to the same number of songs, and
 `lyricLines` holds the line that matched under the song's id (two lines
 joined by " / " when the words run across a break). Lyrics are never
-fetched for a search. The lyrics index is made on first use from the
-user's own lyrics, and made again the same way if it is damaged.
+fetched for a search, and a search never waits on lyrics: the lyrics
+index is made on first use from the user's own lyrics, and a missing or
+damaged index finds nothing that time and is mended in the background,
+keeping what songs already showed where it can.
 
 Matching is forgiving (`db/searchtext.rs` holds the rules and the table of
 spellings): case, accents, apostrophes and most punctuation fold away, "$"
