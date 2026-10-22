@@ -727,6 +727,8 @@ pub fn run() {
                     autoplay: initial.queue_end == settings::QueueEnd::KeepPlaying,
                     smart_shuffle: initial.smart_shuffle,
                     automix: initial.automix_options(),
+                    #[cfg(target_os = "ios")]
+                    session: audio::player::SessionActivate(Arc::new(platform::audio_session::activate)),
                     ..Default::default()
                 },
             );

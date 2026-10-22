@@ -10,12 +10,12 @@ use tokio::sync::broadcast;
 
 use super::engine::EngineConfig;
 use super::events::{
-    AbLoop, ErrorPayload, EventSink, OutputLost, PlayerState, PlayerStatus, PositionPayload,
+    AbLoop, ErrorPayload, EventSink, NO_SOUND_MESSAGE, OutputLost, PlayerState, PlayerStatus, PositionPayload,
     SKIPPED_MESSAGE, STOPPED_MESSAGE, TrackingEvent, UNREACHABLE_MESSAGE,
 };
 use super::http::HttpConfig;
 use super::output::{CaptureHandle, CaptureOutput, OutputDevice, OutputFormat, OutputState};
-use super::player::{FAILURES_BEFORE_STOP, PlayerConfig, PlayerHandle};
+use super::player::{FAILURES_BEFORE_STOP, PlayerConfig, PlayerHandle, SessionActivate};
 use super::queue::{AddAt, Repeat};
 use super::source::{ContextKind, PlayContext};
 use super::testutil::*;
@@ -931,6 +931,223 @@ async fn a_paused_song_stays_paused_after_an_interruption() {
     r.player.interruption(false, true);
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Paused);
+}
+
+/// The phone's audio session, faked: it refuses the next asks, the way iOS
+/// does during a call and for a moment after one.
+#[derive(Clone, Default)]
+struct FakeSession {
+    refuse: Arc<std::sync::atomic::AtomicUsize>,
+    asks: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl FakeSession {
+    fn config(&self) -> PlayerConfig {
+        let me = self.clone();
+        PlayerConfig {
+            session: SessionActivate(Arc::new(move || {
+                use std::sync::atomic::Ordering::SeqCst;
+                me.asks.fetch_add(1, SeqCst);
+                let left = me.refuse.load(SeqCst);
+                if left > 0 {
+                    me.refuse.store(left - 1, SeqCst);
+                    return Err(crate::error::AppError::Io("OSStatus 560557684".into()));
+                }
+                Ok(())
+            })),
+            ..PlayerConfig::default()
+        }
+    }
+    fn refuse(&self, n: usize) {
+        self.refuse.store(n, std::sync::atomic::Ordering::SeqCst);
+    }
+    fn asks(&self) -> usize {
+        self.asks.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+fn no_errors(r: &Rig) {
+    assert!(r.sink.errors.lock().is_empty(), "{:?}", r.sink.errors.lock());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_route_change_during_a_call_waits_for_its_end() {
+    let mut r = rig(&["a"], 4.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.interruption(true, false);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    // The call moves the sound (the car, the earpiece): the stream resets.
+    let opens = r.cap.opens();
+    r.cap.reset_stream();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(r.cap.opens(), opens, "no reopen while the call holds the sound");
+    r.player.interruption(false, true);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Playing).await;
+    audio_flows(&r).await;
+    no_errors(&r);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_song_picked_after_a_call_that_moved_the_sound_plays() {
+    let mut r = rig(&["a", "b"], 4.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a", "b"]), None, Some(false)).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.interruption(true, false);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    r.cap.reset_stream();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    // The call ends with no word to play on; the user picks a song.
+    r.player.interruption(false, false);
+    let opens = r.cap.opens();
+    r.player.play_context(ctx(&["a", "b"]), Some("b".into()), Some(false)).await.unwrap();
+    next_tracking(&mut r.tracking, started("b")).await;
+    assert!(r.cap.opens() > opens, "a fresh stream, not the dead one");
+    audio_flows(&r).await;
+    no_errors(&r);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_call_whose_end_never_comes_doesnt_hold_later_route_changes() {
+    let mut r = rig(&["a", "b"], 4.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a", "b"]), None, Some(false)).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.interruption(true, false);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    // No end arrives. The user picks a song, then the car connects.
+    r.player.play_context(ctx(&["a", "b"]), Some("b".into()), Some(false)).await.unwrap();
+    next_tracking(&mut r.tracking, started("b")).await;
+    let opens = r.cap.opens();
+    r.cap.reset_stream();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while r.cap.opens() <= opens {
+        assert!(Instant::now() < deadline, "never reopened");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Playing);
+    audio_flows(&r).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_sound_refused_right_after_a_call_plays_on_after_a_retry() {
+    let session = FakeSession::default();
+    let mut r = rig(&["a"], 4.0, true, session.config()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.interruption(true, false);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    r.cap.reset_stream();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    session.refuse(1);
+    let asks = session.asks();
+    r.player.interruption(false, true);
+    let s = tokio::time::timeout(Duration::from_secs(5), wait_state(&r.player, |s| s.status == PlayerStatus::Playing)).await;
+    assert!(s.is_ok(), "plays on once the session is back");
+    assert!(session.asks() >= asks + 2, "asked again");
+    audio_flows(&r).await;
+    no_errors(&r);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_output_slow_to_open_after_a_call_plays_on() {
+    let mut r = rig(&["a"], 4.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.interruption(true, false);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    r.cap.reset_stream();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    r.cap.fail_opens(1);
+    r.player.interruption(false, true);
+    let s = tokio::time::timeout(Duration::from_secs(5), wait_state(&r.player, |s| s.status == PlayerStatus::Playing)).await;
+    assert!(s.is_ok(), "plays on once the output opens");
+    audio_flows(&r).await;
+    no_errors(&r);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sound_that_never_comes_back_after_a_call_says_so_plainly() {
+    let session = FakeSession::default();
+    let mut r = rig(&["a"], 4.0, true, session.config()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.interruption(true, false);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    session.refuse(100);
+    let asks = session.asks();
+    r.player.interruption(false, true);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while r.sink.errors.lock().is_empty() {
+        assert!(Instant::now() < deadline, "never said");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Paused);
+    // The end's own try, then three more, then no more.
+    assert_eq!(session.asks() - asks, 4);
+    let errs = r.sink.errors.lock().clone();
+    assert_eq!(errs.len(), 1, "{errs:?}");
+    assert_eq!(errs[0].message, NO_SOUND_MESSAGE);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_second_call_while_the_sound_comes_back_calls_off_the_tries() {
+    let session = FakeSession::default();
+    let mut r = rig(&["a"], 4.0, true, session.config()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.interruption(true, false);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    session.refuse(100);
+    r.player.interruption(false, true);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    r.player.interruption(true, false);
+    // Let the call's begin land, then see that nothing asks any more.
+    r.player.state().await.unwrap();
+    let asks = session.asks();
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert_eq!(session.asks(), asks, "the tries were called off");
+    assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Paused);
+    no_errors(&r);
+    // Its end plays on.
+    session.refuse(0);
+    r.player.interruption(false, true);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Playing).await;
+    audio_flows(&r).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn play_when_the_sound_is_refused_says_so_plainly() {
+    let session = FakeSession::default();
+    let mut r = rig(&["a"], 4.0, true, session.config()).await;
+    r.player.play_context(ctx(&["a"]), None, None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    // Another app's video: its end gives no word to play on.
+    r.player.interruption(true, false);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    r.player.interruption(false, false);
+    session.refuse(1);
+    let e = r.player.resume().await.unwrap_err();
+    assert_eq!(e.message(), NO_SOUND_MESSAGE);
+    let errs = r.sink.errors.lock().clone();
+    assert_eq!(errs.len(), 1, "{errs:?}");
+    assert_eq!(errs[0].message, NO_SOUND_MESSAGE);
+    assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Paused);
+    // The next Play works.
+    r.player.resume().await.unwrap();
+    wait_state(&r.player, |s| s.status == PlayerStatus::Playing).await;
+    audio_flows(&r).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_output_that_wont_open_on_load_says_so_plainly() {
+    let r = rig(&["a"], 4.0, true, PlayerConfig::default()).await;
+    r.cap.fail_opens(1);
+    let e = r.player.play_context(ctx(&["a"]), None, None).await.unwrap_err();
+    assert_eq!(e.message(), NO_SOUND_MESSAGE, "the reply is plain too");
+    let errs = r.sink.errors.lock().clone();
+    assert_eq!(errs.len(), 1, "{errs:?}");
+    assert_eq!(errs[0].message, NO_SOUND_MESSAGE);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
