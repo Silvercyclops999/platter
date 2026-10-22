@@ -34,7 +34,7 @@ import { nav, useRouter } from "../stores/router";
 import { AlbumCard, ArtistCard, useContextState } from "./cards";
 import { usePageBar, useTitleStep } from "./detail";
 import { AboutCard, useArtistInfo } from "./ArtistAbout";
-import { useGetSpots, useLidarrReady } from "./lidarrShared";
+import { lidarrNote, useGetSpots, useLidarrReady, useLidarrStatus } from "./lidarrShared";
 import { useIsGuest } from "../stores/asks";
 import { GetAlbumsDialog } from "./GetAlbumsDialog";
 import { CatalogueArtistCard, NOT_IN_LIBRARY, dismissArtist, undismissArtist, useCatalogueFans } from "./catalogue";
@@ -625,7 +625,9 @@ function FansAlsoLike({ id, artists, more = [] }: { id: string; artists: Artist[
 function CatalogueArtistView({ mbid }: { mbid: string }) {
   const [version, setVersion] = useState(0);
   const { data, error, retry } = useLoad(() => backend.catalogueArtist(mbid), [mbid, version]);
-  const lidarrReady = useLidarrReady();
+  const lidarr = useLidarrStatus();
+  const lidarrReady = !!lidarr?.ready;
+  const lidarrSays = lidarrNote(lidarr, "Set up Lidarr in Settings to get albums, or buy them from a store.");
   const spots = useGetSpots();
   const guest = useIsGuest();
   const [getting, setGetting] = useState(false);
@@ -717,7 +719,7 @@ function CatalogueArtistView({ mbid }: { mbid: string }) {
               )
             }
           />
-          {!lidarrReady && !guest && data && <span className="cat-actions__note">Set up Lidarr in Settings to get albums, or buy them from a store.</span>}
+          {!lidarrReady && lidarrSays && !guest && data && <span className="cat-actions__note">{lidarrSays}</span>}
         </div>
         {artist && getting && <GetAlbumsDialog mbid={artist.mbid} name={artist.name} open onClose={() => setGetting(false)} />}
         {!data && <Shelf title="Discography" loading />}

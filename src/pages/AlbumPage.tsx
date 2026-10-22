@@ -50,7 +50,7 @@ import {
 } from "./album";
 import "./album.css";
 import { CatalogueAction, MissingButton, NOT_IN_LIBRARY, StoreLinks, catalogueKind } from "./catalogue";
-import { useGetSpots } from "./lidarrShared";
+import { useGetSpots, useLidarrNote } from "./lidarrShared";
 import { useIsGuest } from "../stores/asks";
 import { LookForBetterDialog, UpgradeCard, upgradeMenuItems, useAlbumUpgrade } from "./LidarrUpgrade";
 import { useRouter } from "../stores/router";
@@ -394,6 +394,7 @@ function CatalogueAlbumView({ rgid }: { rgid: string }) {
   const [version, setVersion] = useState(0);
   const { data, error, retry } = useLoad(() => backend.catalogueAlbum(rgid), [rgid, version]);
   const lidarrReady = useGetSpots();
+  const lidarrSays = useLidarrNote("Set up Lidarr in Settings to request it.");
   const guest = useIsGuest();
   const album = data?.album;
   useArtTint(null, album?.thumb ?? undefined);
@@ -468,7 +469,7 @@ function CatalogueAlbumView({ rgid }: { rgid: string }) {
               )
             }
           />
-          {album && !lidarrReady && !guest && !album.refusal && <span className="cat-actions__note">Set up Lidarr in Settings to request it.</span>}
+          {album && !lidarrReady && lidarrSays && !guest && !album.refusal && <span className="cat-actions__note">{lidarrSays}</span>}
         </div>
         {album?.refusal && <p className="cat-actions__note">{album.refusal}</p>}
         {data && <StoreLinks links={data.links} title={data.album.title} />}

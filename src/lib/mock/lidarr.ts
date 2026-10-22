@@ -160,6 +160,8 @@ export class MockLidarr {
     this.lastPassed = this.hasKey;
     this.typedOnce = false;
     this.homeSide = false;
+    this.autoChecked = false;
+    this.bridgeQuiet = false;
     this.moved = null;
     this.headers = [];
     this.confirmed.clear();
@@ -173,6 +175,26 @@ export class MockLidarr {
 
   /** Test hook: a computer at home or a Bridge answers Lidarr for this device. */
   homeSide = false;
+  /** The setup check the core starts by itself has been started. */
+  autoChecked = false;
+  /** Test hook: a Bridge is linked but not answering (the relay down, say). */
+  bridgeQuiet = false;
+
+  /**
+   * Lidarr reachable through a home side with no check passed yet: the core
+   * starts the check by itself, once. True when it started one now.
+   */
+  startAutoCheck(s: Settings): boolean {
+    const st = this.status(s);
+    if (st.ready || !this.homeSide || this.autoChecked) return false;
+    this.autoChecked = true;
+    return true;
+  }
+
+  /** The check through the home side finished: it passes unless Lidarr can't be reached. */
+  finishAutoCheck() {
+    if (this.demo !== "unreachable" && this.demo !== "offline") this.lastPassed = true;
+  }
 
   private setUp(s: Settings) {
     return ((!!s.lidarrUrl.trim() || !!s.lidarrAwayUrl.trim()) && this.hasKey) || this.homeSide;
@@ -328,6 +350,7 @@ export class MockLidarr {
       unencrypted: [s.lidarrUrl, s.lidarrAwayUrl].filter((u) => u && unencrypted(u)),
       ready: this.setUp(s) && this.lastPassed && !this.moved,
       homeSide: this.homeSide,
+      homeQuiet: this.bridgeQuiet && !this.homeSide && !((!!s.lidarrUrl.trim() || !!s.lidarrAwayUrl.trim()) && this.hasKey),
       moved: this.hasKey ? this.moved : null,
     };
   }

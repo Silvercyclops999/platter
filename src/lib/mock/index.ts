@@ -4247,8 +4247,18 @@ export class MockBackend implements Backend {
     return this.delay(() => this.scrobble.check());
   }
   lidarrStatus() {
-    // Someone the server is shared with never uses Lidarr from here.
-    return this.delay(() => (this.asks.mode === "guest" ? { ...this.lidarr.status(this.settings), ready: false, notOwner: true } : this.lidarr.status(this.settings)));
+    return this.delay(() => {
+      // Someone the server is shared with never uses Lidarr from here.
+      if (this.asks.mode === "guest") return { ...this.lidarr.status(this.settings), ready: false, notOwner: true };
+      // Reached through a Bridge with no check yet: the check runs by itself.
+      if (this.lidarr.startAutoCheck(this.settings)) {
+        setTimeout(() => {
+          this.lidarr.finishAutoCheck();
+          this.emit("lidarr://changed", null);
+        }, 200);
+      }
+      return this.lidarr.status(this.settings);
+    });
   }
   releaseRadar() {
     return this.delay(() => this.radar.page());
