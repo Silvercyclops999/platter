@@ -265,11 +265,16 @@ pub async fn playlist_page(db: State<'_, DbHandle>, id: String) -> AppResult<Pla
 #[tauri::command]
 pub async fn search(
     db: State<'_, DbHandle>,
+    lyrics: State<'_, crate::lyrics::LyricsService>,
     query: String,
     filter: Option<SearchFilter>,
     limit: Option<u32>,
 ) -> AppResult<SearchResults> {
-    let mut out = search::search_with_fallback(db.inner(), &query, filter.unwrap_or_default(), limit).await?;
+    let filter = filter.unwrap_or_default();
+    let mut out = search::search_with_fallback(db.inner(), &query, filter, limit).await?;
+    // Songs found by their lyrics fill in after the ones found by name.
+    let room = search::songs_limit(filter, limit).saturating_sub(out.songs.len());
+    crate::lyricsearch::add_songs(db.inner(), &mut out, &query, lyrics.shows_auto(), room).await;
     let server = db.server_view();
     let f = db.read_async(move |c| super::merge::ViewFilter::load(c, &server)).await?;
     f.search(&mut out);
@@ -279,6 +284,7 @@ pub async fn search(
     let artist = search::named_artist(&query, &out.artists);
     db.read_async(move |c| {
         crate::archive::versions::group_search(c, &mut out, show, artist.as_deref())?;
+        crate::lyricsearch::tidy(&mut out);
         Ok(out)
     })
     .await

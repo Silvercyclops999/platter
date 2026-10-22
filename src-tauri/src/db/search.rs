@@ -794,6 +794,11 @@ fn kind_limit(filter: SearchFilter, limit: Option<u32>, kind: SearchFilter, all_
     }
 }
 
+/// How many songs a search with this filter and limit lists.
+pub fn songs_limit(filter: SearchFilter, limit: Option<u32>) -> usize {
+    kind_limit(filter, limit, SearchFilter::Songs, ALL_SONGS)
+}
+
 /// One pass's results per kind.
 #[derive(Default)]
 struct Found {

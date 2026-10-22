@@ -215,3 +215,6 @@ export function typedPrefixLength(completion: string, typed: string): number {
   }
   return 0;
 }
+
+/** A lyric line as shown under a song found by it. */
+export const lyricQuote = (line: string) => `\u201c${line}\u201d`;

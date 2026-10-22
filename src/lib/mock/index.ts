@@ -234,6 +234,7 @@ import { MockSoundMap } from "./soundmap";
 import { MockJellyfin, plexRecord } from "./jellyfin";
 import { MockSubsonic } from "./subsonic";
 import { CONSOLE_COLUMNS, clampPane, consoleSortOk } from "../consoleLayout";
+import { mockLyricSearch } from "./lyricSearch";
 
 /** Record labels for the mock album footers. */
 const MOCK_LABELS = ["Northlight Records", "Harbor Sound", "Quiet Hours Music", "Glasshouse Recordings"];
@@ -2004,9 +2005,22 @@ export class MockBackend implements Backend {
       if (songs[0] && score(songs[0].title) > 0) cands.push([score(songs[0].title), { kind: "track", track: songs[0] }]);
       if (playlists[0]) cands.push([score(playlists[0].title) + 0.1, { kind: "playlist", playlist: playlists[0] }]);
       if (cands.length) top = cands.sort((a, b) => b[0] - a[0])[0][1];
+      // Songs found by the lyrics stored here fill in after the ones found by name.
+      const listed = songs.slice(0, limit);
+      const lyricLines: Record<string, string> = {};
+      if (f === "all" || f === "songs") {
+        for (const m of mockLyricSearch(args.query, [...this.own.values()].map((o) => [o.trackId, o.text] as const))) {
+          if (listed.length >= limit) break;
+          const t = this.trackById(m.trackId);
+          if (!t || listed.some((x) => x.id === t.id)) continue;
+          listed.push(t);
+          lyricLines[t.id] = m.line;
+        }
+      }
       return this.archive.groupSearch({
         top,
-        songs: songs.slice(0, limit),
+        ...(Object.keys(lyricLines).length ? { lyricLines } : {}),
+        songs: listed,
         artists: artists.slice(0, limit),
         albums: albums.slice(0, limit),
         playlists: playlists.slice(0, limit),

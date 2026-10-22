@@ -346,6 +346,10 @@ pub struct SearchResults {
     /// The query the results are for when the typo fallback changed a word.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub corrected: Option<String>,
+    /// Songs in `songs` found by their lyrics, with the line that matched,
+    /// under the song's id (crate::lyricsearch).
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub lyric_lines: std::collections::HashMap<String, String>,
 }
 
 #[cfg(test)]

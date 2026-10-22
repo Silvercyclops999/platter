@@ -32,6 +32,7 @@ pub mod libraries;
 pub mod lidarr;
 pub mod likes;
 pub mod lyrics;
+pub mod lyricsearch;
 pub mod mixes;
 pub mod model;
 pub mod musicshare;
