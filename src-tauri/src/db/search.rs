@@ -335,19 +335,35 @@ pub struct Extra {
     /// Short words also matched letter by letter ("rem" finds "R.E.M."),
     /// kept apart from `alts` so they don't count as library words.
     pub spelled: Vec<Option<String>>,
-    /// Words match whole, not as the start of a longer word (the
-    /// missing-word fallback: with a word left out, "wrld" finding
-    /// "WRLDFMS" in a credit is a guess on a guess).
+    /// Words match whole, not as the start of a longer word, except the
+    /// last word, which may still be the start of a title's word (it may be
+    /// half typed). The missing-word fallback: with a word left out, "wrld"
+    /// finding "WRLDFMS" in a credit is a guess on a guess.
     pub whole: bool,
 }
 
-/// One word's FTS group: as typed (prefix, unless `whole`), its parts as a
-/// phrase, its spellings and any extra forms.
-fn group_expr(t: &QToken, extra: &[String], whole: bool) -> String {
-    let star = if whole { "" } else { "*" };
-    let mut parts = vec![format!("{}{star}", quote(&t.text))];
+/// How a word's typed form matches.
+#[derive(Clone, Copy, PartialEq)]
+enum Match {
+    /// The start of any word.
+    Prefix,
+    /// A whole word.
+    Whole,
+    /// A whole word, or the start of a word in the title.
+    WholeOrTitle,
+}
+
+/// One word's FTS group: as typed (as `m` says), its parts as a phrase,
+/// its spellings and any extra forms.
+fn group_expr(t: &QToken, extra: &[String], m: Match) -> String {
+    let typed = |p: &str| match m {
+        Match::Prefix => vec![format!("{}*", quote(p))],
+        Match::Whole => vec![quote(p)],
+        Match::WholeOrTitle => vec![quote(p), format!("title : {}*", quote(p))],
+    };
+    let mut parts = typed(&t.text);
     if !t.pieces.is_empty() && t.pieces != [t.text.clone()] {
-        parts.push(format!("{}{star}", quote(&t.pieces.join(" "))));
+        parts.extend(typed(&t.pieces.join(" ")));
     }
     parts.extend(searchtext::variants(&t.text).map(quote));
     parts.extend(extra.iter().map(|e| quote(e)));
@@ -371,7 +387,12 @@ pub fn build_fts(q: &ParsedQuery, extra: &Extra) -> Option<String> {
     let g = |i: usize| {
         let mut forms = extra.alts.get(i).unwrap_or(&none).clone();
         forms.extend(extra.spelled.get(i).cloned().flatten());
-        group_expr(&q.toks[i], &forms, extra.whole)
+        let m = match (extra.whole, i + 1 == n) {
+            (false, _) => Match::Prefix,
+            (true, false) => Match::Whole,
+            (true, true) => Match::WholeOrTitle,
+        };
+        group_expr(&q.toks[i], &forms, m)
     };
     let mut parts = Vec::new();
     let mut k = 0;
@@ -379,7 +400,7 @@ pub fn build_fts(q: &ParsedQuery, extra: &Extra) -> Option<String> {
         let i = idx[k];
         if k + 1 < idx.len() && idx[k + 1] == i + 1 && extra.joins.get(i) == Some(&true) {
             let joined = format!("{}{}", q.toks[i].text, q.toks[i + 1].text);
-            let star = if extra.whole { "" } else { "*" };
+            let star = if extra.whole && i + 2 < n { "" } else { "*" };
             parts.push(format!("(({} AND {}) OR {}{star})", g(i), g(i + 1), quote(&joined)));
             k += 2;
         } else {
@@ -981,8 +1002,9 @@ pub(crate) fn search_conn(
 
     // Pass 3, when nothing matched every word: leave out the words the
     // library has nowhere (in any spelling); failing that, one word at a
-    // time. The words left must match whole words: "juice wrld" in a
-    // library without him finds nothing, not songs crediting "The WRLDFMS".
+    // time. The words left must match whole words (the last may be the
+    // start of a title's word, still being typed): "juice wrld" in a library
+    // without him finds nothing, not songs crediting "The WRLDFMS".
     if found.count() == 0 && !q.short {
         let unknown: Vec<usize> = match &vocab {
             Some(v) => (0..q.toks.len()).filter(|&i| !q.toks[i].optional && !in_library(&q, i, v, &extra)).collect(),

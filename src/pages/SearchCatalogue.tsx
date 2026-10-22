@@ -161,17 +161,23 @@ export const foldName = (s: string) =>
 
 /**
  * The artist you don't have to put on top: the one the query names exactly
- * ("juice wrld" names Juice WRLD), unless the library's top result is named
- * exactly; with nothing in the library, the first one found.
+ * ("juice wrld" names Juice WRLD), unless one of the library's top results
+ * is named exactly; with nothing in the library, the first one found.
  */
-export function catalogueTop(q: string, c: CatalogueResults | null, libTop: SearchHit | null | undefined): CatArtist | null {
+export function catalogueTop(q: string, c: CatalogueResults | null, ...libTops: (SearchHit | null | undefined)[]): CatArtist | null {
   if (!c) return null;
   const want = foldName(q);
   const artists = c.artists.filter((a) => !a.libraryId);
   const exact = artists.find((a) => foldName(a.name) === want);
-  const libExact = libTop && foldName(hitInfo(libTop)?.title ?? "") === want;
+  const found = libTops.filter((h): h is SearchHit => !!h);
+  const libExact = found.some((h) => foldName(hitInfo(h)?.title ?? "") === want);
   if (exact && !libExact) return exact;
-  return !libTop ? (artists[0] ?? null) : null;
+  return !found.length ? (artists[0] ?? null) : null;
+}
+
+/** Whether a catalogue answer has anything the phone lists (owned artists fold into the library's rows). */
+export function hasCatalogueRows(c: CatalogueResults | null): boolean {
+  return !!c && c.songs.length + c.albums.length + c.artists.filter((a) => !a.libraryId).length > 0;
 }
 
 // ---------------------------------------------------------------- rows
