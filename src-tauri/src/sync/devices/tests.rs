@@ -708,6 +708,40 @@ async fn big_entries_wait_for_the_local_network_instead_of_the_relay() {
     assert!(sent * link::PIECE <= super::run::RELAY_BULK_MAX + link::PIECE, "{sent} pieces");
 }
 
+#[tokio::test]
+async fn transcriptions_go_through_the_relay_at_most_every_half_hour_and_wait_meanwhile() {
+    let ntfy = FakeNtfy::start().await;
+    let a = dev("a");
+    let b = dev("b");
+    let (la, lb) = pair(&a, &b, &ntfy.url);
+    round(&a, &la, &b, &lb).await;
+    let wire = Arc::new(Wire::new(a.links.clone(), Arc::new(Ntfy::new().unwrap()), Arc::new(crate::sync::store::system_ms)));
+    let sync = DeviceSync::new(a.peer.clone(), wire, Timing::default());
+    assert_eq!(Timing::default().lyrics_relay_every, Duration::from_secs(30 * 60));
+    let song = |id: &str| {
+        let mut m = EntryMap::new();
+        m.entry(store::TRANSCRIPTS.name().into())
+            .or_default()
+            .insert(format!("{id}|turbo"), Entry { value: Some(json!({"text": "[00:01.00]Hello", "model": "turbo", "part": "/p/1"})), ts: 1, device: "a".into() });
+        m
+    };
+    // The first goes at once.
+    sync.deliver(&la, vec![Msg::SyncEntries { entries: song("501") }]).await;
+    let first = ntfy.published().len();
+    assert!(first > 0);
+    // The next song done a moment later waits; other changes still go.
+    let mut both = song("502");
+    both.entry(HIDDEN.name().into()).or_default().insert("track:9".into(), Entry { value: Some(json!(hidden("Quiet"))), ts: 1, device: "a".into() });
+    sync.deliver(&la, vec![Msg::SyncEntries { entries: both }]).await;
+    let all = ntfy.published();
+    assert!(all.len() > first, "the other change went");
+    let at_b = Wire::new(b.links.clone(), Arc::new(Ntfy::new().unwrap()), Arc::new(crate::sync::store::system_ms));
+    let opened: Vec<Msg> = all[first..].iter().filter_map(|m| at_b.receive(&lb, &m.body)).collect();
+    assert!(!opened.is_empty());
+    assert!(opened.iter().all(|m| !matches!(m, Msg::SyncEntries { entries } if entries.contains_key(store::TRANSCRIPTS.name()))), "502 waits");
+    assert!(opened.iter().any(|m| matches!(m, Msg::SyncEntries { entries } if entries.contains_key(HIDDEN.name()))));
+}
+
 #[test]
 fn replays_and_tampered_frames_on_a_device_link_are_dropped() {
     let a = dev("a");

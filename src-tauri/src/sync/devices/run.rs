@@ -43,6 +43,11 @@ pub struct Timing {
     /// other device isn't on the local network (rounds there go every
     /// `every`). Changes still go a moment after they're made.
     pub relay_every: Duration,
+    /// Transcriptions go through the relay at most this often per link:
+    /// a computer doing its songs again makes one every few seconds, and
+    /// each would take from the relay's daily allowance. They gather
+    /// meanwhile (the local network takes them at once).
+    pub lyrics_relay_every: Duration,
 }
 
 impl Default for Timing {
@@ -52,6 +57,7 @@ impl Default for Timing {
             every: Duration::from_secs(5 * 60),
             reopen: Duration::from_secs(30),
             relay_every: Duration::from_secs(3 * 3600),
+            lyrics_relay_every: Duration::from_secs(30 * 60),
         }
     }
 }
@@ -149,6 +155,8 @@ pub struct DeviceSync {
     /// When each link last had a round through the relay, and how many in
     /// a row went unheard.
     relay_rounds: Mutex<HashMap<String, (tokio::time::Instant, u32)>>,
+    /// When transcriptions last went to each link through the relay.
+    lyrics_relayed: Mutex<HashMap<String, tokio::time::Instant>>,
     /// The relay turning messages away was logged: once until it takes
     /// one again, not once per link and queued round.
     said_busy: AtomicBool,
@@ -195,6 +203,7 @@ impl DeviceSync {
             replies: Mutex::default(),
             rounds: Mutex::default(),
             relay_rounds: Mutex::default(),
+            lyrics_relayed: Mutex::default(),
             said_busy: Default::default(),
             kick: tokio::sync::Notify::new(),
             switch: RwLock::default(),
@@ -360,6 +369,8 @@ impl DeviceSync {
             return;
         }
         let (msgs, held_for_wifi) = if self.big_waits() { hold_big(msgs) } else { (msgs, false) };
+        let lyrics_due = self.lyrics_relayed.lock().get(&link.id).is_none_or(|t| t.elapsed() >= self.timing.lyrics_relay_every);
+        let msgs = if lyrics_due { msgs } else { hold_lyrics(msgs) };
         let mut budget = RELAY_BULK_MAX;
         let mut waiting = false;
         let mut sent = Vec::new();
@@ -398,6 +409,9 @@ impl DeviceSync {
             }
         }
         if !sent.is_empty() {
+            if sent.iter().any(carries_lyrics) {
+                self.lyrics_relayed.lock().insert(link.id.clone(), tokio::time::Instant::now());
+            }
             let link2 = link.clone();
             self.peer.blocking(move |p| p.sent_all(&link2, &sent)).await;
         }
@@ -870,6 +884,25 @@ fn hold_big(msgs: Vec<Msg>) -> (Vec<Msg>, bool) {
         })
         .collect();
     (out, held)
+}
+
+/// Leave transcriptions out of messages for the relay until they're due
+/// again ([`Timing::lyrics_relay_every`]); they stay to send.
+fn hold_lyrics(msgs: Vec<Msg>) -> Vec<Msg> {
+    let ns = crate::sync::store::TRANSCRIPTS.name();
+    msgs.into_iter()
+        .filter_map(|m| match m {
+            Msg::SyncEntries { mut entries } => {
+                entries.remove(ns);
+                (!entries.is_empty()).then_some(Msg::SyncEntries { entries })
+            }
+            m => Some(m),
+        })
+        .collect()
+}
+
+fn carries_lyrics(m: &Msg) -> bool {
+    matches!(m, Msg::SyncEntries { entries } if entries.get(crate::sync::store::TRANSCRIPTS.name()).is_some_and(|e| !e.is_empty()))
 }
 
 /// Run a long-lived task, starting it again (waiting longer each time) if
