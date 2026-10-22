@@ -21,7 +21,7 @@ use super::engine::{EndedEarly, Engine, EngineConfig, EngineDeps, EngineEvent, u
 use super::gate::TransferGate;
 use super::events::{
     AbLoop, ErrorPayload, EventSink, OutputLost, PlayerState, PlayerStatus, PositionPayload, Problem,
-    SKIPPED_MESSAGE, STOPPED_MESSAGE, TrackingEvent, UNREACHABLE_MESSAGE, perceptual_gain,
+    NO_SOUND_MESSAGE, SKIPPED_MESSAGE, STOPPED_MESSAGE, TrackingEvent, UNREACHABLE_MESSAGE, perceptual_gain,
 };
 use super::output::{AudioOutput, OutputState};
 use super::persist::{self, PersistedRef};
@@ -147,6 +147,27 @@ pub struct PlayerConfig {
     pub smart_shuffle: bool,
     /// Automix (from settings).
     pub automix: AutomixOptions,
+    /// Asks the system for the sound before the output opens.
+    pub session: SessionActivate,
+}
+
+/// Makes the system's audio session ours again before the output opens.
+/// The iPhone's session can be held by a call or refused for a moment
+/// after one; elsewhere there is nothing to ask. An error means the
+/// output can't open yet.
+#[derive(Clone)]
+pub struct SessionActivate(pub Arc<dyn Fn() -> AppResult<()> + Send + Sync>);
+
+impl Default for SessionActivate {
+    fn default() -> Self {
+        Self(Arc::new(|| Ok(())))
+    }
+}
+
+impl std::fmt::Debug for SessionActivate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SessionActivate")
+    }
 }
 
 impl Default for PlayerConfig {
@@ -168,6 +189,7 @@ impl Default for PlayerConfig {
             autoplay: true,
             smart_shuffle: true,
             automix: AutomixOptions::default(),
+            session: SessionActivate::default(),
         }
     }
 }
@@ -450,6 +472,7 @@ impl PlayerHandle {
             unreachable_at: None,
             next_unreachable: None,
             interrupted_playing: false,
+            interrupted: false,
             headphones_playing: false,
             output_retry: None,
             retry_gen: 0,
@@ -1030,6 +1053,9 @@ struct Actor {
     unreachable_at: Option<Unreachable>,
     /// Playing when an interruption began: its end may resume.
     interrupted_playing: bool,
+    /// A call or another app holds the sound now: the output isn't
+    /// reopened until it ends (the system refuses it meanwhile).
+    interrupted: bool,
     /// Playing when the headphones left: only their coming back resumes.
     headphones_playing: bool,
     /// Playing when the output wouldn't reopen: the tries made so far.
@@ -1850,11 +1876,9 @@ impl Actor {
                 self.cur_key = None;
                 self.long_resumed = None;
                 self.status = PlayerStatus::Error;
-                self.sink.error(&ErrorPayload {
-                    track_id: Some(item.track.id.clone()),
-                    kind: e.kind().into(),
-                    message: e.to_string(),
-                });
+                // Only the output fails a load (the song's own trouble
+                // comes later, as an engine event).
+                self.say_no_sound(&e);
                 Err(e)
             }
         }
@@ -1912,11 +1936,7 @@ impl Actor {
                 let r = self.engine.set_exclusive_devices(ids);
                 if let Err(e) = &r {
                     self.pause_for_output();
-                    self.sink.error(&ErrorPayload {
-                        track_id: None,
-                        kind: e.kind().into(),
-                        message: e.to_string(),
-                    });
+                    self.say_no_sound(e);
                 }
                 let state = self.engine.output_state();
                 self.emit_output(&state);
@@ -2006,11 +2026,7 @@ impl Actor {
                     && let Err(e) = self.refresh_output()
                 {
                     self.pause_for_output();
-                    self.sink.error(&ErrorPayload {
-                        track_id: self.current_track().map(|t| t.id.clone()),
-                        kind: e.kind().into(),
-                        message: e.to_string(),
-                    });
+                    self.say_no_sound(&e);
                 }
             }
             Cmd::Next(reply) => {
@@ -2426,11 +2442,7 @@ impl Actor {
         let r = self.engine.select_output(id);
         if let Err(e) = &r {
             self.pause_for_output();
-            self.sink.error(&ErrorPayload {
-                track_id: None,
-                kind: e.kind().into(),
-                message: e.to_string(),
-            });
+            self.say_no_sound(e);
         }
         let state = self.engine.output_state();
         self.emit_output(&state);
@@ -2461,26 +2473,60 @@ impl Actor {
     /// their leaving cancels any pending resume, so nothing plays on out
     /// loud, and only their coming back resumes what they left playing.
     fn on_interruption(&mut self, began: bool, resume: bool, stale: bool) {
+        // Still trying to get the sound back from the last call: as good as
+        // playing, so this call's end plays on too.
+        let coming_back = self.output_retry.is_some();
         // A call or the headphones decide now, not a pending output retry.
         self.cancel_output_retry();
         self.output_stale |= stale;
         let headphones = !stale;
+        if !headphones {
+            self.interrupted = began;
+        }
         if began {
             if headphones {
                 self.headphones_playing = self.is_active();
                 self.interrupted_playing = false;
             } else {
                 // A second begin (a call during a video) keeps the first word.
-                self.interrupted_playing |= self.is_active();
+                self.interrupted_playing |= self.is_active() || coming_back;
             }
             let _ = self.do_pause();
             return;
         }
         let flag = if headphones { &mut self.headphones_playing } else { &mut self.interrupted_playing };
         let was_playing = std::mem::take(flag);
-        if was_playing && resume {
-            let _ = self.do_resume();
+        if !was_playing || !resume {
+            return;
         }
+        if headphones {
+            let _ = self.do_resume();
+            return;
+        }
+        // Right after a call the system can refuse the sound for a moment:
+        // get the output back first, and try again a few times if it isn't
+        // ready, instead of saying the system's error.
+        match self.refresh_output() {
+            Ok(()) => {
+                let _ = self.do_resume();
+            }
+            Err(e) => {
+                tracing::info!("audio output not back after the interruption: {e}; trying again");
+                self.output_retry = Some(0);
+                self.schedule_output_retry();
+            }
+        }
+    }
+
+    /// Says in plain words that the sound wouldn't start; the system's own
+    /// error goes to the log.
+    fn say_no_sound(&self, e: &AppError) {
+        tracing::warn!("audio output: {e}");
+        self.sink.error(&ErrorPayload {
+            track_id: self.current_track().map(|t| t.id.clone()),
+            kind: e.kind().into(),
+            message: NO_SOUND_MESSAGE.into(),
+        });
     }
 
     /// Calls off pending output retries; timers already set are ignored.
@@ -2495,6 +2541,7 @@ impl Actor {
         if n >= OUTPUT_RETRIES {
             tracing::warn!("audio output still not open; staying paused");
             self.output_retry = None;
+            self.say_no_sound(&AppError::Io("output still not open after retries".into()));
             return;
         }
         self.output_retry = Some(n + 1);
@@ -2516,10 +2563,8 @@ impl Actor {
         {
             return;
         }
-        #[cfg(target_os = "ios")]
-        crate::platform::audio_session::activate();
         // The failed reopen left it closed: open it now, not on Play.
-        match self.engine.reopen_output() {
+        match (self.config.session.0)().and_then(|()| self.engine.reopen_output()) {
             Ok(()) => {
                 tracing::info!("audio output open again; playing on");
                 self.output_stale = false;
@@ -2537,8 +2582,9 @@ impl Actor {
     /// Reopens a stream another app may have killed, keeping position. On
     /// failure it stays stale, so the next Play tries again.
     fn refresh_output(&mut self) -> AppResult<()> {
-        #[cfg(target_os = "ios")]
-        crate::platform::audio_session::activate();
+        // Without the session the stream can't open (the iPhone says
+        // "can't interrupt others"): no use trying.
+        (self.config.session.0)()?;
         if self.engine.published_format().is_some()
             && let Err(e) = self.engine.reopen_output()
         {
@@ -2554,16 +2600,15 @@ impl Actor {
         if self.queue.current().is_none() {
             return Ok(());
         }
+        // Playing again: whatever held the sound has let go (the end of a
+        // call doesn't always come).
+        self.interrupted = false;
         if self.output_stale
             && let Err(e) = self.refresh_output()
         {
             self.pause_for_output();
-            self.sink.error(&ErrorPayload {
-                track_id: self.current_track().map(|t| t.id.clone()),
-                kind: e.kind().into(),
-                message: e.to_string(),
-            });
-            return Err(e);
+            self.say_no_sound(&e);
+            return Err(AppError::Io(NO_SOUND_MESSAGE.into()));
         }
         if self.cur_key.is_none() || self.engine.position().is_none() {
             // Nothing loaded (fresh start / restored / ended / lost
@@ -2600,11 +2645,7 @@ impl Actor {
             }
             Err(e) => {
                 self.status = PlayerStatus::Error;
-                self.sink.error(&ErrorPayload {
-                    track_id: self.current_track().map(|t| t.id.clone()),
-                    kind: e.kind().into(),
-                    message: e.to_string(),
-                });
+                self.say_no_sound(&e);
                 Err(e)
             }
         }
@@ -2870,6 +2911,13 @@ impl Actor {
                 if let Some(device) = fell_back_from {
                     self.sink.output_lost(&OutputLost { device });
                 }
+            }
+            EngineEvent::OutputReset(why) if self.interrupted => {
+                // The system refuses a new stream until the interruption
+                // ends; its end reopens it.
+                tracing::info!("audio output reset during an interruption: {why}; reopened when it ends");
+                self.output_stale = true;
+                self.emit_output(&self.engine.output_state());
             }
             EngineEvent::OutputReset(why) => {
                 tracing::info!("audio output reset: {why}");

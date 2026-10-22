@@ -28,6 +28,9 @@ pub const SKIPPED_MESSAGE: &str = "Skipped: file unavailable";
 pub const UNREACHABLE_MESSAGE: &str = "Paused: can't reach your server. Press play to try again.";
 /// Playback stopped because song after song wouldn't play.
 pub const STOPPED_MESSAGE: &str = "Stopped: the last few songs wouldn't play. Press play to try again.";
+/// Playback paused because the sound wouldn't start (the phone kept it for
+/// a call, the output didn't come up). The system's own error stays in the log.
+pub const NO_SOUND_MESSAGE: &str = "Paused: the sound couldn't start. Press play to try again.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
