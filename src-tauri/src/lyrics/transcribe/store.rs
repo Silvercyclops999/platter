@@ -31,9 +31,13 @@ pub fn save_timed(c: &Connection, track_id: &str, body: &str, model: &str, now: 
 
 /// How a transcription was heard: the whole mix with nothing to go on, the
 /// mix with the title hint and unsure lines left out, or the voice alone.
+/// [`HEARD_VOICE_EARLY`] is the voice before 0.2.38: separating it failed
+/// on every song until 0.2.37, and a song whose redo failed then was noted
+/// as done anyway, so every song noted that way is heard once more.
 pub const HEARD_OLD: i64 = 1;
 pub const HEARD_MIX: i64 = 2;
-pub const HEARD_VOICE: i64 = 3;
+pub const HEARD_VOICE_EARLY: i64 = 3;
+pub const HEARD_VOICE: i64 = 4;
 
 /// Note how the song's transcription (or its "no words found") was heard.
 pub fn set_heard(c: &Connection, track_id: &str, heard: i64) -> AppResult<()> {
@@ -45,10 +49,15 @@ pub fn set_heard(c: &Connection, track_id: &str, heard: i64) -> AppResult<()> {
     Ok(())
 }
 
+/// How the song's transcription was heard here, if noted.
+pub fn heard(c: &Connection, track_id: &str) -> AppResult<Option<i64>> {
+    Ok(c.query_row("SELECT heard FROM lyrics_auto_heard WHERE track_id = ?1", params![track_id], |r| r.get(0)).optional()?)
+}
+
 /// Songs transcribed (or found to have no words) heard worse than `below`,
 /// the last played first. Lyrics the user wrote or edited aren't among
-/// them, nor songs no longer in the library. Transcriptions from another
-/// device since the upgrade aren't either (they have no note here).
+/// them, nor songs no longer in the library. A transcription from another
+/// device is noted as it was heard there (an older build's as the old way).
 pub fn redo_due(c: &Connection, below: i64, limit: usize) -> AppResult<Vec<String>> {
     let mut st = c.prepare(
         "SELECT h.track_id FROM lyrics_auto_heard h JOIN tracks t ON t.id = h.track_id

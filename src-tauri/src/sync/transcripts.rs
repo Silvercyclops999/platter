@@ -7,7 +7,11 @@
 //! each other; each carries the file version (part key) it was made from.
 //! A result for another version of the file is ignored, so a replaced file
 //! is transcribed again. Which result a song shows: lyrics the user wrote or
-//! edited always win; then the bigger model; then the newest.
+//! edited always win; then the bigger model (Turbo the biggest); then the
+//! one heard better (the voice alone over the whole mix); then the newest.
+//! How it was heard travels too, so a computer that can hear the voice
+//! alone redoes a song another device heard from the mix, and not one
+//! already heard from the voice.
 //!
 //! Whether the user shared a song's lyrics to LRCLIB travels in
 //! `lyricsShared`, so no device offers it again.
@@ -25,9 +29,9 @@ use crate::lyrics::transcribe::store as tstore;
 use crate::lyrics::user;
 
 /// The models, smallest first.
-pub const MODELS: [&str; 2] = ["small", "medium"];
-/// Every model a transcription can come from (Turbo too, unranked).
-pub const KNOWN_MODELS: [&str; 3] = ["small", "medium", "turbo"];
+pub const MODELS: [&str; 3] = ["small", "medium", "turbo"];
+/// Every model a transcription can come from.
+pub const KNOWN_MODELS: [&str; 3] = MODELS;
 
 /// A transcription as it travels.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -46,6 +50,21 @@ pub struct Transcript {
     /// before the field are the first timing.
     #[serde(default = "first_timing")]
     pub timing: i64,
+    /// How it was heard (lyrics::transcribe::store's HEARD_*); 0 from a
+    /// build before the field, counted as the old way.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub heard: i64,
+}
+
+fn is_zero(n: &i64) -> bool {
+    *n == 0
+}
+
+impl Transcript {
+    /// How it was heard, a result from an older build as the old way.
+    pub fn heard(&self) -> i64 {
+        self.heard.max(tstore::HEARD_OLD)
+    }
 }
 
 fn first_timing() -> i64 {
@@ -73,9 +92,10 @@ fn split_key(k: &str) -> Option<(&str, &str)> {
     k.rsplit_once('|')
 }
 
-/// The result a song shows among these: the bigger model, then the newest.
+/// The result a song shows among these: the bigger model, then the one
+/// heard better, then the newest.
 pub fn best<'a>(results: impl IntoIterator<Item = &'a Transcript>) -> Option<&'a Transcript> {
-    results.into_iter().max_by(|a, b| (rank(&a.model), a.at).cmp(&(rank(&b.model), b.at)))
+    results.into_iter().max_by(|a, b| (rank(&a.model), a.heard(), a.at).cmp(&(rank(&b.model), b.heard(), b.at)))
 }
 
 /// A result from another device Platter would show: a model it has, and
@@ -87,7 +107,8 @@ pub fn usable(t: &Transcript) -> bool {
 /// After a result was saved here.
 pub fn saved(store: &SyncStore, db: &DbHandle, track_id: &str, body: &str, model: &str, at: i64) -> AppResult<()> {
     let Some(part) = db.read(|c| tstore::part_key(c, track_id))? else { return Ok(()) };
-    let t = Transcript { text: body.trim().to_owned(), model: model.to_owned(), part, at, timing: TIMING_VERSION };
+    let heard = db.read(|c| tstore::heard(c, track_id))?.unwrap_or(tstore::HEARD_OLD);
+    let t = Transcript { text: body.trim().to_owned(), model: model.to_owned(), part, at, timing: TIMING_VERSION, heard };
     store.put(&TRANSCRIPTS, &key(track_id, model), &t)
 }
 
@@ -124,7 +145,8 @@ pub fn take(store: &SyncStore, db: &DbHandle, track_id: &str) -> AppResult<Optio
 }
 
 /// Save a result in the local tables unless something there wins: the
-/// user's own lyrics, or a result from a bigger model (or as big and newer).
+/// user's own lyrics, or a result from a bigger model (or as big and heard
+/// better, or as big, heard as well and newer), noting how it was heard.
 /// True when it changed anything.
 fn put_here(db: &DbHandle, track_id: &str, t: &Transcript) -> AppResult<bool> {
     // From another device (or a Bridge): only a model Platter has, lyrics
@@ -159,18 +181,27 @@ fn put_here(db: &DbHandle, track_id: &str, t: &Transcript) -> AppResult<bool> {
             Some(o) => Some((o.auto.clone().unwrap_or_default(), o.updated_at, o.text.trim() == t.text)),
             None => tstore::empty_model(c, track_id)?.map(|(m, at)| (m, at, t.text.is_empty())),
         };
+        let heard_here = tstore::heard(c, track_id)?.unwrap_or(tstore::HEARD_OLD);
         if let Some((model, at, same)) = here {
             if model == t.model && same {
+                // The same words: only how they were heard can be news.
+                if t.heard() > heard_here {
+                    tstore::set_heard(c, track_id, t.heard())?;
+                }
                 return Ok(false);
             }
-            if (rank(&model), at) > (rank(&t.model), t.at) {
+            if (rank(&model), heard_here, at) > (rank(&t.model), t.heard(), t.at) {
                 return Ok(false);
             }
         }
         if t.text.is_empty() && c.execute("DELETE FROM user_lyrics WHERE track_id = ?1 AND auto IS NOT NULL", [track_id])? > 0 {
             crate::lyricsearch::forget_or_log(c, track_id);
         }
-        tstore::save_timed(c, track_id, &t.text, &t.model, t.at, t.timing)
+        let saved = tstore::save_timed(c, track_id, &t.text, &t.model, t.at, t.timing)?;
+        if saved {
+            tstore::set_heard(c, track_id, t.heard())?;
+        }
+        Ok(saved)
     })
 }
 
@@ -217,12 +248,14 @@ pub fn seed(store: &SyncStore, db: &DbHandle) -> AppResult<()> {
         let Some(model) = own.auto else { continue };
         let Some(part) = db.read(|c| tstore::part_key(c, &id))? else { continue };
         let timing = db.read(|c| user::auto_timing(c, &id))?.unwrap_or(1);
-        let t = Transcript { text: own.text, model: model.clone(), part, at: own.updated_at, timing };
+        let heard = db.read(|c| tstore::heard(c, &id))?.unwrap_or(tstore::HEARD_OLD);
+        let t = Transcript { text: own.text, model: model.clone(), part, at: own.updated_at, timing, heard };
         store.seed(&TRANSCRIPTS, &key(&id, &model), &t, (own.updated_at.max(1) as u64) * 1000)?;
     }
     for (id, model, at) in db.read(tstore::empties)? {
         let Some(part) = db.read(|c| tstore::part_key(c, &id))? else { continue };
-        let t = Transcript { text: String::new(), model: model.clone(), part, at, timing: TIMING_VERSION };
+        let heard = db.read(|c| tstore::heard(c, &id))?.unwrap_or(tstore::HEARD_OLD);
+        let t = Transcript { text: String::new(), model: model.clone(), part, at, timing: TIMING_VERSION, heard };
         store.seed(&TRANSCRIPTS, &key(&id, &model), &t, (at.max(1) as u64) * 1000)?;
     }
     Ok(())

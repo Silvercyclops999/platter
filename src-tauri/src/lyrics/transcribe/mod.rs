@@ -602,14 +602,20 @@ impl Transcriber {
     /// Queues songs transcribed worse than this computer can now (the old
     /// way, or without the voice where it can be separated) to be done
     /// again in the background, the last played first, a few each round.
-    /// Not while transcription is off, broken, or left to the Bridge.
+    /// Not while transcription is off or broken. Left to the Bridge only
+    /// when this computer can't hear the voice alone either: one that can
+    /// does better than the Bridge, so it redoes them itself.
     /// Returns how many were queued.
     pub async fn redo_old(&self) -> usize {
         let rec = &self.inner.deps.recognizer;
-        if !self.inner.st.lock().enabled || rec.unavailable().is_some() || rec.crashed_too_often() || self.deferring() || self.working() {
+        if !self.inner.st.lock().enabled || rec.unavailable().is_some() || rec.crashed_too_often() || self.working() {
             return 0;
         }
-        let best = if self.voice_model().is_some() { store::HEARD_VOICE } else { store::HEARD_MIX };
+        let voice = self.voice_model().is_some();
+        if !voice && self.deferring() {
+            return 0;
+        }
+        let best = if voice { store::HEARD_VOICE } else { store::HEARD_MIX };
         let ids = self.inner.deps.db.read_async(move |c| store::redo_due(c, best, REDO_BATCH)).await.unwrap_or_else(|e| {
             tracing::warn!("old transcriptions couldn't be listed: {e}");
             Vec::new()
@@ -1509,10 +1515,13 @@ impl Transcriber {
                 st.error = Some(Failure { kind: FailureKind::Transcribe, message: STOPPED.into(), track_id: None });
             }
         }
-        // Done again or not, a song isn't queued again and again.
+        // Done again or not, a song isn't queued again and again: it's
+        // noted as heard as well as this computer can now (a redo that
+        // failed with the voice off is tried again in a later session).
         if job.redo && matches!(outcome, Outcome::Skipped | Outcome::Failed) {
             let id = job.track_id.clone();
-            if let Err(e) = self.inner.deps.db.write_async(move |c| store::set_heard(c, &id, store::HEARD_VOICE)).await {
+            let best = if self.voice_model().is_some() { store::HEARD_VOICE } else { store::HEARD_MIX };
+            if let Err(e) = self.inner.deps.db.write_async(move |c| store::set_heard(c, &id, best)).await {
                 tracing::warn!("a song done again wasn't noted: {e}");
             }
         }
@@ -1522,6 +1531,7 @@ impl Transcriber {
     /// Waits out the pause conditions for work nobody is waiting on: the
     /// computer being busy, and battery power for the background batch.
     /// Gives way to a song someone asks for meanwhile.
+    /// `batch`: work a paired Bridge may take over (it waits while it does).
     async fn wait_conditions(&self, cancel: &Stop, battery: bool, batch: bool) -> Waited {
         let pacer = &self.inner.deps.pacer;
         loop {
@@ -1688,7 +1698,9 @@ impl Transcriber {
             r.job.model = kind;
         }
         if !job.now {
-            match self.wait_conditions(cancel, job.background, job.batch).await {
+            // A song done again with the voice alone isn't the Bridge's to do.
+            let bridge_may = job.batch && !(job.redo && self.voice_model().is_some());
+            match self.wait_conditions(cancel, job.background, bridge_may).await {
                 Waited::Go => {}
                 Waited::Cancelled => return Outcome::Cancelled,
                 Waited::GiveWay => return Outcome::Again,

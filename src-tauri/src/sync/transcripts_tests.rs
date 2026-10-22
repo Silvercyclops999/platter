@@ -106,7 +106,7 @@ fn lyrics_the_user_wrote_beat_a_transcription() {
 
 #[test]
 fn the_bigger_model_wins_then_the_newest() {
-    let t = |model: &str, at| Transcript { text: "x".into(), model: model.into(), part: "/p/1".into(), at, timing: 2 };
+    let t = |model: &str, at| Transcript { text: "x".into(), model: model.into(), part: "/p/1".into(), at, timing: 2, heard: 0 };
     let (small_new, small_old, medium_old) = (t("small", 300), t("small", 100), t("medium", 50));
     assert_eq!(transcripts::best([&small_new, &medium_old]), Some(&medium_old));
     assert_eq!(transcripts::best([&small_old, &small_new]), Some(&small_new));
@@ -124,6 +124,74 @@ fn the_bigger_model_wins_then_the_newest() {
         let own = d.db.read(|c| user::get(c, "501")).unwrap().unwrap();
         assert_eq!((own.auto.as_deref(), own.text.as_str()), (Some("medium"), LRC_MEDIUM));
     }
+}
+
+#[test]
+fn turbo_is_the_biggest_model_and_the_voice_beats_the_mix() {
+    let t = |model: &str, at, heard| Transcript { text: "x".into(), model: model.into(), part: "/p/1".into(), at, timing: 2, heard };
+    // Turbo over the others, however old.
+    assert_eq!(transcripts::best([&t("small", 300, 0), &t("turbo", 10, 0)]).unwrap().model, "turbo");
+    assert_eq!(transcripts::best([&t("medium", 300, 0), &t("turbo", 10, 0)]).unwrap().model, "turbo");
+    // The same model: heard from the voice over the mix, then the newest.
+    let (voice, mix_newer) = (t("turbo", 100, tstore::HEARD_VOICE), t("turbo", 900, tstore::HEARD_MIX));
+    assert_eq!(transcripts::best([&voice, &mix_newer]), Some(&voice));
+    // A result from an older build counts as the old way.
+    assert_eq!(t("turbo", 1, 0).heard(), tstore::HEARD_OLD);
+}
+
+#[test]
+fn a_song_done_again_with_turbo_replaces_a_small_transcription_on_the_other_device() {
+    let folder = tempfile::tempdir().unwrap();
+    let (a, b) = (Dev::new("dev-a"), Dev::new("dev-b"));
+    // b (a phone) has a small model's lyrics, from the mix.
+    b.transcribe("501", LRC, "small", 300);
+    b.db.write(|c| tstore::set_heard(c, "501", tstore::HEARD_MIX)).unwrap();
+    // a (a computer with the voice) does it again with Turbo.
+    a.db.write(|c| tstore::set_heard(c, "501", tstore::HEARD_VOICE)).unwrap();
+    a.transcribe("501", LRC_MEDIUM, "turbo", 100);
+    exchange(&a, &b, folder.path());
+    assert_eq!(b.apply(), vec![("501".to_string(), true)]);
+    let own = b.db.read(|c| user::get(c, "501")).unwrap().unwrap();
+    assert_eq!((own.auto.as_deref(), own.text.as_str()), (Some("turbo"), LRC_MEDIUM));
+    // Noted as heard from the voice there, so a computer there doesn't redo it.
+    assert_eq!(b.db.read(|c| tstore::heard(c, "501")).unwrap(), Some(tstore::HEARD_VOICE));
+    // And forgetting it reaches the other device too.
+    transcripts::forgot(&a.store, "501").unwrap();
+    a.db.write(|c| tstore::forget(c, "501")).unwrap();
+    exchange(&a, &b, folder.path());
+    b.apply();
+    assert!(b.db.read(|c| user::get(c, "501")).unwrap().is_none(), "Turbo's result was forgotten too");
+}
+
+#[test]
+fn a_transcription_from_another_device_is_noted_as_heard_there() {
+    let b = Dev::new("dev-b");
+    let put = |t: Transcript| b.store.put(&super::store::TRANSCRIPTS, &transcripts::key("501", &t.model), &t).unwrap();
+    let t = |at, heard| Transcript { text: LRC.into(), model: "turbo".into(), part: "/p/1".into(), at, timing: 2, heard };
+    // From an older build (the Bridge before an update): the old way, so a
+    // computer that hears the voice does it again.
+    put(t(100, 0));
+    assert_eq!(b.apply(), vec![("501".to_string(), true)]);
+    assert_eq!(b.db.read(|c| tstore::heard(c, "501")).unwrap(), Some(tstore::HEARD_OLD));
+    let due = b.db.read(|c| tstore::redo_due(c, tstore::HEARD_VOICE, 10)).unwrap();
+    assert_eq!(due, vec!["501"]);
+    // The same words said again, now heard from the voice: only the note changes.
+    put(t(100, tstore::HEARD_VOICE));
+    assert!(b.apply().is_empty());
+    assert_eq!(b.db.read(|c| tstore::heard(c, "501")).unwrap(), Some(tstore::HEARD_VOICE));
+    assert!(b.db.read(|c| tstore::redo_due(c, tstore::HEARD_VOICE, 10)).unwrap().is_empty());
+}
+
+#[test]
+fn how_a_song_was_heard_travels_with_it() {
+    let b = Dev::new("dev-b");
+    b.db.write(|c| tstore::set_heard(c, "501", tstore::HEARD_VOICE)).unwrap();
+    b.transcribe("501", LRC, "turbo", 100);
+    let sent = b.store.get(&super::store::TRANSCRIPTS, &transcripts::key("501", "turbo")).unwrap().unwrap();
+    assert_eq!(sent.heard, tstore::HEARD_VOICE);
+    // Older builds read it fine: the field is extra to them, and absent reads as 0.
+    let old: Transcript = serde_json::from_str(r#"{"text":"x","model":"small","part":"/p/1","at":1}"#).unwrap();
+    assert_eq!(old.heard, 0);
 }
 
 #[test]
@@ -204,7 +272,7 @@ fn shared_songs_are_remembered_everywhere() {
 fn odd_results_from_another_device_are_left_out_and_a_future_time_is_clamped() {
     let b = Dev::new("dev-b");
     let put = |id: &str, t: Transcript| b.store.put(&super::store::TRANSCRIPTS, &transcripts::key(id, &t.model), &t).unwrap();
-    let t = |text: String, model: &str, at: i64| Transcript { text, model: model.into(), part: "/p/1".into(), at, timing: 2 };
+    let t = |text: String, model: &str, at: i64| Transcript { text, model: model.into(), part: "/p/1".into(), at, timing: 2, heard: 0 };
     // A model Platter doesn't have, and lyrics far longer than the editor takes.
     put("501", t(LRC.into(), "huge-v9", 100));
     put("501", t("x".repeat(user::MAX_BYTES + 1), "medium", 100));
