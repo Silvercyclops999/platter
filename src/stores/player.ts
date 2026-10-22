@@ -23,6 +23,7 @@ import type {
   RepeatMode,
   QueueAt,
 } from "../lib/types";
+import { formatDuration } from "../lib/format";
 import { offlineSkipped } from "../lib/offline";
 import { usePhoneForm } from "../phone/form";
 import { useApp } from "./app";
@@ -139,6 +140,18 @@ export function connectPlayer(b: Backend = backend): () => void {
     // A notice, not an error: the songs play again once the server is back.
     toast.info(offlineSkipped(usePhoneForm.getState().phone));
   }).then((u) => (alive ? unsubs.push(u) : u()));
+  // A long song picked up where it was left says so once, with a way back to its start.
+  let resumedKey: string | null = null;
+  unsubs.push(
+    usePlayer.subscribe((p) => {
+      const at = p.state?.resumedAtMs;
+      const key = at != null && p.state?.track ? `${p.state.track.id}:${at}` : null;
+      if (key === resumedKey) return;
+      resumedKey = key;
+      if (at == null) return;
+      useToasts.getState().push({ kind: "info", message: `Resumed at ${formatDuration(at)}`, action: { label: "Start over", run: () => void player.seek(0) } }, 8000);
+    }),
+  );
   b.remoteState()
     .then((r) => alive && usePlayer.getState().setRemote(r))
     .catch(() => {});

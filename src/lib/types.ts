@@ -796,6 +796,8 @@ export interface PlayerState {
   smartContexts?: string[];
   /** Crossfade on for this playback only (a mix's smooth transitions). */
   smoothTransitions?: boolean;
+  /** A long song (20 min or more) picked up where it was left, at this position. Gone once it is moved. */
+  resumedAtMs?: number | null;
 }
 
 /** An A-B loop: playback that reaches B goes back to A (ms, A before B). */

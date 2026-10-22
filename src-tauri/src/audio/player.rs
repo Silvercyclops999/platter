@@ -441,6 +441,8 @@ impl PlayerHandle {
             cur_ended: false,
             next_key: None,
             restore_pos,
+            long_resumed: None,
+            no_long_resume: false,
             skip_ids: HashSet::new(),
             failures_in_row: 0,
             unreachable_at: None,
@@ -1012,6 +1014,11 @@ struct Actor {
     next_key: Option<u64>,
     /// Position to start from when nothing is loaded (restore / ended).
     restore_pos: u64,
+    /// The current entry (by item id) was a long song picked up where it was
+    /// left, at this position, and nothing has moved it since.
+    long_resumed: Option<(String, u64)>,
+    /// The next start comes from another device: it says where to start.
+    no_long_resume: bool,
     /// Queue entries that failed to load this context (skipped).
     skip_ids: HashSet<String>,
     failures_in_row: usize,
@@ -1177,6 +1184,7 @@ impl Actor {
     /// playing) is a moment it should be updated.
     fn mark_dirty(&mut self) {
         self.queue.note_position(self.position_ms());
+        self.queue.note_long(self.position_ms());
         if self.config.persist_path.is_some() && self.held.is_none() {
             self.dirty = true;
             self.persist_at = Some(Instant::now() + self.config.persist_debounce);
@@ -1243,6 +1251,10 @@ impl Actor {
             smart_shuffle: self.smart_on(),
             smart_contexts: self.queue.smart_contexts(),
             smooth_transitions: self.transitions_for.is_some(),
+            resumed_at_ms: match (&self.long_resumed, self.queue.current()) {
+                (Some((id, at)), Some(c)) if &c.item_id == id => Some(*at),
+                _ => None,
+            },
         }
     }
 
@@ -1617,9 +1629,12 @@ impl Actor {
         self.maybe_refill();
         self.sync_album_context();
         if let Some(cur) = self.cur_key {
+            // A long song with a place isn't joined on gaplessly: it starts
+            // on its own, where it was left.
             let next = self
                 .pick_next()
                 .filter(|i| self.next_unreachable.as_deref() != Some(i.item_id.as_str()))
+                .filter(|i| self.queue.long_place(&i.track).is_none())
                 .map(|i| (i.track, i.item_id));
             self.next_key = self.engine.set_next(next, cur);
         }
@@ -1760,6 +1775,7 @@ impl Actor {
                 (None, Some(u)) => (self.restore_pos, u.listened_ms),
                 (None, None) => (0, 0),
             };
+            self.queue.note_long_for(&item.track, pos);
             self.track_event(TrackingEvent::TrackEnded {
                 track: item.track,
                 item_id: item.item_id,
@@ -1774,11 +1790,21 @@ impl Actor {
     /// Loads the queue's current entry into the engine.
     fn start_current(&mut self, play: bool, start_ms: u64) -> AppResult<()> {
         self.next_on_refill = false;
+        let from_elsewhere = std::mem::take(&mut self.no_long_resume);
+        self.long_resumed = None;
         let Some(item) = self.queue.current().cloned() else {
             self.engine.stop();
             self.cur_key = None;
             self.status = PlayerStatus::Idle;
             return Ok(());
+        };
+        // A long song started from the top picks up where it was left.
+        let start_ms = match self.queue.long_place(&item.track).filter(|_| start_ms == 0 && !from_elsewhere) {
+            Some(at) => {
+                self.long_resumed = Some((item.item_id.clone(), at));
+                at
+            }
+            None => start_ms,
         };
         self.cur_started = false;
         self.cur_ended = false;
@@ -2331,6 +2357,7 @@ impl Actor {
                 self.skip_ids.clear();
                 self.failures_in_row = 0;
                 let _ = self.queue.adopt(info, tracks, user, shuffle, repeat);
+                self.no_long_resume = true;
                 let r = self.start_current(play, start_ms);
                 self.update_next();
                 self.mark_dirty();
@@ -2571,6 +2598,14 @@ impl Actor {
     fn do_seek(&mut self, ms: u64) -> AppResult<()> {
         let dur = self.current_track().map_or(0, |t| t.duration_ms);
         let ms = if dur > 0 { ms.min(dur) } else { ms };
+        // Moving on from where a long song was picked up; back to its start
+        // ("Start over", or Previous) forgets the place.
+        self.long_resumed = None;
+        if ms < 5_000
+            && let Some(id) = self.current_track().map(|t| t.id.clone())
+        {
+            self.queue.clear_long(&id);
+        }
         // Seeking outside the loop's span clears it.
         if let Some(l) = self.current_loop()
             && (ms < l.a_ms || ms > l.b_ms)
@@ -2703,6 +2738,9 @@ impl Actor {
                 if let Some(item) = self.queue.current().cloned() {
                     if let Some(e) = &early {
                         self.record_problem(&item.item_id, &item.track.id, &e.error);
+                    } else {
+                        // Played to the end: next time it starts from the top.
+                        self.queue.clear_long(&item.track.id);
                     }
                     self.track_event(TrackingEvent::TrackEnded {
                         track: item.track,

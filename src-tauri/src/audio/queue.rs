@@ -65,6 +65,30 @@ pub struct ResumePoint {
 /// A resume point older than this starts its context over.
 pub const RESUME_EXPIRY_MS: i64 = 60 * 60 * 1000;
 
+/// Songs this long or longer (DJ mixes, live sets, audiobooks) remember
+/// where they were left, wherever they are played from.
+pub const LONG_TRACK_MS: u64 = 20 * 60 * 1000;
+/// A long song's place is kept this long after it was last listened to.
+pub const LONG_PLACE_EXPIRY_MS: i64 = 90 * 24 * 60 * 60 * 1000;
+/// Long songs whose place is kept at most (the least recent go first).
+const LONG_PLACE_CAP: usize = 200;
+/// A place this early isn't worth resuming at (and doesn't replace a later one).
+const LONG_PLACE_MIN_MS: u64 = 30_000;
+/// A place this close to the end counts as finished.
+const LONG_PLACE_END_MS: u64 = 60_000;
+
+/// Where a long song was left (Unix ms for when).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LongPlace {
+    pub position_ms: u64,
+    pub at_ms: i64,
+}
+
+fn is_long(t: &Track) -> bool {
+    t.duration_ms >= LONG_TRACK_MS
+}
+
 /// Context kinds that keep a resume point: albums and playlists (Liked Songs
 /// and mixes are playlists too). Artist play always starts at its first top
 /// song; radio, search results and loose tracks start where asked.
@@ -181,6 +205,9 @@ pub struct Queue {
     /// Resume point per context id, least recently used first.
     #[serde(default)]
     resume: VecDeque<(String, ResumePoint)>,
+    /// Where long songs were left, by track id, least recently used first.
+    #[serde(default)]
+    long: VecDeque<(String, LongPlace)>,
     /// Context ids with shuffle on, least recently used first.
     #[serde(default)]
     shuffled: VecDeque<String>,
@@ -375,6 +402,49 @@ impl Queue {
         while self.resume.len() > CONTEXT_MEMORY_CAP {
             self.resume.pop_front();
         }
+    }
+
+    /// Notes where the current song is, when it is a long one: the place
+    /// to pick it up at next time. Near its end it counts as finished.
+    pub fn note_long(&mut self, position_ms: u64) {
+        let Some(t) = self.current.as_ref().map(|c| c.track.clone()) else {
+            return;
+        };
+        self.note_long_for(&t, position_ms);
+    }
+
+    /// [`note_long`](Self::note_long) for a song that may no longer be current.
+    pub fn note_long_for(&mut self, t: &Track, position_ms: u64) {
+        if !is_long(t) {
+            return;
+        }
+        if position_ms + LONG_PLACE_END_MS >= t.duration_ms {
+            self.clear_long(&t.id);
+            return;
+        }
+        if position_ms < LONG_PLACE_MIN_MS {
+            return;
+        }
+        let at_ms = self.now_ms();
+        self.long.retain(|(k, _)| *k != t.id);
+        self.long.push_back((t.id.clone(), LongPlace { position_ms, at_ms }));
+        while self.long.len() > LONG_PLACE_CAP {
+            self.long.pop_front();
+        }
+    }
+
+    /// Where to pick a long song up, if it was left partway in the last 90 days.
+    pub fn long_place(&self, t: &Track) -> Option<u64> {
+        if !is_long(t) {
+            return None;
+        }
+        let (_, p) = self.long.iter().find(|(k, _)| *k == t.id)?;
+        (self.now_ms() - p.at_ms <= LONG_PLACE_EXPIRY_MS && p.position_ms + LONG_PLACE_END_MS < t.duration_ms).then_some(p.position_ms)
+    }
+
+    /// The song finished, or was started over by hand.
+    pub fn clear_long(&mut self, track_id: &str) {
+        self.long.retain(|(k, _)| k != track_id);
     }
 
     fn clear_resume(&mut self, id: &str) {
@@ -2006,6 +2076,60 @@ mod tests {
         q.note_position(42_000);
         q.set_context(ctx_id("y"), tracks(3), None, None);
         q
+    }
+
+    fn long(id: &str) -> Track {
+        let mut t = track(id, "A", "/p");
+        t.duration_ms = 75 * 60 * 1000;
+        t
+    }
+
+    #[test]
+    fn a_long_song_keeps_its_place_for_90_days() {
+        let mut q = Queue::with_seed(1);
+        q.set_clock(Some(T0));
+        let set = long("set");
+        q.set_context(ctx_id("x"), vec![set.clone(), track("short", "A", "/p")], Some(0), None);
+        q.note_long(41 * 60 * 1000 + 12_000);
+        assert_eq!(q.long_place(&set), Some(2_472_000));
+        // An early place doesn't replace a later one.
+        q.note_long(5_000);
+        assert_eq!(q.long_place(&set), Some(2_472_000));
+        q.set_clock(Some(T0 + 89 * 24 * 60 * MIN));
+        assert_eq!(q.long_place(&set), Some(2_472_000));
+        q.set_clock(Some(T0 + 91 * 24 * 60 * MIN));
+        assert_eq!(q.long_place(&set), None, "expired");
+    }
+
+    #[test]
+    fn short_songs_finished_songs_and_started_over_songs_keep_no_place() {
+        let mut q = Queue::with_seed(1);
+        q.set_clock(Some(T0));
+        let mut short = track("short", "A", "/p");
+        short.duration_ms = 19 * 60 * 1000;
+        q.note_long_for(&short, 10 * 60 * 1000);
+        assert_eq!(q.long_place(&short), None, "under 20 minutes");
+        let set = long("set");
+        q.note_long_for(&set, 40 * 60 * 1000);
+        q.note_long_for(&set, set.duration_ms - 30_000);
+        assert_eq!(q.long_place(&set), None, "near the end counts as finished");
+        q.note_long_for(&set, 40 * 60 * 1000);
+        q.clear_long("set");
+        assert_eq!(q.long_place(&set), None, "started over");
+    }
+
+    #[test]
+    fn long_places_survive_a_save() {
+        let mut q = Queue::with_seed(1);
+        q.set_clock(Some(T0));
+        let set = long("set");
+        q.note_long_for(&set, 40 * 60 * 1000);
+        let mut back: Queue = serde_json::from_str(&serde_json::to_string(&q).unwrap()).unwrap();
+        back.set_clock(Some(T0));
+        assert_eq!(back.long_place(&set), Some(40 * 60 * 1000));
+        // A file from before long places were kept still reads.
+        let old: Queue = serde_json::from_str(&serde_json::to_string(&Queue::new()).unwrap().replace(",\"long\":[]", "")).unwrap();
+        assert_eq!(old.long_place(&set), None);
     }
 
     #[test]
