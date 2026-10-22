@@ -40,6 +40,8 @@ pub mod waves_bridge;
 pub mod write;
 
 #[cfg(test)]
+mod bring_over_tests;
+#[cfg(test)]
 mod catchup_tests;
 #[cfg(test)]
 mod changes_tests;

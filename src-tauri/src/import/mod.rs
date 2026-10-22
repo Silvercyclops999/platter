@@ -34,6 +34,8 @@ mod tests;
 #[cfg(test)]
 mod bring_tests;
 #[cfg(test)]
+mod dryrun_tests;
+#[cfg(test)]
 mod played_tests;
 
 use serde::Serialize;
