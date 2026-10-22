@@ -180,16 +180,18 @@ describe("downloads on your other devices", () => {
     expect(ask).not.toHaveBeenCalled();
   });
 
-  it("show on the phone's Downloads page", async () => {
+  it("show in the phone's Settings, where the old Downloads page now leads", async () => {
     usePhoneForm.setState({ phone: true });
     try {
       mock.deviceSync.suggest("playlist", "p1", "Road Trip");
       act(() => useApp.setState({ auth: { state: "signedIn", username: "listener", needsServerPick: false } }));
       useRouter.getState().reset({ name: "downloads" });
       render(<PhoneShell />);
-      const list = await screen.findByRole("list", { name: "On your other devices" });
-      expect(within(list).getByText("Downloaded on Studio PC")).toBeInTheDocument();
-      expect(within(list).getByRole("button", { name: "Download here" })).toBeInTheDocument();
+      await waitFor(() => expect(useRouter.getState().entries[useRouter.getState().index].route).toEqual({ name: "settings", section: "Downloads and devices" }));
+      const title = await screen.findByText("Road Trip", { selector: ".setting-row__title" }, { timeout: 6000 });
+      const row = title.closest(".setting-row") as HTMLElement;
+      expect(within(row).getByText("Downloaded on Studio PC")).toBeInTheDocument();
+      expect(within(row).getByRole("button", { name: "Download here" })).toBeInTheDocument();
     } finally {
       usePhoneForm.setState({ phone: false });
     }

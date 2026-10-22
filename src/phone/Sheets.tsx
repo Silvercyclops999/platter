@@ -784,7 +784,7 @@ function downloadAction(item: DownloadItem | undefined, target: DownloadTarget, 
     label,
     icon: state === "none" || state === "error" ? ArrowDownToLine : CircleSlash,
     danger: state === "done",
-    run: act(() => (state === "error" ? retryDownload(target.kind, target.id) : toggleDownload(target))),
+    run: act(() => (state === "error" ? retryDownload(target.kind, target.id) : toggleDownload(target, { askAlways: true }))),
   };
 }
 

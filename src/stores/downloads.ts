@@ -2,8 +2,9 @@
  * Downloads as the UI sees them: the core's status (items, progress, the
  * queue's state, storage), kept current from `downloads://status`, and the
  * set of downloaded songs (rows show a mark), reloaded on `downloads://changed`.
- * Removing a download asks first when it frees more than 1 GB; stopping one
- * that hasn't finished asks the same way. An item that finishes says
+ * Removing a download asks first when it frees more than 1 GB (on the phone,
+ * whenever any of it is saved); stopping one that hasn't finished asks the
+ * same way. An item that finishes says
  * "Download complete". A downloaded item that gains songs (a playlist edit,
  * a new like) catches up by itself and says "Downloading N songs".
  */
@@ -12,6 +13,7 @@ import { backend, type Backend } from "../lib/backend";
 import { formatBytes } from "../lib/format";
 import type { AppError, DownloadItem, DownloadKind, DownloadPause, DownloadStatus } from "../lib/types";
 import type { MenuItem } from "./ui";
+import type { Route } from "./router";
 import { toast } from "./toasts";
 
 export interface DownloadTarget {
@@ -138,11 +140,16 @@ export async function setDownload(t: DownloadTarget, on: boolean): Promise<boole
 /** Removing a download that frees more than this asks first. */
 export const CONFIRM_REMOVE_BYTES = 1024 ** 3;
 
-/** The download button and menu item: download, or remove (asking first when it frees a lot). */
-export function toggleDownload(t: DownloadTarget) {
+/**
+ * The download button and menu item: download, or remove (asking first when
+ * it frees a lot). `askAlways`: the phone asks before removing anything that
+ * has a song saved, whatever its size.
+ */
+export function toggleDownload(t: DownloadTarget, opts: { askAlways?: boolean } = {}) {
   const item = findItem(useDownloads.getState().status, t.kind, t.id);
   if (!item) return void setDownload(t, true);
-  if (item.bytes <= CONFIRM_REMOVE_BYTES) return void setDownload(t, false);
+  const ask = opts.askAlways ? item.done > 0 || item.bytes > 0 : item.bytes > CONFIRM_REMOVE_BYTES;
+  if (!ask) return void setDownload(t, false);
   useDownloads.setState({ confirming: { target: t, bytes: item.bytes } });
 }
 
@@ -174,6 +181,16 @@ export function downloadMenuItems(t: DownloadTarget): MenuItem[] {
       onSelect: () => void retryDownload(t.kind, t.id),
     },
   ];
+}
+
+/** Where a download's page is: an album, a playlist, Liked Songs, a mix or a Top Songs list. */
+export function downloadRoute(i: { kind: DownloadKind; id: string }): Route {
+  if (i.kind === "album") return { name: "album", id: i.id };
+  if (i.kind === "playlist") return { name: "playlist", id: i.id };
+  if (i.kind === "liked") return { name: "liked" };
+  if (i.id === "topSongs:all") return { name: "topSongs" };
+  if (i.id.startsWith("topSongs:")) return { name: "topSongs", year: Number(i.id.slice(9)) };
+  return { name: "mix", id: i.id };
 }
 
 export async function retryDownload(kind?: DownloadKind, id?: string) {

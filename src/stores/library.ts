@@ -267,6 +267,8 @@ export interface LibEntry {
   blend?: boolean;
   /** Kept on this computer (downloads). */
   downloaded?: boolean;
+  /** A downloaded mix or Top Songs list (the phone lists it with the playlists while it's downloaded). */
+  mix?: boolean;
   /** An artist you follow. */
   followed?: boolean;
   /** An album you own on vinyl, CD, cassette or another format. */
@@ -399,7 +401,7 @@ export function libraryEntries(items: LibEntry[], opts: EntryOpts): LibEntry[] {
   const sub = opts.filter !== "all" && opts.sub && SUB_CHIPS[opts.filter].includes(opts.sub) ? opts.sub : null;
   const keep = (e: LibEntry) =>
     (opts.filter === "all" || e.kind === opts.filter) &&
-    (sub === null || (sub === "followed" ? !!e.followed : sub === "shelf" ? !!e.owned : sub === "smart" ? e.smart : !e.smart && !e.shared && !e.blend)) &&
+    (sub === null || (sub === "followed" ? !!e.followed : sub === "shelf" ? !!e.owned : sub === "smart" ? e.smart : !e.smart && !e.shared && !e.blend && !e.mix)) &&
     (!opts.downloadedOnly || !!e.downloaded) &&
     matchesQuery(e, opts.query);
   const pinned = items.filter((e) => e.pinned && keep(e));

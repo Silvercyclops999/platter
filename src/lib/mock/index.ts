@@ -766,6 +766,9 @@ export class MockBackend implements Backend {
     if (this.opts.downloads) {
       this.downloads.seedDone("album", this.fx.albums[0].id, this.fx.albums[0].title);
       this.downloads.seedDone("liked", "", "Liked Songs");
+      // A downloaded mix: on the phone it's a Library row with the playlists.
+      const mix = this.mixes.shelves().madeForYou[0];
+      if (mix) this.downloads.seedDone("mix", mix.id, mix.title);
       this.settings = { ...this.settings, downloadLiked: true };
       if (this.opts.downloads === "full") {
         this.settings = { ...this.settings, downloadLimitGb: 1 };

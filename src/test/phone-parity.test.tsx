@@ -31,7 +31,7 @@ import { shortLine } from "../pages/SettingsPage";
 import { phoneText } from "../pages/settingsMeta";
 import { useApp } from "../stores/app";
 import { refreshRequests, resetRequests } from "../stores/requests";
-import { useRouter, type Route } from "../stores/router";
+import { nav, useRouter, type Route } from "../stores/router";
 import { loadSettings, useSettings } from "../stores/settings";
 import { useSocial } from "../stores/social";
 import { useToasts } from "../stores/toasts";
@@ -129,7 +129,8 @@ describe("every route has a phone page", () => {
   });
 
   // Route names whose phone page is the phone's own (no borrowed computer page).
-  const routes = Object.values(SAMPLES).filter((r) => r.name !== "lyrics");
+  // Lyrics and downloads aren't pages on the phone: they step on elsewhere.
+  const routes = Object.values(SAMPLES).filter((r) => r.name !== "lyrics" && r.name !== "downloads");
   it.each(routes.map((r) => [r.name, r] as const))("%s shows a phone page, never a computer page in a narrow column", async (_name, r) => {
     act(() => useRouter.getState().reset(r));
     const { container, unmount } = render(<PhonePage route={r} />);
@@ -492,15 +493,16 @@ describe("downloads on the phone", () => {
     expect(countText({ total: 19, done: 12 })).toBe("12/19");
   });
 
-  it("the Downloads page lists what's on the phone and is reached from Library's Downloads", async () => {
+  it("Library's last pill is Downloaded, with no manage row; the old downloads page opens Settings", async () => {
     render(<PhoneShell />);
     act(() => phone.tab("library"));
     const show = await screen.findByRole("group", { name: "Show" }, SLOW);
-    expect(within(show).getAllByRole("button").map((b) => b.textContent)).toEqual(["Playlists", "Albums", "Artists", "Downloads"]);
-    fireEvent.click(within(show).getByRole("button", { name: "Downloads" }));
-    fireEvent.click(await screen.findByRole("button", { name: /^Manage downloads/ }, SLOW));
-    await waitFor(() => expect(route()).toEqual({ name: "downloads" }));
-    expect(await screen.findByRole("switch", { name: "Go offline" }, SLOW)).toBeInTheDocument();
+    expect(within(show).getAllByRole("button").map((b) => b.textContent)).toEqual(["Playlists", "Albums", "Artists", "Downloaded"]);
+    fireEvent.click(within(show).getByRole("button", { name: "Downloaded" }));
+    expect(within(show).getByRole("button", { name: "Downloaded" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: /Manage downloads/ })).toBeNull();
+    act(() => nav.go({ name: "downloads" }));
+    await waitFor(() => expect(route()).toEqual({ name: "settings", section: "Downloads and devices" }));
   });
 });
 

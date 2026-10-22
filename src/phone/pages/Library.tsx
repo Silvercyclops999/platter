@@ -1,9 +1,11 @@
 /**
  * The library on the phone: one mixed list with four pills (Playlists,
- * Albums, Artists, Downloads), the current sort as a label (it opens a
+ * Albums, Artists, Downloaded), the current sort as a label (it opens a
  * sheet), a list or grid toggle, pinned items at the top, and small glyphs
- * for pinned and downloaded. Downloads also leads to managing them. While
- * the library doctor has something to fix, a quiet row at the end leads to it.
+ * for pinned and downloaded. Library is where downloads are found: whatever
+ * is downloaded is a row here (a downloaded mix too, with the playlists),
+ * and Downloaded narrows the list to it. Storage is in Settings. While the
+ * library doctor has something to fix, a quiet row at the end leads to it.
  */
 import { ArrowUpDown, ChevronRight, Disc3, LayoutGrid, List, Plus, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
@@ -14,7 +16,8 @@ import { openEntry, useLibraryLoader, useLibraryModel } from "../../shell/useLib
 import { useApp } from "../../stores/app";
 import { useDoctorCount } from "../../stores/doctor";
 import { useSettings } from "../../stores/settings";
-import type { DownloadKind } from "../../lib/types";
+import type { DownloadKind, MixSummary } from "../../lib/types";
+import { MixArt } from "../../pages/MixCard";
 import { RowGlyphs, tap } from "../bits";
 import { letterOf, phoneRows, phoneSubtitle } from "../libraryRows";
 import "./parity.css";
@@ -36,7 +39,7 @@ function loadView(): PhoneLibView {
 
 export function PhoneLibrary() {
   useLibraryLoader();
-  const model = useLibraryModel("", false);
+  const model = useLibraryModel("", false, true);
   const [view, setView] = useState<PhoneLibView>(loadView);
   // Crates stay off the phone's Library for now: the owner found them
   // confusing there. They're still on the computer and in Settings.
@@ -83,7 +86,7 @@ export function PhoneLibrary() {
             aria-pressed={model.downloaded.on}
             onClick={() => (tap("selection"), useLibraryView.getState().setDownloaded(!model.downloaded.on))}
           >
-            Downloads
+            Downloaded
             {model.downloaded.on && <X size={14} aria-hidden="true" className="ph-chip__x" />}
           </button>
         )}
@@ -137,19 +140,6 @@ function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof use
           </button>
         </span>
       </div>
-      {model.downloaded.on && (
-        <ul className="ph-set-list ph-library__manage" aria-label="Downloads">
-          <li>
-            <button type="button" className="ph-set-link" onClick={() => (tap(), nav.go({ name: "downloads" }))}>
-              <span className="ph-set-link__text">
-                <span className="ph-set-link__title">Manage downloads</span>
-                <span className="ph-set-link__sub">Storage, quality and Go offline</span>
-              </span>
-              <ChevronRight size={18} aria-hidden="true" className="ph-set-link__chev" />
-            </button>
-          </li>
-        </ul>
-      )}
       {model.loading ? (
         <ul className="ph-lib-list" aria-busy="true">
           {Array.from({ length: 6 }, (_, i) => (
@@ -160,7 +150,7 @@ function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof use
         <div className={`ph-lib-index-wrap ${indexed ? "is-indexed" : ""}`}>
           <ul ref={listRef} className="ph-lib-list" aria-label="Your library">
             {rows.map((e) => (
-              <LibRow key={`${e.kind}:${e.id}`} e={e} typed={model.filter !== "all"} letter={letterFor(e)} />
+              <LibRow key={rowKey(e)} e={e} typed={model.filter !== "all"} letter={letterFor(e)} />
             ))}
           </ul>
           {indexed && <LetterIndex list={listRef} letters={[...firsts]} />}
@@ -168,10 +158,12 @@ function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof use
       ) : (
         <ul className={`ph-lib-grid ${model.filter === "artist" ? "ph-lib-grid--round" : ""}`} aria-label="Your library">
           {rows.map((e) => (
-            <li key={`${e.kind}:${e.id}`}>
+            <li key={rowKey(e)}>
               <button type="button" className={`ph-card-tile ph-card-tile--fluid ${e.kind === "artist" ? "is-round" : ""}`} onClick={() => openEntry(e)}>
                 {e.liked || e.bookmarks || e.stats ? (
                   <LikedCover fluid icon={e.liked ? "heart" : e.bookmarks ? "bookmark" : "stats"} />
+                ) : e.mix ? (
+                  <MixRowSleeve e={e} fluid />
                 ) : (
                   <Art
                     path={e.thumb}
@@ -269,9 +261,23 @@ function LetterIndex({ list, letters }: { list: React.RefObject<HTMLUListElement
   );
 }
 
-/** The download a library item stands for: Liked Songs, an album or a playlist. */
-export function downloadItemOf(e: Pick<LibEntry, "kind" | "id" | "liked">): { kind: DownloadKind; id: string } | undefined {
+/** A downloaded mix's cover, as its page shows it: a printed sleeve with its name, or the daylist's colours. */
+function MixRowSleeve({ e, fluid }: { e: LibEntry; fluid?: boolean }) {
+  const kind = e.id === "daylist" ? "daylist" : e.id.startsWith("topSongs:") ? "topSongs" : "daily";
+  return (
+    <span className={`ph-lib-mix ${fluid ? "is-fluid" : ""}`}>
+      <MixArt mix={{ kind, title: e.title, description: "" } as MixSummary} />
+    </span>
+  );
+}
+
+/** A row's key: a downloaded mix's id can't clash with a playlist's. */
+const rowKey = (e: LibEntry) => `${e.mix ? "mix" : e.kind}:${e.id}`;
+
+/** The download a library item stands for: Liked Songs, an album, a playlist or a downloaded mix. */
+export function downloadItemOf(e: Pick<LibEntry, "kind" | "id" | "liked" | "mix">): { kind: DownloadKind; id: string } | undefined {
   if (e.liked) return { kind: "liked", id: "" };
+  if (e.mix) return { kind: "mix", id: e.id };
   return e.kind === "album" || e.kind === "playlist" ? { kind: e.kind, id: e.id } : undefined;
 }
 
@@ -282,6 +288,8 @@ function LibRow({ e, typed, letter }: { e: LibEntry; typed: boolean; letter?: st
       <button type="button" className="ph-lib-row" onClick={() => openEntry(e)} disabled={e.unavailable}>
         {e.liked || e.bookmarks || e.stats ? (
           <LikedCover size={56} icon={e.liked ? "heart" : e.bookmarks ? "bookmark" : "stats"} />
+        ) : e.mix ? (
+          <MixRowSleeve e={e} />
         ) : (
           <Art path={e.thumb} size={56} round={round} kind={e.kind} tint={e.tint} monogram={round ? e.title : undefined} sleeve={e.kind === "album" ? { title: e.title, artist: e.creator } : undefined} />
         )}

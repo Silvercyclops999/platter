@@ -8,11 +8,11 @@ import { createPlaylist } from "../stores/playlists";
 import { bookmarkPageItem, deleteSmartPlaylist, editSmartPlaylist } from "../stores/curate";
 import { useSettings } from "../stores/settings";
 import { backend } from "../lib/backend";
-import { downloadMenuItems, useDownloads } from "../stores/downloads";
+import { downloadMenuItems, downloadRoute, useDownloads } from "../stores/downloads";
 import { sendToDeviceItem } from "../components/DeviceMenu";
 import { startSessionItem, useSocial } from "../stores/social";
 import { useLikes } from "../stores/likes";
-import type { Playlist } from "../lib/types";
+import type { DownloadItem, Playlist } from "../lib/types";
 import { useApp } from "../stores/app";
 import {
   LIB_KINDS,
@@ -184,14 +184,43 @@ export function pageEntry(page: PinnablePage): LibEntry {
 
 /** The route a built-in row opens (Stats or a pinned page), if it is one. */
 export function builtInRoute(e: LibEntry): Route | null {
+  if (e.mix) return downloadRoute({ kind: "mix", id: e.id });
   if (e.stats) return { name: "stats" };
   if (e.page === "crates") return { name: "crates" };
   if (e.page === "soundMap") return { name: "soundMap" };
   return null;
 }
 
-/** `drillable`: the list follows the folder the sidebar is drilled into (not the rail). */
-export function useLibraryModel(query: string, drillable = true): LibraryModel {
+/**
+ * A downloaded mix or Top Songs list as a library row: it sits with the
+ * playlists from the moment its download starts until it's removed.
+ */
+export function mixEntry(i: DownloadItem): LibEntry {
+  return {
+    kind: "playlist",
+    id: i.id,
+    title: i.title,
+    sortTitle: i.title,
+    creator: null,
+    creatorId: null,
+    thumb: null,
+    smart: false,
+    format: null,
+    addedAt: null,
+    playedAt: null,
+    pinned: false,
+    mix: true,
+    ...(i.total ? { trackCount: i.total } : {}),
+    ...(i.done > 0 ? { downloaded: true } : {}),
+  };
+}
+
+/**
+ * `drillable`: the list follows the folder the sidebar is drilled into (not
+ * the rail). `mixes`: downloaded mixes are listed with the playlists (the
+ * phone, where Library is where downloads are found).
+ */
+export function useLibraryModel(query: string, drillable = true, mixes = false): LibraryModel {
   const items = useLibraryView((s) => s.items);
   const filter = useLibraryView((s) => s.filter);
   const sub = useLibraryView((s) => s.sub);
@@ -230,8 +259,9 @@ export function useLibraryModel(query: string, drillable = true): LibraryModel {
     };
     const pages = pinnedPages.filter((p) => (p === "crates" ? cratesOn : soundMapOn)).map(pageEntry);
     const top = [likedEntry(owner), ...(showBookmarks ? [bookmarksEntry()] : []), ...(showStats ? [statsEntry()] : []), ...pages];
-    return [...top, ...mergePins(toEntries(items, owner), pins)].map(mark);
-  }, [items, owner, pins, dlItems, followIds, ownedIds, showBookmarks, showStats, pinnedPages, cratesOn, soundMapOn]);
+    const mixRows = mixes ? (dlItems ?? []).filter((i) => i.kind === "mix").map(mixEntry) : [];
+    return [...top, ...mergePins(toEntries(items, owner), pins)].map(mark).concat(mixRows);
+  }, [items, owner, pins, dlItems, followIds, ownedIds, showBookmarks, showStats, pinnedPages, cratesOn, soundMapOn, mixes]);
   const shelf = !!ownedIds && all.some((e) => e.owned);
   const dlAvailable = all.some((e) => e.downloaded);
   const downloadedOnly = dlChoice ?? (cachedOnly && dlAvailable);
