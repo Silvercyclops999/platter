@@ -16,6 +16,10 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      notes:
+        description: 'Release notes for listeners (optional; with them the release publishes by itself)'
+        required: false
 
 env:
   # The LunarG Vulkan SDK the Windows build compiles against.
@@ -181,12 +185,14 @@ jobs:
           repo: ${{ vars.RELEASES_REPO || github.event.repository.name }}
           tagName: ${{ github.ref_name }}
           releaseName: 'Platter ${{ github.ref_name }}'
-          releaseBody: 'The Windows installer is not code-signed yet: on SmartScreen click More info, then Run anyway. The Mac app is signed and notarized.'
+          releaseBody: >-
+            ${{ inputs.notes || 'The Windows installer is not code-signed yet: on SmartScreen click More info, then Run anyway. The Mac app is signed and notarized.' }}
           releaseDraft: true
           # Not a prerelease: the updater reads releases/latest, which skips prereleases.
           prerelease: false
           includeUpdaterJson: true
-          generateReleaseNotes: true
+          # Written notes go out as they are, without the commit list.
+          generateReleaseNotes: ${{ !inputs.notes }}
           args: ${{ matrix.args }} --config src-tauri/tauri.streamdeck.conf.json
       # The plugin as a release asset too, for people who install it by hand.
       # Both builds try; the second finds it there already.
