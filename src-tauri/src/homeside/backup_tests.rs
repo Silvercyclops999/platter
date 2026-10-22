@@ -350,7 +350,10 @@ fn the_backups_allow_more_background_work_than_ntfy_sh() {
     let mut backup = relay::Allowance::for_relay(crate::social::listen::BACKUP_RELAYS[0]);
     assert!(main.take(relay::ALLOWANCE_MOST as usize, t0) && !main.take(1, t0));
     assert!(backup.take(relay::BACKUP_ALLOWANCE_MOST as usize, t0) && !backup.take(1, t0));
-    assert!(relay::BACKUP_ALLOWANCE_PER_HOUR > relay::ALLOWANCE_PER_HOUR);
+    // An hour later the backup has far more back than ntfy.sh.
+    let hour = t0 + std::time::Duration::from_secs(3600);
+    assert!(backup.take(100, hour));
+    assert!(!main.take(5, hour));
 }
 
 #[test]
