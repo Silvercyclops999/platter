@@ -15,7 +15,7 @@ import { DEFAULT_SETTINGS, type PlayerState, type QueueItem, type Track } from "
 import { SettingsPage } from "../pages/SettingsPage";
 import { phoneFromAgent, phoneFromUrl, usePhoneForm } from "../phone/form";
 import { CLOSE_FRACTION, SKIP_FRACTION, follow, lockAxis, release } from "../phone/gestures";
-import { anchorTarget, PHONE_ANCHOR } from "../phone/lyricsFollow";
+import { anchorTarget, FOLLOW_DELAY_MS, FOLLOW_MS, PHONE_ANCHOR } from "../phone/lyricsFollow";
 import { cardWindow } from "../phone/LyricsScreen";
 import { inLibraryLine } from "../phone/pages/Artist";
 import { PhonePlaylist, topGenres } from "../phone/pages/Playlist";
@@ -555,6 +555,51 @@ describe("lyrics", () => {
     await waitFor(() => expect(lineAt(3)).toHaveClass("is-sung"));
     expect(lineAt(3)).toHaveAttribute("aria-current", "true");
     expect(lineAt(4)).not.toHaveClass("is-sung");
+  });
+
+  it("full screen: a hand scroll stays put while the song moves on, until Follow along", async () => {
+    const t = timedTrack();
+    const l = mockLyrics(t)!;
+    const from = l.timed![1].startMs + 10;
+    play(t, { status: "playing", positionMs: from });
+    render(<PhoneShell />);
+    act(() => {
+      phone.openPlayer();
+      phone.openLyrics();
+    });
+    const dialog = await screen.findByRole("dialog", { name: "Lyrics" });
+    const view = within(dialog).getByTestId("lyrics-view");
+    const lineAt = (i: number) => view.querySelector<HTMLElement>(`[data-line="${i}"]`)!;
+    await waitFor(() => expect(lineAt(1)).toHaveAttribute("aria-current", "true"));
+    // Every scroll the follow makes from here on.
+    let top = 0;
+    const writes: number[] = [];
+    Object.defineProperty(view, "scrollTop", {
+      configurable: true,
+      get: () => top,
+      set: (v: number) => {
+        writes.push(v);
+        top = v;
+      },
+    });
+    expect(screen.queryByRole("button", { name: "Follow along" })).not.toBeInTheDocument();
+    fireEvent.touchMove(view);
+    top = 640;
+    const follow = await screen.findByRole("button", { name: "Follow along" });
+    // The song reaches later lines in small steps (ticks, not a seek): the lines light, the list stays.
+    const to = l.timed![3].startMs + 10;
+    for (let ms = from; ms < to; ms = Math.min(to, ms + 1000)) {
+      const next = Math.min(to, ms + 1000);
+      act(() => usePlayer.setState({ positionMs: next }));
+    }
+    await waitFor(() => expect(lineAt(3)).toHaveAttribute("aria-current", "true"));
+    // Longer than a follow's eased scroll takes.
+    await act(() => new Promise((r) => setTimeout(r, FOLLOW_DELAY_MS + FOLLOW_MS + 100)));
+    expect(writes).toEqual([]);
+    expect(top).toBe(640);
+    fireEvent.click(follow);
+    expect(screen.queryByRole("button", { name: "Follow along" })).not.toBeInTheDocument();
+    await waitFor(() => expect(writes.length).toBeGreaterThan(0));
   });
 });
 

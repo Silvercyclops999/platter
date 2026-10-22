@@ -1,11 +1,12 @@
 /**
  * Lyrics on the phone: a tinted card under the player, and the whole screen
  * from it. Sung and current lines are bright, the ones to come are dim.
- * Tapping a timed line plays from there and keeps play or pause. Where the
+ * Tapping a timed line plays from there and keeps play or pause. Scrolling
+ * by hand stops the follow until Follow along (or a tapped line). Where the
  * lyrics time each word, the current line lights word by word, as on the
  * computer; otherwise the whole line lights.
  */
-import { ChevronDown, Maximize2, Pause, PenLine, Play, RotateCw } from "lucide-react";
+import { ChevronDown, LocateFixed, Maximize2, Pause, PenLine, Play, RotateCw } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { backend } from "../lib/backend";
 import { trackArtistLine } from "../lib/format";
@@ -94,7 +95,8 @@ export function LyricsScreen() {
   const open = usePhoneUi((s) => s.lyrics);
   const track = usePlayer((s) => s.state?.track ?? null);
   if (!open || !track) return null;
-  return <LyricsFull track={track} />;
+  // A new song starts following again.
+  return <LyricsFull key={track.id} track={track} />;
 }
 
 function LyricsFull({ track }: { track: Track }) {
@@ -121,7 +123,7 @@ function LyricsFull({ track }: { track: Track }) {
   const playing = status === "playing" || status === "loading" || status === "buffering";
   const timed = timedLines(lyrics);
   const view = useRef<HTMLDivElement>(null);
-  const { current, word, seekTo } = useLyricFollow(timed, view);
+  const { current, word, seekTo, following, pause, follow } = useLyricFollow(timed, view);
   return (
     <section
       className="ph-lyrics"
@@ -140,7 +142,14 @@ function LyricsFull({ track }: { track: Track }) {
         </div>
         <span className="ph-icon-btn" aria-hidden="true" />
       </header>
-      <div className="ph-lyrics__view" ref={view} data-testid="lyrics-view">
+      <div
+        className="ph-lyrics__view"
+        ref={view}
+        data-testid="lyrics-view"
+        // A hand scroll leaves the list where it's put.
+        onTouchMove={timed ? pause : undefined}
+        onWheel={timed ? pause : undefined}
+      >
         {timed ? (
           <TimedLines lines={timed} current={current} word={word} onSeek={seekTo} />
         ) : lyrics ? (
@@ -156,6 +165,18 @@ function LyricsFull({ track }: { track: Track }) {
         )}
         {lyrics?.credit && <p className="ph-lyrics__credit">{lyrics.credit}</p>}
       </div>
+      {timed && !following && (
+        <button
+          type="button"
+          className="ph-lyrics__follow"
+          onClick={() => {
+            tap();
+            follow();
+          }}
+        >
+          <LocateFixed size={16} aria-hidden="true" /> Follow along
+        </button>
+      )}
       <footer className="ph-lyrics__bottom">
         <PhoneSeek />
         <button

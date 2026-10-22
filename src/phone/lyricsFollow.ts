@@ -36,15 +36,22 @@ export function useLyricFollow(lines: LyricLine[] | null, view: RefObject<HTMLEl
   const status = usePlayer((s) => s.state?.status);
   const playing = status === "playing" || status === "buffering";
   const shown = useRef(current);
+  const [following, setFollowing] = useState(true);
+  const followingRef = useRef(true);
   const anim = useRef<{ frame: number; timer: ReturnType<typeof setTimeout> | null }>({ frame: 0, timer: null });
+
+  const stop = () => {
+    cancelAnimationFrame(anim.current.frame);
+    if (anim.current.timer) clearTimeout(anim.current.timer);
+    anim.current.timer = null;
+  };
 
   const scrollTo = (i: number, eased: boolean) => {
     const el = view.current;
     const line = el?.querySelector<HTMLElement>(`[data-line="${i}"]`);
-    if (!el || !line) return;
+    if (!el || !line || !followingRef.current) return;
     const target = anchorTarget(line.offsetTop, line.offsetHeight, el.clientHeight, el.scrollHeight);
-    cancelAnimationFrame(anim.current.frame);
-    if (anim.current.timer) clearTimeout(anim.current.timer);
+    stop();
     if (!eased || Math.abs(target - el.scrollTop) < 1) {
       el.scrollTop = target;
       return;
@@ -94,21 +101,31 @@ export function useLyricFollow(lines: LyricLine[] | null, view: RefObject<HTMLEl
   }, [playing, lines]);
 
   // Any seek, paused too: line states and scroll at once.
-  useEffect(() => onSeek(() => update(false)), [lines]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => onSeek(() => follow(false)), [lines]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(
-    () => () => {
-      cancelAnimationFrame(anim.current.frame);
-      if (anim.current.timer) clearTimeout(anim.current.timer);
-    },
-    [],
-  );
+  useEffect(() => stop, []);
+
+  /** Follow the song again, from where it is now. */
+  const follow = (eased: boolean, ms = currentPositionMs()) => {
+    followingRef.current = true;
+    setFollowing(true);
+    shown.current = -2;
+    update(eased, ms);
+  };
+
+  /** A hand scroll: stop following (and drop any scroll on its way) so the list stays put. */
+  const pause = () => {
+    stop();
+    if (!followingRef.current) return;
+    followingRef.current = false;
+    setFollowing(false);
+  };
 
   /** Tap a line: play from its start, keeping play or pause as it is. */
   const seekTo = (ms: number) => {
     setPlayhead(ms);
     void player.seek(ms);
-    update(false, ms);
+    follow(false, ms);
   };
-  return { current, word, seekTo };
+  return { current, word, seekTo, following, pause, follow: () => follow(true) };
 }
