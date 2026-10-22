@@ -52,8 +52,8 @@ pub const NOT_FOUND: &str = "Lidarr couldn't find it";
 pub const LOOK_EVERY: Duration = Duration::from_secs(10 * 60);
 /// Albums picked in one go at most (MusicBrainz is asked once a second).
 const PICKS_PER_PASS: usize = 50;
-/// Set when a send didn't get everything to the server: "all" (what a file
-/// found) or "arrivals" (what arrived since). The next look sends it again.
+/// Set when a send didn't get everything to the server; the next look
+/// sends again.
 const UNSENT: &str = "bring.unsent";
 
 /// Where an imported list's liked songs go.
@@ -420,28 +420,36 @@ pub fn rated_copy(c: &Connection, track_id: &str, explicit_ok: bool) -> AppResul
     Ok(other.first().map_or_else(|| track_id.to_string(), |r| r.0.clone()))
 }
 
-/// What to send: with `likes`, the liked songs found and not liked by this
-/// before; with `lists`, the playlists to make and the songs to add.
-pub fn plan(c: &Connection, likes: bool, lists: bool, explicit_ok: bool) -> AppResult<Plan> {
+/// A song found when its file was brought over, or picked by the user in
+/// review, always goes; one that arrived later only when `?2` (the setting
+/// for arrivals) says so.
+const SENDABLE: &str = "(?2 OR s.reviewed = 1
+                         OR coalesce(s.matched_at, 0) <= coalesce((SELECT b.brought_at FROM import_bring_sources b WHERE b.source = s.source), 0))";
+
+/// What to send: the liked songs found and not liked by this before, and
+/// the playlists to make and the songs to add. Songs that arrived after
+/// their file was brought over are liked with `like_arrivals` and added to
+/// their playlists with `fill_arrivals`.
+pub fn plan(c: &Connection, like_arrivals: bool, fill_arrivals: bool, explicit_ok: bool) -> AppResult<Plan> {
     let mut out = Plan::default();
     let sources = brought(c)?;
-    if likes {
-        for src in &sources {
-            let target = liked_target(src);
-            let ids = fresh(
-                c,
+    for src in &sources {
+        let target = liked_target(src);
+        let ids = fresh(
+            c,
+            &format!(
                 "SELECT s.track_id FROM import_likes l JOIN import_songs s ON s.id = l.song_id JOIN tracks t ON t.id = s.track_id
-                 WHERE l.source = ?1 AND s.status = 'matched' ORDER BY l.position",
-                [src],
-                &target,
-                explicit_ok,
-            )?;
-            if !ids.is_empty() {
-                out.likes.push((target, ids));
-            }
+                 WHERE l.source = ?1 AND s.status = 'matched' AND {SENDABLE} ORDER BY l.position"
+            ),
+            params![src, like_arrivals],
+            &target,
+            explicit_ok,
+        )?;
+        if !ids.is_empty() {
+            out.likes.push((target, ids));
         }
     }
-    if lists {
+    {
         let mut st = c.prepare_cached(&format!("SELECT id, source, name, name_key FROM import_playlists WHERE source IN {BROUGHT} ORDER BY id"))?;
         let rows: Vec<(i64, String, String, String)> = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<Result<_, _>>()?;
         for (id, source, name, key) in rows {
@@ -455,9 +463,11 @@ pub fn plan(c: &Connection, likes: bool, lists: bool, explicit_ok: bool) -> AppR
             }
             let add = fresh(
                 c,
-                "SELECT s.track_id FROM import_playlist_items i JOIN import_songs s ON s.id = i.song_id JOIN tracks t ON t.id = s.track_id
-                 WHERE i.playlist_id = ?1 AND s.status = 'matched' ORDER BY i.position",
-                [id],
+                &format!(
+                    "SELECT s.track_id FROM import_playlist_items i JOIN import_songs s ON s.id = i.song_id JOIN tracks t ON t.id = s.track_id
+                     WHERE i.playlist_id = ?1 AND s.status = 'matched' AND {SENDABLE} ORDER BY i.position"
+                ),
+                params![id, fill_arrivals],
                 &target,
                 explicit_ok,
             )?;
@@ -514,21 +524,13 @@ pub fn fit_title(name: &str) -> String {
     format!("{}{tail}", base.trim_end())
 }
 
-/// Note how a send went, for the next look to try again (see [`UNSENT`]).
-fn note_unsent(c: &Connection, arrivals: bool, failed: bool) -> AppResult<()> {
-    let all = crate::db::store::kv_get(c, UNSENT)?.as_deref() == Some("all");
-    let next = match (failed, arrivals) {
-        (true, false) => Some("all"),
-        (true, true) | (false, true) if all => Some("all"),
-        (true, true) => Some("arrivals"),
-        (false, _) => None,
-    };
-    match next {
-        Some(v) => crate::db::store::kv_set(c, UNSENT, v),
-        None => {
-            c.execute("DELETE FROM kv WHERE key = ?1", [UNSENT])?;
-            Ok(())
-        }
+/// Note whether a send left anything for the next look (see [`UNSENT`]).
+fn note_unsent(c: &Connection, failed: bool) -> AppResult<()> {
+    if failed {
+        crate::db::store::kv_set(c, UNSENT, "1")
+    } else {
+        c.execute("DELETE FROM kv WHERE key = ?1", [UNSENT])?;
+        Ok(())
     }
 }
 
@@ -582,7 +584,11 @@ pub fn rematch(c: &mut Connection, ranks: HashMap<String, Rank>, now_ms: i64) ->
     let tx = c.transaction()?;
     {
         let mut up = tx.prepare_cached(
-            "UPDATE import_songs SET status = ?2, track_id = ?3, tier = ?4, confidence = ?5, candidates = ?6, matched_at = ?7 WHERE id = ?1",
+            // Found after its file was brought over, so later than that
+            // even within the same moment (sending tells the two apart).
+            "UPDATE import_songs SET status = ?2, track_id = ?3, tier = ?4, confidence = ?5, candidates = ?6,
+                 matched_at = max(?7, coalesce((SELECT b.brought_at + 1 FROM import_bring_sources b WHERE b.source = import_songs.source), ?7))
+             WHERE id = ?1",
         )?;
         for (id, o) in &found {
             up.execute(params![
@@ -921,7 +927,7 @@ impl Bring {
 
     /// Send what was found, leaving what didn't go for the next look.
     async fn send_now(&self) {
-        if let Err(e) = self.send(false).await {
+        if let Err(e) = self.send().await {
             tracing::warn!("bring over: not everything reached the server, trying again soon: {}", e.message());
             self.poke();
         }
@@ -945,14 +951,15 @@ impl Bring {
         self.status().await
     }
 
-    /// Send what's found and not sent yet. With `arrivals`, only what the
-    /// settings say to do as albums arrive. A batch of likes or a playlist
-    /// the server turns down doesn't hold up the rest: everything else goes,
-    /// then the first refusal is returned and the next look tries again.
-    pub async fn send(&self, arrivals: bool) -> AppResult<Sent> {
+    /// Send what's found and not sent yet; songs that arrived since their
+    /// file was brought over as the settings say. A batch of likes or a
+    /// playlist the server turns down doesn't hold up the rest: everything
+    /// else goes, then the first refusal is returned and the next look tries
+    /// again.
+    pub async fn send(&self) -> AppResult<Sent> {
         let _g = self.lock.lock().await;
         let s = crate::settings::load(self.db());
-        let (likes, lists) = if arrivals { (s.bring_like_arrivals, s.bring_fill_playlists) } else { (true, true) };
+        let (likes, lists) = (s.bring_like_arrivals, s.bring_fill_playlists);
         let explicit_ok = s.explicit_content == crate::settings::ExplicitContent::Allowed;
         let plan = self.db().read_async(move |c| plan(c, likes, lists, explicit_ok)).await?;
         let mut sent = Sent::default();
@@ -1003,7 +1010,7 @@ impl Bring {
             *self.last.lock() = sent;
         }
         let any_failed = failed.is_some();
-        self.db().write_async(move |c| note_unsent(c, arrivals, any_failed)).await?;
+        self.db().write_async(move |c| note_unsent(c, any_failed)).await?;
         match failed {
             Some(e) => Err(e),
             None => Ok(sent),
@@ -1013,9 +1020,8 @@ impl Bring {
     /// Sends again what an earlier send didn't get to the server.
     pub async fn send_unsent(&self) -> AppResult<Option<Sent>> {
         let unsent = self.db().read_async(|c| crate::db::store::kv_get(c, UNSENT)).await?;
-        match unsent.as_deref() {
-            Some("all") => self.send(false).await.map(Some),
-            Some(_) => self.send(true).await.map(Some),
+        match unsent {
+            Some(_) => self.send().await.map(Some),
             None => Ok(None),
         }
     }
@@ -1078,7 +1084,7 @@ impl Bring {
         let ranks = db.source_ranks();
         let found = db.write_async(move |c| rematch(c, ranks, now)).await?;
         if found > 0 {
-            self.send(true).await?;
+            self.send().await?;
         }
         Ok(found)
     }

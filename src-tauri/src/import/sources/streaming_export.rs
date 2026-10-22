@@ -191,7 +191,7 @@ fn local_song(o: &Map<String, Value>) -> Option<SongIn> {
         artist: part(artist)?,
         title: part(title)?,
         album: part(album),
-        duration_ms: secs.trim().parse::<u64>().ok().filter(|s| *s > 0).map(|s| s * 1000),
+        duration_ms: secs.trim().parse::<u64>().ok().filter(|s| *s > 0).and_then(|s| s.checked_mul(1000)),
         isrc: None,
         service_id: Some(uri),
     })

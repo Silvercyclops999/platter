@@ -139,12 +139,13 @@ impl SamePlays {
 }
 
 /// Whether an earlier import from a file already has this play (from the
-/// other history format, or under an older id).
+/// other history format, or under an older id). An artist named only with
+/// symbols used to fold to nothing, so a play kept that way counts too.
 fn imported_already(c: &Connection, artist: &str, title: &str, end: i64, ms: u64) -> AppResult<bool> {
     let start = end - ms as i64;
     let mut st = c.prepare_cached(
         "SELECT played_at, ms_played FROM imported_plays
-         WHERE source = ?1 AND played_at BETWEEN ?2 AND ?3 AND artist_fold = ?4 AND title_fold = ?5",
+         WHERE source = ?1 AND played_at BETWEEN ?2 AND ?3 AND artist_fold IN (?4, '') AND title_fold = ?5",
     )?;
     let rows = st.query_map(
         params![ImportSource::File.as_str(), start - 63_000, start + 63_000, artist, title],
