@@ -199,10 +199,12 @@ pub fn fold_artist(s: &str) -> String {
 }
 
 /// A name made only of symbols ("!!!") is the name itself, without spaces.
-/// Dashes, dots, question marks and the like alone stand for no name.
+/// Dashes, dots, brackets, quotes, question marks and the like alone stand
+/// for no name.
 fn symbols_only(folded: &str) -> String {
     let kept: String = folded.chars().filter(|c| !c.is_whitespace()).collect();
-    let meaningful = kept.chars().filter(|c| !matches!(c, '-' | '_' | '.' | ',' | ';' | ':' | '\'' | '"' | '/' | '\\' | '?' | '\u{2026}')).count();
+    let filler = |c: char| "-_.,;:'\"/\\?()[]{}".contains(c) || ('\u{2000}'..='\u{206f}').contains(&c);
+    let meaningful = kept.chars().filter(|c| !filler(*c)).count();
     if meaningful >= 2 { kept } else { String::new() }
 }
 

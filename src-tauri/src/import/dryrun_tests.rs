@@ -553,3 +553,63 @@ fn local_files_in_playlists_are_read_from_their_link() {
     );
     assert_eq!((p.skipped.incomplete_rows, p.skipped.podcasts), (2, 1));
 }
+
+/// Lost Band 000's album lands in the library.
+fn gone_arrives(db: &DbHandle) {
+    let lib = Lib { songs: (1..=10).map(|s| (format!("lost0-{s}"), lost(0), "Gone".to_string(), format!("Lost {s:02}"))).collect() };
+    load_library(db, &lib);
+}
+
+#[tokio::test]
+async fn sending_again_keeps_to_the_arrival_settings() {
+    let w = world();
+    let mut s = crate::settings::load(&w.db);
+    s.bring_like_arrivals = false;
+    s.bring_fill_playlists = false;
+    crate::settings::save(&w.db, &s).unwrap();
+    // The server turns every new playlist down, so there is always
+    // something to send again.
+    *w.server.fail_create.lock() = Some(AppError::Invalid("No.".into()));
+    w.bring.read(w.zip()).await.unwrap();
+    let liked = w.server.liked.lock().len();
+    assert_eq!(liked, 1_296);
+    gone_arrives(&w.db);
+    w.bring.pass().await;
+    w.bring.pass().await;
+    assert_eq!(w.server.liked.lock().len(), liked, "arrivals aren't liked when the setting says not to");
+    // The playlists go once the server takes them, still without arrivals.
+    *w.server.fail_create.lock() = None;
+    w.bring.pass().await;
+    let everything = w.server.made.lock().iter().find(|(n, _)| n == "Everything").unwrap().1.len();
+    assert_eq!(everything, 2_400, "the arrived songs stay out");
+    assert_eq!(w.server.liked.lock().len(), liked);
+}
+
+#[tokio::test]
+async fn arrivals_are_liked_and_added_when_the_settings_say_so() {
+    let w = world();
+    w.bring.read(w.zip()).await.unwrap();
+    gone_arrives(&w.db);
+    w.bring.pass().await;
+    assert_eq!(w.server.liked.lock().len(), 1_306);
+    let added: usize = w.server.added.lock().iter().map(|(_, ids)| ids.len()).sum();
+    assert_eq!(added, 10, "into Everything");
+}
+
+#[tokio::test]
+async fn plays_kept_when_symbol_names_folded_to_nothing_arent_added_twice() {
+    let w = world();
+    let history = json!([{"endTime": "2024-03-01 10:00", "artistName": "!!!", "trackName": "Halo", "msPlayed": 200000}]);
+    let p = w.dir.path().join("StreamingHistory_music_0.json");
+    std::fs::write(&p, serde_json::to_vec(&history).unwrap()).unwrap();
+    w.bring.read(p.clone()).await.unwrap();
+    // As an older version kept it: the artist folded to nothing, and the id with it.
+    w.db.write(|c| {
+        c.execute("UPDATE imported_plays SET artist_fold = '', source_id = replace(source_id, ':!!!:', '::')", [])?;
+        Ok(())
+    })
+    .unwrap();
+    w.bring.read(p).await.unwrap();
+    let plays: i64 = w.db.read(|c| Ok(c.query_row("SELECT count(*) FROM imported_plays", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(plays, 1);
+}

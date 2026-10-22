@@ -33,6 +33,8 @@ fn folding_basics() {
     assert_eq!(fold_artist("! ! !"), fold_artist("!!!"));
     assert_eq!(fold_artist("-"), "");
     assert_eq!(fold_artist("??"), "");
+    assert_eq!(fold_artist("\u{2014}\u{2014}"), "", "long dashes");
+    assert_eq!(fold_artist("()"), "");
     assert_eq!(fold_title("Don't Stop").title, fold_title("Dont Stop").title);
     let t = fold_title("Song (Demo) [v2]");
     assert_eq!((t.title.as_str(), t.version.as_str()), ("song", "demo; v2"), "kept, not thrown away");
