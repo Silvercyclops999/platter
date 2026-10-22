@@ -30,6 +30,8 @@ import { phone, usePhoneUi } from "../phone/phoneUi";
 import { shortLine } from "../pages/SettingsPage";
 import { phoneText } from "../pages/settingsMeta";
 import { useApp } from "../stores/app";
+import { useDownloads } from "../stores/downloads";
+import { demoHealth } from "../lib/mock/health";
 import { refreshRequests, resetRequests } from "../stores/requests";
 import { nav, useRouter, type Route } from "../stores/router";
 import { loadSettings, useSettings } from "../stores/settings";
@@ -413,6 +415,34 @@ describe("versions of a song", () => {
     expect(within(list).getByText("Live Record · 2021")).toBeInTheDocument();
     fireEvent.click(within(list).getByText("Song (Live)"));
     await waitFor(() => expect(play).toHaveBeenCalledWith(expect.objectContaining({ startTrackId: "v2" })));
+  });
+
+  it("while only music on the phone plays, a version that isn't on it is dimmed and doesn't play", async () => {
+    const t = { ...mock.fx.tracks[0] } as Track;
+    const items = [
+      { track: { ...t, id: "v1", title: "Song", albumTitle: "First Record" }, status: "released", current: true, year: 2019, date: null, edition: null, version: null, quality: null },
+      { track: { ...t, id: "v2", title: "Song (Live)", albumTitle: "Live Record" }, status: "released", current: false, year: 2021, date: null, edition: null, version: null, quality: null },
+    ];
+    vi.spyOn(mock, "trackVersions").mockResolvedValue(items as never);
+    const play = vi.spyOn(mock, "playContext");
+    render(<PhoneShell />);
+    act(() => {
+      useApp.setState({ health: demoHealth("offline", { name: "Basement Server", version: "1.42.2" }, Date.now()), cached: new Set() });
+      useDownloads.setState({ ids: new Set(["v2"]) });
+    });
+    act(() => phone.push({ kind: "versions", track: t }));
+    const list = await screen.findByRole("list", { name: `Versions of ${t.title}` }, SLOW);
+    const first = within(list).getByText("Song").closest("li")!;
+    expect(first).toHaveAttribute("aria-disabled", "true");
+    expect(within(list).getByText("Song (Live)").closest("li")).not.toHaveAttribute("aria-disabled");
+    fireEvent.click(within(first).getByText("Song"));
+    expect(play).not.toHaveBeenCalled();
+    fireEvent.click(within(list).getByText("Song (Live)"));
+    await waitFor(() => expect(play).toHaveBeenCalledWith(expect.objectContaining({ startTrackId: "v2" })));
+    act(() => {
+      useApp.setState({ health: null, cached: null });
+      useDownloads.setState({ ids: new Set() });
+    });
   });
 });
 

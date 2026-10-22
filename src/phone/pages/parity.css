@@ -325,7 +325,8 @@
 /* ---------------------------------------------------------------- downloads */
 .ph-dl { position: relative; color: var(--color-text-secondary); }
 .ph-dl.is-done { color: var(--color-accent); }
-.ph-song.is-unplayable { opacity: 0.4; }
+.ph-song.is-unplayable,
+.ph-version.is-unplayable { opacity: 0.4; }
 
 .ph-library__doctor { margin: 16px 0 0; }
 /* A downloaded mix in Library: its printed sleeve at the row's art size. */
