@@ -164,8 +164,8 @@ impl Cool {
 
 /// How long a relay that couldn't be reached (or refused) is left alone
 /// when there are others to use, doubled each time in a row.
-pub const DOWN_FIRST: Duration = if cfg!(test) { Duration::from_millis(300) } else { Duration::from_secs(60) };
-pub const DOWN_MAX: Duration = if cfg!(test) { Duration::from_secs(1) } else { Duration::from_secs(30 * 60) };
+pub const DOWN_FIRST: Duration = if cfg!(test) { Duration::from_secs(2) } else { Duration::from_secs(60) };
+pub const DOWN_MAX: Duration = if cfg!(test) { Duration::from_secs(4) } else { Duration::from_secs(30 * 60) };
 
 /// Background messages one device may publish to ntfy.sh at once, and how
 /// many come back an hour. Four devices at one home together stay near

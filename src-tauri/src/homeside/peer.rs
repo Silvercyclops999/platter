@@ -38,6 +38,8 @@ pub struct Wire {
     backups: Vec<(String, Vec<String>)>,
     /// Relays that couldn't be reached lately, by address.
     down: DownMap,
+    /// Each relay's queue of messages, by link and relay.
+    queues: Mutex<HashMap<(String, String), mpsc::UnboundedSender<Job>>>,
 }
 
 impl Wire {
@@ -46,7 +48,7 @@ impl Wire {
             crate::social::listen::DEFAULT_RELAY.to_string(),
             crate::social::listen::BACKUP_RELAYS.iter().map(|b| b.to_string()).collect(),
         )];
-        Self { links, relays, clock, counters: Mutex::default(), parts: Mutex::default(), sending: Mutex::default(), backups, down: Arc::default() }
+        Self { links, relays, clock, counters: Mutex::default(), parts: Mutex::default(), sending: Mutex::default(), backups, down: Arc::default(), queues: Mutex::default() }
     }
 
     pub fn now_ms(&self) -> u64 {
@@ -55,17 +57,6 @@ impl Wire {
 
     pub fn relays(&self) -> &Arc<dyn RelayFactory> {
         &self.relays
-    }
-
-    /// The relay couldn't be reached or refused just now: leave it alone
-    /// for a while if there's another.
-    pub fn went_down(&self, base: &str) {
-        mark(&self.down, base, false);
-    }
-
-    /// The relay answered: back to normal.
-    pub fn came_up(&self, base: &str) {
-        mark(&self.down, base, true);
     }
 
     /// Whether the relay is being left alone after it couldn't be reached.
@@ -112,7 +103,10 @@ impl Wire {
         let kind = msg.kind();
         let all = self.relays_for(&link.relay);
         let up: Vec<String> = all.iter().filter(|b| !self.is_down(b)).cloned().collect();
-        let tries = if up.is_empty() { all } else { up };
+        // Every relay marked down: try them all anyway.
+        let force = up.is_empty();
+        let tries = if force { all } else { up };
+        let bodies = Arc::new(bodies);
         let mut held = false;
         let mut going = FuturesUnordered::new();
         for base in tries {
@@ -123,17 +117,11 @@ impl Wire {
                 held = true;
                 continue;
             }
-            let (topic, bodies) = (topic.clone(), bodies.clone());
-            let down = self.down.clone();
-            going.push(tokio::spawn(relay::as_kind(kind, async move {
-                let res = publish_all(&*relay, &topic, &bodies).await;
-                match res {
-                    Ok(()) => mark(&down, &base, true),
-                    Err(RelayError::Refused(400) | RelayError::Limited) => {}
-                    Err(_) => mark(&down, &base, false),
-                }
-                res
-            })));
+            let (done, result) = tokio::sync::oneshot::channel();
+            let job = Job { topic: topic.clone(), bodies: bodies.clone(), kind, force, done };
+            if self.queue(&link.id, &base, relay).send(job).is_ok() {
+                going.push(result);
+            }
         }
         let mut worst = held.then_some(RelayError::Limited);
         while let Some(done) = going.next().await {
@@ -150,6 +138,22 @@ impl Wire {
             tracing::debug!(kind, pieces = bodies.len(), "relay: held back to stay under the limit");
         }
         Err(AppError::Network(relay_error(worst.unwrap_or(RelayError::Unreachable))))
+    }
+
+    /// The queue of messages for one relay of a link. Each relay takes a
+    /// link's messages one at a time and in order, however far behind the
+    /// others it is, so a slow relay never lets a later message overtake an
+    /// earlier one.
+    fn queue(&self, link: &str, base: &str, relay: Arc<dyn Relay>) -> mpsc::UnboundedSender<Job> {
+        let mut queues = self.queues.lock();
+        let key = (link.to_string(), base.to_string());
+        if let Some(q) = queues.get(&key).filter(|q| !q.is_closed()) {
+            return q.clone();
+        }
+        let (tx, rx) = mpsc::unbounded_channel();
+        tokio::spawn(publisher(relay, base.to_string(), self.down.clone(), rx));
+        queues.insert(key, tx.clone());
+        tx
     }
 
     /// The publish lock for one link: hold it to keep a run of messages in
@@ -221,6 +225,37 @@ impl Wire {
 }
 
 type DownMap = Arc<Mutex<HashMap<String, relay::Cool>>>;
+
+/// One message for one relay.
+struct Job {
+    topic: String,
+    bodies: Arc<Vec<String>>,
+    kind: &'static str,
+    /// Every relay was marked down, so it's tried anyway.
+    force: bool,
+    done: tokio::sync::oneshot::Sender<Result<(), RelayError>>,
+}
+
+/// Publishes one link's messages on one relay, in order. While the relay is
+/// marked down, waiting messages fail at once instead of each waiting out
+/// its tries.
+async fn publisher(relay: Arc<dyn Relay>, base: String, down: DownMap, mut jobs: mpsc::UnboundedReceiver<Job>) {
+    while let Some(job) = jobs.recv().await {
+        let skip = !job.force && down.lock().get(&base).is_some_and(|c| c.waiting(std::time::Instant::now()));
+        let res = if skip {
+            Err(RelayError::Unreachable)
+        } else {
+            let res = relay::as_kind(job.kind, publish_all(&*relay, &job.topic, &job.bodies)).await;
+            match res {
+                Ok(()) => mark(&down, &base, true),
+                Err(RelayError::Refused(400) | RelayError::Limited) => {}
+                Err(_) => mark(&down, &base, false),
+            }
+            res
+        };
+        let _ = job.done.send(res);
+    }
+}
 
 /// A relay answered (`up`), or couldn't be reached or refused: then it's
 /// left alone for a while, longer each time in a row.
@@ -343,7 +378,13 @@ async fn listen_on(wire: Arc<Wire>, link: Link, base: String, open: Arc<AtomicUs
                         ev = rx.recv() => match ev {
                             Some(RelayEvent::Open) => {
                                 wait = Duration::from_secs(2);
-                                wire.came_up(&base);
+                                // A backup never read: from now on, not the last while again.
+                                if !main {
+                                    let now = (wire.now_ms() / 1000).to_string();
+                                    let _ = wire.links.update(&link.id, |p| {
+                                        p.since_on.entry(base.clone()).or_insert(now);
+                                    });
+                                }
                                 if !opened {
                                     opened = true;
                                     if open.fetch_add(1, Ordering::SeqCst) == 0 && tx.send(Incoming::Opened(link.id.clone())).await.is_err() {
@@ -378,8 +419,6 @@ async fn listen_on(wire: Arc<Wire>, link: Link, base: String, open: Arc<AtomicUs
                 tracing::info!("Bridge link ({}): {}", host(&base), relay_error(e));
                 if e == RelayError::Limited {
                     wait = wait.max(Duration::from_secs(60));
-                } else if e != RelayError::Refused(400) {
-                    wire.went_down(&base);
                 }
             }
         }

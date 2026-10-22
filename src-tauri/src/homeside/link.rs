@@ -196,20 +196,39 @@ pub fn open_frame(ch: &Channel, body: &str, now_ms: u64) -> Result<Frame, Reject
     Ok(f)
 }
 
-/// The last counter seen per sender; anything not above it is a replay.
-/// Kept with the link so a restart doesn't accept old frames again.
+/// The last counter seen per sender, and the last few taken. A frame above
+/// the last counts; so does one below it that was never taken and is newer
+/// than the oldest one kept (it came in late on another relay). Anything
+/// else is a replay. Kept with the link so a restart doesn't accept old
+/// frames again.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Guard {
     pub last: BTreeMap<String, u64>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub recent: BTreeMap<String, Vec<u64>>,
 }
+
+/// Counters kept per sender for frames that come in late.
+pub const GUARD_WINDOW: usize = 64;
 
 impl Guard {
     pub fn accept(&mut self, f: &Frame) -> Result<(), Rejected> {
         let last = self.last.entry(f.f.clone()).or_insert(0);
-        if f.c <= *last {
+        let recent = self.recent.entry(f.f.clone()).or_default();
+        if f.c > *last {
+            *last = f.c;
+        } else if !recent.first().is_some_and(|oldest| f.c > *oldest) {
             return Err(Rejected::Replayed);
         }
-        *last = f.c;
+        // Kept in order: anything taken and dropped from here is older than
+        // the oldest one kept.
+        match recent.binary_search(&f.c) {
+            Ok(_) => return Err(Rejected::Replayed),
+            Err(i) => recent.insert(i, f.c),
+        }
+        if recent.len() > GUARD_WINDOW {
+            recent.remove(0);
+        }
         Ok(())
     }
 }
