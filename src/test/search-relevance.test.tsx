@@ -12,7 +12,7 @@ import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { MockCatalogue } from "../lib/mock/catalogue";
 import { DEFAULT_SETTINGS, type SearchResults, type Track } from "../lib/types";
-import { resetCatalogueCache } from "../pages/SearchCatalogue";
+import { catalogueTop, nameMatches, resetCatalogueCache, type CatalogueResults } from "../pages/SearchCatalogue";
 import { HOME_UNREACHABLE, lidarrNote } from "../pages/lidarrShared";
 import { resetArtistPhotos } from "../lib/artistPhotos";
 import { usePhoneForm } from "../phone/form";
@@ -97,6 +97,40 @@ describe("an artist you don't have", () => {
     const first = within(results).getAllByRole("listitem")[0];
     expect(within(first).getByText("Coastal Cold Front")).toBeInTheDocument();
     expect(first.closest("section[aria-label='Not in your library']")).toBeNull();
+  });
+});
+
+describe("an artist's name as people type it", () => {
+  it("matches stylised spellings, typos, a leading the and run-together words, not other names", () => {
+    expect(nameMatches("juice world", "Juice WRLD")).toBe(true);
+    expect(nameMatches("cold coasst", "Cold Coast")).toBe(true);
+    expect(nameMatches("kold coast", "Cold Coast")).toBe(false);
+    expect(nameMatches("the cold coast", "Cold Coast")).toBe(true);
+    expect(nameMatches("coldcoast", "Cold Coast")).toBe(true);
+    expect(nameMatches("juice world", "In A Perfect World")).toBe(false);
+    expect(nameMatches("cold coast", "Coastal Cold Front")).toBe(false);
+  });
+
+  it("puts the artist you don't have on top over library results that don't name it", () => {
+    const wrld = { mbid: "m1", name: "Juice WRLD" } as CatalogueResults["artists"][number];
+    const other = { mbid: "m2", name: "World Order" } as CatalogueResults["artists"][number];
+    const c = { artists: [other, wrld], albums: [], songs: [], inLibrary: new Set(), pending: [], source: "", failed: false } as unknown as CatalogueResults;
+    const song = { kind: "track", track: { ...mock.fx.tracks[0], title: "In A Perfect World" } } as SearchResults["top"];
+    expect(catalogueTop("juice world", c, song)?.name).toBe("Juice WRLD");
+    expect(catalogueTop("world", c, song)).toBeNull();
+  });
+
+  it("when nothing matched every word, lists what's out there first and the library's near misses after", async () => {
+    const song = { ...mock.fx.tracks[0], id: "p1", title: "Coast Road" } as Track;
+    vi.spyOn(mock, "search").mockResolvedValue({ songs: [song], artists: [], albums: [], playlists: [], top: { kind: "track", track: song }, tookMs: 1, source: "local", partial: true } as SearchResults);
+    search("cold coast");
+    const top = await screen.findByRole("button", { name: "Cold Coast, artist, not in your library" }, SLOW);
+    const results = screen.getByRole("region", { name: "Results" });
+    expect(within(results).getAllByRole("button")[0]).toBe(top);
+    const close = await screen.findByRole("region", { name: "Close matches in your library" }, SLOW);
+    expect(within(close).getByText("Coast Road")).toBeInTheDocument();
+    const rest = screen.getByRole("region", { name: "Not in your library" });
+    expect(rest.compareDocumentPosition(close) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 

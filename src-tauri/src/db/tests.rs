@@ -1605,6 +1605,41 @@ async fn search_with_a_word_left_out_matches_the_rest_whole() {
 }
 
 #[tokio::test]
+async fn search_finds_an_artist_by_the_name_as_people_spell_it() {
+    let salt: Vec<Pop> = vec![
+        ("s1", "Brave New World", None, 40, None, None, 200),
+        ("s2", "World Turning", None, 30, None, None, 200),
+    ];
+    let velvet: Vec<Pop> = vec![("v1", "Lucid", None, 1, None, None, 200)];
+    let t = open();
+    sync(&t.db, &Arc::new(FakeSource::new(popular_library(&[], &[("Saltglass", &salt), ("Velvet WRLD", &velvet)]))), false).await;
+    // "world" for "WRLD": the artist is the top result, over songs with the word in their titles.
+    for typed in ["velvet world", "velvet wrld", "velvetwrld", "velvit world"] {
+        let r = search::search(&t.db, typed, SearchFilter::All, None).unwrap();
+        let top = r.top.as_ref().and_then(|h| h.artist.as_ref()).map(|a| a.title.as_str());
+        assert_eq!(top, Some("Velvet WRLD"), "{typed}");
+    }
+    // Only part of the query matched: the results say so.
+    let r = search::search(&t.db, "zebra world", SearchFilter::All, None).unwrap();
+    assert!(r.partial && !r.songs.is_empty());
+    let r = search::search(&t.db, "brave new world", SearchFilter::All, None).unwrap();
+    assert!(!r.partial);
+}
+
+#[test]
+fn a_name_sounds_like_its_common_spellings() {
+    use super::searchtext::sounds_like;
+    assert!(sounds_like("juice world", "Juice WRLD"));
+    assert!(sounds_like("mgmt", "MGMT"));
+    assert!(sounds_like("the beatles", "Beatles"));
+    assert!(sounds_like("kanyewest", "Kanye West"));
+    assert!(sounds_like("tame impalla", "Tame Impala"));
+    assert!(!sounds_like("juice world", "In A Perfect World"));
+    assert!(!sounds_like("world", "Wired"));
+    assert!(!sounds_like("cold coast", "Coastal Cold Front"));
+}
+
+#[tokio::test]
 async fn search_puts_the_typed_spelling_above_its_variant() {
     let t = forgiving_db().await;
     let r = search::search(&t.db, "tonite", SearchFilter::Songs, None).unwrap();

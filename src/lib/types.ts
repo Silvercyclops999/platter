@@ -719,6 +719,8 @@ export interface SearchResults {
   corrected?: string | null;
   /** Songs in `songs` found by their lyrics: the line that matched, under the song's id. */
   lyricLines?: Record<string, string>;
+  /** Nothing matched every word: these results leave a word out. */
+  partial?: boolean;
 }
 
 // ---------------------------------------------------------------- playback & queue
