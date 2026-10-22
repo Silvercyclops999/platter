@@ -110,26 +110,41 @@ impl Wire {
         let up: Vec<String> = all.iter().filter(|b| !self.is_down(b)).cloned().collect();
         // Every relay marked down: try them all anyway.
         let force = up.is_empty();
-        let mut tries = if force { all } else { up };
-        // Background work rides the backups when the other end listens on
-        // them too, and leaves the main relay's daily allowance to requests
-        // and answers.
-        if background(msg) && tries.len() > 1 && tries[0] == link.relay && self.links.get(&link.id).is_some_and(|p| hears_backups(&p.version)) {
-            tries.remove(0);
-        }
+        let tries = if force { all } else { up };
         let bodies = Arc::new(bodies);
+        // Background work rides the backups the other end was heard on,
+        // when it runs a build that listens on them, and leaves the main
+        // relay's daily allowance to requests and answers. If none of those
+        // takes it, the main relay still does.
+        if background(msg) && tries.first() == Some(&link.relay) && self.backups.iter().any(|(p, _)| p == &link.relay) {
+            let heard = self.links.get(&link.id).filter(|p| hears_backups(&p.version)).map(|p| heard_on(&p)).unwrap_or_default();
+            let backups: Vec<String> = tries[1..].iter().filter(|b| heard.contains(*b)).cloned().collect();
+            if !backups.is_empty() {
+                match self.publish_on(link, &topic, kind, &bodies, backups, force, true).await {
+                    Ok(()) => return Ok(()),
+                    Err(_) => return self.publish_on(link, &topic, kind, &bodies, vec![link.relay.clone()], force, true).await.map_err(|e| AppError::Network(relay_error(e))),
+                }
+            }
+        }
+        self.publish_on(link, &topic, kind, &bodies, tries, force, background(msg)).await.map_err(|e| AppError::Network(relay_error(e)))
+    }
+
+    /// Publish sealed pieces on these relays; done once one took them all.
+    /// `paced`: background work, which takes from each relay's allowance.
+    #[allow(clippy::too_many_arguments)]
+    async fn publish_on(&self, link: &Link, topic: &str, kind: &'static str, bodies: &Arc<Vec<String>>, tries: Vec<String>, force: bool, paced: bool) -> Result<(), RelayError> {
         let mut held = false;
         let mut going = FuturesUnordered::new();
         for base in tries {
             let relay = self.relays.relay(&base);
-            if background(msg) && !relay.room_for(bodies.len()) {
+            if paced && !relay.room_for(bodies.len()) {
                 // The rest of this hour's allowance there is spent: it goes later.
                 relay::note(kind, bodies.len(), relay::Counted::Held);
                 held = true;
                 continue;
             }
             let (done, result) = tokio::sync::oneshot::channel();
-            let job = Job { topic: topic.clone(), bodies: bodies.clone(), kind, force, done };
+            let job = Job { topic: topic.to_string(), bodies: bodies.clone(), kind, force, done };
             if self.queue(&link.id, &base, relay).send(job).is_ok() {
                 going.push(result);
             }
@@ -148,7 +163,7 @@ impl Wire {
         if held && worst == Some(RelayError::Limited) {
             tracing::debug!(kind, pieces = bodies.len(), "relay: held back to stay under the limit");
         }
-        Err(AppError::Network(relay_error(worst.unwrap_or(RelayError::Unreachable))))
+        Err(worst.unwrap_or(RelayError::Unreachable))
     }
 
     /// The queue of messages for one relay of a link. Each relay takes a
@@ -309,6 +324,12 @@ pub fn hears_backups(version: &str) -> bool {
         (Some(a), Some(b), Some(c)) => (a, b, c) >= BACKUPS_FROM,
         _ => false,
     }
+}
+
+/// The backup relays a message from the other end of a link has come in
+/// on (a read position that's a message id, not the time it started from).
+fn heard_on(p: &super::links::Paired) -> Vec<String> {
+    p.since_on.iter().filter(|(_, at)| !at.bytes().all(|b| b.is_ascii_digit())).map(|(b, _)| b.clone()).collect()
 }
 
 /// Which error to report when no relay took a message: busy over

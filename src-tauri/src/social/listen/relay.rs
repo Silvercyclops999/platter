@@ -174,38 +174,59 @@ pub const DOWN_MAX: Duration = if cfg!(test) { Duration::from_secs(4) } else { D
 pub const ALLOWANCE_MOST: f64 = 30.0;
 pub const ALLOWANCE_PER_HOUR: f64 = 4.0;
 
+/// The same for the backup relays. They allow an address about 17,000
+/// messages in 12 hours (1,440 an hour), so four devices at one home at
+/// this pace use about a third of it.
+pub const BACKUP_ALLOWANCE_MOST: f64 = 240.0;
+pub const BACKUP_ALLOWANCE_PER_HOUR: f64 = 120.0;
+
 /// What background work (synced changes, shared Lidarr state, lyrics) may
-/// still publish to ntfy.sh from this device. What doesn't fit waits for
-/// the home network or a later round.
+/// still publish to a public relay from this device. What doesn't fit
+/// waits for the home network or a later round.
 #[derive(Debug)]
 pub struct Allowance {
     left: f64,
     at: Option<Instant>,
+    most: f64,
+    per_hour: f64,
 }
 
 impl Default for Allowance {
     fn default() -> Self {
-        Self { left: ALLOWANCE_MOST, at: None }
+        Self::new(ALLOWANCE_MOST, ALLOWANCE_PER_HOUR)
     }
 }
 
 impl Allowance {
+    pub fn new(most: f64, per_hour: f64) -> Self {
+        Self { left: most, at: None, most, per_hour }
+    }
+
+    /// The allowance for a relay: the backups' is bigger than ntfy.sh's.
+    pub fn for_relay(base: &str) -> Self {
+        if super::BACKUP_RELAYS.contains(&base) { Self::new(BACKUP_ALLOWANCE_MOST, BACKUP_ALLOWANCE_PER_HOUR) } else { Self::default() }
+    }
+
     /// Take `n` messages if there's room. A message too big for the whole
     /// allowance goes once it's full, and the rest of it is owed.
     pub fn take(&mut self, n: usize, now: Instant) -> bool {
         if let Some(at) = self.at {
             let hours = now.saturating_duration_since(at).as_secs_f64() / 3600.0;
-            self.left = (self.left + hours * ALLOWANCE_PER_HOUR).min(ALLOWANCE_MOST);
+            self.left = (self.left + hours * self.per_hour).min(self.most);
         }
         self.at = Some(now);
         let n = n as f64;
-        if self.left >= n.min(ALLOWANCE_MOST) {
+        if self.left >= n.min(self.most) {
             self.left -= n;
             true
         } else {
             false
         }
     }
+}
+
+fn pace_entry<'a>(pace: &'a mut HashMap<String, (Cool, Allowance)>, base: &str) -> &'a mut (Cool, Allowance) {
+    pace.entry(base.to_string()).or_insert_with(|| (Cool::default(), Allowance::for_relay(base)))
 }
 
 /// Per relay address: its wait and this device's allowance there.
@@ -358,7 +379,7 @@ impl Relay for NtfyRelay {
         let code = resp.status().as_u16();
         let res = if resp.status().is_success() { Ok(()) } else { Err(status_err(code)) };
         let mut pace = PACE.lock();
-        let (cool, _) = pace.entry(self.base.clone()).or_default();
+        let (cool, _) = pace_entry(&mut pace, &self.base);
         match res {
             Ok(()) => {
                 cool.went();
@@ -380,7 +401,7 @@ impl Relay for NtfyRelay {
         if !self.paced() {
             return true;
         }
-        PACE.lock().entry(self.base.clone()).or_default().1.take(messages, Instant::now())
+        pace_entry(&mut PACE.lock(), &self.base).1.take(messages, Instant::now())
     }
 
     async fn subscribe(&self, topics: &[String], since: Option<&str>) -> Result<mpsc::Receiver<RelayEvent>, RelayError> {

@@ -308,17 +308,60 @@ fn only_a_build_that_listens_on_the_backups_counts() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn background_work_leaves_the_main_relay_to_requests_when_the_other_end_hears_the_backups() {
-    let (main, b1) = (FakeNtfy::start().await, FakeNtfy::start().await);
-    let (desk, _bridge) = pair(&main, &[&b1], &[], &[]);
+    let (main, b1, b2) = (FakeNtfy::start().await, FakeNtfy::start().await, FakeNtfy::start().await);
+    let (desk, bridge) = pair(&main, &[&b1, &b2], &[], &[]);
     let entries = || Msg::Entries { entries: crate::sync::store::EntryMap::new() };
+    let set = |v: &str, heard: &[&FakeNtfy]| {
+        let heard: Vec<String> = heard.iter().map(|n| n.url.clone()).collect();
+        desk.wire
+            .links
+            .update(&desk.link.id, |p| {
+                p.version = v.into();
+                p.since_on = heard.into_iter().map(|u| (u, "m00000000001".to_string())).collect();
+            })
+            .unwrap();
+    };
+    let counts = || (main.published().len(), b1.published().len(), b2.published().len());
     // An older build at the other end: background still goes everywhere.
-    desk.wire.links.update(&desk.link.id, |p| p.version = "0.2.37".into()).unwrap();
+    set("0.2.37", &[&b1]);
     desk.wire.send(&desk.link, &entries()).await.unwrap();
-    super::tests::until("on both", || main.published().len() == 1 && b1.published().len() == 1).await;
-    // A build that listens on the backups: background only there, requests everywhere.
-    desk.wire.links.update(&desk.link.id, |p| p.version = "0.2.38".into()).unwrap();
+    super::tests::until("on all three", || counts() == (1, 1, 1)).await;
+    // A new build, but never heard on a backup yet: everywhere too.
+    set("0.2.38", &[]);
     desk.wire.send(&desk.link, &entries()).await.unwrap();
-    super::tests::until("on the backup", || b1.published().len() == 2).await;
+    super::tests::until("on all three again", || counts() == (2, 2, 2)).await;
+    // Heard on one backup: background only there, requests everywhere.
+    set("0.2.38", &[&b1]);
+    desk.wire.send(&desk.link, &entries()).await.unwrap();
+    super::tests::until("on the backup it was heard on", || counts() == (2, 3, 2)).await;
     desk.wire.send(&desk.link, &answer(1)).await.unwrap();
-    super::tests::until("the answer on both", || main.published().len() == 2 && b1.published().len() == 3).await;
+    super::tests::until("the answer on all three", || counts() == (3, 4, 3)).await;
+    // That backup takes nothing: the main relay still carries it.
+    b1.set_limited(true);
+    desk.wire.send(&desk.link, &entries()).await.unwrap();
+    super::tests::until("on the main relay", || main.published().len() == 4).await;
+    drop(bridge);
+}
+
+#[test]
+fn the_backups_allow_more_background_work_than_ntfy_sh() {
+    let t0 = std::time::Instant::now();
+    let mut main = relay::Allowance::for_relay(crate::social::listen::DEFAULT_RELAY);
+    let mut backup = relay::Allowance::for_relay(crate::social::listen::BACKUP_RELAYS[0]);
+    assert!(main.take(relay::ALLOWANCE_MOST as usize, t0) && !main.take(1, t0));
+    assert!(backup.take(relay::BACKUP_ALLOWANCE_MOST as usize, t0) && !backup.take(1, t0));
+    assert!(relay::BACKUP_ALLOWANCE_PER_HOUR > relay::ALLOWANCE_PER_HOUR);
+}
+
+#[test]
+fn a_link_is_heard_from_when_its_newest_frame_came_in() {
+    let mut p: super::links::Paired = serde_json::from_value(serde_json::json!({
+        "id": "l", "relay": "r", "side": "bridge", "me": "m", "name": "PC", "pairedAt": 1_000
+    }))
+    .unwrap();
+    assert_eq!(super::run::last_heard_s(&p), 1_000, "never heard: when it was paired");
+    // Counters are the sender's clock in microseconds.
+    p.guard.last.insert("desk".into(), 1_800_000_000_000_000);
+    p.guard.last.insert("desk.lan".into(), 1_700_000_000_000_000);
+    assert_eq!(super::run::last_heard_s(&p), 1_800_000_000);
 }

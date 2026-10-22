@@ -65,6 +65,18 @@ const RADAR_START: Duration = Duration::from_secs(5 * 60);
 const RADAR_EVERY: Duration = Duration::from_secs(30 * 60);
 /// Wait after a shared change before sending it (changes come in bursts).
 const SETTLE: Duration = Duration::from_secs(3);
+/// A link quiet this long gets no shared state or lyrics until it's heard
+/// from again.
+const QUIET_S: i64 = 2 * 86_400;
+
+/// When something last came in on a link, in Unix seconds: the newest
+/// frame counter its replay guard took (counters start at the sender's
+/// clock in microseconds), or when it was paired if that's later.
+pub fn last_heard_s(p: &super::links::Paired) -> i64 {
+    let newest = p.guard.last.values().copied().max().unwrap_or(0);
+    ((newest / 1_000_000) as i64).max(p.paired_at)
+}
+
 /// Most JSON of lyrics in one message to a device, so each message is a
 /// few relay pieces.
 const LYRICS_BATCH_BYTES: usize = 12 * 1024;
@@ -304,6 +316,9 @@ pub struct Bridge {
     /// Links paired from the Bridge's own code: say hello at their first
     /// message (the computer may not have been listening for the first one).
     greet: Mutex<HashSet<String>>,
+    /// Links whose shared state and lyrics wait because the other end has
+    /// been quiet (said once in the log).
+    quiet: Mutex<HashSet<String>>,
     /// Welcomes waiting for their link's listener to open: (relay, topic, body).
     welcomes: Mutex<std::collections::HashMap<String, (String, String, String)>>,
     links_changed: tokio::sync::Notify,
@@ -364,6 +379,7 @@ impl Bridge {
             waves,
             shown: Mutex::default(),
             greet: Mutex::default(),
+            quiet: Mutex::default(),
             welcomes: Mutex::default(),
             links_changed: tokio::sync::Notify::new(),
             plex_now: tokio::sync::Notify::new(),
@@ -718,6 +734,11 @@ impl Bridge {
             let hello = self.hello_msg();
             let _ = self.wire.send(link, &hello).await;
         }
+        if self.quiet.lock().contains(&link.id) {
+            // Back after a quiet while: what it missed goes now.
+            tracing::info!("A quiet device is back; its shared Lidarr state and lyrics go now.");
+            Box::pin(self.flush_entries()).await;
+        }
         match msg {
             Msg::Config(mut cfg) => {
                 if !cfg.device.is_empty() && cfg.device.len() <= 100 {
@@ -1062,7 +1083,20 @@ impl Bridge {
 
     /// Send shared Lidarr state the desktops don't have yet.
     pub async fn flush_entries(&self) {
+        let now = self.now_s();
         for link in self.wire.links.links() {
+            // A link nothing has come in on for days (an old pairing the
+            // device moved on from, or a device that's off) waits: what it
+            // misses goes once it's back, and it doesn't take relay room
+            // from the devices in use.
+            let Some(p) = self.wire.links.get(&link.id) else { continue };
+            if now - last_heard_s(&p) > QUIET_S {
+                if self.quiet.lock().insert(link.id.clone()) {
+                    tracing::info!("Shared Lidarr state and lyrics wait for {} until it's back (nothing from it for a while).", if p.name.is_empty() { "a device" } else { &p.name });
+                }
+                continue;
+            }
+            self.quiet.lock().remove(&link.id);
             let ob = Outbox::new(&self.p.db, &link.id);
             // Shared Lidarr state first, in its own messages, so it never
             // waits behind lyrics. Then the lyrics transcribed here, a few
