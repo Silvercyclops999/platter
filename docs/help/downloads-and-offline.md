@@ -22,6 +22,12 @@ To keep Liked Songs on this computer all the time, turn on Settings, Downloads a
 
 Press the download button again and confirm **Remove**. Platter tells you how much space that frees. To remove everything, use **Remove all downloads** in Settings, Downloads and devices.
 
+## On the phone
+
+On the phone, downloads live in Library like everything else you keep. Whatever you download shows there with the small mark. A mix you download sits with your playlists until you remove its download. The Downloaded pill shows only what's on the phone, and Platter turns it on by itself when there's no connection.
+
+Removing a download on the phone always asks first, whatever its size. Storage, Remove all downloads, Download over mobile data and Go offline are in Settings, Downloads and devices.
+
 ## Download quality
 
 Settings, Downloads and devices, Download quality decides what gets saved:

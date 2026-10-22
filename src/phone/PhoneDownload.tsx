@@ -22,7 +22,7 @@ export function PhoneDownload({ kind, id, title, trackIds, size = 24 }: { kind: 
   const press = () => {
     tap();
     if (state === "error") void retryDownload(kind, id);
-    else toggleDownload(target);
+    else toggleDownload(target, { askAlways: true });
   };
   const label =
     state === "none"

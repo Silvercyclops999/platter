@@ -21,6 +21,7 @@ import {
   useDownloads,
   useIsDownloaded,
 } from "../stores/downloads";
+import { usePhoneForm } from "../phone/form";
 import { nav } from "../stores/router";
 import { Banner } from "./Banner";
 import { Button, IconButton } from "./Button";
@@ -161,6 +162,7 @@ export function DownloadedGlyph() {
 /** Asks before removing a download. Mounted once in the shell. */
 export function DownloadDialogs() {
   const ask = useDownloads((s) => s.confirming);
+  const onPhone = usePhoneForm((x) => x.phone);
   const cancel = useRef<HTMLButtonElement>(null);
   if (!ask) return null;
   return (
@@ -168,7 +170,7 @@ export function DownloadDialogs() {
       <h2 className="confirm__title">Remove from downloads?</h2>
       <p className="confirm__body">
         You won't be able to play this offline.
-        {ask.bytes > 0 && ` It frees ${formatBytes(ask.bytes)} on this computer.`}
+        {ask.bytes > 0 && ` It frees ${formatBytes(ask.bytes)} on this ${onPhone ? "phone" : "computer"}.`}
       </p>
       <div className="confirm__actions">
         <Button ref={cancel} variant="ghost" onClick={() => answerRemove(false)}>

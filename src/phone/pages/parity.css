@@ -320,17 +320,13 @@
 /* ---------------------------------------------------------------- downloads */
 .ph-dl { position: relative; color: var(--color-text-secondary); }
 .ph-dl.is-done { color: var(--color-accent); }
-.ph-dl-card { margin: 4px 0 16px !important; display: flex; flex-direction: column; gap: 8px; }
-.ph-dl-card__used { margin: 0; font-size: 15px; font-weight: 600; }
-.ph-dl-card__meter { display: block; height: 6px; border-radius: 3px; overflow: hidden; background: var(--ph-faint); }
-.ph-dl-card__meter span { display: block; height: 100%; background: var(--color-accent); }
-.ph-dl-card__offline { display: flex; align-items: center; gap: 12px; padding-top: 8px; border-top: 1px solid var(--ph-line); }
-.ph-dl-card__offline .ph-row__sub { white-space: normal; }
 .ph-song.is-unplayable { opacity: 0.4; }
 
-/* Library with Downloads picked: the way to manage them, above the list. */
-.ph-library__manage { margin: 0 0 8px; }
 .ph-library__doctor { margin: 16px 0 0; }
+/* A downloaded mix in Library: its printed sleeve at the row's art size. */
+.ph-lib-mix { display: block; flex: none; width: 56px; height: 56px; }
+.ph-lib-mix.is-fluid { width: 100%; height: auto; aspect-ratio: 1; }
+.ph-lib-mix .mix-art { border-radius: 2px; box-shadow: none; }
 
 /* Requests on What's new: No and Get it, or where one stands. */
 .ph-ask__actions { flex: none; display: flex; align-items: center; gap: 6px; }

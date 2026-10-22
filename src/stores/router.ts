@@ -89,7 +89,7 @@ export type Route =
   | { name: "mixes" }
   /** The archive: demos, mixtapes and unreleased albums (the library with that filter on). */
   | { name: "archive" }
-  /** What's downloaded on this device, storage used and Remove all. */
+  /** Downloads: Settings, Downloads and devices (on the phone too; what's downloaded is in Library). */
   | { name: "downloads" }
   /** Help as a page (the phone; a computer opens its help panel instead): the list, or one page and section. */
   | { name: "help"; slug?: string; anchor?: string };

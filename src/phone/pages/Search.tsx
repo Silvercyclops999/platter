@@ -269,7 +269,11 @@ function HitRow({
             {i.title}
           </span>
           <span className="ph-row__sub">
-            <RowGlyphs trackId={i.kind === "track" ? i.id : undefined} albumId={i.kind === "album" ? i.id : undefined} />
+            <RowGlyphs
+              trackId={i.kind === "track" ? i.id : undefined}
+              albumId={i.kind === "album" ? i.id : undefined}
+              item={i.kind === "album" || i.kind === "playlist" ? { kind: i.kind, id: i.id } : undefined}
+            />
             {hitLine(i, typed)}
           </span>
         </span>

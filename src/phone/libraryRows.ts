@@ -43,8 +43,12 @@ export function phoneRows(rows: LibEntry[], sort: LibSort, counts?: ReadonlyMap<
   return [...top, ...rest];
 }
 
-/** A row's grey line: a playlist's song count in place of its owner. */
+/** A row's grey line: a playlist's song count in place of its owner; a downloaded mix says Mix. */
 export function phoneSubtitle(e: LibEntry, typed: boolean): string {
+  if (e.mix) {
+    const count = e.trackCount ? countLine(e.trackCount, "song") : null;
+    return typed ? (count ?? "Mix") : ["Mix", count].filter(Boolean).join(" · ");
+  }
   if (e.kind === "playlist" && !e.liked && !e.shared && !e.blend && !e.platter && !e.folder) {
     const count = e.trackCount ? countLine(e.trackCount, "song") : null;
     if (typed) return count ?? (e.smart ? "Smart playlist" : "");
