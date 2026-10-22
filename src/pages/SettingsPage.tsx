@@ -4557,6 +4557,26 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
             </>
           ) : (
             <>
+              {/* Go offline as a quick switch before the sections, where it's found in a hurry. */}
+              <ul className="ph-set-list ph-set-quick" aria-label="Quick switches">
+                <li>
+                  <div className="ph-set-link">
+                    <span className="ph-set-link__text">
+                      <span id="ph-quick-offline" className="ph-set-link__title">
+                        Go offline
+                      </span>
+                      <span id="ph-quick-offline-desc" className="ph-set-link__sub">
+                        {s?.goOffline ? "On. Only downloaded music plays." : "Play only downloads, using no data."}
+                      </span>
+                    </span>
+                    {s ? (
+                      <Switch checked={s.goOffline} onChange={(v) => void updateSettings({ goOffline: v })} labelledBy="ph-quick-offline" describedBy="ph-quick-offline-desc" />
+                    ) : (
+                      <Skeleton width={44} height={26} radius="pill" />
+                    )}
+                  </div>
+                </li>
+              </ul>
               <ul className="ph-set-list" aria-label="Settings sections">
                 {GROUPS.filter((x) => usable.some((r) => r.section === x) || groupPages(x).length > 0).map((x) => (
                   <li key={x}>
