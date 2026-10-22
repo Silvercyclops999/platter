@@ -335,14 +335,19 @@ pub struct Extra {
     /// Short words also matched letter by letter ("rem" finds "R.E.M."),
     /// kept apart from `alts` so they don't count as library words.
     pub spelled: Vec<Option<String>>,
+    /// Words match whole, not as the start of a longer word (the
+    /// missing-word fallback: with a word left out, "wrld" finding
+    /// "WRLDFMS" in a credit is a guess on a guess).
+    pub whole: bool,
 }
 
-/// One word's FTS group: as typed (prefix), its parts as a phrase, its
-/// spellings and any extra forms.
-fn group_expr(t: &QToken, extra: &[String]) -> String {
-    let mut parts = vec![format!("{}*", quote(&t.text))];
+/// One word's FTS group: as typed (prefix, unless `whole`), its parts as a
+/// phrase, its spellings and any extra forms.
+fn group_expr(t: &QToken, extra: &[String], whole: bool) -> String {
+    let star = if whole { "" } else { "*" };
+    let mut parts = vec![format!("{}{star}", quote(&t.text))];
     if !t.pieces.is_empty() && t.pieces != [t.text.clone()] {
-        parts.push(format!("{}*", quote(&t.pieces.join(" "))));
+        parts.push(format!("{}{star}", quote(&t.pieces.join(" "))));
     }
     parts.extend(searchtext::variants(&t.text).map(quote));
     parts.extend(extra.iter().map(|e| quote(e)));
@@ -366,7 +371,7 @@ pub fn build_fts(q: &ParsedQuery, extra: &Extra) -> Option<String> {
     let g = |i: usize| {
         let mut forms = extra.alts.get(i).unwrap_or(&none).clone();
         forms.extend(extra.spelled.get(i).cloned().flatten());
-        group_expr(&q.toks[i], &forms)
+        group_expr(&q.toks[i], &forms, extra.whole)
     };
     let mut parts = Vec::new();
     let mut k = 0;
@@ -374,7 +379,8 @@ pub fn build_fts(q: &ParsedQuery, extra: &Extra) -> Option<String> {
         let i = idx[k];
         if k + 1 < idx.len() && idx[k + 1] == i + 1 && extra.joins.get(i) == Some(&true) {
             let joined = format!("{}{}", q.toks[i].text, q.toks[i + 1].text);
-            parts.push(format!("(({} AND {}) OR {}*)", g(i), g(i + 1), quote(&joined)));
+            let star = if extra.whole { "" } else { "*" };
+            parts.push(format!("(({} AND {}) OR {}{star})", g(i), g(i + 1), quote(&joined)));
             k += 2;
         } else {
             parts.push(g(i));
@@ -974,17 +980,20 @@ pub(crate) fn search_conn(
     }
 
     // Pass 3, when nothing matched every word: leave out the words the
-    // library has nowhere (in any spelling); failing that, one word at a time.
+    // library has nowhere (in any spelling); failing that, one word at a
+    // time. The words left must match whole words: "juice wrld" in a
+    // library without him finds nothing, not songs crediting "The WRLDFMS".
     if found.count() == 0 && !q.short {
         let unknown: Vec<usize> = match &vocab {
             Some(v) => (0..q.toks.len()).filter(|&i| !q.toks[i].optional && !in_library(&q, i, v, &extra)).collect(),
             None => Vec::new(),
         };
         let some_left = q.toks.iter().enumerate().any(|(i, t)| !t.optional && !unknown.contains(&i));
+        let whole = Extra { whole: true, ..extra.clone() };
         let e = if !unknown.is_empty() && some_left {
-            build_fts(&q, &Extra { skip: unknown, ..extra.clone() })
+            build_fts(&q, &Extra { skip: unknown, ..whole })
         } else {
-            drop_one_fts(&q, &extra)
+            drop_one_fts(&q, &whole)
         };
         if let Some(e) = e {
             let more = run(c, &q, &e, now, l.fallback())?;
