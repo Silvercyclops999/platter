@@ -87,6 +87,28 @@ pub fn voice_or_mix(sep: Option<(&dyn Separator, &Path)>, song: Decoded, stop: &
     Ok((song.speech, heard))
 }
 
+/// The separated singing, with any sample that isn't a number made silent.
+/// Mostly broken is a failed separation: the mix is heard instead.
+pub fn checked(mut mono: Vec<f32>) -> Result<Vec<f32>, VoiceError> {
+    let broken = mono.iter().filter(|x| !x.is_finite()).count();
+    if broken == 0 {
+        return Ok(mono);
+    }
+    tracing::warn!(broken, of = mono.len(), "the separated voice has samples that aren't numbers");
+    if broken * 2 > mono.len() {
+        return Err(VoiceError::Failed(format!("the voice model gave back broken sound ({broken} of {} samples)", mono.len())));
+    }
+    for x in mono.iter_mut().filter(|x| !x.is_finite()) {
+        *x = 0.0;
+    }
+    Ok(mono)
+}
+
+/// What a panic said, for the log.
+pub fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
+    p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_else(|| "no message".into())
+}
+
 /// The separator this build has, in this process (the helper runs it).
 pub fn in_process() -> Option<std::sync::Arc<dyn Separator>> {
     #[cfg(feature = "transcribe")]
@@ -109,7 +131,7 @@ pub mod demucs {
     use parking_lot::Mutex;
 
     use super::super::engine::{Progress, Step, Stop};
-    use super::{RATE, Separator, VoiceError};
+    use super::{RATE, Separator, VoiceError, panic_text};
 
     type B = burn::backend::wgpu::Wgpu;
 
@@ -176,7 +198,7 @@ pub mod demucs {
             tracing::info!(audio_s = left.len() / RATE as usize, took_ms = started.elapsed().as_millis() as u64, "voice separated");
             let mono: Vec<f32> = vocals.left.iter().zip(&vocals.right).map(|(l, r)| (l + r) / 2.0).collect();
             drop(vocals);
-            Ok(to_speech(&mono))
+            Ok(to_speech(&super::checked(mono)?))
         }
     }
 
@@ -195,11 +217,12 @@ pub mod demucs {
     impl Separator for Demucs {
         fn vocals(&self, weights: &Path, song: &[f32], stop: Stop, progress: Progress) -> Result<Vec<f32>, VoiceError> {
             // The graphics library panics rather than failing on some
-            // drivers: that's a failed separation, not a lost helper.
+            // drivers: that's a failed separation, not a lost helper. What
+            // the panic said is kept: it isn't always the graphics card.
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.run(weights, song, stop, progress)));
             // Off the card again, so the speech model has it all.
             *self.loaded.lock() = None;
-            r.unwrap_or_else(|_| Err(VoiceError::Failed("the graphics card stopped while separating the voice".into())))
+            r.unwrap_or_else(|p| Err(VoiceError::Failed(format!("separating the voice stopped: {}", panic_text(&*p)))))
         }
 
         fn unload(&self) {
@@ -252,6 +275,25 @@ mod tests {
             assert_eq!(heard, Heard::MixAfterTrouble);
             assert_eq!(pcm, vec![0.1; 32_000]);
         }
+    }
+
+    #[test]
+    fn a_voice_that_isnt_all_numbers_is_cleaned_or_given_up() {
+        assert_eq!(checked(vec![0.5, -0.25]), Ok(vec![0.5, -0.25]));
+        // A few broken samples (a silent stretch the model divided by zero): silence there.
+        assert_eq!(checked(vec![0.5, f32::NAN, f32::INFINITY, 0.25, 0.1]), Ok(vec![0.5, 0.0, 0.0, 0.25, 0.1]));
+        // Mostly broken: the separation failed, so the mix is heard.
+        let Err(VoiceError::Failed(m)) = checked(vec![f32::NAN, f32::NAN, 0.1]) else { panic!("broken sound kept") };
+        assert!(m.contains("2 of 3"), "{m}");
+    }
+
+    #[test]
+    fn a_panic_says_what_went_wrong() {
+        let p = std::panic::catch_unwind(|| panic!("Imaginary part of first value was non-zero.")).unwrap_err();
+        assert_eq!(panic_text(&*p), "Imaginary part of first value was non-zero.");
+        let n = 3;
+        let p = std::panic::catch_unwind(|| panic!("{n} chunks")).unwrap_err();
+        assert_eq!(panic_text(&*p), "3 chunks");
     }
 
     #[test]

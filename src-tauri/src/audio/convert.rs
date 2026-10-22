@@ -177,6 +177,10 @@ impl Converter {
         if rs.pending.len() < frames_in * ch {
             rs.pending.resize(frames_in * ch, 0.0);
         }
+        // A sample that isn't a number would panic the transform: silence.
+        for x in rs.pending.iter_mut().filter(|x| !x.is_finite()) {
+            *x = 0.0;
+        }
         let out_frames_cap = rs.out_buf.len() / ch;
         let mut idx = Indexing::new();
         idx.partial_len = partial;
@@ -324,6 +328,24 @@ mod tests {
         c.push(&[0.1; 3 * 5_000], &mut out);
         c.finish(&mut out);
         assert_eq!(out.len() / 2, (5_000 * 48_000 + 11_025 / 2) / 11_025);
+    }
+
+    #[test]
+    fn samples_that_arent_numbers_are_silence_not_a_crash() {
+        // The resampler's inverse transform panics on a NaN or an infinity
+        // (a separated voice on one graphics card came back like that).
+        for (rin, rout, ch) in [(44_100, 16_000, 1), (44_100, 48_000, 2)] {
+            let mut c = Converter::new(rin, ch, rout, ch).unwrap();
+            let mut input = vec![0.25; ch * 20_000];
+            input[ch * 100] = f32::NAN;
+            input[ch * 9_000] = f32::INFINITY;
+            input[ch * 15_000 + ch - 1] = f32::NEG_INFINITY;
+            let mut out = Vec::new();
+            c.push(&input, &mut out);
+            c.finish(&mut out);
+            assert_eq!(out.len() / ch, (20_000 * rout as usize + rin as usize / 2) / rin as usize);
+            assert!(out.iter().all(|s| s.is_finite()), "{rin}->{rout}");
+        }
     }
 
     #[test]
