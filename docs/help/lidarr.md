@@ -61,7 +61,7 @@ With **Show missing official releases** on, artist pages list official releases 
 
 ## New albums from artists you follow
 
-Follow an artist and their new albums and EPs come in by themselves, up to **Most new albums a day**, and you get a notification when each one is here. Only what comes out after you follow, never their older albums. Bootlegs, promos, live albums and anything sharing a title with an album you have, unreleased ones included, are never asked for. To follow someone without getting everything, pick **Just show new albums** in their menu (on the phone, tap **Following**). **Get singles too** adds singles.
+Follow an artist and their new albums and EPs come in by themselves, up to **Most new albums a day**, and you get a notification when each one is here. Only what comes out after you follow, never their older albums. Bootlegs, promos, live albums and anything sharing a title with an album you have, unreleased ones included, are never asked for. To follow someone without getting everything, pick **Just show new albums** in their menu (on the phone, tap **Following**). **Get singles too** adds singles. With a [Platter Bridge](https://github.com/Silvercyclops999/platter/blob/main/docs/BRIDGE.md#new-albums-from-artists-you-follow), new albums keep coming while your phone and computers are closed, and they show in **Requests** the next time you open Platter.
 
 ## Bring in my listening
 

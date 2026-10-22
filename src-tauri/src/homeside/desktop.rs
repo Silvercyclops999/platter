@@ -30,12 +30,14 @@ use crate::plex::PlexState;
 use crate::plex::keychain::TokenStore;
 use crate::social::listen::relay::{RelayEvent, RelayFactory};
 use crate::sync::SyncStore;
-use crate::sync::store::{LIDARR, TRANSCRIPTS};
+use crate::sync::store::{FOLLOWS, LIDARR, TRANSCRIPTS};
 
 /// A Bridge heard from within this long counts as answering (it says
 /// it's alive every hour, so one missed heartbeat is fine).
 pub const ONLINE_S: i64 = 150 * 60;
 const SETTLE: Duration = Duration::from_secs(3);
+/// A change to who's followed waits this long, so several go in one plan.
+const RADAR_SETTLE: Duration = Duration::from_secs(60);
 /// How long "Add the Bridge" waits for the Bridge's answer.
 pub const JOIN_WAIT: Duration = Duration::from_secs(60);
 /// Told which songs got lyrics from a Bridge: (song, words found).
@@ -75,6 +77,11 @@ fn seen_key(id: &str) -> String {
     format!("bridge.seen.{id}")
 }
 
+/// The radar plan last sent to a Bridge (`Desktop::send_radar_plan`).
+fn radar_sent_key(id: &str) -> String {
+    format!("bridge.radarSent.{id}")
+}
+
 /// What the desktop last heard from a Bridge (this device only).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,6 +94,9 @@ pub struct Seen {
     /// It can run Bring in my listening.
     #[serde(default)]
     pub waves: bool,
+    /// It can run the daily look for followed artists.
+    #[serde(default)]
+    pub radar: bool,
     /// Since when (unix s) its lyrics work has waited on a busy server.
     #[serde(default)]
     pub lyrics_busy_since: Option<i64>,
@@ -158,6 +168,8 @@ pub struct Desktop {
     waves_changed: Arc<Notify>,
     /// The plan last sent, per link (this run only).
     sent_plan: Mutex<HashMap<String, String>>,
+    /// The release radar, whose daily look a Bridge runs too.
+    radar: RwLock<Option<crate::radar::Radar>>,
     /// Lyrics a Bridge made were saved here: (song, words found).
     on_lyrics: RwLock<Option<OnLyrics>>,
     /// The have list last sent, per link (this run only): its digest and when.
@@ -186,6 +198,7 @@ impl Desktop {
             waves: RwLock::default(),
             waves_changed: Arc::new(Notify::new()),
             sent_plan: Mutex::default(),
+            radar: RwLock::default(),
             on_lyrics: RwLock::default(),
             sent_have: Mutex::default(),
             relook: RwLock::default(),
@@ -298,6 +311,56 @@ impl Desktop {
             Err(e) => tracing::info!("bring in my listening: the Bridge didn't get the plan: {e}"),
         }
         self.changed();
+    }
+
+    /// The release radar (set by the app).
+    pub fn set_radar(&self, r: crate::radar::Radar) {
+        *self.radar.write() = Some(r);
+    }
+
+    /// Send every answering Bridge that runs the daily look this device's
+    /// radar plan, when it changed since the last one it got from here
+    /// (kept across runs, so a device opened after a while doesn't bring an
+    /// older plan back). One that was never on isn't sent at all: a new
+    /// device not set up yet leaves the others' plan be. Only the owner's:
+    /// someone else signed in here leaves the Bridge be.
+    pub async fn send_radar_plan(&self) {
+        let Some(r) = self.radar.read().clone() else { return };
+        if !self.d.lidarr.is_owner() {
+            return;
+        }
+        let now = self.now_s();
+        let links: Vec<Link> = self
+            .wire
+            .links
+            .links()
+            .into_iter()
+            .filter(|l| {
+                let s = self.seen(&l.id);
+                s.radar && s.last_seen.is_some_and(|t| now - t < ONLINE_S)
+            })
+            .collect();
+        if links.is_empty() {
+            return;
+        }
+        let plan = r.bridge_plan().await;
+        let Ok(json) = serde_json::to_string(&plan) else { return };
+        for link in links {
+            let key = radar_sent_key(&link.id);
+            let last: Option<crate::radar::bridge::RadarPlan> =
+                self.d.db.read(|c| kv_get(c, &key)).ok().flatten().and_then(|s| serde_json::from_str(&s).ok());
+            if last.as_ref() == Some(&plan) || (!plan.on && !last.as_ref().is_some_and(|l| l.on)) {
+                continue;
+            }
+            match self.wire.send(&link, &Msg::RadarPlan(Box::new(plan.clone()))).await {
+                Ok(()) => {
+                    if let Err(e) = self.d.db.write(|c| kv_set(c, &key, &json)) {
+                        tracing::debug!("release radar: {e}");
+                    }
+                }
+                Err(e) => tracing::info!("release radar: the Bridge didn't get the plan: {e}"),
+            }
+        }
     }
 
     /// Tell the UI something changed (set by the app).
@@ -652,7 +715,7 @@ impl Desktop {
         let now = self.now_s();
         self.set_seen(&link.id, |s| s.last_seen = Some(now));
         match msg {
-            Msg::Hello { name, version, music, waves, device } => {
+            Msg::Hello { name, version, music, waves, radar, device } => {
                 let mut learned = false;
                 let _ = self.wire.links.update(&link.id, |p| {
                     p.name = name.chars().take(60).collect();
@@ -669,6 +732,7 @@ impl Desktop {
                 self.set_seen(&link.id, |s| {
                     s.music = music;
                     s.waves = waves;
+                    s.radar = radar;
                 });
                 self.send_config_to(link, true).await;
                 self.flush_entries().await;
@@ -676,7 +740,24 @@ impl Desktop {
                 if waves {
                     self.send_waves_plan(true).await;
                 }
+                if radar {
+                    self.send_radar_plan().await;
+                }
                 self.changed();
+            }
+            // The owner's requests: someone else signed in here doesn't get them.
+            Msg::RadarMade { .. } if !self.d.lidarr.is_owner() => {}
+            Msg::RadarMade { records } => {
+                match self.d.lidarr.adopt_requests(records).await {
+                    Ok(0) => {}
+                    Ok(n) => {
+                        tracing::info!(requests = n, "new albums the Bridge asked for");
+                        if let Some(r) = self.radar.read().clone() {
+                            r.changed();
+                        }
+                    }
+                    Err(e) => tracing::warn!("release radar: the Bridge's requests: {e}"),
+                }
             }
             Msg::WavesProgress(p) => {
                 self.set_seen(&link.id, |s| s.waves = true);
@@ -701,6 +782,9 @@ impl Desktop {
                 if self.seen(&link.id).waves {
                     self.send_waves_plan(false).await;
                 }
+                if self.seen(&link.id).radar {
+                    self.send_radar_plan().await;
+                }
                 self.changed();
             }
             Msg::Entries { entries } => {
@@ -720,7 +804,7 @@ impl Desktop {
                 self.wire.links.unpaired(&link.id);
                 let _ = self.forget(&link.id);
             }
-            Msg::Config(_) | Msg::Get { .. } | Msg::Write { .. } | Msg::WavesPlan(_) | Msg::LyricsHave { .. } => {}
+            Msg::Config(_) | Msg::Get { .. } | Msg::Write { .. } | Msg::WavesPlan(_) | Msg::RadarPlan(_) | Msg::LyricsHave { .. } => {}
             // Device link messages and kinds from a newer build.
             Msg::SyncHello(_) | Msg::SyncDiff { .. } | Msg::SyncWant { .. } | Msg::SyncEntries { .. } | Msg::SyncCopyWant { .. } | Msg::SyncCopy { .. } | Msg::SyncBye | Msg::Unknown => {}
         }
@@ -748,6 +832,7 @@ impl Desktop {
         let Some(mut rx) = self.rx.lock().take() else { return };
         let mut changes = self.d.store.subscribe();
         let mut dirty: Option<tokio::time::Instant> = None;
+        let mut radar_at: Option<tokio::time::Instant> = None;
         // Lidarr and Plex settings changed here reach the Bridges within minutes.
         let mut settings = tokio::time::interval(Duration::from_secs(5 * 60));
         settings.tick().await;
@@ -801,11 +886,21 @@ impl Desktop {
                     }
 
                     self.send_waves_plan(false).await;
+                    self.send_radar_plan().await;
                 }
                 c = changes.recv() => {
-                    if c.is_ok_and(|c| c.namespaces.iter().any(|n| n == LIDARR.name())) && !self.wire.links.all().is_empty() {
+                    let ns = c.map(|c| c.namespaces).unwrap_or_default();
+                    if ns.iter().any(|n| n == LIDARR.name()) && !self.wire.links.all().is_empty() {
                         dirty.get_or_insert_with(tokio::time::Instant::now);
                     }
+                    // Several follows in a row go in one plan.
+                    if ns.iter().any(|n| n == FOLLOWS.name()) {
+                        radar_at.get_or_insert_with(|| tokio::time::Instant::now() + RADAR_SETTLE);
+                    }
+                }
+                _ = async { if let Some(t) = radar_at { tokio::time::sleep_until(t).await } else { std::future::pending::<()>().await } } => {
+                    radar_at = None;
+                    self.send_radar_plan().await;
                 }
                 _ = async { if let Some(t) = flush_at { tokio::time::sleep_until(t).await } else { std::future::pending::<()>().await } } => {
                     dirty = None;

@@ -103,6 +103,8 @@ struct FakeLidarr {
     clock: Mutex<i64>,
     /// Claims that aren't simply ours, by event.
     claims: Mutex<HashMap<String, ClaimState>>,
+    /// The shared day counts, by device ("me" is this one).
+    days: Mutex<HashMap<String, (i64, usize)>>,
 }
 
 #[async_trait]
@@ -146,6 +148,14 @@ impl RadarLidarr for FakeLidarr {
     }
     fn claim(&self, event: &str) -> AppResult<ClaimState> {
         Ok(self.claims.lock().get(event).cloned().unwrap_or(ClaimState::Ours))
+    }
+    fn asked_on(&self, day: i64) -> usize {
+        self.days.lock().values().filter(|d| d.0 == day).map(|d| d.1).sum()
+    }
+    fn note_asked(&self, day: i64) {
+        let mut days = self.days.lock();
+        let n = days.get("me").filter(|d| d.0 == day).map_or(0, |d| d.1);
+        days.insert("me".into(), (day, n + 1));
     }
 }
 
@@ -683,4 +693,221 @@ fn summary_texts() {
         "2 couldn't be asked for. Requests in Settings say why."
     );
     assert_eq!(summary(&[rec("Q", RequestState::Queued)], 0, 3).unwrap().1, "Getting Q by Northlight.");
+}
+
+#[tokio::test]
+async fn every_devices_asks_count_toward_the_daily_cap() {
+    let r = auto_rig();
+    r.settings(|s| s.auto_request_cap = 3);
+    r.radar.check().await.unwrap();
+    r.later(CHECK_EVERY);
+    r.mb.route("/release-group?query=", Some(answer(vec![album(20, "A Side", 5), album(21, "B Side", 4), album(22, "C Side", 3)])));
+    // A Bridge already asked for two today.
+    let today = (*r.now.lock()).div_euclid(DAY);
+    r.lidarr.days.lock().insert("bridge".into(), (today, 2));
+    let o = r.radar.check().await.unwrap();
+    assert_eq!(o.auto.iter().map(|x| x.title.as_str()).collect::<Vec<_>>(), vec!["A Side"]);
+    assert_eq!(o.waiting, 2);
+    assert_eq!(r.lidarr.days.lock().get("me"), Some(&(today, 1)), "this one counts only its own ask");
+    assert_eq!(r.lidarr.asked_on(today), 3);
+    // Yesterday's count doesn't hold today back.
+    r.later(CHECK_EVERY);
+    assert!((*r.now.lock()).div_euclid(DAY) > today);
+    let o = r.radar.check().await.unwrap();
+    assert_eq!(o.auto.len(), 2);
+}
+
+#[tokio::test]
+async fn the_bridge_plan_has_the_follows_that_get_new_albums_with_their_ids() {
+    let r = auto_rig();
+    r.follows
+        .save(&[
+            FollowedArtist { id: "ar1".into(), title: "Northlight".into(), thumb: None, followed_at: 10, just_show: false },
+            FollowedArtist { id: "ar2".into(), title: "Harbor Sound".into(), thumb: Some("/t".into()), followed_at: 20, just_show: true },
+            FollowedArtist { id: "ar9".into(), title: "Nobody Known".into(), thumb: None, followed_at: 30, just_show: false },
+        ])
+        .unwrap();
+    r.settings(|s| {
+        s.follow_get_singles = true;
+        s.auto_request_cap = 5;
+    });
+    // An artist followed since the last look has their id looked up for it.
+    let p = r.radar.bridge_plan().await;
+    assert!(p.on && p.singles);
+    assert_eq!(p.cap, 5);
+    assert_eq!(
+        p.follows,
+        vec![
+            bridge::PlanFollow { id: "ar1".into(), title: "Northlight".into(), mbid: Some(ARTIST.into()), followed_at: 10 },
+            bridge::PlanFollow { id: "ar9".into(), title: "Nobody Known".into(), mbid: None, followed_at: 30 },
+        ],
+        "just-show follows stay on the device"
+    );
+    // Off here: off there, and nobody's follows travel.
+    r.settings(|s| s.follow_get = false);
+    let p = r.radar.bridge_plan().await;
+    assert!(!p.on);
+    assert!(p.follows.is_empty());
+    r.settings(|s| {
+        s.follow_get = true;
+        s.release_radar = false;
+    });
+    assert!(!r.radar.bridge_plan().await.on);
+}
+
+struct BridgeRig {
+    _dir: tempfile::TempDir,
+    db: DbHandle,
+    mb: Arc<FakeMb>,
+    lidarr: Arc<FakeLidarr>,
+    now: Arc<Mutex<i64>>,
+    radar: Radar,
+}
+
+/// The radar as the Bridge builds it, on a database of its own.
+fn bridge_rig() -> BridgeRig {
+    let dir = tempfile::tempdir().unwrap();
+    let db = DbHandle::open(dir.path().join("bridge.db")).unwrap();
+    let mb = Arc::new(FakeMb::default());
+    mb.route("/release-group?query=", Some(answer(vec![album(20, "Paper Moon", 3)])));
+    let lidarr = Arc::new(FakeLidarr::default());
+    lidarr.ready.store(true, Ordering::Relaxed);
+    *lidarr.clock.lock() = NOW;
+    let now = Arc::new(Mutex::new(NOW));
+    let n = now.clone();
+    let radar = Radar::new(bridge::deps(db.clone(), mb.clone(), lidarr.clone(), Arc::new(Events::default()), Arc::new(Notes::default()), Arc::new(move || *n.lock())));
+    BridgeRig { _dir: dir, db, mb, lidarr, now, radar }
+}
+
+fn plan_for_northlight() -> bridge::RadarPlan {
+    bridge::RadarPlan {
+        on: true,
+        singles: false,
+        cap: 2,
+        follows: vec![bridge::PlanFollow { id: "ar1".into(), title: "Northlight".into(), mbid: Some(ARTIST.into()), followed_at: 1 }],
+    }
+}
+
+#[test]
+fn the_bridge_takes_a_plan_into_its_settings() {
+    let BridgeRig { _dir, db, radar, .. } = bridge_rig();
+    assert!(!radar.due(), "nothing to look for before a device hands a plan over");
+    assert!(bridge::take_plan(&db, "desk", Some(&plan_for_northlight())).unwrap());
+    assert!(!bridge::take_plan(&db, "desk", Some(&plan_for_northlight())).unwrap(), "the same plan again changes nothing");
+    let s = crate::settings::load(&db);
+    assert!(s.release_radar && s.follow_get && !s.follow_get_singles && !s.radar_notify);
+    assert_eq!(s.auto_request_cap, 2);
+    assert!(radar.due());
+    assert_eq!(radar.artists(), vec![RadarArtist { id: Some("ar1".into()), name: "Northlight".into() }], "followed artists only, no listening of its own");
+    // A cap no device offers falls back to the usual one; off stops it and drops the follows.
+    let mut p = plan_for_northlight();
+    p.cap = 99;
+    bridge::take_plan(&db, "desk", Some(&p)).unwrap();
+    assert_eq!(crate::settings::load(&db).auto_request_cap, DEFAULT_CAP);
+    p.on = false;
+    bridge::take_plan(&db, "desk", Some(&p)).unwrap();
+    assert!(!crate::settings::load(&db).release_radar);
+    assert!(!radar.due());
+    assert!(bridge::plan(&db).follows.is_empty());
+    assert_eq!(bridge::plan_links(&db), vec!["desk".to_string()], "it still reads what the Bridge asked for");
+}
+
+#[tokio::test]
+async fn the_bridge_looks_and_asks_like_a_device_and_says_what_it_asked_for() {
+    let BridgeRig { _dir, db, mb, lidarr, now, radar, .. } = bridge_rig();
+    bridge::take_plan(&db, "desk", Some(&plan_for_northlight())).unwrap();
+    // Its first look only sets the scene.
+    let o = radar.check().await.unwrap();
+    assert!(o.auto.is_empty());
+    *now.lock() += CHECK_EVERY;
+    *lidarr.clock.lock() += CHECK_EVERY;
+    mb.route("/release-group?query=", Some(answer(vec![album(20, "Paper Moon", 3), album(21, "Second Wind", 1), album(22, "Refused Record", 1)])));
+    lidarr.claims.lock().insert(
+        format!("follow:{}", id(21)),
+        ClaimState::Theirs(crate::lidarr::shared::Claim { device: "phone".into(), label: "iPhone".into(), at: 1 }),
+    );
+    let o = radar.check().await.unwrap();
+    assert_eq!(
+        o.auto.iter().map(|x| x.title.as_str()).collect::<Vec<_>>(),
+        vec!["Refused Record"],
+        "the phone has Second Wind, and Paper Moon was there at the first look"
+    );
+    *now.lock() += CHECK_EVERY;
+    *lidarr.clock.lock() += CHECK_EVERY;
+    mb.route("/release-group?query=", Some(answer(vec![album(23, "Paper Sun", 1)])));
+    let o = radar.check().await.unwrap();
+    assert_eq!(o.auto.iter().map(|x| x.title.as_str()).collect::<Vec<_>>(), vec!["Paper Sun"]);
+    // What goes back to the devices: what Lidarr has, not refusals.
+    let t = *now.lock();
+    bridge::note_made(&db, &[lidarr.list.lock()[0].clone()], t).unwrap();
+    bridge::note_made(&db, &o.auto, t).unwrap();
+    let back = bridge::made_records(&db, &lidarr.list.lock(), t);
+    assert_eq!(back.iter().map(|x| x.title.as_str()).collect::<Vec<_>>(), vec!["Paper Sun"]);
+    // One still waiting to be sent stays on the Bridge, so no device sends it too.
+    lidarr.list.lock().iter_mut().for_each(|r| r.state = RequestState::Queued);
+    assert!(bridge::made_records(&db, &lidarr.list.lock(), t).is_empty());
+    // And after a fortnight it's no longer sent.
+    lidarr.list.lock().iter_mut().for_each(|r| r.state = RequestState::Imported);
+    assert_eq!(bridge::made_records(&db, &lidarr.list.lock(), t).len(), 1);
+    assert!(bridge::made_records(&db, &lidarr.list.lock(), t + bridge::MADE_FOR_S).is_empty());
+}
+
+#[tokio::test]
+async fn the_bridge_knows_artists_ids_from_the_plan() {
+    use crate::lidarr::ArtistMbid;
+    let BridgeRig { _dir, db, .. } = bridge_rig();
+    bridge::take_plan(&db, "desk", Some(&plan_for_northlight())).unwrap();
+    let ids = bridge::PlanMbids(db.clone());
+    assert_eq!(ids.artist_mbid("ar1", "Someone Else").await.as_deref(), Some(ARTIST), "by id");
+    assert_eq!(ids.artist_mbid("", "NORTHLIGHT").await.as_deref(), Some(ARTIST), "by name without an id");
+    assert_eq!(ids.artist_mbid("other-id", "Northlight").await, None, "a same-name artist with another id isn't this one");
+    assert_eq!(ids.artist_mbid("other-id", "Harbor Sound").await, None);
+}
+
+#[test]
+fn the_newest_plan_wins_and_an_unpaired_device_is_forgotten() {
+    let BridgeRig { _dir, db, .. } = bridge_rig();
+    let mut phone = plan_for_northlight();
+    phone.singles = true;
+    phone.cap = 5;
+    phone.follows = vec![bridge::PlanFollow { id: "ar3".into(), title: "Cold Coast".into(), mbid: Some(COLD.into()), followed_at: 60 }];
+    bridge::take_plan(&db, "desk", Some(&plan_for_northlight())).unwrap();
+    assert!(bridge::take_plan(&db, "phone", Some(&phone)).unwrap());
+    // Northlight was unfollowed on the phone: the computer's older list doesn't keep it.
+    assert_eq!(bridge::plan(&db), phone);
+    let s = crate::settings::load(&db);
+    assert!(s.follow_get_singles);
+    assert_eq!(s.auto_request_cap, 5);
+    assert_eq!(bridge::plan_links(&db), vec!["desk".to_string(), "phone".to_string()]);
+    // Turned off on the phone: off.
+    bridge::take_plan(&db, "phone", Some(&bridge::RadarPlan::default())).unwrap();
+    assert!(!crate::settings::load(&db).release_radar);
+    bridge::take_plan(&db, "phone", None).unwrap();
+    assert_eq!(bridge::plan_links(&db), vec!["desk".to_string()]);
+}
+
+#[tokio::test]
+async fn a_release_already_on_the_requests_list_isnt_asked_for_or_claimed() {
+    let r = auto_rig();
+    r.radar.check().await.unwrap();
+    r.later(CHECK_EVERY);
+    r.mb.route("/release-group?query=", Some(answer(vec![album(20, "Paper Moon", 1)])));
+    // A Bridge's request this device took in, under the release's id in capitals.
+    let theirs = r.lidarr.request_auto(RequestInput {
+        release_group_id: id(20).to_ascii_uppercase(),
+        title: "Paper Moon".into(),
+        artist: "Northlight".into(),
+        artist_id: Some("ar1".into()),
+        artist_mbid: None,
+        typed: None,
+    });
+    theirs.await.unwrap();
+    r.lidarr.claims.lock().insert(format!("follow:{}", id(20)), ClaimState::Settling);
+    let o = r.radar.check().await.unwrap();
+    assert!(o.auto.is_empty());
+    assert_eq!(r.lidarr.list.lock().len(), 1);
+    r.lidarr.claims.lock().clear();
+    r.later(1800);
+    assert!(r.radar.get_waiting().await.unwrap().is_empty(), "passed over for good");
+    assert_eq!(r.lidarr.asked_on((*r.now.lock()).div_euclid(DAY)), 0);
 }

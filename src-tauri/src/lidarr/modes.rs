@@ -456,7 +456,7 @@ pub fn library_artists(c: &Connection) -> AppResult<Vec<LibraryArtist>> {
 const MODES_TTL_S: i64 = 10 * 60;
 
 impl super::Lidarr {
-    pub(super) fn shared(&self) -> &super::shared::Shared {
+    pub(crate) fn shared(&self) -> &super::shared::Shared {
         &self.inner.shared
     }
 

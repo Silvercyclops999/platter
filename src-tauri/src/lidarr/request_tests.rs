@@ -968,3 +968,49 @@ async fn a_request_stops_before_searching_when_lidarr_switches_the_edition() {
     assert_eq!(seen.what, "Lidarr switched Second Wind to the 14-track edition");
     assert_only_allowed_writes(&r.web);
 }
+
+#[tokio::test]
+async fn requests_a_bridge_made_are_taken_once_and_never_come_back_after_clearing() {
+    let bridge = rig();
+    let device = rig();
+    let sent = bridge.lidarr.request_auto(input(RG_SECOND, "Second Wind", None)).await.unwrap();
+    assert_eq!(sent.state, RequestState::Searching);
+    let done = super::request::RequestRecord { id: "bridge-2".into(), release_group_id: RG_SKETCH.to_ascii_uppercase(), state: RequestState::Imported, ..sent.clone() };
+    let waiting = super::request::RequestRecord { id: "bridge-3".into(), release_group_id: RG_EP.into(), state: RequestState::Queued, ..sent.clone() };
+    let refused = super::request::RequestRecord { id: "bridge-4".into(), release_group_id: RG_BOOT.into(), state: RequestState::Failed, ..sent.clone() };
+    let odd = super::request::RequestRecord { id: "bridge-5".into(), release_group_id: "not an id".into(), ..sent.clone() };
+    let all = vec![sent.clone(), done.clone(), waiting, refused, odd];
+    assert_eq!(device.lidarr.adopt_requests(all.clone()).await.unwrap(), 2, "only what Lidarr has, with a real id");
+    let list = device.lidarr.requests();
+    assert_eq!(list.len(), 2);
+    assert!(list.iter().all(|r| r.auto));
+    assert!(list.iter().any(|r| r.release_group_id == RG_SKETCH), "ids are kept the way the device keeps them");
+    // The same again: nothing new.
+    assert_eq!(device.lidarr.adopt_requests(all.clone()).await.unwrap(), 0);
+    // Cleared on the device: it doesn't come back.
+    device.lidarr.cancel(&done.id).await.unwrap();
+    assert_eq!(device.lidarr.requests().len(), 1);
+    assert_eq!(device.lidarr.adopt_requests(all).await.unwrap(), 0);
+    assert_eq!(device.lidarr.requests().len(), 1);
+    // One the device asked for itself isn't taken over.
+    let own = device.lidarr.request_auto(input(RG_EP, "Small Hours", None)).await.unwrap();
+    let theirs = super::request::RequestRecord { id: "bridge-6".into(), release_group_id: RG_EP.into(), state: RequestState::Searching, ..sent };
+    assert_eq!(device.lidarr.adopt_requests(vec![theirs]).await.unwrap(), 0);
+    assert_eq!(device.lidarr.requests().iter().filter(|r| r.release_group_id == RG_EP).map(|r| r.id.clone()).collect::<Vec<_>>(), vec![own.id]);
+}
+
+#[test]
+fn the_daily_count_for_follows_adds_up_every_devices_own() {
+    use crate::radar::RadarLidarr;
+    let r = rig();
+    let day = 20_000;
+    r.lidarr.shared().put("follow:day|phone", &json!({"day": day, "n": 2})).unwrap();
+    r.lidarr.shared().put("follow:day|bridge", &json!({"day": day - 1, "n": 9})).unwrap();
+    assert_eq!(r.lidarr.asked_on(day), 2, "yesterday's doesn't count");
+    r.lidarr.note_asked(day);
+    r.lidarr.note_asked(day);
+    assert_eq!(r.lidarr.asked_on(day), 4);
+    assert_eq!(r.lidarr.shared().get::<Value>("follow:day|phone").unwrap()["n"], 2, "another device's count is never written here");
+    r.lidarr.note_asked(day + 1);
+    assert_eq!(r.lidarr.asked_on(day + 1), 1, "a new day starts at one");
+}

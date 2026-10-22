@@ -158,12 +158,13 @@ impl Wire {
 }
 
 /// Work that can wait (synced changes, shared Lidarr state, lyrics,
-/// Bring in my listening's plan), so it takes from the relay's allowance.
+/// Bring in my listening's plan, the daily look's), so it takes from the relay's allowance.
 /// Requests, answers, hellos and status don't.
 pub fn background(msg: &Msg) -> bool {
     matches!(
         msg,
         Msg::Entries { .. } | Msg::LyricsHave { .. } | Msg::SyncEntries { .. } | Msg::SyncDiff { .. } | Msg::WavesPlan(_) | Msg::WavesProgress(_)
+            | Msg::RadarPlan(_) | Msg::RadarMade { .. }
     )
 }
 

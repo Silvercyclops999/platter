@@ -25,6 +25,7 @@
 //! once its claim has settled and still wins. Artists an older build had
 //! auto-request on for become followed ones.
 
+pub mod bridge;
 pub mod commands;
 #[cfg(test)]
 mod tests;
@@ -81,6 +82,8 @@ pub const CAP_CHOICES: [u32; 5] = [1, 2, 3, 5, 10];
 pub const DEFAULT_CAP: u32 = 3;
 
 const STORE_KEY: &str = "radar.state.v1";
+/// Most MusicBrainz ids looked up for one Bridge plan.
+const PLAN_LOOKUPS: usize = 5;
 /// Where an older build kept the artists it auto-requested for.
 pub const LEGACY_AUTO_KEY: &str = "radar.auto.v1";
 
@@ -123,6 +126,9 @@ struct Stored {
     /// back to get, singles turned on, a first run after an update) only
     /// gets what comes out from then on.
     getting: Option<Getting>,
+    /// Artists' MusicBrainz ids from the last look, by folded name, for
+    /// the plan a Bridge gets (`bridge`).
+    mbids: BTreeMap<String, String>,
 }
 
 /// What new albums are got for: the settings and artists at one pass.
@@ -235,6 +241,24 @@ pub trait RadarLidarr: Send + Sync {
     async fn request_auto(&self, input: RequestInput) -> AppResult<RequestRecord>;
     /// Claim getting a release among the user's devices, so only one asks.
     fn claim(&self, event: &str) -> AppResult<ClaimState>;
+    /// New albums asked for on `day` (unix days) by all of the user's
+    /// devices and Bridges, as far as this one knows.
+    fn asked_on(&self, _day: i64) -> usize {
+        0
+    }
+    /// One more asked for on `day` by this one.
+    fn note_asked(&self, _day: i64) {}
+}
+
+/// New albums got for follows on one day, one count per device (each
+/// writes only its own, so none is lost when two ask at once), shared
+/// among the user's devices.
+const FOLLOW_DAY_PREFIX: &str = "follow:day|";
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct FollowDay {
+    day: i64,
+    n: usize,
 }
 
 #[async_trait]
@@ -250,6 +274,16 @@ impl RadarLidarr for crate::lidarr::Lidarr {
     }
     fn claim(&self, event: &str) -> AppResult<ClaimState> {
         crate::lidarr::Lidarr::claim(self, event)
+    }
+    fn asked_on(&self, day: i64) -> usize {
+        self.shared().list::<FollowDay>(FOLLOW_DAY_PREFIX).into_iter().filter(|(_, d)| d.day == day).map(|(_, d)| d.n).sum()
+    }
+    fn note_asked(&self, day: i64) {
+        let key = format!("{FOLLOW_DAY_PREFIX}{}", self.shared().device());
+        let n = self.shared().get::<FollowDay>(&key).filter(|d| d.day == day).map_or(0, |d| d.n);
+        if let Err(e) = self.shared().put(&key, &FollowDay { day, n: n + 1 }) {
+            tracing::debug!("release radar: day count: {e}");
+        }
     }
 }
 
@@ -285,6 +319,9 @@ pub struct Radar {
     inner: Arc<RadarDeps>,
     checking: Arc<AtomicBool>,
     one: Arc<tokio::sync::Mutex<()>>,
+    /// Followed artists whose MusicBrainz id wasn't found for the Bridge's
+    /// plan, and when (this run only), so they're tried again a day later.
+    missed: Arc<parking_lot::Mutex<HashMap<String, i64>>>,
 }
 
 // ---------------------------------------------------------------- MusicBrainz
@@ -380,7 +417,7 @@ pub fn summary(made: &[RequestRecord], waiting: usize, cap: u32) -> Option<(Stri
 
 impl Radar {
     pub fn new(deps: RadarDeps) -> Self {
-        Self { inner: Arc::new(deps), checking: Arc::default(), one: Arc::default() }
+        Self { inner: Arc::new(deps), checking: Arc::default(), one: Arc::default(), missed: Arc::default() }
     }
 
     fn now(&self) -> i64 {
@@ -571,6 +608,7 @@ impl Radar {
         items.truncate(MAX_ITEMS);
         st.items = items;
         st.known = wants.keys().cloned().collect();
+        st.mbids = wants.iter().map(|(m, w)| (fold_artist(&w.name), m.clone())).collect();
         st.checked_at = Some(now);
         self.save(&st)?;
 
@@ -616,12 +654,20 @@ impl Radar {
             .iter()
             .filter(|r| r.auto && r.state != RequestState::Failed && r.created_at.div_euclid(DAY) == today)
             .count();
+        // Every device's and Bridge's asks count (this one's list holds what a Bridge sent back).
+        let used = used.max(self.inner.lidarr.asked_on(today));
         let mut left = (s.auto_request_cap as usize).saturating_sub(used);
         let mut made = Vec::new();
         let mut waiting = 0;
         for f in todo {
             if left == 0 {
                 waiting += 1;
+                continue;
+            }
+            // Already on the list (asked for by hand, or by a Bridge): nothing to ask.
+            if self.inner.lidarr.requests().iter().any(|r| r.release_group_id.eq_ignore_ascii_case(&f.release_group_id)) {
+                st.auto_tried.push(f.release_group_id.clone());
+                self.save(st)?;
                 continue;
             }
             // One device asks: the others leave it to the claim's holder,
@@ -652,6 +698,7 @@ impl Radar {
             self.save(st)?;
             if rec.state != RequestState::Failed {
                 left -= 1;
+                self.inner.lidarr.note_asked(today);
             }
             made.push(rec);
         }
@@ -704,6 +751,71 @@ impl Radar {
             self.inner.events.emit(EVENT_CHANGED, Value::Null);
         }
         Ok(made)
+    }
+
+    /// What this device hands its Bridges (`bridge`): the follows that get
+    /// new albums, with the MusicBrainz ids its last look found, and the
+    /// settings. An artist followed since the last look has theirs looked
+    /// up here, a few at a time and not while a look runs, so the Bridge
+    /// can look for them before this device's next look.
+    pub async fn bridge_plan(&self) -> bridge::RadarPlan {
+        let s = crate::settings::load(&self.inner.db);
+        let on = s.release_radar && s.follow_get;
+        let mut ids = self.stored().mbids;
+        if on && let Ok(_one) = self.one.try_lock() {
+            let now = self.now();
+            let missing: Vec<FollowedArtist> = self
+                .inner
+                .follows
+                .list()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|f| !f.just_show && !ids.contains_key(&fold_artist(&f.title)))
+                .filter(|f| self.missed.lock().get(&f.id).is_none_or(|t| now - *t >= DAY))
+                .take(PLAN_LOOKUPS)
+                .collect();
+            let mut found = BTreeMap::new();
+            for f in missing {
+                match self.inner.mbids.artist_mbid(&f.id, &f.title).await.map(|m| m.to_ascii_lowercase()).filter(|m| is_mbid(m)) {
+                    Some(m) => {
+                        found.insert(fold_artist(&f.title), m);
+                    }
+                    None => {
+                        self.missed.lock().insert(f.id, now);
+                    }
+                }
+            }
+            if !found.is_empty() {
+                let mut st = self.stored();
+                st.mbids.extend(found.clone());
+                if let Err(e) = self.save(&st) {
+                    tracing::debug!("release radar: {e}");
+                }
+                ids.extend(found);
+            }
+        }
+        let follows = if on {
+            self.inner
+                .follows
+                .list()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|f| !f.just_show)
+                .take(MAX_FOLLOWED)
+                .map(|f| {
+                    let mbid = ids.get(&fold_artist(&f.title)).cloned();
+                    bridge::PlanFollow { id: f.id, title: f.title, mbid, followed_at: f.followed_at }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        bridge::RadarPlan { on, singles: s.follow_get_singles, cap: s.auto_request_cap, follows }
+    }
+
+    /// Something the page shows changed elsewhere (a Bridge's requests).
+    pub fn changed(&self) {
+        self.inner.events.emit(EVENT_CHANGED, Value::Null);
     }
 
     /// The page (and the Home shelf).

@@ -73,6 +73,8 @@ Every few minutes, the same way an open Platter would:
   Lidarr has no away address and no computer at home is on.
 - Runs Bring in my listening, so the waves of requests keep going while
   your computers are off (see below).
+- Gets new albums from artists you follow while your phone and computers
+  are closed (see below).
 
 What it never does:
 
@@ -237,7 +239,8 @@ updates, it gives that up once and asks for its own sign-in instead.
 ## Privacy
 
 - The Bridge only makes outgoing connections: to the relay, Lidarr, Plex,
-  plex.tv, MusicBrainz (to check albums Bring in my listening asks for),
+  plex.tv, MusicBrainz (to check albums Bring in my listening asks for, and
+  to look for new albums from artists you follow),
   Hugging Face once for the speech model, and LRCLIB only while Lyrics from
   LRCLIB is on in Platter. Your songs' audio never leaves the server.
   It opens no ports. Its health check and status page listen on 127.0.0.1
@@ -324,6 +327,28 @@ the waves, and shows its progress and anything that needs you. Turning Bring
 in my listening off on your computer stops the Bridge. If the Bridge stops
 answering for over two hours, your computer takes the waves back and carries
 on from where the Bridge got to.
+
+## New albums from artists you follow
+
+When Get their new albums is on, your phone and computers hand the Bridge
+the artists you follow that get new albums (name, MusicBrainz id and when
+you followed them), along with Get singles too and Most new albums a day.
+Artists set to Just show new albums stay on your devices, and so does
+everything else.
+
+The Bridge then looks for new releases about once a day, the same way your
+devices do, and asks Lidarr for them through the same checks. Its first
+look only notes what's out already, so it never asks for an older album.
+Your devices keep looking too, for their own pages. Each new album is
+claimed first, so only one of them asks for it, and the daily limit counts
+every one's requests. What the Bridge asked for shows in Requests on your
+phone and computers the next time they're open. Clear one there and it
+stays cleared.
+
+The Bridge follows the newest list it got, so unfollowing someone or
+turning Get their new albums off on any of your devices holds there too.
+A new phone that isn't set up yet doesn't change it. Only the server
+owner's devices send the list.
 
 ## A computer at home
 

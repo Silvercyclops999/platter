@@ -1322,6 +1322,8 @@ pub fn run() {
                     clock: Arc::new(db::queries::now_s),
                 });
                 tauri::async_runtime::spawn(radar::watch(radar.clone()));
+                // A Bridge runs the daily look too, while this device is closed.
+                app.state::<Arc<homeside::desktop::Desktop>>().set_radar(radar.clone());
                 app.manage(radar);
 
                 // Discover: music that isn't in the library (search, catalogue
