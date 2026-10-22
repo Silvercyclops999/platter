@@ -3596,8 +3596,9 @@ Started from the top again, such a song picks up there and `resumedAtMs`
 says where, until it is moved (the window offers Start over, which seeks to
 0). A song played to its end, or within a minute of it, or sought back to
 its first few seconds, starts from the top next time. A place under 30
-seconds isn't kept, and a start from another device starts where that
-device says. Such a song is never joined on gaplessly while it has a place,
+seconds isn't kept, and a start that names its own place (another device,
+a handoff, a bookmark) starts there. `resumedAtMs` is only sent in the first
+15 seconds after it picks up. Such a song is never joined on gaplessly while it has a place,
 so it can start there.
 
 An `album` context with `trackIds` plays only those of the album's songs, in album order (one side of the record, see "Record sides"); it is still the album that's playing.

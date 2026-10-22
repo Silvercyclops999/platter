@@ -67,6 +67,8 @@ export function withRemote(local: PlayerState | null, r: RemoteSession | null): 
     shuffle: r.shuffle,
     repeat: r.repeat,
     abLoop: null,
+    // Picking a song up where it was left is this device's own.
+    resumedAtMs: null,
   };
 }
 
@@ -149,7 +151,12 @@ export function connectPlayer(b: Backend = backend): () => void {
       if (key === resumedKey) return;
       resumedKey = key;
       if (at == null) return;
-      useToasts.getState().push({ kind: "info", message: `Resumed at ${formatDuration(at)}`, action: { label: "Start over", run: () => void player.seek(0) } }, 8000);
+      const id = p.state!.track!.id;
+      const startOver = () => {
+        // Only the song it was said for.
+        if (usePlayer.getState().state?.track?.id === id) void player.seek(0);
+      };
+      useToasts.getState().push({ kind: "info", message: `Resumed at ${formatDuration(at)}`, action: { label: "Start over", run: startOver } }, 8000);
     }),
   );
   b.remoteState()
