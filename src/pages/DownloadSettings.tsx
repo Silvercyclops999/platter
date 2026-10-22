@@ -1,8 +1,10 @@
-/** Settings parts for downloads: the storage meter, Remove all, location and the queue's state. */
+/** Settings parts for downloads: the storage meter (on the phone, the whole drive's bar), Remove all, location and the queue's state. */
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
+import { backend } from "../lib/backend";
 import { formatBytes } from "../lib/format";
+import { useLoad } from "../lib/useLoad";
 import { usePhoneForm } from "../phone/form";
 import { chooseDownloadFolder, pauseText, removeAllDownloads, startDownloads, useDownloads } from "../stores/downloads";
 import "../components/downloads.css";
@@ -18,13 +20,57 @@ export function downloadsTitle(used: number | undefined): string {
   return used === undefined ? "Downloads" : `Downloads: ${formatBytes(used)}`;
 }
 
-/** Used of the limit, with free space, and a meter. */
+/** The phone's storage, in four parts that add up to the drive (bytes each). */
+export function storageParts(total: number, free: number, downloads: number, cache: number) {
+  const used = Math.max(0, total - free);
+  const ours = Math.min(used, downloads + cache);
+  const dl = Math.min(downloads, ours);
+  return [
+    { key: "other", label: "Other apps", bytes: used - ours },
+    { key: "downloads", label: "Downloads", bytes: dl },
+    { key: "cache", label: "Cache", bytes: ours - dl },
+    { key: "free", label: "Free", bytes: Math.min(free, total) },
+  ];
+}
+
+/** The phone's drive as one bar: other apps, Platter's downloads, its cache and free space, with a line for each. */
+function PhoneStorageBar({ total, free, downloads, full }: { total: number; free: number; downloads: number; full: boolean }) {
+  // Read again as the drive changes (a clear, a download).
+  const { data: art } = useLoad(() => backend.artCacheInfo(), [free]);
+  const parts = storageParts(total, free, downloads, art?.usedBytes ?? 0);
+  return (
+    <span className="dl-bar-wrap">
+      <span className={`dl-bar ${full ? "dl-bar--full" : ""}`} role="img" aria-label={parts.map((p) => `${p.label} ${formatBytes(p.bytes)}`).join(", ")}>
+        {parts.filter((p) => p.bytes > 0).map((p) => (
+          <span key={p.key} className={`dl-bar__part dl-bar__part--${p.key}`} style={{ width: `${(p.bytes / total) * 100}%` }} />
+        ))}
+      </span>
+      <span className="dl-legend" aria-hidden="true">
+        {parts.map((p) => (
+          <span key={p.key} className="dl-legend__line">
+            <span className={`dl-legend__dot dl-bar__part--${p.key}`} />
+            {p.label} <span className="dl-legend__size tabular">{formatBytes(p.bytes)}</span>
+          </span>
+        ))}
+      </span>
+    </span>
+  );
+}
+
+/** Used of the limit, with free space, and a meter (on the phone, the drive's bar). */
 export function StorageNote() {
   const st = useDownloadStatus();
   const phone = usePhoneForm((x) => x.phone);
   if (!st) return null;
   const share = st.limitBytes > 0 ? Math.min(1, st.usedBytes / st.limitBytes) : 0;
   const full = st.paused === "full" || st.paused === "noSpace";
+  if (phone && st.totalBytes && st.freeBytes != null)
+    return (
+      <>
+        {formatBytes(st.usedBytes)} of {formatBytes(st.limitBytes)} used{full ? ", so downloads have stopped" : ""}.
+        <PhoneStorageBar total={st.totalBytes} free={st.freeBytes} downloads={st.usedBytes} full={full} />
+      </>
+    );
   return (
     <>
       {formatBytes(st.usedBytes)} of {formatBytes(st.limitBytes)} used

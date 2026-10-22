@@ -3,10 +3,11 @@
  * shortcuts, then at most four more sections: Made for you, what's new in
  * the library, your top artists and Explore. Everything else has its own
  * tab (playlists in Library, what you played in Stats). A type picked shows
- * every shelf of that type.
+ * every shelf of that type. While only music on the phone can play, an "On
+ * this phone" shelf of what's downloaded follows the grid.
  */
 import { UserRound } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Art } from "../../components/Art";
 import { backend } from "../../lib/backend";
 import { useLoad } from "../../lib/useLoad";
@@ -16,8 +17,12 @@ import { useLikes } from "../../stores/likes";
 import { useSettings } from "../../stores/settings";
 import type { HomeShelfId } from "../../lib/types";
 import { useApp } from "../../stores/app";
+import { downloadRoute, useDownloads } from "../../stores/downloads";
+import { toEntries, useLibraryView } from "../../stores/library";
 import { usePlayer } from "../../stores/player";
-import { tap } from "../bits";
+import { RowGlyphs, tap } from "../bits";
+import { MixRowSleeve } from "./Library";
+import { useLibraryLoader } from "../../shell/useLibrary";
 import { nav } from "../../stores/router";
 import { phone } from "../phoneUi";
 import { Carousel, PageFailed, PageLoading, ShelfCard, itemInfo } from "./common";
@@ -79,6 +84,7 @@ export function PhoneHome() {
           })}
         </ul>
       )}
+      {filter === "all" && <OnThisPhone />}
       {filter === "all" && <HomeMixes />}
       {shelves.map((s) => (
         <Carousel key={s.id} title={s.title} onAll={() => nav.go(s.id === "recentlyPlayed" ? { name: "recents" } : { name: "homeShelf", shelf: s.id })}>
@@ -102,3 +108,37 @@ export function PhoneHome() {
   );
 }
 
+
+/** What's downloaded, as a shelf, while only music on the phone can play: albums, playlists and mixes with something saved. */
+export function OnThisPhone() {
+  useLibraryLoader();
+  const cachedOnly = useApp((s) => !!s.health?.cachedOnly);
+  const dl = useDownloads((s) => s.status?.items);
+  const items = useLibraryView((s) => s.items);
+  const owner = useApp((s) => s.auth?.username ?? null);
+  const cards = useMemo(() => {
+    const byKey = new Map(toEntries(items ?? [], owner).map((e) => [`${e.kind}:${e.id}`, e]));
+    return (dl ?? [])
+      .filter((i) => i.done > 0 && i.kind !== "liked")
+      .map((i) => ({ i, e: i.kind === "mix" ? undefined : byKey.get(`${i.kind}:${i.id}`) }))
+      .filter(({ i, e }) => i.kind === "mix" || e);
+  }, [dl, items, owner]);
+  if (!cachedOnly || !cards.length) return null;
+  return (
+    <Carousel title="On this phone">
+      {cards.slice(0, 12).map(({ i, e }) => (
+        <ShelfCard
+          key={`${i.kind}:${i.id}`}
+          title={e?.title ?? i.title}
+          sub={i.kind === "album" ? (e?.creator ?? undefined) : i.kind === "mix" ? "Mix" : "Playlist"}
+          thumb={e?.thumb ?? null}
+          tint={e?.tint}
+          kind={i.kind === "album" ? "album" : "playlist"}
+          marks={<RowGlyphs item={{ kind: i.kind, id: i.id }} />}
+          art={i.kind === "mix" ? <MixRowSleeve e={{ id: i.id, title: i.title, thumb: null }} card /> : undefined}
+          onOpen={() => nav.go(downloadRoute(i))}
+        />
+      ))}
+    </Carousel>
+  );
+}

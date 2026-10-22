@@ -54,12 +54,14 @@ export const NOTCH = typeof window !== "undefined" && notchFromUrl(window.locati
  * One line over the tabs for the app's state: why only songs on the phone
  * can play (the songs dimmed in every list are explained wherever you are),
  * no music library, a full phone, a relay connection, a sign-in to redo.
+ * Go offline, chosen by you, needs no line: a short caption under the tabs
+ * says it instead (`OfflineCaption`).
  */
 export function HealthStrip() {
   const health = useApp((s) => s.health);
   const [guide, setGuide] = useState(false);
   const line = phoneHealthLine(health);
-  if (!line) return null;
+  if (!line || health?.banner?.kind === "goneOffline") return null;
   return (
     <>
       <p className="ph-offline-strip" role="status" data-testid="phone-offline-strip">
@@ -72,6 +74,17 @@ export function HealthStrip() {
       </p>
       <LibraryGuide open={guide} onClose={() => setGuide(false)} />
     </>
+  );
+}
+
+/** "Offline", under the tabs on every screen while Go offline is on. */
+export function OfflineCaption() {
+  const on = useApp((s) => s.health?.banner?.kind === "goneOffline");
+  if (!on) return null;
+  return (
+    <p className="ph-offline-caption" role="status">
+      Offline
+    </p>
   );
 }
 
@@ -134,6 +147,7 @@ export function PhoneShell() {
             );
           })}
         </nav>
+        <OfflineCaption />
       </div>
       <NowPlaying />
       <LyricsScreen />

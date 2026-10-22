@@ -172,18 +172,26 @@ describe("phone settings screens", () => {
     expect(lastRoute()).toEqual({ name: "settings", section: "Playback" });
   });
 
-  it("Go offline is a quick switch above the sections, and turns offline on and off", async () => {
+  it("Go offline and Private session are quick tiles above the sections, each on and off in a tap", async () => {
     useRouter.getState().reset({ name: "settings" });
     render(<SettingsPage />);
-    const quick = await screen.findByRole("list", { name: "Quick switches" });
+    const quick = await screen.findByRole("group", { name: "Quick switches" });
     expect(quick.compareDocumentPosition(screen.getByRole("list", { name: "Settings sections" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    const sw = await within(quick).findByRole("switch", { name: "Go offline" });
+    expect(within(quick).getAllByRole("switch").map((t) => t.querySelector(".ph-quick__name")?.textContent)).toEqual(["Go offline", "Private session"]);
+    const sw = await within(quick).findByRole("switch", { name: /Go offline/ });
+    await waitFor(() => expect(sw).not.toBeDisabled());
     expect(sw).toHaveAttribute("aria-checked", "false");
+    expect(sw).toHaveTextContent("Off");
     fireEvent.click(sw);
     await waitFor(() => expect(useSettings.getState().settings?.goOffline).toBe(true));
-    expect(within(quick).getByText("On. Only downloaded music plays.")).toBeInTheDocument();
-    fireEvent.click(within(quick).getByRole("switch", { name: "Go offline" }));
+    await waitFor(() => expect(within(quick).getByRole("switch", { name: /Go offline/ })).toHaveClass("is-on"));
+    expect(within(quick).getByRole("switch", { name: /Go offline/ })).toHaveTextContent("On");
+    fireEvent.click(within(quick).getByRole("switch", { name: /Go offline/ }));
     await waitFor(() => expect(useSettings.getState().settings?.goOffline).toBe(false));
+    fireEvent.click(within(quick).getByRole("switch", { name: /Private session/ }));
+    await waitFor(() => expect(useSettings.getState().settings?.privateSession).toBe(true));
+    fireEvent.click(within(quick).getByRole("switch", { name: /Private session/ }));
+    await waitFor(() => expect(useSettings.getState().settings?.privateSession).toBe(false));
   });
 
   it("search finds rows from every section", async () => {
