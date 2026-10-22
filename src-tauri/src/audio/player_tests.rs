@@ -2264,6 +2264,20 @@ async fn a_long_song_picks_up_where_it_was_left_until_started_over() {
     assert!(s.position_ms >= 35_000, "{}", s.position_ms);
     assert_eq!(s.resumed_at_ms, Some(35_000));
 
+    // A start that names its own place (another device at 0:00) starts there.
+    play("b", "six").await;
+    next_tracking(&mut r.tracking, started("b")).await;
+    r.player.play_context_at(album("seven", &["set", "b"]), Some("set".into()), 0, false).await.unwrap();
+    let s = wait_state(&r.player, |s| tid(&s.track) == "set").await;
+    assert!(s.position_ms < 30_000, "{}", s.position_ms);
+    assert_eq!(s.resumed_at_ms, None);
+    // The place is still kept for a start from the top here.
+    play("b", "eight").await;
+    next_tracking(&mut r.tracking, started("b")).await;
+    play("set", "nine").await;
+    let s = wait_state(&r.player, |s| tid(&s.track) == "set").await;
+    assert!(s.resumed_at_ms.is_some_and(|at| at >= 35_000), "{:?}", s.resumed_at_ms);
+
     // Start over: from the top, and the place is gone.
     r.player.seek(0).await.unwrap();
     let s = r.player.state().await.unwrap();

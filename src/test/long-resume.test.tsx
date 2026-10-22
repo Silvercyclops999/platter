@@ -9,7 +9,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { Toaster } from "../components/Toast";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
-import { connectPlayer, usePlayer } from "../stores/player";
+import { connectPlayer, usePlayer, withRemote } from "../stores/player";
 import { useToasts } from "../stores/toasts";
 
 const mock = backend as MockBackend;
@@ -44,6 +44,23 @@ describe("long songs pick up where they were left", () => {
     expect(useToasts.getState().toasts).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "Start over" }));
     expect(seek).toHaveBeenCalledWith(0);
+  });
+
+  it("Start over only restarts the song it was said for", async () => {
+    const seek = vi.spyOn(backend, "playSeek");
+    const user = userEvent.setup();
+    render(<Toaster />);
+    resumeAt(41 * 60 * 1000);
+    await screen.findByText("Resumed at 41:00");
+    // Next was pressed while the note still shows.
+    resumeAt(null, { ...set, id: "other" });
+    await user.click(screen.getByRole("button", { name: "Start over" }));
+    expect(seek).not.toHaveBeenCalled();
+  });
+
+  it("is this device's own: playing elsewhere says nothing", () => {
+    const s = usePlayer.getState().state!;
+    expect(withRemote({ ...s, resumedAtMs: 5_000_000 }, { status: "playing", track: set, positionMs: 0, durationMs: set.durationMs, shuffle: false, repeat: "off" } as never)?.resumedAtMs).toBeNull();
   });
 
   it("says nothing for a song started from the top", () => {

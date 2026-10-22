@@ -89,6 +89,8 @@ fn skip_hidden(lookup: &dyn TrackLookup, tracks: Vec<Track>, start: Option<&str>
 pub const PREVIOUS_RESTART_MS: u64 = 3_000;
 /// The shortest A-B loop.
 pub const MIN_LOOP_MS: u64 = 1_000;
+/// How long after a long song picks up its place the window is told so.
+const RESUMED_SAID_MS: u64 = 15_000;
 /// Songs a radio refill or a keep-playing batch asks for.
 pub const REFILL_BATCH: usize = 20;
 /// A refill lookup that fails is tried again after these waits (the
@@ -1012,7 +1014,8 @@ struct Actor {
     /// The current entry (by item id) was a long song picked up where it was
     /// left, at this position, and nothing has moved it since.
     long_resumed: Option<(String, u64)>,
-    /// The next start comes from another device: it says where to start.
+    /// The next start names its own place (another device, a handoff, a
+    /// bookmark): a long song starts there, not where it was left.
     no_long_resume: bool,
     /// Queue entries that failed to load this context (skipped).
     skip_ids: HashSet<String>,
@@ -1179,7 +1182,11 @@ impl Actor {
     /// playing) is a moment it should be updated.
     fn mark_dirty(&mut self) {
         self.queue.note_position(self.position_ms());
-        self.queue.note_long(self.position_ms());
+        // Only while the song is loaded and not finished: a stopped engine
+        // reads back the place it started at.
+        if self.cur_key.is_some() && !self.cur_ended {
+            self.queue.note_long(self.position_ms());
+        }
         if self.config.persist_path.is_some() && self.held.is_none() {
             self.dirty = true;
             self.persist_at = Some(Instant::now() + self.config.persist_debounce);
@@ -1246,8 +1253,10 @@ impl Actor {
             smart_shuffle: self.smart_on(),
             smart_contexts: self.queue.smart_contexts(),
             smooth_transitions: self.transitions_for.is_some(),
+            // Said only just after it picked up, so a window opened later
+            // doesn't announce it.
             resumed_at_ms: match (&self.long_resumed, self.queue.current()) {
-                (Some((id, at)), Some(c)) if &c.item_id == id => Some(*at),
+                (Some((id, at)), Some(c)) if &c.item_id == id && self.position_ms() < at + RESUMED_SAID_MS => Some(*at),
                 _ => None,
             },
         }
@@ -1625,11 +1634,12 @@ impl Actor {
         self.sync_album_context();
         if let Some(cur) = self.cur_key {
             // A long song with a place isn't joined on gaplessly: it starts
-            // on its own, where it was left.
+            // on its own, where it was left (repeating itself, it loops as ever).
+            let playing = self.queue.current().map(|c| c.track.id.clone());
             let next = self
                 .pick_next()
                 .filter(|i| self.next_unreachable.as_deref() != Some(i.item_id.as_str()))
-                .filter(|i| self.queue.long_place(&i.track).is_none())
+                .filter(|i| playing.as_deref() == Some(i.track.id.as_str()) || self.queue.long_place(&i.track).is_none())
                 .map(|i| (i.track, i.item_id));
             self.next_key = self.engine.set_next(next, cur);
         }
@@ -1833,6 +1843,7 @@ impl Actor {
             }
             Err(e) => {
                 self.cur_key = None;
+                self.long_resumed = None;
                 self.status = PlayerStatus::Error;
                 self.sink.error(&ErrorPayload {
                     track_id: Some(item.track.id.clone()),
@@ -2330,6 +2341,7 @@ impl Actor {
                 self.failures_in_row = 0;
                 let _ = self.queue.set_context_at(info, tracks, start, None);
                 self.smart_built = false;
+                self.no_long_resume = true;
                 let r = self.start_current(play, start_ms);
                 let _ = reply.send(r);
             }
@@ -2370,7 +2382,10 @@ impl Actor {
                 let r = self
                     .queue
                     .jump(&id)
-                    .and_then(|_| self.start_current(play, ms));
+                    .and_then(|_| {
+                        self.no_long_resume = true;
+                        self.start_current(play, ms)
+                    });
                 let _ = reply.send(r);
             }
         }
