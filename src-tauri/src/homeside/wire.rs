@@ -5,7 +5,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::lidarr::request::RequestRecord;
 use crate::lidarr::waves_bridge::{WavesPlan, WavesProgress};
+use crate::radar::bridge::RadarPlan;
 use crate::sync::store::{Digests, EntryMap, Stamp};
 
 /// How the Bridge reaches the music folder.
@@ -253,6 +255,9 @@ pub enum Msg {
         music: MusicAccess,
         #[serde(default)]
         waves: bool,
+        /// It can run the daily look for followed artists (`crate::radar::bridge`).
+        #[serde(default)]
+        radar: bool,
         /// The Bridge's Plex client id (empty from older builds).
         #[serde(default, skip_serializing_if = "String::is_empty")]
         device: String,
@@ -280,6 +285,11 @@ pub enum Msg {
     WavesPlan(Box<WavesPlan>),
     /// From the Bridge: how the waves are going.
     WavesProgress(Box<WavesProgress>),
+    /// From an owner's device: the followed artists whose new albums are
+    /// got, and the settings (`crate::radar::bridge`).
+    RadarPlan(Box<RadarPlan>),
+    /// From the Bridge: what its daily look asked for lately.
+    RadarMade { records: Vec<RequestRecord> },
     /// From a computer: the songs it has lyrics for already (its own or
     /// transcribed), so the Bridge doesn't transcribe them. Ids only.
     LyricsHave { ids: Vec<String> },
@@ -376,6 +386,8 @@ impl Msg {
             Msg::Unpair => "unpair",
             Msg::WavesPlan(_) => "wavesPlan",
             Msg::WavesProgress(_) => "wavesProgress",
+            Msg::RadarPlan(_) => "radarPlan",
+            Msg::RadarMade { .. } => "radarMade",
             Msg::LyricsHave { .. } => "lyricsHave",
             Msg::SyncHello(_) => "syncHello",
             Msg::SyncDiff { .. } => "syncDiff",

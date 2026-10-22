@@ -378,7 +378,7 @@ async fn the_bridge_passes_on_only_lidarr_reads_and_platters_fixed_writes() {
 #[test]
 fn an_older_bridges_hello_means_no_waves() {
     let old: Msg = serde_json::from_value(json!({"t": "hello", "name": "Shed", "version": "0.2.20", "music": "none"})).unwrap();
-    assert!(matches!(old, Msg::Hello { waves: false, .. }));
+    assert!(matches!(old, Msg::Hello { waves: false, radar: false, .. }));
 }
 
 struct Quiet;
@@ -1032,6 +1032,161 @@ async fn the_bridges_lyrics_travel_to_a_paired_device_sealed() {
     assert!(p.store.has_entry(&TRANSCRIPTS, "t1|small").unwrap());
     for m in ntfy.published() {
         assert!(!m.body.contains("Quiet") && !m.body.contains("t1|small"), "lyrics travelled in the clear");
+    }
+    let _ = stop_tx.send(true);
+}
+
+struct FollowIds;
+
+#[async_trait]
+impl ArtistMbid for FollowIds {
+    async fn artist_mbid(&self, _artist_id: &str, name: &str) -> Option<String> {
+        (name == "Northlight").then(|| NORTHLIGHT_MBID.to_string())
+    }
+}
+
+struct NoTop;
+
+impl crate::radar::TopPlayed for NoTop {
+    fn top(&self, _: usize) -> Vec<crate::radar::RadarArtist> {
+        Vec::new()
+    }
+}
+
+struct NoEvents;
+
+impl crate::plex::state::EventSink for NoEvents {
+    fn emit(&self, _: &str, _: serde_json::Value) {}
+}
+
+const NORTHLIGHT_MBID: &str = "aaaaaaaa-1111-2222-3333-444444444444";
+const PAPER_MOON: &str = "bbbbbbbb-1111-2222-3333-444444444444";
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_bridge_gets_the_followed_artists_sealed_and_its_requests_show_on_the_device() {
+    use crate::lidarr::request::RequestRecord;
+    use crate::lidarr::status::RequestState;
+    use crate::radar::{Radar, RadarDeps};
+    use crate::social::follows::{FollowStore, FollowedArtist, KvFollows};
+    let ntfy = FakeNtfy::start().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let relays: Arc<dyn RelayFactory> = Arc::new(Ntfy::new().unwrap());
+
+    // The device follows Northlight, and gets new albums.
+    let d = side(tmp.path(), "desk");
+    let mut s = crate::settings::load(&d.db);
+    s.lidarr_url = LIDARR_URL.into();
+    s.release_radar = true;
+    s.follow_get = true;
+    s.auto_request_cap = 2;
+    crate::settings::save(&d.db, &s).unwrap();
+    d.lidarr.set_key(Some(LIDARR_KEY)).unwrap();
+    let follows = KvFollows(d.db.clone());
+    follows
+        .save(&[
+            FollowedArtist { id: "ar1".into(), title: "Northlight".into(), thumb: None, followed_at: 7, just_show: false },
+            FollowedArtist { id: "ar2".into(), title: "Harbor Sound".into(), thumb: None, followed_at: 8, just_show: true },
+        ])
+        .unwrap();
+    let radar = Radar::new(RadarDeps {
+        db: d.db.clone(),
+        mb: Arc::new(NoMb),
+        mbids: Arc::new(FollowIds),
+        follows: Arc::new(KvFollows(d.db.clone())),
+        top: Arc::new(NoTop),
+        lidarr: Arc::new(d.lidarr.clone()),
+        notifier: Arc::new(Quiet),
+        events: Arc::new(NoEvents),
+        usable: Arc::new(|| true),
+        private_session: Arc::default(),
+        clock: Arc::new(crate::db::queries::now_s),
+    });
+    // Its daily look found Northlight's MusicBrainz id.
+    radar.check().await.unwrap();
+    let desk = desktop_for(&d, "Desk", relays.clone());
+    desk.set_radar(radar);
+    tokio::spawn(desk.clone().run());
+    let start = desk.pair_start(Some(ntfy.url.clone())).unwrap();
+
+    // The Bridge asked for Paper Moon earlier, while the device was closed.
+    let b = side(tmp.path(), "bridge");
+    b.web.route("/api/v1/system/status", None, 200, r#"{"appName": "Lidarr", "version": "2.8.2"}"#);
+    let now = crate::db::queries::now_s();
+    let asked = RequestRecord {
+        id: "bridge-req-1".into(),
+        release_group_id: PAPER_MOON.into(),
+        title: "Paper Moon".into(),
+        artist: "Northlight".into(),
+        artist_id: Some("ar1".into()),
+        artist_mbid: None,
+        state: RequestState::Downloading,
+        destination: None,
+        lidarr_album_id: Some(41),
+        added_artist: false,
+        already_in_lidarr: false,
+        created_at: now,
+        updated_at: now,
+        message: None,
+        notes: vec![],
+        auto: true,
+        protected: false,
+        progress: None,
+        searched_at: None,
+        searches: 0,
+        next_search_at: None,
+        attempts: 0,
+        quick: false,
+    };
+    let json = serde_json::to_string(&vec![asked.clone()]).unwrap();
+    b.db.write(|c| crate::db::store::kv_set(c, "lidarr.requests", &json)).unwrap();
+    crate::radar::bridge::note_made(&b.db, &[asked], now).unwrap();
+    let env = Env { data: tmp.path().join("bridge-data"), name: "Shed Bridge".into(), pair_code: Some(start.code.clone()), ..Default::default() };
+    let bridge = bridge_from(&b, env, relays.clone());
+    bridge.set_radar(Radar::new(crate::radar::bridge::deps(
+        b.db.clone(),
+        Arc::new(NoMb),
+        Arc::new(b.lidarr.clone()),
+        Arc::new(NoEvents),
+        Arc::new(Quiet),
+        Arc::new(crate::db::queries::now_s),
+    )));
+    assert_eq!(tokio::time::timeout(Duration::from_secs(20), bridge.pair_from_env()).await.unwrap().unwrap(), FromEnv::Paired);
+    let (stop_tx, stop) = tokio::sync::watch::channel(false);
+    tokio::spawn(bridge.clone().run(stop));
+
+    // The Bridge says it runs the daily look; the device hands over who it follows.
+    until("the follows on the Bridge", || !crate::radar::bridge::plan(&b.db).follows.is_empty()).await;
+    let plan = crate::radar::bridge::plan(&b.db);
+    assert!(plan.on);
+    assert_eq!(plan.cap, 2);
+    assert_eq!(
+        plan.follows,
+        vec![crate::radar::bridge::PlanFollow { id: "ar1".into(), title: "Northlight".into(), mbid: Some(NORTHLIGHT_MBID.into()), followed_at: 7 }],
+        "only the follows that get new albums"
+    );
+    let bs = crate::settings::load(&b.db);
+    assert!(bs.release_radar && bs.follow_get);
+    // What the Bridge asked for shows in the device's Requests.
+    until("the Bridge's request on the device", || d.lidarr.requests().iter().any(|r| r.release_group_id == PAPER_MOON)).await;
+    let r = d.lidarr.requests().into_iter().find(|r| r.release_group_id == PAPER_MOON).unwrap();
+    assert_eq!((r.title.as_str(), r.state, r.auto), ("Paper Moon", RequestState::Downloading, true));
+    assert_eq!(d.lidarr.requests().len(), 1);
+
+    // Nothing changed: nothing is sent again. Turned off here: the Bridge stops.
+    let before = ntfy.published().len();
+    desk.send_radar_plan().await;
+    assert_eq!(ntfy.published().len(), before);
+    let mut s = crate::settings::load(&d.db);
+    s.follow_get = false;
+    crate::settings::save(&d.db, &s).unwrap();
+    desk.send_radar_plan().await;
+    until("the Bridge's look off", || !crate::settings::load(&b.db).release_radar).await;
+    assert!(crate::radar::bridge::plan(&b.db).follows.is_empty());
+
+    for m in &ntfy.published() {
+        for secret in ["Northlight", "Paper Moon", NORTHLIGHT_MBID] {
+            assert!(!m.body.contains(secret), "{secret} travelled in the clear");
+        }
     }
     let _ = stop_tx.send(true);
 }

@@ -81,7 +81,12 @@ async fn start(env: run::Env) -> i32 {
         parts.env.music.as_ref().map(|(root, _)| root.clone()),
         parts.plex.clone(),
     );
+    let radar = run::Bridge::radar_for(&parts);
     let bridge = run::Bridge::new(parts);
+    match radar {
+        Ok(r) => bridge.set_radar(r),
+        Err(e) => tracing::warn!("The daily look for followed artists can't run here: {e}"),
+    }
     match lyrics {
         Ok(l) => {
             l.spawn();

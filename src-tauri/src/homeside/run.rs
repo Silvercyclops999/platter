@@ -60,6 +60,9 @@ pub const HEARTBEAT: Duration = Duration::from_secs(60 * 60);
 pub const DEVICE_PREFIX: &str = "bridge-";
 /// How often the library cache is brought up to date.
 const LIBRARY_EVERY: Duration = Duration::from_secs(6 * 3600);
+/// The daily look's first pass after start, and how often it asks whether one is due.
+const RADAR_START: Duration = Duration::from_secs(5 * 60);
+const RADAR_EVERY: Duration = Duration::from_secs(30 * 60);
 /// Wait after a shared change before sending it (changes come in bursts).
 const SETTLE: Duration = Duration::from_secs(3);
 const USED_CODES_KEY: &str = "bridge.usedCodes";
@@ -311,6 +314,10 @@ pub struct Bridge {
     lyrics_sent: Mutex<Option<super::wire::LyricsLine>>,
     /// Look at the account's devices now (just signed in).
     account_now: tokio::sync::Notify,
+    /// The daily look for followed artists (None: not set up, as in most tests).
+    radar: parking_lot::RwLock<Option<crate::radar::Radar>>,
+    /// The requests last sent back, per link (this run only).
+    radar_sent: Mutex<HashMap<String, String>>,
 }
 
 impl Bridge {
@@ -362,7 +369,104 @@ impl Bridge {
             lidarr_on: AtomicBool::new(lidarr_on),
             lyrics_sent: Mutex::default(),
             account_now: tokio::sync::Notify::new(),
+            radar: Default::default(),
+            radar_sent: Mutex::default(),
         })
+    }
+
+    /// The daily look for followed artists, once its parts are built (the binary does it).
+    pub fn set_radar(&self, r: crate::radar::Radar) {
+        *self.radar.write() = Some(r);
+    }
+
+    /// The Bridge's radar: the plan a device handed over, MusicBrainz at
+    /// half its one a second (the Lidarr checks take the other half), and
+    /// the Bridge's own Lidarr.
+    pub fn radar_for(p: &Parts) -> AppResult<crate::radar::Radar> {
+        let mb = Arc::new(crate::lidarr::mbpick::MbCached {
+            http: Arc::new(crate::artistinfo::http::ReqwestHttp::new()?),
+            limiter: Arc::new(crate::artistinfo::limit::Limiter::per_second(0.5)),
+            db: p.db.clone(),
+            clock: Arc::new(crate::db::queries::now_s),
+            ttl: crate::radar::MB_TTL,
+        });
+        Ok(crate::radar::Radar::new(crate::radar::bridge::deps(
+            p.db.clone(),
+            mb,
+            Arc::new(p.lidarr.clone()),
+            Arc::new(NoEvents),
+            Arc::new(LogNotifier),
+            Arc::new(crate::db::queries::now_s),
+        )))
+    }
+
+    /// One pass of the daily look (a look when one is due, else asks that
+    /// waited), then what it asked for back to the devices.
+    pub async fn radar_once(&self) {
+        let Some(r) = self.radar.read().clone() else { return };
+        if !self.lidarr_on() {
+            return;
+        }
+        // A request that waited for Lidarr goes now, as an open device would
+        // send it (no device may be open).
+        if self.p.lidarr.requests().iter().any(|q| q.state == crate::lidarr::status::RequestState::Queued)
+            && let Err(e) = self.p.lidarr.retry_queued().await
+        {
+            tracing::info!("Requests waiting for Lidarr: {e}");
+        }
+        if !crate::settings::load(&self.p.db).release_radar {
+            return;
+        }
+        // Asks go only once Lidarr's setup check has passed (Bring in my
+        // listening may not be running to have it done).
+        let st = self.p.lidarr.status();
+        if st.url_set && st.has_key && self.p.lidarr.last_check().is_none() {
+            self.doing("Running Lidarr's setup check");
+            if let Err(e) = self.p.lidarr.check().await {
+                tracing::info!("Lidarr's setup check: {e}");
+            }
+            self.doing("Waiting for the next catch-up");
+        }
+        let made = if r.due() {
+            r.check().await.map(|o| o.auto)
+        } else {
+            r.get_waiting().await
+        };
+        match made {
+            Ok(made) => {
+                if !made.is_empty() {
+                    tracing::info!(asked = made.iter().filter(|m| m.state != crate::lidarr::status::RequestState::Failed).count(), "New albums by followed artists");
+                }
+                if let Err(e) = crate::radar::bridge::note_made(&self.p.db, &made, self.now_s()) {
+                    tracing::warn!("Couldn't keep what the daily look asked for: {e}");
+                }
+            }
+            Err(e) => tracing::info!("The daily look for followed artists: {e}"),
+        }
+        let to = crate::radar::bridge::plan_links(&self.p.db);
+        for link in self.wire.links.links().into_iter().filter(|l| to.contains(&l.id)) {
+            self.send_radar_made(&link, false).await;
+        }
+    }
+
+    /// What the daily look asked for lately, to one device (when it changed
+    /// since the last time this run, or `always`; never an empty list).
+    async fn send_radar_made(&self, link: &Link, always: bool) {
+        if self.radar.read().is_none() {
+            return;
+        }
+        let records = crate::radar::bridge::made_records(&self.p.db, &self.p.lidarr.requests(), self.now_s());
+        if records.is_empty() {
+            return;
+        }
+        let ids: Vec<&str> = records.iter().map(|r| r.id.as_str()).collect();
+        let key = ids.join(",");
+        if !always && self.radar_sent.lock().get(&link.id) == Some(&key) {
+            return;
+        }
+        if self.wire.send(link, &Msg::RadarMade { records }).await.is_ok() {
+            self.radar_sent.lock().insert(link.id.clone(), key);
+        }
     }
 
     /// Lyrics for every song, once its parts are built (the binary does it).
@@ -403,7 +507,14 @@ impl Bridge {
     }
 
     fn hello_msg(&self) -> Msg {
-        Msg::Hello { name: self.p.env.name.clone(), version: super::VERSION.into(), music: self.p.music, waves: true, device: self.plex_id() }
+        Msg::Hello {
+            name: self.p.env.name.clone(),
+            version: super::VERSION.into(),
+            music: self.p.music,
+            waves: true,
+            radar: self.radar.read().is_some(),
+            device: self.plex_id(),
+        }
     }
 
     /// The Bridge's Plex client id.
@@ -643,6 +754,9 @@ impl Bridge {
             Msg::Unpair => {
                 tracing::info!("Unpaired by the desktop.");
                 self.wire.links.unpaired(&link.id);
+                if let Err(e) = crate::radar::bridge::take_plan(&self.p.db, &link.id, None) {
+                    tracing::warn!("Couldn't forget the device's followed artists: {e}");
+                }
                 if let Some(l) = self.lyrics() {
                     l.forget_link(&link.id).await;
                 }
@@ -661,7 +775,19 @@ impl Bridge {
                 let _ = self.wire.send(link, &progress).await;
                 self.waves.poke();
             }
-            Msg::Hello { .. } | Msg::Status(_) | Msg::Answer { .. } | Msg::Failed { .. } | Msg::WavesProgress(_) => {}
+            Msg::RadarPlan(plan) => {
+                match crate::radar::bridge::take_plan(&self.p.db, &link.id, Some(&plan)) {
+                    Ok(true) => tracing::info!(
+                        artists = crate::radar::bridge::plan(&self.p.db).follows.len(),
+                        on = plan.on,
+                        "Took the followed artists for the daily look from {}", link.id
+                    ),
+                    Ok(false) => {}
+                    Err(e) => tracing::warn!("Couldn't take the followed artists: {e}"),
+                }
+                self.send_radar_made(link, false).await;
+            }
+            Msg::Hello { .. } | Msg::Status(_) | Msg::Answer { .. } | Msg::Failed { .. } | Msg::WavesProgress(_) | Msg::RadarMade { .. } => {}
             // Device link messages and kinds from a newer build.
             Msg::SyncHello(_) | Msg::SyncDiff { .. } | Msg::SyncWant { .. } | Msg::SyncEntries { .. } | Msg::SyncCopyWant { .. } | Msg::SyncCopy { .. } | Msg::SyncBye | Msg::Unknown => {}
         }
@@ -1098,6 +1224,8 @@ impl Bridge {
         let mut library = tokio::time::interval(LIBRARY_EVERY);
         let mut tick = tokio::time::interval(Duration::from_secs(30));
         let mut waves = tokio::time::interval(crate::lidarr::waves::LOOK_EVERY);
+        // After the library has been read at start.
+        let mut radar = tokio::time::interval_at(tokio::time::Instant::now() + RADAR_START, RADAR_EVERY);
         let mut dirty: Option<tokio::time::Instant> = None;
         beat.tick().await;
         self.migrate_plex().await;
@@ -1185,6 +1313,7 @@ impl Bridge {
                 _ = waves.tick() => {
                     self.waves_once().await;
                 }
+                _ = radar.tick() => self.radar_once().await,
                 _ = self.waves.woken() => {
                     self.waves_once().await;
                 }
@@ -1234,7 +1363,8 @@ pub fn build(env: Env) -> AppResult<Parts> {
             clock: Arc::new(crate::db::queries::now_s),
             ttl: crate::lidarr::mbpick::CACHE_TTL,
         }),
-        artist_mbid: Arc::new(NoMbid),
+        // Followed artists' ids, from the plan devices hand over.
+        artist_mbid: Arc::new(crate::radar::bridge::PlanMbids(db.clone())),
         album_wait: Duration::from_secs(2),
         shared,
         plex_server: Arc::new(crate::lidarr::plexside::PlexLive(plex.clone())),
@@ -1289,6 +1419,13 @@ impl crate::lidarr::catchup::Announcer for LogAnnouncer {
     }
 }
 
+/// Nothing shows the Bridge's radar page.
+struct NoEvents;
+
+impl crate::plex::state::EventSink for NoEvents {
+    fn emit(&self, _event: &str, _payload: serde_json::Value) {}
+}
+
 /// Bring in my listening's daily summary goes to the log.
 struct LogNotifier;
 
@@ -1298,11 +1435,4 @@ impl crate::social::Notifier for LogNotifier {
     }
 }
 
-struct NoMbid;
 
-#[async_trait::async_trait]
-impl crate::lidarr::ArtistMbid for NoMbid {
-    async fn artist_mbid(&self, _artist_id: &str, _name: &str) -> Option<String> {
-        None
-    }
-}

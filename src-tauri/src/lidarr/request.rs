@@ -40,6 +40,9 @@ pub(super) const MAX_KEPT: usize = 200;
 /// Release groups of requests that left the list, so they're never asked for again.
 const ASKED_KEY: &str = "lidarr.requests.asked";
 const KEEP_ASKED: usize = 5000;
+/// Release groups a Bridge asked for that this device took into its list.
+const ADOPTED_KEY: &str = "lidarr.requests.fromBridge";
+const KEEP_ADOPTED: usize = 2000;
 /// Most searches again sent in one look, so a long time away doesn't end in a burst.
 pub const MAX_RESEARCH_PER_LOOK: usize = 3;
 /// Tries of a waiting request that keeps going wrong (Lidarr answering with
@@ -1318,6 +1321,41 @@ impl Lidarr {
         let mut l = self.records();
         l.sort_by_key(|r| std::cmp::Reverse(r.created_at));
         l
+    }
+
+    /// Requests a Bridge's daily look made, into this device's list so they
+    /// show and are followed here. Each is taken once: one already here,
+    /// asked for before, or taken before and cleared since isn't. Returns
+    /// how many were added.
+    pub async fn adopt_requests(&self, recs: Vec<RequestRecord>) -> AppResult<usize> {
+        let _one = self.lock.lock().await;
+        let mut taken: Vec<String> = self.inner.db.read(|c| kv_get(c, ADOPTED_KEY)).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        let asked: std::collections::HashSet<String> = self.asked_all().into_iter().map(|a| a.release_group_id).collect();
+        let mut list = self.records();
+        let mut n = 0;
+        for mut r in recs.into_iter().take(crate::radar::bridge::KEEP_MADE) {
+            r.release_group_id = r.release_group_id.trim().to_ascii_lowercase();
+            if !crate::artistinfo::is_mbid(&r.release_group_id) || asked.contains(&r.release_group_id) || taken.contains(&r.release_group_id) {
+                continue;
+            }
+            if matches!(r.state, RequestState::Queued | RequestState::Failed) || list.iter().any(|x| x.id == r.id) {
+                continue;
+            }
+            taken.push(r.release_group_id.clone());
+            r.auto = true;
+            list.push(r);
+            n += 1;
+        }
+        if n == 0 {
+            return Ok(0);
+        }
+        if taken.len() > KEEP_ADOPTED {
+            taken.drain(..taken.len() - KEEP_ADOPTED);
+        }
+        let json = serde_json::to_string(&taken).map_err(|e| AppError::Internal(e.to_string()))?;
+        self.inner.db.write(|c| kv_set(c, ADOPTED_KEY, &json))?;
+        self.save_records(&list)?;
+        Ok(n)
     }
 
     /// Cancel a waiting request, or clear a finished one from the list.
