@@ -404,6 +404,7 @@ pub(crate) mod tests {
             smart_shuffle: false,
             smart_contexts: vec![],
             smooth_transitions: false,
+            resumed_at_ms: None,
         }
     }
 

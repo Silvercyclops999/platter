@@ -92,6 +92,7 @@ impl Local {
                 smart_shuffle: false,
                 smart_contexts: vec![],
                 smooth_transitions: false,
+                resumed_at_ms: None,
             }),
             log: Mutex::default(),
             output: Mutex::default(),

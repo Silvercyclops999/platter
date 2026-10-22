@@ -71,6 +71,10 @@ pub struct PlayerState {
     /// Crossfade is on for this playback only (a mix's smooth transitions).
     #[serde(default)]
     pub smooth_transitions: bool,
+    /// The playing song is a long one picked up where it was left, at this
+    /// position ("Resumed at 41:12, Start over"). Gone once it is moved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resumed_at_ms: Option<u64>,
 }
 
 /// How many songs after the current one the window is sent. Playing a
@@ -111,6 +115,7 @@ impl PlayerState {
             smart_shuffle: self.smart_shuffle,
             smart_contexts: self.smart_contexts.clone(),
             smooth_transitions: self.smooth_transitions,
+            resumed_at_ms: self.resumed_at_ms,
         }
     }
 }
@@ -315,6 +320,7 @@ mod tests {
             smart_shuffle: false,
             smart_contexts: vec![],
             smooth_transitions: false,
+            resumed_at_ms: None,
         };
         let v = serde_json::to_value(&s).unwrap();
         assert_eq!(v["abLoop"]["aMs"], 1_000);
@@ -350,6 +356,7 @@ mod tests {
             smart_shuffle: false,
             smart_contexts: vec![],
             smooth_transitions: false,
+            resumed_at_ms: None,
         };
         assert!(matches!(s.for_ui(), std::borrow::Cow::Borrowed(_)));
         // A whole library playing: the window gets the first stretch only.

@@ -2242,3 +2242,51 @@ async fn jumping_to_the_row_that_just_became_current_keeps_it_playing() {
     let TrackingEvent::TrackEnded { completed, .. } = end else { unreachable!() };
     assert!(completed);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_long_song_picks_up_where_it_was_left_until_started_over() {
+    let mut r = rig(&["set", "b"], 40.0, true, PlayerConfig::default()).await;
+    // A 30-minute set (the test audio is shorter; its length is what counts).
+    r.resolver.tracks.lock().get_mut("set").unwrap().duration_ms = 30 * 60 * 1000;
+    let play = |id: &'static str, ctx: &'static str| {
+        let p = r.player.clone();
+        async move { p.play_context(album(ctx, &["set", "b"]), Some(id.into()), None).await.unwrap() }
+    };
+    play("set", "one").await;
+    next_tracking(&mut r.tracking, started("set")).await;
+    r.player.pause().await.unwrap();
+    r.player.seek(35_000).await.unwrap();
+    play("b", "two").await;
+    next_tracking(&mut r.tracking, started("b")).await;
+
+    play("set", "three").await;
+    let s = wait_state(&r.player, |s| tid(&s.track) == "set").await;
+    assert!(s.position_ms >= 35_000, "{}", s.position_ms);
+    assert_eq!(s.resumed_at_ms, Some(35_000));
+
+    // Start over: from the top, and the place is gone.
+    r.player.seek(0).await.unwrap();
+    let s = r.player.state().await.unwrap();
+    assert_eq!(s.resumed_at_ms, None);
+    play("b", "four").await;
+    next_tracking(&mut r.tracking, started("b")).await;
+    play("set", "five").await;
+    let s = wait_state(&r.player, |s| tid(&s.track) == "set").await;
+    assert!(s.position_ms < 30_000, "{}", s.position_ms);
+    assert_eq!(s.resumed_at_ms, None);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_short_song_always_starts_from_the_top() {
+    let mut r = rig(&["a", "b"], 40.0, true, PlayerConfig::default()).await;
+    r.player.play_context(album("one", &["a", "b"]), Some("a".into()), None).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.pause().await.unwrap();
+    r.player.seek(35_000).await.unwrap();
+    r.player.play_context(album("two", &["a", "b"]), Some("b".into()), None).await.unwrap();
+    next_tracking(&mut r.tracking, started("b")).await;
+    r.player.play_context(album("three", &["a", "b"]), Some("a".into()), None).await.unwrap();
+    let s = wait_state(&r.player, |s| tid(&s.track) == "a").await;
+    assert!(s.position_ms < 30_000, "{}", s.position_ms);
+    assert_eq!(s.resumed_at_ms, None);
+}

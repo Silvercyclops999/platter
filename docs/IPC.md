@@ -3583,10 +3583,20 @@ dropdown parts off; the UI checks them.
 | `queue_jump` | `{ itemId }` (play that item now) |
 | `player_state` | – → `PlayerState` |
 
-`PlayerState = { status: "idle"|"loading"|"playing"|"paused"|"buffering"|"error", track?: Track, positionMs, durationMs, volume, muted, shuffle, shuffledContexts: string[], repeat, queue: QueueView, abLoop: { aMs, bMs } | null, smartShuffle, smartContexts: string[], smoothTransitions }`
+`PlayerState = { status: "idle"|"loading"|"playing"|"paused"|"buffering"|"error", track?: Track, positionMs, durationMs, volume, muted, shuffle, shuffledContexts: string[], repeat, queue: QueueView, abLoop: { aMs, bMs } | null, smartShuffle, smartContexts: string[], smoothTransitions, resumedAtMs? }`
 `QueueView = { current?: QueueItem, userQueue: QueueItem[], nextUp: QueueItem[], history: QueueItem[], context?: { kind, id?, title? } }`
 (the window gets at most the next 500 songs in `nextUp`, so playing a whole library doesn't send every song on each change)
 `QueueItem = { itemId, track: Track, source: "user"|"context"|"autoplay"|"smart" }` (`autoplay`: similar music after the context ran out; `smart`: put in by smart shuffle)
+
+Songs 20 minutes or longer (DJ mixes, live sets, audiobooks) remember where
+they were left, on this device, for 90 days, wherever they are played from.
+Started from the top again, such a song picks up there and `resumedAtMs`
+says where, until it is moved (the window offers Start over, which seeks to
+0). A song played to its end, or within a minute of it, or sought back to
+its first few seconds, starts from the top next time. A place under 30
+seconds isn't kept, and a start from another device starts where that
+device says. Such a song is never joined on gaplessly while it has a place,
+so it can start there.
 
 An `album` context with `trackIds` plays only those of the album's songs, in album order (one side of the record, see "Record sides"); it is still the album that's playing.
 
