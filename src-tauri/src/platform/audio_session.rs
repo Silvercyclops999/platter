@@ -21,14 +21,17 @@ use objc2_avf_audio::{
 use super::route_move::{RouteMove, route_move};
 use crate::audio::PlayerHandle;
 
-/// Makes the session active again (after another app took it). Cheap when
-/// it already is.
-pub fn activate() {
+/// Makes the session active again (after a call or another app took it).
+/// Cheap when it already is. Right after a call iOS can refuse for a moment
+/// ("can't interrupt others"); the player tries again.
+pub fn activate() -> crate::error::AppResult<()> {
     // SAFETY: a plain call on the shared session.
     unsafe {
-        if let Err(e) = AVAudioSession::sharedInstance().setActive_error(true) {
-            tracing::warn!("audio session: not activated: {}", e.localizedDescription());
-        }
+        AVAudioSession::sharedInstance().setActive_error(true).map_err(|e| {
+            let why = format!("audio session not activated: {} ({})", e.localizedDescription(), e.code());
+            tracing::warn!("{why}");
+            crate::error::AppError::Io(why)
+        })
     }
 }
 
