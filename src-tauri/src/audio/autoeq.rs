@@ -129,6 +129,34 @@ pub fn search(query: &str, limit: usize) -> Vec<Entry> {
     hits.into_iter().take(limit.min(SEARCH_LIMIT)).map(|(_, _, r)| entry(i, r)).collect()
 }
 
+/// Who measured it, best first (the order AutoEq itself recommends);
+/// anyone else comes after, in index order.
+const SOURCE_ORDER: [&str; 5] = ["oratory1990", "crinacle", "Innerfidelity", "Rtings", "Headphone.com"];
+
+/// The one headphone model `name` is, when the index has it by exactly that
+/// name, maker in front or not ("AirPods Pro" is "Apple AirPods Pro"). A
+/// name that only starts a longer model's ("AirPods" for "AirPods Pro"), or
+/// that two different models share, is no match. When several people
+/// measured it, the most trusted measurement wins.
+pub fn model_match(name: &str) -> Option<Entry> {
+    let q = fold(name.trim());
+    if q.is_empty() {
+        return None;
+    }
+    let i = index();
+    let is_model = |lower: &str| {
+        lower == q || lower.strip_suffix(q.as_str()).and_then(|maker| maker.strip_suffix(' ')).is_some_and(|m| !m.is_empty() && !m.contains(' '))
+    };
+    let hits: Vec<&Row> = i.rows.iter().filter(|r| is_model(&r.lower)).collect();
+    // One maker's model: "Sony X" and "Other X" are two headphones.
+    let first = hits.first()?;
+    if hits.iter().any(|r| r.lower != first.lower) {
+        return None;
+    }
+    let rank = |r: &Row| SOURCE_ORDER.iter().position(|s| i.dirs[r.dir].1.starts_with(s)).unwrap_or(SOURCE_ORDER.len());
+    hits.into_iter().min_by_key(|r| rank(r)).map(|r| entry(i, r))
+}
+
 /// The index entry at `path` (None: not a headphone the app knows).
 pub fn find(path: &str) -> Option<Entry> {
     let i = index();

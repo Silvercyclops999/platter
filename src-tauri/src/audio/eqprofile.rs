@@ -105,6 +105,9 @@ pub fn apply_patch(s: &mut Settings, p: &SettingsPatch) -> AppResult<()> {
         }
         s.preamp_db = v;
     }
+    if let Some(v) = p.tune_headphones {
+        s.tune_headphones = v;
+    }
     if let Some(v) = p.limiter {
         s.limiter = v;
     }

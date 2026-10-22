@@ -1786,13 +1786,21 @@ impl Engine {
     /// The output devices, the choice and the device in use.
     pub fn output_state(&self) -> OutputState {
         let devices = self.output.devices();
-        self.output
+        #[cfg_attr(not(target_os = "ios"), allow(unused_mut))]
+        let mut state = self.output
             .quick(|out| {
                 let mut s = OutputState::build(devices.clone(), out.selected(), out.opened());
                 s.exclusive = out.exclusive();
                 s
             })
-            .unwrap_or_else(|| OutputState::build(devices, None, None))
+            .unwrap_or_else(|| OutputState::build(devices, None, None));
+        // The phone has one output stream whatever the route: the route
+        // (AirPods, the speaker, the car) is the device in use.
+        #[cfg(target_os = "ios")]
+        if let Some(route) = crate::platform::audio_session::current_output() {
+            state.current = Some(route);
+        }
+        state
     }
 
     /// Chooses the output device (None follows the system default). An open

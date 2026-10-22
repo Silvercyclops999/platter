@@ -4184,7 +4184,9 @@ The rest of the fields, with their defaults:
 | `eqOutputs` | `{ deviceId, deviceName, preset }[]`, empty | Read only here. The preset or profile each output device uses. Set with `eq_use_for_output`. |
 | `eqFallback` | `{ preset, bands }` or null | Read only. The choice for devices without their own, kept from the last such device. |
 | `eqLastOutput` | device id or null | Read only. The device the EQ last followed. |
-| `headphoneCorrection` | `{ deviceId, deviceName, name, source, form, path, preampDb, filters }[]`, empty | Read only here. The headphone correction each output device uses. Set with `headphone_correction_set`. This device only. |
+| `headphoneCorrection` | `{ deviceId, deviceName, name, source, form, path, preampDb, filters, auto }[]`, empty | Read only here. The headphone correction each output device uses. Set with `headphone_correction_set`; `auto` is true for one Platter picked itself, which plays only while `tuneHeadphones` is on. This device only. |
+| `tuneHeadphones` | bool, true | When headphones start playing and their name is exactly one model in the correction index, use its correction and send `audio://tuned`. Never for a phone's speaker, the car, AirPlay or a network device, and never where a correction was set or turned off by hand. This device only. |
+| `headphoneDeclined` | device ids, empty | Read only. Output devices whose correction was turned off by hand, so it isn't picked there again. Picking one there clears it. This device only. |
 | `bitPerfectOutputs` | `{ deviceId, deviceName }[]`, empty | Read only here. Output devices that play bit-perfect. Set with `bit_perfect_set`. This device only. |
 | `shareCardQr` | bool, true | Share cards include a QR code that opens the item in Platter (the `platter://` link only). |
 | `shareCardSongLink` | bool, true | Share cards for released songs and albums include the song.link line. Also needs `sharePublicLinks`. |
@@ -4347,6 +4349,7 @@ art cache, never as a server URL.
 | `eq_profile_rename` | `{ from, to }` → `Settings`. Outputs using it keep it. |
 | `eq_profile_delete` | `{ name }` → `Settings`. Outputs using it lose their binding; if it was selected the curve stays as `"custom"`. |
 | `eq_use_for_output` | `{ on }` → `Settings`. Binds the selected preset or profile to the output device in use (`on: false` unbinds it). A custom curve has to be saved first (`invalid`). |
+| `headphone_detect` | – → `{ outputName, matches }`. The output in use (on a phone, the headphones on the audio route) and the headphones it most likely is, best first; `matches` is empty for a speaker or an unknown name. |
 | `headphone_search` | `{ query }` → `HeadphoneEntry[]` (at most 50). Headphones in the bundled correction index whose name has every word of `query`, ignoring case and accents. |
 | `headphone_correction_set` | `{ path: string \| null }` → `Settings`. Uses that headphone's correction whenever the output device in use plays; null turns it off there. The profile is fetched the first time (`network`, `notFound`, `decode` errors) and kept on disk. |
 | `headphone_correction_compare` | `{ bypass }` → –. Plays without the correction while true, to compare. Not saved. |
@@ -4432,7 +4435,16 @@ When the output device changes (a switch, a new system default, an unplug),
 the core switches to the preset or profile bound to the new device, or back
 to the earlier choice on a device without one, saves it and sends
 `settings://changed`. The device's headphone correction and bit-perfect
-choice follow it the same way.
+choice follow it the same way. With `tuneHeadphones` on, headphones without
+a correction get one: the profile is fetched (or read from disk) in the
+background and bound only if the sound is still going there, then
+`settings://changed` and `audio://tuned` → `{ deviceId, name }` are sent.
+A failed fetch changes nothing and is tried again next time.
+
+On an iPhone the device in use (`OutputState.current`) is the audio route,
+with the id `route:<kind>:<port id>` and the port's own name, so AirPods,
+wired headphones, the speaker and the car each keep their own EQ and
+correction.
 
 Events:
 - `settings://changed` → `Settings` (the core changed a setting itself)

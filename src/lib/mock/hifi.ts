@@ -41,13 +41,45 @@ export function profile(entry: HeadphoneEntry): { preampDb: number; filters: Peq
   return { preampDb, filters };
 }
 
+/** The correction `deviceId` uses; one Platter picked counts only while Tune for my headphones is on. */
 export function correctionFor(s: Settings, deviceId: string | undefined): DeviceCorrection | undefined {
-  return deviceId ? s.headphoneCorrection.find((c) => c.deviceId === deviceId) : undefined;
+  return deviceId ? s.headphoneCorrection.find((c) => c.deviceId === deviceId && (!c.auto || s.tuneHeadphones)) : undefined;
 }
 
+/** Set by hand: off also stops Platter picking one there again; a pick lets it. */
 export function setCorrection(s: Settings, device: OutputDevice, entry: HeadphoneEntry | null) {
+  s.headphoneDeclined = [...(s.headphoneDeclined ?? []).filter((id) => id !== device.id), ...(entry ? [] : [device.id])];
+  bind(s, device, entry, false);
+}
+
+function bind(s: Settings, device: OutputDevice, entry: HeadphoneEntry | null, auto: boolean) {
   s.headphoneCorrection = s.headphoneCorrection.filter((c) => c.deviceId !== device.id);
-  if (entry) s.headphoneCorrection = [...s.headphoneCorrection, { ...entry, deviceId: device.id, deviceName: device.name, ...profile(entry) }];
+  if (entry) s.headphoneCorrection = [...s.headphoneCorrection, { ...entry, deviceId: device.id, deviceName: device.name, ...profile(entry), auto }];
+}
+
+/** The model a name is, exactly ("Kestrel Buds Pro"), not one it starts ("Kestrel"). */
+export function modelMatch(name: string): HeadphoneEntry | null {
+  const q = fold(name.replace(/^\S+['\u2019]s /, "").replace(/\(\d\)|\b(bluetooth|stereo|headphones)\b|[()]/gi, " ").replace(/\s+/g, " ").trim());
+  const hits = q ? MOCK_HEADPHONES.filter((h) => fold(h.name) === q) : [];
+  return hits[0] ?? null;
+}
+
+const TUNED_ROUTES = ["headphones", "bluetooth", "usb"];
+
+/** Headphones, never set by hand or turned off there, with the switch on. */
+export function mayTune(s: Settings, device: OutputDevice): boolean {
+  if (!s.tuneHeadphones || device.id.startsWith("net:")) return false;
+  if (device.id.startsWith("route:") && !TUNED_ROUTES.includes(device.id.split(":")[1])) return false;
+  return !s.headphoneCorrection.some((c) => c.deviceId === device.id) && !(s.headphoneDeclined ?? []).includes(device.id);
+}
+
+/** Tunes `device` when Platter may and knows its model; returns the headphone's name. */
+export function autoTune(s: Settings, device: OutputDevice | null): string | null {
+  if (!device || !mayTune(s, device)) return null;
+  const entry = modelMatch(device.name);
+  if (!entry) return null;
+  bind(s, device, entry, true);
+  return entry.name;
 }
 
 export function setBitPerfect(s: Settings, device: OutputDevice, on: boolean) {

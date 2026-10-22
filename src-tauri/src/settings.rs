@@ -533,6 +533,12 @@ pub struct Settings {
     /// Headphone correction profiles bound to output devices (this device
     /// only). Changed with the headphone_correction commands.
     pub headphone_correction: Vec<crate::audio::hifi::DeviceCorrection>,
+    /// Tune for my headphones: when headphones the correction list knows
+    /// start playing, use their correction (this device only).
+    pub tune_headphones: bool,
+    /// Output devices whose correction was turned off by hand, so Platter
+    /// never picks one there again (this device only).
+    pub headphone_declined: Vec<String>,
     /// Output devices that play bit-perfect (this device only). Changed
     /// with bit_perfect_set.
     pub bit_perfect_outputs: Vec<crate::audio::hifi::BitPerfectOutput>,
@@ -1247,6 +1253,8 @@ impl Default for Settings {
             eq_fallback: None,
             eq_last_output: None,
             headphone_correction: Vec::new(),
+            tune_headphones: true,
+            headphone_declined: Vec::new(),
             bit_perfect_outputs: Vec::new(),
             share_public_links: false,
             share_card_qr: true,
@@ -1769,6 +1777,8 @@ pub const DEVICE_SETTINGS: &[&str] = &[
     "eqFallback",
     "eqLastOutput",
     "headphoneCorrection",
+    "tuneHeadphones",
+    "headphoneDeclined",
     "bitPerfectOutputs",
     "discordStatus",
     "discordShowUnreleased",
@@ -1917,6 +1927,7 @@ pub struct SettingsPatch {
     pub preamp_db: Option<f32>,
     pub limiter: Option<bool>,
     pub eq_enabled: Option<bool>,
+    pub tune_headphones: Option<bool>,
     /// Moving bands makes the curve custom.
     pub eq_bands: Option<[f32; EQ_BANDS]>,
     /// Selects a preset or profile (and its curve).
@@ -2196,6 +2207,7 @@ impl SettingsPatch {
             || self.preamp_db.is_some()
             || self.limiter.is_some()
             || self.eq_enabled.is_some()
+            || self.tune_headphones.is_some()
             || self.eq_bands.is_some()
             || self.eq_preset.is_some()
     }
@@ -3488,6 +3500,9 @@ async fn apply_to_player(player: &PlayerHandle, s: &Settings, patch: &SettingsPa
     // Turning the loop handles off clears a loop that's set.
     if patch.touches_dsp() {
         player.set_dsp(s.dsp()).await?;
+    }
+    if patch.tune_headphones == Some(true) {
+        crate::audio::hifi::RETUNE.notify_one();
     }
     if patch.touches_automix() {
         player.set_automix(s.automix_options()).await?;

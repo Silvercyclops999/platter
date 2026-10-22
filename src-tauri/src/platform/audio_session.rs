@@ -102,6 +102,16 @@ pub fn current_route() -> Option<super::audio_route::AudioRoute> {
     }
 }
 
+/// The route playing now as an output device (`route:<kind>:<uid>`).
+pub fn current_output() -> Option<crate::audio::output::OutputDevice> {
+    // SAFETY: reading the shared session's current route.
+    unsafe {
+        let route = AVAudioSession::sharedInstance().currentRoute();
+        let port = route.outputs().firstObject()?;
+        Some(super::audio_route::route_device(&port.portType().to_string(), &port.UID().to_string(), &port.portName().to_string()))
+    }
+}
+
 fn observe_session(player: PlayerHandle, app: tauri::AppHandle) {
     use block2::RcBlock;
     use objc2::msg_send;
@@ -159,6 +169,8 @@ fn observe_session(player: PlayerHandle, app: tauri::AppHandle) {
                     use tauri::Emitter;
                     let _ = app.emit(super::audio_route::EV_ROUTE, current_route());
                 }
+                // The EQ and headphone correction follow the new route.
+                p.route_changed();
                 let Some(reason) = info_number(note, AVAudioSessionRouteChangeReasonKey) else { return };
                 // None: the notification didn't say what the route was.
                 let before: Option<Option<String>> = AVAudioSessionRouteChangePreviousRouteKey.and_then(|key| {

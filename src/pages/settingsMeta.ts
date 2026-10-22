@@ -448,6 +448,7 @@ const BY_KEY: Record<string, HelpRef> = {
   crossfade: ["playing-and-queue", "crossfade"],
   leveling: ["playing-and-queue", "loudness-leveling"],
   eqEnabled: ["playing-and-queue", "equalizer"],
+  tuneHeadphones: ["playing-and-queue", "equalizer"],
   smartShuffle: ["playing-and-queue", "shuffle"],
   keyboardShortcuts: ["playing-and-queue", "keyboard-shortcuts"],
   miniplayerOnTop: ["playing-and-queue", "miniplayer"],
@@ -576,8 +577,10 @@ export const DESKTOP_ONLY: ReadonlySet<string> = new Set([
   // Library: mouse dragging and the shelf's spines.
   "dragAndDrop",
   "spineWidthByTracks",
-  // Sound: the phone picks its output through the system.
+  // Sound: the phone picks its output through the system, and has no
+  // bit-perfect mode (the system mixes every app's sound).
   "outputDevice",
+  "bitPerfectOutputs",
   // Downloads and devices: folders on disk. (Being a Plex player and this
   // device's name work on a phone too; the Devices page is USB drives.)
   "downloadFolder",

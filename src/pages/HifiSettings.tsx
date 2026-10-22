@@ -11,11 +11,11 @@ import { SearchField } from "../components/SearchField";
 import { Skeleton } from "../components/Skeleton";
 import { Switch } from "../components/Switch";
 import { backend } from "../lib/backend";
-import { exclusiveText } from "../lib/hifi";
-import type { AppError, DeviceCorrection, HeadphoneEntry, OutputDevice, Settings } from "../lib/types";
+import { bindingFor, exclusiveText } from "../lib/hifi";
+import type { AppError, HeadphoneEntry, OutputDevice, Settings } from "../lib/types";
 import { splitDeviceName } from "../shell/OutputPanel";
 import { loadOutput, useOutput } from "../stores/output";
-import { useSettings } from "../stores/settings";
+import { updateSettings, useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
 import "./hifi-settings.css";
 
@@ -53,10 +53,6 @@ const usePicking = create<{ picking: boolean; set: (v: boolean) => void }>()((se
   picking: false,
   set: (picking) => set({ picking }),
 }));
-
-function bindingFor(s: Settings | null, d: OutputDevice | null | undefined): DeviceCorrection | undefined {
-  return d ? s?.headphoneCorrection?.find((c) => c.deviceId === d.id) : undefined;
-}
 
 function CorrectionSwitch({ ids }: { ids: Ids }) {
   const s = useSettings((x) => x.settings);
@@ -106,6 +102,7 @@ function CorrectionBlock() {
   const [busy, setBusy] = useState<string | null>(null);
   const [bypass, setBypass] = useState(false);
   const bypassRef = useRef(false);
+  const [guess, setGuess] = useState<HeadphoneEntry[]>([]);
   const binding = bindingFor(s, device);
 
   useEffect(() => {
@@ -142,6 +139,19 @@ function CorrectionBlock() {
     usePicking.getState().set(false);
     setQuery("");
   }, [deviceId]);
+  // The headphones the output in use most likely is, offered before any typing.
+  const searching = picking || !binding;
+  useEffect(() => {
+    if (!deviceId || !searching) return;
+    let alive = true;
+    backend.headphoneDetect().then(
+      (g) => alive && setGuess(g.matches),
+      () => alive && setGuess([]),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [deviceId, searching]);
 
   const compare = (off: boolean) => {
     setBypass(off);
@@ -162,7 +172,7 @@ function CorrectionBlock() {
       .catch((e) => toast.error(`Couldn't get that profile${errorText(e)}`))
       .finally(() => setBusy(null));
   };
-  const searching = picking || !binding;
+  const shown = query.trim() ? results : guess.length ? guess : null;
 
   return (
     <div className="hifi">
@@ -174,7 +184,7 @@ function CorrectionBlock() {
           <div className="hifi-profile__text">
             <div className="hifi-profile__name truncate">{binding.name}</div>
             <div className="hifi-profile__sub truncate">
-              {`${binding.source} • ${binding.form} • for ${deviceLabel(device)} • preamp ${binding.preampDb.toFixed(1)} dB`}
+              {`${binding.auto ? "Picked for " : "For "}${deviceLabel(device)} • ${binding.source} • ${binding.form} • preamp ${binding.preampDb.toFixed(1)} dB`}
             </div>
           </div>
           <div className="hifi-ab" role="group" aria-label="Compare">
@@ -202,9 +212,10 @@ function CorrectionBlock() {
             label="Search for your headphones"
             autoFocus={picking}
           />
-          {results && results.length > 0 && (
+          {!query.trim() && shown && <p className="hifi-note">These look like your headphones.</p>}
+          {shown && shown.length > 0 && (
             <ul className="hifi-results" aria-label="Headphones">
-              {results.slice(0, 8).map((h) => (
+              {shown.slice(0, 8).map((h) => (
                 <ResultRow key={h.path} h={h} chosen={binding?.path === h.path} busy={busy === h.path} onPick={() => pick(h)} />
               ))}
             </ul>
@@ -228,8 +239,21 @@ function CorrectionNote() {
   const exclusive = useOutput((x) => x.state?.exclusive);
   const binding = bindingFor(s, device);
   if (exclusive?.state === "on" && binding) return <>Bypassed while bit-perfect output is on.</>;
-  if (device && binding) return <>On for {deviceLabel(device)}.</>;
+  if (device && binding) return <>{binding.auto ? "Picked" : "On"} for {deviceLabel(device)}.</>;
   return null;
+}
+
+function TuneSwitch({ ids }: { ids: Ids }) {
+  const s = useSettings((x) => x.settings);
+  if (!s) return <Skeleton width={40} height={24} radius="pill" />;
+  return (
+    <Switch
+      checked={s.tuneHeadphones !== false}
+      labelledBy={ids.title}
+      describedBy={ids.desc}
+      onChange={(on) => void updateSettings({ tuneHeadphones: on }).catch((e) => toast.error(`Couldn't change that${errorText(e)}`))}
+    />
+  );
 }
 
 function BitPerfectSwitch({ ids }: { ids: Ids }) {
@@ -273,6 +297,15 @@ function BitPerfectNote() {
 /** The two rows, for the Settings page's list. */
 export function hifiRows(): HifiRow[] {
   return [
+    {
+      key: "tuneHeadphones",
+      section: "Sound",
+      title: "Tune for my headphones",
+      description: "Known headphones get their measured correction when they start playing. This device only.",
+      more:
+        "When headphones start playing, Platter looks up their model in a list of measured headphones and evens out their sound, then says so with an Undo. The phone speaker, the car, AirPlay and TVs are never changed, and nothing changes when the name doesn't say the model. Pick or change a model under Headphone correction. This device only.",
+      control: (ids) => <TuneSwitch ids={ids} />,
+    },
     {
       key: "headphoneCorrection",
       section: "Sound",

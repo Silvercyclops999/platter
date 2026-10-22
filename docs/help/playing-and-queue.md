@@ -59,6 +59,8 @@ Turn on Settings, Sound, Use the equalizer to shape the sound with ten bands. Dr
 
 Settings, Sound, Headphone correction evens out the sound of your headphones with a measured profile for your model.
 
+With Settings, Sound, Tune for my headphones on (it starts on), Platter does that for you. When headphones start playing it looks up their model by name, uses its profile and says "Tuned for" with an Undo. On a phone each pair of headphones, the speaker and the car keep their own equalizer and correction, and the speaker, the car, AirPlay and TVs are never corrected. If Platter can't tell the model from the name, nothing changes and Headphone correction suggests the closest ones. Undo, or turning the correction off, means it's never picked for those headphones again.
+
 ## Signal path
 
 The badge in the player bar shows the playing song's format, like FLAC 24/48. Click it to see each step the sound takes from the file to your output device: the source, decoding, loudness, the equalizer, resampling, crossfade or Automix, and the output. The top line sums it up in plain words, like "Bit-perfect", "Lossless, volume applied" or "Lossy source (MP3 320)".
