@@ -514,6 +514,7 @@ impl Bridge {
     pub fn status(&self) -> BridgeStatus {
         let mut s = self.status.lock().clone();
         s.lyrics = self.lyrics().map(|l| l.line());
+        s.staging_folder = Some(crate::settings::load(&self.p.db).lidarr_staging_folder).filter(|f| !f.trim().is_empty());
         s
     }
 

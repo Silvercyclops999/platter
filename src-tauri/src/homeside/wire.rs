@@ -241,6 +241,10 @@ pub struct BridgeStatus {
     /// Lyrics for every song. None from a Bridge before it.
     #[serde(default)]
     pub lyrics: Option<LyricsLine>,
+    /// The staging folder it gives Lidarr for protected artists, so phones
+    /// and computers don't need one set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub staging_folder: Option<String>,
 }
 
 /// One message.

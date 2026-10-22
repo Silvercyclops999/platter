@@ -20,7 +20,8 @@ import { player, usePlayer } from "../../stores/player";
 import { PlayingBars } from "./common";
 import { catalogueTop, hasCatalogue, hasCatalogueRows, nameMatches, playCatalogueSong, useCatalogueSearch, useTapPlays, type CatalogueResults } from "../../pages/SearchCatalogue";
 import { useArtistPhoto } from "../../lib/artistPhotos";
-import { useGetSpots } from "../../pages/lidarrShared";
+import { PHONE_SET_UP, lidarrNote, useGetSpots, useLidarrStatus } from "../../pages/lidarrShared";
+import { useIsGuest } from "../../stores/asks";
 import { catalogueKind } from "../../lib/format";
 import "../../pages/catalogue.css";
 
@@ -129,6 +130,12 @@ export function PhoneSearch() {
       );
     });
   const getSpots = useGetSpots();
+  const lidarr = useLidarrStatus();
+  const guest = useIsGuest();
+  // Music you don't have shows with why Get isn't there, never without it.
+  const outside = !!catTop || hasCatalogueRows(cat, shown);
+  const getNote = outside && !getSpots && !guest ? lidarrNote(lidarr, PHONE_SET_UP) : null;
+  const lookFailed = !!cat?.failed && !cat.pending.length && !outside;
   return (
     <div className="ph-page ph-search">
       <h1 className="ph-title">Search</h1>
@@ -218,7 +225,9 @@ export function PhoneSearch() {
             </ul>
           )}
           {nothingAnywhere && <p className="ph-rows__note">Nothing in your library matches "{q}".</p>}
+          {getNote && <p className="ph-rows__note">{getNote}</p>}
           <PhoneCatalogue c={cat} kind={shown} skipArtist={catTop?.mbid} getSpots={getSpots} />
+          {lookFailed && <p className="ph-rows__note">Couldn't look beyond your library just now. Try again in a moment.</p>}
           {closeLast && hits.length > 0 && (
             <section aria-label="Close matches in your library" className="ph-search__catalogue">
               <h2 className="ph-section-title">Close matches in your library</h2>

@@ -374,7 +374,7 @@ export function SearchPage({ query }: { query: string }) {
       <h1 className="sr-only">Results for “{q}”</h1>
       <FilterChips label="Filter results" items={FILTERS} value={filter} onChange={setFilter} className="sr-chips" scroll />
       {(filter === "all" || filter === "playlists") && <TopSongsResults found={topSongs} />}
-      {offline && (failed || res?.source === "server" || empty) ? (
+      {offline && (failed || res?.source === "server" || (empty && !hasCatalogue(cat) && !cat?.pending.length)) ? (
         // Only the server could answer this: say why, and that it comes back.
         <div className="sr-empty" role="status">
           <h2 className="section-title">No results for “{q.length > 60 ? `${q.slice(0, 60)}…` : q}”</h2>
