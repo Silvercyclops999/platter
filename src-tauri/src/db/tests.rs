@@ -1585,6 +1585,8 @@ async fn search_with_a_word_left_out_matches_the_rest_whole() {
     let salt: Vec<Pop> = vec![
         ("s1", "Runaway", None, 9, None, Some("Saltglass, Pusha, The WRLDFMS"), 200),
         ("s2", "Highlights", None, 3, None, Some("Saltglass, The WRLDFMS"), 200),
+        // Credits written into the title too, as many libraries have them.
+        ("s3", "Lift Off (feat. Pusha, The WRLDFMS Choir)", None, 5, None, Some("Saltglass, Pusha, The WRLDFMS Choir"), 200),
     ];
     let t = open();
     sync(&t.db, &Arc::new(FakeSource::new(popular_library(&[], &[("Saltglass", &salt)]))), false).await;
@@ -1593,7 +1595,7 @@ async fn search_with_a_word_left_out_matches_the_rest_whole() {
     assert!(r.songs.is_empty() && r.artists.is_empty() && r.top.is_none(), "{:?}", song_titles(&r));
     // Typed on its own the word still finds them as it's typed.
     let r = search::search(&t.db, "wrld", SearchFilter::Songs, None).unwrap();
-    assert_eq!(song_titles(&r).len(), 2);
+    assert_eq!(song_titles(&r).len(), 3);
     // A whole word is still found with an unknown one left out.
     let r = search::search(&t.db, "zebra runaway", SearchFilter::Songs, None).unwrap();
     assert_eq!(song_titles(&r), vec!["Runaway"]);
@@ -1602,6 +1604,9 @@ async fn search_with_a_word_left_out_matches_the_rest_whole() {
     assert_eq!(song_titles(&r), vec!["Runaway"]);
     let r = search::search(&t.db, "zebra highl", SearchFilter::Songs, None).unwrap();
     assert_eq!(song_titles(&r), vec!["Highlights"]);
+    // Two words kept, the half typed last one may start a word inside the title.
+    let r = search::search(&t.db, "zebra lift wrldf", SearchFilter::Songs, None).unwrap();
+    assert_eq!(song_titles(&r), vec!["Lift Off (feat. Pusha, The WRLDFMS Choir)"]);
 }
 
 #[tokio::test]

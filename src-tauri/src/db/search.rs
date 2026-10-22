@@ -351,6 +351,8 @@ enum Match {
     Whole,
     /// A whole word, or the start of a word in the title.
     WholeOrTitle,
+    /// A whole word, or the start of the title.
+    WholeOrTitleStart,
 }
 
 /// One word's FTS group: as typed (as `m` says), its parts as a phrase,
@@ -360,6 +362,7 @@ fn group_expr(t: &QToken, extra: &[String], m: Match) -> String {
         Match::Prefix => vec![format!("{}*", quote(p))],
         Match::Whole => vec![quote(p)],
         Match::WholeOrTitle => vec![quote(p), format!("title : {}*", quote(p))],
+        Match::WholeOrTitleStart => vec![quote(p), format!("title : ^{}*", quote(p))],
     };
     let mut parts = typed(&t.text);
     if !t.pieces.is_empty() && t.pieces != [t.text.clone()] {
@@ -387,9 +390,12 @@ pub fn build_fts(q: &ParsedQuery, extra: &Extra) -> Option<String> {
     let g = |i: usize| {
         let mut forms = extra.alts.get(i).unwrap_or(&none).clone();
         forms.extend(extra.spelled.get(i).cloned().flatten());
+        // Left on its own, a half typed word only starts a title: "wrld"
+        // alone is no reason to list every title with "WRLDFMS" in it.
         let m = match (extra.whole, i + 1 == n) {
             (false, _) => Match::Prefix,
             (true, false) => Match::Whole,
+            (true, true) if idx.len() == 1 => Match::WholeOrTitleStart,
             (true, true) => Match::WholeOrTitle,
         };
         group_expr(&q.toks[i], &forms, m)
