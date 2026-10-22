@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use super::mbpick::tests::RG_SECOND;
 use super::quick::NO_COPY;
-use super::request_tests::{FakeLidarr, Rig, rig};
+use super::request_tests::{FakeLidarr, Rig, for_real, rig};
 use super::tap::{
     AWAY_NOTE, LATE_EVERY, LibraryTrack, PLEX_GAVE_UP_NOTE, PLEX_GIVE_UP, PLEX_LATE_NOTE, PLEX_WAIT, STALLED_AFTER, STALLED_NOTE, TAP_RETRY_EVERY, Tap, TapHost, TapInput,
     TapPhase, Taps,
@@ -152,6 +152,14 @@ impl T {
                 Ok(())
             })
             .unwrap();
+    }
+
+    /// Lidarr downloaded a whole CD in one file at `added` and couldn't import it.
+    fn import_failed(&self, added: &str) {
+        let id = album_id(&self.r.web);
+        self.r.web.st.lock().queue = vec![json!({"id": 77, "albumId": id, "title": "Northlight-Second_Wind-CD-FLAC-2021-GRP", "status": "completed",
+            "trackedDownloadStatus": "warning", "trackedDownloadState": "importFailed", "downloadId": "dl77", "added": added, "protocol": "usenet",
+            "statusMessages": [{"title": "Northlight-Second_Wind-CD-FLAC-2021-GRP.flac", "messages": ["Has missing tracks"]}]})];
     }
 
     fn tap0(&self) -> Tap {
@@ -597,4 +605,41 @@ async fn someone_who_doesnt_own_the_server_requests_instead_and_lidarr_never_hea
     assert!(mine[0].item.thumb.is_none());
     assert!(t.taps.list().is_empty());
     assert!(writes(&t.r.web).is_empty());
+}
+
+#[tokio::test]
+async fn a_copy_lidarr_cant_import_says_so_and_the_tap_carries_on_with_another() {
+    let t = setup().await;
+    t.taps.tap(tap_in()).await.unwrap();
+    // Practice mode holds the clear back, and the tap says so.
+    t.import_failed("2027-01-15T08:00:30Z");
+    t.taps.follow().await;
+    assert_eq!(t.tap0().phase, TapPhase::Importing);
+    assert!(t.tap0().message.unwrap().contains("Practice mode"));
+    for_real(&t.r);
+    t.taps.follow().await;
+    assert_eq!(t.tap0().phase, TapPhase::Searching);
+    assert_eq!(
+        t.tap0().message.as_deref(),
+        Some("The copy Lidarr got couldn't be imported (has missing tracks). Platter is clearing it and looking for another.")
+    );
+    // The requests' follow clears it; the tap keeps going.
+    t.r.lidarr.refresh_statuses().await.unwrap();
+    assert!(t.r.web.st.lock().queue.is_empty());
+    t.taps.follow().await;
+    assert_eq!(t.tap0().phase, TapPhase::Searching);
+}
+
+#[tokio::test]
+async fn a_failed_import_platter_wont_clear_fails_the_tap() {
+    let t = setup().await;
+    t.taps.tap(tap_in()).await.unwrap();
+    for_real(&t.r);
+    // Lidarr got it an hour before the tap: the user's own download.
+    t.import_failed("2027-01-15T07:00:00Z");
+    t.taps.follow().await;
+    assert_eq!(t.tap0().phase, TapPhase::Failed);
+    assert_eq!(t.tap0().message.as_deref(), Some("Lidarr couldn't import the copy it got (has missing tracks). Lidarr's Activity page has it."));
+    t.r.lidarr.refresh_statuses().await.unwrap();
+    assert_eq!(t.r.web.st.lock().queue.len(), 1, "left alone");
 }

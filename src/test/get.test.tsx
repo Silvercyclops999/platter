@@ -130,6 +130,20 @@ describe("one-click Get", () => {
     expect(useRouter.getState().entries[useRouter.getState().index].route).toEqual({ name: "search", query: "Cold Coast Low Tide Radio" });
   });
 
+  it("says on the row when Lidarr couldn't import a copy, and when it didn't come through", async () => {
+    await userEvent.click(await getOnAlbumPage());
+    await screen.findByText("Looking on your indexers", {}, AFTER_UNDO);
+    const retry = "The copy Lidarr got couldn't be imported (has missing tracks). Platter cleared it and is looking for another.";
+    mock.lidarr.advance(LOW_TIDE, "searching", null, retry);
+    await act(() => refreshRequests());
+    expect(await screen.findByText(retry, {}, SLOW)).toBeVisible();
+    const gaveUp = "3 copies Lidarr got couldn't be imported (the last: has missing tracks). Platter stopped trying; Lidarr's Activity page has it.";
+    mock.lidarr.advance(LOW_TIDE, "failed", null, gaveUp);
+    await act(() => refreshRequests());
+    expect(await screen.findByText(gaveUp, {}, SLOW)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Get again Low Tide Radio" })).toBeInTheDocument();
+  });
+
   it("with Ask before each Get on, the dialog opens every time", async () => {
     await setUp({ askBeforeGet: true });
     const get = vi.spyOn(mock, "lidarrGet");

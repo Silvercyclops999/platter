@@ -3279,6 +3279,15 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
             control: (ids) => toggle(s, "lidarrPreferFastest", ids),
           },
           {
+            key: "lidarrClearFailed",
+            section: "Integrations",
+            page: "lidarr",
+            title: "Clear downloads that can't be imported",
+            description: "Takes them out of Lidarr's queue, blocklists that copy and looks for another.",
+            more: "When Lidarr can't import a download Platter asked for (a whole CD in one file, tracks missing), Platter removes it from Lidarr's queue and your download client, blocklists that copy so it's never grabbed again, and searches for another. Up to 3 copies per album, each one in the Changes log. Off: Platter only says so, and you clear it in Lidarr.",
+            control: (ids) => toggle(s, "lidarrClearFailed", ids),
+          },
+          {
             key: "lidarrPlayArriving",
             section: "Integrations",
             page: "lidarr",

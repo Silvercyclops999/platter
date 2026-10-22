@@ -248,6 +248,7 @@ function OwnerGetButton({ album, known = null, libraryAlbumId = null, refusal = 
           <Icon size={14} aria-hidden="true" />
           <span className="get-state__text">{compact ? getShortLabel(state, rec?.progress) : full}</span>
         </span>
+        {!compact && rec?.message && state !== "queued" && <span className="get-note">{rec.message}</span>}
         {state === "notFound" && rec && (
           <>
             <Button size="sm" variant="secondary" icon={<RotateCw size={14} />} onClick={() => void searchAgain()} aria-label={`Search again for ${name}`}>
@@ -274,6 +275,7 @@ function OwnerGetButton({ album, known = null, libraryAlbumId = null, refusal = 
       >
         {state === "failed" ? "Get again" : idleLabel}
       </Button>
+      {state === "failed" && !compact && rec?.message && <span className="get-note">{rec.message}</span>}
       {dialogEl}
     </>
   );

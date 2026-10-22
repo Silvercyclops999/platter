@@ -56,7 +56,23 @@ export function gettingFill(phase: TapPhase, progress: number | null): number {
   }
 }
 
+/** Notices already shown, per tap: "failed" and "retry". */
+const told = new Map<string, Set<string>>();
+
+/** A notice when a tap fails or Platter starts over with another copy, once each. */
+function tell(t: Tap) {
+  if (!t.message) return;
+  const kind = t.phase === "failed" ? "failed" : /couldn't be imported/.test(t.message) && t.phase === "searching" ? "retry" : null;
+  const seen = told.get(t.id) ?? new Set<string>();
+  if (!kind || seen.has(kind)) return;
+  if (kind === "failed") toast.error(`${t.title} didn't come through. ${t.message}`);
+  else toast.info(`${t.title}: ${t.message}`);
+  seen.add(kind);
+  told.set(t.id, seen);
+}
+
 function show(t: Tap) {
+  tell(t);
   const cur = useTaps.getState().current;
   if (t.wanted) useTaps.setState({ current: t });
   else if (cur?.id === t.id) useTaps.setState({ current: { ...t } });

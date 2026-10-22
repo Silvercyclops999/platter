@@ -25,7 +25,7 @@ import { connectPlayer, usePlayer } from "../stores/player";
 import { resetRequests } from "../stores/requests";
 import { useRouter } from "../stores/router";
 import { loadSettings, useSettings } from "../stores/settings";
-import { dismissTap, getting, gettingFill, gettingLabel, useTaps } from "../stores/taps";
+import { dismissTap, followTaps, getting, gettingFill, gettingLabel, useTaps } from "../stores/taps";
 import { useToasts } from "../stores/toasts";
 
 const mock = backend as MockBackend;
@@ -157,6 +157,22 @@ describe("the Getting it line", () => {
     mock.resetTaps();
     expect((await coming).tap).toBeNull();
     expect(mock.taps).toHaveLength(0);
+  });
+
+  it("a copy that couldn't be imported, and a Get that failed, each come as a notice once", async () => {
+    followTaps();
+    await act(async () => {});
+    const retry = "The copy Lidarr got couldn't be imported (has missing tracks). Platter is clearing it and looking for another.";
+    act(() => mock.emit("lidarr://tap", tap({ id: "tap-n", phase: "searching", progress: null, message: retry })));
+    // The request's own words once it's cleared: no second notice.
+    const cleared = "The copy Lidarr got couldn't be imported (has missing tracks). Platter cleared it and is looking for another.";
+    act(() => mock.emit("lidarr://tap", tap({ id: "tap-n", phase: "searching", progress: null, message: cleared })));
+    const said = () => useToasts.getState().toasts.map((t) => t.message);
+    expect(said().filter((m) => m.includes("couldn't be imported"))).toEqual([`First Frost: ${retry}`]);
+    const failed = "Lidarr couldn't import the copy it got (has missing tracks). Lidarr's Activity page has it.";
+    act(() => mock.emit("lidarr://tap", tap({ id: "tap-n", phase: "failed", progress: null, message: failed })));
+    expect(said()).toContain(`First Frost didn't come through. ${failed}`);
+    dismissTap();
   });
 
   it("labels and fills each step", () => {

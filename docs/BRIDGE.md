@@ -259,7 +259,9 @@ updates, it gives that up once and asks for its own sign-in instead.
   the pages Platter reads, each query name given once, folders only inside
   Lidarr's own; every change is rebuilt from only the fields Platter sends
   and checked against Lidarr first. Keys and passwords are taken out of
-  every answer.
+  every answer. The one removal it passes is clearing a download Lidarr
+  couldn't import, and only while Lidarr's queue shows that download as
+  failed to import.
 - On the server, the Bridge keeps its secrets in `keys.json` in the data
   folder, readable only by its own user (put right if that ever changes),
   and its state in `bridge.db`, which holds no keys or tokens.

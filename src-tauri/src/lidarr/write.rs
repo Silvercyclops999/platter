@@ -318,6 +318,10 @@ pub enum WriteCall {
     ManualImport(Vec<ImportFile>),
     /// One album's "Automatically Switch Release" turned off.
     SwitchOff(SwitchOff),
+    /// A download of Platter's own that Lidarr couldn't import: out of the
+    /// queue and the download client, and that copy blocklisted. Lidarr
+    /// doesn't search again by itself; Platter does, for that album only.
+    ClearFailed { queue_id: i64 },
     /// One of the writes above as it arrived through a Bridge (the home
     /// Platter route) or from the Bridge's queue, checked again here.
     Relayed(RelayedWrite),
@@ -336,6 +340,19 @@ pub struct RelayedWrite {
 
 /// Most bytes a relayed write's body may have.
 const RELAYED_MAX: usize = 1024 * 1024;
+
+/// How a failed download is cleared: removed from the download client and
+/// blocklisted, with Lidarr's own search after it skipped.
+pub const CLEAR_FAILED_QUERY: &str = "removeFromClient=true&blocklist=true&skipRedownload=true";
+
+/// The queue item a [`WriteCall::ClearFailed`] path names.
+pub fn clear_failed_id(path: &str) -> Option<i64> {
+    let n = path.strip_suffix(CLEAR_FAILED_QUERY)?.strip_suffix('?')?.strip_prefix("/queue/")?;
+    if n.is_empty() || n.len() > 12 || !n.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    n.parse::<i64>().ok().filter(|n| *n > 0)
+}
 
 fn numbered(path: &str, prefix: &str) -> bool {
     path.strip_prefix(prefix).is_some_and(|n| !n.is_empty() && n.len() <= 12 && n.bytes().all(|b| b.is_ascii_digit()))
@@ -370,6 +387,7 @@ impl RelayedWrite {
             }
             "DELETE" => {
                 (path == "/trackfile/bulk" && json().is_some())
+                    || (clear_failed_id(path).is_some() && body.trim().is_empty())
                     || (["/importlistexclusion/", "/rootfolder/", "/qualityprofile/"].iter().any(|p| numbered(path, p)) && body.trim().is_empty())
             }
             _ => false,
@@ -498,9 +516,11 @@ impl WriteCall {
                 _ => WriteMethod::Post,
             },
             WriteCall::Monitor { .. } | WriteCall::PutConfig { .. } | WriteCall::SwitchOff(_) => WriteMethod::Put,
-            WriteCall::RemoveExclusion { .. } | WriteCall::RemoveRootFolder { .. } | WriteCall::RemoveQualityProfile { .. } | WriteCall::FreeStaging(_) => {
-                WriteMethod::Delete
-            }
+            WriteCall::RemoveExclusion { .. }
+            | WriteCall::RemoveRootFolder { .. }
+            | WriteCall::RemoveQualityProfile { .. }
+            | WriteCall::FreeStaging(_)
+            | WriteCall::ClearFailed { .. } => WriteMethod::Delete,
         }
     }
 
@@ -521,6 +541,7 @@ impl WriteCall {
             WriteCall::RemoveQualityProfile { id } => format!("/qualityprofile/{id}"),
             WriteCall::FreeStaging(_) => "/trackfile/bulk".into(),
             WriteCall::SwitchOff(s) => format!("/album/{}", s.id),
+            WriteCall::ClearFailed { queue_id } => format!("/queue/{queue_id}?{CLEAR_FAILED_QUERY}"),
             WriteCall::Relayed(r) => r.path.clone(),
         }
     }
@@ -541,7 +562,9 @@ impl WriteCall {
             WriteCall::ManualImport(files) => {
                 serde_json::to_string(&json!({"name": "ManualImport", "importMode": "move", "replaceExistingFiles": false, "files": files}))
             }
-            WriteCall::RemoveExclusion { .. } | WriteCall::RemoveRootFolder { .. } | WriteCall::RemoveQualityProfile { .. } => Ok(String::new()),
+            WriteCall::RemoveExclusion { .. } | WriteCall::RemoveRootFolder { .. } | WriteCall::RemoveQualityProfile { .. } | WriteCall::ClearFailed { .. } => {
+                Ok(String::new())
+            }
             WriteCall::Relayed(r) => Ok(r.body.clone()),
         };
         v.unwrap_or_default()
@@ -625,6 +648,11 @@ impl LidarrWriter {
             return Ok(());
         }
         self.send(WriteCall::Monitor { album_ids, monitored }).await.map(|_| ())
+    }
+
+    /// Clear a download Lidarr couldn't import (see [`WriteCall::ClearFailed`]).
+    pub async fn clear_failed(&self, queue_id: i64) -> AppResult<()> {
+        self.send(WriteCall::ClearFailed { queue_id }).await.map(|_| ())
     }
 
     pub async fn search(&self, album_ids: Vec<i64>) -> AppResult<()> {

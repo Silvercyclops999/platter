@@ -1018,6 +1018,9 @@ pub struct Settings {
     /// A tapped song's release is the fastest good one (usenet first, well
     /// seeded torrents next) rather than Lidarr's own first choice.
     pub lidarr_prefer_fastest: bool,
+    /// A download Platter asked for that Lidarr couldn't import is taken
+    /// out of the queue, that copy blocklisted, and another searched for.
+    pub lidarr_clear_failed: bool,
     /// A tapped song plays from the finished download, before Lidarr moves
     /// it into the library, when this device can open the file.
     pub lidarr_play_arriving: bool,
@@ -1455,6 +1458,7 @@ impl Default for Settings {
             ask_before_get: false,
             lidarr_tap_to_get: true,
             lidarr_prefer_fastest: true,
+            lidarr_clear_failed: true,
             lidarr_play_arriving: true,
             requests_from_others: true,
             request_rules: Vec::new(),
@@ -1697,6 +1701,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "askBeforeGet",
     "lidarrTapToGet",
     "lidarrPreferFastest",
+    "lidarrClearFailed",
     "lidarrPlayArriving",
     "requestsFromOthers",
     "requestRules",
@@ -2128,6 +2133,7 @@ pub struct SettingsPatch {
     pub ask_before_get: Option<bool>,
     pub lidarr_tap_to_get: Option<bool>,
     pub lidarr_prefer_fastest: Option<bool>,
+    pub lidarr_clear_failed: Option<bool>,
     pub lidarr_play_arriving: Option<bool>,
     pub requests_from_others: Option<bool>,
     pub request_rules: Option<Vec<RequestRule>>,
@@ -2531,6 +2537,7 @@ impl Settings {
         set(&mut self.ask_before_get, p.ask_before_get);
         set(&mut self.lidarr_tap_to_get, p.lidarr_tap_to_get);
         set(&mut self.lidarr_prefer_fastest, p.lidarr_prefer_fastest);
+        set(&mut self.lidarr_clear_failed, p.lidarr_clear_failed);
         set(&mut self.lidarr_play_arriving, p.lidarr_play_arriving);
         set(&mut self.requests_from_others, p.requests_from_others);
         set(&mut self.request_group_notices, p.request_group_notices);

@@ -61,7 +61,8 @@ pub fn map_status(album: &Album, queue: &[QueueItem], history: &[HistoryItem]) -
     let mine = |id: Option<i64>| id == Some(album.id);
     if let Some(q) = queue.iter().find(|q| mine(q.album_id)) {
         let state = q.tracked_download_state.as_deref().unwrap_or_default().to_ascii_lowercase();
-        let failed = q.status.eq_ignore_ascii_case("failed") || state.starts_with("failed");
+        // Lidarr won't try an import that failed again: it's failed, not importing.
+        let failed = q.status.eq_ignore_ascii_case("failed") || state.starts_with("failed") || state == "importfailed";
         let importing = matches!(state.as_str(), "importpending" | "importing" | "imported") || q.status.eq_ignore_ascii_case("completed");
         return if failed {
             RequestState::Failed
@@ -112,6 +113,7 @@ mod tests {
         assert_eq!(map_status(&album(true, 0, 10), &[q("completed", "importPending")], &[]), RequestState::Importing);
         assert_eq!(map_status(&album(true, 0, 10), &[q("downloading", "importing")], &[]), RequestState::Importing);
         assert_eq!(map_status(&album(true, 0, 10), &[q("failed", "failedPending")], &[]), RequestState::Failed);
+        assert_eq!(map_status(&album(true, 0, 10), &[q("completed", "importFailed")], &[]), RequestState::Failed, "not importing forever");
         assert_eq!(map_status(&album(true, 0, 10), &[], &[h("grabbed")]), RequestState::Downloading);
         assert_eq!(map_status(&album(true, 0, 10), &[], &[h("downloadFailed"), h("grabbed")]), RequestState::Failed);
         assert_eq!(map_status(&album(true, 0, 10), &[], &[h("downloadImported"), h("grabbed")]), RequestState::Imported);

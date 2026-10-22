@@ -142,6 +142,10 @@ impl RadarLidarr for FakeLidarr {
             next_search_at: None,
             attempts: 0,
             quick: false,
+            cleared: Vec::new(),
+            practiced_clears: Vec::new(),
+            clear_fails: 0,
+            clear_after: None,
         };
         self.list.lock().push(r.clone());
         Ok(r)
@@ -685,6 +689,10 @@ fn summary_texts() {
         next_search_at: None,
         attempts: 0,
         quick: false,
+        cleared: Vec::new(),
+        practiced_clears: Vec::new(),
+        clear_fails: 0,
+        clear_after: None,
     };
     assert_eq!(summary(&[], 0, 3), None);
     assert_eq!(summary(&[], 2, 3).unwrap().1, "2 more wait for tomorrow (up to 3 a day).");
