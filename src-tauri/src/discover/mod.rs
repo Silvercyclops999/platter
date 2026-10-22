@@ -35,6 +35,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::artistinfo::is_mbid;
 use crate::db::DbHandle;
+use crate::db::searchtext::{canonical, sounds_like};
 use crate::db::store::{kv_get, kv_set};
 use crate::error::{AppError, AppResult};
 use crate::import::store::{StoreLinks, album_store_links, wanted_albums};
@@ -630,6 +631,7 @@ impl Discover {
         } else {
             self.mb_part(&q, part).await?
         };
+        let fresh = if part == "artists" { self.named_loosely(&q, fresh).await } else { fresh };
         tracing::debug!(part, source = %fresh.source, ms = started.elapsed().as_millis() as u64, "catalogue search");
         let mut cache = self.searches.lock();
         if cache.len() >= SEARCH_KEPT {
@@ -643,6 +645,44 @@ impl Discover {
         // Searches nobody is waiting on any more.
         self.searching.lock().retain(|_, m| Arc::strong_count(m) > 1);
         Ok(fresh)
+    }
+
+    /// When a name of two to four words found nobody named that way,
+    /// MusicBrainz asked again forgiving a letter or two per word: an artist
+    /// it finds named the way the query spells it comes first ("juice
+    /// world" is Juice WRLD). Not when an artist found is named in the query
+    /// with more words after ("northlight live").
+    async fn named_loosely(&self, q: &str, mut p: CataloguePart) -> CataloguePart {
+        let words: Vec<String> = canonical(q).split(' ').map(str::to_string).collect();
+        let in_query = |name: &str| canonical(name).split(' ').all(|w| words.iter().any(|x| x == w));
+        if !(2..=4).contains(&words.len()) || p.artists.iter().any(|a| sounds_like(q, &a.name) || in_query(&a.name)) {
+            return p;
+        }
+        let found = match self.inner.mb.get(&mb::artist_loose_search_url(q)).await {
+            Ok(Some(v)) => mb::parse_artists(&v),
+            Ok(None) => return p,
+            Err(e) => {
+                tracing::debug!("loose artist search: {e}");
+                return p;
+            }
+        };
+        let named: Vec<CatArtist> = found.into_iter().filter(|a| sounds_like(q, &a.name)).collect();
+        if named.is_empty() {
+            return p;
+        }
+        let Ok(ix) = self.index().await else { return p };
+        let mut more = CataloguePart::default();
+        Self::keep_artists(&ix, named, &mut more);
+        for id in more.in_library {
+            if !p.in_library.contains(&id) {
+                p.in_library.push(id);
+            }
+        }
+        p.artists.retain(|a| !more.artists.iter().any(|m| m.mbid == a.mbid));
+        more.artists.append(&mut p.artists);
+        more.artists.truncate(SEARCH_SHOWN);
+        p.artists = more.artists;
+        p
     }
 
     /// Artists a search found, minus the library's (noted in `in_library`).

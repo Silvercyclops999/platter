@@ -350,6 +350,9 @@ pub struct SearchResults {
     /// under the song's id (crate::lyricsearch).
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
     pub lyric_lines: std::collections::HashMap<String, String>,
+    /// Nothing matched every word: these results leave a word out.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub partial: bool,
 }
 
 #[cfg(test)]

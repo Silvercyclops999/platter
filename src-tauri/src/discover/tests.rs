@@ -229,6 +229,27 @@ async fn search_shows_only_what_the_library_lacks() {
 }
 
 #[tokio::test]
+async fn search_finds_an_artist_typed_the_way_the_name_sounds() {
+    let r = rig();
+    // MusicBrainz's plain search doesn't name them; asked again forgiving a letter, it does.
+    r.mb.route(
+        "/artist?query=velvet%7E+world%7E",
+        Some(json!({"artists": [
+            {"id": OTHER, "name": "Velvet WRLD", "score": 100},
+            {"id": NOPE, "name": "Velvet World Orchestra", "score": 90}
+        ]})),
+    );
+    let p = r.d.search_part("velvet world", "artists").await.unwrap();
+    let names: Vec<&str> = p.artists.iter().map(|a| a.name.as_str()).collect();
+    assert_eq!(names[0], "Velvet WRLD");
+    assert!(!names.contains(&"Velvet World Orchestra"), "only the one named that way is added");
+    assert_eq!(r.mb.count("velvet%7E"), 1);
+    // Named by the plain search: nothing more is asked.
+    r.d.search_part("northlight", "artists").await.unwrap();
+    assert_eq!(r.mb.count("northlight%7E"), 0);
+}
+
+#[tokio::test]
 async fn search_asks_nothing_while_off_or_offline() {
     let r = rig();
     r.prefs.0.lock().search = false;

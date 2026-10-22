@@ -159,18 +159,53 @@ export const foldName = (s: string) =>
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
 
+const skeleton = (w: string) => w.replace(/[aeiouy]/g, "");
+
+/** Edits from `a` to `b`, or more than `max` once it's past that. */
+function edits(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = row;
+  }
+  return prev[b.length];
+}
+
+/** Equal, one written without its vowels ("world" for "WRLD"), or one typo in a word of 5+ letters. */
+function wordLike(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [sa, sb] = [skeleton(a), skeleton(b)];
+  if (sa === sb && sa.length >= 2 && (sa === a || sb === b)) return true;
+  return Math.min(a.length, b.length) >= 5 && edits(a, b, 1) <= 1;
+}
+
 /**
- * The artist you don't have to put on top: the one the query names exactly
- * ("juice wrld" names Juice WRLD), unless one of the library's top results
- * is named exactly; with nothing in the library, the first one found.
+ * Whether `name` is the name `q` spells the way names get typed: word for
+ * word with stylised spellings and typos ("juice world" for Juice WRLD), a
+ * leading "the" either way, or the words run together. The library's search
+ * matches names the same way.
+ */
+export function nameMatches(q: string, name: string): boolean {
+  const [a, b] = [foldName(q), foldName(name)];
+  if (!a || !b) return false;
+  if (a.replace(/ /g, "") === b.replace(/ /g, "")) return true;
+  const [qw, nw] = [a.split(" "), b.split(" ")];
+  return qw.length === nw.length && qw.every((w, i) => wordLike(w, nw[i]));
+}
+
+/**
+ * The artist you don't have to put on top: the one the query names
+ * ("juice world" names Juice WRLD), unless one of the library's top results
+ * is named that way too; with nothing in the library, the first one found.
  */
 export function catalogueTop(q: string, c: CatalogueResults | null, ...libTops: (SearchHit | null | undefined)[]): CatArtist | null {
   if (!c) return null;
-  const want = foldName(q);
   const artists = c.artists.filter((a) => !a.libraryId);
-  const exact = artists.find((a) => foldName(a.name) === want);
+  const exact = artists.find((a) => nameMatches(q, a.name));
   const found = libTops.filter((h): h is SearchHit => !!h);
-  const libExact = found.some((h) => foldName(hitInfo(h)?.title ?? "") === want);
+  const libExact = found.some((h) => nameMatches(q, hitInfo(h)?.title ?? ""));
   if (exact && !libExact) return exact;
   return !found.length ? (artists[0] ?? null) : null;
 }

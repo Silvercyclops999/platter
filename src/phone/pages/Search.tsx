@@ -103,10 +103,30 @@ export function PhoneSearch() {
   // whose pills are hidden: All.
   const shown: SearchKind = !res || (kinds.length > 2 && kinds.some((k) => k.id === kind)) ? kind : "all";
   const hits = ofKind(all, shown);
-  // An artist you don't have, named exactly, is the top result (unless the
-  // library has something named exactly).
+  // An artist you don't have, named the way you typed it, is the top result
+  // (unless the library has something named that way).
   const catTop = shown === "all" || shown === "artist" ? catalogueTop(q, cat, res?.top, all[0]) : null;
   const nothingAnywhere = !hits.length && !catTop && !hasCatalogueRows(cat) && !cat?.pending.length;
+  // Nothing matched every word: what's out there named that way comes
+  // first, the library's near misses after.
+  const closeLast = !!res?.partial && hasCatalogueRows(cat);
+  const hitRows =
+    res &&
+    hits.map((h) => {
+      const versions = h.track ? versionsCount(h.track, res) : 0;
+      return (
+        <HitRow
+          key={hitInfo(h)?.key}
+          hit={h}
+          typed={shown !== "all"}
+          onOpen={() => open(h)}
+          // Versions are a line in the song's sheet, not a button on every row.
+          onMore={h.track ? () => phone.push({ kind: "track", track: { ...h.track!, otherVersions: Math.max(h.track!.otherVersions ?? 0, versions) } }) : h.album ? () => phone.push({ kind: "album", album: h.album! }) : undefined}
+          versions={versions}
+          lyric={h.track ? res.lyricLines?.[h.track.id] : undefined}
+        />
+      );
+    });
   const getSpots = useGetSpots();
   return (
     <div className="ph-page ph-search">
@@ -190,28 +210,20 @@ export function PhoneSearch() {
       )}
       {q && res && (
         <section aria-label="Results" className="ph-search__results">
-          {(catTop || hits.length > 0) && (
+          {(catTop || (!closeLast && hits.length > 0)) && (
             <ul className="ph-rows">
               {catTop && <CatalogueArtistRow artist={catTop} get={getSpots} />}
-              {hits.map((h) => {
-                const versions = h.track ? versionsCount(h.track, res) : 0;
-                return (
-                  <HitRow
-                    key={hitInfo(h)?.key}
-                    hit={h}
-                    typed={shown !== "all"}
-                    onOpen={() => open(h)}
-                    // Versions are a line in the song's sheet, not a button on every row.
-                    onMore={h.track ? () => phone.push({ kind: "track", track: { ...h.track!, otherVersions: Math.max(h.track!.otherVersions ?? 0, versions) } }) : h.album ? () => phone.push({ kind: "album", album: h.album! }) : undefined}
-                    versions={versions}
-                    lyric={h.track ? res.lyricLines?.[h.track.id] : undefined}
-                  />
-                );
-              })}
+              {!closeLast && hitRows}
             </ul>
           )}
           {nothingAnywhere && <p className="ph-rows__note">Nothing in your library matches "{q}".</p>}
           <PhoneCatalogue c={cat} kind={shown} skipArtist={catTop?.mbid} getSpots={getSpots} />
+          {closeLast && hits.length > 0 && (
+            <section aria-label="Close matches in your library" className="ph-search__catalogue">
+              <h2 className="ph-section-title">Close matches in your library</h2>
+              <ul className="ph-rows">{hitRows}</ul>
+            </section>
+          )}
         </section>
       )}
     </div>

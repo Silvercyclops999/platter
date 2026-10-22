@@ -207,6 +207,44 @@ pub fn canonical_of(ws: &[Word]) -> String {
     ws.iter().map(|w| canon(&w.text)).collect::<Vec<_>>().join(" ")
 }
 
+/// A word's letters without its vowels: "world" and "wrld" are both "wrld".
+fn skeleton(w: &str) -> String {
+    w.chars().filter(|c| !matches!(c, 'a' | 'e' | 'i' | 'o' | 'u' | 'y')).collect()
+}
+
+/// Two words of a name that are the same as people type them: equal, one
+/// written without its vowels ("world" for "WRLD", "mgmt"), or one typo in a
+/// word of 5+ letters.
+fn word_like(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    let (sa, sb) = (skeleton(a), skeleton(b));
+    if sa == sb && sa.chars().count() >= 2 && (sa == a || sb == b) {
+        return true;
+    }
+    let (ca, cb): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let max = max_typos(ca.len().min(cb.len()));
+    max > 0 && edits_within(&ca, &cb, max).is_some()
+}
+
+/// True when `name` is the name `query` spells, allowing for how names are
+/// written: word for word with stylised spellings and typos ("juice world"
+/// for "Juice WRLD"), a leading "the" either way, or the words run together
+/// ("kanyewest").
+pub fn sounds_like(query: &str, name: &str) -> bool {
+    let strip = |s: String| s.strip_prefix("the ").map(str::to_string).unwrap_or(s);
+    let (q, n) = (strip(canonical(query)), strip(canonical(name)));
+    if q.is_empty() || n.is_empty() {
+        return false;
+    }
+    if q.replace(' ', "") == n.replace(' ', "") {
+        return true;
+    }
+    let (qw, nw): (Vec<&str>, Vec<&str>) = (q.split(' ').collect(), n.split(' ').collect());
+    qw.len() == nw.len() && qw.iter().zip(&nw).all(|(a, b)| word_like(a, b))
+}
+
 /// Typos a word of `len` chars may have and still match: one wrong,
 /// missing, extra or swapped letter from 5 letters, none in shorter words.
 pub fn max_typos(len: usize) -> usize {

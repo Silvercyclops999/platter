@@ -672,11 +672,19 @@ fn search_artists(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize
     let mut v = Vec::new();
     for a in rows {
         let a = a?;
-        let (t, in_title, bonus) = rate(q, &a.title, &[]);
+        let (t, in_title, bonus) = artist_rate(q, &a.title);
         let s = score(t, in_title, a.view_count, None, a.title.len(), now) + bonus + 3.0;
         v.push(Scored { item: a, score: s });
     }
     Ok(rank(v, n))
+}
+
+/// [`rate`] for an artist's name: a name the query spells the way names
+/// are written ("juice world" for "Juice WRLD") counts as exact, so the
+/// artist is the top result.
+fn artist_rate(q: &ParsedQuery, name: &str) -> (Tier, bool, f64) {
+    let r = rate(q, name, &[]);
+    if r.0 < Tier::Exact && searchtext::sounds_like(&q.norm, name) { (Tier::Exact, true, r.2) } else { r }
 }
 
 /// Credited artists (names in track artist lines with no library artist)
@@ -722,7 +730,7 @@ fn search_credited(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usiz
                 f.2 = f.2.saturating_add(plays);
                 continue;
             }
-            let (t, in_title) = tier(q, &name, &[]);
+            let (t, in_title, _) = artist_rate(q, &name);
             if !in_title || t == Tier::Partial || in_library.exists([&name])? {
                 continue;
             }
@@ -1020,6 +1028,7 @@ pub(crate) fn search_conn(
         if let Some(e) = e {
             let more = run(c, &q, &e, now, l.fallback())?;
             merge_found(&mut found, more, l);
+            out.partial = found.count() > 0;
         }
     }
 
@@ -1117,7 +1126,7 @@ pub fn rank_remote(
         hits.artists
             .into_iter()
             .map(|a| {
-                let (t, in_title, bonus) = rate(&q, &a.title, &[]);
+                let (t, in_title, bonus) = artist_rate(&q, &a.title);
                 let score = score(t, in_title, a.view_count, None, a.title.len(), now) + bonus + 3.0;
                 Scored { item: a, score }
             })

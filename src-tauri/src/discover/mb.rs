@@ -42,6 +42,13 @@ pub fn artist_search_url(q: &str) -> String {
     search("artist", &escape(q))
 }
 
+/// An artist search that forgives a letter or two in each longer word, for
+/// a name typed the way it sounds ("juice world" finds Juice WRLD).
+pub fn artist_loose_search_url(q: &str) -> String {
+    let words: Vec<String> = escape(q).split_whitespace().map(|w| if w.chars().count() >= 4 { format!("{w}~") } else { w.to_string() }).collect();
+    search("artist", &words.join(" "))
+}
+
 pub fn group_search_url(q: &str) -> String {
     search("release-group", &escape(q))
 }
