@@ -405,6 +405,7 @@ incremental sync runs every 15 minutes.
 | `playlist_update` | `{ id, title?, summary? }` | `Playlist` |
 | `playlist_set_cover` | `{ id, bytes: number[], contentType }` | – |
 | `playlist_delete` | `{ id }` | – |
+| `playlist_save_file` | `{ title, trackIds }` | `string \| null` (the saved file's name; null when cancelled) |
 
 `Playlist` also carries `summary` (the description) and `updatedAt` (unix
 seconds, the last change). `playlist_page` returns `itemIds` next to
@@ -434,6 +435,14 @@ PNG or WebP under 10 MB. Smart playlists can't be edited (`invalid`).
 
 `playlist_duplicates` lets the UI ask before adding a song that's already
 there (setting `playlistAskDuplicates`).
+
+`playlist_save_file` opens a save dialog (suggested name from `title`, made
+safe for file names) and writes the songs in the order given: a playlist
+file (`.m3u8`) with each song's path on the server when the library knows it
+and "Artist - Title" when it doesn't, or a text list of "Artist - Title"
+lines when the picked name ends in `.txt`. Up to 20,000 songs; none is an
+`invalid` error. A failed write is an `io` error that says why. Nothing is
+uploaded.
 
 ## Edit in Plex
 | Command | Args | Returns |

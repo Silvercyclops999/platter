@@ -24,7 +24,7 @@ import { useArtTint } from "../lib/useTint";
 import { usePins } from "../stores/pins";
 import { player, usePlayer } from "../stores/player";
 import { dragLeft } from "../stores/drag";
-import { askRemove, editDetails, removeRows, savePlaylistDetails, usePlaylistUi } from "../stores/playlists";
+import { askRemove, editDetails, removeRows, savePlaylistDetails, savePlaylistFile, usePlaylistUi } from "../stores/playlists";
 import { nav } from "../stores/router";
 import { toast } from "../stores/toasts";
 import type { MenuItem } from "../stores/ui";
@@ -314,6 +314,7 @@ export function PlaylistPage({ id }: { id: string }) {
         ...(pl.smart ? [{ label: "Edit rules", onSelect: () => void editSmartPlaylist(pl.id, pl.title) }] : []),
         ...(!own && !empty ? [mixMenuItem(mixed, mixSwitch.toggle)] : []),
         ...playlistEditItems(pl),
+        ...(empty ? [] : [{ label: "Save as a file", onSelect: () => void savePlaylistFile(pl.title, shown!.tracks.map((t) => t.id)) }]),
         bookmarkPageItem("playlist", pl.id, pl.title, { thumb: pl.thumb }),
         ...(empty ? [] : downloadMenuItems({ kind: "playlist", id: pl.id, title: pl.title })),
         shareItem("playlist", pl.id, pl.thumb),

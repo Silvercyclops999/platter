@@ -163,6 +163,7 @@ const CALLS: [string, (b: ReturnType<typeof createTauriBackend>) => Promise<unkn
   ["sleep_cancel", (b) => b.sleepCancel(), undefined],
   ["songs_page", (b) => b.songsPage({ sort: "plays", desc: true, find: "rain" }, 200, 200), { query: { sort: "plays", desc: true, find: "rain" }, offset: 200, limit: 200 }],
   ["songs_play_ids", (b) => b.songsPlayIds({ sort: "title", desc: false, find: "" }, "7"), { query: { sort: "title", desc: false, find: "" }, startTrackId: "7" }],
+  ["playlist_save_file", (b) => b.playlistSaveFile("Road trip", ["1", "2"]), { title: "Road trip", trackIds: ["1", "2"] }],
   ["album_crates", (b) => b.albumCrates("5"), { id: "5" }],
   ["album_sides", (b) => b.albumSides("5"), { id: "5" }],
   ["album_sides_set", (b) => b.setAlbumSides("5", ["t3"]), { id: "5", starts: ["t3"] }],
