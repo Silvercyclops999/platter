@@ -247,8 +247,11 @@ updates, it gives that up once and asks for its own sign-in instead.
   inside the container, for Docker and `platter-bridge status` only.
 - Everything between the Bridge and your computers goes through the same
   relay as Listen along (ntfy.sh by default, or your own ntfy server: set it
-  in Settings > Listen along, and `BRIDGE_RELAY` on the Bridge). The relay
-  sees random topic names and sealed messages. No address, key, token,
+  in Settings > Listen along, and `BRIDGE_RELAY` on the Bridge). With
+  ntfy.sh, the same sealed messages also go to two other public ntfy
+  servers, ntfy.envs.net and ntfy.adminforge.de, and both ends listen on all
+  three, so one server turning your home's address away doesn't cut the
+  Bridge off. The relays see random topic names and sealed messages. No address, key, token,
   artist or album name ever goes through it in the clear.
 - Sealed messages count for 12 hours, can't be replayed, and can't be moved
   to another topic.
@@ -269,8 +272,11 @@ what doesn't fit waits for your home network or goes a little later.
 Requests and answers always go. The Bridge sends a heartbeat every hour,
 and devices that aren't on the same network check in through the relay
 every few hours. If the relay says no anyway, nothing more goes to it for
-a while instead of trying again at once. If you run your own ntfy server,
-only its own limits apply.
+a while instead of trying again at once. A relay that can't be reached at
+all is left alone for a minute, then longer each time, up to half an hour,
+while the other two carry everything. Each of the three has its own
+allowance. If you run your own ntfy server, only it and its own limits
+apply.
 
 ## Settings
 

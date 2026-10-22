@@ -73,6 +73,12 @@ and your own Plex server.
   MusicBrainz recording the song sounds like.
 - ntfy.sh (or your own ntfy server), only during a listening session. It
   carries the session's sealed messages; see Listening sessions below.
+- ntfy.sh, ntfy.envs.net and ntfy.adminforge.de (public ntfy servers), for
+  your own devices and the Bridge reaching each other away from home. The
+  same sealed messages go to all three, so one of them turning your home's
+  address away doesn't cut you off. They see random topic names and sealed
+  text they can't read, and the address you connect from, like any website.
+  If you set your own ntfy server, only that one is used.
 - Apple's iTunes Search, only when you copy a public link for a song or album
   from a Share menu (off until you turn on public links in Settings). The search
   carries the artist and the song or album title, nothing else. Unreleased

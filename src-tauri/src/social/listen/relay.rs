@@ -114,10 +114,10 @@ pub struct NtfyRelay {
 }
 
 impl NtfyRelay {
-    /// Only ntfy.sh is paced by an allowance: a server of the user's own
-    /// has whatever limits they gave it.
+    /// Only the public servers (ntfy.sh and its backups) are paced by an
+    /// allowance: a server of the user's own has whatever limits they gave it.
     fn paced(&self) -> bool {
-        self.base == super::DEFAULT_RELAY
+        self.base == super::DEFAULT_RELAY || super::BACKUP_RELAYS.contains(&self.base.as_str())
     }
 }
 
@@ -146,9 +146,14 @@ impl Cool {
 
     /// The relay said no: wait, longer each time in a row.
     pub fn turned_away(&mut self, now: Instant) {
-        let wait = if self.next.is_zero() { COOL_FIRST } else { self.next };
+        self.wait(now, COOL_FIRST, COOL_MAX);
+    }
+
+    /// Wait `first`, then twice as long each time in a row, up to `most`.
+    pub fn wait(&mut self, now: Instant, first: Duration, most: Duration) {
+        let wait = if self.next.is_zero() { first } else { self.next };
         self.until = Some(now + wait);
-        self.next = (wait * 2).min(COOL_MAX);
+        self.next = (wait * 2).min(most);
     }
 
     /// A message went: back to normal.
@@ -156,6 +161,11 @@ impl Cool {
         *self = Self::default();
     }
 }
+
+/// How long a relay that couldn't be reached (or refused) is left alone
+/// when there are others to use, doubled each time in a row.
+pub const DOWN_FIRST: Duration = if cfg!(test) { Duration::from_millis(300) } else { Duration::from_secs(60) };
+pub const DOWN_MAX: Duration = if cfg!(test) { Duration::from_secs(1) } else { Duration::from_secs(30 * 60) };
 
 /// Background messages one device may publish to ntfy.sh at once, and how
 /// many come back an hour. Four devices at one home together stay near

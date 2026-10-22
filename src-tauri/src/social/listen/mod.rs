@@ -62,6 +62,11 @@ pub const EVENT: &str = "listen://state";
 pub const EVENT_NOTICE: &str = "listen://notice";
 /// The relay used unless the user sets their own.
 pub const DEFAULT_RELAY: &str = "https://ntfy.sh";
+/// Public ntfy servers (from ntfy's own list) that links on
+/// [`DEFAULT_RELAY`] also use, side by side with it, so one server turning
+/// a home's address away doesn't cut the home off. Everything on them is
+/// sealed, the same as on ntfy.sh.
+pub const BACKUP_RELAYS: &[&str] = &["https://ntfy.envs.net", "https://ntfy.adminforge.de"];
 
 /// Guests one session takes.
 pub const MAX_GUESTS: usize = 10;

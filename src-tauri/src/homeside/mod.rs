@@ -43,6 +43,8 @@ pub mod wire;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod backup_tests;
+#[cfg(test)]
 mod lyrics_tests;
 
 pub use crate::social::listen::DEFAULT_RELAY;

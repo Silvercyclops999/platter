@@ -42,6 +42,9 @@ pub struct Paired {
     /// The last relay message read (ntfy's `since`).
     #[serde(default)]
     pub since: Option<String>,
+    /// The same on each backup relay, by its address.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub since_on: BTreeMap<String, String>,
     #[serde(default)]
     pub guard: Guard,
     #[serde(default)]
@@ -134,6 +137,7 @@ impl Links {
             version: version.to_string(),
             paired_at: now_s,
             since: None,
+            since_on: BTreeMap::new(),
             guard: Guard::default(),
             counter: 0,
             peer: link.peer.clone(),

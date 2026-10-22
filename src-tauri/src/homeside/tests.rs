@@ -224,7 +224,7 @@ fn side(dir: &std::path::Path, name: &str) -> End {
     End { db, keys, store, lidarr, web }
 }
 
-async fn until(what: &str, mut f: impl FnMut() -> bool) {
+pub(super) async fn until(what: &str, mut f: impl FnMut() -> bool) {
     for _ in 0..200 {
         if f() {
             return;

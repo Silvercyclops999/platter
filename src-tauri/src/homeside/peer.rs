@@ -4,7 +4,11 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 
 use parking_lot::Mutex;
 use tokio::sync::{mpsc, watch};
@@ -13,7 +17,7 @@ use super::link::{self, Counter, Link, Reassembler};
 use super::links::Links;
 use super::wire::Msg;
 use crate::error::{AppError, AppResult};
-use crate::social::listen::relay::{RelayError, RelayEvent, RelayFactory};
+use crate::social::listen::relay::{self, Relay, RelayError, RelayEvent, RelayFactory};
 
 pub type Clock = Arc<dyn Fn() -> u64 + Send + Sync>;
 
@@ -30,11 +34,19 @@ pub struct Wire {
     parts: Mutex<HashMap<String, Reassembler>>,
     /// One publish sequence per link at a time, so pieces stay in order.
     sending: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Relays used side by side with a link's own, by that relay.
+    backups: Vec<(String, Vec<String>)>,
+    /// Relays that couldn't be reached lately, by address.
+    down: DownMap,
 }
 
 impl Wire {
     pub fn new(links: Links, relays: Arc<dyn RelayFactory>, clock: Clock) -> Self {
-        Self { links, relays, clock, counters: Mutex::default(), parts: Mutex::default(), sending: Mutex::default() }
+        let backups = vec![(
+            crate::social::listen::DEFAULT_RELAY.to_string(),
+            crate::social::listen::BACKUP_RELAYS.iter().map(|b| b.to_string()).collect(),
+        )];
+        Self { links, relays, clock, counters: Mutex::default(), parts: Mutex::default(), sending: Mutex::default(), backups, down: Arc::default() }
     }
 
     pub fn now_ms(&self) -> u64 {
@@ -45,7 +57,45 @@ impl Wire {
         &self.relays
     }
 
-    /// Seal and publish a message.
+    /// The relay couldn't be reached or refused just now: leave it alone
+    /// for a while if there's another.
+    pub fn went_down(&self, base: &str) {
+        mark(&self.down, base, false);
+    }
+
+    /// The relay answered: back to normal.
+    pub fn came_up(&self, base: &str) {
+        mark(&self.down, base, true);
+    }
+
+    /// Whether the relay is being left alone after it couldn't be reached.
+    pub fn is_down(&self, base: &str) -> bool {
+        self.down.lock().get(base).is_some_and(|c| c.waiting(std::time::Instant::now()))
+    }
+
+    /// The relays a link uses: its own, then the backups when it's on
+    /// ntfy.sh. A server of the user's own is used alone.
+    pub fn relays_for(&self, relay: &str) -> Vec<String> {
+        let mut all = vec![relay.to_string()];
+        if let Some((_, more)) = self.backups.iter().find(|(p, _)| p == relay) {
+            all.extend(more.iter().cloned());
+        }
+        all
+    }
+
+    /// Use these backups for links on `relay` (tests; the app uses
+    /// [`crate::social::listen::BACKUP_RELAYS`] for ntfy.sh).
+    pub fn with_backups(mut self, relay: &str, backups: Vec<String>) -> Self {
+        self.backups.retain(|(p, _)| p != relay);
+        self.backups.push((relay.to_string(), backups));
+        self
+    }
+
+    /// Seal and publish a message on every relay of the link that isn't
+    /// known to be down (all of them if every one is). The same frames go
+    /// to each, so the other end takes the first copy and its replay guard
+    /// drops the rest. Sent once one relay took every piece; the slower
+    /// ones carry on by themselves.
     pub async fn send(&self, link: &Link, msg: &Msg) -> AppResult<()> {
         let lock = self.sending.lock().entry(link.id.clone()).or_default().clone();
         let _one = lock.lock().await;
@@ -58,35 +108,48 @@ impl Wire {
             let _ = self.links.update(&link.id, |p| p.counter = p.counter.max(last));
             bodies
         };
-        let relay = self.relays.relay(&link.relay);
         let topic = link.outbox().topic;
         let kind = msg.kind();
-        if background(msg) && !relay.room_for(bodies.len()) {
-            // The rest of this hour's allowance is spent: it goes later.
-            crate::social::listen::relay::note(kind, bodies.len(), crate::social::listen::relay::Counted::Held);
-            tracing::debug!(kind, pieces = bodies.len(), "relay: held back to stay under the limit");
-            return Err(AppError::Network(relay_error(RelayError::Limited)));
-        }
-        crate::social::listen::relay::as_kind(kind, async {
-            for b in &bodies {
-                let mut tries = 0;
-                loop {
-                    match relay.publish(&topic, b).await {
-                        Ok(()) => break,
-                        // Turned away: trying again soon only counts against the limit.
-                        Err(e) if tries < 3 && !matches!(e, RelayError::Refused(400) | RelayError::Limited) => {
-                            tries += 1;
-                            tokio::time::sleep(Duration::from_millis(500 * (1 << tries))).await;
-                        }
-                        Err(e) => return Err(AppError::Network(relay_error(e))),
-                    }
-                }
+        let all = self.relays_for(&link.relay);
+        let up: Vec<String> = all.iter().filter(|b| !self.is_down(b)).cloned().collect();
+        let tries = if up.is_empty() { all } else { up };
+        let mut held = false;
+        let mut going = FuturesUnordered::new();
+        for base in tries {
+            let relay = self.relays.relay(&base);
+            if background(msg) && !relay.room_for(bodies.len()) {
+                // The rest of this hour's allowance there is spent: it goes later.
+                relay::note(kind, bodies.len(), relay::Counted::Held);
+                held = true;
+                continue;
             }
-            Ok(())
-        })
-        .await?;
-        tracing::debug!(kind, pieces = bodies.len(), "bridge link: sent");
-        Ok(())
+            let (topic, bodies) = (topic.clone(), bodies.clone());
+            let down = self.down.clone();
+            going.push(tokio::spawn(relay::as_kind(kind, async move {
+                let res = publish_all(&*relay, &topic, &bodies).await;
+                match res {
+                    Ok(()) => mark(&down, &base, true),
+                    Err(RelayError::Refused(400) | RelayError::Limited) => {}
+                    Err(_) => mark(&down, &base, false),
+                }
+                res
+            })));
+        }
+        let mut worst = held.then_some(RelayError::Limited);
+        while let Some(done) = going.next().await {
+            match done {
+                Ok(Ok(())) => {
+                    tracing::debug!(kind, pieces = bodies.len(), "bridge link: sent");
+                    return Ok(());
+                }
+                Ok(Err(e)) => worst = Some(worse(worst, e)),
+                Err(_) => {}
+            }
+        }
+        if held && worst == Some(RelayError::Limited) {
+            tracing::debug!(kind, pieces = bodies.len(), "relay: held back to stay under the limit");
+        }
+        Err(AppError::Network(relay_error(worst.unwrap_or(RelayError::Unreachable))))
     }
 
     /// The publish lock for one link: hold it to keep a run of messages in
@@ -157,6 +220,52 @@ impl Wire {
     }
 }
 
+type DownMap = Arc<Mutex<HashMap<String, relay::Cool>>>;
+
+/// A relay answered (`up`), or couldn't be reached or refused: then it's
+/// left alone for a while, longer each time in a row.
+fn mark(down: &DownMap, base: &str, up: bool) {
+    let mut d = down.lock();
+    if up {
+        d.remove(base);
+    } else {
+        d.entry(base.to_string()).or_default().wait(std::time::Instant::now(), relay::DOWN_FIRST, relay::DOWN_MAX);
+    }
+}
+
+/// Every piece of a message on one relay, in order.
+async fn publish_all(relay: &dyn Relay, topic: &str, bodies: &[String]) -> Result<(), RelayError> {
+    for b in bodies {
+        let mut tries = 0;
+        loop {
+            match relay.publish(topic, b).await {
+                Ok(()) => break,
+                // Turned away: trying again soon only counts against the limit.
+                Err(e) if tries < 3 && !matches!(e, RelayError::Refused(400) | RelayError::Limited) => {
+                    tries += 1;
+                    tokio::time::sleep(Duration::from_millis(500 * (1 << tries))).await;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Which error to report when no relay took a message: busy over
+/// unreachable over refused, so callers that wait out a busy relay still do.
+fn worse(a: Option<RelayError>, b: RelayError) -> RelayError {
+    let rank = |e: &RelayError| match e {
+        RelayError::Limited => 2,
+        RelayError::Unreachable => 1,
+        RelayError::Refused(_) => 0,
+    };
+    match a {
+        Some(a) if rank(&a) >= rank(&b) => a,
+        _ => b,
+    }
+}
+
 /// Work that can wait (synced changes, shared Lidarr state, lyrics,
 /// Bring in my listening's plan, the daily look's), so it takes from the relay's allowance.
 /// Requests, answers, hellos and status don't.
@@ -194,45 +303,83 @@ pub enum Incoming {
     Msg(String, Msg),
 }
 
-/// Listen on a link's inbox until `stop`, handing whole messages to `tx`
-/// with the link's id. Reconnects with a growing wait, and picks up after
-/// the last message read.
-pub async fn listen(wire: Arc<Wire>, link: Link, tx: mpsc::Sender<Incoming>, mut stop: watch::Receiver<bool>) {
-    let relay = wire.relays().relay(&link.relay);
+/// Listen on a link's inbox, on every relay it uses, until `stop`, handing
+/// whole messages to `tx` with the link's id. [`Incoming::Opened`] goes
+/// once the first relay is listening, not once per relay.
+pub async fn listen(wire: Arc<Wire>, link: Link, tx: mpsc::Sender<Incoming>, stop: watch::Receiver<bool>) {
+    let open = Arc::new(AtomicUsize::new(0));
+    let all = wire.relays_for(&link.relay);
+    futures::future::join_all(all.into_iter().map(|base| listen_on(wire.clone(), link.clone(), base, open.clone(), tx.clone(), stop.clone()))).await;
+}
+
+/// Where to pick up on a relay: the last message read there, or for a
+/// backup never read yet, the last while (the replay guard drops what came
+/// in on another relay already).
+fn since_on(wire: &Wire, link: &Link, base: &str) -> Option<String> {
+    let p = wire.links.get(&link.id)?;
+    if base == link.relay {
+        return p.since;
+    }
+    p.since_on.get(base).cloned().or_else(|| Some(((wire.now_ms() / 1000).saturating_sub(link::TTL_MS / 1000)).to_string()))
+}
+
+/// One relay of a link: reconnects with a growing wait, and picks up after
+/// the last message read there.
+async fn listen_on(wire: Arc<Wire>, link: Link, base: String, open: Arc<AtomicUsize>, tx: mpsc::Sender<Incoming>, mut stop: watch::Receiver<bool>) {
+    let relay = wire.relays().relay(&base);
     let topic = link.inbox().topic;
+    let main = base == link.relay;
     let mut wait = Duration::from_secs(2);
     loop {
         if *stop.borrow() {
             return;
         }
-        let since = wire.links.get(&link.id).and_then(|p| p.since);
+        let since = since_on(&wire, &link, &base);
         match relay.subscribe(std::slice::from_ref(&topic), since.as_deref()).await {
-            Ok(mut rx) => loop {
-                tokio::select! {
-                    ev = rx.recv() => match ev {
-                        Some(RelayEvent::Open) => {
-                            wait = Duration::from_secs(2);
-                            if tx.send(Incoming::Opened(link.id.clone())).await.is_err() {
-                                return;
+            Ok(mut rx) => {
+                let mut opened = false;
+                loop {
+                    tokio::select! {
+                        ev = rx.recv() => match ev {
+                            Some(RelayEvent::Open) => {
+                                wait = Duration::from_secs(2);
+                                wire.came_up(&base);
+                                if !opened {
+                                    opened = true;
+                                    if open.fetch_add(1, Ordering::SeqCst) == 0 && tx.send(Incoming::Opened(link.id.clone())).await.is_err() {
+                                        return;
+                                    }
+                                }
                             }
-                        }
-                        Some(RelayEvent::Message { id, body, .. }) => {
-                            let _ = wire.links.update(&link.id, |p| p.since = Some(id));
-                            if let Some(m) = wire.receive(&link, &body)
-                                && tx.send(Incoming::Msg(link.id.clone(), m)).await.is_err()
-                            {
-                                return;
+                            Some(RelayEvent::Message { id, body, .. }) => {
+                                let _ = wire.links.update(&link.id, |p| {
+                                    if main {
+                                        p.since = Some(id);
+                                    } else {
+                                        p.since_on.insert(base.clone(), id);
+                                    }
+                                });
+                                if let Some(m) = wire.receive(&link, &body)
+                                    && tx.send(Incoming::Msg(link.id.clone(), m)).await.is_err()
+                                {
+                                    return;
+                                }
                             }
-                        }
-                        None => break,
-                    },
-                    _ = stop.changed() => return,
+                            None => break,
+                        },
+                        _ = stop.changed() => return,
+                    }
                 }
-            },
+                if opened {
+                    open.fetch_sub(1, Ordering::SeqCst);
+                }
+            }
             Err(e) => {
-                tracing::info!("Bridge link: {}", relay_error(e));
+                tracing::info!("Bridge link ({}): {}", host(&base), relay_error(e));
                 if e == RelayError::Limited {
                     wait = wait.max(Duration::from_secs(60));
+                } else if e != RelayError::Refused(400) {
+                    wire.went_down(&base);
                 }
             }
         }
@@ -245,4 +392,9 @@ pub async fn listen(wire: Arc<Wire>, link: Link, tx: mpsc::Sender<Incoming>, mut
         }
         wait = (wait * 2).min(Duration::from_secs(300));
     }
+}
+
+/// A relay's host name for the log (never the topic).
+fn host(base: &str) -> &str {
+    base.split("://").nth(1).unwrap_or(base).split('/').next().unwrap_or(base)
 }
