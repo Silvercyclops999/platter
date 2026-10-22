@@ -192,7 +192,18 @@ pub fn fold_artist(s: &str) -> String {
         w.remove(0);
     }
     let out = join(&w);
+    if out.is_empty() {
+        return symbols_only(&f);
+    }
     if NO_ARTIST.contains(&out.as_str()) { String::new() } else { out }
+}
+
+/// A name made only of symbols ("!!!") is the name itself, without spaces.
+/// Dashes, dots, question marks and the like alone stand for no name.
+fn symbols_only(folded: &str) -> String {
+    let kept: String = folded.chars().filter(|c| !c.is_whitespace()).collect();
+    let meaningful = kept.chars().filter(|c| !matches!(c, '-' | '_' | '.' | ',' | ';' | ':' | '\'' | '"' | '/' | '\\' | '?' | '\u{2026}')).count();
+    if meaningful >= 2 { kept } else { String::new() }
 }
 
 /// The featured artists a title credits ("Home (feat. John Legend)",

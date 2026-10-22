@@ -7,6 +7,7 @@
 //!   albums), entries naming `artist`, `track`/`album` and a `uri`
 //! - playlists: an object with `playlists`, each with a `name` and `items`
 //!   whose `track` names `trackName`, `artistName`, `albumName`, `trackUri`
+//!   (a local file has only a `localTrack` link with its names in it)
 //! - history: an array of plays, either short (`endTime`, `artistName`,
 //!   `trackName`, `msPlayed`) or extended (`ts`, `ms_played`,
 //!   `master_metadata_track_name`, `master_metadata_album_artist_name`,
@@ -162,15 +163,38 @@ fn read_playlist(p: &Map<String, Value>, out: &mut Parsed) {
     let items = p.get("items").or_else(|| p.get("tracks")).and_then(Value::as_array);
     for it in items.into_iter().flatten().filter_map(Value::as_object) {
         // The song is under "track"; some versions put it on the item.
-        let t = it.get("track").and_then(Value::as_object).or_else(|| it.get("localTrack").and_then(Value::as_object));
+        let local = it.get("localTrack").and_then(Value::as_object);
+        let t = it.get("track").and_then(Value::as_object).or(local);
         let is_episode = it.get("episode").is_some_and(|e| !e.is_null()) || it.get("audiobook").is_some_and(|e| !e.is_null());
-        match t.and_then(song).or_else(|| song(it)) {
+        match t.and_then(song).or_else(|| song(it)).or_else(|| local.and_then(local_song)) {
             Some(s) => songs.push(s),
             None if is_episode => out.skipped.podcasts += 1,
             None => out.skipped.incomplete_rows += 1,
         }
     }
     out.playlists.push(PlaylistIn { name, songs });
+}
+
+/// A local file added to a playlist, which the download names only by its
+/// link: `<service>:local:<artist>:<album>:<title>:<seconds>`, each part
+/// percent-encoded with + for a space. Parts can be empty; one with no
+/// title or no artist is nothing to match.
+fn local_song(o: &Map<String, Value>) -> Option<SongIn> {
+    let uri = text(o, &["uri", "trackUri"])?;
+    let parts: Vec<&str> = uri.splitn(6, ':').collect();
+    let [_, "local", artist, album, title, secs] = parts.as_slice() else { return None };
+    let part = |s: &str| -> Option<String> {
+        let s = percent_encoding::percent_decode_str(&s.replace('+', " ")).decode_utf8_lossy().trim().to_string();
+        (!s.is_empty()).then_some(s)
+    };
+    Some(SongIn {
+        artist: part(artist)?,
+        title: part(title)?,
+        album: part(album),
+        duration_ms: secs.trim().parse::<u64>().ok().filter(|s| *s > 0).map(|s| s * 1000),
+        isrc: None,
+        service_id: Some(uri),
+    })
 }
 
 /// One history record. Only the song, end time and time played are copied

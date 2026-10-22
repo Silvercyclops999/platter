@@ -52,6 +52,9 @@ pub const NOT_FOUND: &str = "Lidarr couldn't find it";
 pub const LOOK_EVERY: Duration = Duration::from_secs(10 * 60);
 /// Albums picked in one go at most (MusicBrainz is asked once a second).
 const PICKS_PER_PASS: usize = 50;
+/// Set when a send didn't get everything to the server: "all" (what a file
+/// found) or "arrivals" (what arrived since). The next look sends it again.
+const UNSENT: &str = "bring.unsent";
 
 /// Where an imported list's liked songs go.
 pub fn liked_target(source: &str) -> String {
@@ -486,6 +489,49 @@ pub fn record(c: &mut Connection, target: &str, list: Option<(&str, &str)>, ids:
     Ok(())
 }
 
+/// A playlist name the server takes: trimmed, and cut to
+/// [`TITLE_MAX`](crate::db::playlists::TITLE_MAX) characters keeping a
+/// " (2)" on the end, so two long names that differ only there stay apart.
+pub fn fit_title(name: &str) -> String {
+    let max = crate::db::playlists::TITLE_MAX;
+    let name = name.trim();
+    if name.is_empty() {
+        return "Playlist".into();
+    }
+    if name.chars().count() <= max {
+        return name.to_string();
+    }
+    let tail = name
+        .strip_suffix(')')
+        .and_then(|r| r.rfind(" (").map(|i| (i, &r[i + 2..])))
+        .filter(|(_, d)| !d.is_empty() && d.len() < 6 && d.chars().all(|c| c.is_ascii_digit()))
+        .map(|(i, _)| i);
+    let (base, tail) = match tail {
+        Some(i) => (&name[..i], &name[i..]),
+        None => (name, ""),
+    };
+    let base: String = base.chars().take(max - tail.chars().count()).collect();
+    format!("{}{tail}", base.trim_end())
+}
+
+/// Note how a send went, for the next look to try again (see [`UNSENT`]).
+fn note_unsent(c: &Connection, arrivals: bool, failed: bool) -> AppResult<()> {
+    let all = crate::db::store::kv_get(c, UNSENT)?.as_deref() == Some("all");
+    let next = match (failed, arrivals) {
+        (true, false) => Some("all"),
+        (true, true) | (false, true) if all => Some("all"),
+        (true, true) => Some("arrivals"),
+        (false, _) => None,
+    };
+    match next {
+        Some(v) => crate::db::store::kv_set(c, UNSENT, v),
+        None => {
+            c.execute("DELETE FROM kv WHERE key = ?1", [UNSENT])?;
+            Ok(())
+        }
+    }
+}
+
 /// The user deleted the playlist a list became: leave it be from now on.
 pub fn mark_gone(c: &Connection, target: &str) -> AppResult<()> {
     c.execute("UPDATE import_bring_lists SET gone = 1 WHERE target = ?1", [target])?;
@@ -839,14 +885,18 @@ pub struct BringDeps {
 #[derive(Clone)]
 pub struct Bring {
     inner: Arc<BringDeps>,
+    /// One send at a time.
     lock: Arc<tokio::sync::Mutex<()>>,
+    /// One round of picking at a time, apart from sending: picking waits on
+    /// MusicBrainz, and a file brought in meanwhile shouldn't.
+    picking: Arc<tokio::sync::Mutex<()>>,
     wake: Arc<tokio::sync::Notify>,
     last: Arc<parking_lot::Mutex<Sent>>,
 }
 
 impl Bring {
     pub fn new(deps: BringDeps) -> Self {
-        Self { inner: Arc::new(deps), lock: Default::default(), wake: Default::default(), last: Default::default() }
+        Self { inner: Arc::new(deps), lock: Default::default(), picking: Default::default(), wake: Default::default(), last: Default::default() }
     }
 
     fn db(&self) -> &DbHandle {
@@ -857,14 +907,24 @@ impl Bring {
         (self.inner.clock_ms)()
     }
 
-    /// Step 1 with a file: read it, then send what's found.
+    /// Step 1 with a file: read it, then send what's found. The file is in
+    /// once it's read: what the server didn't take goes again on the next
+    /// look.
     pub async fn read(&self, path: PathBuf) -> AppResult<BringStatus> {
         let (db, now) = (self.db().clone(), self.now());
         tokio::task::spawn_blocking(move || read(&db, &path, now))
             .await
             .map_err(|e| AppError::Internal(format!("import task: {e}")))??;
-        self.send(false).await?;
+        self.send_now().await;
         self.status().await
+    }
+
+    /// Send what was found, leaving what didn't go for the next look.
+    async fn send_now(&self) {
+        if let Err(e) = self.send(false).await {
+            tracing::warn!("bring over: not everything reached the server, trying again soon: {}", e.message());
+            self.poke();
+        }
     }
 
     /// A source imported another way (a connected account): bring it over.
@@ -881,12 +941,14 @@ impl Bring {
             return Err(AppError::Invalid("Nothing has come in from there yet.".into()));
         }
         self.db().write_async(move |c| mark_brought(c, &src, now)).await?;
-        self.send(false).await?;
+        self.send_now().await;
         self.status().await
     }
 
     /// Send what's found and not sent yet. With `arrivals`, only what the
-    /// settings say to do as albums arrive.
+    /// settings say to do as albums arrive. A batch of likes or a playlist
+    /// the server turns down doesn't hold up the rest: everything else goes,
+    /// then the first refusal is returned and the next look tries again.
     pub async fn send(&self, arrivals: bool) -> AppResult<Sent> {
         let _g = self.lock.lock().await;
         let s = crate::settings::load(self.db());
@@ -894,20 +956,33 @@ impl Bring {
         let explicit_ok = s.explicit_content == crate::settings::ExplicitContent::Allowed;
         let plan = self.db().read_async(move |c| plan(c, likes, lists, explicit_ok)).await?;
         let mut sent = Sent::default();
+        let mut failed: Option<AppError> = None;
         for (target, ids) in plan.likes {
-            self.inner.server.like(ids.clone()).await?;
-            sent.liked += ids.len() as u64;
-            self.db().write_async(move |c| record(c, &target, None, &ids)).await?;
+            match self.inner.server.like(ids.clone()).await {
+                Ok(()) => {
+                    sent.liked += ids.len() as u64;
+                    self.db().write_async(move |c| record(c, &target, None, &ids)).await?;
+                }
+                Err(e) => {
+                    tracing::warn!(songs = ids.len(), "bring over: likes not sent: {}", e.message());
+                    failed.get_or_insert(e);
+                }
+            }
         }
         for l in plan.lists {
             let ListPlan { target, name, playlist_id, add } = l;
             match playlist_id {
-                None => {
-                    let id = self.inner.server.create(&name, add.clone()).await?;
-                    sent.playlists_made += 1;
-                    sent.songs_added += add.len() as u64;
-                    self.db().write_async(move |c| record(c, &target, Some((&name, &id)), &add)).await?;
-                }
+                None => match self.inner.server.create(&fit_title(&name), add.clone()).await {
+                    Ok(id) => {
+                        sent.playlists_made += 1;
+                        sent.songs_added += add.len() as u64;
+                        self.db().write_async(move |c| record(c, &target, Some((&name, &id)), &add)).await?;
+                    }
+                    Err(e) => {
+                        tracing::warn!(playlist = %name, "bring over: playlist not made: {}", e.message());
+                        failed.get_or_insert(e);
+                    }
+                },
                 Some(id) => match self.inner.server.add(&id, add.clone()).await {
                     Ok(()) => {
                         sent.songs_added += add.len() as u64;
@@ -917,14 +992,32 @@ impl Bring {
                         tracing::info!(playlist = %name, "bring over: the playlist was deleted, leaving it be");
                         self.db().write_async(move |c| mark_gone(c, &target)).await?;
                     }
-                    Err(e) => return Err(e),
+                    Err(e) => {
+                        tracing::warn!(playlist = %name, "bring over: songs not added: {}", e.message());
+                        failed.get_or_insert(e);
+                    }
                 },
             }
         }
         if sent != Sent::default() {
             *self.last.lock() = sent;
         }
-        Ok(sent)
+        let any_failed = failed.is_some();
+        self.db().write_async(move |c| note_unsent(c, arrivals, any_failed)).await?;
+        match failed {
+            Some(e) => Err(e),
+            None => Ok(sent),
+        }
+    }
+
+    /// Sends again what an earlier send didn't get to the server.
+    pub async fn send_unsent(&self) -> AppResult<Option<Sent>> {
+        let unsent = self.db().read_async(|c| crate::db::store::kv_get(c, UNSENT)).await?;
+        match unsent.as_deref() {
+            Some("all") => self.send(false).await.map(Some),
+            Some(_) => self.send(true).await.map(Some),
+            None => Ok(None),
+        }
     }
 
     /// Step 3: get albums (all not asked for yet, or those named).
@@ -941,7 +1034,7 @@ impl Bring {
     /// Picks the albums waiting for MusicBrainz and queues them. Stops when
     /// MusicBrainz or Lidarr can't be reached (the next pass carries on).
     pub async fn pick_pending(&self) -> AppResult<usize> {
-        let _g = self.lock.lock().await;
+        let _g = self.picking.lock().await;
         if !self.inner.getter.ready() {
             return Ok(0);
         }
@@ -1016,13 +1109,17 @@ impl Bring {
         self.wake.notify_one();
     }
 
-    /// One look: pick what's waiting, then catch up with the library.
+    /// One look: pick what's waiting, catch up with the library, and send
+    /// what an earlier send didn't get to the server.
     pub async fn pass(&self) {
         if let Err(e) = self.pick_pending().await {
             tracing::warn!("bring over: picking: {e}");
         }
         if let Err(e) = self.catch_up().await {
             tracing::warn!("bring over: catching up: {e}");
+        }
+        if let Err(e) = self.send_unsent().await {
+            tracing::warn!("bring over: sending again: {e}");
         }
     }
 }
