@@ -2860,6 +2860,9 @@ export interface LidarrStatus {
   /** Signed in as someone who doesn't own the Plex server: Lidarr isn't
    * used from this device at all. */
   notOwner?: boolean;
+  /** Lidarr is set up at home (a Bridge is linked, or its address came from
+   * another device) but nothing reaches it from here now. */
+  homeQuiet?: boolean;
   /** The address came from another device with a host the key wasn't
    * entered for, so the key isn't sent there: the words to show. */
   moved?: string | null;
@@ -4679,6 +4682,8 @@ export interface EventMap {
   "library://changed": null;
   /** A tapped song moved on (lidarr_tap). */
   "lidarr://tap": Tap;
+  /** A setup check that started by itself finished: ask lidarr_status again. */
+  "lidarr://changed": null;
   "asks://mine": Record<string, never>;
   "asks://incoming": IncomingAsk[];
   /** Listening diary entries changed on this device. */

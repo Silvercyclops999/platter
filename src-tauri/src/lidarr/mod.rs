@@ -233,6 +233,11 @@ pub struct LidarrStatus {
     /// from here at all.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub not_owner: bool,
+    /// A Bridge is linked but isn't answering, and Lidarr isn't reached any
+    /// other way from here: getting music waits until home can be reached
+    /// (nothing to set up).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub home_quiet: bool,
 }
 
 impl LidarrStatus {
@@ -242,6 +247,13 @@ impl LidarrStatus {
         !self.not_owner && (((self.url_set || self.away_set) && self.has_key) || self.home_side)
     }
 }
+
+/// How long after a setup check that started by itself and didn't finish
+/// another is tried (seconds).
+pub const AUTO_CHECK_AGAIN_S: i64 = 15 * 60;
+/// How long after one that ran and didn't pass (seconds): it needs a change
+/// in Lidarr first, and each check asks Lidarr and Plex a lot.
+pub const AUTO_RECHECK_FAILED_S: i64 = 24 * 3600;
 
 /// When nothing answers for Lidarr away from home.
 pub const HOME_SIDE_OFF: &str = "Lidarr isn't reachable away from home. Turn on a computer at home or add the Bridge.";
@@ -269,6 +281,8 @@ pub struct Lidarr {
     hosts: Arc<parking_lot::RwLock<Option<Arc<dyn upgrade::Hosts>>>>,
     /// Platter Bridge: bridge mode, and the route through a paired Bridge.
     home: Arc<homeside::Hooks>,
+    /// When the last setup check started by itself began (unix seconds).
+    auto_check: Arc<parking_lot::Mutex<Option<i64>>>,
 }
 
 /// The address as a key for stored confirmations (and, from the home
@@ -320,7 +334,7 @@ pub fn parse_headers(text: &str) -> AppResult<Vec<(String, String)>> {
 
 impl Lidarr {
     pub fn new(deps: LidarrDeps) -> Self {
-        Self { inner: Arc::new(deps), lock: Arc::new(tokio::sync::Mutex::new(())), modes_cache: Default::default(), proposals: Default::default(), announcer: Default::default(), hosts: Default::default(), home: Default::default() }
+        Self { inner: Arc::new(deps), lock: Arc::new(tokio::sync::Mutex::new(())), modes_cache: Default::default(), proposals: Default::default(), announcer: Default::default(), hosts: Default::default(), home: Default::default(), auto_check: Default::default() }
     }
 
     /// (home, away) addresses from Settings; empty when not set.
@@ -355,6 +369,7 @@ impl Lidarr {
             home_side,
             header_names: self.headers().into_iter().map(|(n, _)| n).collect(),
             unencrypted: [home, away].into_iter().filter(|u| unencrypted(u)).collect(),
+            home_quiet: owner && !direct && !home_side && self.bridge_linked(),
             moved,
             not_owner: !owner,
         }
@@ -550,6 +565,31 @@ impl Lidarr {
     /// comparisons are settled (or the budget runs out).
     pub async fn check(&self) -> AppResult<CheckReport> {
         Ok(self.check_full().await?.report)
+    }
+
+    /// Lidarr can be asked from here but no setup check has passed for it
+    /// (a phone that reaches it only through the Bridge never opens that
+    /// part of Settings). With `st` from [`Self::status`] just now: true
+    /// when a check should start by itself now, and
+    /// it's counted as started. One that didn't finish is tried again after
+    /// [`AUTO_CHECK_AGAIN_S`]; one that ran and didn't pass, after a day.
+    pub fn claim_auto_check(&self, st: &LidarrStatus) -> bool {
+        if self.bridge_mode() {
+            return false;
+        }
+        if st.ready || !st.usable() {
+            return false;
+        }
+        let now = (self.inner.clock)();
+        if self.last_check().is_some_and(|l| now - l.checked_at < AUTO_RECHECK_FAILED_S) {
+            return false;
+        }
+        let mut at = self.auto_check.lock();
+        if at.is_some_and(|t| now - t < AUTO_CHECK_AGAIN_S) {
+            return false;
+        }
+        *at = Some(now);
+        true
     }
 
     /// The last check's outcome on this device, when it was for the

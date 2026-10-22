@@ -222,3 +222,48 @@ fn an_address_that_arrives_by_sync_never_becomes_the_keys_host() {
     crate::settings::save(&r.db, &s).unwrap();
     assert!(!crate::keyhost::trusted(&r.db, super::KEY_ACCOUNT, &s.lidarr_url, &[&s.lidarr_url]));
 }
+
+#[test]
+fn a_phone_reaching_lidarr_only_through_the_bridge_checks_it_by_itself() {
+    let r = rig();
+    r.lidarr.set_key(None).unwrap();
+    let mut s = crate::settings::load(&r.db);
+    s.lidarr_url = String::new();
+    crate::settings::save(&r.db, &s).unwrap();
+    let (_, br) = sides(&r.lidarr);
+    let claim = || r.lidarr.claim_auto_check(&r.lidarr.status());
+    // No Bridge answering: nothing to check.
+    assert!(!claim());
+    assert!(!r.lidarr.status().home_quiet, "no Bridge at all: nothing to wait for");
+    // A Bridge linked but quiet (the relay down, say): getting music waits for home.
+    r.lidarr.set_bridge_linked(Arc::new(|| true));
+    assert!(r.lidarr.status().home_quiet);
+    assert!(!claim());
+    // The Bridge answers and no check has passed: one starts, once.
+    br.store(true, Ordering::SeqCst);
+    assert!(!r.lidarr.status().home_quiet);
+    assert!(claim());
+    assert!(!claim(), "not twice while the first runs");
+    // It didn't finish: tried again a while later.
+    *r.now.lock() += super::AUTO_CHECK_AGAIN_S;
+    assert!(claim());
+    // It ran and didn't pass: not again for a day.
+    let failed = super::LastCheck { passed: false, managed_ok: Some(false), checked_at: *r.now.lock(), url: "homeside".into(), roots: vec![] };
+    r.db.write(|c| crate::db::store::kv_set(c, "lidarr.lastCheck", &serde_json::to_string(&failed).unwrap())).unwrap();
+    *r.now.lock() += super::AUTO_CHECK_AGAIN_S;
+    assert!(!claim());
+    *r.now.lock() += super::AUTO_RECHECK_FAILED_S;
+    assert!(claim());
+    // Passed: ready, and no more checks by itself.
+    let passed = super::LastCheck { passed: true, managed_ok: Some(true), checked_at: *r.now.lock(), ..failed };
+    r.db.write(|c| crate::db::store::kv_set(c, "lidarr.lastCheck", &serde_json::to_string(&passed).unwrap())).unwrap();
+    *r.now.lock() += super::AUTO_RECHECK_FAILED_S;
+    assert!(r.lidarr.status().ready);
+    assert!(!claim());
+    // Someone the server is shared with never asks Lidarr.
+    let other = rig();
+    other.lidarr.set_owner(false);
+    let (_, br) = sides(&other.lidarr);
+    br.store(true, Ordering::SeqCst);
+    assert!(!other.lidarr.claim_auto_check(&other.lidarr.status()));
+}

@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { backend } from "../lib/backend";
-import type { LidarrMissing, LidarrRequestState } from "../lib/types";
+import type { LidarrMissing, LidarrRequestState, LidarrStatus } from "../lib/types";
 import { useCanRequest } from "../stores/asks";
 import { useSettings } from "../stores/settings";
 
@@ -49,33 +49,67 @@ export function useMissingReleases(artistId: string, artist: string | undefined)
 }
 
 /**
- * True when Request should show: Lidarr is reachable (its own addresses
- * with a key, or through a home-side computer or the Bridge) and its last
- * setup check passed. The core decides; every request still runs the check
- * again first. Asked again when an address changes or a Bridge comes or goes.
+ * Lidarr's state here, asked again when an address changes, a Bridge comes
+ * or goes, or a setup check that started by itself finishes. Null until the
+ * first answer.
  */
-export function useLidarrReady(): boolean {
+export function useLidarrStatus(): LidarrStatus | null {
   const home = useSettings((s) => s.settings?.lidarrUrl);
   const away = useSettings((s) => s.settings?.lidarrAwayUrl);
-  const [ready, setReady] = useState(false);
+  const [status, setStatus] = useState<LidarrStatus | null>(null);
   const [version, setVersion] = useState(0);
   useEffect(() => {
-    // A Bridge paired, or Plex answering at last (who owns the server is known then).
+    // A Bridge paired, Plex answering at last (who owns the server is known
+    // then), or the setup check the core ran by itself.
     const again = () => setVersion((v) => v + 1);
-    const offs = [backend.listen("bridge://changed", again), backend.listen("auth://changed", again)];
+    const offs = [backend.listen("bridge://changed", again), backend.listen("auth://changed", again), backend.listen("lidarr://changed", again)];
     return () => offs.forEach((un) => void un.then((f) => f()));
   }, []);
   useEffect(() => {
     let alive = true;
     backend.lidarrStatus().then(
-      (s) => alive && setReady(s.ready),
-      () => alive && setReady(false),
+      (s) => alive && setStatus(s),
+      () => alive && setStatus(null),
     );
     return () => {
       alive = false;
     };
   }, [home, away, version]);
-  return ready;
+  return status;
+}
+
+/**
+ * True when Request should show: Lidarr is reachable (its own addresses
+ * with a key, or through a home-side computer or the Bridge) and its last
+ * setup check passed. The core decides; every request still runs the check
+ * again first.
+ */
+export function useLidarrReady(): boolean {
+  return useLidarrStatus()?.ready ?? false;
+}
+
+/** Whether Lidarr can be asked from here at all (set up here, or a Bridge or a computer at home answers). */
+export function lidarrReachable(s: LidarrStatus): boolean {
+  return !s.notOwner && (((s.urlSet || s.awaySet) && s.hasKey) || !!s.homeSide);
+}
+
+/** Said where Get would be while Lidarr is set up at home but nothing reaches it from here. */
+export const HOME_UNREACHABLE = "Getting music is paused: Platter can't reach your home right now. It comes back by itself.";
+
+/**
+ * The line a page shows where Get would be, or null: none while Lidarr is
+ * ready or reachable (its check runs by itself, and Get shows when it
+ * passes); a pause while home can't be reached; `setUp` only when there's
+ * no Lidarr anywhere.
+ */
+export function lidarrNote(s: LidarrStatus | null, setUp: string): string | null {
+  if (!s || s.ready || lidarrReachable(s)) return null;
+  return s.homeQuiet ? HOME_UNREACHABLE : setUp;
+}
+
+/** [`lidarrNote`] for a page that asks for nothing else. */
+export function useLidarrNote(setUp: string): string | null {
+  return lidarrNote(useLidarrStatus(), setUp);
 }
 
 /**

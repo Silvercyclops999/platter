@@ -19,7 +19,7 @@ import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { toast, useToasts } from "../stores/toasts";
 import { RequestDialog, StoreLinks, errText, requestInput } from "./catalogue";
-import { useLidarrReady } from "./lidarrShared";
+import { lidarrNote, useLidarrStatus } from "./lidarrShared";
 import { useIsGuest } from "../stores/asks";
 import "./catalogue.css";
 import "./shelf.css";
@@ -195,7 +195,9 @@ export function ShelfPage() {
   const owned = usePhysical((s) => s.owned);
   const discogs = usePhysical((s) => s.discogs);
   const stats = useShelfStats();
-  const lidarrReady = useLidarrReady();
+  const lidarr = useLidarrStatus();
+  const lidarrReady = !!lidarr?.ready;
+  const lidarrSays = lidarrNote(lidarr, "Set up Lidarr in Settings to request them.");
   const guest = useIsGuest();
   const [asking, setAsking] = useState<LidarrRequestInput | null>(null);
   useEffect(() => {
@@ -251,7 +253,7 @@ export function ShelfPage() {
               <ShelfOnlyRow key={u.releaseId} item={u} lidarrReady={lidarrReady} onRequest={(i) => void request(i)} />
             ))}
           </ul>
-          {!lidarrReady && !guest && <p className="cat-actions__note">Set up Lidarr in Settings to request them.</p>}
+          {!lidarrReady && lidarrSays && !guest && <p className="cat-actions__note">{lidarrSays}</p>}
           <p className="shelf-credit">{DISCOGS_CREDIT}</p>
         </section>
       )}

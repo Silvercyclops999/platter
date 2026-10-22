@@ -12,10 +12,33 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> AppResult<T> + Send + '
     tokio::task::spawn_blocking(f).await.map_err(|e| AppError::Internal(e.to_string()))?
 }
 
+/// Sent when a setup check that started by itself finishes, so Get shows.
+pub const EVENT_CHANGED: &str = "lidarr://changed";
+
+/// Lidarr's state here. When it can be reached (through the Bridge, say)
+/// but no setup check has passed, one starts in the background and
+/// `lidarr://changed` follows when it's done.
 #[tauri::command]
-pub async fn lidarr_status(lidarr: State<'_, Lidarr>) -> AppResult<LidarrStatus> {
+pub async fn lidarr_status(app: tauri::AppHandle, lidarr: State<'_, Lidarr>) -> AppResult<LidarrStatus> {
     let l = lidarr.inner().clone();
-    blocking(move || Ok(l.status())).await
+    let (st, start) = blocking(move || {
+        let st = l.status();
+        let start = l.claim_auto_check(&st);
+        Ok((st, start))
+    })
+    .await?;
+    if start {
+        let l = lidarr.inner().clone();
+        tauri::async_runtime::spawn(async move {
+            match l.check().await {
+                Ok(r) => tracing::info!(passed = r.passed, "Lidarr's setup check ran by itself"),
+                Err(e) => tracing::info!("Lidarr's setup check by itself didn't finish: {e}"),
+            }
+            use tauri::Emitter;
+            let _ = app.emit(EVENT_CHANGED, ());
+        });
+    }
+    Ok(st)
 }
 
 /// Save (or with null remove) Lidarr's API key in the OS keychain.
