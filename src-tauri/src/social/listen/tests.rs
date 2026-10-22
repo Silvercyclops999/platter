@@ -503,6 +503,12 @@ fn the_hourly_count_says_what_went() {
     sent.insert("entries", 12);
     sent.insert("other", 5);
     assert_eq!(relay::meter_line(&sent, 4, 1), "23 messages in the last hour (entries 12, syncHello 6, other 5), 4 held back to stay under the limit, 1 turned away");
+    let mut by = std::collections::BTreeMap::new();
+    assert_eq!(relay::relays_line(&by), "");
+    by.insert("ntfy.envs.net".to_string(), (12, 0));
+    by.insert("ntfy.sh".to_string(), (0, 3));
+    assert_eq!(relay::relays_line(&by), "; by relay: ntfy.envs.net 12, ntfy.sh 0 (3 turned away)");
+    assert_eq!(relay::host("https://ntfy.envs.net/"), "ntfy.envs.net");
 }
 
 #[tokio::test]

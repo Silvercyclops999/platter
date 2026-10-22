@@ -144,6 +144,8 @@ async fn a_link_on_ntfy_sh_also_uses_the_backups_and_one_of_its_own_doesnt() {
     assert_eq!(all.len(), 1 + crate::social::listen::BACKUP_RELAYS.len());
     assert!(all.iter().all(|r| r.starts_with("https://")));
     assert_eq!(wire.relays_for("https://ntfy.example.org"), vec!["https://ntfy.example.org".to_string()]);
+    // Kept with a slash on the end, it's still ntfy.sh.
+    assert_eq!(wire.relays_for("https://ntfy.sh/").len(), all.len());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

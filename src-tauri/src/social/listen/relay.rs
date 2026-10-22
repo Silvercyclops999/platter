@@ -212,15 +212,17 @@ impl Allowance {
 static PACE: LazyLock<parking_lot::Mutex<HashMap<String, (Cool, Allowance)>>> = LazyLock::new(Default::default);
 
 /// What this device published in the hour so far, by kind, for the log.
+#[derive(Default)]
 struct Meter {
-    since: Instant,
+    since: Option<Instant>,
     sent: HashMap<&'static str, u32>,
     held: u32,
     turned_away: u32,
+    /// Per relay host: sent there, turned away there.
+    relays: std::collections::BTreeMap<String, (u32, u32)>,
 }
 
-static METER: LazyLock<parking_lot::Mutex<Meter>> =
-    LazyLock::new(|| parking_lot::Mutex::new(Meter { since: Instant::now(), sent: HashMap::new(), held: 0, turned_away: 0 }));
+static METER: LazyLock<parking_lot::Mutex<Meter>> = LazyLock::new(Default::default);
 
 tokio::task_local! {
     /// What's being published, for the hourly count (set with [`as_kind`]).
@@ -248,18 +250,52 @@ pub enum Counted {
 /// Count messages for the hourly line in the log ("relay: 23 messages in
 /// the last hour (syncHello 6, entries 12, other 5)").
 pub fn note(kind: &'static str, n: usize, what: Counted) {
+    note_at(None, kind, n, what);
+}
+
+/// [`note`] for messages that went to (or were turned away by) one relay,
+/// so the hourly line also says how each relay is doing.
+fn note_at(host: Option<&str>, kind: &'static str, n: usize, what: Counted) {
     let mut m = METER.lock();
+    let since = *m.since.get_or_insert_with(Instant::now);
     let n = n as u32;
     match what {
         Counted::Sent => *m.sent.entry(kind).or_default() += n,
         Counted::Held => m.held += n,
         Counted::TurnedAway => m.turned_away += n,
     }
-    if m.since.elapsed() >= Duration::from_secs(3600) {
-        let line = meter_line(&m.sent, m.held, m.turned_away);
-        tracing::info!("relay: {line}");
-        *m = Meter { since: Instant::now(), sent: HashMap::new(), held: 0, turned_away: 0 };
+    if let Some(h) = host {
+        let r = m.relays.entry(h.to_string()).or_default();
+        match what {
+            Counted::Sent => r.0 += n,
+            Counted::TurnedAway => r.1 += n,
+            Counted::Held => {}
+        }
     }
+    if since.elapsed() >= Duration::from_secs(3600) {
+        let line = meter_line(&m.sent, m.held, m.turned_away);
+        let by = relays_line(&m.relays);
+        tracing::info!("relay: {line}{by}");
+        *m = Meter { since: Some(Instant::now()), ..Default::default() };
+    }
+}
+
+/// How each relay did in the hour: "; by relay: ntfy.envs.net 12,
+/// ntfy.sh 0 (3 turned away)". Empty with no relay counted.
+pub fn relays_line(relays: &std::collections::BTreeMap<String, (u32, u32)>) -> String {
+    if relays.is_empty() {
+        return String::new();
+    }
+    let parts: Vec<String> = relays
+        .iter()
+        .map(|(h, (sent, away))| if *away > 0 { format!("{h} {sent} ({away} turned away)") } else { format!("{h} {sent}") })
+        .collect();
+    format!("; by relay: {}", parts.join(", "))
+}
+
+/// A relay's host name for the log (never the topic).
+pub fn host(base: &str) -> &str {
+    base.split("://").nth(1).unwrap_or(base).split('/').next().unwrap_or(base)
 }
 
 /// The hourly line: the total, then each kind, most first.
@@ -327,13 +363,13 @@ impl Relay for NtfyRelay {
             Ok(()) => {
                 cool.went();
                 drop(pace);
-                note(kind_now(), 1, Counted::Sent);
+                note_at(Some(host(&self.base)), kind_now(), 1, Counted::Sent);
             }
             Err(RelayError::Limited) => {
                 cool.turned_away(Instant::now());
                 drop(pace);
-                tracing::info!("relay: it's turning messages away; nothing more goes to it for a while");
-                note(kind_now(), 1, Counted::TurnedAway);
+                tracing::info!("relay {}: it's turning messages away; nothing more goes to it for a while (any other relays carry on)", host(&self.base));
+                note_at(Some(host(&self.base)), kind_now(), 1, Counted::TurnedAway);
             }
             Err(_) => {}
         }

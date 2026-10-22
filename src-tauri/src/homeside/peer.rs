@@ -38,6 +38,10 @@ pub struct Wire {
     backups: Vec<(String, Vec<String>)>,
     /// Relays that couldn't be reached lately, by address.
     down: DownMap,
+    /// Relays a listener has opened on, for one "listening" line each.
+    heard: Mutex<std::collections::HashSet<String>>,
+    /// The relays in use were said in the log.
+    announced: std::sync::atomic::AtomicBool,
     /// Each relay's queue of messages, by link and relay.
     queues: Mutex<HashMap<(String, String), mpsc::UnboundedSender<Job>>>,
 }
@@ -48,7 +52,7 @@ impl Wire {
             crate::social::listen::DEFAULT_RELAY.to_string(),
             crate::social::listen::BACKUP_RELAYS.iter().map(|b| b.to_string()).collect(),
         )];
-        Self { links, relays, clock, counters: Mutex::default(), parts: Mutex::default(), sending: Mutex::default(), backups, down: Arc::default(), queues: Mutex::default() }
+        Self { links, relays, clock, counters: Mutex::default(), parts: Mutex::default(), sending: Mutex::default(), backups, down: Arc::default(), heard: Mutex::default(), announced: Default::default(), queues: Mutex::default() }
     }
 
     pub fn now_ms(&self) -> u64 {
@@ -68,7 +72,8 @@ impl Wire {
     /// ntfy.sh. A server of the user's own is used alone.
     pub fn relays_for(&self, relay: &str) -> Vec<String> {
         let mut all = vec![relay.to_string()];
-        if let Some((_, more)) = self.backups.iter().find(|(p, _)| p == relay) {
+        let same = |p: &str| p.trim_end_matches('/') == relay.trim_end_matches('/');
+        if let Some((_, more)) = self.backups.iter().find(|(p, _)| same(p)) {
             all.extend(more.iter().cloned());
         }
         all
@@ -344,6 +349,10 @@ pub enum Incoming {
 pub async fn listen(wire: Arc<Wire>, link: Link, tx: mpsc::Sender<Incoming>, stop: watch::Receiver<bool>) {
     let open = Arc::new(AtomicUsize::new(0));
     let all = wire.relays_for(&link.relay);
+    if !wire.announced.swap(true, Ordering::SeqCst) {
+        let hosts: Vec<&str> = all.iter().map(|b| relay::host(b)).collect();
+        tracing::info!("relay: links use {}", hosts.join(", "));
+    }
     futures::future::join_all(all.into_iter().map(|base| listen_on(wire.clone(), link.clone(), base, open.clone(), tx.clone(), stop.clone()))).await;
 }
 
@@ -378,6 +387,9 @@ async fn listen_on(wire: Arc<Wire>, link: Link, base: String, open: Arc<AtomicUs
                         ev = rx.recv() => match ev {
                             Some(RelayEvent::Open) => {
                                 wait = Duration::from_secs(2);
+                                if wire.heard.lock().insert(base.clone()) {
+                                    tracing::info!("relay {}: listening", relay::host(&base));
+                                }
                                 // A backup never read: from now on, not the last while again.
                                 if !main {
                                     let now = (wire.now_ms() / 1000).to_string();
@@ -416,7 +428,7 @@ async fn listen_on(wire: Arc<Wire>, link: Link, base: String, open: Arc<AtomicUs
                 }
             }
             Err(e) => {
-                tracing::info!("Bridge link ({}): {}", host(&base), relay_error(e));
+                tracing::info!("Bridge link ({}): {}", relay::host(&base), relay_error(e));
                 if e == RelayError::Limited {
                     wait = wait.max(Duration::from_secs(60));
                 }
@@ -431,9 +443,4 @@ async fn listen_on(wire: Arc<Wire>, link: Link, base: String, open: Arc<AtomicUs
         }
         wait = (wait * 2).min(Duration::from_secs(300));
     }
-}
-
-/// A relay's host name for the log (never the topic).
-fn host(base: &str) -> &str {
-    base.split("://").nth(1).unwrap_or(base).split('/').next().unwrap_or(base)
 }
