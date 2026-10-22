@@ -1936,6 +1936,7 @@ export class MockBackend implements Backend {
   playlistSaveFile(title: string, trackIds: string[]) {
     return this.delay(() => {
       if (!trackIds.length) throw { kind: "invalid", message: "This playlist has no songs to save." };
+      if (trackIds.length > 20_000) throw { kind: "invalid", message: "A playlist file can hold up to 20000 songs." };
       if (this.exportCancels) return null;
       this.playlistFiles.push({ title, trackIds });
       return `${title.replace(/[<>:"/\\|?*]/g, "_").trim() || "Playlist"}.m3u8`;

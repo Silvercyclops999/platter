@@ -477,7 +477,7 @@ describe("smart playlists", () => {
     expectNoReorder();
     await user.click(screen.getByRole("button", { name: "More options for Most Played" }));
     const menu = await screen.findByRole("menu");
-    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Add to queue", "Edit rules", "Turn on mix", "Duplicate", "Bookmark", "Download", "Share", "Pin to sidebar"]);
+    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Add to queue", "Edit rules", "Turn on mix", "Duplicate", "Save as a file", "Bookmark", "Download", "Share", "Pin to sidebar"]);
     await user.keyboard("{Escape}");
     fireEvent.contextMenu(body(screen.getAllByRole("row"))[0], { clientX: 5, clientY: 5 });
     const rowMenu = await screen.findByRole("menu");

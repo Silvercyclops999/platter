@@ -438,11 +438,13 @@ there (setting `playlistAskDuplicates`).
 
 `playlist_save_file` opens a save dialog (suggested name from `title`, made
 safe for file names) and writes the songs in the order given: a playlist
-file (`.m3u8`) with each song's path on the server when the library knows it
-and "Artist - Title" when it doesn't, or a text list of "Artist - Title"
-lines when the picked name ends in `.txt`. Up to 20,000 songs; none is an
-`invalid` error. A failed write is an `io` error that says why. Nothing is
-uploaded.
+file (`.m3u8`) with each song's full path on the server when the library
+knows one and "Artist - Title" when it doesn't (a path relative to a library
+folder counts as unknown, since it would point next to the saved file), or a
+text list of "Artist - Title" lines when the picked name ends in `.txt`. Up
+to 20,000 songs; none is an `invalid` error, and so is a list whose songs
+have all left the library. A failed write leaves any file it was replacing
+as it was, and is an `io` error that says why. Nothing is uploaded.
 
 ## Edit in Plex
 | Command | Args | Returns |

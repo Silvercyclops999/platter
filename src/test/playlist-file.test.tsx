@@ -11,7 +11,7 @@ import { Toaster } from "../components/Toast";
 import { backend } from "../lib/backend";
 import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS } from "../lib/types";
-import { PlaylistPage } from "../pages/PlaylistPage";
+import { PlaylistPage, sortRows } from "../pages/PlaylistPage";
 import { useRouter } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
@@ -33,9 +33,11 @@ afterEach(() => {
   mock.exportCancels = false;
 });
 
-async function openMenu(title: string) {
+async function openMenu(title: string, sortBy?: string) {
   const user = userEvent.setup();
   const ids = mock.fx.tracks.slice(0, 3).map((t) => t.id);
+  // Out of title order, so sorting moves them.
+  if (sortBy) ids.reverse();
   const pl = await backend.playlistCreate(title, ids);
   render(
     <>
@@ -44,6 +46,10 @@ async function openMenu(title: string) {
       <Toaster />
     </>,
   );
+  if (sortBy) {
+    await user.click(await screen.findByRole("button", { name: "Sort songs: Custom order" }));
+    await user.click(within(await screen.findByRole("menu")).getByRole("menuitemradio", { name: sortBy }));
+  }
   await user.click(await screen.findByRole("button", { name: `More options for ${title}` }));
   const menu = await screen.findByRole("menu");
   return { user, ids, item: within(menu).getByRole("menuitem", { name: "Save as a file" }) };
@@ -55,6 +61,16 @@ describe("save a playlist as a file", () => {
     await user.click(item);
     await waitFor(() => expect(toastText()).toContain("Saved Road trip.m3u8"));
     expect(mock.playlistFiles).toEqual([{ title: "Road trip", trackIds: ids }]);
+  });
+
+  it("saves in the order shown when the page is sorted", async () => {
+    const { user, ids, item } = await openMenu("Sorted", "Title");
+    await user.click(item);
+    await waitFor(() => expect(mock.playlistFiles).toHaveLength(1));
+    const rows = ids.map((id, i) => ({ track: mock.fx.tracks.find((t) => t.id === id)!, itemId: String(i) }));
+    const sorted = sortRows(rows, "title").map((r) => r.track.id);
+    expect(sorted).not.toEqual(ids);
+    expect(mock.playlistFiles[0].trackIds).toEqual(sorted);
   });
 
   it("a cancelled save dialog says nothing", async () => {
