@@ -19,12 +19,14 @@ import { SongSwipeUnder, useSongSwipe } from "../rowSwipe";
 /**
  * The bar over a page that was opened from another: Back, and once the page
  * has scrolled past its header (`after` px) a solid bar with the page's
- * title, so nothing scrolls under a floating button.
+ * title, so nothing scrolls under a floating button. With `cover` the bar
+ * goes solid (without the title) as soon as anything scrolls under it.
  */
-export function BackBar({ title, after = 160, right }: { title?: string; after?: number; right?: ReactNode }) {
+export function BackBar({ title, after = 160, right, cover = false }: { title?: string; after?: number; right?: ReactNode; cover?: boolean }) {
   const canBack = useCanGoBack();
   const bar = useRef<HTMLDivElement>(null);
   const [titled, setTitled] = useState(false);
+  const [under, setUnder] = useState(false);
   useEffect(() => {
     const page = bar.current?.closest(".ph-page");
     if (!page) return;
@@ -32,6 +34,7 @@ export function BackBar({ title, after = 160, right }: { title?: string; after?:
     const check = () => {
       frame = 0;
       setTitled(page.scrollTop > after);
+      setUnder(page.scrollTop > 2);
       // Until something scrolls under the clock, the status bar shows the page itself (phone.css).
       page.classList.toggle("is-scrolled", page.scrollTop > 2);
     };
@@ -46,7 +49,7 @@ export function BackBar({ title, after = 160, right }: { title?: string; after?:
     };
   }, [after]);
   return (
-    <div ref={bar} className={`ph-backbar ${titled ? "is-titled" : ""}`}>
+    <div ref={bar} className={`ph-backbar ${titled ? "is-titled" : ""} ${cover && under ? "is-covering" : ""}`}>
       {canBack ? (
         <button type="button" className="ph-icon-btn ph-backbar__back" aria-label="Back" onClick={() => useRouter.getState().back()}>
           <ChevronLeft size={26} aria-hidden="true" />
