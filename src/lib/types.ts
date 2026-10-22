@@ -1457,6 +1457,8 @@ export interface Settings {
   requestGroupNotices: boolean;
   /** A tapped song's copy is the fastest good one (usenet first, well seeded torrents next). */
   lidarrPreferFastest: boolean;
+  /** A download Platter asked for that Lidarr couldn't import is cleared, that copy blocklisted, and another searched for. */
+  lidarrClearFailed: boolean;
   /** A tapped song plays from the finished download, before Lidarr moves it in, when this device can open it. */
   lidarrPlayArriving: boolean;
   /** The kinds "Get albums" offers ticked. */
@@ -2021,6 +2023,7 @@ export const DEFAULT_SETTINGS: Settings = {
   requestWeeklyLimit: 20,
   requestGroupNotices: true,
   lidarrPreferFastest: true,
+  lidarrClearFailed: true,
   lidarrPlayArriving: true,
   getAlbumsKinds: ["studio"],
   discographyChip: "popular",

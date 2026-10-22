@@ -306,10 +306,10 @@ export class MockLidarr {
   }
 
   /** Test hook: what Lidarr is doing with a request now. */
-  advance(releaseGroupId: string, state: LidarrRequestState, progress: number | null = null) {
+  advance(releaseGroupId: string, state: LidarrRequestState, progress: number | null = null, message: string | null = null) {
     this.requests = this.requests.map((r) =>
       r.releaseGroupId === releaseGroupId
-        ? { ...r, state, progress, message: state === "notFound" ? "Nothing turned up on your indexers yet. Search again, or try another edition." : null }
+        ? { ...r, state, progress, message: message ?? (state === "notFound" ? "Nothing turned up on your indexers yet. Search again, or try another edition." : null) }
         : r,
     );
   }

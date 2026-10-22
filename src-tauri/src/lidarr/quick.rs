@@ -18,7 +18,18 @@ pub const NO_COPY: &str = "Your indexers have no copy of this yet. Platter will 
 /// this album rather than a whole discography. A torrent nobody seeds never
 /// finishes, so it's left out too.
 fn usable(r: &Release) -> bool {
-    r.approved && !r.rejected && r.download_allowed && !r.discography && !(is_torrent(r) && r.seeders == Some(0))
+    r.approved && !r.rejected && r.download_allowed && !r.discography && !(is_torrent(r) && r.seeders == Some(0)) && !one_file_image(&r.title, &[&r.album_title, &r.artist_name])
+}
+
+/// A whole CD as one file, by the release's name ("image", "img"). Lidarr
+/// approves these and then can't import them. A cue sheet alone says
+/// nothing (split tracks often come with one), and words in the album's or
+/// artist's own name don't count. Most such releases don't say so; those
+/// are cleared after the import fails.
+pub fn one_file_image(title: &str, names: &[&str]) -> bool {
+    let words = |s: &str| s.split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_ascii_lowercase).collect::<Vec<_>>();
+    let own: Vec<String> = names.iter().flat_map(|n| words(n)).collect();
+    words(title).iter().any(|w| ["image", "img", "imgcue", "cueimg"].contains(&w.as_str()) && !own.contains(w))
 }
 
 fn is_torrent(r: &Release) -> bool {
@@ -96,6 +107,19 @@ impl Lidarr {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn one_file_cd_images_are_told_by_their_names() {
+        for t in ["Artist-Album-CD-FLAC-IMAGE-2021", "Artist - Album [img+cue]", "Artist_Album_FLAC_img", "Artist - Album (2021) [FLAC image+cue]"] {
+            assert!(super::one_file_image(t, &["Album", "Artist"]), "{t}");
+        }
+        for t in ["Northlight-Second_Wind-CD-FLAC-2021-GRP", "Artist - Album (2021) [FLAC+CUE]", "Artist - Album [tracks+cue]", "Artist - Imagine (2021) [FLAC]", "Cuesta - Album"] {
+            assert!(!super::one_file_image(t, &["Album", "Artist"]), "{t}");
+        }
+        // The album's own name isn't a sign.
+        assert!(!super::one_file_image("Northlight - Image (2021) [FLAC]", &["Image", "Northlight"]));
+        assert!(super::one_file_image("Northlight - Image (2021) [FLAC] [img]", &["Image", "Northlight"]));
+    }
+
     use super::*;
     use crate::lidarr::api::{ProfileItem, QualityRef, ReleaseQuality};
 

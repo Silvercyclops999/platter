@@ -237,6 +237,17 @@ pub async fn vet(w: &RelayedWrite, get: &dyn LidarrGet, staging: &str) -> AppRes
             let ok = StagingFiles::check(&files, staging).map_err(|e| AppError::Invalid(format!("{e} The Bridge didn't send it.")))?;
             rebuilt(json!({"trackFileIds": ok.ids()}))
         }
+        ("DELETE", p) if super::write::clear_failed_id(p).is_some() => {
+            // Only a download whose import failed, as Lidarr has it now.
+            let id = super::write::clear_failed_id(p).unwrap_or(0);
+            let page: Value = fetch(get, "/queue", &[("page", "1"), ("pageSize", "500")]).await?;
+            let item = page["records"].as_array().into_iter().flatten().find(|q| q["id"].as_i64() == Some(id));
+            match item {
+                Some(q) if q["trackedDownloadState"].as_str().is_some_and(|s| s.eq_ignore_ascii_case("importFailed")) => Ok(w.clone()),
+                Some(_) => Err(refuse("Platter only ever clears a download Lidarr couldn't import.")),
+                None => Err(refuse("Lidarr's queue doesn't have that download any more.")),
+            }
+        }
         ("DELETE", p) if number_after(p, "/importlistexclusion/").is_some() => Ok(w.clone()),
         ("DELETE", p) if number_after(p, "/rootfolder/").is_some() => {
             let id = number_after(p, "/rootfolder/").unwrap_or(0);
@@ -429,7 +440,21 @@ mod tests {
         m.insert("/trackfile/12".into(), json!({"id": 12, "path": "/data/media/Music/A/B/01.flac"}));
         m.insert("/trackfile".into(), json!([{"id": 0, "path": "/data/media/Music/Northlight/First/03.flac"}]));
         m.insert("/config/naming".into(), json!({"id": 1, "renameTracks": true, "standardTrackFormat": "{Track Title}"}));
+        m.insert("/queue".into(), json!({"totalRecords": 2, "records": [
+            {"id": 77, "albumId": 9, "trackedDownloadState": "importFailed"},
+            {"id": 78, "albumId": 10, "trackedDownloadState": "downloading"}]}));
         Fake(m)
+    }
+
+    #[tokio::test]
+    async fn only_a_download_lidarr_couldnt_import_is_cleared() {
+        let q = |id: i64| format!("/queue/{id}?removeFromClient=true&blocklist=true&skipRedownload=true");
+        assert!(vetted("DELETE", &q(77), Value::Null).await.is_ok());
+        assert!(vetted("DELETE", &q(78), Value::Null).await.is_err(), "still downloading");
+        assert!(vetted("DELETE", &q(79), Value::Null).await.is_err(), "not in the queue");
+        assert!(RelayedWrite::check("DELETE", "/queue/77", "").is_err(), "only with the options Platter uses");
+        assert!(RelayedWrite::check("DELETE", "/queue/77?removeFromClient=true&blocklist=false&skipRedownload=true", "").is_err());
+        assert!(RelayedWrite::check("DELETE", "/queue/bulk?removeFromClient=true&blocklist=true&skipRedownload=true", "").is_err());
     }
 
     async fn vetted(m: &str, p: &str, b: Value) -> AppResult<Value> {

@@ -16,6 +16,7 @@ pub mod lookup;
 pub mod homeside;
 pub mod conventions;
 pub mod editions;
+pub mod failed;
 pub mod grabbed;
 pub mod mbpick;
 pub mod modes;
@@ -302,6 +303,8 @@ pub struct Lidarr {
     home: Arc<homeside::Hooks>,
     /// A setup check started by itself is running.
     auto_check: Arc<std::sync::atomic::AtomicBool>,
+    /// Gets that failed or started over since the follow last told them.
+    notices: Arc<parking_lot::Mutex<Vec<(String, String)>>>,
 }
 
 /// The address as a key for stored confirmations (and, from the home
@@ -353,7 +356,7 @@ pub fn parse_headers(text: &str) -> AppResult<Vec<(String, String)>> {
 
 impl Lidarr {
     pub fn new(deps: LidarrDeps) -> Self {
-        Self { inner: Arc::new(deps), lock: Arc::new(tokio::sync::Mutex::new(())), modes_cache: Default::default(), proposals: Default::default(), announcer: Default::default(), hosts: Default::default(), home: Default::default(), auto_check: Default::default() }
+        Self { inner: Arc::new(deps), lock: Arc::new(tokio::sync::Mutex::new(())), modes_cache: Default::default(), proposals: Default::default(), announcer: Default::default(), hosts: Default::default(), home: Default::default(), auto_check: Default::default(), notices: Default::default() }
     }
 
     /// (home, away) addresses from Settings; empty when not set.

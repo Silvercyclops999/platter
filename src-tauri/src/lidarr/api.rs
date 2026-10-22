@@ -400,10 +400,32 @@ pub fn queue_item_stuck(r: &serde_json::Value) -> bool {
     ["importFailed", "importBlocked", "downloadFailed", "downloadFailedPending", "failed", "failedPending", "ignored"].iter().any(|s| state.eq_ignore_ascii_case(s))
 }
 
+/// Why Lidarr is stuck on one file of a download.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusMessage {
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub messages: Vec<String>,
+}
+
 /// One download in Lidarr's queue.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueItem {
+    /// Lidarr's id for the queue item.
+    #[serde(default)]
+    pub id: Option<i64>,
+    /// The release's name.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// `ok`, `warning` or `error`.
+    #[serde(default)]
+    pub tracked_download_status: Option<String>,
+    /// Why Lidarr is stuck on it, file by file.
+    #[serde(default)]
+    pub status_messages: Vec<StatusMessage>,
     #[serde(default)]
     pub album_id: Option<i64>,
     /// `queued`, `downloading`, `paused`, `completed`, `failed`, `warning`...
@@ -428,6 +450,28 @@ pub struct QueueItem {
     /// `usenet` or `torrent`.
     #[serde(default)]
     pub protocol: Option<String>,
+    /// When Lidarr got it.
+    #[serde(default)]
+    pub added: Option<String>,
+}
+
+impl QueueItem {
+    /// Downloaded, and Lidarr couldn't import it (it won't try again).
+    pub fn import_failed(&self) -> bool {
+        self.tracked_download_state.as_deref().is_some_and(|s| s.eq_ignore_ascii_case("importFailed"))
+    }
+
+    /// Lidarr's reasons in a few words ("Has missing tracks").
+    pub fn why(&self) -> Option<String> {
+        let mut seen: Vec<String> = Vec::new();
+        for m in self.status_messages.iter().flat_map(|s| s.messages.iter()).chain(self.error_message.iter()) {
+            let m = m.trim().trim_end_matches('.').to_string();
+            if !m.is_empty() && !seen.iter().any(|x| x.eq_ignore_ascii_case(&m)) {
+                seen.push(m);
+            }
+        }
+        (!seen.is_empty()).then(|| seen.into_iter().take(3).collect::<Vec<_>>().join(", "))
+    }
 }
 
 /// One event in Lidarr's history.
@@ -549,6 +593,10 @@ pub struct Release {
     pub indexer: Option<String>,
     #[serde(default)]
     pub title: String,
+    #[serde(default)]
+    pub album_title: String,
+    #[serde(default)]
+    pub artist_name: String,
     #[serde(default)]
     pub size: Option<i64>,
     /// `usenet` or `torrent`.

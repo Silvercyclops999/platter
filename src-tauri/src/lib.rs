@@ -925,7 +925,7 @@ pub fn run() {
                 let (plex, backends) = (plex.clone(), backends.clone());
                 lidarr_service.set_owner_check(Arc::new(move || plex.owns_current_server_now().unwrap_or_else(|| !backends.plex_set_up())));
             }
-            tauri::async_runtime::spawn(lidarr::request::watch(lidarr_service.clone()));
+            tauri::async_runtime::spawn(lidarr::request::watch(lidarr_service.clone(), Arc::new(social::commands::OsNotifier(app.handle().clone()))));
             // Tap a song the library doesn't have: it's got and played.
             let taps = lidarr::tap::Taps::new(
                 lidarr_service.clone(),

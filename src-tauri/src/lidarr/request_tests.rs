@@ -116,6 +116,8 @@ pub(super) struct State {
     pub(super) releases: Vec<Value>,
     /// The download client turns grabs down.
     pub(super) refuse_grab: bool,
+    /// Clearing a queue item answers with a server error.
+    pub(super) refuse_clear: bool,
     /// Releases sent to the download client (guids).
     pub(super) grabbed: Vec<String>,
     /// Imported files (`GET /trackfile`).
@@ -224,6 +226,15 @@ impl FakeLidarr {
                 }
             }
             (Method::Get, "/queue/details") => (200, Value::Array(st.queue.clone())),
+            (Method::Delete, p) if p.starts_with("/queue/") && st.refuse_clear => (500, json!({"message": "Download client unavailable"})),
+            (Method::Delete, p) if p.starts_with("/queue/") => {
+                let id: i64 = p.trim_start_matches("/queue/").parse().unwrap_or(-1);
+                let Some(at) = st.queue.iter().position(|q| q["id"] == id) else { return (404, json!({})) };
+                let q = st.queue.remove(at);
+                // As Lidarr does: the blocklisted download shows as failed.
+                st.history.insert(0, json!({"id": 900 + id, "albumId": q["albumId"], "downloadId": q["downloadId"], "eventType": "downloadFailed"}));
+                (200, json!({}))
+            }
             (Method::Get, "/queue") => {
                 let stuck: Vec<Value> = (0..st.queue_stuck).map(|i| json!({"id": 900 + i, "status": "completed", "trackedDownloadStatus": "warning", "trackedDownloadState": "importFailed"})).collect();
                 (200, json!({"page": 1, "pageSize": 500, "totalRecords": st.queue_total + st.queue_stuck, "records": stuck}))
@@ -454,7 +465,7 @@ pub(super) fn assert_only_allowed_writes(web: &FakeLidarr) {
             Method::Get => p.starts_with("/api/v1/"),
             Method::Post => p == "/api/v1/artist" || p == "/api/v1/command",
             Method::Put => p == "/api/v1/album/monitor",
-            Method::Delete => false,
+            Method::Delete => super::write::clear_failed_id(p.trim_start_matches("/api/v1")).is_some(),
         };
         assert!(ok, "Lidarr was sent {m:?} {p}");
     }
@@ -721,6 +732,208 @@ async fn status_follows_lidarrs_queue_and_history() {
     assert_eq!(l[0].state, RequestState::Failed);
     assert!(l[0].message.is_some());
     assert_only_allowed_writes(&r.web);
+}
+
+/// A whole CD in one file: Lidarr downloaded it after the request (the
+/// rig's clock starts at 2027-01-15T08:00:00Z) and couldn't import it.
+fn one_file_cd(album_id: i64, queue_id: i64) -> Value {
+    json!({"id": queue_id, "albumId": album_id, "title": "Northlight-Second_Wind-CD-FLAC-2021-GRP", "status": "completed", "added": "2027-01-15T08:00:30Z",
+           "trackedDownloadStatus": "warning", "trackedDownloadState": "importFailed", "downloadId": format!("dl{queue_id}"),
+           "statusMessages": [
+               {"title": "One or more tracks expected in this release were not imported or missing from the release", "messages": []},
+               {"title": "Northlight-Second_Wind-CD-FLAC-2021-GRP.flac", "messages": ["Has missing tracks"]}]})
+}
+
+/// Practice mode off (the rig's check starts the first week's practice).
+pub(super) fn for_real(r: &Rig) {
+    let mut s = crate::settings::load(&r.db);
+    s.lidarr_practice_until = 0;
+    crate::settings::save(&r.db, &s).unwrap();
+}
+
+fn cleared(r: &Rig) -> Vec<String> {
+    r.web.writes().into_iter().filter(|(m, _, _)| *m == Method::Delete).map(|(_, p, _)| p).collect()
+}
+
+#[tokio::test]
+async fn a_download_lidarr_cant_import_is_cleared_blocklisted_and_searched_again() {
+    let r = rig();
+    let rec = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
+    let id = rec.lidarr_album_id.unwrap();
+    for_real(&r);
+    let searches = |r: &Rig| r.web.writes().iter().filter(|(m, p, b)| *m == Method::Post && p == "/api/v1/command" && b.contains("AlbumSearch")).count();
+    let before = searches(&r);
+    r.web.st.lock().queue.push(one_file_cd(id, 77));
+    let l = r.lidarr.refresh_statuses().await.unwrap();
+    assert_eq!(cleared(&r), ["/api/v1/queue/77?removeFromClient=true&blocklist=true&skipRedownload=true"]);
+    assert_eq!(searches(&r), before + 1, "and searched for another copy");
+    assert_eq!(l[0].state, RequestState::Searching);
+    assert_eq!(l[0].message.as_deref(), Some("The copy Lidarr got couldn't be imported (has missing tracks). Platter cleared it and is looking for another."));
+    let log = r.lidarr.changes();
+    let e = log.iter().find(|c| c.what == "Cleared a download of Second Wind by Northlight that Lidarr couldn't import").unwrap();
+    assert_eq!(e.before, "Northlight-Second_Wind-CD-FLAC-2021-GRP: Has missing tracks");
+    assert!(!e.asked && !e.practice);
+    // The cleared download's failure doesn't count against the request.
+    let l = r.lidarr.refresh_statuses().await.unwrap();
+    assert_eq!(l[0].state, RequestState::Searching, "{:?}", l[0].message);
+    assert_eq!(cleared(&r).len(), 1, "nothing cleared twice");
+    assert_only_allowed_writes(&r.web);
+}
+
+#[tokio::test]
+async fn after_three_bad_copies_platter_stops_and_says_so() {
+    let r = rig();
+    let rec = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
+    let id = rec.lidarr_album_id.unwrap();
+    for_real(&r);
+    for n in 0..3 {
+        r.web.st.lock().queue.push(one_file_cd(id, 70 + n));
+        r.lidarr.refresh_statuses().await.unwrap();
+    }
+    assert_eq!(cleared(&r).len(), 3);
+    r.web.st.lock().queue.push(one_file_cd(id, 80));
+    let l = r.lidarr.refresh_statuses().await.unwrap();
+    assert_eq!(cleared(&r).len(), 3, "the fourth is left");
+    assert_eq!(l[0].state, RequestState::Failed);
+    assert!(l[0].message.as_deref().unwrap().starts_with("3 copies Lidarr got couldn't be imported"), "{:?}", l[0].message);
+}
+
+#[tokio::test]
+async fn practice_mode_and_the_setting_off_leave_a_failed_download_alone() {
+    let r = rig();
+    let rec = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
+    let id = rec.lidarr_album_id.unwrap();
+    r.web.st.lock().queue.push(one_file_cd(id, 77));
+    let mut s = crate::settings::load(&r.db);
+    s.lidarr_practice_until = 1_900_000_000;
+    crate::settings::save(&r.db, &s).unwrap();
+    r.lidarr.refresh_statuses().await.unwrap();
+    let l = r.lidarr.refresh_statuses().await.unwrap();
+    assert!(cleared(&r).is_empty());
+    assert!(l[0].message.as_deref().unwrap().contains("Practice mode"), "{:?}", l[0].message);
+    let practice: Vec<String> = r.lidarr.changes().into_iter().filter(|c| c.practice).map(|c| c.what).collect();
+    assert_eq!(practice, ["Would clear a download of Second Wind by Northlight that Lidarr couldn't import"], "logged once");
+    // Off: Platter only says so.
+    s.lidarr_practice_until = 0;
+    s.lidarr_clear_failed = false;
+    crate::settings::save(&r.db, &s).unwrap();
+    let l = r.lidarr.refresh_statuses().await.unwrap();
+    assert!(cleared(&r).is_empty());
+    assert_eq!(l[0].state, RequestState::Failed);
+    assert!(l[0].message.as_deref().unwrap().contains("Clear it on Lidarr's Activity page"), "{:?}", l[0].message);
+}
+
+#[tokio::test]
+async fn an_album_lidarr_already_had_is_never_cleared() {
+    let r = rig();
+    r.web.st.lock().albums.push(json!({"id": 9, "artistId": 5, "title": "Second Wind", "foreignAlbumId": RG_SECOND, "monitored": true}));
+    r.web.st.lock().artists.push(json!({"id": 5, "artistName": "Northlight", "foreignArtistId": ARTIST, "path": "/downloads/lidarr/Northlight", "monitored": true}));
+    let rec = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
+    assert!(rec.already_in_lidarr);
+    r.web.st.lock().queue.push(one_file_cd(9, 77));
+    r.lidarr.refresh_statuses().await.unwrap();
+    assert!(cleared(&r).is_empty(), "Lidarr's own download is Lidarr's");
+}
+
+#[tokio::test]
+async fn a_download_the_user_started_before_the_get_is_never_cleared() {
+    let r = rig();
+    let rec = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
+    for_real(&r);
+    let mut cd = one_file_cd(rec.lidarr_album_id.unwrap(), 77);
+    cd["added"] = json!("2027-01-15T07:00:00Z");
+    r.web.st.lock().queue.push(cd);
+    let l = r.lidarr.refresh_statuses().await.unwrap();
+    assert!(cleared(&r).is_empty());
+    assert_eq!(l[0].state, RequestState::Failed);
+    // Nor one Lidarr gives no time or download id for.
+    for strip in ["added", "downloadId"] {
+        let r = rig();
+        let rec = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
+        for_real(&r);
+        let mut cd = one_file_cd(rec.lidarr_album_id.unwrap(), 77);
+        cd.as_object_mut().unwrap().remove(strip);
+        r.web.st.lock().queue.push(cd);
+        r.lidarr.refresh_statuses().await.unwrap();
+        assert!(cleared(&r).is_empty(), "{strip}");
+    }
+}
+
+#[tokio::test]
+async fn a_cleared_download_lidarr_still_lists_isnt_cleared_again_or_failed() {
+    let r = rig();
+    let rec = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
+    for_real(&r);
+    let id = rec.lidarr_album_id.unwrap();
+    r.web.st.lock().queue.push(one_file_cd(id, 77));
+    r.lidarr.refresh_statuses().await.unwrap();
+    assert_eq!(cleared(&r).len(), 1);
+    // Lidarr lists it again, failed now, before the client lets it go.
+    let mut back = one_file_cd(id, 77);
+    back["trackedDownloadState"] = json!("failed");
+    back["status"] = json!("failed");
+    r.web.st.lock().queue.push(back);
+    let l = r.lidarr.refresh_statuses().await.unwrap();
+    assert_eq!(l[0].state, RequestState::Searching, "{:?}", l[0].message);
+    r.web.st.lock().queue[0]["trackedDownloadState"] = json!("importFailed");
+    let l = r.lidarr.refresh_statuses().await.unwrap();
+    assert_eq!(cleared(&r).len(), 1, "never twice");
+    assert_eq!(l[0].cleared.len(), 1);
+    assert_eq!(l[0].state, RequestState::Searching);
+}
+
+#[tokio::test]
+async fn a_clear_that_doesnt_go_out_waits_longer_then_is_left_to_the_user() {
+    let r = rig();
+    let rec = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
+    for_real(&r);
+    let id = rec.lidarr_album_id.unwrap();
+    r.web.st.lock().queue.push(one_file_cd(id, 77));
+    r.web.st.lock().refuse_clear = true;
+    let tries = |r: &Rig| r.web.log.lock().iter().filter(|(m, p, _)| *m == Method::Delete && p.starts_with("/api/v1/queue/")).count();
+    let l = r.lidarr.refresh_statuses().await.unwrap();
+    assert_eq!((tries(&r), l[0].state), (1, RequestState::Importing));
+    assert!(l[0].message.as_deref().unwrap().contains("tries again soon"), "{:?}", l[0].message);
+    r.lidarr.refresh_statuses().await.unwrap();
+    assert_eq!(tries(&r), 1, "not on every look");
+    *r.now.lock() += 5 * 60;
+    r.lidarr.refresh_statuses().await.unwrap();
+    assert_eq!(tries(&r), 2);
+    *r.now.lock() += 5 * 60;
+    r.lidarr.refresh_statuses().await.unwrap();
+    assert_eq!(tries(&r), 2, "ten minutes after the second");
+    *r.now.lock() += 5 * 60;
+    let l = r.lidarr.refresh_statuses().await.unwrap();
+    assert_eq!(tries(&r), 3);
+    assert_eq!(l[0].state, RequestState::Failed);
+    assert!(l[0].message.as_deref().unwrap().contains("Platter couldn't clear it. Clear it on Lidarr's Activity page."), "{:?}", l[0].message);
+}
+
+#[tokio::test]
+async fn a_get_that_fails_or_starts_over_is_told() {
+    let r = rig();
+    let rec = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
+    let id = rec.lidarr_album_id.unwrap();
+    for_real(&r);
+    r.lidarr.take_notices();
+    r.web.st.lock().queue.push(one_file_cd(id, 77));
+    r.lidarr.refresh_statuses().await.unwrap();
+    assert_eq!(
+        r.lidarr.take_notices(),
+        [("Getting another copy".to_string(), "Second Wind by Northlight. The copy Lidarr got couldn't be imported (has missing tracks). Platter cleared it and is looking for another.".to_string())]
+    );
+    let mut s = crate::settings::load(&r.db);
+    s.lidarr_clear_failed = false;
+    crate::settings::save(&r.db, &s).unwrap();
+    r.web.st.lock().queue.push(one_file_cd(id, 78));
+    // The app's own look (not the follow's) is told too.
+    r.lidarr.refresh_statuses().await.unwrap();
+    let n = r.lidarr.take_notices();
+    assert_eq!(n.len(), 1);
+    assert_eq!(n[0].0, "Didn't come through");
+    assert!(n[0].1.starts_with("Second Wind by Northlight. Lidarr couldn't import the copy it got (has missing tracks)."), "{}", n[0].1);
+    r.lidarr.refresh_statuses().await.unwrap();
+    assert!(r.lidarr.take_notices().is_empty(), "told once");
 }
 
 #[tokio::test]

@@ -109,6 +109,18 @@ pub struct RequestRecord {
     /// Sent for a tapped song: a try again goes the quick way too.
     #[serde(default)]
     pub quick: bool,
+    /// Downloads Lidarr couldn't import that Platter cleared (download ids):
+    /// their history doesn't count any more.
+    #[serde(default)]
+    pub cleared: Vec<String>,
+    /// Queue items practice mode already logged a clear for.
+    #[serde(default)]
+    pub practiced_clears: Vec<i64>,
+    /// Clears that didn't go out in a row, and when the next one may.
+    #[serde(default)]
+    pub clear_fails: u32,
+    #[serde(default)]
+    pub clear_after: Option<i64>,
 }
 
 /// A request that left the list, remembered so it's never asked for again.
@@ -719,6 +731,10 @@ impl Lidarr {
             next_search_at: None,
             attempts: 0,
             quick: false,
+            cleared: Vec::new(),
+            practiced_clears: Vec::new(),
+            clear_fails: 0,
+            clear_after: None,
         }
     }
 
@@ -1168,10 +1184,11 @@ impl Lidarr {
         if live.is_empty() {
             return Ok(list);
         }
+        let before = list.clone();
         let (client, _, route) = Self::connect(self.routes()?).await?;
         let writer = self.writer_for(route);
         let ids: Vec<i64> = live.iter().filter_map(|&i| list[i].lidarr_album_id).collect();
-        let queue = client.queue(&ids).await.unwrap_or_default();
+        let all_queue = client.queue(&ids).await.unwrap_or_default();
         let now = (self.inner.clock)();
         let ready = self.status().ready;
         // Searches again sent in this look, and the setup check they need
@@ -1195,8 +1212,41 @@ impl Lidarr {
                 tracing::info!(title = %list[i].title, "lidarr request: failed, the album isn't in Lidarr any more");
                 continue;
             };
-            let history = client.history(album.id).await.unwrap_or_default();
+            let mut history = client.history(album.id).await.unwrap_or_default();
+            // Downloads Platter cleared are gone: neither their events nor
+            // their queue items count.
+            history.retain(|h| !h.download_id.as_ref().is_some_and(|d| list[i].cleared.contains(d)));
+            let queue = super::failed::without_cleared(&all_queue, &list[i].cleared);
             let mut state = map_status(&album, &queue, &history);
+            // A download of this request's that Lidarr couldn't import.
+            let mut note: Option<String> = None;
+            if let Some(q) = queue.iter().find(|q| q.album_id == Some(album.id) && q.import_failed())
+                && super::failed::ours(&list[i], q, &history)
+            {
+                match self.clear_failed(&writer, &mut list[i], q, album.id, now).await {
+                    Ok(super::failed::Cleared::Yes(msg)) => {
+                        state = RequestState::Searching;
+                        note = Some(msg);
+                        list[i].state = state;
+                        list[i].updated_at = now;
+                        self.save_records(&list)?;
+                    }
+                    Ok(super::failed::Cleared::Waits(msg)) => {
+                        // Still followed, so it's cleared once it can be.
+                        state = RequestState::Importing;
+                        note = Some(msg);
+                    }
+                    Ok(super::failed::Cleared::No(msg)) => {
+                        state = RequestState::Failed;
+                        note = Some(msg);
+                    }
+                    // Only the changes log can fail here; looks again later.
+                    Err(e) => {
+                        state = RequestState::Importing;
+                        tracing::info!(album = album.id, error = %e, "lidarr request: couldn't clear a failed download; tries again");
+                    }
+                }
+            }
             // Nothing found yet stays that way until something turns up.
             if list[i].state == RequestState::NotFound && state == RequestState::Searching {
                 continue;
@@ -1278,7 +1328,7 @@ impl Lidarr {
                         let why = queue
                             .iter()
                             .filter(|q| q.album_id == Some(album.id))
-                            .find_map(|q| q.error_message.clone().filter(|m| !m.trim().is_empty()));
+                            .find_map(|q| q.error_message.clone().filter(|m| !m.trim().is_empty()).or_else(|| q.why()));
                         let msg = match why {
                             Some(w) => format!("Lidarr couldn't download or import it: {}", w.trim()),
                             None => "Lidarr couldn't download or import it. Lidarr's Activity page says why.".into(),
@@ -1290,13 +1340,28 @@ impl Lidarr {
                     _ => None,
                 };
             }
+            if let Some(n) = note {
+                r.message = Some(n);
+            }
             if searched {
                 // Saved at once, so a look that stops part way never sends it twice.
                 self.save_records(&list)?;
             }
         }
         self.save_records(&list)?;
-        Ok(self.records())
+        let after = self.records();
+        let mut told = self.notices.lock();
+        told.extend(notices(&before, &after));
+        // Kept for the follow to tell; only the latest when nothing does.
+        let over = told.len().saturating_sub(20);
+        told.drain(..over);
+        Ok(after)
+    }
+
+    /// Gets that failed or started over since this was last asked, as
+    /// title and body for a notification.
+    pub fn take_notices(&self) -> Vec<(String, String)> {
+        std::mem::take(&mut *self.notices.lock())
     }
 
     /// "Search again": an AlbumSearch for that one album now, and the
@@ -1433,10 +1498,31 @@ fn followed(r: &RequestRecord) -> bool {
 /// How often requests in flight are followed in Lidarr's queue and history.
 pub const FOLLOW_EVERY: Duration = Duration::from_secs(15);
 
+/// What to tell the user about requests that changed in one look: a Get
+/// that failed, and one Platter started over because Lidarr couldn't import
+/// the copy it got. Title and body for a notification.
+pub fn notices(before: &[RequestRecord], after: &[RequestRecord]) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for r in after {
+        let Some(was) = before.iter().find(|b| b.id == r.id) else { continue };
+        let what = format!("{} by {}", r.title, r.artist);
+        let msg = r.message.clone().unwrap_or_default();
+        if r.state == RequestState::Failed && was.state != RequestState::Failed {
+            let body = if msg.is_empty() { what } else { format!("{what}. {msg}") };
+            out.push(("Didn't come through".to_string(), body));
+        } else if r.cleared.len() > was.cleared.len() {
+            out.push(("Getting another copy".to_string(), format!("{what}. {msg}")));
+        }
+    }
+    out
+}
+
 /// The background retry: waiting requests are sent every [`RETRY_EVERY`];
 /// requests Lidarr is working on are followed every [`FOLLOW_EVERY`] (reads,
-/// plus the scheduled searches again), the rest every [`RETRY_EVERY`].
-pub async fn watch(l: Lidarr) {
+/// plus the scheduled searches again), the rest every [`RETRY_EVERY`]. A Get
+/// that fails or starts over, in any look (the app's own too), is told
+/// through `notifier`.
+pub async fn watch(l: Lidarr, notifier: std::sync::Arc<dyn crate::social::Notifier>) {
     tokio::time::sleep(Duration::from_secs(30)).await;
     let mut last_slow: Option<tokio::time::Instant> = None;
     loop {
@@ -1453,6 +1539,9 @@ pub async fn watch(l: Lidarr) {
             && let Err(e) = l.refresh_statuses().await
         {
             tracing::debug!("lidarr status: {e}");
+        }
+        for (title, body) in l.take_notices() {
+            notifier.notify(&title, &body);
         }
         if slow_due {
             last_slow = Some(tokio::time::Instant::now());

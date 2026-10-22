@@ -93,6 +93,7 @@
 
 /* One-click Get: the state it's in, Undo, and what to do when nothing turned up. */
 .get-row { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.get-note { flex-basis: 100%; font-size: var(--font-size-sm); color: var(--color-text-muted); }
 .lidarr-state--importing { color: var(--color-text-primary); }
 .lidarr-state--checking { color: var(--color-text-primary); }
 .lidarr-state--notFound { color: var(--color-text-secondary); }

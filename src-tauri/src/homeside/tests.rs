@@ -1136,6 +1136,10 @@ async fn the_bridge_gets_the_followed_artists_sealed_and_its_requests_show_on_th
         next_search_at: None,
         attempts: 0,
         quick: false,
+        cleared: Vec::new(),
+        practiced_clears: Vec::new(),
+        clear_fails: 0,
+        clear_after: None,
     };
     let json = serde_json::to_string(&vec![asked.clone()]).unwrap();
     b.db.write(|c| crate::db::store::kv_set(c, "lidarr.requests", &json)).unwrap();

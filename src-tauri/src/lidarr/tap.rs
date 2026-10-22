@@ -352,6 +352,10 @@ pub struct Probe {
     pub finished_at: Option<String>,
     /// Imported files, as Lidarr sees them.
     pub imported: Vec<String>,
+    /// Lidarr couldn't import the download, and why.
+    pub import_failed: Option<String>,
+    /// That download is the request's to clear (`failed::ours`).
+    pub clearable: bool,
 }
 
 impl Lidarr {
@@ -361,15 +365,21 @@ impl Lidarr {
     }
 
     /// Lidarr's queue, history and files for one album. Reads only.
-    pub async fn probe(&self, album_id: i64, rgid: &str) -> AppResult<Probe> {
+    pub async fn probe(&self, album_id: i64, rgid: &str, rec: &RequestRecord) -> AppResult<Probe> {
         let (client, _) = self.connection().await?;
         let Some(album) = client.album_by_release_group(rgid).await? else {
             return Ok(Probe { state: Some(RequestState::Failed), ..Default::default() });
         };
-        let queue = client.queue(&[album_id]).await.unwrap_or_default();
-        let history = client.history(album_id).await.unwrap_or_default();
+        let mut history = client.history(album_id).await.unwrap_or_default();
+        // Downloads Platter cleared are gone: neither their events nor their
+        // queue items count.
+        history.retain(|h| !h.download_id.as_ref().is_some_and(|d| rec.cleared.contains(d)));
+        let queue = super::failed::without_cleared(&client.queue(&[album_id]).await.unwrap_or_default(), &rec.cleared);
         let state = map_status(&album, &queue, &history);
         let mine = queue.iter().find(|q| q.album_id == Some(album_id));
+        let failed = mine.filter(|q| q.import_failed());
+        let import_failed = failed.map(super::failed::reason);
+        let clearable = failed.is_some_and(|q| super::failed::ours(rec, q, &history));
         let done = mine.is_some_and(|q| {
             let t = q.tracked_download_state.as_deref().unwrap_or_default().to_ascii_lowercase();
             q.status.eq_ignore_ascii_case("completed") || matches!(t.as_str(), "importpending" | "importing") || q.sizeleft.is_some_and(|l| l <= 0.0)
@@ -380,7 +390,7 @@ impl Lidarr {
         } else {
             Vec::new()
         };
-        Ok(Probe { state: Some(state), progress: super::status::progress(album_id, &queue), finished_at, imported })
+        Ok(Probe { state: Some(state), progress: super::status::progress(album_id, &queue), finished_at, imported, import_failed, clearable })
     }
 
     /// The last get's timings.
@@ -638,7 +648,7 @@ impl Taps {
                 return self.in_library(t, track).await;
             }
         }
-        let probe = match self.lidarr.probe(album_id, &rec.release_group_id).await {
+        let probe = match self.lidarr.probe(album_id, &rec.release_group_id, &rec).await {
             Ok(p) => p,
             Err(e) if e.kind() == "network" => {
                 if t.phase != TapPhase::Playing {
@@ -651,6 +661,31 @@ impl Taps {
                 return t;
             }
         };
+        // Lidarr couldn't import the copy it got: say so. Platter clears it
+        // and looks for another (the requests' follow does it), or it failed.
+        // It says what the request says: the follow decides.
+        if let Some(lower) = &probe.import_failed {
+            let s = crate::settings::load(self.lidarr.db());
+            let clears = probe.clearable && s.lidarr_clear_failed && rec.cleared.len() < super::failed::MAX_CLEARS;
+            if clears && rec.state != RequestState::Failed && self.lidarr.practice_active() {
+                t.phase = TapPhase::Importing;
+                t.progress = None;
+                t.message = Some(super::failed::practice_note(lower));
+            } else if clears && rec.state != RequestState::Failed {
+                t.phase = TapPhase::Searching;
+                t.progress = None;
+                t.message = Some(format!("The copy Lidarr got couldn't be imported ({lower}). Platter is clearing it and looking for another."));
+            } else {
+                t.phase = TapPhase::Failed;
+                t.message = rec
+                    .message
+                    .clone()
+                    .filter(|m| rec.state == RequestState::Failed && !m.is_empty())
+                    .or_else(|| Some(format!("Lidarr couldn't import the copy it got ({lower}). Lidarr's Activity page has it.")));
+                tracing::info!(title = %t.title, reason = t.message.as_deref().unwrap_or_default(), "lidarr tap: failed");
+            }
+            return t;
+        }
         let state = probe.state.unwrap_or(rec.state);
         let was = (t.phase, t.progress);
         match state {
