@@ -1581,6 +1581,25 @@ async fn search_drops_a_word_only_when_nothing_matches_them_all() {
 }
 
 #[tokio::test]
+async fn search_with_a_word_left_out_matches_the_rest_whole() {
+    let salt: Vec<Pop> = vec![
+        ("s1", "Runaway", None, 9, None, Some("Saltglass, Pusha, The WRLDFMS"), 200),
+        ("s2", "Highlights", None, 3, None, Some("Saltglass, The WRLDFMS"), 200),
+    ];
+    let t = open();
+    sync(&t.db, &Arc::new(FakeSource::new(popular_library(&[], &[("Saltglass", &salt)]))), false).await;
+    // An artist the library doesn't have: not the songs a credit's word starts with.
+    let r = search::search(&t.db, "juice wrld", SearchFilter::All, None).unwrap();
+    assert!(r.songs.is_empty() && r.artists.is_empty() && r.top.is_none(), "{:?}", song_titles(&r));
+    // Typed on its own the word still finds them as it's typed.
+    let r = search::search(&t.db, "wrld", SearchFilter::Songs, None).unwrap();
+    assert_eq!(song_titles(&r).len(), 2);
+    // A whole word is still found with an unknown one left out.
+    let r = search::search(&t.db, "zebra runaway", SearchFilter::Songs, None).unwrap();
+    assert_eq!(song_titles(&r), vec!["Runaway"]);
+}
+
+#[tokio::test]
 async fn search_puts_the_typed_spelling_above_its_variant() {
     let t = forgiving_db().await;
     let r = search::search(&t.db, "tonite", SearchFilter::Songs, None).unwrap();
