@@ -8,17 +8,23 @@ const fold = (s: string) =>
     .normalize("NFD")
     .replace(/\p{M}/gu, "")
     .toLowerCase();
-const words = (s: string) => fold(s).split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+/** Apostrophes and hyphens inside a word join it ("don't" is one word), as the core reads them. */
+const words = (s: string) =>
+  fold(s)
+    .replace(/(\p{L})['\u2019-](\p{L})/gu, "$1$2")
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
 /** Timestamps and tags off an LRC line. */
 const plain = (line: string) => line.replace(/\[[^\]]*\]/g, "").trim();
 
 export function lyricQuery(raw: string): { words: string[]; prefix: boolean } | null {
   const quotes = (raw.match(/"/g) ?? []).length;
-  const quoted = quotes > 0 ? raw.split('"')[1] : undefined;
+  // Words in quotes once the quote is closed; an open quote is just typing.
+  const quoted = quotes >= 2 ? raw.split('"')[1] : undefined;
   const useQuoted = quoted !== undefined && quoted.trim() !== "";
   const w = words(useQuoted ? quoted : raw).slice(0, 12);
   if (!w.length || (!useQuoted && w.length < 3)) return null;
-  return { words: w, prefix: !(useQuoted && quotes >= 2) && !/\s$/.test(raw) };
+  return { words: w, prefix: !useQuoted && !/\s$/.test(raw) };
 }
 
 export function mockLyricSearch(raw: string, stored: (readonly [string, string])[]): { trackId: string; line: string }[] {

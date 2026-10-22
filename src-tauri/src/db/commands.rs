@@ -274,7 +274,7 @@ pub async fn search(
     let mut out = search::search_with_fallback(db.inner(), &query, filter, limit).await?;
     // Songs found by their lyrics fill in after the ones found by name.
     let room = search::songs_limit(filter, limit).saturating_sub(out.songs.len());
-    crate::lyricsearch::add_songs(db.inner(), &mut out, &query, lyrics.shows_auto(), room).await;
+    let by_name = crate::lyricsearch::add_songs(db.inner(), &mut out, &query, lyrics.shows_auto(), room).await;
     let server = db.server_view();
     let f = db.read_async(move |c| super::merge::ViewFilter::load(c, &server)).await?;
     f.search(&mut out);
@@ -284,7 +284,7 @@ pub async fn search(
     let artist = search::named_artist(&query, &out.artists);
     db.read_async(move |c| {
         crate::archive::versions::group_search(c, &mut out, show, artist.as_deref())?;
-        crate::lyricsearch::tidy(&mut out);
+        crate::lyricsearch::tidy(&mut out, &by_name);
         Ok(out)
     })
     .await

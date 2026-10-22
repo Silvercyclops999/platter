@@ -167,8 +167,8 @@ fn put_here(db: &DbHandle, track_id: &str, t: &Transcript) -> AppResult<bool> {
                 return Ok(false);
             }
         }
-        if t.text.is_empty() {
-            c.execute("DELETE FROM user_lyrics WHERE track_id = ?1 AND auto IS NOT NULL", [track_id])?;
+        if t.text.is_empty() && c.execute("DELETE FROM user_lyrics WHERE track_id = ?1 AND auto IS NOT NULL", [track_id])? > 0 {
+            crate::lyricsearch::forget_or_log(c, track_id);
         }
         tstore::save_timed(c, track_id, &t.text, &t.model, t.at, t.timing)
     })

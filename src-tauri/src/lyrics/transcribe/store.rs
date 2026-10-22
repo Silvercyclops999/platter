@@ -84,6 +84,9 @@ pub fn found_nothing(c: &Connection, track_id: &str) -> AppResult<bool> {
 /// Forget a transcription (not lyrics the user wrote or edited).
 pub fn forget(c: &Connection, track_id: &str) -> AppResult<bool> {
     let a = c.execute("DELETE FROM user_lyrics WHERE track_id = ?1 AND auto IS NOT NULL", params![track_id])?;
+    if a > 0 {
+        crate::lyricsearch::forget_or_log(c, track_id);
+    }
     let b = c.execute("DELETE FROM lyrics_auto_empty WHERE track_id = ?1", params![track_id])?;
     Ok(a + b > 0)
 }

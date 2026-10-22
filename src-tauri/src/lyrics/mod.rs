@@ -462,6 +462,11 @@ impl LyricsService {
         Ok(self.shown(track_id).await?.filter(Shown::has_words).map(|s| s.lyrics))
     }
 
+    /// "Show auto-transcribed lyrics" is on.
+    pub fn shows_auto(&self) -> bool {
+        on(&self.inner.sw.show_auto)
+    }
+
     /// The lyrics as the lyrics view shows them (docs/IPC.md `lyrics_get`).
     ///
     /// The user's pick for the song wins. Otherwise [`candidates::decide`]
@@ -474,11 +479,6 @@ impl LyricsService {
     /// `borrowed_timing`, unless "Show borrowed timing on live versions" is
     /// on (then they keep their times, still marked). The user's timing
     /// nudge applies last.
-    /// "Show auto-transcribed lyrics" is on.
-    pub fn shows_auto(&self) -> bool {
-        on(&self.inner.sw.show_auto)
-    }
-
     pub async fn shown(&self, track_id: &str) -> AppResult<Option<Shown>> {
         let shown = self.resolve(track_id, false).await?.shown;
         self.note_for_search(track_id, shown.as_ref());
@@ -500,6 +500,13 @@ impl LyricsService {
         }
         let (db, id) = (self.inner.db.clone(), track_id.to_owned());
         tokio::spawn(async move {
+            // Most views change nothing: check on a reader before waiting for the writer.
+            if let Some((l, auto)) = words.clone() {
+                let id = id.clone();
+                if db.read_async(move |c| Ok(crate::lyricsearch::holds(c, &id, &l, auto))).await.unwrap_or(false) {
+                    return;
+                }
+            }
             let _ = db
                 .write_async(move |c| {
                     match words {
