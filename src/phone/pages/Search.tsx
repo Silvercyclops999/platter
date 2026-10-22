@@ -3,11 +3,11 @@
  * one, and results as you type (no submit), the top artist first. The
  * same folding and typo rules as on the desktop: the core does the search.
  */
-import { GitBranch, MoreHorizontal, Search as SearchIcon, X } from "lucide-react";
+import { MoreHorizontal, Search as SearchIcon, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Art } from "../../components/Art";
 import { backend } from "../../lib/backend";
-import type { Album, SearchHit, SearchResults, Track } from "../../lib/types";
+import type { Album, CatArtist, SearchHit, SearchResults, Track } from "../../lib/types";
 import { headerColorsFromServer } from "../../lib/color";
 import { useSettings } from "../../stores/settings";
 import { hitInfo, hitOf, lyricQuote, mixedHits, openHit, rememberHit, subtitleWithType } from "../../shell/searchModel";
@@ -19,7 +19,8 @@ import { SongSwipeUnder, useRowSwipe } from "../rowSwipe";
 import { isLiked, setLiked } from "../../stores/likes";
 import { player, usePlayer } from "../../stores/player";
 import { PlayingBars, countLine } from "./common";
-import { hasCatalogue, playCatalogueSong, useCatalogueSearch, useTapPlays, type CatalogueResults } from "../../pages/SearchCatalogue";
+import { catalogueTop, hasCatalogue, playCatalogueSong, useCatalogueSearch, useTapPlays, type CatalogueResults } from "../../pages/SearchCatalogue";
+import { useArtistPhoto } from "../../lib/artistPhotos";
 import { useGetSpots } from "../../pages/lidarrShared";
 import { catalogueKind } from "../../lib/format";
 import "../../pages/catalogue.css";
@@ -102,6 +103,10 @@ export function PhoneSearch() {
   // whose pills are hidden: All.
   const shown: SearchKind = !res || (kinds.length > 2 && kinds.some((k) => k.id === kind)) ? kind : "all";
   const hits = ofKind(all, shown);
+  // An artist you don't have, named exactly, is the top result (unless the
+  // library has something named exactly).
+  const catTop = shown === "all" || shown === "artist" ? catalogueTop(q, cat, all[0]) : null;
+  const nothingAnywhere = !hits.length && !catTop && !hasCatalogue(cat) && !cat?.pending.length;
   return (
     <div className="ph-page ph-search">
       <h1 className="ph-title">Search</h1>
@@ -183,25 +188,29 @@ export function PhoneSearch() {
         </section>
       )}
       {q && res && (
-        <section aria-label="Results">
-          {hits.length ? (
+        <section aria-label="Results" className="ph-search__results">
+          {(catTop || hits.length > 0) && (
             <ul className="ph-rows">
-              {hits.map((h) => (
-                <HitRow
-                  key={hitInfo(h)?.key}
-                  hit={h}
-                  typed={shown !== "all"}
-                  onOpen={() => open(h)}
-                  onMore={h.track ? () => phone.push({ kind: "track", track: h.track! }) : h.album ? () => phone.push({ kind: "album", album: h.album! }) : undefined}
-                  versions={h.track ? versionsCount(h.track, res) : 0}
-                  lyric={h.track ? res.lyricLines?.[h.track.id] : undefined}
-                />
-              ))}
+              {catTop && <CatalogueArtistRow artist={catTop} />}
+              {hits.map((h) => {
+                const versions = h.track ? versionsCount(h.track, res) : 0;
+                return (
+                  <HitRow
+                    key={hitInfo(h)?.key}
+                    hit={h}
+                    typed={shown !== "all"}
+                    onOpen={() => open(h)}
+                    // Versions are a line in the song's sheet, not a button on every row.
+                    onMore={h.track ? () => phone.push({ kind: "track", track: { ...h.track!, otherVersions: Math.max(h.track!.otherVersions ?? 0, versions) } }) : h.album ? () => phone.push({ kind: "album", album: h.album! }) : undefined}
+                    versions={versions}
+                    lyric={h.track ? res.lyricLines?.[h.track.id] : undefined}
+                  />
+                );
+              })}
             </ul>
-          ) : (
-            <p className="ph-rows__note">Nothing in your library matches "{q}".</p>
           )}
-          <PhoneCatalogue c={cat} kind={shown} />
+          {nothingAnywhere && <p className="ph-rows__note">Nothing in your library matches "{q}".</p>}
+          <PhoneCatalogue c={cat} kind={shown} skipArtist={catTop?.mbid} />
         </section>
       )}
     </div>
@@ -261,7 +270,7 @@ function HitRow({
   return (
     <li
       ref={song ? swipe.ref : undefined}
-      className={`ph-hit ${song ? swipe.className : ""} ${top ? "is-top" : ""} ${versions > 0 ? "has-versions" : ""}`}
+      className={`ph-hit ${song ? swipe.className : ""} ${top ? "is-top" : ""}`}
       {...(song ? swipe.props : {})}
     >
       {song && <SongSwipeUnder trackId={song.id} />}
@@ -275,6 +284,7 @@ function HitRow({
           <span className="ph-row__sub">
             <RowGlyphs trackId={i.kind === "track" ? i.id : undefined} albumId={i.kind === "album" ? i.id : undefined} />
             {hitLine(i, typed)}
+            {versions > 0 && hit.track && <span className="ph-row__versions"> · {versions + 1} versions</span>}
           </span>
           {lyric && <span className="ph-row__lyric">{lyricQuote(lyric)}</span>}
         </span>
@@ -292,14 +302,6 @@ function HitRow({
         ) : (
           !top && <span className="ph-icon-btn" aria-hidden="true" />
         ))}
-      {versions > 0 && hit.track && (
-        <div className="ph-hit__versions-line">
-          <button type="button" className="ph-hit__versions" onClick={() => phone.push({ kind: "versions", track: hit.track! })}>
-            <GitBranch size={14} aria-hidden="true" />
-            {versions + 1} versions
-          </button>
-        </div>
-      )}
     </li>
   );
 }
@@ -354,22 +356,49 @@ function Browse() {
   );
 }
 
+/** An artist you don't have, as a result row: their photo, and their page (Get albums) a tap away. */
+function CatalogueArtistRow({ artist }: { artist: CatArtist }) {
+  const get = useGetSpots();
+  const box = useRef<HTMLLIElement>(null);
+  const { photo } = useArtistPhoto(box, artist.mbid, artist.name, artist.photo);
+  return (
+    <li ref={box} className="ph-hit">
+      <button type="button" className="ph-row" aria-label={`${artist.name}, artist, not in your library`} onClick={() => nav.go({ name: "catalogueArtist", mbid: artist.mbid })}>
+        <Art path={photo} size={52} round kind="artist" monogram={artist.name} />
+        <span className="ph-row__text">
+          <span className="ph-row__title">{artist.name}</span>
+          <span className="ph-row__sub">Artist · Not in your library</span>
+        </span>
+        {get && (
+          <span className="sr-get-mark" aria-hidden="true">
+            Get
+          </span>
+        )}
+      </button>
+    </li>
+  );
+}
+
 /**
- * Music you don't have, under the library's results: a song plays on tap
- * when Lidarr can get it (Get where the length would be); an album or an
- * artist opens its page, with Get there.
+ * Music you don't have, under the library's results: artists first, then a
+ * song plays on tap when Lidarr can get it (Get where the length would be),
+ * then records; an album or an artist opens its page, with Get there. The
+ * artist shown as the top result isn't listed again.
  */
-function PhoneCatalogue({ c, kind }: { c: CatalogueResults | null; kind: SearchKind }) {
+function PhoneCatalogue({ c, kind, skipArtist }: { c: CatalogueResults | null; kind: SearchKind; skipArtist?: string }) {
   const tapPlays = useTapPlays(useGetSpots());
   if (!c || !hasCatalogue(c)) return null;
   const songs = kind === "all" || kind === "track" ? c.songs : [];
   const albums = kind === "all" || kind === "album" ? c.albums : [];
-  const artists = kind === "all" || kind === "artist" ? c.artists.filter((a) => !a.libraryId) : [];
+  const artists = kind === "all" || kind === "artist" ? c.artists.filter((a) => !a.libraryId && a.mbid !== skipArtist) : [];
   if (!songs.length && !albums.length && !artists.length) return null;
   return (
     <section aria-label="Not in your library" className="ph-search__catalogue">
       <h2 className="ph-section-title">Not in your library</h2>
       <ul className="ph-rows">
+        {artists.map((a) => (
+          <CatalogueArtistRow key={`ar-${a.mbid}`} artist={a} />
+        ))}
         {songs.map((s) => (
           <li key={`so-${s.recordingId}`} className="ph-hit">
             <button
@@ -398,17 +427,6 @@ function PhoneCatalogue({ c, kind }: { c: CatalogueResults | null; kind: SearchK
               <span className="ph-row__text">
                 <span className="ph-row__title">{a.title}</span>
                 <span className="ph-row__sub">{[catalogueKind(a), a.artist].filter(Boolean).join(" · ")}</span>
-              </span>
-            </button>
-          </li>
-        ))}
-        {artists.map((a) => (
-          <li key={`ar-${a.mbid}`} className="ph-hit">
-            <button type="button" className="ph-row" onClick={() => nav.go({ name: "catalogueArtist", mbid: a.mbid })}>
-              <Art path={a.photo ?? null} size={52} round kind="artist" monogram={a.name} />
-              <span className="ph-row__text">
-                <span className="ph-row__title">{a.name}</span>
-                <span className="ph-row__sub">Artist</span>
               </span>
             </button>
           </li>

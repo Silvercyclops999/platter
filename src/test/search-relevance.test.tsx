@@ -1,0 +1,151 @@
+/**
+ * Phone search when the library doesn't have what's asked for: an artist
+ * named exactly comes first with Get, music you don't have isn't listed
+ * twice, other versions are a quiet word (in the song's sheet, not a button
+ * on every row), and a phone that reaches Lidarr only through the Bridge
+ * gets Get without anyone setting Lidarr up on it.
+ */
+import { ONLINE_EXTRAS } from "./onlineExtras";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { backend } from "../lib/backend";
+import type { MockBackend } from "../lib/mock";
+import { MockCatalogue } from "../lib/mock/catalogue";
+import { DEFAULT_SETTINGS, type SearchResults, type Track } from "../lib/types";
+import { resetCatalogueCache } from "../pages/SearchCatalogue";
+import { HOME_UNREACHABLE } from "../pages/lidarrShared";
+import { resetArtistPhotos } from "../lib/artistPhotos";
+import { usePhoneForm } from "../phone/form";
+import { PhoneSearch } from "../phone/pages/Search";
+import { PhoneCatalogueArtist } from "../phone/pages/CatalogueArtist";
+import { usePhoneUi } from "../phone/phoneUi";
+import { useApp } from "../stores/app";
+import { resetRequests } from "../stores/requests";
+import { useRouter } from "../stores/router";
+import { loadSettings, useSettings } from "../stores/settings";
+
+const mock = backend as MockBackend;
+const SLOW = { timeout: 6000 };
+const COLD = MockCatalogue.artistId(1);
+
+async function setUp(lidarr: "ready" | "demo" = "demo") {
+  mock.lidarr.reset(lidarr);
+  await mock.settingsSet({ ...DEFAULT_SETTINGS, lidarrUrl: lidarr === "ready" ? "http://10.0.0.5:8686" : "", ...ONLINE_EXTRAS });
+  useSettings.setState({ settings: null });
+  await loadSettings();
+}
+
+beforeEach(async () => {
+  usePhoneForm.setState({ phone: true });
+  usePhoneUi.setState({ tab: "search", nowPlaying: false, lyrics: false, sheets: [] });
+  useApp.setState({ auth: { state: "signedIn", username: "listener", needsServerPick: false } });
+  resetCatalogueCache();
+  resetArtistPhotos();
+  resetRequests();
+  await setUp();
+});
+
+afterEach(() => {
+  usePhoneForm.setState({ phone: false });
+  vi.restoreAllMocks();
+});
+
+function search(query: string) {
+  useRouter.getState().reset({ name: "search", query });
+  return render(<PhoneSearch />);
+}
+
+describe("an artist you don't have", () => {
+  it("named exactly, is the first result with Get, and isn't listed again below", async () => {
+    await setUp("ready");
+    search("cold coast");
+    const top = await screen.findByRole("button", { name: "Cold Coast, artist, not in your library" }, SLOW);
+    const results = screen.getByRole("region", { name: "Results" });
+    expect(within(results).getAllByRole("button")[0]).toBe(top);
+    expect(await within(top).findByText("Get", {}, SLOW)).toBeInTheDocument();
+    // The records follow under Not in your library; the artist isn't there twice.
+    const rest = await screen.findByRole("region", { name: "Not in your library" }, SLOW);
+    expect(within(rest).getByText("Low Tide Radio")).toBeInTheDocument();
+    expect(within(rest).queryByText("Cold Coast", { selector: ".ph-row__title" })).toBeNull();
+    // Something was found, so no "nothing matches" line.
+    expect(screen.queryByText(/Nothing in your library matches/)).toBeNull();
+    fireEvent.click(top);
+    expect(useRouter.getState().entries[useRouter.getState().index].route).toEqual({ name: "catalogueArtist", mbid: COLD });
+  });
+
+  it("comes first over library results that only partly match", async () => {
+    const song = { ...mock.fx.tracks[0], id: "x1", title: "Coastline (feat. Cold Hands)" } as Track;
+    vi.spyOn(mock, "search").mockResolvedValue({ songs: [song], artists: [], albums: [], playlists: [], top: { kind: "track", track: song }, tookMs: 1, source: "local" } as SearchResults);
+    search("cold coast");
+    const top = await screen.findByRole("button", { name: "Cold Coast, artist, not in your library" }, SLOW);
+    const results = screen.getByRole("region", { name: "Results" });
+    expect(within(results).getAllByRole("listitem")[0]).toContainElement(top);
+    expect(within(results).getByText("Coastline (feat. Cold Hands)")).toBeInTheDocument();
+    // Without Lidarr there's no Get mark.
+    expect(within(top).queryByText("Get")).toBeNull();
+  });
+
+  it("stays below a library result named exactly", async () => {
+    const song = { ...mock.fx.tracks[0], id: "x2", title: "Cold Coast" } as Track;
+    vi.spyOn(mock, "search").mockResolvedValue({ songs: [song], artists: [], albums: [], playlists: [], top: { kind: "track", track: song }, tookMs: 1, source: "local" } as SearchResults);
+    search("cold coast");
+    const rest = await screen.findByRole("region", { name: "Not in your library" }, SLOW);
+    await within(rest).findByRole("button", { name: "Cold Coast, artist, not in your library" }, SLOW);
+    const results = screen.getByRole("region", { name: "Results" });
+    expect(within(within(results).getAllByRole("listitem")[0]).getByText("Cold Coast", { selector: ".ph-row__title" })).toBeInTheDocument();
+    expect(within(results).getAllByRole("listitem")[0].closest("section[aria-label='Not in your library']")).toBeNull();
+  });
+});
+
+describe("other versions on a result", () => {
+  it("are a quiet word on its grey line, and a line in the song's sheet", async () => {
+    const song = { ...mock.fx.tracks[0], id: "v1", title: "Glass Bell", otherVersions: 0 } as Track;
+    vi.spyOn(mock, "search").mockResolvedValue({
+      songs: [song],
+      artists: [],
+      albums: [],
+      playlists: [],
+      top: { kind: "track", track: song },
+      versions: { v1: [{} as Track, {} as Track, {} as Track, {} as Track] },
+      tookMs: 1,
+      source: "local",
+    } as SearchResults);
+    search("glass bell");
+    const row = (await screen.findByText("Glass Bell", {}, SLOW)).closest("li")!;
+    expect(within(row).getByText(/5 versions/)).toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: /^\d+ versions$/ })).toBeNull();
+    fireEvent.click(within(row).getByRole("button", { name: "More for Glass Bell" }));
+    const sheet = usePhoneUi.getState().sheets.slice(-1)[0] as { kind: string; track: Track };
+    expect(sheet.kind).toBe("track");
+    expect(sheet.track.otherVersions).toBe(4);
+  });
+});
+
+describe("Lidarr through the Bridge on a phone", () => {
+  it("never asks to set Lidarr up; Get albums shows once the check that runs by itself passes", async () => {
+    mock.lidarr.homeSide = true;
+    useRouter.getState().reset({ name: "catalogueArtist", mbid: COLD });
+    render(<PhoneCatalogueArtist mbid={COLD} />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Cold Coast" }, SLOW)).toBeInTheDocument();
+    expect(screen.queryByText(/Set up Lidarr/)).toBeNull();
+    expect(await screen.findByRole("button", { name: "Get albums" }, SLOW)).toBeInTheDocument();
+    expect(mock.lidarr.autoChecked).toBe(true);
+    expect(screen.queryByText(/Set up Lidarr/)).toBeNull();
+  });
+
+  it("while the Bridge can't be reached, says getting music is paused, not to set anything up", async () => {
+    mock.lidarr.bridgeQuiet = true;
+    render(<PhoneCatalogueArtist mbid={COLD} />);
+    expect(await screen.findByText(HOME_UNREACHABLE, {}, SLOW)).toBeInTheDocument();
+    expect(screen.queryByText(/Set up Lidarr/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Get albums" })).toBeNull();
+  });
+
+  it("with no Lidarr anywhere, still says how to get albums", async () => {
+    render(<PhoneCatalogueArtist mbid={COLD} />);
+    expect(await screen.findByText(/Set up Lidarr in Settings/, {}, SLOW)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Get albums" })).toBeNull();
+    await act(() => new Promise((r) => setTimeout(r, 400)));
+    expect(mock.lidarr.autoChecked).toBe(false);
+  });
+});

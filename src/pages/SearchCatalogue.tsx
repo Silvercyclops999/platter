@@ -14,7 +14,8 @@ import { Skeleton } from "../components/Skeleton";
 import { useArtistPhoto } from "../lib/artistPhotos";
 import { backend } from "../lib/backend";
 import { formatDuration } from "../lib/format";
-import type { CatAlbum, CatArtist, CataloguePart, CataloguePartKind, CatSong, SearchFilter } from "../lib/types";
+import type { CatAlbum, CatArtist, CataloguePart, CataloguePartKind, CatSong, SearchFilter, SearchHit } from "../lib/types";
+import { hitInfo } from "../shell/searchModel";
 import type { MenuItem } from "../stores/ui";
 import { nav } from "../stores/router";
 import { useRequestFor } from "../stores/requests";
@@ -157,6 +158,21 @@ export const foldName = (s: string) =>
     .replace(/^the\s+/, "")
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
+
+/**
+ * The artist you don't have to put on top: the one the query names exactly
+ * ("juice wrld" names Juice WRLD), unless the library's top result is named
+ * exactly; with nothing in the library, the first one found.
+ */
+export function catalogueTop(q: string, c: CatalogueResults | null, libTop: SearchHit | null | undefined): CatArtist | null {
+  if (!c) return null;
+  const want = foldName(q);
+  const artists = c.artists.filter((a) => !a.libraryId);
+  const exact = artists.find((a) => foldName(a.name) === want);
+  const libExact = libTop && foldName(hitInfo(libTop)?.title ?? "") === want;
+  if (exact && !libExact) return exact;
+  return !libTop ? (artists[0] ?? null) : null;
+}
 
 // ---------------------------------------------------------------- rows
 

@@ -11,7 +11,7 @@ import { backend } from "../lib/backend";
 import { useFeaturedPhoto } from "../lib/artistPhotos";
 import { isOffline, OFFLINE_SEARCH } from "../lib/offline";
 import { modKey } from "../lib/platform";
-import type { CatArtist, SearchFilter, SearchHit, SearchResults } from "../lib/types";
+import type { SearchFilter, SearchHit, SearchResults } from "../lib/types";
 import { useApp } from "../stores/app";
 import { player, usePlayer } from "../stores/player";
 import { MAX_QUERY } from "../shell/SearchBox";
@@ -20,7 +20,7 @@ import { hitInfo, hitMenuItems, hitOf, lyricQuote, mixedHits, openHit, playHit, 
 import { AlbumCard, ArtistCard, PlaylistCard, useContextState } from "./cards";
 import { otherVersionsText } from "./era";
 import { TopSongsResults, useTopSongsFound } from "./TopSongsResults";
-import { CatalogueList, CatalogueRow, CatalogueSkeleton, CatalogueTopResult, catalogueRows, useTapPlays, foldName, hasCatalogue, useCatalogueSearch, type CatalogueResults } from "./SearchCatalogue";
+import { CatalogueList, CatalogueRow, CatalogueSkeleton, CatalogueTopResult, catalogueRows, catalogueTop, useTapPlays, hasCatalogue, useCatalogueSearch, type CatalogueResults } from "./SearchCatalogue";
 import { CatalogueAlbumCard, CatalogueArtistCard } from "./catalogue";
 import { useGetSpots } from "./lidarrShared";
 import type { HelpHit } from "../help/pages";
@@ -268,16 +268,6 @@ export function interleave<A, B>(lib: A[], cat: B[], every = WOVEN_EVERY): { lib
 /** Where the music you don't have came from, for the meta line. */
 function catalogueNote(c: CatalogueResults): string {
   return c.source === "lidarr" ? "Music you don't have from Lidarr and MusicBrainz" : "Music you don't have from MusicBrainz";
-}
-
-/** The artist to put on top: the one named exactly, unless the library's top result is named exactly. */
-function catalogueTop(q: string, c: CatalogueResults | null, libTop: SearchHit | null | undefined): CatArtist | null {
-  if (!c) return null;
-  const want = foldName(q);
-  const exact = c.artists.find((a) => foldName(a.name) === want);
-  const libExact = libTop && foldName(hitInfo(libTop)?.title ?? "") === want;
-  if (exact && !libExact) return exact;
-  return !libTop ? (c.artists[0] ?? null) : null;
 }
 
 /** A search the library found nothing for: the music you don't have, with its own top result. */

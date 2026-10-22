@@ -37,7 +37,7 @@ export function PageFrame({
 }) {
   return (
     <div className={`ph-page ph-x ${className}`} data-phone-page={name}>
-      <BackBar title={typeof title === "string" ? title : undefined} after={72} right={right} />
+      <BackBar title={typeof title === "string" ? title : undefined} after={72} right={right} cover />
       {kicker && <p className="ph-eyebrow ph-x__kicker">{kicker}</p>}
       <h1 className="ph-title ph-title--page ph-x__title">{title}</h1>
       {lede && <p className="ph-x__lede">{lede}</p>}

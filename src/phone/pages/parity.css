@@ -301,8 +301,14 @@
 .phone .settings--phone [data-setting="eqEnabled"]:has(> .setting-row__control .switch:not(.is-on)) > .setting-row__block { display: none; }
 
 /* ---------------------------------------------------------------- versions */
-.ph-hit.has-versions { flex-wrap: wrap; }
-.ph-hit__versions { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; margin: -6px 0 6px 66px; padding: 0 10px !important; border-radius: 999px; background: var(--ph-faint) !important; font-size: 13px; font-weight: 600; color: var(--color-text-secondary) !important; }
+/* A page's words scrolling under the back button: the bar covers them from the first pixel, so the
+   button never sits on the small heading over the title. */
+.ph-backbar.is-covering { background: color-mix(in srgb, var(--color-bg-base) 94%, transparent); -webkit-backdrop-filter: blur(16px) saturate(1.4); backdrop-filter: blur(16px) saturate(1.4); }
+.ph-backbar.is-covering .ph-backbar__back { background: none !important; }
+/* Results straight under the field (no type pills): a little air. */
+.ph-search__bar + .ph-search__results { margin-top: 12px; }
+/* A search row's other versions: a quiet word on its grey line (they're in the song's sheet). */
+.ph-row__versions { color: var(--color-text-muted); }
 .ph-version { display: flex; align-items: center; }
 .ph-version .ph-row { flex: 1; min-width: 0; }
 .ph-version__here { color: var(--color-accent); font-weight: 600; }
@@ -310,8 +316,6 @@
 /* A round photo for an artist's hero. */
 .ph-cat .ph-x__hero .ph-album__cover:has(.ph-x__photo) { border-radius: 50%; }
 .ph-x__hero .ph-x__photo, .ph-x__hero .ph-x__photo .art { width: 100% !important; height: auto !important; aspect-ratio: 1; }
-.ph-hit__versions-line { flex-basis: 100%; }
-.ph-hit.is-top.has-versions .ph-hit__versions { margin-left: 78px; }
 
 /* A cover still loading on the phone: its printed sleeve, set from data attributes. */
 .art__sleeve--pending [data-text]::before { content: attr(data-text); }
