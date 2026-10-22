@@ -295,3 +295,30 @@ async fn a_busy_relay_with_a_down_backup_still_reads_as_busy() {
     let err = desk.wire.send(&desk.link, &answer(1)).await.unwrap_err();
     assert!(peer::is_busy(&err), "{err}");
 }
+
+#[test]
+fn only_a_build_that_listens_on_the_backups_counts() {
+    for v in ["0.2.38", "0.2.39", "0.3.0", "1.0.0", "v0.2.38", "0.2.38-beta.1"] {
+        assert!(peer::hears_backups(v), "{v}");
+    }
+    for v in ["", "0.2.37", "0.1.99", "junk", "0.2"] {
+        assert!(!peer::hears_backups(v), "{v}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn background_work_leaves_the_main_relay_to_requests_when_the_other_end_hears_the_backups() {
+    let (main, b1) = (FakeNtfy::start().await, FakeNtfy::start().await);
+    let (desk, _bridge) = pair(&main, &[&b1], &[], &[]);
+    let entries = || Msg::Entries { entries: crate::sync::store::EntryMap::new() };
+    // An older build at the other end: background still goes everywhere.
+    desk.wire.links.update(&desk.link.id, |p| p.version = "0.2.37".into()).unwrap();
+    desk.wire.send(&desk.link, &entries()).await.unwrap();
+    super::tests::until("on both", || main.published().len() == 1 && b1.published().len() == 1).await;
+    // A build that listens on the backups: background only there, requests everywhere.
+    desk.wire.links.update(&desk.link.id, |p| p.version = "0.2.38".into()).unwrap();
+    desk.wire.send(&desk.link, &entries()).await.unwrap();
+    super::tests::until("on the backup", || b1.published().len() == 2).await;
+    desk.wire.send(&desk.link, &answer(1)).await.unwrap();
+    super::tests::until("the answer on both", || main.published().len() == 2 && b1.published().len() == 3).await;
+}

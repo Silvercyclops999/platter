@@ -65,6 +65,9 @@ const RADAR_START: Duration = Duration::from_secs(5 * 60);
 const RADAR_EVERY: Duration = Duration::from_secs(30 * 60);
 /// Wait after a shared change before sending it (changes come in bursts).
 const SETTLE: Duration = Duration::from_secs(3);
+/// Most JSON of lyrics in one message to a device, so each message is a
+/// few relay pieces.
+const LYRICS_BATCH_BYTES: usize = 12 * 1024;
 const USED_CODES_KEY: &str = "bridge.usedCodes";
 const CONFIG_KEY: &str = "bridge.config";
 const DEVICE_KEY: &str = "bridge.device";
@@ -725,10 +728,15 @@ impl Bridge {
                         }
                     });
                 }
-                if cfg.version.is_empty()
-                    && let Some(p) = self.wire.links.get(&link.id)
-                {
-                    cfg.version = p.version;
+                if cfg.version.is_empty() {
+                    if let Some(p) = self.wire.links.get(&link.id) {
+                        cfg.version = p.version;
+                    }
+                } else {
+                    // Which build is at the other end (it decides whether
+                    // background work can leave ntfy.sh to the backups).
+                    let version: String = cfg.version.chars().take(20).collect();
+                    let _ = self.wire.links.update(&link.id, |p| p.version = version);
                 }
                 if let Err(e) = self.apply_config(&cfg).await {
                     tracing::warn!("Couldn't use the settings from {}: {e}", cfg.desktop);
@@ -1056,9 +1064,13 @@ impl Bridge {
     pub async fn flush_entries(&self) {
         for link in self.wire.links.links() {
             let ob = Outbox::new(&self.p.db, &link.id);
-            // Shared Lidarr state, and the lyrics transcribed here.
-            let Ok(batches) = ob.pending(&self.p.store, &[LIDARR.name(), TRANSCRIPTS.name()]) else { continue };
-            for b in batches {
+            // Shared Lidarr state first, in its own messages, so it never
+            // waits behind lyrics. Then the lyrics transcribed here, a few
+            // at a time: small messages fit the relay's allowance and go
+            // steadily instead of one big one waiting for hours.
+            let lidarr = ob.pending(&self.p.store, &[LIDARR.name()]).unwrap_or_default();
+            let lyrics = ob.unsent(self.p.store.entries(&[TRANSCRIPTS.name()]).unwrap_or_default());
+            for b in lidarr.into_iter().chain(super::links::batches_of(lyrics, LYRICS_BATCH_BYTES)) {
                 if self.wire.send(&link, &Msg::Entries { entries: b.clone() }).await.is_ok() {
                     let _ = ob.mark(&b);
                 } else {

@@ -110,7 +110,13 @@ impl Wire {
         let up: Vec<String> = all.iter().filter(|b| !self.is_down(b)).cloned().collect();
         // Every relay marked down: try them all anyway.
         let force = up.is_empty();
-        let tries = if force { all } else { up };
+        let mut tries = if force { all } else { up };
+        // Background work rides the backups when the other end listens on
+        // them too, and leaves the main relay's daily allowance to requests
+        // and answers.
+        if background(msg) && tries.len() > 1 && tries[0] == link.relay && self.links.get(&link.id).is_some_and(|p| hears_backups(&p.version)) {
+            tries.remove(0);
+        }
         let bodies = Arc::new(bodies);
         let mut held = false;
         let mut going = FuturesUnordered::new();
@@ -290,6 +296,19 @@ async fn publish_all(relay: &dyn Relay, topic: &str, bodies: &[String]) -> Resul
         }
     }
     Ok(())
+}
+
+/// The first build that listens on the backup relays too.
+const BACKUPS_FROM: (u32, u32, u32) = (0, 2, 38);
+
+/// Whether a Platter of this version listens on the backup relays (an
+/// unknown version doesn't count).
+pub fn hears_backups(version: &str) -> bool {
+    let mut n = version.trim().trim_start_matches('v').split(['.', '-', '+']).map(|p| p.parse::<u32>().ok());
+    match (n.next().flatten(), n.next().flatten(), n.next().flatten()) {
+        (Some(a), Some(b), Some(c)) => (a, b, c) >= BACKUPS_FROM,
+        _ => false,
+    }
 }
 
 /// Which error to report when no relay took a message: busy over

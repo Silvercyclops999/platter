@@ -275,7 +275,11 @@ every few hours. If the relay says no anyway, nothing more goes to it for
 a while instead of trying again at once. A relay that can't be reached at
 all is left alone for a minute, then longer each time, up to half an hour,
 while the other two carry everything. Each of the three has its own
-allowance. If you run your own ntfy server, only it and its own limits
+allowance. Once both ends run a build that listens on all three,
+background work goes only to the two backups, so ntfy.sh's daily
+allowance is kept for requests and answers. Shared Lidarr state goes
+before lyrics, and lyrics go a few songs per message, so they trickle in
+steadily instead of waiting for room for one big message. If you run your own ntfy server, only it and its own limits
 apply.
 
 ## Settings

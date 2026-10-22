@@ -288,13 +288,19 @@ type Sent = BTreeMap<String, BTreeMap<String, (u64, String)>>;
 /// Entries cut into batches of at most [`BATCH`] entries and about
 /// [`BATCH_BYTES`] of JSON.
 pub fn batches(all: EntryMap) -> Vec<EntryMap> {
+    batches_of(all, BATCH_BYTES)
+}
+
+/// [`batches`] with at most about `max_bytes` of JSON each (one entry
+/// bigger than that goes alone).
+pub fn batches_of(all: EntryMap, max_bytes: usize) -> Vec<EntryMap> {
     let mut out: Vec<EntryMap> = Vec::new();
     let mut cur = EntryMap::new();
     let (mut n, mut bytes) = (0, 0);
     for (ns, entries) in all {
         for (k, e) in entries {
             let size = k.len() + e.device.len() + e.value.as_ref().map_or(0, |v| v.to_string().len()) + 32;
-            if n > 0 && (n == BATCH || bytes + size > BATCH_BYTES) {
+            if n > 0 && (n == BATCH || bytes + size > max_bytes) {
                 out.push(std::mem::take(&mut cur));
                 (n, bytes) = (0, 0);
             }
