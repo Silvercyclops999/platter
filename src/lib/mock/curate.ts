@@ -150,6 +150,7 @@ const LABEL: Record<string, string> = {
   finished: "Album finished",
   played: "Played",
   trackNumber: "Track number",
+  lastSkipped: "Last skipped",
   playlist: "Playlist",
   sampleRate: "Sample rate",
   bitDepth: "Bit depth",

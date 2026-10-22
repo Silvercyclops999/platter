@@ -170,6 +170,7 @@ impl Field {
                 | Field::Finished
                 | Field::Played
                 | Field::TrackNumber
+                | Field::LastSkipped
                 | Field::Playlist
                 | Field::SampleRate
                 | Field::BitDepth

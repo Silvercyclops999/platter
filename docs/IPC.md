@@ -2401,7 +2401,7 @@ created as a Plex smart playlist (see docs/PLEX-API.md "Smart playlists") and
 read back into the cache, so it shows with the other playlists. Rules Plex
 can't express (`playedHere`, `played`, `duration`, `releaseType`,
 `explicit`, `version`, `era`, `unreleased`, `lossless`, `skips`, `finished`,
-`trackNumber`, `playlist`, `sampleRate`, `bitDepth`, a range of days, a
+`trackNumber`, `lastSkipped`, `playlist`, `sampleRate`, `bitDepth`, a range of days, a
 number range that isn't whole numbers, a limit in hours, a daily or weekly
 update), prompt picks, or
 `platter: true` make a Platter smart playlist with a `smart:` id. When Plex

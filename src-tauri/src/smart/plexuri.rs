@@ -54,7 +54,6 @@ pub fn plex_field(r: &Rule) -> Option<String> {
             Field::AddedAt => "album.addedAt",
             Field::PlayCount => "track.viewCount",
             Field::LastPlayed => "track.lastViewedAt",
-            Field::LastSkipped => "track.lastSkippedAt",
             Field::Rating | Field::Liked => "track.userRating",
             // Filled on this computer only (Field::local_only).
             _ => return None,
@@ -179,11 +178,16 @@ fn rule_query(r: &Rule, liked_min: f64, tags: &TagIds) -> AppResult<String> {
         Field::Year | Field::PlayCount | Field::Decade | Field::Rating if r.op == Op::Between => {
             let (a, b) = parse_number_range(v).ok_or_else(|| AppError::Invalid(format!("Check the value for {}.", r.field.label())))?;
             let scale = if r.field == Field::Rating { 2.0 } else { 1.0 };
+            let below = cond(&field, "<<=", &number_text(b * scale + 1.0));
+            // From nothing up: "less than" alone, so songs Plex has no number for still count.
+            if a <= 0.0 {
+                return Ok(below);
+            }
             // Plex's "more than" and "less than" leave the ends out, so step past them.
             format!(
                 "push=1&{}&and=1&{}&pop=1",
                 cond(&field, ">>=", &number_text(a * scale - 1.0)),
-                cond(&field, "<<=", &number_text(b * scale + 1.0))
+                below
             )
         }
         Field::Year | Field::PlayCount | Field::Decade | Field::Rating => {
@@ -196,9 +200,7 @@ fn rule_query(r: &Rule, liked_min: f64, tags: &TagIds) -> AppResult<String> {
             };
             cond(&field, op, &value)
         }
-        Field::AddedAt | Field::LastPlayed | Field::LastSkipped => {
-            cond(&field, if r.op == Op::InLast { ">>=" } else { "<<=" }, &plex_span(v))
-        }
+        Field::AddedAt | Field::LastPlayed => cond(&field, if r.op == Op::InLast { ">>=" } else { "<<=" }, &plex_span(v)),
         Field::Liked => {
             let min = liked_min.round() as i64;
             if v == "true" { cond(&field, ">>=", &(min - 1).to_string()) } else { cond(&field, "<<=", &min.to_string()) }
@@ -490,12 +492,8 @@ fn cond_rule(c: &Cond, liked_min: f64, tags: &TagIds) -> AppResult<Rule> {
             };
             Rule { field, op, value, plex_field: None }
         }
-        ("album", "addedAt") | ("track", "lastViewedAt" | "lastSkippedAt") => {
-            let field = match tail {
-                "addedAt" => Field::AddedAt,
-                "lastViewedAt" => Field::LastPlayed,
-                _ => Field::LastSkipped,
-            };
+        ("album", "addedAt") | ("track", "lastViewedAt") => {
+            let field = if tail == "addedAt" { Field::AddedAt } else { Field::LastPlayed };
             let op = match c.op.as_str() {
                 ">>=" => Op::InLast,
                 "<<=" => Op::NotInLast,

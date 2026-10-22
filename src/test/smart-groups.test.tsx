@@ -70,7 +70,7 @@ describe("groups", () => {
     const group = within(dialog).getByRole("region", { name: "Group 1" });
     expect(within(group).getByRole("combobox", { name: "Group 1 match" })).toHaveValue("any");
     await user.type(within(group).getByRole("textbox", { name: "Group 1 rule 1 value" }), g1);
-    await user.click(within(group).getByRole("button", { name: "Add a rule" }));
+    await user.click(within(group).getByRole("button", { name: "Add a rule to group 1" }));
     await user.type(within(group).getByRole("textbox", { name: "Group 1 rule 2 value" }), g2);
     const want: SmartRules = {
       ...base,
@@ -93,6 +93,12 @@ describe("groups", () => {
     const user = userEvent.setup();
     const dialog = await openEditor();
     await user.click(within(dialog).getByRole("button", { name: "Add a group" }));
+    // A new rule in a group starts like the one above it, ready to use.
+    await user.selectOptions(within(dialog).getByRole("combobox", { name: "Group 1 rule 1 field" }), "lastPlayed");
+    await user.click(within(dialog).getByRole("button", { name: "Add a rule to group 1" }));
+    expect(within(dialog).getByRole("combobox", { name: "Group 1 rule 2 comparison" })).toHaveValue("inLast");
+    expect(within(dialog).getByRole("combobox", { name: "Group 1 rule 2 time" })).toHaveValue("30d");
+    await user.click(within(dialog).getByRole("button", { name: "Remove group 1 rule 2" }));
     await user.click(within(dialog).getByRole("button", { name: "Remove group 1 rule 1" }));
     expect(within(dialog).queryByRole("region", { name: "Group 1" })).toBeNull();
     await user.click(within(dialog).getByRole("button", { name: "Add a group" }));

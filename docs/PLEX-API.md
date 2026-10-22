@@ -702,9 +702,11 @@ other Plex clients do, and "match any" as `push=1&<a>&or=1&<b>&pop=1`. The
 app tests these with a fake server only. `limit=<n>` caps the songs.
 Groups of rules nest the same way, each its own `push=1 ... pop=1` joined by
 `and=1` or `or=1`, and a number range is a group of `>>=` one below the low
-end and `<<=` one above the high end (Plex leaves both ends out). Not yet
-checked against a server either. `track.title` takes the string operators
-and `track.lastSkippedAt` the date ones.
+end and `<<=` one above the high end (Plex leaves both ends out); a range
+from 0 is just the `<<=`. Not yet checked against a server either.
+`track.title` takes the string operators. Last skipped is read from the
+listen history on this computer, like Skips, not from `track.lastSkippedAt`,
+so the count the editor shows is the one the playlist fills.
 
 ### 2026-10-14: can Plex carry listen along between accounts?
 

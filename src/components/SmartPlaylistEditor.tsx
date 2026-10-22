@@ -459,6 +459,18 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
   // Groups: each its own all or any, one level deep.
   const groups = rules.groups ?? [];
   const setGroups = (next: SmartRuleGroup[]) => setRules({ ...rules, groups: next });
+  /** Offers from the description follow a group's rules as they're taken out (rule null: the whole group). */
+  const dropOffers = (gi: number, rule: number | null) => {
+    if (!described) return;
+    const choices = described.choices
+      .filter((c) => c.group !== gi || (rule !== null && c.index !== rule))
+      .map((c) => {
+        if (c.group == null || c.group < gi) return c;
+        if (c.group > gi) return rule === null ? { ...c, group: c.group - 1 } : c;
+        return c.index > rule! ? { ...c, index: c.index - 1 } : c;
+      });
+    setDescribed({ ...described, choices });
+  };
   const setGroup = (g: number, next: SmartRuleGroup | null) =>
     setGroups(next ? groups.map((x, j) => (j === g ? next : x)) : groups.filter((_, j) => j !== g));
   const addGroup = () => setGroups([...groups, { matchAll: false, rules: [{ field: "genre", op: "is", value: "" }] }]);
@@ -583,14 +595,7 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
                         aria-label={`Remove ${words}`}
                         onClick={() => {
                           setGroup(gi, null);
-                          // Offers for the group's words go with it; later groups move up.
-                          if (described)
-                            setDescribed({
-                              ...described,
-                              choices: described.choices
-                                .filter((c) => c.group !== gi)
-                                .map((c) => (c.group != null && c.group > gi ? { ...c, group: c.group - 1 } : c)),
-                            });
+                          dropOffers(gi, null);
                         }}
                       >
                         <X size={12} />
@@ -693,7 +698,15 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
                   ]}
                   onChange={(v) => setGroup(gi, { ...g, matchAll: v === "all" })}
                 />
-                <IconButton label={`Remove ${label.toLowerCase()}`} size="sm" icon={<X size={16} />} onClick={() => setGroup(gi, null)} />
+                <IconButton
+                  label={`Remove ${label.toLowerCase()}`}
+                  size="sm"
+                  icon={<X size={16} />}
+                  onClick={() => {
+                    setGroup(gi, null);
+                    dropOffers(gi, null);
+                  }}
+                />
               </div>
               <ul className="smart-ed__rules" aria-label={`${label} rules`}>
                 {g.rules.map((r, i) => (
@@ -704,7 +717,11 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
                     listId={listId}
                     onChange={(x) => setGroup(gi, { ...g, rules: g.rules.map((y, j) => (j === i ? x : y)) })}
                     // The last rule out takes the group with it.
-                    onRemove={() => setGroup(gi, g.rules.length > 1 ? { ...g, rules: g.rules.filter((_, j) => j !== i) } : null)}
+                    onRemove={() => {
+                      const last = g.rules.length === 1;
+                      setGroup(gi, last ? null : { ...g, rules: g.rules.filter((_, j) => j !== i) });
+                      dropOffers(gi, last ? null : i);
+                    }}
                   />
                 ))}
               </ul>
@@ -713,8 +730,14 @@ export function SmartPlaylistEditor({ initial }: { initial: SmartEditorState }) 
                 size="sm"
                 icon={<Plus size={16} />}
                 disabled={full}
-                onClick={() => setGroup(gi, { ...g, rules: [...g.rules, { field: g.rules[g.rules.length - 1]?.field ?? "genre", op: "is", value: "" }] })}
+                onClick={() => {
+                  // The new rule starts on the same field as the one above it.
+                  const field = g.rules[g.rules.length - 1]?.field ?? "genre";
+                  const k = fieldKind(field);
+                  setGroup(gi, { ...g, rules: [...g.rules, { field, op: OPS[k][0].value, value: defaultValue(k) }] });
+                }}
                 className="smart-ed__add"
+                aria-label={`Add a rule to ${label.toLowerCase()}`}
               >
                 Add a rule
               </Button>
