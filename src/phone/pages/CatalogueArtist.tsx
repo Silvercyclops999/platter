@@ -11,7 +11,7 @@ import { useLoad } from "../../lib/useLoad";
 import { catalogueEntries } from "../../pages/artist";
 import { dismissArtist, undismissArtist } from "../../pages/catalogue";
 import { GetAlbumsDialog } from "../../pages/GetAlbumsDialog";
-import { lidarrNote, useGetSpots, useLidarrStatus } from "../../pages/lidarrShared";
+import { PHONE_SET_UP, lidarrNote, useGetSpots, useLidarrStatus } from "../../pages/lidarrShared";
 import { useIsGuest } from "../../stores/asks";
 import { nav, useRouter } from "../../stores/router";
 import { useSettings } from "../../stores/settings";
@@ -24,7 +24,7 @@ export function PhoneCatalogueArtist({ mbid }: { mbid: string }) {
   const { data, error, retry } = useLoad(() => backend.catalogueArtist(mbid), [mbid, version]);
   const lidarr = useLidarrStatus();
   const lidarrReady = !!lidarr?.ready;
-  const lidarrSays = lidarrNote(lidarr, "Set up Lidarr in Settings to get albums, or buy them from a store.");
+  const lidarrSays = lidarrNote(lidarr, PHONE_SET_UP);
   const spots = useGetSpots();
   const guest = useIsGuest();
   const [getting, setGetting] = useState(false);

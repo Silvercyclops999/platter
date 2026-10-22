@@ -11,7 +11,7 @@ import { catalogueKind, formatDuration, formatLongDuration, plural } from "../..
 import { STORE_LINKS } from "../../lib/importStrings";
 import { useLoad } from "../../lib/useLoad";
 import { CatalogueAction, addToMissing, openStore, removeFromMissing } from "../../pages/catalogue";
-import { useGetSpots, useLidarrNote } from "../../pages/lidarrShared";
+import { PHONE_SET_UP, useGetSpots, useLidarrNote } from "../../pages/lidarrShared";
 import { useIsGuest } from "../../stores/asks";
 import { nav, useRouter } from "../../stores/router";
 import { PageFailed, PageLoading } from "./common";
@@ -21,7 +21,7 @@ export function PhoneCatalogueAlbum({ id }: { id: string }) {
   const [version, setVersion] = useState(0);
   const { data, error, retry } = useLoad(() => backend.catalogueAlbum(id), [id, version]);
   const lidarrReady = useGetSpots();
-  const lidarrSays = useLidarrNote("Set up Lidarr in Settings to get it.");
+  const lidarrSays = useLidarrNote(PHONE_SET_UP);
   const guest = useIsGuest();
   const [busy, setBusy] = useState(false);
   const owned = data?.album.libraryAlbumId;

@@ -698,6 +698,18 @@ async fn search_uses_lidarrs_search_when_its_set_up() {
 }
 
 #[tokio::test]
+async fn search_asks_musicbrainz_when_lidarrs_search_finds_nobody() {
+    let r = rig();
+    with_lidarr(&r);
+    // Lidarr's metadata service answers with nothing.
+    r.lookup.artists.lock().clear();
+    let a = r.d.search_part("north", "artists").await.unwrap();
+    assert_eq!(a.source, "musicBrainz");
+    assert!(!a.artists.is_empty() || !a.in_library.is_empty(), "MusicBrainz's answer shows");
+    assert_eq!(r.mb.count("/artist?query="), 1);
+}
+
+#[tokio::test]
 async fn search_falls_back_to_musicbrainz_or_follows_the_setting() {
     let r = rig();
     with_lidarr(&r);

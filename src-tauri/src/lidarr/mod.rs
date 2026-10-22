@@ -243,6 +243,10 @@ pub struct LidarrStatus {
     /// (nothing to set up).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub home_quiet: bool,
+    /// Lidarr is reached, and its last setup check found something that
+    /// stops getting any music.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub check_failed: bool,
 }
 
 impl LidarrStatus {
@@ -302,6 +306,8 @@ pub struct Lidarr {
     home: Arc<homeside::Hooks>,
     /// A setup check started by itself is running.
     auto_check: Arc<std::sync::atomic::AtomicBool>,
+    /// Why Get is off, as last written to the log.
+    said: Arc<parking_lot::Mutex<String>>,
 }
 
 /// The address as a key for stored confirmations (and, from the home
@@ -353,7 +359,7 @@ pub fn parse_headers(text: &str) -> AppResult<Vec<(String, String)>> {
 
 impl Lidarr {
     pub fn new(deps: LidarrDeps) -> Self {
-        Self { inner: Arc::new(deps), lock: Arc::new(tokio::sync::Mutex::new(())), modes_cache: Default::default(), proposals: Default::default(), announcer: Default::default(), hosts: Default::default(), home: Default::default(), auto_check: Default::default() }
+        Self { inner: Arc::new(deps), lock: Arc::new(tokio::sync::Mutex::new(())), modes_cache: Default::default(), proposals: Default::default(), announcer: Default::default(), hosts: Default::default(), home: Default::default(), auto_check: Default::default(), said: Default::default() }
     }
 
     /// (home, away) addresses from Settings; empty when not set.
@@ -380,15 +386,33 @@ impl Lidarr {
         let home_side = self.home_side_up();
         let owner = self.is_owner();
         let direct = owner && set && has_key && moved.is_none();
+        let last = self.last_check();
+        let ready = (direct || home_side) && last.as_ref().is_some_and(|l| l.managed_ok.unwrap_or(l.passed));
+        if !self.bridge_mode() {
+            let why = match () {
+                _ if ready => "on",
+                _ if !owner => "off: not the server's owner",
+                _ if !direct && !home_side && self.bridge_linked() => "off: the Bridge isn't answering",
+                _ if !direct && !home_side => "off: no Lidarr address here and no Bridge",
+                _ if last.is_none() => "off: no setup check yet",
+                _ => "off: the setup check found a problem",
+            };
+            let mut said = self.said.lock();
+            if *said != why {
+                tracing::info!(home_side, direct, "lidarr get {why}");
+                *said = why.to_string();
+            }
+        }
         LidarrStatus {
             url_set: !home.trim().is_empty(),
             away_set: !away.trim().is_empty(),
             has_key,
-            ready: (direct || home_side) && self.last_check().is_some_and(|l| l.managed_ok.unwrap_or(l.passed)),
+            ready,
             home_side,
             header_names: self.headers().into_iter().map(|(n, _)| n).collect(),
             unencrypted: [home, away].into_iter().filter(|u| unencrypted(u)).collect(),
             home_quiet: owner && !direct && !home_side && self.bridge_linked(),
+            check_failed: (direct || home_side) && last.as_ref().is_some_and(|l| !l.managed_ok.unwrap_or(l.passed)),
             moved,
             not_owner: !owner,
         }
@@ -700,7 +724,7 @@ impl Lidarr {
             unencrypted: [home, away].into_iter().filter(|u| unencrypted(u)).collect(),
             route: Some(client.route()),
             now: (self.inner.clock)(),
-            staging: Some(crate::settings::load(&self.inner.db).lidarr_staging_folder).filter(|s| !s.trim().is_empty()),
+            staging: Some(self.staging_folder()).filter(|s| !s.trim().is_empty()),
             library_has_unreleased: self.inner.db.read(library_has_unreleased).unwrap_or(false),
         };
         let mut budget = MAX_LISTINGS;
