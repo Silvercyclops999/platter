@@ -1587,7 +1587,7 @@ export function createTauriBackend(): Backend {
     audioRoute: () => call("audio_route"),
     headphoneDetect: () => call("headphone_detect"),
     headphoneSearch: (query) => call("headphone_search", { query }),
-    headphoneCorrectionSet: (path, deviceId) => call("headphone_correction_set", { path, deviceId: deviceId ?? null }),
+    headphoneCorrectionSet: (path, deviceId) => call("headphone_correction_set", deviceId === undefined ? { path } : { path, deviceId }),
     headphoneCorrectionCompare: (bypass) => call("headphone_correction_compare", { bypass }),
     bitPerfectSet: (on) => call("bit_perfect_set", { on }),
     artCacheInfo: () => call("art_cache_info"),
