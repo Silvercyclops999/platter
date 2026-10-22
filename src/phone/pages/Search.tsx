@@ -19,7 +19,7 @@ import { SongSwipeUnder, useRowSwipe } from "../rowSwipe";
 import { isLiked, setLiked } from "../../stores/likes";
 import { player, usePlayer } from "../../stores/player";
 import { PlayingBars, countLine } from "./common";
-import { catalogueTop, hasCatalogue, hasCatalogueRows, playCatalogueSong, useCatalogueSearch, useTapPlays, type CatalogueResults } from "../../pages/SearchCatalogue";
+import { catalogueTop, hasCatalogue, hasCatalogueRows, nameMatches, playCatalogueSong, useCatalogueSearch, useTapPlays, type CatalogueResults } from "../../pages/SearchCatalogue";
 import { useArtistPhoto } from "../../lib/artistPhotos";
 import { useGetSpots } from "../../pages/lidarrShared";
 import { catalogueKind } from "../../lib/format";
@@ -106,10 +106,11 @@ export function PhoneSearch() {
   // An artist you don't have, named the way you typed it, is the top result
   // (unless the library has something named that way).
   const catTop = shown === "all" || shown === "artist" ? catalogueTop(q, cat, res?.top, all[0]) : null;
-  const nothingAnywhere = !hits.length && !catTop && !hasCatalogueRows(cat) && !cat?.pending.length;
-  // Nothing matched every word: what's out there named that way comes
-  // first, the library's near misses after.
-  const closeLast = !!res?.partial && hasCatalogueRows(cat);
+  const nothingAnywhere = !hits.length && !catTop && !hasCatalogueRows(cat, shown) && !cat?.pending.length;
+  // Nothing matched every word and the library's best isn't named that way:
+  // once the search beyond the library is in, what it found comes first and
+  // the library's near misses after.
+  const closeLast = !!res?.partial && !!cat && !cat.pending.length && hasCatalogueRows(cat, shown) && !nameMatches(q, (res.top && hitInfo(res.top)?.title) ?? "");
   const hitRows =
     res &&
     hits.map((h) => {

@@ -650,12 +650,37 @@ impl Discover {
     /// When a name of two to four words found nobody named that way,
     /// MusicBrainz asked again forgiving a letter or two per word: an artist
     /// it finds named the way the query spells it comes first ("juice
-    /// world" is Juice WRLD). Not when an artist found is named in the query
-    /// with more words after ("northlight live").
+    /// world" is Juice WRLD). Not when an artist found or in the library is
+    /// named that way already, or named by the query's first words with one
+    /// more after ("northlight live").
     async fn named_loosely(&self, q: &str, mut p: CataloguePart) -> CataloguePart {
         let words: Vec<String> = canonical(q).split(' ').map(str::to_string).collect();
-        let in_query = |name: &str| canonical(name).split(' ').all(|w| words.iter().any(|x| x == w));
-        if !(2..=4).contains(&words.len()) || p.artists.iter().any(|a| sounds_like(q, &a.name) || in_query(&a.name)) {
+        if !(2..=4).contains(&words.len()) {
+            return p;
+        }
+        let named = {
+            let (q, words) = (q.to_string(), words.clone());
+            move |name: &str| {
+                let nw: Vec<String> = canonical(name).split(' ').map(str::to_string).collect();
+                sounds_like(&q, name) || (nw.len() + 1 == words.len() && words.starts_with(&nw))
+            }
+        };
+        if p.artists.iter().any(|a| named(&a.name)) {
+            return p;
+        }
+        let in_library = self
+            .inner
+            .db
+            .read_async({
+                let named = named.clone();
+                move |c| {
+                    let mut st = c.prepare_cached("SELECT title FROM artists")?;
+                    let titles = st.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+                    Ok(titles.iter().any(|t| named(t)))
+                }
+            })
+            .await;
+        if in_library.unwrap_or(true) {
             return p;
         }
         let found = match self.inner.mb.get(&mb::artist_loose_search_url(q)).await {

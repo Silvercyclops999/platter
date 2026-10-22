@@ -6,9 +6,10 @@
 //! evicted first. Concurrent requests for the same key share one fetch.
 //! When the disk is full, the cache evicts and retries once; if that fails
 //! the store errors (the image is still served to the caller).
-//! An image that is all one colour (a blank white poster a server holds) is
-//! no picture: it's answered as not found, so the app draws its own sleeve,
-//! and remembered that way so it isn't fetched again.
+//! A blank image (all white, like a blank poster a server holds, or all
+//! see-through) is no picture: it's answered as not found, so the app draws
+//! its own sleeve, and remembered that way (evicted and cleared like any
+//! image) so it isn't fetched again. An all-black cover is a real cover.
 
 use std::collections::HashMap;
 use std::io::ErrorKind;
@@ -42,10 +43,14 @@ const BLANK: &str = "x-platter/blank";
 /// Only images this small for their size are looked at closely: a picture
 /// of anything takes far more bytes per pixel than a blank one.
 const BLANK_MAX_BYTES_PER_PIXEL: f64 = 0.15;
+/// The lowest level of each colour that still reads as white.
+const BLANK_WHITE: u8 = 235;
+/// What's kept for a blank image: a few bytes, so eviction and Clear count it.
+const BLANK_BYTES: &[u8] = b"blank";
 /// How far a pixel may stray from the first (JPEG noise) and still be the same colour.
 const BLANK_TOLERANCE: i16 = 12;
 
-/// Whether an image is all one colour (or all see-through).
+/// Whether an image is blank: all white, or all see-through.
 pub fn is_blank(bytes: &[u8]) -> bool {
     let reader = || image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok();
     let Some((w, h)) = reader().and_then(|r| r.into_dimensions().ok()) else { return false };
@@ -57,6 +62,10 @@ pub fn is_blank(bytes: &[u8]) -> bool {
     let img = img.to_rgba8();
     let mut px = img.pixels();
     let Some(first) = px.next().map(|p| p.0) else { return false };
+    let white = first[3] == 255 && first[..3].iter().all(|&c| c >= BLANK_WHITE);
+    if !white && first[3] != 0 {
+        return false;
+    }
     let near = |p: [u8; 4]| {
         if first[3] == 0 && p[3] == 0 {
             return true;
@@ -437,7 +446,7 @@ impl ArtCache {
         let (stored, a) = tokio::task::spawn_blocking(move || {
             if is_blank(&a.bytes) {
                 tracing::debug!(path = %crate::sid::key(&path).chars().take(64).collect::<String>(), "art is all one colour; no picture");
-                a = ArtBytes { bytes: Bytes::new(), content_type: BLANK.into() };
+                a = ArtBytes { bytes: Bytes::from_static(BLANK_BYTES), content_type: BLANK.into() };
             }
             (me.store_key(&key, &a), a)
         })
@@ -610,6 +619,7 @@ mod tests {
             self.0.fetch_add(1, Ordering::SeqCst);
             let img = match path {
                 "/white" => image::RgbaImage::from_pixel(w, h, image::Rgba([255, 255, 255, 255])),
+                "/black" => image::RgbaImage::from_pixel(w, h, image::Rgba([0, 0, 0, 255])),
                 "/clear" => image::RgbaImage::from_pixel(w, h, image::Rgba([10, 20, 30, 0])),
                 // White with a small black word in a corner.
                 "/word" => image::RgbaImage::from_fn(w, h, |x, y| if (10..30).contains(&x) && (10..14).contains(&y) { image::Rgba([0, 0, 0, 255]) } else { image::Rgba([255, 255, 255, 255]) }),
@@ -632,7 +642,12 @@ mod tests {
         assert_eq!(f.0.load(Ordering::SeqCst), 2);
         assert_eq!(c.get_or_fetch("/white", 300, 300).await.unwrap_err().kind(), "notFound");
         assert_eq!(f.0.load(Ordering::SeqCst), 2, "remembered as blank");
-        // A picture, even a nearly blank one, is a picture.
+        // Clear forgets that too.
+        c.clear().unwrap();
+        assert_eq!(c.get_or_fetch("/white", 300, 300).await.unwrap_err().kind(), "notFound");
+        assert_eq!(f.0.load(Ordering::SeqCst), 3);
+        // A picture, even a nearly blank one or an all-black one, is a picture.
+        assert!(c.get_or_fetch("/black", 300, 300).await.is_ok());
         assert!(c.get_or_fetch("/word", 300, 300).await.is_ok());
         assert!(c.get_or_fetch("/cover", 300, 300).await.is_ok());
         assert!(!is_blank(b"not an image"));

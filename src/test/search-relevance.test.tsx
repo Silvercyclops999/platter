@@ -109,6 +109,12 @@ describe("an artist's name as people type it", () => {
     expect(nameMatches("coldcoast", "Cold Coast")).toBe(true);
     expect(nameMatches("juice world", "In A Perfect World")).toBe(false);
     expect(nameMatches("cold coast", "Coastal Cold Front")).toBe(false);
+    // Read the way the library's search reads names.
+    expect(nameMatches("simon and garfunkel", "Simon & Garfunkel")).toBe(true);
+    expect(nameMatches("guns and roses", "Guns N' Roses")).toBe(true);
+    expect(nameMatches("asap rocky", "A$AP Rocky")).toBe(true);
+    expect(nameMatches("cold caost", "Cold Coast")).toBe(true);
+    expect(nameMatches("mr", "Mayor")).toBe(false);
   });
 
   it("puts the artist you don't have on top over library results that don't name it", () => {
@@ -131,6 +137,16 @@ describe("an artist's name as people type it", () => {
     expect(within(close).getByText("Coast Road")).toBeInTheDocument();
     const rest = screen.getByRole("region", { name: "Not in your library" });
     expect(rest.compareDocumentPosition(close) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("keeps the library's result first when it's named the way you typed it", async () => {
+    const song = { ...mock.fx.tracks[0], id: "p2", title: "Cold Coast" } as Track;
+    vi.spyOn(mock, "search").mockResolvedValue({ songs: [song], artists: [], albums: [], playlists: [], top: { kind: "track", track: song }, tookMs: 1, source: "local", partial: true } as SearchResults);
+    search("cold coast");
+    await screen.findByRole("region", { name: "Not in your library" }, SLOW);
+    expect(screen.queryByRole("region", { name: "Close matches in your library" })).toBeNull();
+    const results = screen.getByRole("region", { name: "Results" });
+    expect(within(within(results).getAllByRole("listitem")[0]).getByText("Cold Coast")).toBeInTheDocument();
   });
 });
 

@@ -244,9 +244,13 @@ async fn search_finds_an_artist_typed_the_way_the_name_sounds() {
     assert_eq!(names[0], "Velvet WRLD");
     assert!(!names.contains(&"Velvet World Orchestra"), "only the one named that way is added");
     assert_eq!(r.mb.count("velvet%7E"), 1);
-    // Named by the plain search: nothing more is asked.
+    // Named by the plain search, or by the query's first words: nothing more is asked.
     r.d.search_part("northlight", "artists").await.unwrap();
+    r.d.search_part("northlight live", "artists").await.unwrap();
     assert_eq!(r.mb.count("northlight%7E"), 0);
+    // The library has them (one letter off): its own search puts them on top.
+    r.d.search_part("harbr sound", "artists").await.unwrap();
+    assert_eq!(r.mb.count("harbr%7E"), 0);
 }
 
 #[tokio::test]
