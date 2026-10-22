@@ -103,6 +103,7 @@ const SAMPLES = `async (m) => {
     blendNew: { name: "blendNew" },
     credits: { name: "credits", person },
     mixes: { name: "mixes" },
+    songs: { name: "songs" },
     archive: { name: "archive" },
     downloads: { name: "downloads" },
     help: [{ name: "help" }, { name: "help", slug: "getting-started" }],
