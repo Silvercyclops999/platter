@@ -46,10 +46,17 @@ jobs:
         run: |
           set -eu
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not a release tag: $TAG"; exit 1; }
-          rel=$(gh api "repos/$REPO/releases?per_page=30" | jq --arg t "$TAG" '[.[] | select(.tag_name == $t)][0]')
+          # A release can lose its tag (tag_name "untagged-..."), so look by name too.
+          rel=$(gh api "repos/$REPO/releases?per_page=30" | jq --arg t "$TAG" '[.[] | select(.tag_name == $t or .name == "Platter " + $t)][0]')
           [ -n "$rel" ] && [ "$rel" != null ] || { echo "no release for $TAG"; exit 1; }
-          if [ "$(echo "$rel" | jq .draft)" != true ]; then echo "$TAG is already published"; exit 0; fi
           id=$(echo "$rel" | jq .id)
+          # Downloads (and the updater) need the release on its tag.
+          if [ "$(echo "$rel" | jq -r .tag_name)" != "$TAG" ]; then
+            gh api -X PATCH "repos/$REPO/releases/$id" -f tag_name="$TAG" >/dev/null
+            echo "put back on $TAG"
+            rel=$(gh api "repos/$REPO/releases/$id")
+          fi
+          if [ "$(echo "$rel" | jq .draft)" != true ]; then echo "$TAG is already published"; exit 0; fi
 
           if ! echo "$rel" | jq -e '[.assets[].name | select(endswith(".dmg"))] | length > 0' >/dev/null; then
             echo "no dmg on the $TAG draft yet"; exit 1
@@ -64,7 +71,7 @@ jobs:
           [ "$(jq -r .version latest.json)" = "${TAG#v}" ] || { echo "latest.json is for another version"; exit 1; }
 
           if [ -n "$NOTES" ]; then
-            jq -n --arg b "$NOTES" '{body: $b}' | gh api -X PATCH "repos/$REPO/releases/$id" --input - >/dev/null
+            jq -n --arg b "$NOTES" --arg t "$TAG" '{body: $b, tag_name: $t}' | gh api -X PATCH "repos/$REPO/releases/$id" --input - >/dev/null
             echo "notes written"
             rel=$(gh api "repos/$REPO/releases/$id")
           fi
@@ -74,4 +81,4 @@ jobs:
               echo "the $TAG draft still has placeholder notes; write the notes, then run this by hand"; exit 1 ;;
           esac
 
-          gh api -X PATCH "repos/$REPO/releases/$id" -F draft=false -f make_latest=true --jq '"Published " + .tag_name + ": " + .html_url'
+          gh api -X PATCH "repos/$REPO/releases/$id" -F draft=false -f tag_name="$TAG" -f make_latest=true --jq '"Published " + .tag_name + ": " + .html_url'
