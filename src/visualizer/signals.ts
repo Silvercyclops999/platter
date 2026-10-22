@@ -110,9 +110,10 @@ export class MusicSignals {
   /**
    * Moves everything `dtMs` on. `bands` is the latest frame's (null when
    * frames stopped: everything falls back to rest), `frameKey` tells a new
-   * frame from the same one drawn again, `nowMs` is the stage's clock.
+   * frame from the same one drawn again, `nowMs` is the stage's clock,
+   * `pace` how fast the slow phases run (1 playing, toward 0 as a pause winds down).
    */
-  step(bands: ArrayLike<number> | null, frameKey: unknown, dtMs: number, nowMs: number): void {
+  step(bands: ArrayLike<number> | null, frameKey: unknown, dtMs: number, nowMs: number, pace = 1): void {
     const how = MOTION;
     const dt = Math.max(0, Math.min(250, dtMs));
     if (bands && frameKey !== this.lastFrame) {
@@ -137,8 +138,8 @@ export class MusicSignals {
     this.mid = follow(this.mid, mi, dt, mi > this.mid ? 70 : how.releaseMs * 1.4);
     this.high = follow(this.high, hi, dt, hi > this.high ? 30 : how.releaseMs * 0.8);
     this.pulse *= Math.exp(-dt / how.pulseMs);
-    this.flow += (dt / 1000) * (0.1 + 0.6 * this.low + 0.25 * this.pulse);
-    this.drift += (dt / 1000) * (0.04 + 0.16 * this.mid);
+    this.flow += ((dt * pace) / 1000) * (0.1 + 0.6 * this.low + 0.25 * this.pulse);
+    this.drift += ((dt * pace) / 1000) * (0.04 + 0.16 * this.mid);
   }
 
   /** Spectral flux over the low bands against its own recent statistics. */
