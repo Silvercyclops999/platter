@@ -37,8 +37,6 @@ export const styleLabel = (id: VisualizerStyle) => STYLES.find((s) => s.id === i
 /** Frames a second on a computer, and the phone's most. */
 export const DESKTOP_FPS = 60;
 export const PHONE_FPS = 30;
-/** Paused, the art moves at most this many frames a second. */
-export const PAUSED_FPS = 12;
 /** How many bands Ring shows (each twice, mirrored round the rim). */
 export const PHONE_BARS = 32;
 export const DESKTOP_BARS = 40;

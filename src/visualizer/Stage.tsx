@@ -32,7 +32,7 @@ import { latestFrame, useFeed, useSpectrumFeed } from "./feed";
 import { paletteFromColour, paletteFromImage, type ArtPalette } from "./palette";
 import { BarLevels, current } from "./scale";
 import { MOTION, MusicSignals } from "./signals";
-import { DESKTOP_BARS, DESKTOP_FPS, PAUSED_FPS, PHONE_BARS, PHONE_FPS, STYLES, styleLabel } from "./styles";
+import { DESKTOP_BARS, DESKTOP_FPS, PHONE_BARS, PHONE_FPS, STYLES, styleLabel } from "./styles";
 import "./stage.css";
 
 /** A phone draws at most this share of its screen's pixels: the art is soft, the battery isn't free. */
@@ -41,6 +41,8 @@ export const PHONE_RENDER_CAP = 0.7;
 export const MAX_RENDER_PIXELS = 2_600_000;
 /** The record turns at 33 1/3 a minute while playing (degrees a second). */
 const SPIN_DEG_S = 200;
+/** Paused, the record and the art's own drift wind down together over about this long (ms, time constant). */
+const WIND_DOWN_MS = 700;
 /** How often the stage looks again at where the sharp cover sits (ms). */
 const MEASURE_MS = 1_000;
 /** Under reduced motion, frames are drawn for this long after something changes, then none. */
@@ -144,6 +146,14 @@ function MovingStage({ style, phone = false, cover }: StageProps & { style: Excl
   const spin = useRef(0);
   const spinSpeed = useRef(0);
   const clock = useRef(0);
+  // How fast the art's own time runs: 1 playing, easing to 0 when paused, with the record.
+  const pace = useRef(playing ? 1 : 0);
+  // Paused and wound down: nothing moves, so nothing is drawn until something changes.
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    if (playing) setSettled(false);
+  }, [playing]);
+  const quiet = still || (!playing && settled);
   const coverFn = useRef(cover);
   useLayoutEffect(() => {
     coverFn.current = cover;
@@ -154,7 +164,7 @@ function MovingStage({ style, phone = false, cover }: StageProps & { style: Excl
   const sleepTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const poke = useRef(() => {});
   poke.current = () => {
-    if (!still) return;
+    if (!quiet) return;
     setAwake(true);
     if (sleepTimer.current) clearTimeout(sleepTimer.current);
     sleepTimer.current = setTimeout(() => setAwake(false), STILL_AWAKE_MS);
@@ -164,7 +174,7 @@ function MovingStage({ style, phone = false, cover }: StageProps & { style: Excl
     return () => {
       if (sleepTimer.current) clearTimeout(sleepTimer.current);
     };
-  }, [still, renderer, style]);
+  }, [quiet, renderer, style]);
 
   // The GPU: both programs on one canvas of this mount's own, given back when it goes. A lost
   // context draws with the CSS layers until it returns.
@@ -341,7 +351,9 @@ function MovingStage({ style, phone = false, cover }: StageProps & { style: Excl
 
   useFrameLoop(
     (dt, now) => {
-      clock.current += dt / 1000;
+      // Paused, the art's time slows with the record instead of dropping frames, so it settles smoothly.
+      pace.current += ((playing ? 1 : 0) - pace.current) * (1 - Math.exp(-dt / WIND_DOWN_MS));
+      clock.current += (dt * pace.current) / 1000;
       const sig = signals.current;
       const motion = still ? 0 : 1;
       let bands: ArrayLike<number> | null = null;
@@ -349,11 +361,11 @@ function MovingStage({ style, phone = false, cover }: StageProps & { style: Excl
         const { frame: f, at } = latestFrame();
         const cur = current(f, at, now);
         bands = cur?.bands ?? null;
-        sig.step(bands, cur, dt, clock.current * 1000);
+        sig.step(bands, cur, dt, clock.current * 1000, pace.current);
       }
       // The record speeds up and slows down like a platter, never jumping.
       const wantSpin = playing && !still && style !== "blur" ? SPIN_DEG_S : 0;
-      spinSpeed.current += (wantSpin - spinSpeed.current) * (1 - Math.exp(-dt / 700));
+      spinSpeed.current += (wantSpin - spinSpeed.current) * (1 - Math.exp(-dt / WIND_DOWN_MS));
       spin.current = (spin.current + (spinSpeed.current * dt) / 1000) % 360;
 
       const el = coverFn.current();
@@ -387,10 +399,11 @@ function MovingStage({ style, phone = false, cover }: StageProps & { style: Excl
       } else if (renderer === "css") {
         moveFields(fields.current, sig, motion);
       }
+      if (!playing && !settled && atRest(pace.current, spinSpeed.current, sig, style === "bars" ? bars.current.shown : null)) setSettled(true);
     },
-    // Paused, the art rests at a slower rate; holding still it draws only after a change.
-    playing ? fps : Math.min(fps, PAUSED_FPS),
-    renderer !== null && (!still || awake),
+    fps,
+    // Holding still, or paused and wound down, it draws only for a moment after a change.
+    renderer !== null && (!quiet || awake),
   );
 
   const line = stillLine(local, reduced, resting, phone);
@@ -403,6 +416,7 @@ function MovingStage({ style, phone = false, cover }: StageProps & { style: Excl
       data-renderer={renderer ?? undefined}
       data-style={style}
       data-still={still || undefined}
+      data-settled={(!playing && settled) || undefined}
       aria-hidden="true"
     >
       {(style === "bars" || cssArt) && (
@@ -453,6 +467,14 @@ function StyleName({ style }: { style: VisualizerStyle }) {
       </span>
     </div>
   );
+}
+
+/** Paused and wound down: the art's time and the record stopped, the music's marks gone. */
+export function atRest(pace: number, spinDegS: number, sig: MusicSignals, shown: ArrayLike<number> | null): boolean {
+  if (pace > 0.002 || spinDegS > 0.3) return false;
+  if (sig.low + sig.mid + sig.high + sig.pulse > 0.004) return false;
+  if (shown) for (let i = 0; i < shown.length; i++) if (shown[i] > 0.004) return false;
+  return true;
 }
 
 const COVER_PROPS = ["--vis-breath", "--vis-spin"];
