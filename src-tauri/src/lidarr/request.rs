@@ -1220,9 +1220,7 @@ impl Lidarr {
             let mut state = map_status(&album, &queue, &history);
             // A download of this request's that Lidarr couldn't import.
             let mut note: Option<String> = None;
-            if let Some(q) = queue.iter().find(|q| q.album_id == Some(album.id) && q.import_failed())
-                && super::failed::ours(&list[i], q, &history)
-            {
+            if let Some(q) = queue.iter().find(|q| q.album_id == Some(album.id) && q.import_failed() && super::failed::ours(&list[i], q, &history)) {
                 match self.clear_failed(&writer, &mut list[i], q, album.id, now).await {
                     Ok(super::failed::Cleared::Yes(msg)) => {
                         state = RequestState::Searching;
