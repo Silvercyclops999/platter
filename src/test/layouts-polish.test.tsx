@@ -306,8 +306,8 @@ describe("Radio and mixes", () => {
     expect(screen.getByRole("heading", { name: "Radio and mixes" })).toBeInTheDocument();
     expect(screen.getByText(/Start radio from any song, album or artist/)).toBeInTheDocument();
     expect(await screen.findByRole("region", { name: "Made for you" })).toBeInTheDocument();
-    // It leads with what there is to play, and each mix is a row with its name and Play.
-    expect(screen.getByTestId("mixes-lead")).toHaveTextContent(/^\d+ mixes made from what you play/);
+    // No sentence of numbers; each mix is a row with its name and Play.
+    expect(screen.queryByText(/mixes made from what you play/)).toBeNull();
     const made = screen.getByRole("list", { name: "Made for you" });
     expect(within(made).getByRole("button", { name: "Daily Mix 1" })).toBeInTheDocument();
     expect(within(made).getByRole("button", { name: "Play Daily Mix 1" })).toBeInTheDocument();

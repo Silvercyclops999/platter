@@ -190,8 +190,6 @@
    list: the sleeve, the name in the display face, who is in it, its
    length in the readout face, and Play. */
 .mixes-page { container-type: inline-size; }
-.mixes-page .mixes-page__lead { margin: 0 var(--space-3) var(--space-3); max-width: 30em; }
-.mixes-page .mixes-page__lead + .mixes-page__lede { margin-top: 0; font-size: var(--font-size-sm); }
 .mixes-page .lg-head { margin: 0 var(--space-3) var(--space-1); }
 .mixes-page__group + .mixes-page__group { margin-top: var(--space-10, 40px); }
 .mix-rows { list-style: none; margin: 0 var(--space-3); padding: 0; }
@@ -237,7 +235,6 @@
   .mix-row__sleeve { width: 56px; height: 56px; }
   .mix-row__length { display: none; }
 }
-.ph-mixes .ph-mixes__lead { margin: 12px 0 20px; }
 .ph-mixes .ph-mixes__rows .ph-mixes__row { border-top: 1px solid var(--ledger-faint); border-radius: 0; }
 .ph-mixes .ph-mixes__rows li:first-child .ph-mixes__row { border-top: 0; }
 .ph-mixes .ph-mixes__row .ph-row__title { font-family: var(--font-headings, var(--font-family)); font-weight: 600; }

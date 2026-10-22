@@ -1,8 +1,7 @@
 /**
  * Radio and mixes: every mix Platter made for you, by kind, on one page.
- * It leads with a sentence on what there is to play (how many mixes, how
- * long they run, when the daylist turns over), then each kind as a ruled
- * list: the mix's sleeve, its name, who is in it, its length and Play.
+ * Each kind is a ruled list: the mix's picture, its name, who is in it,
+ * its length and Play.
  * Radio starts from any song, album or artist menu, so the page says so.
  * New mixes show as soon as they are made; offline, only downloaded ones.
  */
@@ -12,34 +11,28 @@ import { IconButton } from "../components/Button";
 import { LoadError } from "../components/LoadError";
 import { Skeleton } from "../components/Skeleton";
 import { duration } from "../lib/statsStory";
-import type { MixShelves, MixSummary } from "../lib/types";
+import type { MixSummary } from "../lib/types";
 import { useApp } from "../stores/app";
 import { player } from "../stores/player";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useContextState } from "./cards";
-import { MixArt, openMix } from "./MixCard";
+import { openMix } from "./MixCard";
 import { useMixShelves } from "./mixShelves";
 import "./home.css";
 import "./ledger.css";
 import "./mixes.css";
 import "../shell/facets.css";
 
-const clock = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
-
-/** The page's sentence: how many mixes, how long in all, and when the daylist is made again. */
-export function mixesSentence(data: MixShelves): string {
-  const all = [...data.madeForYou, ...data.moods, ...data.genres];
-  const ms = all.reduce((n, m) => n + m.durationMs, 0);
-  const day = all.find((m) => m.kind === "daylist" && m.nextUpdateAt);
-  const head = `${all.length === 1 ? "One mix" : `${all.length} mixes`} made from what you play${ms > 0 ? `, ${duration(ms)} of listening in all` : ""}.`;
-  return day?.nextUpdateAt ? `${head} The daylist turns over at ${clock.format(new Date(day.nextUpdateAt))}.` : head;
-}
-
-/** A mix's sleeve in the list: the mix's own art, or for the daylist its covers (a printed sleeve with none). */
+/**
+ * A mix's picture in the list, where the row prints its name: the leading
+ * artist's photo, else four of its covers, else plain paper. (A printed
+ * sleeve's type can't be read this small.) The daylist shows its covers.
+ */
 export function MixSleeve({ mix, size }: { mix: MixSummary; size: number }) {
-  if (mix.kind !== "daylist") return <MixArt mix={mix} named={false} />;
-  if (!mix.covers.length) return <Art path={null} fluid sleeve={{ title: "daylist" }} />;
+  const photo = mix.kind === "daylist" || mix.kind === "topSongs" ? null : mix.art;
+  if (photo) return <Art path={photo} fluid requestSize={size * 2} kind="album" />;
+  if (!mix.covers.length) return <Art path={null} fluid kind="album" />;
   return (
     <span className="mix-art" aria-hidden="true">
       <span className="mix-art__collage">
@@ -116,11 +109,6 @@ export function MixesPage() {
   return (
     <div className="page-pad mixes-page">
       <h1 className="page-title">Radio and mixes</h1>
-      {on && data && count > 0 && (
-        <p className="lg-lead lg-lead--sm mixes-page__lead" data-testid="mixes-lead">
-          {mixesSentence(data)}
-        </p>
-      )}
       <p className="mixes-page__lede">Start radio from any song, album or artist with its menu. Mixes refresh as you listen.</p>
       {!on ? (
         <div className="empty-state" role="status">

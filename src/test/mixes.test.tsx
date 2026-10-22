@@ -8,6 +8,7 @@ import type { MockBackend } from "../lib/mock";
 import { DEFAULT_SETTINGS, type MixSummary } from "../lib/types";
 import { HomePage } from "../pages/HomePage";
 import { MixArt, mixArtists } from "../pages/MixCard";
+import { MixSleeve } from "../pages/MixesPage";
 import { MixPage } from "../pages/MixPage";
 import { PlayControls } from "../shell/PlayerBar";
 import { useApp } from "../stores/app";
@@ -100,6 +101,44 @@ describe("mix art", () => {
     const { container } = render(<MixArt mix={{ ...mix, kind: "daylist" }} />);
     expect(container.querySelector(".mix-art--daylist")).not.toBeNull();
     expect(container.querySelector(".mix-art--sleeve")).toBeNull();
+  });
+});
+
+describe("a mix's picture in the list", () => {
+  const mix: MixSummary = {
+    id: "daily:1",
+    kind: "daily",
+    title: "Daily Mix 1",
+    description: "Copperline Choir, Motte and more",
+    color: "#336699",
+    art: "0a1b2c3d:/library/metadata/5/thumb/1",
+    covers: ["0a1b2c3d:/library/metadata/6/thumb/1", "0a1b2c3d:/library/metadata/7/thumb/1"],
+    artistIds: [],
+    tag: null,
+    trackCount: 10,
+    durationMs: 1,
+    nextUpdateAt: null,
+  };
+  const pictures = (c: HTMLElement) => [...c.querySelectorAll("img")].map((n) => n.getAttribute("src") ?? "");
+
+  it("is the leading artist's photo, with no printed name (the row prints it)", () => {
+    const { container } = render(<MixSleeve mix={mix} size={56} />);
+    expect(pictures(container)).toHaveLength(1);
+    expect(container.querySelector(".mix-art__collage")).toBeNull();
+    expect(container.querySelector(".mix-art--sleeve, .mix-art__title")).toBeNull();
+  });
+
+  it("without a photo is four of its covers, and without covers plain paper", () => {
+    const collage = render(<MixSleeve mix={{ ...mix, art: null }} size={56} />);
+    expect(collage.container.querySelectorAll(".mix-art__collage .art")).toHaveLength(4);
+    const paper = render(<MixSleeve mix={{ ...mix, art: null, covers: [] }} size={56} />);
+    expect(paper.container.querySelector('[data-testid="paper-sleeve"]')).not.toBeNull();
+    expect(paper.container.textContent).toBe("");
+  });
+
+  it("Top Songs shows its covers, not one artist", () => {
+    const { container } = render(<MixSleeve mix={{ ...mix, kind: "topSongs" }} size={56} />);
+    expect(container.querySelectorAll(".mix-art__collage .art")).toHaveLength(4);
   });
 });
 

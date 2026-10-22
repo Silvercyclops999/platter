@@ -1,12 +1,11 @@
 /**
- * Radio and mixes on the phone: the computer's page set for the phone. The
- * same sentence, then every mix made for you by kind as ruled rows with
- * its sleeve and length. Radio starts from any song, album or artist's sheet.
+ * Radio and mixes on the phone: the computer's page set for the phone.
+ * Every mix made for you by kind, as ruled rows with its picture and length. Radio starts from any song, album or artist's sheet.
  */
 import { useApp } from "../../stores/app";
 import { useSettings } from "../../stores/settings";
 import { openMix } from "../../pages/MixCard";
-import { MixSleeve, mixesSentence } from "../../pages/MixesPage";
+import { MixSleeve } from "../../pages/MixesPage";
 import { duration } from "../../lib/statsStory";
 import { useMixShelves } from "../../pages/mixShelves";
 import type { MixSummary } from "../../lib/types";
@@ -49,7 +48,6 @@ export function PhoneMixes() {
   const count = data ? data.madeForYou.length + data.moods.length + data.genres.length : 0;
   return (
     <PageFrame name="mixes" title="Radio and mixes" lede="Start radio from any song, album or artist with its menu. Mixes refresh as you listen." className="ph-mixes">
-      {on && data && count > 0 && <p className="lg-lead lg-lead--sm ph-mixes__lead">{mixesSentence(data)}</p>}
       {!on ? (
         <Empty title="Mixes are off" text="Turn on mixes in Settings and they show here." action={<GoPill route={{ name: "settings", row: "homeMixes" }}>Open Settings</GoPill>} />
       ) : error && !data ? (
