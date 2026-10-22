@@ -35,6 +35,9 @@ pub type RouteFn = Arc<dyn Fn() -> Option<Arc<dyn LidarrRoute>> + Send + Sync>;
 /// Whether the signed-in account owns the server, asked each time.
 pub type OwnerFn = Arc<dyn Fn() -> bool + Send + Sync>;
 
+/// The staging folder the home side uses, when it has one.
+pub type StagingFn = Arc<dyn Fn() -> Option<String> + Send + Sync>;
+
 #[derive(Default)]
 pub struct Hooks {
     bridge: AtomicBool,
@@ -46,6 +49,8 @@ pub struct Hooks {
     bridge_linked: RwLock<Option<OwnerFn>>,
     /// A computer at home answering over a device link (`crate::homeside::computer`).
     computer: RwLock<Option<RouteFn>>,
+    /// The answering Bridge's staging folder.
+    staging: RwLock<Option<StagingFn>>,
     /// On the Bridge: the desktops' name for this Lidarr in the shared
     /// store, whatever address the Bridge itself uses.
     server: RwLock<Option<String>>,
@@ -236,6 +241,26 @@ impl Lidarr {
     /// have answered yet, just after the app starts).
     pub fn set_bridge_linked(&self, f: OwnerFn) {
         *self.home.bridge_linked.write() = Some(f);
+    }
+
+    /// On a phone or computer: how to learn the staging folder the Bridge
+    /// uses, so nothing about it is set up here.
+    pub fn set_home_staging(&self, f: StagingFn) {
+        *self.home.staging.write() = Some(f);
+    }
+
+    /// The staging folder: the one set here, or with no Lidarr address here,
+    /// the one the Bridge uses.
+    pub fn staging_folder(&self) -> String {
+        let here = crate::settings::load(&self.inner.db).lidarr_staging_folder;
+        if !here.trim().is_empty() || self.bridge_mode() {
+            return here;
+        }
+        let (home, away) = self.urls();
+        if !home.trim().is_empty() || !away.trim().is_empty() {
+            return here;
+        }
+        self.home.staging.read().as_ref().and_then(|f| f()).map(|s| s.trim().to_string()).unwrap_or_default()
     }
 
     pub fn bridge_linked(&self) -> bool {

@@ -9,9 +9,13 @@ use crate::artistinfo::{ext_art_path, is_mbid};
 use crate::error::AppResult;
 
 impl Lidarr {
-    /// An address and a key are set, so lookups can be asked.
+    /// An address and a key are set here, so lookups can be asked. Not
+    /// through a Bridge or a computer at home: each lookup would wait on the
+    /// relay and spend its messages, and MusicBrainz has the same artists
+    /// and ids straight away.
     pub fn lookups_ready(&self) -> bool {
-        self.status().usable()
+        let st = self.status();
+        !st.not_owner && (st.url_set || st.away_set) && st.has_key && st.moved.is_none()
     }
 
     /// Artists matching search words.
