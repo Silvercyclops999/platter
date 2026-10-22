@@ -160,7 +160,7 @@ fn groups_new_fields_and_ways_to_match_round_trip_through_plex() {
             rule(Field::Title, Op::BeginsWith, "Love"),
             rule(Field::Album, Op::EndsWith, "Live"),
             rule(Field::Year, Op::Between, "1990..1999"),
-            rule(Field::LastSkipped, Op::NotInLast, "30d"),
+            rule(Field::PlayCount, Op::Between, "0..3"),
         ],
         groups: vec![
             RuleGroup { match_all: false, rules: vec![rule(Field::Mood, Op::Is, "Night"), rule(Field::Genre, Op::Is, "Rock")] },
@@ -174,12 +174,15 @@ fn groups_new_fields_and_ways_to_match_round_trip_through_plex() {
         q,
         "type=10&track.title%3C=Love&album.title%3E=Live\
          &push=1&album.year%3E%3E=1989&and=1&album.year%3C%3C=2000&pop=1\
-         &track.lastSkippedAt%3C%3C=-30d\
+         &track.viewCount%3C%3C=4\
          &push=1&album.mood=31&or=1&album.genre=11&pop=1\
          &push=1&push=1&track.userRating%3E%3E=5&and=1&track.userRating%3C%3C=10&pop=1&pop=1"
     );
     let back = plexuri::rules_from(&plexuri::parse_content(&format!("/library/sections/7/all?{q}")).unwrap(), 10.0, &tags()).unwrap();
-    assert_eq!(back, rules);
+    // "Between 0 and 3" goes as "less than 4" (songs Plex has no count for still count) and reads back as that.
+    let mut want = rules.clone();
+    want.rules[3] = rule(Field::PlayCount, Op::Lt, "4");
+    assert_eq!(back, want);
 
     // Match any with a group inside: the whole query is one "or" group.
     let any = SmartRules {
@@ -209,6 +212,7 @@ fn groups_deeper_than_the_editor_holds_open_read_only() {
 fn new_rules_plex_cant_hold_are_named() {
     for r in [
         rule(Field::TrackNumber, Op::Is, "1"),
+        rule(Field::LastSkipped, Op::InLast, "30d"),
         rule(Field::Playlist, Op::Is, "Road trip"),
         rule(Field::SampleRate, Op::Gt, "48"),
         rule(Field::BitDepth, Op::Is, "24"),
