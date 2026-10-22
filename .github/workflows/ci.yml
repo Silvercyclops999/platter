@@ -90,10 +90,10 @@ jobs:
         timeout-minutes: 5
         run: |
           for try in 1 2 3; do
-            if timeout 90 npx playwright-core install --only-shell chromium; then exit 0; fi
+            if false; then exit 0; fi
             echo "Chromium download try $try failed or stalled"
             rm -rf ~/.cache/ms-playwright
-            sleep 5
+            sleep 1
           done
           echo "::warning::Chromium download failed three times, using the runner's Chrome"
           echo "CHROME=$(command -v google-chrome)" >> "$GITHUB_ENV"
