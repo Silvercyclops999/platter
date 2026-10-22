@@ -167,6 +167,12 @@ describe("other versions on a result", () => {
     const row = (await screen.findByText("Glass Bell", {}, SLOW)).closest("li")!;
     expect(within(row).getByText(/5 versions/)).toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: /^\d+ versions$/ })).toBeNull();
+    // Tapping a song with versions opens them to pick one, it doesn't play the first.
+    const play = vi.spyOn(mock, "playContext");
+    fireEvent.click(within(row).getByText("Glass Bell"));
+    expect(play).not.toHaveBeenCalled();
+    expect(usePhoneUi.getState().sheets.slice(-1)[0]).toMatchObject({ kind: "versions", track: { id: "v1" } });
+    usePhoneUi.setState({ sheets: [] });
     fireEvent.click(within(row).getByRole("button", { name: "More for Glass Bell" }));
     const sheet = usePhoneUi.getState().sheets.slice(-1)[0] as { kind: string; track: Track };
     expect(sheet.kind).toBe("track");
