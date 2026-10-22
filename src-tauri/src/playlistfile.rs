@@ -46,6 +46,13 @@ fn artist_title(t: &Track) -> String {
     format!("{} - {}", line(artist), line(&t.title))
 }
 
+/// A path that means the same wherever the file is saved: a path relative
+/// to a library folder would point next to the playlist file instead.
+fn is_full_path(p: &str) -> bool {
+    let b = p.as_bytes();
+    p.starts_with('/') || p.starts_with("\\\\") || (b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/'))
+}
+
 /// The file's text. `paths` maps song ids to their path on the server.
 pub fn render(title: &str, tracks: &[Track], paths: &HashMap<String, String>, format: Format) -> String {
     let mut out = String::new();
@@ -56,11 +63,16 @@ pub fn render(title: &str, tracks: &[Track], paths: &HashMap<String, String>, fo
             for t in tracks {
                 let secs = (t.duration_ms / 1000) as i64;
                 out.push_str(&format!("#EXTINF:{},{}\n", if secs > 0 { secs } else { -1 }, artist_title(t)));
-                // Without a path, the artist and title stand in, so a person or a matching tool can still find it.
-                match paths.get(&t.id).map(|p| line(p)).filter(|p| !p.is_empty()) {
-                    Some(p) => out.push_str(&p),
-                    None => out.push_str(&artist_title(t)),
+                // Without a full path, the artist and title stand in, so a person or a matching tool can still find it.
+                let entry = match paths.get(&t.id).map(|p| line(p)).filter(|p| is_full_path(p)) {
+                    Some(p) => p,
+                    None => artist_title(t),
+                };
+                // A line starting with # would be read as a comment and the song lost.
+                if entry.starts_with('#') {
+                    out.push_str("./");
                 }
+                out.push_str(&entry);
                 out.push('\n');
             }
         }
@@ -103,17 +115,29 @@ pub fn file_name(title: &str) -> String {
     format!("{s}.m3u8")
 }
 
-/// Write the file, saying why when it can't be written.
+/// Write the file, saying why when it can't be written. It is written next
+/// to the target first and then moved over it, so a failed save never
+/// leaves a file it replaces cut short.
 pub fn write(path: &Path, body: &str) -> AppResult<()> {
-    std::fs::write(path, body).map_err(|e| {
-        let why = match e.kind() {
-            std::io::ErrorKind::PermissionDenied => "that folder doesn't allow it".to_string(),
-            std::io::ErrorKind::NotFound => "that folder isn't there any more".to_string(),
-            std::io::ErrorKind::StorageFull => "the disk is full".to_string(),
-            _ => e.to_string(),
-        };
-        AppError::Io(format!("Couldn't save the playlist file: {why}."))
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let tmp = path.with_file_name(format!(".{name}.saving"));
+    let done = std::fs::write(&tmp, body).and_then(|()| std::fs::rename(&tmp, path));
+    done.map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        AppError::Io(format!("Couldn't save the playlist file: {}.", why(&e)))
     })
+}
+
+fn why(e: &std::io::Error) -> String {
+    if cfg!(windows) && e.raw_os_error() == Some(32) {
+        return "another app has it open".into();
+    }
+    match e.kind() {
+        std::io::ErrorKind::PermissionDenied => "it can't be written there".into(),
+        std::io::ErrorKind::NotFound => "that folder isn't there any more".into(),
+        std::io::ErrorKind::StorageFull => "the disk is full".into(),
+        _ => e.to_string().chars().take(160).collect(),
+    }
 }
 
 /// `playlist_save_file`: save these songs as a playlist file wherever the
@@ -141,6 +165,9 @@ pub async fn playlist_save_file(app: AppHandle, db: State<'_, DbHandle>, title: 
     };
     let path = picked.into_path().map_err(|e| AppError::Io(format!("save path: {e}")))?;
     let (tracks, paths) = db.read_async(move |c| load(c, &track_ids)).await?;
+    if tracks.is_empty() {
+        return Err(AppError::Invalid("None of these songs are in the library any more.".into()));
+    }
     let body = render(&title, &tracks, &paths, Format::of(&path));
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     tokio::task::spawn_blocking(move || write(&path, &body))
@@ -183,6 +210,20 @@ mod tests {
     }
 
     #[test]
+    fn lines_never_start_with_a_hash_and_partial_paths_are_left_out() {
+        let tracks = vec![track("1", "#9", "#1 Dads", None, 1000), track("2", "Two", "Band", None, 1000), track("3", "Three", "Band", None, 1000)];
+        let paths = HashMap::from([
+            ("2".to_string(), "Band/Album/02 Two.flac".to_string()),
+            ("3".to_string(), "D:\\Music\\03 Three.flac".to_string()),
+        ]);
+        let out = render("x", &tracks, &paths, Format::M3u8);
+        let entries: Vec<&str> = out.lines().filter(|l| !l.starts_with('#')).collect();
+        assert_eq!(entries, ["./#1 Dads - #9", "Band - Two", "D:\\Music\\03 Three.flac"]);
+        assert!(is_full_path("\\\\nas\\music\\a.flac"));
+        assert!(!is_full_path("C:music"));
+    }
+
+    #[test]
     fn a_text_list_is_artist_and_title() {
         let (tracks, paths) = songs();
         assert_eq!(render("x", &tracks, &paths, Format::Text), "Copperline Choir - Blue Hour\nKesto Marrow - Ferris Wheel\n");
@@ -220,5 +261,17 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("platter-plfile-{}", std::process::id()));
         let e = write(&dir.join("missing").join("x.m3u8"), "x").unwrap_err();
         assert!(e.to_string().contains("Couldn't save the playlist file: that folder isn't there any more."), "{e}");
+    }
+
+    #[test]
+    fn saving_over_a_file_replaces_it_whole_and_leaves_nothing_behind() {
+        let dir = std::env::temp_dir().join(format!("platter-plfile-over-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("Road trip.m3u8");
+        std::fs::write(&f, "old and longer text").unwrap();
+        write(&f, "new").unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "new");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
