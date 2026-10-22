@@ -35,6 +35,7 @@ import { folderMenu, moveToFolderItem } from "./FolderMenus";
 import { player, usePlayer } from "../stores/player";
 import { nav, type Route } from "../stores/router";
 import { PINNABLE, usePinnedPages, type PinnablePage } from "../stores/pinnedPages";
+import { useSavedMixes, type SavedMix } from "../stores/savedMixes";
 import { leavePlaylist, openCircleDialog, playBlend, playShared, setInLibrary } from "../stores/circle";
 
 /** Load the library items, and again after every library change. */
@@ -192,10 +193,11 @@ export function builtInRoute(e: LibEntry): Route | null {
 }
 
 /**
- * A downloaded mix or Top Songs list as a library row: it sits with the
- * playlists from the moment its download starts until it's removed.
+ * A saved or downloaded mix or Top Songs list as a library row, with the
+ * playlists. A download saves its mix; removing the download leaves it saved.
  */
-export function mixEntry(i: DownloadItem): LibEntry {
+export function mixEntry(i: Pick<DownloadItem, "id" | "title" | "total" | "done">, savedAt?: number): LibEntry {
+  const at = savedAt ? Math.floor(savedAt / 1000) : null;
   return {
     kind: "playlist",
     id: i.id,
@@ -206,8 +208,9 @@ export function mixEntry(i: DownloadItem): LibEntry {
     thumb: null,
     smart: false,
     format: null,
-    addedAt: null,
-    playedAt: null,
+    addedAt: at,
+    // Saved just now sits near the top of Recents.
+    playedAt: at,
     pinned: false,
     mix: true,
     ...(i.total ? { trackCount: i.total } : {}),
@@ -215,10 +218,22 @@ export function mixEntry(i: DownloadItem): LibEntry {
   };
 }
 
+/** The library's mixes: every saved one (its download's count while there is one), and any download not saved here. */
+export function savedMixRows(saved: readonly SavedMix[], dl: readonly DownloadItem[]): LibEntry[] {
+  const dlMixes = dl.filter((i) => i.kind === "mix");
+  const byId = new Map(dlMixes.map((i) => [i.id, i]));
+  const rows = saved.map((m) => {
+    const d = byId.get(m.id);
+    return mixEntry(d ?? { id: m.id, title: m.title, total: m.trackCount, done: 0 }, m.savedAt);
+  });
+  const savedIds = new Set(saved.map((m) => m.id));
+  return rows.concat(dlMixes.filter((i) => !savedIds.has(i.id)).map((i) => mixEntry(i)));
+}
+
 /**
  * `drillable`: the list follows the folder the sidebar is drilled into (not
- * the rail). `mixes`: downloaded mixes are listed with the playlists (the
- * phone, where Library is where downloads are found).
+ * the rail). `mixes`: saved and downloaded mixes are listed with the
+ * playlists (the phone, where Library is where downloads are found).
  */
 export function useLibraryModel(query: string, drillable = true, mixes = false): LibraryModel {
   const items = useLibraryView((s) => s.items);
@@ -239,6 +254,7 @@ export function useLibraryModel(query: string, drillable = true, mixes = false):
   const cratesOn = useSettings((s) => s.settings?.showCrates !== false);
   const soundMapOn = useSettings((s) => s.settings?.showSoundMap !== false);
   const pinnedPages = usePinnedPages((s) => s.pages);
+  const savedMixes = useSavedMixes((s) => s.mixes);
   const dlChoice = useLibraryView((s) => s.downloaded);
   const cachedOnly = useApp((s) => !!s.health?.cachedOnly);
   // Going offline or back online hands the chip back to the connection.
@@ -259,15 +275,16 @@ export function useLibraryModel(query: string, drillable = true, mixes = false):
     };
     const pages = pinnedPages.filter((p) => (p === "crates" ? cratesOn : soundMapOn)).map(pageEntry);
     const top = [likedEntry(owner), ...(showBookmarks ? [bookmarksEntry()] : []), ...(showStats ? [statsEntry()] : []), ...pages];
-    const mixRows = mixes ? (dlItems ?? []).filter((i) => i.kind === "mix").map(mixEntry) : [];
+    const mixRows = mixes ? savedMixRows(savedMixes, dlItems ?? []) : [];
     return [...top, ...mergePins(toEntries(items, owner), pins)].map(mark).concat(mixRows);
-  }, [items, owner, pins, dlItems, followIds, ownedIds, showBookmarks, showStats, pinnedPages, cratesOn, soundMapOn, mixes]);
+  }, [items, owner, pins, dlItems, followIds, ownedIds, showBookmarks, showStats, pinnedPages, cratesOn, soundMapOn, mixes, savedMixes]);
   const shelf = !!ownedIds && all.some((e) => e.owned);
   const dlAvailable = all.some((e) => e.downloaded);
   const downloadedOnly = dlChoice ?? (cachedOnly && dlAvailable);
   const kinds = items === null ? LIB_KINDS : LIB_KINDS.filter((k) => all.some((e) => e.kind === k));
   // A saved filter for a type that's no longer there shows everything.
-  const activeFilter: LibFilter = filter !== "all" && !kinds.includes(filter) ? "all" : filter;
+  // On the phone, Downloaded (chosen, or on by itself offline) over Artists shows everything downloaded; the choice is kept for later.
+  const activeFilter: LibFilter = (filter !== "all" && !kinds.includes(filter)) || (mixes && downloadedOnly && filter === "artist") ? "all" : filter;
   // The shelf chip saved from before, with nothing on the shelf now, shows every album.
   const activeSub = activeFilter === "all" || (sub === "shelf" && !shelf) ? null : sub;
   const tree = useFolders((s) => s.tree);

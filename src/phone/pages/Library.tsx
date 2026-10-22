@@ -1,13 +1,16 @@
 /**
- * The library on the phone: one mixed list with four pills (Playlists,
- * Albums, Artists, Downloaded), the current sort as a label (it opens a
- * sheet), a list or grid toggle, pinned items at the top, and small glyphs
- * for pinned and downloaded. Library is where downloads are found: whatever
- * is downloaded is a row here (a downloaded mix too, with the playlists),
- * and Downloaded narrows the list to it. Storage is in Settings. While the
+ * The library on the phone: one mixed list with the type pills (Playlists,
+ * Albums, Artists) after a round filter button, the current sort as a label
+ * (it opens a sheet), a list or grid toggle, pinned items at the top, and
+ * small glyphs for pinned and downloaded. Library is where downloads are
+ * found: whatever is downloaded is a row here (a saved or downloaded mix
+ * too, with the playlists). Downloaded is in the filter sheet; while it's
+ * on, the row reads clear, Downloaded, then only Playlists and Albums, and
+ * a type picked with it joins it in one pill. A slim strip over the title
+ * counts the songs while they come in. Storage is in Settings. While the
  * library doctor has something to fix, a quiet row at the end leads to it.
  */
-import { ArrowUpDown, ChevronRight, Disc3, LayoutGrid, List, Plus, X } from "lucide-react";
+import { ArrowUpDown, ChevronRight, Disc3, LayoutGrid, List, Plus, SlidersHorizontal, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { Art } from "../../components/Art";
 import { LikedCover } from "../../components/LikedCover";
@@ -16,6 +19,7 @@ import { openEntry, useLibraryLoader, useLibraryModel } from "../../shell/useLib
 import { useApp } from "../../stores/app";
 import { useDoctorCount } from "../../stores/doctor";
 import { useSettings } from "../../stores/settings";
+import { useDownloads } from "../../stores/downloads";
 import type { DownloadKind, MixSummary } from "../../lib/types";
 import { MixArt } from "../../pages/MixCard";
 import { RowGlyphs, tap } from "../bits";
@@ -50,6 +54,15 @@ export function PhoneLibrary() {
     setCrates(false);
     useLibraryView.getState().setFilter(model.filter === k && !crates ? "all" : k);
   };
+  const dlOn = model.downloaded.on && !crates;
+  // While Downloaded is on, only playlists and albums can be downloaded.
+  const kinds = dlOn ? model.kinds.filter((k) => DOWNLOADED_KINDS.includes(k)) : model.kinds;
+  const joined = dlOn && DOWNLOADED_KINDS.includes(model.filter as LibKind) ? (model.filter as LibKind) : null;
+  const clearAll = () => {
+    tap("selection");
+    useLibraryView.getState().setDownloaded(false);
+    useLibraryView.getState().setFilter("all");
+  };
   const toggleView = () => {
     const next = view === "list" ? "grid" : "list";
     setView(next);
@@ -61,6 +74,7 @@ export function PhoneLibrary() {
   };
   return (
     <div className="ph-page ph-library">
+      <DownloadingStrip />
       <div className="ph-library__head">
         <h1 className="ph-title">Library</h1>
         <button type="button" className="ph-icon-btn" aria-label="Create" onClick={() => phone.push({ kind: "create" })}>
@@ -68,26 +82,41 @@ export function PhoneLibrary() {
         </button>
       </div>
       <div className="ph-pills ph-pills--scroll" role="group" aria-label="Show">
-        {model.kinds.map((k) => (
-          <button key={k} type="button" className={`ph-chip ${model.filter === k && !crates ? "is-on" : ""}`} aria-pressed={model.filter === k && !crates} onClick={() => (tap("selection"), pick(k))}>
-            {KIND_LABEL[k]}
-            {model.filter === k && !crates && <X size={14} aria-hidden="true" className="ph-chip__x" />}
+        {dlOn ? (
+          <button type="button" className="ph-chip ph-chip--round" aria-label="Clear filters" onClick={clearAll}>
+            <X size={16} aria-hidden="true" />
           </button>
-        ))}
+        ) : (
+          <button type="button" className="ph-chip ph-chip--round" aria-label="Filters" onClick={() => (tap("selection"), phone.push({ kind: "libraryFilter", kinds: model.kinds, filter: model.filter, downloaded: model.downloaded.on }))}>
+            <SlidersHorizontal size={16} aria-hidden="true" />
+          </button>
+        )}
+        {dlOn && joined ? (
+          <span className="ph-chip-join" role="group" aria-label={`Downloaded ${KIND_LABEL[joined]}`}>
+            <button type="button" className="ph-chip is-on" aria-pressed="true" onClick={() => (tap("selection"), useLibraryView.getState().setDownloaded(false))}>
+              Downloaded
+            </button>
+            <button type="button" className="ph-chip is-on" aria-pressed="true" onClick={() => (tap("selection"), pick(joined))}>
+              {KIND_LABEL[joined]}
+            </button>
+          </span>
+        ) : (
+          dlOn && (
+            <button type="button" className="ph-chip is-on" aria-pressed="true" onClick={() => (tap("selection"), useLibraryView.getState().setDownloaded(false))}>
+              Downloaded
+            </button>
+          )
+        )}
+        {!joined &&
+          kinds.map((k) => (
+            <button key={k} type="button" className={`ph-chip ${model.filter === k && !crates ? "is-on" : ""}`} aria-pressed={model.filter === k && !crates} onClick={() => (tap("selection"), pick(k))}>
+              {KIND_LABEL[k]}
+              {model.filter === k && !crates && <X size={14} aria-hidden="true" className="ph-chip__x" />}
+            </button>
+          ))}
         {cratesOn && (
           <button type="button" className={`ph-chip ${crates ? "is-on" : ""}`} aria-pressed={crates} onClick={() => (tap("selection"), setCrates(!crates))}>
             Crates
-          </button>
-        )}
-        {!crates && (
-          <button
-            type="button"
-            className={`ph-chip ${model.downloaded.on ? "is-on" : ""}`}
-            aria-pressed={model.downloaded.on}
-            onClick={() => (tap("selection"), useLibraryView.getState().setDownloaded(!model.downloaded.on))}
-          >
-            Downloaded
-            {model.downloaded.on && <X size={14} aria-hidden="true" className="ph-chip__x" />}
           </button>
         )}
       </div>
@@ -96,6 +125,38 @@ export function PhoneLibrary() {
       ) : (
         <LibraryList model={model} view={view} toggleView={toggleView} />
       )}
+    </div>
+  );
+}
+
+/** The types that can be downloaded, the only ones shown while Downloaded is on. */
+export const DOWNLOADED_KINDS: readonly LibKind[] = ["playlist", "album"];
+
+/** "12 of 40": songs in from the downloads under way, while one is actually coming. */
+export function downloadingCount(s: { items: { state: string; total: number; done: number }[]; current?: unknown } | null | undefined): { done: number; total: number } | null {
+  if (!s?.current) return null;
+  const going = s.items.filter((i) => i.state === "queued" || i.state === "downloading");
+  const total = going.reduce((n, i) => n + i.total, 0);
+  if (!total) return null;
+  return { done: Math.min(total, going.reduce((n, i) => n + i.done, 0)), total };
+}
+
+/** A slim strip over the title while songs are coming in: Downloading, N of M, and a thin bar. */
+function DownloadingStrip() {
+  const st = useDownloads((s) => s.status);
+  const count = useMemo(() => downloadingCount(st), [st]);
+  if (!count) return null;
+  return (
+    <div className="ph-dl-strip">
+      <span className="ph-dl-strip__line">
+        <span>Downloading</span>
+        <span className="tabular">
+          {count.done} of {count.total}
+        </span>
+      </span>
+      <span className="ph-dl-strip__bar" aria-hidden="true">
+        <span style={{ width: `${(count.done / count.total) * 100}%` }} />
+      </span>
     </div>
   );
 }
@@ -261,11 +322,11 @@ function LetterIndex({ list, letters }: { list: React.RefObject<HTMLUListElement
   );
 }
 
-/** A downloaded mix's cover, as its page shows it: a printed sleeve with its name, or the daylist's colours. */
-function MixRowSleeve({ e, fluid }: { e: LibEntry; fluid?: boolean }) {
+/** A saved mix's cover, as its page shows it: a printed sleeve with its name, or the daylist's colours. */
+export function MixRowSleeve({ e, fluid, card }: { e: Pick<LibEntry, "id" | "title" | "thumb">; fluid?: boolean; card?: boolean }) {
   const kind = e.id === "daylist" ? "daylist" : e.id.startsWith("topSongs:") ? "topSongs" : "daily";
   return (
-    <span className={`ph-lib-mix ${fluid ? "is-fluid" : ""}`}>
+    <span className={`ph-lib-mix ${fluid ? "is-fluid" : ""} ${card ? "is-card" : ""}`}>
       <MixArt mix={{ kind, title: e.title, description: "", color: "#5a5048", art: null, covers: e.thumb ? [e.thumb] : [] } as MixSummary} />
     </span>
   );

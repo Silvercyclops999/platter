@@ -325,15 +325,52 @@
 /* ---------------------------------------------------------------- downloads */
 .ph-dl { position: relative; color: var(--color-text-secondary); }
 .ph-dl.is-done { color: var(--color-accent); }
+.ph-dl.is-downloading { color: var(--color-text-primary); }
+/* Waiting: a thin ring with a short arc going round it. */
+.ph-dl-wait__track { fill: none; stroke: color-mix(in srgb, var(--color-text-secondary) 40%, transparent); stroke-width: 1.25; }
+.ph-dl-wait__arc { fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; transform-origin: 12px 12px; animation: ph-dl-turn 1.1s linear infinite; }
+/* Coming: a stop square in a ring that fills in the accent. */
+.ph-dl-stop__track { fill: none; stroke: color-mix(in srgb, var(--color-text-secondary) 45%, transparent); stroke-width: 1.5; }
+.ph-dl-stop__fill { fill: none; stroke: var(--color-accent); stroke-width: 2; stroke-linecap: round; transition: stroke-dashoffset var(--motion-medium) var(--motion-easing); }
+.ph-dl-stop__square { fill: currentColor; }
+/* A row's spinner: the song coming down now. */
+.ph-dl-spin__arc { fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; transform-origin: 12px 12px; animation: ph-dl-turn 0.9s linear infinite; }
+@keyframes ph-dl-turn { to { transform: rotate(360deg); } }
+:root[data-reduced-motion="true"] .ph-dl-wait__arc,
+:root[data-reduced-motion="true"] .ph-dl-spin__arc { animation: none; }
+/* A mix's add button: filled in the accent once it's in Your Library. */
+.ph-save { color: var(--color-text-secondary); }
+.ph-save.is-on { color: var(--color-accent); }
 .ph-song.is-unplayable,
+.ph-hit.is-unplayable,
 .ph-version.is-unplayable { opacity: 0.4; }
 
 .ph-library__doctor { margin: 16px 0 0; }
 /* A downloaded mix in Library: its printed sleeve at the row's art size. */
 .ph-lib-mix { display: block; flex: none; width: 56px; height: 56px; }
 .ph-lib-mix.is-fluid { width: 100%; height: auto; aspect-ratio: 1; }
+.ph-lib-mix.is-card { width: 136px; height: 136px; }
 .ph-lib-mix .mix-art { border-radius: 2px; box-shadow: none; }
 
 /* Requests on What's new: No and Get it, or where one stands. */
 .ph-ask__actions { flex: none; display: flex; align-items: center; gap: 6px; }
 .ph-ask__actions .lidarr-state { min-height: 32px; font-size: 13px; }
+
+/* Library's filter row: a round filter (or clear) button first, Downloaded joined with a type in one pill. */
+.ph-chip.ph-chip--round { width: 34px; padding: 0; justify-content: center; }
+.ph-chip-join { display: inline-flex; flex: none; }
+.ph-chip-join .ph-chip:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; padding-right: 10px; }
+.ph-chip-join .ph-chip:last-child {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  padding-left: 10px;
+  border-left-color: color-mix(in srgb, var(--color-text-on-accent) 35%, var(--color-accent)) !important;
+}
+.ph-filter-sheet { display: grid; gap: 16px; padding: 4px 0 16px; }
+.ph-pills--wrap { flex-wrap: wrap; }
+
+/* Over Library's title while songs come in: Downloading, N of M, a thin bar. */
+.ph-dl-strip { display: grid; gap: 6px; margin: 0 0 12px; font-size: 12px; font-weight: 600; color: var(--color-text-secondary); }
+.ph-dl-strip__line { display: flex; justify-content: space-between; }
+.ph-dl-strip__bar { display: block; height: 3px; border-radius: 999px; overflow: hidden; background: color-mix(in srgb, var(--color-text-secondary) 22%, transparent); }
+.ph-dl-strip__bar > span { display: block; height: 100%; background: var(--color-accent); transition: width var(--motion-medium) var(--motion-easing); }

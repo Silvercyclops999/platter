@@ -14,6 +14,7 @@ import { formatBytes } from "../lib/format";
 import type { AppError, DownloadItem, DownloadKind, DownloadPause, DownloadStatus } from "../lib/types";
 import type { MenuItem } from "./ui";
 import type { Route } from "./router";
+import { saveMix } from "./savedMixes";
 import { toast } from "./toasts";
 
 export interface DownloadTarget {
@@ -123,11 +124,12 @@ export function useIsDownloaded(trackId: string): boolean {
 
 const message = (e: unknown) => (e && typeof e === "object" && "message" in e ? String((e as AppError).message) : "Something went wrong.");
 
-/** Turn a download on or off. */
+/** Turn a download on or off. Downloading a mix saves it to Your Library too (removing it doesn't take it out). */
 export async function setDownload(t: DownloadTarget, on: boolean): Promise<boolean> {
   try {
     const seen = statusEvents;
     const status = await backend.downloadsSet(t.kind, t.id, on, { title: t.title, trackIds: t.trackIds?.() });
+    if (on && t.kind === "mix") saveMix({ id: t.id, title: t.title, trackCount: t.trackIds?.().length ?? 0 });
     // An event that came meanwhile may be newer than this answer (see statusEvents).
     if (statusEvents === seen) takeStatus(status);
     return true;

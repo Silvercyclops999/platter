@@ -24,9 +24,15 @@ Press the download button again and confirm **Remove**. Platter tells you how mu
 
 ## On the phone
 
-On the phone, downloads live in Library like everything else you keep. Whatever you download shows there with the small mark. A mix you download sits with your playlists until you remove its download. The Downloaded pill shows only what's on the phone, and Platter turns it on by itself when there's no connection.
+On the phone, downloads live in Library like everything else you keep. Whatever you download shows there with the small mark: a hollow arrow while it waits, a small spinner while it comes, a filled arrow once it's on the phone. While songs come in, a strip over Library counts them.
 
-Removing a download on the phone always asks first, whatever its size. Storage, Remove all downloads, Download over mobile data and Go offline are in Settings, Downloads and devices.
+Downloading a mix adds it to Library, with your playlists. Removing the download leaves it there. The add button on the mix's page takes it out of Library.
+
+To see only what's on the phone, tap the round filter button at the start of Library's pills and pick Downloaded. Platter turns it on by itself when there's no connection. With it on, you can narrow it to playlists or albums.
+
+Removing a download on the phone always asks first, whatever its size. Storage, Remove all downloads and Download over mobile data are in Settings, Downloads and devices. Go offline is also a tile at the top of Settings, and while it's on, Offline shows under the tabs.
+
+Without a connection, songs that aren't on the phone are dimmed and a tap does nothing. Home shows what's on the phone, and Search lists only the songs that can play.
 
 ## Download quality
 
