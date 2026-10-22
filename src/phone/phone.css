@@ -621,6 +621,28 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 @media (prefers-reduced-motion: reduce) { :is(.ph-lyric, .ph-lyrics-card__line) .lyrics__word { transition: none !important; } }
 .ph-lyric--gap { min-height: 1.28em; letter-spacing: 0.2em; }
 .ph-lyrics__none, .ph-lyrics__credit { margin: 24px 0 0; font-size: 13px; color: rgba(255, 250, 240, 0.7); }
+/* After a hand scroll: back to the current line, just above the controls. */
+.ph-lyrics__follow {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: calc(92px + var(--ph-safe-bottom));
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background: #fffaf0;
+  color: #141210;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+  animation: ph-fade var(--ph-slide) var(--ph-ease);
+}
 .ph-lyrics__bottom { display: flex; align-items: center; gap: 16px; padding: 8px 20px calc(16px + var(--ph-safe-bottom)); }
 .ph-lyrics__bottom .ph-seek { flex: 1; margin: 0; }
 .ph-lyrics .ph-scrub .slider__track { background: rgba(255, 250, 240, 0.28); }
