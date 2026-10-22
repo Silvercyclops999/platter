@@ -6,6 +6,7 @@
 import { create } from "zustand";
 import type { Album, Playlist, Track } from "../lib/types";
 import { sameRoute, useRouter, type Route } from "../stores/router";
+import type { LibFilter, LibKind } from "../stores/library";
 import { stackSignals } from "./motion";
 
 export type PhoneTab = "home" | "search" | "library" | "you";
@@ -36,6 +37,8 @@ export type Sheet =
   /** Every version of a song in the library, each playable. */
   | { kind: "versions"; track: Track }
   | { kind: "librarySort" }
+  /** The library's filters: its types, then Downloaded. */
+  | { kind: "libraryFilter"; kinds: LibKind[]; filter: LibFilter; downloaded: boolean }
   | { kind: "create" }
   /** What happens to the sound between the file and the output. */
   | { kind: "signal" }

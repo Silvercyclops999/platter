@@ -6,6 +6,8 @@
 import { ListPlus, Sparkles } from "lucide-react";
 import { useMemo } from "react";
 import { PhoneDownload } from "../PhoneDownload";
+import { ListDownloadingFor } from "../DownloadMark";
+import { SaveMixButton } from "./Mix";
 import { backend } from "../../lib/backend";
 import { failText } from "../../lib/errorText";
 import { formatLongDuration, plural, trackArtistLine } from "../../lib/format";
@@ -88,6 +90,7 @@ export function PhoneTopSongs({ year }: { year: number | null }) {
             left={
               <>
                 <PhoneDownload kind="mix" id={key} title={title} trackIds={() => ids} />
+                <SaveMixButton id={key} title={title} trackCount={ids.length} />
                 <button type="button" className="ph-icon-btn" aria-label="Save as playlist" disabled={!ids.length} onClick={() => void save()}>
                   <ListPlus size={24} aria-hidden="true" />
                 </button>
@@ -102,11 +105,13 @@ export function PhoneTopSongs({ year }: { year: number | null }) {
           {list.rows.length === 0 ? (
             <Empty title="None of these are here" text="None of these songs are in your library right now." />
           ) : (
-            <ul className="ph-songs" aria-label={`${title} songs`}>
-              {list.rows.map((r, i) => (
-                <SongRow key={r.track.id} track={r.track} index={i + 1} sub={[trackArtistLine(r.track), ...rowNotes(r, { allTime: year == null, showPlays })].join(" · ")} onPlay={() => void play(r.track.id)} />
-              ))}
-            </ul>
+            <ListDownloadingFor item={{ kind: "mix", id: key }}>
+              <ul className="ph-songs" aria-label={`${title} songs`}>
+                {list.rows.map((r, i) => (
+                  <SongRow key={r.track.id} track={r.track} index={i + 1} sub={[trackArtistLine(r.track), ...rowNotes(r, { allTime: year == null, showPlays })].join(" · ")} onPlay={() => void play(r.track.id)} />
+                ))}
+              </ul>
+            </ListDownloadingFor>
           )}
         </>
       )}

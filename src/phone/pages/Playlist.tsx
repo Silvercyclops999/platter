@@ -11,9 +11,10 @@ import { LikedCover } from "../../components/LikedCover";
 import { phone } from "../phoneUi";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PhoneDownload } from "../PhoneDownload";
+import { ListDownloadingFor } from "../DownloadMark";
 import { backend } from "../../lib/backend";
 import { formatLongDuration } from "../../lib/format";
-import type { Playlist, Track } from "../../lib/types";
+import type { DownloadKind, Playlist, Track } from "../../lib/types";
 import { useLoad } from "../../lib/useLoad";
 import { BlendCover } from "../../pages/BlendPage";
 import { useContextState } from "../../pages/cards";
@@ -60,6 +61,7 @@ function PhoneOwnPlaylist({ id }: { id: string }) {
       playing={playing}
       shuffle={<PhoneShuffleToggle id={data.playlist.id} kind="playlist" name={data.playlist.title} />}
       download={<PhoneDownload kind="playlist" id={data.playlist.id} title={data.playlist.title} trackIds={() => data.tracks.map((t) => t.id)} />}
+      dl={{ kind: "playlist", id: data.playlist.id }}
       play={(start, shuffle, ids) => void player.playPlaylist(data.playlist.id, start, shuffle, ids)}
       inPlaylist={(i) => ({ playlist: data.playlist, itemId: data.itemIds[i], order })}
     />
@@ -80,6 +82,7 @@ export function PhoneLiked() {
       playing={playing}
       shuffle={<PhoneShuffleToggle id="liked" kind="liked" name="Liked Songs" />}
       download={<PhoneDownload kind="liked" id="" title="Liked Songs" />}
+      dl={{ kind: "liked", id: "" }}
       play={(start, shuffle, ids) => void player.playLiked(start, ids, shuffle)}
     />
   );
@@ -238,6 +241,7 @@ function SongList({
   playing,
   shuffle,
   download,
+  dl,
   play,
   inPlaylist,
   note,
@@ -256,6 +260,8 @@ function SongList({
   /** The shuffle control, or "once" for a list played as plain songs. */
   shuffle: ReactNode | "once";
   download?: ReactNode;
+  /** The list's download, so its songs show the waiting arrow while it's under way. */
+  dl?: { kind: DownloadKind; id: string };
   play: (startTrackId: string | undefined, shuffle: boolean | undefined, trackIds?: string[]) => void;
   inPlaylist?: (index: number) => import("../phoneUi").InPlaylist;
   note?: string;
@@ -315,11 +321,13 @@ function SongList({
           <p className="ph-empty__title">{empty}</p>
         </div>
       ) : (
-        <ul className="ph-songs" aria-label="Songs">
-          {rows.map(({ t, i }) => (
-            <SongRow key={`${t.id}:${i}`} track={t} onPlay={() => play(t.id, undefined, ids)} inPlaylist={inPlaylist?.(i)} />
-          ))}
-        </ul>
+        <ListDownloadingFor item={dl}>
+          <ul className="ph-songs" aria-label="Songs">
+            {rows.map(({ t, i }) => (
+              <SongRow key={`${t.id}:${i}`} track={t} onPlay={() => play(t.id, undefined, ids)} inPlaylist={inPlaylist?.(i)} />
+            ))}
+          </ul>
+        </ListDownloadingFor>
       )}
     </div>
   );

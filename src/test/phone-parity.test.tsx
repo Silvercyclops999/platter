@@ -508,7 +508,10 @@ describe("phone Settings words", () => {
 describe("downloads on the phone", () => {
   const it0 = { state: "downloaded" as const, total: 19, done: 12, failed: 0, missing: 0, progress: 0.63 };
   it("an item is downloaded only when every one of its songs is, whatever the core's word", () => {
-    expect(phoneDownloadState(it0)).toBe("downloading");
+    // Partly here but not coming right now (held, or behind another list): waiting.
+    expect(phoneDownloadState(it0)).toBe("waiting");
+    expect(phoneDownloadState({ ...it0, state: "queued" })).toBe("waiting");
+    expect(phoneDownloadState({ ...it0, state: "downloading" })).toBe("downloading");
     expect(phoneDownloadState({ ...it0, done: 19 })).toBe("done");
     expect(phoneDownloadState({ ...it0, state: "downloaded", total: 0, done: 0 })).toBe("waiting");
     expect(phoneDownloadState({ ...it0, state: "queued", done: 0 })).toBe("waiting");
@@ -523,13 +526,25 @@ describe("downloads on the phone", () => {
     expect(countText({ total: 19, done: 12 })).toBe("12/19");
   });
 
-  it("Library's last pill is Downloaded, with no manage row; the old downloads page opens Settings", async () => {
+  it("Library's Downloaded is in the filter sheet, with no manage row; the old downloads page opens Settings", async () => {
     render(<PhoneShell />);
     act(() => phone.tab("library"));
     const show = await screen.findByRole("group", { name: "Show" }, SLOW);
-    expect(within(show).getAllByRole("button").map((b) => b.textContent)).toEqual(["Playlists", "Albums", "Artists", "Downloaded"]);
-    fireEvent.click(within(show).getByRole("button", { name: "Downloaded" }));
+    expect(within(show).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual(["Filters", "Playlists", "Albums", "Artists"]);
+    fireEvent.click(within(show).getByRole("button", { name: "Filters" }));
+    const sheet = await screen.findByRole("dialog", { name: "Filters" });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Downloaded" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Filters" })).toBeNull());
+    // On: clear, Downloaded first, then only the types that download.
+    expect(within(show).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual(["Clear filters", "Downloaded", "Playlists", "Albums"]);
     expect(within(show).getByRole("button", { name: "Downloaded" })).toHaveAttribute("aria-pressed", "true");
+    // A type with it joins it in one pill.
+    fireEvent.click(within(show).getByRole("button", { name: "Albums" }));
+    const joined = within(show).getByRole("group", { name: "Downloaded Albums" });
+    expect(within(joined).getAllByRole("button").map((b) => b.textContent)).toEqual(["Downloaded", "Albums"]);
+    expect(within(show).queryByRole("button", { name: "Playlists" })).toBeNull();
+    fireEvent.click(within(show).getByRole("button", { name: "Clear filters" }));
+    expect(within(show).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual(["Filters", "Playlists", "Albums", "Artists"]);
     expect(screen.queryByRole("button", { name: /Manage downloads/ })).toBeNull();
     act(() => nav.go({ name: "downloads" }));
     await waitFor(() => expect(route()).toEqual({ name: "settings", section: "Downloads and devices" }));

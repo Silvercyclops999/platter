@@ -56,7 +56,7 @@ import { countText, phoneDownloadState } from "./PhoneDownload";
 import { useSettings } from "../stores/settings";
 import { openSongCredits } from "../stores/songCredits";
 import { countLine, PlayingBars, SongRow, songCantPlay } from "./pages/common";
-import { SORT_LABEL, useLibraryView, type LibSort } from "../stores/library";
+import { KIND_LABEL, SORT_LABEL, useLibraryView, type LibFilter, type LibKind, type LibSort } from "../stores/library";
 import { isLiked, setLiked } from "../stores/likes";
 import { player, usePlayer } from "../stores/player";
 import { askDelete, createPlaylist, editDetails, removeRows } from "../stores/playlists";
@@ -150,6 +150,8 @@ const SheetFor = memo(function SheetFor({ sheet }: { sheet: Sheet }) {
       return <VersionsSheet track={sheet.track} />;
     case "librarySort":
       return <SortSheet />;
+    case "libraryFilter":
+      return <FilterSheet kinds={sheet.kinds} filter={sheet.filter} downloaded={sheet.downloaded} />;
     case "create":
       return <CreateSheet />;
     case "signal":
@@ -1109,6 +1111,52 @@ function SortSheet() {
           </li>
         ))}
       </ul>
+    </SheetFrame>
+  );
+}
+
+/**
+ * The library's filters: the type chips, then Downloaded on a line of its
+ * own. A pick applies at once and closes the sheet.
+ */
+function FilterSheet({ kinds, filter, downloaded }: { kinds: LibKind[]; filter: LibFilter; downloaded: boolean }) {
+  const pick = (f: () => void) => {
+    tap("selection");
+    f();
+    phone.pop();
+  };
+  return (
+    <SheetFrame title="Filters" onClose={phone.pop}>
+      <div className="ph-filter-sheet">
+        <div className="ph-pills ph-pills--wrap" role="group" aria-label="Type">
+          {kinds.map((k) => (
+            <button
+              key={k}
+              type="button"
+              className={`ph-chip ${filter === k ? "is-on" : ""}`}
+              aria-pressed={filter === k}
+              onClick={() => pick(() => useLibraryView.getState().setFilter(filter === k ? "all" : k))}
+            >
+              {KIND_LABEL[k]}
+            </button>
+          ))}
+        </div>
+        <div className="ph-pills" role="group" aria-label="On this phone">
+          <button
+            type="button"
+            className={`ph-chip ${downloaded ? "is-on" : ""}`}
+            aria-pressed={downloaded}
+            onClick={() =>
+              pick(() => {
+                useLibraryView.getState().setDownloaded(!downloaded);
+                if (!downloaded && filter === "artist") useLibraryView.getState().setFilter("all");
+              })
+            }
+          >
+            Downloaded
+          </button>
+        </div>
+      </div>
     </SheetFrame>
   );
 }
