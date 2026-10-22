@@ -178,14 +178,72 @@ impl Cool {
         self.wait(now, COOL_FIRST, COOL_MAX);
     }
 
-    /// [`Cool::turned_away`] for this relay: a backup only pauses briefly.
-    pub fn turned_away_by(&mut self, base: &str, now: Instant) {
-        if super::BACKUP_RELAYS.contains(&base) {
+    /// [`Cool::turned_away`] for what the relay said: too many at once is
+    /// a short pause, the day's messages used up a long one. When it
+    /// doesn't say, a backup only pauses briefly.
+    pub fn turned_away_by(&mut self, base: &str, why: Why, now: Instant) {
+        let short = match why {
+            Why::AtOnce | Why::Listening => true,
+            Why::Today => false,
+            Why::Unknown => super::BACKUP_RELAYS.contains(&base),
+        };
+        if short {
             self.wait(now, BACKUP_COOL_FIRST, BACKUP_COOL_MAX);
         } else {
             self.turned_away(now);
         }
     }
+}
+
+/// Why a relay turned this address away (ntfy says in the 429's body).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Why {
+    /// Too many requests at once (ntfy's 42901).
+    AtOnce,
+    /// Too many listening from this address (42903).
+    Listening,
+    /// The day's messages are used up (42908).
+    Today,
+    Unknown,
+}
+
+/// Read why from a 429's body, like `{"code":42901,"http":429,...}`.
+pub fn why_turned_away(body: &str) -> Why {
+    let code = serde_json::from_str::<serde_json::Value>(body).ok().and_then(|v| v.get("code").and_then(|c| c.as_u64()));
+    match code {
+        Some(42901) => Why::AtOnce,
+        Some(42903) => Why::Listening,
+        Some(42908) => Why::Today,
+        _ => Why::Unknown,
+    }
+}
+
+/// The log line for a relay turning this address away.
+pub fn turned_away_line(host: &str, why: Why) -> String {
+    match why {
+        Why::AtOnce => format!("relay {host}: too many requests at once from this address; it gets a short pause (any other relays carry on)"),
+        Why::Listening => format!("relay {host}: too many devices at this address are listening there already; trying again in a minute"),
+        Why::Today => format!("relay {host}: this address has used its messages there for today; nothing more goes to it for a while (any other relays carry on)"),
+        Why::Unknown => format!("relay {host}: it's turning messages away; nothing more goes to it for a while (any other relays carry on)"),
+    }
+}
+
+/// Log a relay turning this address away, at most once a minute for each
+/// relay and reason, so six links listening there make one line.
+fn log_turned_away(host: &str, why: Why) {
+    static LAST: LazyLock<parking_lot::Mutex<HashMap<(String, Why), Instant>>> = LazyLock::new(Default::default);
+    let now = Instant::now();
+    let mut last = LAST.lock();
+    let key = (host.to_string(), why);
+    if last.get(&key).is_some_and(|t| now.saturating_duration_since(*t) < Duration::from_secs(60)) {
+        return;
+    }
+    last.insert(key, now);
+    drop(last);
+    tracing::info!("{}", turned_away_line(host, why));
+}
+
+impl Cool {
 
     /// Wait `first`, then twice as long each time in a row, up to `most`.
     pub fn wait(&mut self, now: Instant, first: Duration, most: Duration) {
@@ -529,6 +587,7 @@ impl Relay for NtfyRelay {
             .map_err(|_| RelayError::Unreachable)?;
         let code = resp.status().as_u16();
         let res = if resp.status().is_success() { Ok(()) } else { Err(status_err(code)) };
+        let why = if code == 429 { why_turned_away(&resp.text().await.unwrap_or_default()) } else { Why::Unknown };
         let mut pace = PACE.lock();
         let p = pace_entry(&mut pace, &self.base);
         match res {
@@ -539,10 +598,10 @@ impl Relay for NtfyRelay {
             }
             Err(RelayError::Limited) => {
                 let now = Instant::now();
-                p.cool.turned_away_by(&self.base, now);
+                p.cool.turned_away_by(&self.base, why, now);
                 p.burst.emptied(now);
                 drop(pace);
-                tracing::info!("relay {}: it's turning messages away; nothing more goes to it for a while (any other relays carry on)", host(&self.base));
+                log_turned_away(host(&self.base), why);
                 note_at(Some(host(&self.base)), kind_now(), 1, Counted::TurnedAway);
             }
             Err(_) => {}
@@ -583,8 +642,23 @@ impl Relay for NtfyRelay {
             req = req.query(&[("since", id)]);
         }
         let resp = req.send().await.map_err(|_| RelayError::Unreachable)?;
+        let code = resp.status().as_u16();
+        if code == 429 {
+            let why = why_turned_away(&resp.text().await.unwrap_or_default());
+            // Too many at once holds for publishing too; too many listening
+            // doesn't.
+            if why == Why::AtOnce {
+                let now = Instant::now();
+                let mut pace = PACE.lock();
+                let p = pace_entry(&mut pace, &self.base);
+                p.cool.turned_away_by(&self.base, why, now);
+                p.burst.emptied(now);
+            }
+            log_turned_away(host(&self.base), why);
+            return Err(RelayError::Limited);
+        }
         if !resp.status().is_success() {
-            return Err(status_err(resp.status().as_u16()));
+            return Err(status_err(code));
         }
         let (tx, rx) = mpsc::channel(64);
         let idle = self.idle;

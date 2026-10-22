@@ -1053,7 +1053,7 @@ async fn the_relay_turning_messages_away_is_logged_once_not_for_every_round() {
     round(&a, &la, &b, &lb).await;
     let wire = Arc::new(Wire::new(a.links.clone(), Arc::new(Ntfy::new().unwrap()), Arc::new(crate::sync::store::system_ms)));
     let sync = DeviceSync::new(a.peer.clone(), wire, Timing::default());
-    let busy = "too many today";
+    let busy = "busy for now";
     ntfy.set_limited(true);
     // Many queued rounds while the relay says no: one line.
     for i in 0..27 {
