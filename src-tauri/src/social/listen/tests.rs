@@ -1361,13 +1361,13 @@ fn a_run_of_requests_to_one_relay_goes_spread_out() {
     let t0 = std::time::Instant::now();
     let mut b = relay::Burst::default();
     for _ in 0..relay::BURST_MOST as usize {
-        assert!(b.take(t0).is_ok());
+        assert!(b.take(t0, 0.0).is_ok());
     }
     // The run is used up: the next waits about one turn.
-    let wait = b.take(t0).unwrap_err();
+    let wait = b.take(t0, 0.0).unwrap_err();
     assert!(wait > std::time::Duration::ZERO && wait <= relay::BURST_EVERY);
-    assert!(b.take(t0 + relay::BURST_EVERY).is_ok());
-    assert!(b.take(t0 + relay::BURST_EVERY).is_err());
+    assert!(b.take(t0 + relay::BURST_EVERY, 0.0).is_ok());
+    assert!(b.take(t0 + relay::BURST_EVERY, 0.0).is_err());
 }
 
 #[test]
@@ -1375,18 +1375,25 @@ fn background_work_leaves_room_for_requests_and_answers() {
     let t0 = std::time::Instant::now();
     let mut b = relay::Burst::default();
     let keep = relay::BURST_KEEP as usize;
-    let most = relay::BURST_MOST as usize;
-    assert!(b.fits(most - keep, t0));
-    b.take_n(most - keep);
+    assert_eq!(b.prepay(relay::BURST_CHUNK, t0), Some(relay::BURST_CHUNK));
     // Only what's kept is left: background waits, a request still goes.
-    assert!(!b.fits(1, t0));
-    assert!(b.take(t0).is_ok());
-    // A message too big for the run goes once it's full.
-    let full = t0 + relay::BURST_EVERY * (most as u32 + 1);
-    assert!(b.fits(most + 10, full));
+    assert_eq!(b.prepay(1, t0), None);
+    assert!(b.take(t0, relay::BURST_KEEP).is_err());
+    for _ in 0..keep {
+        assert!(b.take(t0, 0.0).is_ok());
+    }
+    // A message bigger than the run takes only the first part up front,
+    // and never more than leaves what's kept.
+    let full = t0 + relay::BURST_EVERY * (relay::BURST_MOST as u32 + 1);
+    assert_eq!(b.prepay(relay::BURST_CHUNK * 3, full), Some(relay::BURST_CHUNK));
+    assert!(b.take(full, relay::BURST_KEEP).is_err());
+    assert!(b.take(full, 0.0).is_ok());
+    // Given back when it didn't go.
+    b.refund(relay::BURST_CHUNK);
+    assert!(b.take(full, relay::BURST_KEEP).is_ok());
     // Turned away: nothing left until it comes back.
     b.emptied(full);
-    assert!(b.take(full).is_err());
+    assert!(b.take(full, 0.0).is_err());
 }
 
 #[test]

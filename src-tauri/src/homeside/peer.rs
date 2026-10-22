@@ -120,11 +120,21 @@ impl Wire {
         if background(msg) && tries.first() == Some(&link.relay) && self.backups.iter().any(|(p, _)| p == &link.relay) {
             let heard = self.links.get(&link.id).filter(|p| hears_backups(&p.version)).map(|p| heard_on(&p)).unwrap_or_default();
             let backups: Vec<String> = tries[1..].iter().filter(|b| heard.contains(*b)).cloned().collect();
+            // A backup that's only busy means it waits for a later round
+            // rather than spending the main relay's allowance. One that's
+            // slow to answer is given a while before the next is tried (it
+            // carries on, and a second copy counts once).
             if !backups.is_empty() {
+                let mut busy = false;
                 for b in backups {
-                    if self.publish_on(link, &topic, kind, &bodies, vec![b], force, true).await.is_ok() {
-                        return Ok(());
+                    match tokio::time::timeout(BACKUP_GIVEN, self.publish_on(link, &topic, kind, &bodies, vec![b], force, true)).await {
+                        Ok(Ok(())) => return Ok(()),
+                        Ok(Err(RelayError::Limited)) => busy = true,
+                        _ => {}
                     }
+                }
+                if busy {
+                    return Err(AppError::Network(relay_error(RelayError::Limited)));
                 }
                 return self.publish_on(link, &topic, kind, &bodies, vec![link.relay.clone()], force, true).await.map_err(|e| AppError::Network(relay_error(e)));
             }
@@ -147,7 +157,8 @@ impl Wire {
                 continue;
             }
             let (done, result) = tokio::sync::oneshot::channel();
-            let job = Job { topic: topic.to_string(), bodies: bodies.clone(), kind, force, paid: paced, done };
+            let paid = if paced { bodies.len().min(relay::BURST_CHUNK) } else { 0 };
+            let job = Job { topic: topic.to_string(), bodies: bodies.clone(), kind, force, background: paced, paid, done };
             if self.queue(&link.id, &base, relay).send(job).is_ok() {
                 going.push(result);
             }
@@ -253,6 +264,9 @@ impl Wire {
     }
 }
 
+/// How long background work waits on one backup before trying the next.
+const BACKUP_GIVEN: Duration = if cfg!(test) { Duration::from_secs(1) } else { Duration::from_secs(10) };
+
 type DownMap = Arc<Mutex<HashMap<String, relay::Cool>>>;
 
 /// One message for one relay.
@@ -262,8 +276,10 @@ struct Job {
     kind: &'static str,
     /// Every relay was marked down, so it's tried anyway.
     force: bool,
-    /// Background work the relay already made room for.
-    paid: bool,
+    /// Work that can wait, and how many of its pieces the relay already
+    /// made room for.
+    background: bool,
+    paid: usize,
     done: tokio::sync::oneshot::Sender<Result<(), RelayError>>,
 }
 
@@ -276,7 +292,7 @@ async fn publisher(relay: Arc<dyn Relay>, base: String, down: DownMap, mut jobs:
         let res = if skip {
             Err(RelayError::Unreachable)
         } else {
-            let res = relay::as_kind(job.kind, job.paid, publish_all(&*relay, &job.topic, &job.bodies)).await;
+            let res = relay::as_kind(job.kind, job.background, job.paid, publish_all(&*relay, &job.topic, &job.bodies)).await;
             match res {
                 Ok(()) => mark(&down, &base, true),
                 Err(RelayError::Refused(400) | RelayError::Limited) => {}

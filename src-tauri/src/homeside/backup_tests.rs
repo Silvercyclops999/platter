@@ -344,10 +344,12 @@ async fn background_work_leaves_the_main_relay_to_requests_when_the_other_end_he
     b1.set_limited(true);
     desk.wire.send(&desk.link, &entries()).await.unwrap();
     super::tests::until("on the other backup", || counts() == (3, 5, 4)).await;
-    // No backup takes it: the main relay still does.
+    // Both busy: it waits for a later round, and the main relay is left alone.
     b2.set_limited(true);
-    desk.wire.send(&desk.link, &entries()).await.unwrap();
-    super::tests::until("on the main relay", || main.published().len() == 4).await;
+    let e = desk.wire.send(&desk.link, &entries()).await.unwrap_err();
+    assert!(peer::is_busy(&e), "{e}");
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(main.published().len(), 3);
     drop(bridge);
 }
 

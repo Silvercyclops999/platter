@@ -123,15 +123,17 @@ impl NtfyRelay {
 
     /// Wait for room in this relay's run of requests (see [`Burst`]), so a
     /// lot at once (say every link starting up) goes spread out instead of
-    /// being turned away. False when it would wait too long.
-    async fn turn(&self) -> bool {
+    /// being turned away. Background work leaves [`BURST_KEEP`] for
+    /// requests and answers. False when it would wait too long.
+    async fn turn(&self, background: bool) -> bool {
         if !self.paced() {
             return true;
         }
+        let keep = if background { BURST_KEEP } else { 0.0 };
         let give_up = Instant::now() + BURST_WAIT_MOST;
         loop {
             let now = Instant::now();
-            let wait = match pace_entry(&mut PACE.lock(), &self.base).burst.take(now) {
+            let wait = match pace_entry(&mut PACE.lock(), &self.base).burst.take(now, keep) {
                 Ok(()) => return true,
                 Err(wait) => wait,
             };
@@ -220,18 +222,21 @@ pub const BACKUP_ALLOWANCE_PER_HOUR: f64 = 120.0;
 /// Requests (publishes and listens) one device may make to a public relay
 /// in a row, and how often one more comes back. The relays let an address
 /// make about 60 in a row and then one every 5 seconds, and every device
-/// at a home shares that, so one device keeps to a third of the run and
+/// at a home shares that, so one device keeps to two thirds of the run and
 /// a slower pace.
-pub const BURST_MOST: f64 = 20.0;
+pub const BURST_MOST: f64 = 40.0;
 pub const BURST_EVERY: Duration = if cfg!(test) { Duration::from_millis(50) } else { Duration::from_secs(6) };
 /// What background work leaves for requests and answers.
-pub const BURST_KEEP: f64 = 5.0;
+pub const BURST_KEEP: f64 = 10.0;
+/// The most pieces of a background message taken up front; a bigger one
+/// takes the rest a piece at a time as they go.
+pub const BURST_CHUNK: usize = (BURST_MOST - BURST_KEEP) as usize;
 /// How long a request waits for its turn before giving up on that relay
 /// (any other relays carry on).
 pub const BURST_WAIT_MOST: Duration = if cfg!(test) { Duration::from_millis(500) } else { Duration::from_secs(30) };
 
 /// The run of requests this device may still make to one relay right now.
-/// Requests and answers wait their turn; background work only goes when
+/// Requests and answers wait their turn; background work only starts when
 /// it leaves [`BURST_KEEP`] for them, and otherwise waits for a later round.
 #[derive(Debug)]
 pub struct Burst {
@@ -254,27 +259,34 @@ impl Burst {
         self.at = Some(now);
     }
 
-    /// One request: taken, or how long until there's room for it.
-    pub fn take(&mut self, now: Instant) -> Result<(), Duration> {
+    /// One request that leaves `keep`: taken, or how long until there's
+    /// room for it.
+    pub fn take(&mut self, now: Instant, keep: f64) -> Result<(), Duration> {
         self.fill(now);
-        if self.left >= 1.0 {
+        if self.left >= 1.0 + keep {
             self.left -= 1.0;
             Ok(())
         } else {
-            Err(BURST_EVERY.mul_f64(1.0 - self.left))
+            Err(BURST_EVERY.mul_f64(1.0 + keep - self.left))
         }
     }
 
-    /// Whether background work can make `n` requests now and still leave
-    /// [`BURST_KEEP`]. A message too big for that goes once the run is full.
-    pub fn fits(&mut self, n: usize, now: Instant) -> bool {
+    /// Background work of `n` requests: take the first [`BURST_CHUNK`] of
+    /// them now if that leaves [`BURST_KEEP`], and say how many were taken.
+    pub fn prepay(&mut self, n: usize, now: Instant) -> Option<usize> {
         self.fill(now);
-        self.left >= (n as f64 + BURST_KEEP).min(BURST_MOST)
+        let first = n.min(BURST_CHUNK);
+        if self.left >= first as f64 + BURST_KEEP {
+            self.left -= first as f64;
+            Some(first)
+        } else {
+            None
+        }
     }
 
-    /// Take `n` requests that [`Burst::fits`] said there was room for.
-    pub fn take_n(&mut self, n: usize) {
-        self.left -= n as f64;
+    /// Give back what [`Burst::prepay`] took for work that didn't go.
+    pub fn refund(&mut self, n: usize) {
+        self.left = (self.left + n as f64).min(BURST_MOST);
     }
 
     /// The relay said too many at once: start again from nothing.
@@ -358,24 +370,35 @@ struct Meter {
 static METER: LazyLock<parking_lot::Mutex<Meter>> = LazyLock::new(Default::default);
 
 tokio::task_local! {
-    /// What's being published, for the hourly count, and whether it's
-    /// background work whose requests [`Relay::room_for`] already took
-    /// (set with [`as_kind`]).
-    static KIND: (&'static str, bool);
+    /// What's being published, for the hourly count; whether it's
+    /// background work; and how many of its requests [`Relay::room_for`]
+    /// already took (set with [`as_kind`]).
+    static KIND: (&'static str, bool, std::cell::Cell<usize>);
 }
 
 /// Publish under a kind name, so the hourly count can say what went.
-/// `paid`: background work that [`Relay::room_for`] made room for.
-pub async fn as_kind<F: std::future::Future>(kind: &'static str, paid: bool, f: F) -> F::Output {
-    KIND.scope((kind, paid), f).await
+/// `background`: work that can wait, with `paid` of its requests already
+/// taken by [`Relay::room_for`] (see [`BURST_CHUNK`]).
+pub async fn as_kind<F: std::future::Future>(kind: &'static str, background: bool, paid: usize, f: F) -> F::Output {
+    KIND.scope((kind, background, std::cell::Cell::new(paid)), f).await
 }
 
 fn kind_now() -> &'static str {
     KIND.try_with(|k| k.0).unwrap_or("other")
 }
 
-fn paid_now() -> bool {
+fn background_now() -> bool {
     KIND.try_with(|k| k.1).unwrap_or(false)
+}
+
+/// One request already paid for, if any is left.
+fn take_paid() -> bool {
+    KIND.try_with(|k| {
+        let n = k.2.get();
+        k.2.set(n.saturating_sub(1));
+        n > 0
+    })
+    .unwrap_or(false)
 }
 
 /// What a count is about: `n` messages of a kind went, were held back to
@@ -485,7 +508,12 @@ impl Relay for NtfyRelay {
             note(kind_now(), 1, Counted::Held);
             return Err(RelayError::Limited);
         }
-        if !paid_now() && !self.turn().await {
+        if !take_paid() && !self.turn(background_now()).await {
+            note(kind_now(), 1, Counted::Held);
+            return Err(RelayError::Limited);
+        }
+        // The relay may have said no to another request while this waited.
+        if PACE.lock().get(&self.base).is_some_and(|p| p.cool.waiting(Instant::now())) {
             note(kind_now(), 1, Counted::Held);
             return Err(RelayError::Limited);
         }
@@ -529,10 +557,17 @@ impl Relay for NtfyRelay {
         let now = Instant::now();
         let mut pace = PACE.lock();
         let p = pace_entry(&mut pace, &self.base);
-        if !p.burst.fits(messages, now) || !p.allowance.take(messages, now) {
+        // Paused after a no: nothing goes, so nothing is taken.
+        if p.cool.waiting(now) {
             return false;
         }
-        p.burst.take_n(messages);
+        let Some(paid) = p.burst.prepay(messages, now) else {
+            return false;
+        };
+        if !p.allowance.take(messages, now) {
+            p.burst.refund(paid);
+            return false;
+        }
         true
     }
 
@@ -540,7 +575,7 @@ impl Relay for NtfyRelay {
         if topics.is_empty() || !topics.iter().all(|t| ok_topic(t)) {
             return Err(RelayError::Refused(400));
         }
-        if !self.turn().await {
+        if !self.turn(false).await {
             return Err(RelayError::Limited);
         }
         let mut req = self.http.get(format!("{}/{}/json", self.base, topics.join(",")));
