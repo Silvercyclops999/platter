@@ -275,10 +275,13 @@ every few hours. Every relay also lets one address make only so many
 requests in a row (about 60, then one every 5 seconds), so each device
 makes at most 40 in a row to a relay and then one every 6 seconds. When a
 lot is due at once, like every link starting up, it goes spread out, and
-background work always leaves a few for requests and answers. If ntfy.sh
-says no anyway, nothing more goes to it for a while instead of trying
-again at once. A backup that says no is paused for 10 seconds, then
-longer each time in a row, up to 2 minutes. A relay that can't be reached
+background work always leaves a few for requests and answers. A relay
+that says no also says why, and the log names it: too many requests at
+once, too many devices listening from one address, or the day's messages
+used up. Too many at once pauses that relay for 10 seconds, then longer
+each time in a row, up to 2 minutes. The day used up pauses it for 15
+minutes, doubling up to 2 hours. Every Platter app at home counts against
+the same address, so keep them all on a current version. A relay that can't be reached
 at all is left alone for a minute, then longer each time, up to half an
 hour, while the other two carry everything. Each of the three has its own
 allowance. Once both ends run a build that listens on all three,
