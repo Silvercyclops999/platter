@@ -264,6 +264,10 @@ impl Wire {
     }
 }
 
+/// How long a relay connection must stay open before a reconnect after it
+/// starts from the short wait again.
+const STAYED_OPEN: Duration = if cfg!(test) { Duration::from_millis(500) } else { Duration::from_secs(60) };
+
 /// How long background work waits on one backup before trying the next.
 const BACKUP_GIVEN: Duration = if cfg!(test) { Duration::from_secs(1) } else { Duration::from_secs(10) };
 
@@ -392,7 +396,7 @@ fn lan_sender(id: &str, reply: bool) -> String {
 pub fn relay_error(e: RelayError) -> String {
     match e {
         RelayError::Unreachable => "The relay can't be reached.".into(),
-        RelayError::Limited => "The relay is turning messages away for a while (too many today). It will try again later.".into(),
+        RelayError::Limited => "The relay is busy for now and will try again shortly.".into(),
         RelayError::Refused(c) => format!("The relay refused the message ({c})."),
     }
 }
@@ -443,11 +447,12 @@ async fn listen_on(wire: Arc<Wire>, link: Link, base: String, open: Arc<AtomicUs
         match relay.subscribe(std::slice::from_ref(&topic), since.as_deref()).await {
             Ok(mut rx) => {
                 let mut opened = false;
+                let mut opened_at = std::time::Instant::now();
                 loop {
                     tokio::select! {
                         ev = rx.recv() => match ev {
                             Some(RelayEvent::Open) => {
-                                wait = Duration::from_secs(2);
+                                opened_at = std::time::Instant::now();
                                 if wire.heard.lock().insert(base.clone()) {
                                     tracing::info!("relay {}: listening", relay::host(&base));
                                 }
@@ -486,10 +491,19 @@ async fn listen_on(wire: Arc<Wire>, link: Link, base: String, open: Arc<AtomicUs
                 }
                 if opened {
                     open.fetch_sub(1, Ordering::SeqCst);
+                    // Back to a short wait only after it stayed open a while,
+                    // so a connection the relay keeps closing isn't opened
+                    // again every 2 seconds.
+                    if opened_at.elapsed() >= STAYED_OPEN {
+                        wait = Duration::from_secs(2);
+                    }
                 }
             }
             Err(e) => {
-                tracing::info!("Bridge link ({}): {}", relay::host(&base), relay_error(e));
+                // A busy relay says why in its own line, once for every link.
+                if e != RelayError::Limited {
+                    tracing::info!("Bridge link ({}): {}", relay::host(&base), relay_error(e));
+                }
                 if e == RelayError::Limited {
                     wait = wait.max(Duration::from_secs(60));
                 }

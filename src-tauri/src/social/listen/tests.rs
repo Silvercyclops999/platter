@@ -1400,13 +1400,32 @@ fn background_work_leaves_room_for_requests_and_answers() {
 fn a_backup_relay_that_says_no_is_only_paused_briefly() {
     let t0 = std::time::Instant::now();
     let mut backup = relay::Cool::default();
-    backup.turned_away_by(crate::social::listen::BACKUP_RELAYS[0], t0);
+    backup.turned_away_by(crate::social::listen::BACKUP_RELAYS[0], relay::Why::Unknown, t0);
     let mut main = relay::Cool::default();
-    main.turned_away_by(crate::social::listen::DEFAULT_RELAY, t0);
+    main.turned_away_by(crate::social::listen::DEFAULT_RELAY, relay::Why::Unknown, t0);
     assert!(!backup.waiting(t0 + relay::BACKUP_COOL_FIRST));
     assert!(main.waiting(t0 + relay::BACKUP_COOL_FIRST));
     for _ in 0..10 {
-        backup.turned_away_by(crate::social::listen::BACKUP_RELAYS[0], t0);
+        backup.turned_away_by(crate::social::listen::BACKUP_RELAYS[0], relay::Why::Unknown, t0);
     }
     assert!(!backup.waiting(t0 + relay::BACKUP_COOL_MAX));
+}
+
+#[test]
+fn a_relay_that_turns_this_address_away_says_why() {
+    use relay::Why;
+    assert_eq!(relay::why_turned_away(r#"{"code":42901,"http":429,"error":"limit reached: too many requests"}"#), Why::AtOnce);
+    assert_eq!(relay::why_turned_away(r#"{"code":42903,"http":429}"#), Why::Listening);
+    assert_eq!(relay::why_turned_away(r#"{"code":42908,"http":429}"#), Why::Today);
+    assert_eq!(relay::why_turned_away(""), Why::Unknown);
+    assert!(relay::turned_away_line("ntfy.envs.net", Why::AtOnce).contains("at once"));
+    assert!(!relay::turned_away_line("ntfy.envs.net", Why::AtOnce).contains("today"));
+    // Too many at once is a short pause anywhere; the day used up is long.
+    let t0 = std::time::Instant::now();
+    let mut main = relay::Cool::default();
+    main.turned_away_by(crate::social::listen::DEFAULT_RELAY, Why::AtOnce, t0);
+    assert!(!main.waiting(t0 + relay::BACKUP_COOL_FIRST));
+    let mut backup = relay::Cool::default();
+    backup.turned_away_by(crate::social::listen::BACKUP_RELAYS[0], Why::Today, t0);
+    assert!(backup.waiting(t0 + relay::BACKUP_COOL_FIRST));
 }
