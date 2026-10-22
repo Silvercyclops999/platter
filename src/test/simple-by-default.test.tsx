@@ -152,29 +152,26 @@ describe("what left the profile menu", () => {
 });
 
 describe("the phone's Home", () => {
-  it("keeps to its sections: on the platter, spun this week, your mixes, two shelves and Explore", async () => {
+  it("keeps to five sections: the grid, Made for you, two shelves and Explore", async () => {
     usePhoneForm.setState({ phone: true });
     localStorage.removeItem(MORE_OPEN_KEY);
     render(<PhoneShell />);
-    await screen.findByRole("list", { name: "Spun this week" }, SLOW);
+    await screen.findByRole("list", { name: "Recent and pinned" }, SLOW);
     await screen.findByRole("region", { name: "Explore" }, SLOW);
-    await screen.findByText("Your mixes", {}, SLOW);
+    await screen.findByText("Made for you", {}, SLOW);
     const home = document.querySelector<HTMLElement>(".ph-home")!;
-    expect(within(home).getByTestId("on-the-platter")).toBeInTheDocument();
-    const titles = [...home.querySelectorAll(".ph-shelf__title, h2:not(.ph-platter__title)")].map((h) => h.textContent?.trim()).filter(Boolean);
-    expect(new Set(titles)).toEqual(new Set(["Spun this week", "Your mixes", "Recently added", "Your top artists", "Explore"]));
-    // No type pills: Library has them.
-    expect(within(home).queryByRole("group", { name: "Show" })).toBeNull();
+    const titles = [...home.querySelectorAll(".ph-shelf__title, h2")].map((h) => h.textContent?.trim()).filter(Boolean);
+    expect(new Set(titles)).toEqual(new Set(["Made for you", "Recently added", "Your top artists", "Explore"]));
     // No tools or settings on Home.
     expect(within(home).queryByRole("button", { name: /Settings|Library doctor|Downloads/ })).toBeNull();
   });
 
-  it("leads Spun this week with Liked Songs, as the computer does, in two rows of three", async () => {
+  it("leads the grid with Liked Songs, as the computer does, in eight places", async () => {
     usePhoneForm.setState({ phone: true });
     useLikes.getState().setIds(["t1"]);
     render(<PhoneShell />);
-    const grid = await screen.findByRole("list", { name: "Spun this week" }, SLOW);
+    const grid = await screen.findByRole("list", { name: "Recent and pinned" }, SLOW);
     await waitFor(() => expect(within(grid).getAllByRole("listitem")[0]).toHaveTextContent("Liked Songs"), SLOW);
-    expect(within(grid).getAllByRole("listitem").length).toBeLessThanOrEqual(6);
+    expect(within(grid).getAllByRole("listitem").length).toBeLessThanOrEqual(8);
   });
 });

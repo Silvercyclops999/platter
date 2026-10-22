@@ -17,7 +17,7 @@ import { player } from "../stores/player";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useContextState } from "./cards";
-import { openMix } from "./MixCard";
+import { MixArt, openMix } from "./MixCard";
 import { useMixShelves } from "./mixShelves";
 import "./home.css";
 import "./ledger.css";
@@ -30,9 +30,8 @@ import "../shell/facets.css";
  * sleeve's type can't be read this small.) The daylist shows its covers.
  */
 export function MixSleeve({ mix, size }: { mix: MixSummary; size: number }) {
-  const photo = mix.kind === "daylist" || mix.kind === "topSongs" ? null : mix.art;
-  if (photo) return <Art path={photo} fluid requestSize={size * 2} kind="album" />;
-  if (!mix.covers.length) return <Art path={null} fluid kind="album" />;
+  if (mix.kind !== "daylist") return <MixArt mix={mix} size={size * 2} named={false} />;
+  if (!mix.covers.length) return <Art path={null} fluid sleeve={{ title: "daylist" }} />;
   return (
     <span className="mix-art" aria-hidden="true">
       <span className="mix-art__collage">

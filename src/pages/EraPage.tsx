@@ -91,7 +91,6 @@ export function EraPage({ artistId, name }: { artistId: string; name: string }) 
             label={playingHere ? `Pause ${name}` : `Play ${name}`}
             variant="accent"
             size="xl"
-            text={playingHere ? "Pause" : "Play"}
             disabled={!data}
             icon={playingHere ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
             onClick={play}

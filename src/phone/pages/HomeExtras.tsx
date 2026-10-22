@@ -4,7 +4,7 @@
  * radar, new artists, on this day, the archive, your shelf, the sound map).
  * Each shows only while its feature is on.
  */
-import { MixArt, openMix, sleeveName } from "../../pages/MixCard";
+import { MixArt, openMix } from "../../pages/MixCard";
 import { useMixShelves } from "../../pages/mixShelves";
 import { useShowPhysical } from "../../stores/physical";
 import { nav, type Route } from "../../stores/router";
@@ -19,11 +19,15 @@ export function HomeMixes() {
   const list = data ? [...data.madeForYou, ...data.moods, ...data.genres] : [];
   if (!list.length) return null;
   return (
-    <Carousel title="Your mixes" onAll={() => nav.go({ name: "mixes" })}>
+    <Carousel title="Made for you" onAll={() => nav.go({ name: "mixes" })}>
       {list.slice(0, 12).map((m) => (
-        <button key={m.id} type="button" className="ph-card-tile ph-mix-tile" aria-label={m.kind === "daylist" ? "daylist" : sleeveName(m)} onClick={() => openMix(m)}>
-          {/* The sleeve is the name: printed once, on the paper. */}
-          <MixArt mix={m} />
+        <button key={m.id} type="button" className="ph-card-tile ph-mix-tile" onClick={() => openMix(m)}>
+          <span className="ph-mix-tile__art">
+            {/* The name is printed once, under the cover. */}
+            <MixArt mix={m} size={272} named={false} />
+          </span>
+          <span className="ph-card-tile__title">{m.kind === "daylist" ? "daylist" : m.title}</span>
+          <span className="ph-card-tile__sub">{m.kind === "daylist" ? "Your day in a playlist" : m.description}</span>
         </button>
       ))}
     </Carousel>

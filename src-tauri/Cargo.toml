@@ -143,8 +143,6 @@ dispatch2 = "0.3"
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSString", "NSDictionary", "NSValue", "NSArray", "NSObject", "NSData", "NSNotification", "NSOperation", "NSError"] }
 objc2-media-player = { version = "0.3.2", default-features = false, features = ["std", "block2", "MPNowPlayingInfoCenter", "MPRemoteCommandCenter", "MPRemoteCommand", "MPRemoteCommandEvent", "MPMediaItem", "MPNowPlayingInfoLanguageOption"] }
 objc2-ui-kit = { version = "0.3.2", default-features = false, features = ["std", "UIImage", "UIScene", "UISceneDefinitions", "UISceneOptions", "UISceneSession", "UIResponder", "UIApplication"] }
-# CarPlay's own pictures (Shuffle, Liked songs, mix sleeves) are drawn here, with their type.
-ab_glyph = "0.2.32"
 # CarPlay: the car's screen, built from Apple's templates.
 objc2-car-play = { version = "0.3.2", default-features = false, features = ["std", "block2", "dispatch2", "objc2-ui-kit", "CPTemplateApplicationScene", "CPInterfaceController", "CPTemplate", "CPTabBarTemplate", "CPListTemplate", "CPListSection", "CPListItem", "CPListImageRowItem", "CPListImageRowItemElement", "CPListImageRowItemRowElement", "CPListItemTypes", "CPNowPlayingTemplate", "CPNowPlayingButton", "CPAlertTemplate", "CPAlertAction"] }
 
@@ -193,7 +191,6 @@ lto = "thin"
 codegen-units = 16
 
 [dev-dependencies]
-ab_glyph = "0.2.32"
 dotenvy = "0.15.7"
 hound = "3.5.1"
 tempfile = "3.27.0"

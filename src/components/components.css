@@ -88,8 +88,6 @@
   background: currentColor;
 }
 .icon-btn[aria-disabled="true"] { opacity: 0.5; }
-/* The word beside the glyph shows only in Platter's own looks (identity.css). */
-.icon-btn__text { display: none; }
 
 /* ---------------------------------------------------------------- Tooltip */
 .tooltip {
@@ -222,10 +220,6 @@
   color: #241D15;
 }
 :root[data-theme-base="light"] .art__sleeve-artist { color: color-mix(in srgb, #241D15 70%, transparent); }
-/* No cover and no title to print: plain paper with Platter's P pressed into
-   it, the same in every look (a sleeve is a thing, not a surface). */
-.art__paper { background: linear-gradient(160deg, rgba(255, 255, 255, 0.4), transparent 60%), #EDE6D6; container-type: inline-size; }
-.art__paper-mark { width: 30cqi; height: auto; fill: #B9A585; }
 /* Initials for an artist no source has a picture of. */
 .art__monogram {
   background: var(--color-state-pressed);

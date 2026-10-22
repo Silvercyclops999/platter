@@ -125,18 +125,7 @@
   color: var(--color-text-on-accent) !important;
   box-shadow: 0 6px 18px color-mix(in srgb, #000 28%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
-/* Under a page's header, Play is a brass pill with its word. */
-.ph-play--page { display: inline-flex; align-items: center; gap: 8px; width: auto; height: 44px; padding: 0 20px 0 16px; border-radius: 999px; font-size: 15px; font-weight: 600; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2); }
-.ph-pill-btn { display: inline-flex; align-items: center; gap: 8px; width: auto; height: 44px; padding: 0 16px; border-radius: 999px; font-size: 15px; font-weight: 600; color: var(--color-text-primary); box-shadow: inset 0 0 0 1px var(--color-border); }
-.ph-pill-btn.is-on { color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }
-/* A narrow phone, or a row with more beside it (an artist's Follow), keeps Shuffle to its mark. */
-.ph-actions { flex-wrap: wrap; row-gap: 8px; container-type: inline-size; }
-.ph-actions--busy .ph-pill-btn { width: 44px; padding: 0; justify-content: center; }
-.ph-actions--busy .ph-pill-btn > span { display: none; }
-@container (max-width: 330px) {
-  .ph-pill-btn { width: 44px; padding: 0; justify-content: center; }
-  .ph-pill-btn > span { display: none; }
-}
+.ph-play--page { width: 56px; height: 56px; }
 .ph-play--small { width: 56px; height: 56px; }
 .ph-play--row { width: 40px; height: 40px; box-shadow: none; }
 
@@ -280,8 +269,7 @@
 .ph-tab svg { transition: transform var(--ph-quick) var(--ph-ease); }
 /* The tab you're on is lit brass, icon and word together. */
 
-/* The mini player: a raised panel in the look's own colours (never the
-   cover's), with the progress line in brass along its top edge. */
+/* The mini player: dark, tinted from the cover, white text on every look. */
 .ph-mini {
   position: relative;
   display: flex;
@@ -292,20 +280,21 @@
   padding: 0 6px 0 10px;
   border-radius: 10px;
   overflow: hidden;
-  background: var(--color-bg-raised2);
-  color: var(--color-text-primary);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32), inset 0 1px 0 color-mix(in srgb, var(--color-ink) 7%, transparent);
+  background: color-mix(in srgb, var(--ph-tint) 52%, #12100e);
+  color: #f6f1e8;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 .ph-mini__open { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; height: 100%; }
 .ph-mini__art { flex: none; border-radius: 5px; overflow: hidden; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35); }
 .ph-mini__text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .ph-mini__title { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ph-mini__artist { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; color: var(--color-text-secondary); }
+.ph-mini__artist { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; color: rgba(246, 241, 232, 0.72); }
 .ph-mini__artist-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.ph-mini .ph-icon-btn, .ph-mini .ph-output { color: var(--color-text-primary); }
+.ph-mini .plate { --plate-bg: rgba(0, 0, 0, 0.28); --plate-edge: rgba(255, 255, 255, 0.18); --plate-text: rgba(246, 241, 232, 0.82); --plate-hi: transparent; }
+.ph-mini .ph-icon-btn, .ph-mini .ph-output { color: #f6f1e8; }
 .ph-mini__play { width: 48px; height: 48px; }
-.ph-mini__progress { position: absolute; left: 0; right: 0; top: 0; height: 2px; background: color-mix(in srgb, var(--color-ink) 8%, transparent); overflow: hidden; }
-.ph-mini__progress-fill { position: absolute; inset: 0; background: var(--color-accent); transform-origin: left center; transition: transform 250ms linear; }
+.ph-mini__progress { position: absolute; left: 10px; right: 10px; bottom: 0; height: 2px; background: rgba(255, 255, 255, 0.16); border-radius: 1px; overflow: hidden; }
+.ph-mini__progress-fill { position: absolute; inset: 0; background: rgba(255, 255, 255, 0.86); transform-origin: left center; transition: transform 250ms linear; }
 
 .ph-output { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; min-width: 44px; justify-content: center; color: var(--color-text-secondary); font-size: 13px; font-weight: 600; }
 .ph-output.is-remote { color: var(--color-accent) !important; }
@@ -314,8 +303,8 @@
 /* ---------------------------------------------------------------- now playing */
 /* The room the record plays in: lit by the cover's own colour from the top,
    with one soft pool of it behind the sleeve (the desktop's cover light),
-   settling into the page colour toward the controls. The top keeps 20% of
-   the colour at most (NP_TOP_TINT), which the status bar reads. */
+   settling into the page colour toward the controls. The top keeps 46% of
+   the colour (NP_TOP_TINT), which the status bar reads. */
 .ph-np {
   --np-side: clamp(24px, 6.8vw, 34px);
   --np-peek: 0px;
@@ -323,8 +312,8 @@
   inset: 0;
   z-index: 40;
   background:
-    radial-gradient(ellipse 90% 42% at 50% 30%, color-mix(in srgb, var(--ph-tint) 12%, transparent), transparent 74%),
-    linear-gradient(180deg, color-mix(in srgb, var(--ph-tint) 20%, var(--color-bg-base)) 0, color-mix(in srgb, var(--ph-tint) 10%, var(--color-bg-base)) 46%, color-mix(in srgb, var(--ph-tint) 3%, var(--color-bg-base)) 78%, var(--color-bg-base) 100%);
+    radial-gradient(ellipse 90% 42% at 50% 30%, color-mix(in srgb, var(--ph-tint) 30%, transparent), transparent 74%),
+    linear-gradient(180deg, color-mix(in srgb, var(--ph-tint) 46%, var(--color-bg-base)) 0, color-mix(in srgb, var(--ph-tint) 22%, var(--color-bg-base)) 46%, color-mix(in srgb, var(--ph-tint) 6%, var(--color-bg-base)) 78%, var(--color-bg-base) 100%);
   background-color: var(--color-bg-base);
   transition: transform var(--ph-slide) var(--ph-ease);
   animation: ph-rise var(--ph-np-open) var(--ph-ease);
@@ -361,9 +350,9 @@
   box-shadow: 0 1px 0 color-mix(in srgb, #000 22%, transparent);
 }
 .ph-np__top .ph-icon-btn { color: var(--color-text-primary); }
-.ph-np__from { display: block; min-width: 0; min-height: 44px; padding-block: 12px; text-align: center; font-size: 14px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ph-np__from-label { font-weight: 500; color: color-mix(in srgb, var(--color-text-primary) 62%, transparent); }
-.ph-np__from-name { font-weight: 600; }
+.ph-np__from { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; min-width: 0; min-height: 44px; text-align: center; }
+.ph-np__from-label { font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; color: color-mix(in srgb, var(--color-text-primary) 62%, transparent); }
+.ph-np__from-name { max-width: 100%; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The cover is the hero: inside real margins (less when the screen is
    short), square, with the shadow of a sleeve lifted off the table and a
    hairline edge. Paused, it settles back a little. It sits in a row with
@@ -746,40 +735,28 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 .ph-help__text { margin: 0 0 12px; font-size: 14px; line-height: 1.5; color: var(--color-text-secondary); }
 
 /* ---------------------------------------------------------------- home */
-.ph-home__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 18px; }
-.ph-home__title { margin: 0; font-family: var(--font-headings, var(--font-family)); font-size: 30px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.1; }
-/* On the platter: the record to resume, its record peeking out of the sleeve. */
-.ph-platter { display: flex; align-items: center; gap: 16px; margin: 0 0 26px; padding: 14px; border-radius: 6px; background: var(--color-bg-raised); box-shadow: inset 0 1px 0 rgba(255, 243, 224, 0.07); }
-.ph-platter__sleeve { position: relative; flex: none; width: 112px; height: 112px; margin-right: 26px; padding: 0; border: 0; background: none; color: inherit; }
-.ph-platter__record { left: 30%; top: 4px; width: 104px; height: 104px; }
-.ph-platter__cover { position: relative; z-index: 1; display: block; width: 112px; height: 112px; }
-.ph-platter__cover .art { border-radius: 2px; box-shadow: 0 6px 14px rgba(0, 0, 0, 0.4); }
-.ph-platter__text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.ph-platter__eyebrow { font-size: 12px; color: var(--color-text-muted); }
-.ph-platter__title { margin: 0; font-family: var(--font-headings, var(--font-family)); font-size: 21px; font-weight: 600; line-height: 1.1; }
-.ph-platter__title button { display: block; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; }
-.ph-platter__name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.ph-platter__artist { font-size: 13px; color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ph-platter__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 4px; }
-.ph-platter__resume { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--color-accent); color: var(--color-text-on-accent); font: inherit; font-size: 13px; font-weight: 600; }
-/* Both stay their drawn size and take a full finger's reach. */
-.ph-platter__title button, .ph-platter__resume { position: relative; }
-.ph-platter__title button::before { content: ""; position: absolute; inset: min(0px, calc((100% - 44px) / 2)) 0; }
-.ph-platter__resume::before { content: ""; position: absolute; inset: -6px 0; }
-.ph-platter__where { font-size: 12px; color: var(--color-text-muted); white-space: nowrap; }
-/* Spun this week: three columns of covers with their names under them. */
-.ph-spun { display: flex; flex-direction: column; gap: 12px; margin: 0 0 26px; }
-.ph-spun__title { margin: 0; font-family: var(--font-headings, var(--font-family)); font-size: 20px; font-weight: 600; }
-.ph-spun__grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 12px; }
-.ph-spun__tile { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; }
-.ph-spun__tile .art, .ph-spun__tile .liked-cover { border-radius: 2px; }
-.ph-spun__tile.is-round .art { border-radius: 50%; }
-.ph-spun__name { font-size: 13px; font-weight: 500; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.ph-spun__sub { margin-top: -4px; font-size: 12px; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ph-spun__tile.is-playing .ph-spun__name { color: var(--color-accent); }
+.ph-home__top { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; }
+.ph-home__top .ph-pills { overflow-x: auto; scrollbar-width: none; min-width: 0; margin-block: -5px; padding-block: 5px; }
 .ph-avatar { display: grid; place-items: center; flex: none; width: 36px; height: 36px; margin: 4px; border-radius: 50%; overflow: hidden; background: var(--ph-faint) !important; color: var(--color-text-secondary); }
 .ph-avatar::before { content: ""; position: absolute; inset: -4px; }
 .ph-avatar { position: relative; }
+.ph-shortcuts { list-style: none; margin: 0 0 8px; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.ph-shortcut {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 56px;
+  padding-right: 10px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--color-ink) 7%, var(--color-bg-raised)) !important;
+  box-shadow: var(--panel-highlight, none);
+}
+.ph-shortcut .art { border-radius: 0; flex: none; }
+.ph-shortcut__title { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ph-shortcut.is-playing .ph-shortcut__title { color: var(--color-accent); }
 
 .ph-shelf { margin-top: 28px; }
 .ph-shelf__title { margin: 0 0 12px; font-family: var(--ph-title-font); font-size: 20px; font-weight: 600; letter-spacing: -0.005em; }
@@ -852,20 +829,17 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 .ph-backbar__back { color: var(--color-text-primary); background: color-mix(in srgb, var(--color-bg-base) 40%, transparent) !important; }
 .ph-backbar__title { text-align: center; font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; transition: opacity 200ms; }
 .ph-backbar.is-titled .ph-backbar__title { opacity: 1; }
-/* A tenth of the cover's colour at the top of the page, scrolling away with it. */
-.ph-album { background: linear-gradient(180deg, color-mix(in srgb, var(--ph-tint) 10%, var(--color-bg-base)) 0, var(--color-bg-base) 420px); background-attachment: local; }
-/* The sleeve: the cover on the left with its record half out to the right. */
-.ph-album__head { display: flex; flex-direction: column; align-items: flex-start; text-align: left; padding-top: 4px; }
-.ph-album__sleeve { position: relative; width: min(88%, 380px); --record-label: var(--ph-tint); }
-.ph-album__record { top: 3.4%; right: 0; width: 70%; aspect-ratio: 1; }
-.ph-album__cover { position: relative; z-index: 1; width: 75%; border-radius: 2px; overflow: hidden; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4), 0 18px 40px rgba(0, 0, 0, 0.4); }
+/* The cover's colour washes the top of the page and scrolls away with it. */
+.ph-album { background: linear-gradient(180deg, color-mix(in srgb, var(--ph-tint) 38%, var(--color-bg-base)) 0, var(--color-bg-base) 420px); background-attachment: local; }
+.ph-album__head { display: flex; flex-direction: column; align-items: center; text-align: center; padding-top: 4px; }
+.ph-album__cover { width: 56%; max-width: 280px; border-radius: 4px; overflow: hidden; box-shadow: 0 18px 40px rgba(0, 0, 0, 0.4); }
 .ph-album__cover .art { width: 100%; height: auto; aspect-ratio: 1; }
-.ph-album__title { margin: 20px 0 2px; font-family: var(--ph-title-font); font-size: 30px; line-height: 1.15; font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.ph-album__artist { font-size: 15px; font-weight: 600; min-height: 44px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left !important; padding: 0; }
+.ph-album__title { margin: 20px 0 6px; font-family: var(--ph-title-font); font-size: 24px; line-height: 1.15; font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ph-album__artist { font-size: 15px; font-weight: 600; min-height: 44px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center !important; }
 .ph-album__facts { display: flex; align-items: center; gap: 8px; margin: 2px 0 0; font-size: 13px; color: var(--color-text-secondary); }
 .ph-actions { display: flex; align-items: center; justify-content: space-between; margin: 16px 0 8px; }
 .ph-actions__left, .ph-actions__right { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.ph-actions__left { gap: 10px; }
+.ph-actions__right { gap: 10px; }
 .ph-songs { list-style: none; margin: 0; padding: 0; }
 .ph-artist .ph-songs { transition: opacity var(--ph-quick) var(--ph-ease); }
 .ph-songs--waiting { opacity: .45; }
@@ -924,7 +898,6 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 .ph-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 48px 0; }
 .ph-empty__title { margin: 0; font-family: var(--ph-title-font); font-size: 20px; font-weight: 600; }
 .ph-empty__text { margin: 0; font-size: 14px; line-height: 1.5; color: var(--color-text-secondary); }
-.ph-empty__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .ph-loading { display: flex; flex-direction: column; gap: 12px; padding: calc(var(--ph-safe-top) + 56px) var(--ph-gutter); }
 .ph-loading__block { height: 64px; border-radius: 8px; background: var(--ph-faint); }
 .ph-loading__block--hero { height: 200px; width: 56%; align-self: center; }
@@ -1167,7 +1140,7 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 .ph-row--danger .ph-row__icon { color: currentColor; }
 .ph-row--text.is-on { color: var(--color-text-primary); }
 /* Sideways rows hint that they scroll: the last pill fades at the edge. */
-.ph-pills--scroll, .ph-seg { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent); }
+.ph-pills--scroll, .ph-seg, .ph-home__top .ph-pills { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent); }
 /* A chosen type pill shows how to clear it. */
 .ph-chip { display: inline-flex; align-items: center; gap: 6px; }
 .ph-chip__x { margin-right: -4px; }
@@ -1184,14 +1157,11 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 .ph-search__bar .ph-field { flex: 1; margin-bottom: 0; }
 .ph-search__cancel { min-height: 44px; padding: 0 4px; font-size: 16px; font-weight: 600; color: var(--color-text-primary) !important; }
 /* Browse tiles under an empty search: a genre, its count, a tilted sleeve. */
-.ph-browse { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 12px; }
-/* A crate divider: a tab with the genre, and the spines of the records behind it. */
-.ph-divider { display: flex; flex-direction: column; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; }
-.ph-divider__tab { align-self: flex-start; max-width: 100%; padding: 6px 12px 4px; border-radius: 6px 6px 0 0; background: var(--color-bg-raised2); box-shadow: inset 0 1px 0 rgba(255, 243, 224, 0.07); font-family: var(--font-headings, var(--font-family)); font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ph-divider__body { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; height: 70px; padding: 10px 12px; border-radius: 0 6px 6px 6px; background: var(--color-bg-raised2); }
-.ph-divider__count { font-size: 12px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.ph-divider__spines { display: flex; align-items: flex-end; gap: 3px; flex: none; }
-.ph-divider__spines > span { width: 9px; border-radius: 1px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12); }
+.ph-browse { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.ph-browse__tile { position: relative; display: flex; flex-direction: column; justify-content: space-between; width: 100%; height: 88px; padding: 12px 14px !important; border-radius: 10px; overflow: hidden; background: color-mix(in srgb, var(--color-ink) 7%, var(--color-bg-raised)) !important; box-shadow: var(--panel-highlight, none); }
+.ph-browse__name { position: relative; z-index: 1; max-width: 70%; font-size: 15px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
+.ph-browse__count { position: relative; z-index: 1; font-family: var(--font-family); font-variant-numeric: tabular-nums; font-size: 12px; color: var(--color-text-muted); }
+.ph-browse__art { position: absolute; right: -12px; bottom: -10px; transform: rotate(14deg); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); border-radius: 3px; overflow: hidden; }
 .ph-search .ph-pills--scroll { margin-top: 12px; }
 .ph-hit.is-top .ph-row { padding: 10px 12px; margin: 4px 0; border-radius: 12px; background: color-mix(in srgb, var(--color-ink) 6%, var(--color-bg-raised)); }
 /* A playlist's cover over its name, smaller than an album's so the songs start sooner. */
@@ -1201,7 +1171,7 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 .ph-backbar.is-titled .ph-backbar__back { background: none !important; }
 :root[data-theme-base="light"] .ph-artist__name { text-shadow: none; }
 /* Plates on the dark mini player and Home card read light on every look. */
-.ph-now .plate { --plate-lit: #e2c68c; }
+.ph-mini .plate, .ph-now .plate { --plate-lit: #e2c68c; }
 /* Settings pieces built for a wide window, folded to one column. */
 .settings--phone .library-source__head { flex-wrap: wrap; row-gap: 2px; }
 .settings--phone .library-source__name { flex: 1; min-width: 0; }
@@ -1246,7 +1216,7 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
   transition: opacity 220ms var(--ph-ease), transform 260ms var(--ph-ease), background-color 220ms var(--ph-ease);
 }
 .phone .is-pressed { opacity: 0.6; transition-duration: 90ms; }
-.phone :is(.ph-card-tile, .ph-spun__tile, .ph-platter__sleeve, .ph-platter__resume, .ph-pill, .ph-chip, .ph-play, .ph-big-btn, .ph-server, .ph-crate, .ph-avatar, .ph-divider, .ph-select, .ph-seg__tab, .btn).is-pressed { opacity: 1; transform: scale(0.96); }
+.phone :is(.ph-card-tile, .ph-shortcut, .ph-browse__tile, .ph-pill, .ph-chip, .ph-play, .ph-big-btn, .ph-server, .ph-crate, .ph-avatar, .ph-select, .ph-seg__tab, .btn).is-pressed { opacity: 1; transform: scale(0.96); }
 .phone :is(.ph-icon-btn, .ph-text-btn, .ph-output).is-pressed { opacity: 0.7; transform: scale(0.92); }
 .phone .ph-play.is-pressed { transform: scale(0.94); }
 .phone .ph-tab.is-pressed { opacity: 0.7; }
@@ -1295,19 +1265,18 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 .phone.is-cover-flying .ph-dock .ph-mini { opacity: 0; transition: none; }
 
 
-/* Home's card takes its colour from the cover in both looks: a deep tint on
-   the dark look, a pale one with ink on the light. The mini player doesn't. */
-.ph-mini { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32), inset 0 0 0 0.5px color-mix(in srgb, var(--color-ink) 12%, transparent), inset 0 1px 0 color-mix(in srgb, var(--color-ink) 8%, transparent); }
-:root[data-theme-base="light"] .phone .ph-mini { box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12), inset 0 0 0 0.5px rgba(0, 0, 0, 0.08); }
-:root[data-theme-base="light"] .phone .ph-now {
+/* The mini player and Home's card take their colour from the cover in both
+   looks: a deep tint on the dark look, a pale one with ink on the light. */
+.ph-mini { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32), inset 0 0 0 0.5px rgba(255, 255, 255, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.1); }
+:root[data-theme-base="light"] .phone :is(.ph-mini, .ph-now) {
   background: color-mix(in srgb, var(--ph-tint) 20%, var(--color-bg-raised));
   color: var(--color-text-primary);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12), inset 0 0 0 0.5px rgba(0, 0, 0, 0.08);
 }
-:root[data-theme-base="light"] .phone :is(.ph-now__artist, .ph-now__eyebrow) { color: var(--color-text-secondary); }
-:root[data-theme-base="light"] .phone .ph-now :is(.ph-icon-btn, .ph-output) { color: var(--color-text-primary); }
-:root[data-theme-base="light"] .phone .ph-now__progress { background: rgba(0, 0, 0, 0.1); }
-:root[data-theme-base="light"] .phone .ph-now__progress-fill { background: var(--color-text-primary); }
+:root[data-theme-base="light"] .phone :is(.ph-mini__artist, .ph-now__artist, .ph-now__eyebrow) { color: var(--color-text-secondary); }
+:root[data-theme-base="light"] .phone :is(.ph-mini, .ph-now) :is(.ph-icon-btn, .ph-output) { color: var(--color-text-primary); }
+:root[data-theme-base="light"] .phone :is(.ph-mini__progress, .ph-now__progress) { background: rgba(0, 0, 0, 0.1); }
+:root[data-theme-base="light"] .phone :is(.ph-mini__progress-fill, .ph-now__progress-fill) { background: var(--color-text-primary); }
 
 /* A real bar behind the status bar: pages scroll under it, never through the clock. */
 .ph-stack::after {
@@ -1323,9 +1292,6 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
   backdrop-filter: blur(16px) saturate(1.4);
   pointer-events: none;
 }
-/* An album page at rest reaches up under the clock: its tinted top shows
-   through until the page scrolls. */
-.ph-stack:not([data-moving]):has(> .ph-layer:not(.is-under, .is-parked) .ph-album:not(.is-scrolled))::after { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
 /* Inputs take a caret and a selection even though the rest of the phone doesn't. */
 .phone :is(input, textarea, [contenteditable="true"]) { -webkit-user-select: text; user-select: text; }
 :root[data-reduced-motion="true"] .ph-sheet-layer.is-closing:not([data-sliding-out]) .ph-sheet { opacity: 0; transition: opacity 120ms ease-out; }

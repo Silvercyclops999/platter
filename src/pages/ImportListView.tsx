@@ -328,7 +328,7 @@ export function ListView({ id }: { id: string }) {
       </p>
       <div className="import-actions">
         {ids.length > 0 && (
-          <IconButton label={`Play ${list.name}`} variant="accent" size="xl" text="Play" icon={<Play size={24} fill="currentColor" className="nudge-right" />} onClick={play} />
+          <IconButton label={`Play ${list.name}`} variant="accent" size="xl" icon={<Play size={24} fill="currentColor" className="nudge-right" />} onClick={play} />
         )}
         <IconButton label={`Shuffle ${list.name}`} size="lg" icon={<Shuffle size={22} />} onClick={shuffle} />
         <IconButton label={`More options for ${list.name}`} size="lg" icon={<Ellipsis size={22} />} onClick={(e) => pageMenu(e.currentTarget)} />

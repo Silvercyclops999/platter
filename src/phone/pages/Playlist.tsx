@@ -5,7 +5,7 @@
  * playlists made here, playlists shared with you and Blends open the same
  * way, each from its own page data.
  */
-import { MoreHorizontal, Shuffle } from "lucide-react";
+import { MoreHorizontal, Pause, Play, Shuffle } from "lucide-react";
 import { Art } from "../../components/Art";
 import { LikedCover } from "../../components/LikedCover";
 import { phone } from "../phoneUi";
@@ -21,7 +21,7 @@ import { playBlend, playShared, useCircle } from "../../stores/circle";
 import { player, usePlayer } from "../../stores/player";
 import { BackBar, PageFailed, PageLoading, SongRow, countLine } from "./common";
 import { tap } from "../bits";
-import { PhoneShuffleToggle, PlayPill } from "./kit";
+import { PhoneShuffleToggle } from "./kit";
 
 /** Genre pills shown. */
 export const GENRE_PILLS = 6;
@@ -113,7 +113,7 @@ function ShuffleOnce({ ids, play }: { ids: string[]; play: (ids: string[]) => vo
   return (
     <button
       type="button"
-      className="ph-icon-btn ph-pill-btn"
+      className="ph-icon-btn"
       aria-label="Shuffle play"
       disabled={!ids.length}
       onClick={() => {
@@ -121,8 +121,7 @@ function ShuffleOnce({ ids, play }: { ids: string[]; play: (ids: string[]) => vo
         play(shuffled(ids));
       }}
     >
-      <Shuffle size={16} aria-hidden="true" />
-      <span aria-hidden="true">Shuffle</span>
+      <Shuffle size={24} aria-hidden="true" />
     </button>
   );
 }
@@ -282,21 +281,24 @@ function SongList({
       </header>
       <div className="ph-actions">
         <div className="ph-actions__left">
-          <PlayPill
-            playing={playing}
-            label={playing ? "Pause" : `Play ${title}`}
-            disabled={!tracks.length}
-            onClick={() => (playing || (here && !genre) ? void player.toggle() : play(undefined, undefined, ids))}
-          />
-          {shuffle === "once" ? <ShuffleOnce ids={rows.map((r) => r.t.id)} play={(order) => play(order[0], undefined, order)} /> : shuffle}
-        </div>
-        <div className="ph-actions__right">
           {download}
           {sheet && (
             <button type="button" className="ph-icon-btn" aria-label={`More for ${title}`} onClick={() => phone.push({ kind: "playlist", playlist: sheet })}>
               <MoreHorizontal size={24} aria-hidden="true" />
             </button>
           )}
+        </div>
+        <div className="ph-actions__right">
+          {shuffle === "once" ? <ShuffleOnce ids={rows.map((r) => r.t.id)} play={(order) => play(order[0], undefined, order)} /> : shuffle}
+          <button
+            type="button"
+            className="ph-play ph-play--page"
+            aria-label={playing ? "Pause" : `Play ${title}`}
+            disabled={!tracks.length}
+            onClick={() => (playing || (here && !genre) ? void player.toggle() : play(undefined, undefined, ids))}
+          >
+            {playing ? <Pause size={28} fill="currentColor" aria-hidden="true" /> : <Play size={28} fill="currentColor" aria-hidden="true" />}
+          </button>
         </div>
       </div>
       {genres.length > 1 && (

@@ -124,7 +124,6 @@ export function SmartPlaylistPage({ id }: { id: string }) {
           label={playing ? `Pause ${pl?.title ?? "playlist"}` : `Play ${pl?.title ?? "playlist"}`}
           variant="accent"
           size="xl"
-          text={playing ? "Pause" : "Play"}
           disabled={!ids.length}
           icon={playing ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="nudge-right" />}
           onClick={() => (playing ? void player.toggle() : play())}

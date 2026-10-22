@@ -1,13 +1,15 @@
 /**
- * The floating mini player above the tabs: a raised panel with the song
- * over its artist, the output button and play or pause, and a thin brass
- * progress line along the top edge (paused too).
+ * The floating mini player above the tabs: tinted from the cover, the song
+ * over its artist, the output button and play or
+ * pause, and a thin progress line along the bottom edge (paused too).
  * Tapping it opens now playing.
  */
 import { Pause, Play } from "lucide-react";
+import type { CSSProperties } from "react";
 import { Art } from "../components/Art";
 import type { Tap } from "../lib/types";
 import { trackArtistLine } from "../lib/format";
+import { useArtColours } from "../lib/useTint";
 import { player, usePlayer } from "../stores/player";
 import { ProgressLine, tap } from "./bits";
 import { OutputButton } from "./DeviceSheet";
@@ -23,11 +25,13 @@ export function MiniPlayer() {
   useEffect(() => followTaps(), []);
   // A tapped song on its way shows here, over what's still playing.
   const coming = getting(tapped) ? tapped : null;
+  const colours = useArtColours(null, coming ? coming.thumb : track?.thumb);
   if (coming) return <MiniGetting tap={coming} playing={track?.title ?? null} />;
   if (!track) return null;
   const playing = status === "playing" || status === "loading" || status === "buffering";
+  const style = { "--ph-tint": colours?.vivid ?? "var(--color-bg-overlay)" } as CSSProperties;
   return (
-    <div className="ph-mini" data-testid="mini-player">
+    <div className="ph-mini" style={style} data-testid="mini-player">
       <button type="button" className="ph-mini__open" aria-label={`Now playing: ${track.title} by ${trackArtistLine(track)}. Open the player`} onClick={phone.openPlayer}>
         <span className="ph-mini__art">
           <Art path={track.thumb} size={44} sleeve={{ title: track.albumTitle, artist: track.artistTitle }} />

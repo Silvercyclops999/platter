@@ -266,7 +266,7 @@ function MixRowSleeve({ e, fluid }: { e: LibEntry; fluid?: boolean }) {
   const kind = e.id === "daylist" ? "daylist" : e.id.startsWith("topSongs:") ? "topSongs" : "daily";
   return (
     <span className={`ph-lib-mix ${fluid ? "is-fluid" : ""}`}>
-      <MixArt mix={{ kind, title: e.title, description: "" } as MixSummary} />
+      <MixArt mix={{ kind, title: e.title, description: "", color: "#5a5048", art: null, covers: e.thumb ? [e.thumb] : [] } as MixSummary} />
     </span>
   );
 }

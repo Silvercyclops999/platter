@@ -134,7 +134,7 @@ describe("mini player and now playing", () => {
     expect(within(mini).getByText(t.title)).toBeInTheDocument();
     fireEvent.click(within(mini).getByRole("button", { name: /Open the player/ }));
     const np = await screen.findByRole("dialog", { name: "Now playing" });
-    expect(within(np).getByText("From")).toBeInTheDocument();
+    expect(within(np).getByText("Playing from")).toBeInTheDocument();
     expect(within(np).getByText(t.albumTitle)).toBeInTheDocument();
     expect(within(np).getByRole("slider", { name: "Seek" })).toBeInTheDocument();
     expect(within(np).getByText(remaining(30_000, t.durationMs))).toBeInTheDocument();
