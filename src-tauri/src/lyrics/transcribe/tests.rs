@@ -646,7 +646,7 @@ async fn the_model_hears_the_title_and_unsure_lines_are_left_out() {
     *f.rec.behaviour.lock() = Behaviour::Words(vec![sung, guess, words("second line", 5000)]);
     f.t.transcribe_track("801").unwrap();
     until(&f.t, "done", |s| idle(s) && !f.events.done.lock().is_empty()).await;
-    assert_eq!(*f.rec.last_hints.lock(), Some(Hints { language: "en".into(), prompt: "Tape One by Test Artist.".into() }));
+    assert_eq!(*f.rec.last_hints.lock(), Some(Hints { language: "en".into(), prompt: "Tape One by Test Artist.".into(), plain_times: false }));
     let own = f.db.read(|c| user::get(c, "801")).unwrap().unwrap();
     assert!(own.text.contains("Hello") && own.text.contains("Second"), "{}", own.text);
     assert!(!own.text.contains("Banana"), "the unsure line is left out: {}", own.text);
@@ -1834,6 +1834,7 @@ impl helper::Launch for ScriptLaunch {
             input: Box::new(req_w),
             output: Box::new(rep_r),
             process: Box::new(ScriptProcess(self.n.ended.clone(), self.script.killed.clone())),
+            said: Arc::default(),
         })
     }
 }
@@ -2235,12 +2236,18 @@ fn real_voice_before_after() {
     let mut songs: Vec<std::path::PathBuf> =
         if at.is_dir() { std::fs::read_dir(at).unwrap().filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.is_file()).collect() } else { vec![at.into()] };
     songs.sort();
+    // The language heard and each run's timing, in the output.
+    let _ = tracing_subscriber::fmt().with_test_writer().with_ansi(false).try_init();
     let rec = engine::in_process();
     let sep = voice::in_process().expect("this build separates");
     let never = AtomicBool::new(false);
     for song in songs {
         let title = song.file_stem().map(|s| s.to_string_lossy().into_owned());
-        let hints = Hints::for_song(kind, title.as_deref(), None);
+        // PLATTER_PLAIN_TIMES=1: the model's own word times. This test runs the
+        // model in its own process, so a song the speech library stops itself
+        // on ends the test; the app's helper hears it again this way.
+        let plain_times = std::env::var("PLATTER_PLAIN_TIMES").is_ok_and(|v| v == "1");
+        let hints = Hints { plain_times, ..Hints::for_song(kind, title.as_deref(), None) };
         let Ok(d) = audio::decode(std::fs::read(&song).unwrap(), None, &never, Some((voice::RATE, voice::MAX_SECONDS))) else {
             println!("== {}: not decodable, skipped", song.display());
             continue;
@@ -2261,9 +2268,16 @@ fn real_voice_before_after() {
             let started = std::time::Instant::now();
             let segs = rec.transcribe(Path::new(&model), kind, &pcm, 4, &hints, Stop::new(), Arc::new(|_| {})).unwrap();
             let segs = quiet::drop_made_up(segs, &q);
+            // Why a song comes out empty: nothing heard, or all of it unsure.
+            let heard = segs.len();
+            let unsure = segs.iter().filter(|s| s.sure.is_some_and(|p| p < lines::UNSURE)).count();
             let kept = lines::to_lines(&lines::keep_sure(segs, &hints.prompt));
             let extra = if what == "voice" { format!(" (+{:.1} s separating)", separated_in.as_secs_f32()) } else { String::new() };
-            println!("-- {what}: {} lines in {:.1} s{extra}", kept.len(), started.elapsed().as_secs_f32());
+            println!(
+                "-- {what}: {} lines in {:.1} s{extra} ({heard} segments heard, {unsure} of them unsure)",
+                kept.len(),
+                started.elapsed().as_secs_f32()
+            );
             for l in &kept {
                 println!("{:>7} ms  {}", l.start_ms, l.text());
             }

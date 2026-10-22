@@ -15,7 +15,9 @@ use crate::lyrics::transcribe::engine::Step;
 use crate::lyrics::transcribe::lines::Word;
 
 /// Echoes what it was given; blocks on 7 samples, panics on 13, and on 17
-/// ignores the cancel until its "process" is ended.
+/// ignores the cancel until its "process" is ended. On 19 the speech
+/// library's own check stops it unless the word times are plain; on 23 it
+/// stops either way.
 #[derive(Default)]
 struct Fake {
     unloads: AtomicUsize,
@@ -26,6 +28,10 @@ struct Fake {
     /// Runs going on in every helper at once, and the most seen.
     busy: Arc<AtomicUsize>,
     most_busy: Arc<AtomicUsize>,
+    /// The running helper's error output.
+    said: Mutex<Option<Arc<Said>>>,
+    /// Whether each run had plain word times.
+    plain: Mutex<Vec<bool>>,
 }
 
 impl Recognizer for Fake {
@@ -45,6 +51,13 @@ impl Recognizer for Fake {
         if self.loads.lock().last() != Some(&_kind) {
             progress(engine::Step::Loading);
             self.loads.lock().push(_kind);
+        }
+        self.plain.lock().push(hints.plain_times);
+        if pcm.len() == 23 || (pcm.len() == 19 && !hints.plain_times) {
+            if let Some(said) = self.said.lock().as_ref() {
+                said.line("whisper.cpp: WHISPER_ASSERT: whisper.cpp:8772: filter_width < a->ne[2]");
+            }
+            panic!("aborted");
         }
         let n = self.busy.fetch_add(1, Ordering::SeqCst) + 1;
         self.most_busy.fetch_max(n, Ordering::SeqCst);
@@ -152,7 +165,9 @@ impl Launch for ThreadLaunch {
                 let _ = worker::serve(Box::new(req_r), Box::new(rep_w), rec, Some(sep), &|l| lowest.lock().push(l));
             });
         }
-        Ok(Worker { input: Box::new(req_w), output: Box::new(rep_r), process: Box::new(ThreadProcess(self.n.ended.clone(), self.rec.killed.clone())) })
+        let said: Arc<Said> = Arc::default();
+        *self.rec.said.lock() = Some(said.clone());
+        Ok(Worker { input: Box::new(req_w), output: Box::new(rep_r), process: Box::new(ThreadProcess(self.n.ended.clone(), self.rec.killed.clone())), said })
     }
 }
 
@@ -346,6 +361,49 @@ fn a_crash_fails_that_run_and_the_next_one_starts_a_new_helper() {
     assert!(!f.helper.crashed_too_often());
     run(&f.helper, &[0.0; 13], never()).0.unwrap_err();
     assert!(f.helper.crashed_too_often());
+}
+
+#[test]
+fn the_speech_librarys_own_stop_hears_the_song_again_without_head_timing_and_keeps_the_card() {
+    let rec = Arc::new(Fake::default());
+    let n = Arc::new(Launches::default());
+    let gpu = gpu_with_card();
+    let helper = Helper::new(Arc::new(ThreadLaunch { rec: rec.clone(), n: n.clone() }), Arc::new(|| false), Duration::from_secs(60)).with_gpu(gpu.clone());
+    // The word timing step stops the helper: the song is heard again with plain times.
+    assert_eq!(text(run(&helper, &[0.0; 19], never()).0), "m/small.bin 0 2 en");
+    assert_eq!(*rec.plain.lock(), vec![false, true]);
+    assert!(gpu.active().is_some(), "not the card's fault");
+    assert_eq!(*n.gpu.lock(), vec![true, true]);
+    assert!(!helper.crashed_too_often());
+    // The next song has the timing again.
+    run(&helper, &[1.0], never()).0.unwrap();
+    assert_eq!(rec.plain.lock().last(), Some(&false));
+    // Stopped both ways: that song fails as a crash (still not the card's).
+    assert_eq!(run(&helper, &[0.0; 23], never()).0, Err(RecognizeError::Crashed));
+    assert!(gpu.active().is_some());
+    run(&helper, &[0.0; 23], never()).0.unwrap_err();
+    run(&helper, &[0.0; 23], never()).0.unwrap_err();
+    assert!(helper.crashed_too_often());
+}
+
+#[test]
+fn the_check_line_is_found_in_the_error_output_and_waited_for() {
+    let said = Said::reading();
+    said.line("ggml_metal_init: found device");
+    assert_eq!(said.check(Duration::ZERO), None);
+    let s = said.clone();
+    let late = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(50));
+        s.line("whisper.cpp:8772: WHISPER_ASSERT: filter_width < a->ne[2]");
+        s.ended();
+    });
+    // Its last lines arrive a moment after its output ends.
+    assert_eq!(said.check(Duration::from_secs(5)).as_deref(), Some("WHISPER_ASSERT: filter_width < a->ne[2]"));
+    late.join().unwrap();
+    // A helper that never says anything doesn't hold the run up.
+    let started = std::time::Instant::now();
+    assert_eq!(Said::default().check(Duration::from_secs(5)), None);
+    assert!(started.elapsed() < Duration::from_secs(1));
 }
 
 #[test]

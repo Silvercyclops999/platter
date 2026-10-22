@@ -23,6 +23,12 @@
 //! ([`Helper::with_gpu`]); the lyrics check then always goes through it, so
 //! only one model sits on the card. A crash while on the card moves
 //! transcription to the processor for the rest of the session.
+//!
+//! The speech library also stops the helper on purpose when one of its own
+//! checks fails (it writes `WHISPER_ASSERT` and aborts). The known one is in
+//! the attention-head word timing, on a few songs. That isn't the card's
+//! fault and doesn't count as a crash: the song is heard again once with
+//! that timing off.
 
 pub mod proto;
 pub mod worker;
@@ -61,6 +67,45 @@ pub const CRASH_LIMIT: usize = 3;
 const CANCEL_GRACE: Duration = Duration::from_secs(30);
 /// A run the user cancelled gets this long before its helper is ended.
 const STOP_NOW_GRACE: Duration = Duration::from_secs(1);
+/// How long a stopped helper's last error lines get to arrive.
+const LAST_WORDS: Duration = Duration::from_secs(2);
+
+/// What a helper wrote to its error output that matters here.
+#[derive(Default)]
+pub struct Said {
+    /// The speech library's own check that stopped it.
+    check: Mutex<Option<String>>,
+    /// Its error output is still being read.
+    reading: AtomicBool,
+}
+
+impl Said {
+    /// Its error output is read until it ends ([`Said::ended`]).
+    pub fn reading() -> Arc<Self> {
+        Arc::new(Self { check: Mutex::default(), reading: AtomicBool::new(true) })
+    }
+
+    /// One line of its error output.
+    pub fn line(&self, line: &str) {
+        if let Some(at) = line.find("WHISPER_ASSERT") {
+            *self.check.lock() = Some(line[at..].trim().to_string());
+        }
+    }
+
+    /// Its error output ended (it stopped).
+    pub fn ended(&self) {
+        self.reading.store(false, Ordering::SeqCst);
+    }
+
+    /// The check that stopped it, once its last lines are in (or `wait` is up).
+    fn check(&self, wait: Duration) -> Option<String> {
+        let until = Instant::now() + wait;
+        while self.reading.load(Ordering::SeqCst) && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        self.check.lock().clone()
+    }
+}
 
 /// A running helper's process.
 pub trait WorkerProcess: Send {
@@ -75,11 +120,13 @@ pub trait WorkerProcess: Send {
     }
 }
 
-/// A started helper: its stdin, its stdout and its process.
+/// A started helper: its stdin, its stdout, its process and what it said
+/// on its error output.
 pub struct Worker {
     pub input: Box<dyn Write + Send>,
     pub output: Box<dyn Read + Send>,
     pub process: Box<dyn WorkerProcess>,
+    pub said: Arc<Said>,
 }
 
 /// Starts helpers (the real one starts this binary; tests start a thread).
@@ -97,6 +144,7 @@ struct Live {
     input: Mutex<Box<dyn Write + Send>>,
     output: Box<dyn Read + Send>,
     process: Mutex<Box<dyn WorkerProcess>>,
+    said: Arc<Said>,
 }
 
 impl Live {
@@ -230,7 +278,7 @@ impl Helper {
             tracing::warn!("speech helper didn't start: {e}");
             RecognizeError::Failed(format!("the speech helper didn't start: {e}"))
         })?;
-        let mut live = Live { gpu, input: Mutex::new(w.input), output: w.output, process: Mutex::new(w.process) };
+        let mut live = Live { gpu, input: Mutex::new(w.input), output: w.output, process: Mutex::new(w.process), said: w.said };
         match proto::read_msg::<_, Reply>(&mut live.output) {
             Ok(Some(Reply::Hello { version })) if version == proto::VERSION => {}
             other => {
@@ -268,19 +316,35 @@ impl Helper {
         if self.only.is_some_and(|k| k != kind) {
             return Err(RecognizeError::Failed(format!("this helper runs only the {:?} model", self.only)));
         }
-        let req = |lowest| Request::Transcribe {
-            model: model.to_path_buf(),
-            kind,
-            threads,
-            language: hints.language.clone(),
-            prompt: hints.prompt.clone(),
-            samples: pcm.len(),
-            lowest,
+        let req = |plain_times| {
+            move |lowest| Request::Transcribe {
+                model: model.to_path_buf(),
+                kind,
+                threads,
+                language: hints.language.clone(),
+                prompt: hints.prompt.clone(),
+                plain_times,
+                samples: pcm.len(),
+                lowest,
+            }
         };
-        match self.exchange(req, pcm, &cancel, &progress, priority, true)? {
-            Answer::Reply(Reply::Done { segments }) => Ok(segments),
-            Answer::Reply(Reply::Failed { message }) => Err(RecognizeError::Failed(message)),
-            _ => Err(RecognizeError::Cancelled),
+        let mut plain = hints.plain_times;
+        loop {
+            match self.exchange(req(plain), pcm, &cancel, &progress, priority, true)? {
+                Answer::Reply(Reply::Done { segments }) => return Ok(segments),
+                Answer::Reply(Reply::Failed { message }) => return Err(RecognizeError::Failed(message)),
+                Answer::Checked(_) if !plain => {
+                    tracing::info!("hearing the song again with the model's own word times");
+                    plain = true;
+                }
+                // Stopped again without that step: a crash after all (not the card's).
+                Answer::Checked(what) => {
+                    let n = self.crashes.fetch_add(1, Ordering::SeqCst) + 1;
+                    tracing::warn!(crashes = n, "the speech library stopped again: {what}");
+                    return Err(RecognizeError::Crashed);
+                }
+                _ => return Err(RecognizeError::Cancelled),
+            }
         }
     }
 
@@ -325,6 +389,16 @@ impl Helper {
             }
         };
         slot.last_used = Some(Instant::now());
+        if res.as_ref().is_err() || matches!(res, Ok(Ended::Lost(_))) {
+            // Stopped by the speech library's own check: not a crash.
+            if let Some(check) = slot.live.as_ref().and_then(|l| l.said.check(LAST_WORDS)) {
+                tracing::warn!("the speech helper stopped on the speech library's own check: {check}");
+                if let Some(live) = slot.live.take() {
+                    live.process.lock().kill();
+                }
+                return Ok(Answer::Checked(check));
+            }
+        }
         match res {
             Err(what) => Err(self.crashed(slot, &what, card)),
             Ok(Ended::Reply(r)) => Ok(Answer::Reply(r)),
@@ -349,6 +423,8 @@ impl Helper {
 enum Answer {
     Reply(Reply),
     Vocals(Vec<f32>),
+    /// The speech library stopped the helper on one of its own checks.
+    Checked(String),
 }
 
 impl Separator for Helper {
@@ -360,7 +436,7 @@ impl Separator for Helper {
             Ok(Answer::Vocals(v)) => Ok(v),
             Ok(Answer::Reply(Reply::Failed { message })) => Err(VoiceError::Failed(message)),
             Ok(Answer::Reply(_)) | Err(RecognizeError::Cancelled) => Err(VoiceError::Cancelled),
-            Err(RecognizeError::Crashed) => Err(VoiceError::Crashed),
+            Ok(Answer::Checked(_)) | Err(RecognizeError::Crashed) => Err(VoiceError::Crashed),
             Err(RecognizeError::Failed(m)) => Err(VoiceError::Failed(m)),
         }
     }
@@ -537,16 +613,24 @@ impl Launch for ProcessLaunch {
         crate::platform::cpu::lower_child(&child, lowest);
         let input = child.stdin.take().ok_or_else(|| io::Error::other("no stdin"))?;
         let output = child.stdout.take().ok_or_else(|| io::Error::other("no stdout"))?;
-        if let Some(err) = child.stderr.take() {
-            // The helper's log lines (and the speech library's) go to ours.
-            std::thread::spawn(move || {
-                for line in io::BufReader::new(err).lines().map_while(Result::ok) {
-                    tracing::debug!(target: "speech_helper", "{line}");
-                }
-            });
-        }
+        let said = match child.stderr.take() {
+            Some(err) => {
+                let said = Said::reading();
+                let s = said.clone();
+                // The helper's log lines (and the speech library's) go to ours.
+                std::thread::spawn(move || {
+                    for line in io::BufReader::new(err).lines().map_while(Result::ok) {
+                        s.line(&line);
+                        tracing::debug!(target: "speech_helper", "{line}");
+                    }
+                    s.ended();
+                });
+                said
+            }
+            None => Arc::default(),
+        };
         tracing::debug!(pid = child.id(), "speech helper started");
         crate::platform::cpu::helper_started(child.id());
-        Ok(Worker { input: Box::new(input), output: Box::new(output), process: Box::new(ChildProcess(child)) })
+        Ok(Worker { input: Box::new(input), output: Box::new(output), process: Box::new(ChildProcess(child)), said })
     }
 }

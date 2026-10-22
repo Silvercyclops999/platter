@@ -106,9 +106,10 @@ pub fn serve(
                 }
                 continue;
             }
-            Work::Run { req: Request::Transcribe { model, kind, threads, language, prompt, lowest, .. }, pcm, stop } => {
+            Work::Run { req: Request::Transcribe { model, kind, threads, language, prompt, plain_times, lowest, .. }, pcm, stop } => {
                 lower(lowest);
-                let reply = match rec.transcribe(&model, kind, &pcm, threads, &engine::Hints { language, prompt }, stop, progress) {
+                let hints = engine::Hints { language, prompt, plain_times };
+                let reply = match rec.transcribe(&model, kind, &pcm, threads, &hints, stop, progress) {
                     Ok(segments) => Reply::Done { segments },
                     Err(RecognizeError::Cancelled) => Reply::Cancelled,
                     Err(RecognizeError::Failed(message)) => Reply::Failed { message },

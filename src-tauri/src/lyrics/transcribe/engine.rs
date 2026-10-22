@@ -29,19 +29,24 @@ pub struct Hints {
     /// Empty for none.
     #[serde(default)]
     pub prompt: String,
+    /// Word times from the model's own timestamps, with the attention-head
+    /// timing off: the speech library stops itself inside that step on a
+    /// few songs, so a song that did is heard again this way.
+    #[serde(default)]
+    pub plain_times: bool,
 }
 
 impl Hints {
     /// English, no prompt.
     pub fn english() -> Self {
-        Self { language: LANGUAGE.into(), prompt: String::new() }
+        Self { language: LANGUAGE.into(), ..Default::default() }
     }
 
     /// For a song: the model's language (every language with the large
     /// model, English with the English-only ones) and its title and artist.
     pub fn for_song(kind: ModelKind, title: Option<&str>, artist: Option<&str>) -> Self {
         let language = if kind.multilingual() { DETECT } else { LANGUAGE };
-        Self { language: language.into(), prompt: prompt_for(title, artist) }
+        Self { language: language.into(), prompt: prompt_for(title, artist), plain_times: false }
     }
 }
 
@@ -359,7 +364,8 @@ pub mod whisper {
     /// whisper.cpp, keeping the last model loaded between songs.
     #[derive(Default)]
     pub struct Whisper {
-        ctx: Mutex<Option<(PathBuf, WhisperContext)>>,
+        /// The model loaded, and whether with the attention-head timing.
+        ctx: Mutex<Option<(PathBuf, bool, WhisperContext)>>,
     }
 
     fn preset(kind: ModelKind) -> DtwModelPreset {
@@ -377,11 +383,11 @@ pub mod whisper {
         CARD.get_or_init(|| if gpu::allowed() { gpu::pick(&gpu::list_devices()).cloned() } else { None }).as_ref()
     }
 
-    fn load(path: &Path, kind: ModelKind) -> Result<WhisperContext, RecognizeError> {
+    fn load(path: &Path, kind: ModelKind, timed: bool) -> Result<WhisperContext, RecognizeError> {
         // Much faster and cooler than the processor.
         if let Some(card) = card() {
             let api = if cfg!(target_os = "macos") { "Metal" } else { "Vulkan" };
-            match load_on(path, kind, Some(card.index)) {
+            match load_on(path, kind, Some(card.index), timed) {
                 Ok(ctx) => {
                     tracing::info!("speech model on the graphics card: {} ({api})", card.name);
                     return Ok(ctx);
@@ -390,16 +396,18 @@ pub mod whisper {
             }
         }
         tracing::info!("speech model on the processor");
-        load_on(path, kind, None)
+        load_on(path, kind, None, timed)
     }
 
     /// `card`: the graphics card's index, or None for the processor.
-    fn load_on(path: &Path, kind: ModelKind, card: Option<usize>) -> Result<WhisperContext, RecognizeError> {
+    /// `timed`: word times from the attention heads, steadier than token
+    /// guesses (see [`Hints::plain_times`] for when they're off).
+    fn load_on(path: &Path, kind: ModelKind, card: Option<usize>, timed: bool) -> Result<WhisperContext, RecognizeError> {
+        let mode = if timed { DtwMode::ModelPreset { model_preset: preset(kind) } } else { DtwMode::None };
         let p = WhisperContextParameters {
             use_gpu: card.is_some(),
             gpu_device: card.unwrap_or(0) as i32,
-            // Word times from the attention heads, steadier than token guesses.
-            dtw_parameters: DtwParameters { mode: DtwMode::ModelPreset { model_preset: preset(kind) }, ..Default::default() },
+            dtw_parameters: DtwParameters { mode, ..Default::default() },
             ..Default::default()
         };
         let fail = |e: whisper_rs::WhisperError| RecognizeError::Failed(format!("model didn't load: {e}"));
@@ -431,12 +439,13 @@ pub mod whisper {
         ) -> Result<Vec<Segment>, RecognizeError> {
             let cancel = stop.flag().clone();
             let mut slot = self.ctx.lock();
-            if slot.as_ref().is_none_or(|(p, _)| p != model) {
+            let timed = !hints.plain_times;
+            if slot.as_ref().is_none_or(|(p, t, _)| p != model || *t != timed) {
                 *slot = None;
                 progress(Step::Loading);
-                *slot = Some((model.to_path_buf(), load(model, kind)?));
+                *slot = Some((model.to_path_buf(), timed, load(model, kind, timed)?));
             }
-            let (_, ctx) = slot.as_ref().expect("just loaded");
+            let (_, _, ctx) = slot.as_ref().expect("just loaded");
             let mut state = ctx.create_state().map_err(|e| RecognizeError::Failed(e.to_string()))?;
             progress(Step::Percent(0));
             let language = language(&mut state, pcm, threads, hints, &stop);
@@ -548,7 +557,7 @@ mod tests {
     #[test]
     fn songs_get_their_title_and_artist_and_the_models_language() {
         let h = Hints::for_song(ModelKind::Turbo, Some(" Golden Hour "), Some("Kacey"));
-        assert_eq!(h, Hints { language: DETECT.into(), prompt: "Golden Hour by Kacey.".into() });
+        assert_eq!(h, Hints { language: DETECT.into(), prompt: "Golden Hour by Kacey.".into(), plain_times: false });
         assert_eq!(Hints::for_song(ModelKind::Small, Some("Song"), None).language, LANGUAGE, "English-only models stay English");
         assert_eq!(prompt_for(None, Some("Band")), "Band.");
         assert_eq!(prompt_for(Some(" "), None), "");

@@ -36,6 +36,9 @@ pub enum Request {
         language: String,
         #[serde(default)]
         prompt: String,
+        /// See [`Hints::plain_times`](crate::lyrics::transcribe::engine::Hints::plain_times).
+        #[serde(default)]
+        plain_times: bool,
         samples: usize,
         lowest: bool,
     },
@@ -132,6 +135,7 @@ mod tests {
             threads: 2,
             language: "en".into(),
             prompt: "Song by Band.".into(),
+            plain_times: true,
             samples: 3,
             lowest: true,
         };
