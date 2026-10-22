@@ -13,7 +13,7 @@ import type { MockBackend } from "../lib/mock";
 import { MockCatalogue } from "../lib/mock/catalogue";
 import { DEFAULT_SETTINGS, type SearchResults, type Track } from "../lib/types";
 import { catalogueTop, nameMatches, resetCatalogueCache, type CatalogueResults } from "../pages/SearchCatalogue";
-import { HOME_UNREACHABLE, lidarrNote } from "../pages/lidarrShared";
+import { CHECK_FAILED, HOME_CHECKING, HOME_UNREACHABLE, PHONE_SET_UP, lidarrNote } from "../pages/lidarrShared";
 import { resetArtistPhotos } from "../lib/artistPhotos";
 import { usePhoneForm } from "../phone/form";
 import { PhoneSearch } from "../phone/pages/Search";
@@ -194,9 +194,31 @@ describe("Lidarr through the Bridge on a phone", () => {
     expect(screen.queryByRole("button", { name: "Get albums" })).toBeNull();
   });
 
+  it("in search, the artist you don't have shows with Get once the Bridge's check passes", async () => {
+    mock.lidarr.homeSide = true;
+    search("cold coast");
+    const top = await screen.findByRole("button", { name: "Cold Coast, artist, not in your library" }, SLOW);
+    expect(await within(top).findByText("Get", {}, SLOW)).toBeInTheDocument();
+    expect(screen.queryByText(/Set up Lidarr/)).toBeNull();
+  });
+
+  it("in search, the artist you don't have never vanishes: it shows with why Get isn't there", async () => {
+    mock.lidarr.bridgeQuiet = true;
+    search("cold coast");
+    const top = await screen.findByRole("button", { name: "Cold Coast, artist, not in your library" }, SLOW);
+    expect(within(top).queryByText("Get")).toBeNull();
+    expect(await screen.findByText(HOME_UNREACHABLE, {}, SLOW)).toBeInTheDocument();
+  });
+
+  it("in search, a lookup that fails says so instead of showing nothing", async () => {
+    vi.spyOn(mock, "catalogueSearchPart").mockRejectedValue(new Error("down"));
+    search("cold coast");
+    expect(await screen.findByText(/Couldn't look beyond your library just now/, {}, SLOW)).toBeInTheDocument();
+  });
+
   it("with no Lidarr anywhere, still says how to get albums", async () => {
     render(<PhoneCatalogueArtist mbid={COLD} />);
-    expect(await screen.findByText(/Set up Lidarr in Settings/, {}, SLOW)).toBeInTheDocument();
+    expect(await screen.findByText(PHONE_SET_UP, {}, SLOW)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Get albums" })).toBeNull();
     await act(() => new Promise((r) => setTimeout(r, 400)));
     expect(mock.lidarr.autoChecked).toBe(false);
@@ -208,8 +230,9 @@ describe("the line where Get would be", () => {
   it("says to set up only when Lidarr isn't reached, or its check here didn't pass", () => {
     expect(lidarrNote(null, "set up")).toBeNull();
     expect(lidarrNote({ ...base, ready: true }, "set up")).toBeNull();
-    // Through the Bridge, its check running by itself: nothing yet.
-    expect(lidarrNote({ ...base, homeSide: true }, "set up")).toBeNull();
+    // Through the Bridge, its check running by itself, or not passed: never nothing.
+    expect(lidarrNote({ ...base, homeSide: true }, "set up")).toBe(HOME_CHECKING);
+    expect(lidarrNote({ ...base, homeSide: true, checkFailed: true }, "set up")).toBe(CHECK_FAILED);
     // Set up here with a key, but the check didn't pass (or the key isn't sent there).
     expect(lidarrNote({ ...base, urlSet: true, hasKey: true }, "set up")).toBe("set up");
     expect(lidarrNote({ ...base, urlSet: true, hasKey: true, moved: "moved" }, "set up")).toBe("set up");

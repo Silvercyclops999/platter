@@ -2867,6 +2867,8 @@ export interface LidarrStatus {
   /** Lidarr is set up at home (a Bridge is linked, or its address came from
    * another device) but nothing reaches it from here now. */
   homeQuiet?: boolean;
+  /** Lidarr is reached, and its last setup check found something that stops getting any music. */
+  checkFailed?: boolean;
   /** The address came from another device with a host the key wasn't
    * entered for, so the key isn't sent there: the words to show. */
   moved?: string | null;

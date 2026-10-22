@@ -11,7 +11,6 @@ import { Button } from "../components/Button";
 import { openContextMenu } from "../components/ContextMenu";
 import { backend } from "../lib/backend";
 import { STORE_LINKS } from "../lib/importStrings";
-import { isOffline } from "../lib/offline";
 import { useApp } from "../stores/app";
 import type { AppError, CatAlbum, CatArtist, DismissedArtist, LidarrRequestInput, StoreLinkSet } from "../lib/types";
 import type { MenuItem } from "../stores/ui";
@@ -255,9 +254,16 @@ export function MissingButton({ album, onChanged }: { album: CatAlbum; onChanged
 
 // ---------------------------------------------------------------- hooks
 
-/** Platter can reach the internet (catalogue lookups are hidden otherwise). */
+/**
+ * Platter can reach the internet (catalogue lookups are hidden otherwise).
+ * Only no internet or Go offline hides them: they don't go through the
+ * server, so a server that can't be reached doesn't.
+ */
 export function useOnline(): boolean {
-  return useApp((s) => !isOffline(s.health) && !s.health?.cachedOnly);
+  return useApp((s) => {
+    const kind = s.health?.banner?.kind;
+    return kind !== "noInternet" && kind !== "goneOffline";
+  });
 }
 
 /** Artists outside the library for a library artist's "Fans also like" (none while the setting is off or offline). */
