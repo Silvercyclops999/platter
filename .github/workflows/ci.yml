@@ -87,10 +87,10 @@ jobs:
       # the runner's own Chrome runs the guard instead of the job timing out.
       - name: Chromium for the guard
         if: steps.pw-cache.outputs.cache-hit != 'true'
-        timeout-minutes: 5
+        timeout-minutes: 6
         run: |
           for try in 1 2 3; do
-            if timeout 90 npx playwright-core install --only-shell chromium; then exit 0; fi
+            if timeout -k 10 90 npx playwright-core install --only-shell chromium; then exit 0; fi
             echo "Chromium download try $try failed or stalled"
             rm -rf ~/.cache/ms-playwright
             sleep 5
