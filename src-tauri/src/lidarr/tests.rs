@@ -835,3 +835,88 @@ fn a_root_folder_inside_another_is_worth_knowing() {
     assert!(f.fix.as_deref().unwrap().contains("Platter never removes root folders"));
     assert!(r.passed, "a warning, never a block");
 }
+
+// ------------------------------------------------------- where new artists go
+
+fn root_id(id: i64, path: &str) -> RootFolder {
+    RootFolder { id, ..root(path, &[]) }
+}
+
+#[test]
+fn new_artists_go_to_the_root_plex_scans_even_when_staging_has_the_lowest_id() {
+    let p = library("/data/media/Music");
+    let roots = vec![root_id(2, "/data/staging/music"), root_id(3, "/data/media/Music/Lidarr")];
+    // Platter wasn't told about the staging folder: it still isn't picked.
+    let r = run(&p, lidarr(roots.clone()), &ctx(), &no_disk());
+    assert_eq!(r.library_root.as_deref(), Some("/data/media/Music/Lidarr"));
+    let f = r.findings.iter().find(|f| f.id == "libraryRoot").unwrap();
+    assert_eq!(f.title, "New artists go into /data/media/Music/Lidarr");
+    // Told about it: the same.
+    let c = CheckContext { staging: Some("/data/staging/music".into()), ..ctx() };
+    assert_eq!(run(&p, lidarr(roots), &c, &no_disk()).library_root.as_deref(), Some("/data/media/Music/Lidarr"));
+}
+
+#[test]
+fn the_staging_folder_is_never_where_new_artists_go() {
+    let p = library("/data/media/Music");
+    let c = CheckContext { staging: Some("/data/staging/music".into()), ..ctx() };
+    let r = run(&p, lidarr(vec![root_id(2, "/data/staging/music")]), &c, &no_disk());
+    assert_eq!(r.library_root, None);
+}
+
+#[test]
+fn a_staging_folder_holding_artists_plex_has_loses_to_the_folder_plex_scans() {
+    // Staging (id 2, not set in Platter) holds a copy of an artist Plex has,
+    // with the same files; the library folder (id 3) is inside Plex's.
+    let p = library("/data/media/Music");
+    let staging = root("/data/staging/music", &["Northlight"]);
+    let roots = vec![RootFolder { id: 2, ..staging }, root_id(3, "/data/media/Music/Lidarr")];
+    let disk = HashMap::from([
+        ("/data/staging/music/Northlight/".to_string(), listing(&["First Light"], &[])),
+        ("/data/staging/music/Northlight/First Light/".to_string(), listing(&[], &[("01 Dawn.flac", 31_000_111), ("02 Noon.flac", 28_400_222)])),
+    ]);
+    let r = run(&p, lidarr(roots), &ctx(), &disk);
+    assert_eq!(r.library_root.as_deref(), Some("/data/media/Music/Lidarr"));
+}
+
+#[test]
+fn when_lidarr_cant_open_the_folder_plex_scans_no_other_folder_stands_in() {
+    let p = library("/data/media/Music");
+    let closed = RootFolder { accessible: false, ..root_id(3, "/data/media/Music/Lidarr") };
+    let r = run(&p, lidarr(vec![root_id(2, "/data/staging/music"), closed]), &ctx(), &no_disk());
+    assert_eq!(r.library_root, None, "not the staging folder");
+    assert!(ids(&r, Level::Amber).contains(&"libraryRootClosed".to_string()), "{:?}", ids(&r, Level::Amber));
+}
+
+#[test]
+fn several_root_folders_plex_doesnt_show_add_no_new_artists_and_say_why() {
+    let p = library("/data/media/Music");
+    let r = run(&p, lidarr(vec![root_id(1, "/downloads/a"), root_id(2, "/downloads/b")]), &ctx(), &no_disk());
+    assert_eq!(r.library_root, None, "Platter can't tell which one Plex scans");
+    assert!(ids(&r, Level::Amber).contains(&"libraryRootUnclear".to_string()), "{:?}", ids(&r, Level::Amber));
+    // One root folder is the one, as before.
+    let r = run(&p, lidarr(vec![root_id(4, "/downloads/a")]), &ctx(), &no_disk());
+    assert_eq!(r.library_root.as_deref(), Some("/downloads/a"));
+    assert!(!ids(&r, Level::Amber).contains(&"libraryRootUnclear".to_string()));
+}
+
+#[test]
+fn artists_that_get_new_albums_automatically_are_shown_and_left_alone() {
+    let p = library("/data/media/Music");
+    let mut l = lidarr(vec![root_id(3, "/data/media/Music/Lidarr")]);
+    let artist = |name: &str, new: &str| Artist {
+        artist_name: name.into(),
+        path: format!("/data/media/Music/Lidarr/{name}"),
+        monitor_new_items: Some(new.into()),
+        monitored: true,
+        ..Default::default()
+    };
+    // An unmonitored artist: Lidarr doesn't search for its new albums.
+    let quiet = Artist { monitored: false, ..artist("Quiet Hours", "all") };
+    l.artists = vec![artist("Northlight", "all"), artist("Glasshouse", "new"), artist("Harbor Sound", "none"), quiet];
+    let r = run(&p, l, &ctx(), &no_disk());
+    let f = r.findings.iter().find(|f| f.id == "artistsMonitorNew").unwrap();
+    assert_eq!(f.level, Level::Ok, "a note, not a warning: it's the user's choice");
+    assert_eq!(f.title, "2 artists in Lidarr get new albums automatically");
+    assert!(f.detail.contains("Northlight") && f.detail.contains("Glasshouse") && !f.detail.contains("Harbor Sound") && !f.detail.contains("Quiet Hours"), "{}", f.detail);
+}

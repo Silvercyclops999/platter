@@ -48,6 +48,8 @@ pub const MAX_WAVES: usize = 5;
 pub const FAILS_TO_PAUSE: u32 = 3;
 /// Albums looked at in one pass at most.
 pub const PER_PASS: usize = 10;
+/// Albums Bring music over looks up on MusicBrainz per look.
+pub const PICKS_PER_LOOK: usize = 50;
 /// How often it looks for work while Platter is open.
 pub const LOOK_EVERY: Duration = Duration::from_secs(10 * 60);
 const STATE_KEY: &str = "lidarr.bringIn";
@@ -251,15 +253,53 @@ pub struct PassOutcome {
 /// Lidarr's queue and free space, read before each pass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Gauges {
+    /// Items still on their way (stuck ones don't count).
     pub queue: u64,
+    /// Items stuck in Lidarr: a failed download or import.
+    pub stuck: u64,
     /// Bytes free where Lidarr downloads; None when it doesn't say.
     pub free: Option<i64>,
+}
+
+fn albums(n: usize) -> String {
+    if n == 1 { "1 album".into() } else { format!("{n} albums") }
+}
+
+/// Where getting albums is at, in a line or two for the top of the Changes
+/// log: albums still being looked up on MusicBrainz (`looking_up`), then
+/// the Get albums queue (practice mode, paused and why, today's limit).
+pub fn stage_lines(st: &WavesStatus, looking_up: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    if looking_up > 0 {
+        out.push(if st.ready {
+            format!("Looking up {} on MusicBrainz, up to {PICKS_PER_LOOK} every 10 minutes.", albums(looking_up))
+        } else {
+            format!("{} {} for Lidarr to be set up before Platter looks {} up on MusicBrainz.", albums(looking_up), if looking_up == 1 { "waits" } else { "wait" }, if looking_up == 1 { "it" } else { "them" })
+        });
+    }
+    let q = st.queued.len();
+    if q == 0 {
+        return out;
+    }
+    let waiting = format!("{} waiting to be asked for", albums(q));
+    // The user's pause only holds Bring in my listening: Get albums goes on.
+    out.push(if let Some(why) = &st.paused {
+        format!("Get albums is paused: {why} {waiting}.")
+    } else if st.practice {
+        format!("Practice mode: {waiting}. Nothing goes to Lidarr; each one is listed here as \"Would request\".")
+    } else if st.per_day > 0 && st.today >= st.per_day {
+        format!("Today's {} are asked for. {waiting}, from tomorrow.", albums(st.per_day as usize))
+    } else {
+        format!("{waiting}. Up to {PER_PASS} go every 10 minutes, {} a day.", st.per_day)
+    });
+    out
 }
 
 /// Why the guards stop a pass, or None.
 pub fn guard(g: &Gauges, max_queue: u32, min_free_gb: u32) -> Option<String> {
     if g.queue > max_queue as u64 {
-        return Some(format!("Lidarr's queue has {} items. It carries on once it's down to {max_queue}.", g.queue));
+        let stuck = if g.stuck > 0 { format!(" ({} more are stuck in Lidarr and don't count)", g.stuck) } else { String::new() };
+        return Some(format!("Lidarr's queue has {} items on their way{stuck}. It carries on once it's down to {max_queue}.", g.queue));
     }
     if let Some(free) = g.free
         && min_free_gb > 0
@@ -458,6 +498,18 @@ impl Waves {
         })
     }
 
+    /// [`stage_lines`] for this device: the Get albums queue is always sent
+    /// from here, so its pause and today's count are this device's own,
+    /// even while a Bridge runs Bring in my listening.
+    pub fn stage(&self, looking_up: usize) -> AppResult<Vec<String>> {
+        let mut st = self.status()?;
+        let own = self.state();
+        st.paused = own.paused.clone();
+        st.today = if own.day >= self.day(self.now()) { own.today } else { 0 };
+        st.per_day = crate::settings::load(&self.l().inner.db).bring_in_per_day;
+        Ok(stage_lines(&st, looking_up))
+    }
+
     /// "Get albums": queue albums to ask Lidarr for, paced like the waves.
     /// Albums already queued, or asked for before (and not failed), are
     /// left out. Returns how many were added.
@@ -612,14 +664,14 @@ impl Waves {
     /// Lidarr's queue and the free space where it downloads (reads only).
     async fn gauges(&self) -> AppResult<Gauges> {
         let (client, _) = self.l().connection().await?;
-        let (queue, roots) = futures::try_join!(client.queue_total(), client.root_folders())?;
+        let (queue, roots) = futures::try_join!(client.queue_counts(), client.root_folders())?;
         let staging = self.l().staging_norm();
         let free = roots
             .iter()
             .filter(|r| r.accessible && staging.as_ref().is_none_or(|s| super::paths::NormPath::parse(&r.path) != *s))
             .filter_map(|r| r.free_space)
             .min();
-        Ok(Gauges { queue, free })
+        Ok(Gauges { queue: queue.active, stuck: queue.stuck, free })
     }
 
     /// Ask for one album the way a request by hand does, without the typed

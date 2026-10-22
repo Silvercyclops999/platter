@@ -4571,6 +4571,9 @@ export class MockBackend implements Backend {
   lidarrChanges() {
     return this.delay(() => this.lidarrMock.changes.map((c) => ({ ...c })));
   }
+  lidarrStage() {
+    return this.delay(() => [...this.lidarrMock.stage]);
+  }
   lidarrChangePutBack(id: string) {
     return this.delay(() => this.lidarrMock.putBack(id));
   }

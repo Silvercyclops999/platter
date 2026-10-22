@@ -382,6 +382,24 @@ impl Command {
     }
 }
 
+/// Lidarr's download queue, counted.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct QueueCounts {
+    pub active: u64,
+    pub stuck: u64,
+}
+
+/// A queue item that won't move until someone deals with it in Lidarr.
+pub fn queue_item_stuck(r: &serde_json::Value) -> bool {
+    let state = r.get("trackedDownloadState").and_then(serde_json::Value::as_str).unwrap_or_default();
+    let status = r.get("trackedDownloadStatus").and_then(serde_json::Value::as_str).unwrap_or_default();
+    // Downloaded, but Lidarr wants someone to import it by hand.
+    if state.eq_ignore_ascii_case("importPending") && (status.eq_ignore_ascii_case("warning") || status.eq_ignore_ascii_case("error")) {
+        return true;
+    }
+    ["importFailed", "importBlocked", "downloadFailed", "downloadFailedPending", "failed", "failedPending", "ignored"].iter().any(|s| state.eq_ignore_ascii_case(s))
+}
+
 /// One download in Lidarr's queue.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -899,10 +917,15 @@ impl LidarrClient {
         Ok(p.into_vec())
     }
 
-    /// How many items Lidarr's download queue holds.
-    pub async fn queue_total(&self) -> AppResult<u64> {
-        let v: serde_json::Value = self.get("/queue", &[("page", "1"), ("pageSize", "1")]).await?;
-        Ok(v.get("totalRecords").and_then(serde_json::Value::as_u64).or_else(|| v.as_array().map(|a| a.len() as u64)).unwrap_or(0))
+    /// How many items Lidarr's download queue holds: those still on their
+    /// way, and those stuck (a failed download or import waiting for someone
+    /// in Lidarr). Items past the first page count as on their way.
+    pub async fn queue_counts(&self) -> AppResult<QueueCounts> {
+        let v: serde_json::Value = self.get("/queue", &[("page", "1"), ("pageSize", "500")]).await?;
+        let records = v.get("records").and_then(serde_json::Value::as_array).or_else(|| v.as_array());
+        let total = v.get("totalRecords").and_then(serde_json::Value::as_u64).or_else(|| records.map(|a| a.len() as u64)).unwrap_or(0);
+        let stuck = records.into_iter().flatten().filter(|r| queue_item_stuck(r)).count() as u64;
+        Ok(QueueCounts { active: total.saturating_sub(stuck), stuck })
     }
 
     /// The newest history events for one album.

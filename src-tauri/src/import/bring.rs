@@ -51,7 +51,7 @@ pub const NOT_FOUND: &str = "Lidarr couldn't find it";
 /// How often the watcher looks for arrivals and albums to pick while Platter is open.
 pub const LOOK_EVERY: Duration = Duration::from_secs(10 * 60);
 /// Albums picked in one go at most (MusicBrainz is asked once a second).
-const PICKS_PER_PASS: usize = 50;
+const PICKS_PER_PASS: usize = crate::lidarr::waves::PICKS_PER_LOOK;
 /// Set when a send didn't get everything to the server; the next look
 /// sends again.
 const UNSENT: &str = "bring.unsent";
@@ -1108,6 +1108,11 @@ impl Bring {
         st.lidarr = LidarrState { ready: self.inner.getter.ready(), practice_until: self.inner.getter.practice_until() };
         st.sent = *self.last.lock();
         Ok(st)
+    }
+
+    /// Albums waiting to be looked up on MusicBrainz.
+    pub async fn looking_up(&self) -> AppResult<usize> {
+        Ok(self.db().read_async(picking).await?.len())
     }
 
     /// Look soon (the library changed, albums were asked for).

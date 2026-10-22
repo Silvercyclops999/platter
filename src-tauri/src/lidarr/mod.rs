@@ -205,6 +205,9 @@ pub struct LastCheck {
     pub url: String,
     /// Lidarr's root folders then, for where queued requests will land.
     pub roots: Vec<String>,
+    /// Where new artists go, as the check picked it (older checks: unknown).
+    #[serde(default)]
+    pub library_root: Option<String>,
 }
 
 /// What Settings shows before a check.
@@ -662,6 +665,7 @@ impl Lidarr {
             checked_at: report.checked_at,
             url: self.check_key(),
             roots: snap.roots.iter().map(|r| r.path.clone()).collect(),
+            library_root: report.library_root.clone(),
         };
         if let Ok(json) = serde_json::to_string(&last) {
             let _ = self.inner.db.write(|c| kv_set(c, LAST_CHECK_KEY, &json));

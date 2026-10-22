@@ -299,6 +299,14 @@ pub async fn lidarr_changes(lidarr: State<'_, Lidarr>) -> AppResult<Vec<super::c
     blocking(move || Ok(l.changes())).await
 }
 
+/// Where getting albums is at, for the top of the Changes log.
+#[tauri::command]
+pub async fn lidarr_stage(waves: State<'_, super::waves::Waves>, bring: State<'_, crate::import::bring::Bring>) -> AppResult<Vec<String>> {
+    let looking_up = bring.looking_up().await.unwrap_or(0);
+    let w = waves.inner().clone();
+    blocking(move || w.stage(looking_up)).await
+}
+
 /// Put a logged change back.
 #[tauri::command]
 pub async fn lidarr_change_put_back(lidarr: State<'_, Lidarr>, id: String) -> AppResult<super::changes::ChangeEntry> {

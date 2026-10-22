@@ -19,6 +19,8 @@
 .lidarr-work__paused p { flex: 1 1 260px; margin: 0; font-size: var(--font-size-sm); line-height: 1.5; color: var(--color-text-primary); }
 .lidarr-work__paused { box-shadow: inset 3px 0 0 var(--color-warning); }
 .lidarr-work__note { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+.lidarr-changes__now { display: flex; flex-direction: column; gap: var(--space-1); margin: 0; padding: var(--space-3) var(--space-4); border-radius: var(--radius-card); background: var(--color-bg-raised); box-shadow: inset 3px 0 0 var(--color-accent, var(--color-success)); }
+.lidarr-changes__now p { margin: 0; font-size: var(--font-size-sm); }
 
 .lidarr-artists,
 .lidarr-staged,

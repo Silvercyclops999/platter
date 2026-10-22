@@ -152,6 +152,8 @@ export class MockLidarrWork {
   artists = demoArtists();
   prefs: Record<string, LidarrArtistPrefs> = {};
   changes: LidarrChange[] = [];
+  /** Where getting albums is at (top of the Changes log). */
+  stage: string[] = [];
   staged: LidarrStaged[];
   proposals = new Map<string, LidarrProposal>();
   practiceUntil: number | null;
@@ -171,6 +173,7 @@ export class MockLidarrWork {
     this.artists = demoArtists();
     this.prefs = {};
     this.changes = [];
+    this.stage = [];
     this.staged = demoStaged(this.now());
     this.proposals.clear();
     this.practiceUntil = this.now() + 5 * 86_400;

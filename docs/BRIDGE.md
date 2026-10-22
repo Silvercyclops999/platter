@@ -335,7 +335,7 @@ computer: no songs, dates or play times.
 The Bridge asks for each album the same way your computer would. It checks
 the album on MusicBrainz first, runs Lidarr's setup check, follows the
 Managed and Protected rules and the staging folder, keeps to the daily
-pace, and pauses when Lidarr's queue is full, space runs low, Lidarr can't
+pace, and pauses when Lidarr's queue is full (downloads stuck after a failed import don't count), space runs low, Lidarr can't
 be reached or requests keep failing. Practice mode holds here too. Each
 step is in `docker logs`, and requests and pauses go to the Changes log.
 
