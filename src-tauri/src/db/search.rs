@@ -679,12 +679,18 @@ fn search_artists(c: &Connection, q: &ParsedQuery, fts: &str, now: i64, n: usize
     Ok(rank(v, n))
 }
 
-/// [`rate`] for an artist's name: a name the query spells the way names
-/// are written ("juice world" for "Juice WRLD") counts as exact, so the
-/// artist is the top result.
+/// [`rate`] for an artist's name: a name the query spells another way it's
+/// written ("juice world" for "Juice WRLD") counts as exact, so the artist
+/// is the top result; misspelled, as a typo match at least.
 fn artist_rate(q: &ParsedQuery, name: &str) -> (Tier, bool, f64) {
     let r = rate(q, name, &[]);
-    if r.0 < Tier::Exact && searchtext::sounds_like(&q.norm, name) { (Tier::Exact, true, r.2) } else { r }
+    if r.0 < Tier::Exact && searchtext::spelled_like(&q.norm, name) {
+        (Tier::Exact, true, r.2)
+    } else if r.0 < Tier::Fuzzy && searchtext::sounds_like(&q.norm, name) {
+        (Tier::Fuzzy, true, r.2)
+    } else {
+        r
+    }
 }
 
 /// Credited artists (names in track artist lines with no library artist)

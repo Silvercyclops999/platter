@@ -161,23 +161,36 @@ export const foldName = (s: string) =>
 
 const skeleton = (w: string) => w.replace(/[aeiouy]/g, "");
 
-/** Edits from `a` to `b`, or more than `max` once it's past that. */
+/** Edits from `a` to `b` (two letters swapped count as one), or more than `max` once it's past that. */
 function edits(a: string, b: string, max: number): number {
   if (Math.abs(a.length - b.length) > max) return max + 1;
-  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  const d = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
   for (let i = 1; i <= a.length; i++) {
-    const row = [i];
-    for (let j = 1; j <= b.length; j++) row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-    prev = row;
+    for (let j = 1; j <= b.length; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
   }
-  return prev[b.length];
+  return d[a.length][b.length];
 }
+
+/** A name folded the way the library's search reads it: "&", "+" and a lone "n" are "and", "$" in a word is "s", apostrophes join. */
+const nameFold = (s: string) =>
+  foldName(
+    s
+      .replace(/['`\u2018\u2019\u02BC]/g, "")
+      .replace(/(?<=[\p{L}\p{N}])\$|\$(?=[\p{L}\p{N}])/gu, "s")
+      .replace(/\s*[&+]\s*/g, " and "),
+  )
+    .split(" ")
+    .map((w) => (w === "n" ? "and" : w))
+    .join(" ");
 
 /** Equal, one written without its vowels ("world" for "WRLD"), or one typo in a word of 5+ letters. */
 function wordLike(a: string, b: string): boolean {
   if (a === b) return true;
   const [sa, sb] = [skeleton(a), skeleton(b)];
-  if (sa === sb && sa.length >= 2 && (sa === a || sb === b)) return true;
+  if (sa === sb && sa.length >= 3 && (sa === a || sb === b)) return true;
   return Math.min(a.length, b.length) >= 5 && edits(a, b, 1) <= 1;
 }
 
@@ -188,7 +201,7 @@ function wordLike(a: string, b: string): boolean {
  * matches names the same way.
  */
 export function nameMatches(q: string, name: string): boolean {
-  const [a, b] = [foldName(q), foldName(name)];
+  const [a, b] = [nameFold(q), nameFold(name)];
   if (!a || !b) return false;
   if (a.replace(/ /g, "") === b.replace(/ /g, "")) return true;
   const [qw, nw] = [a.split(" "), b.split(" ")];
@@ -211,8 +224,12 @@ export function catalogueTop(q: string, c: CatalogueResults | null, ...libTops: 
 }
 
 /** Whether a catalogue answer has anything the phone lists (owned artists fold into the library's rows). */
-export function hasCatalogueRows(c: CatalogueResults | null): boolean {
-  return !!c && c.songs.length + c.albums.length + c.artists.filter((a) => !a.libraryId).length > 0;
+export function hasCatalogueRows(c: CatalogueResults | null, kind: string = "all"): boolean {
+  if (!c) return false;
+  const songs = kind === "all" || kind === "track" ? c.songs.length : 0;
+  const albums = kind === "all" || kind === "album" ? c.albums.length : 0;
+  const artists = kind === "all" || kind === "artist" ? c.artists.filter((a) => !a.libraryId).length : 0;
+  return songs + albums + artists > 0;
 }
 
 // ---------------------------------------------------------------- rows

@@ -1619,6 +1619,13 @@ async fn search_finds_an_artist_by_the_name_as_people_spell_it() {
         let top = r.top.as_ref().and_then(|h| h.artist.as_ref()).map(|a| a.title.as_str());
         assert_eq!(top, Some("Velvet WRLD"), "{typed}");
     }
+    // A typo isn't another spelling: an artist one letter off doesn't beat a song named exactly.
+    let lovers: Vec<Pop> = vec![("l1", "Night Bus", None, 1, None, None, 200)];
+    let lover: Vec<Pop> = vec![("l2", "Lover", None, 1, None, None, 200)];
+    let t2 = open();
+    sync(&t2.db, &Arc::new(FakeSource::new(popular_library(&[], &[("Lovers", &lovers), ("Saltglass", &lover)]))), false).await;
+    let r = search::search(&t2.db, "lover", SearchFilter::All, None).unwrap();
+    assert_eq!(r.top.as_ref().and_then(|h| h.track.as_ref()).map(|t| t.title.as_str()), Some("Lover"));
     // Only part of the query matched: the results say so.
     let r = search::search(&t.db, "zebra world", SearchFilter::All, None).unwrap();
     assert!(r.partial && !r.songs.is_empty());
@@ -1637,6 +1644,9 @@ fn a_name_sounds_like_its_common_spellings() {
     assert!(!sounds_like("juice world", "In A Perfect World"));
     assert!(!sounds_like("world", "Wired"));
     assert!(!sounds_like("cold coast", "Coastal Cold Front"));
+    assert!(!sounds_like("mr", "Mayor"), "two letters without vowels are too few to tell");
+    use super::searchtext::spelled_like;
+    assert!(spelled_like("juice world", "Juice WRLD") && !spelled_like("velvit world", "Velvet WRLD"), "a typo isn't another spelling");
 }
 
 #[tokio::test]
