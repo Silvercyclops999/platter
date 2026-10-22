@@ -124,6 +124,7 @@ export function PhoneSearch() {
           // Versions are a line in the song's sheet, not a button on every row.
           onMore={h.track ? () => phone.push({ kind: "track", track: { ...h.track!, otherVersions: Math.max(h.track!.otherVersions ?? 0, versions) } }) : h.album ? () => phone.push({ kind: "album", album: h.album! }) : undefined}
           versions={versions}
+          onVersions={h.track ? () => phone.push({ kind: "versions", track: h.track! }) : undefined}
           lyric={h.track ? res.lyricLines?.[h.track.id] : undefined}
         />
       );
@@ -262,6 +263,7 @@ function HitRow({
   onOpen,
   onRemove,
   onMore,
+  onVersions,
   versions = 0,
   lyric,
 }: {
@@ -271,6 +273,8 @@ function HitRow({
   onOpen: () => void;
   onRemove?: () => void;
   onMore?: () => void;
+  /** A song with other versions opens them to pick from, instead of playing one. */
+  onVersions?: () => void;
   versions?: number;
   /** The lyric line the song was found by. */
   lyric?: string;
@@ -296,7 +300,11 @@ function HitRow({
       {...(song ? swipe.props : {})}
     >
       {song && <SongSwipeUnder trackId={song.id} />}
-      <button type="button" className="ph-row" onClick={onOpen}>
+      <button
+        type="button"
+        className="ph-row"
+        onClick={() => (onVersions && versions > 0 && hit.track ? onVersions() : onOpen())}
+      >
         <Art path={i.thumb} size={52} round={i.round} kind={i.kind === "track" ? "album" : i.kind} monogram={i.round ? i.title : undefined} />
         <span className="ph-row__text">
           <span className={`ph-row__title ${playing ? "is-playing" : ""}`}>

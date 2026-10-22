@@ -51,11 +51,11 @@ import { collaboratorPlaylists, editablePlaylists } from "../components/Playlist
 import { versionLabel } from "../components/FileTagBadges";
 import { formatArchiveDate, SONG_STATUS_LABEL } from "../pages/era";
 import type { DownloadItem, VersionItem } from "../lib/types";
-import { retryDownload, toggleDownload, useDownloadItem, type DownloadTarget } from "../stores/downloads";
+import { retryDownload, toggleDownload, useDownloadItem, useDownloads, type DownloadTarget } from "../stores/downloads";
 import { countText, phoneDownloadState } from "./PhoneDownload";
 import { useSettings } from "../stores/settings";
 import { openSongCredits } from "../stores/songCredits";
-import { countLine, PlayingBars, SongRow } from "./pages/common";
+import { countLine, PlayingBars, SongRow, songCantPlay } from "./pages/common";
 import { SORT_LABEL, useLibraryView, type LibSort } from "../stores/library";
 import { isLiked, setLiked } from "../stores/likes";
 import { player, usePlayer } from "../stores/player";
@@ -1017,16 +1017,25 @@ function VersionsSheet({ track }: { track: Track }) {
   const { data, error, retry } = useLoad(() => backend.trackVersions(track.id), [track.id]);
   const nowId = usePlayer((s) => s.state?.track?.id);
   const lineageOn = useSettings((s) => s.settings?.showLineage !== false);
+  // While only music on the phone plays, a version that isn't on it is dimmed and left out of the queue.
+  const health = useApp((s) => s.health);
+  const cached = useApp((s) => s.cached);
+  const downloaded = useDownloads((s) => s.ids);
+  const cantPlay = (id: string) => songCantPlay(id, { health, cached }, { playing: id === nowId, downloaded: downloaded.has(id) });
   const play = (id: string) => {
     tap();
     if (id === nowId) return void player.toggle();
-    void player.playTracks((data ?? []).map((v) => v.track.id), id);
+    if (cantPlay(id)) return;
+    void player.playTracks(
+      (data ?? []).map((v) => v.track.id).filter((v) => !cantPlay(v)),
+      id,
+    );
   };
   return (
     <SheetFrame title="Versions" subtitle={track.title} onClose={phone.pop}>
       <ul className="ph-rows" aria-label={`Versions of ${track.title}`}>
         {data?.map((v) => (
-          <li key={v.track.id} className="ph-version">
+          <li key={v.track.id} className={`ph-version ${cantPlay(v.track.id) ? "is-unplayable" : ""}`} aria-disabled={cantPlay(v.track.id) || undefined}>
             <button type="button" className="ph-row" onClick={() => play(v.track.id)} aria-current={v.current || undefined}>
               <Art path={v.track.thumb} size={48} sleeve={{ title: v.track.albumTitle, artist: v.track.artistTitle }} />
               <span className="ph-row__text">
