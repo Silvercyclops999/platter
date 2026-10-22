@@ -717,6 +717,8 @@ export interface SearchResults {
   versions?: Record<string, Track[]>;
   /** The query with a typo corrected, when the typo fallback found the results (a dropdown suggestion). */
   corrected?: string | null;
+  /** Songs in `songs` found by their lyrics: the line that matched, under the song's id. */
+  lyricLines?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------- playback & queue

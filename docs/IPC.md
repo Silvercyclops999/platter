@@ -3503,7 +3503,7 @@ here, and its messages are no longer opened.
 ## Search
 | Command | Args | Returns |
 | --- | --- | --- |
-| `search` | `{ query, filter: "all"|"songs"|"artists"|"albums"|"playlists", limit? }` | `SearchResults { top?: SearchHit, songs: Track[], artists: Artist[], albums: Album[], playlists: Playlist[], tookMs, source: "local"|"server", corrected?: string }` |
+| `search` | `{ query, filter: "all"|"songs"|"artists"|"albums"|"playlists", limit? }` | `SearchResults { top?: SearchHit, songs: Track[], artists: Artist[], albums: Album[], playlists: Playlist[], tookMs, source: "local"|"server", corrected?: string, lyricLines?: Record<string, string> }` |
 | `search_completions` | `{ query, limit? }` | `string[]` |
 | `search_recents` | – | `SearchHit[]` |
 | `search_recent_add` | `{ kind, id }` | – |
@@ -3519,6 +3519,16 @@ cache. After the first sync, search never touches the network.
 
 With filter `all`, `limit` applies to every kind; without it, All returns
 four songs and ten of each other kind.
+
+Search also looks in the lyrics this computer already has: lyrics a song
+has shown (from the server, a lyrics site, the user, or a transcription,
+the last only while transcribed lyrics are shown) and the user's own. It
+needs three or more words, or words in quotes. Songs found this way come
+after the songs found by name, up to the same number of songs, and
+`lyricLines` holds the line that matched under the song's id (two lines
+joined by " / " when the words run across a break). Lyrics are never
+fetched for a search. The lyrics index is made on first use from the
+user's own lyrics, and made again the same way if it is damaged.
 
 Matching is forgiving (`db/searchtext.rs` holds the rules and the table of
 spellings): case, accents, apostrophes and most punctuation fold away, "$"

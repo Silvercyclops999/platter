@@ -101,7 +101,7 @@ pub fn put(c: &Connection, track_id: &str, text: &str, prefer: bool, now: i64) -
            updated_at = excluded.updated_at, auto = NULL",
         params![track_id, text, prefer as i64, now],
     )?;
-    Ok(())
+    noted(c, track_id)
 }
 
 /// Save a transcription. Never replaces lyrics the user wrote or edited;
@@ -121,8 +121,18 @@ pub fn put_auto_timed(c: &Connection, track_id: &str, text: &str, model: &str, n
     )?;
     if n > 0 {
         set_timing(c, track_id, timing)?;
+        noted(c, track_id)?;
     }
     Ok(n > 0)
+}
+
+/// Keep lyric search (crate::lyricsearch) in step with what is stored.
+fn noted(c: &Connection, track_id: &str) -> AppResult<()> {
+    match get(c, track_id)?.and_then(|own| own.lyrics().map(|l| (l, own.auto.is_some()))) {
+        Some((l, auto)) => crate::lyricsearch::note_or_log(c, track_id, &l, auto),
+        None => crate::lyricsearch::forget_or_log(c, track_id),
+    }
+    Ok(())
 }
 
 fn set_timing(c: &Connection, track_id: &str, timing: i64) -> AppResult<()> {
@@ -153,6 +163,9 @@ pub fn retimed(c: &Connection, track_id: &str, old: &str, text: Option<&str>, ti
     )?;
     if n > 0 {
         set_timing(c, track_id, timing)?;
+        if text.is_some() {
+            noted(c, track_id)?;
+        }
     }
     Ok(n > 0)
 }
@@ -171,7 +184,11 @@ pub fn auto_timing(c: &Connection, track_id: &str) -> AppResult<Option<i64>> {
 
 /// True when there was a row to remove.
 pub fn delete(c: &Connection, track_id: &str) -> AppResult<bool> {
-    Ok(c.execute("DELETE FROM user_lyrics WHERE track_id = ?1", params![track_id])? > 0)
+    let gone = c.execute("DELETE FROM user_lyrics WHERE track_id = ?1", params![track_id])? > 0;
+    if gone {
+        crate::lyricsearch::forget_or_log(c, track_id);
+    }
+    Ok(gone)
 }
 
 /// Every track that has its own lyrics (for "Add" or "Edit lyrics" in menus).

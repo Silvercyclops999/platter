@@ -10,7 +10,7 @@ import { backend } from "../../lib/backend";
 import type { Album, SearchHit, SearchResults, Track } from "../../lib/types";
 import { headerColorsFromServer } from "../../lib/color";
 import { useSettings } from "../../stores/settings";
-import { hitInfo, hitOf, mixedHits, openHit, rememberHit, subtitleWithType } from "../../shell/searchModel";
+import { hitInfo, hitOf, lyricQuote, mixedHits, openHit, rememberHit, subtitleWithType } from "../../shell/searchModel";
 import { useLoad } from "../../lib/useLoad";
 import { nav, useRouter } from "../../stores/router";
 import { phone } from "../phoneUi";
@@ -194,6 +194,7 @@ export function PhoneSearch() {
                   onOpen={() => open(h)}
                   onMore={h.track ? () => phone.push({ kind: "track", track: h.track! }) : h.album ? () => phone.push({ kind: "album", album: h.album! }) : undefined}
                   versions={h.track ? versionsCount(h.track, res) : 0}
+                  lyric={h.track ? res.lyricLines?.[h.track.id] : undefined}
                 />
               ))}
             </ul>
@@ -231,6 +232,7 @@ function HitRow({
   onRemove,
   onMore,
   versions = 0,
+  lyric,
 }: {
   hit: SearchHit;
   top?: boolean;
@@ -239,6 +241,8 @@ function HitRow({
   onRemove?: () => void;
   onMore?: () => void;
   versions?: number;
+  /** The lyric line the song was found by. */
+  lyric?: string;
 }) {
   const i = hitInfo(hit);
   // A song swipes right into the queue, and left into (or out of) Liked Songs.
@@ -272,6 +276,7 @@ function HitRow({
             <RowGlyphs trackId={i.kind === "track" ? i.id : undefined} albumId={i.kind === "album" ? i.id : undefined} />
             {hitLine(i, typed)}
           </span>
+          {lyric && <span className="ph-row__lyric">{lyricQuote(lyric)}</span>}
         </span>
       </button>
       {onRemove && (

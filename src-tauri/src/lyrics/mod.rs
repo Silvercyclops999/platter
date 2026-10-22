@@ -474,8 +474,42 @@ impl LyricsService {
     /// `borrowed_timing`, unless "Show borrowed timing on live versions" is
     /// on (then they keep their times, still marked). The user's timing
     /// nudge applies last.
+    /// "Show auto-transcribed lyrics" is on.
+    pub fn shows_auto(&self) -> bool {
+        on(&self.inner.sw.show_auto)
+    }
+
     pub async fn shown(&self, track_id: &str) -> AppResult<Option<Shown>> {
-        Ok(self.resolve(track_id, false).await?.shown)
+        let shown = self.resolve(track_id, false).await?.shown;
+        self.note_for_search(track_id, shown.as_ref());
+        Ok(shown)
+    }
+
+    /// Lyric search (crate::lyricsearch) looks in what songs have shown. An
+    /// empty result may be a server that is down, so only the user's "no
+    /// lyrics" pick takes a song out. Off the caller's path: the writer may
+    /// be busy with a sync.
+    fn note_for_search(&self, track_id: &str, shown: Option<&Shown>) {
+        if !user::valid_track_id(track_id) {
+            return;
+        }
+        let words = shown.filter(|s| s.has_words()).map(|s| (s.lyrics.clone(), s.lyrics.source == LyricsSource::Auto));
+        let none = shown.is_some_and(|s| matches!(s.notice, Some(Notice::ChosenNone)));
+        if words.is_none() && !none {
+            return;
+        }
+        let (db, id) = (self.inner.db.clone(), track_id.to_owned());
+        tokio::spawn(async move {
+            let _ = db
+                .write_async(move |c| {
+                    match words {
+                        Some((l, auto)) => crate::lyricsearch::note_or_log(c, &id, &l, auto),
+                        None => crate::lyricsearch::forget_or_log(c, &id),
+                    }
+                    Ok(())
+                })
+                .await;
+        });
     }
 
     /// Everything found for the song ("Wrong lyrics?"): every candidate,

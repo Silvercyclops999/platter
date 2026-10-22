@@ -16,7 +16,7 @@ import { useApp } from "../stores/app";
 import { player, usePlayer } from "../stores/player";
 import { MAX_QUERY } from "../shell/SearchBox";
 import { QueueButton } from "../shell/SearchActions";
-import { hitInfo, hitMenuItems, hitOf, mixedHits, openHit, playHit, rememberHit, type HitInfo } from "../shell/searchModel";
+import { hitInfo, hitMenuItems, hitOf, lyricQuote, mixedHits, openHit, playHit, rememberHit, type HitInfo } from "../shell/searchModel";
 import { AlbumCard, ArtistCard, PlaylistCard, useContextState } from "./cards";
 import { otherVersionsText } from "./era";
 import { TopSongsResults, useTopSongsFound } from "./TopSongsResults";
@@ -151,7 +151,7 @@ function TopResult({ hit, songIds, owned }: { hit: SearchHit; songIds: string[];
 }
 
 /** One plain result row: art, title and byline, a grey type label, more options. `owned`: the catalogue had it too (a small "In your library" cue). */
-export function ResultRow({ hit, songIds, owned }: { hit: SearchHit; songIds?: string[]; owned?: boolean }) {
+export function ResultRow({ hit, songIds, owned, lyric }: { hit: SearchHit; songIds?: string[]; owned?: boolean; lyric?: string }) {
   const { i, current, playing, toggle, open, menu } = useHitActions(hit, songIds);
   const more = useRef<HTMLButtonElement>(null);
   return (
@@ -175,6 +175,7 @@ export function ResultRow({ hit, songIds, owned }: { hit: SearchHit; songIds?: s
           <span className="truncate">{i.title}</span>
         </button>
         <span className="sr-row__by truncate">{i.byline || i.typeLabel}</span>
+        {lyric && <span className="sr-row__lyric truncate">{lyricQuote(lyric)}</span>}
       </span>
       {hit.track && (
         <>
@@ -440,12 +441,13 @@ export function SearchPage({ query }: { query: string }) {
                   const h = item.lib!;
                   const others = h.kind === "track" && h.track ? res.versions?.[h.track.id] : undefined;
                   const owned = !!cat?.inLibrary.has(hitInfo(h)!.id);
-                  if (!others?.length) return <ResultRow key={hitInfo(h)!.key} hit={h} songIds={songIds} owned={owned} />;
+                  const lyric = h.kind === "track" && h.track ? res.lyricLines?.[h.track.id] : undefined;
+                  if (!others?.length) return <ResultRow key={hitInfo(h)!.key} hit={h} songIds={songIds} owned={owned} lyric={lyric} />;
                   const id = h.track!.id;
                   const open = expanded.has(id);
                   return (
                     <Fragment key={hitInfo(h)!.key}>
-                      <ResultRow hit={h} songIds={songIds} owned={owned} />
+                      <ResultRow hit={h} songIds={songIds} owned={owned} lyric={lyric} />
                       <VersionsToggle id={id} count={others.length} open={open} onToggle={() => toggle(id)} as="li" />
                       {open && (
                         <li id={`versions-${id}`} className="sr-versions__list">
@@ -475,6 +477,7 @@ export function SearchPage({ query }: { query: string }) {
                       index={i + 1}
                       showArt
                       artPlay
+                      notes={res.lyricLines?.[t.id] ? [lyricQuote(res.lyricLines[t.id])] : undefined}
                       active={t.id === nowTrackId}
                       playing={t.id === nowTrackId && status === "playing"}
                       onPlay={() => {
