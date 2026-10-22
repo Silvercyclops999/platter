@@ -1878,8 +1878,7 @@ impl Actor {
                 self.status = PlayerStatus::Error;
                 // Only the output fails a load (the song's own trouble
                 // comes later, as an engine event).
-                self.say_no_sound(&e);
-                Err(e)
+                Err(self.say_no_sound(&e))
             }
         }
     }
@@ -1910,6 +1909,9 @@ impl Actor {
         ) {
             self.interrupted_playing = false;
             self.headphones_playing = false;
+            // Its end may never come; whatever the user does next, the
+            // output follows routes again.
+            self.interrupted = false;
             self.cancel_output_retry();
         }
         match cmd {
@@ -1933,10 +1935,10 @@ impl Actor {
                 let _ = reply.send(r);
             }
             Cmd::ExclusiveOutputs(ids, reply) => {
-                let r = self.engine.set_exclusive_devices(ids);
+                let mut r = self.engine.set_exclusive_devices(ids);
                 if let Err(e) = &r {
                     self.pause_for_output();
-                    self.say_no_sound(e);
+                    r = Err(self.say_no_sound(e));
                 }
                 let state = self.engine.output_state();
                 self.emit_output(&state);
@@ -2026,7 +2028,7 @@ impl Actor {
                     && let Err(e) = self.refresh_output()
                 {
                     self.pause_for_output();
-                    self.say_no_sound(&e);
+                    let _ = self.say_no_sound(&e);
                 }
             }
             Cmd::Next(reply) => {
@@ -2439,10 +2441,12 @@ impl Actor {
         {
             return Err(AppError::NotFound(format!("output device {id}")));
         }
-        let r = self.engine.select_output(id);
+        let mut r = self.engine.select_output(id);
         if let Err(e) = &r {
+            // The picker says it ("Couldn't switch the output: ..."), once.
+            tracing::warn!("audio output: {e}");
             self.pause_for_output();
-            self.say_no_sound(e);
+            r = Err(AppError::Io("the sound wouldn't start there".into()));
         }
         let state = self.engine.output_state();
         self.emit_output(&state);
@@ -2506,8 +2510,9 @@ impl Actor {
         // Right after a call the system can refuse the sound for a moment:
         // get the output back first, and try again a few times if it isn't
         // ready, instead of saying the system's error.
-        match self.refresh_output() {
+        match (self.config.session.0)().and_then(|()| self.engine.reopen_output()) {
             Ok(()) => {
+                self.output_stale = false;
                 let _ = self.do_resume();
             }
             Err(e) => {
@@ -2519,14 +2524,16 @@ impl Actor {
     }
 
     /// Says in plain words that the sound wouldn't start; the system's own
-    /// error goes to the log.
-    fn say_no_sound(&self, e: &AppError) {
+    /// error goes to the log. Returns the same plain words for the command's
+    /// reply, so the screen shows one message and never the system's.
+    fn say_no_sound(&self, e: &AppError) -> AppError {
         tracing::warn!("audio output: {e}");
         self.sink.error(&ErrorPayload {
             track_id: self.current_track().map(|t| t.id.clone()),
             kind: e.kind().into(),
             message: NO_SOUND_MESSAGE.into(),
         });
+        AppError::Io(NO_SOUND_MESSAGE.into())
     }
 
     /// Calls off pending output retries; timers already set are ignored.
@@ -2541,7 +2548,7 @@ impl Actor {
         if n >= OUTPUT_RETRIES {
             tracing::warn!("audio output still not open; staying paused");
             self.output_retry = None;
-            self.say_no_sound(&AppError::Io("output still not open after retries".into()));
+            let _ = self.say_no_sound(&AppError::Io("output still not open after retries".into()));
             return;
         }
         self.output_retry = Some(n + 1);
@@ -2607,8 +2614,7 @@ impl Actor {
             && let Err(e) = self.refresh_output()
         {
             self.pause_for_output();
-            self.say_no_sound(&e);
-            return Err(AppError::Io(NO_SOUND_MESSAGE.into()));
+            return Err(self.say_no_sound(&e));
         }
         if self.cur_key.is_none() || self.engine.position().is_none() {
             // Nothing loaded (fresh start / restored / ended / lost
@@ -2645,8 +2651,7 @@ impl Actor {
             }
             Err(e) => {
                 self.status = PlayerStatus::Error;
-                self.say_no_sound(&e);
-                Err(e)
+                Err(self.say_no_sound(&e))
             }
         }
     }
@@ -2912,10 +2917,12 @@ impl Actor {
                     self.sink.output_lost(&OutputLost { device });
                 }
             }
-            EngineEvent::OutputReset(why) if self.interrupted => {
+            EngineEvent::OutputReset(why) if self.interrupted && !self.is_active() => {
                 // The system refuses a new stream until the interruption
-                // ends; its end reopens it.
+                // ends: drop the dead one, and the end (or the next song)
+                // opens a fresh one.
                 tracing::info!("audio output reset during an interruption: {why}; reopened when it ends");
+                self.engine.close_output();
                 self.output_stale = true;
                 self.emit_output(&self.engine.output_state());
             }

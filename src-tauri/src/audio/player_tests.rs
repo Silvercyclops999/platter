@@ -989,6 +989,46 @@ async fn a_route_change_during_a_call_waits_for_its_end() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_song_picked_after_a_call_that_moved_the_sound_plays() {
+    let mut r = rig(&["a", "b"], 4.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a", "b"]), None, Some(false)).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.interruption(true, false);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    r.cap.reset_stream();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    // The call ends with no word to play on; the user picks a song.
+    r.player.interruption(false, false);
+    let opens = r.cap.opens();
+    r.player.play_context(ctx(&["a", "b"]), Some("b".into()), Some(false)).await.unwrap();
+    next_tracking(&mut r.tracking, started("b")).await;
+    assert!(r.cap.opens() > opens, "a fresh stream, not the dead one");
+    audio_flows(&r).await;
+    no_errors(&r);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_call_whose_end_never_comes_doesnt_hold_later_route_changes() {
+    let mut r = rig(&["a", "b"], 4.0, true, PlayerConfig::default()).await;
+    r.player.play_context(ctx(&["a", "b"]), None, Some(false)).await.unwrap();
+    next_tracking(&mut r.tracking, started("a")).await;
+    r.player.interruption(true, false);
+    wait_state(&r.player, |s| s.status == PlayerStatus::Paused).await;
+    // No end arrives. The user picks a song, then the car connects.
+    r.player.play_context(ctx(&["a", "b"]), Some("b".into()), Some(false)).await.unwrap();
+    next_tracking(&mut r.tracking, started("b")).await;
+    let opens = r.cap.opens();
+    r.cap.reset_stream();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while r.cap.opens() <= opens {
+        assert!(Instant::now() < deadline, "never reopened");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Playing);
+    audio_flows(&r).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_sound_refused_right_after_a_call_plays_on_after_a_retry() {
     let session = FakeSession::default();
     let mut r = rig(&["a"], 4.0, true, session.config()).await;
@@ -1036,7 +1076,12 @@ async fn sound_that_never_comes_back_after_a_call_says_so_plainly() {
     session.refuse(100);
     let asks = session.asks();
     r.player.interruption(false, true);
-    tokio::time::sleep(Duration::from_millis(6500)).await;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while r.sink.errors.lock().is_empty() {
+        assert!(Instant::now() < deadline, "never said");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(r.player.state().await.unwrap().status, PlayerStatus::Paused);
     // The end's own try, then three more, then no more.
     assert_eq!(session.asks() - asks, 4);
@@ -1098,7 +1143,8 @@ async fn play_when_the_sound_is_refused_says_so_plainly() {
 async fn an_output_that_wont_open_on_load_says_so_plainly() {
     let r = rig(&["a"], 4.0, true, PlayerConfig::default()).await;
     r.cap.fail_opens(1);
-    assert!(r.player.play_context(ctx(&["a"]), None, None).await.is_err());
+    let e = r.player.play_context(ctx(&["a"]), None, None).await.unwrap_err();
+    assert_eq!(e.message(), NO_SOUND_MESSAGE, "the reply is plain too");
     let errs = r.sink.errors.lock().clone();
     assert_eq!(errs.len(), 1, "{errs:?}");
     assert_eq!(errs[0].message, NO_SOUND_MESSAGE);
