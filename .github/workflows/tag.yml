@@ -1,14 +1,17 @@
 name: tag
 
-# Tags a commit vX.Y.Z and starts the release build, for places that can't push
-# tags themselves. The commit must be on main, carry that version in
-# tauri.conf.json, and have passed CI (this waits while CI is still running on it).
+# Tags a commit vX.Y.Z and starts the release build and the Bridge image, for
+# places that can't push tags themselves. The commit must be on main, carry that
+# version in tauri.conf.json, and have passed CI (this waits while CI is still
+# running on it). With notes, the release publishes by itself once both builds
+# are on it, so nothing else is needed:
 #
 #   gh api repos/OWNER/REPO/actions/workflows/tag.yml/dispatches \
-#     -f ref=main -f 'inputs[version]=0.2.35' -f 'inputs[sha]=<commit>'
+#     -f ref=main -f 'inputs[version]=0.2.35' -f 'inputs[sha]=<commit>' \
+#     -F 'inputs[notes]=@notes.md'
 #
 # A tag created with the workflow token doesn't start other workflows, so this
-# starts release.yml on the new tag itself.
+# starts release.yml and bridge.yml on the new tag itself.
 on:
   workflow_dispatch:
     inputs:
@@ -17,6 +20,9 @@ on:
         required: true
       sha:
         description: 'Commit to tag (default: the head of main)'
+        required: false
+      notes:
+        description: 'Release notes for listeners (optional; without them the draft waits for notes)'
         required: false
 
 concurrency:
@@ -35,6 +41,7 @@ jobs:
       REPO: ${{ github.repository }}
       VERSION: ${{ inputs.version }}
       SHA_IN: ${{ inputs.sha }}
+      NOTES: ${{ inputs.notes }}
     steps:
       - name: Check the version and commit
         id: check
@@ -90,6 +97,10 @@ jobs:
           set -eu
           gh api "repos/$REPO/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$SHA" >/dev/null
           echo "Tagged $SHA as $TAG"
-          gh api "repos/$REPO/actions/workflows/release.yml/dispatches" -f "ref=$TAG" || {
+          jq -n --arg r "$TAG" --arg n "$NOTES" '{ref: $r, inputs: (if $n == "" then {} else {notes: $n} end)}' \
+            | gh api "repos/$REPO/actions/workflows/release.yml/dispatches" --input - || {
             echo "$TAG exists but the release didn't start: run release.yml on $TAG by hand"; exit 1; }
           echo "Started release.yml on $TAG"
+          gh api "repos/$REPO/actions/workflows/bridge.yml/dispatches" -f "ref=$TAG" || {
+            echo "the Bridge image didn't start: run bridge.yml on $TAG by hand"; exit 1; }
+          echo "Started bridge.yml on $TAG"
