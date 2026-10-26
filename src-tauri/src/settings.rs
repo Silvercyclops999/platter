@@ -936,6 +936,9 @@ pub struct Settings {
     pub played_min_plays: u32,
     /// Which plays that list counts: `all`, `year` or `days90`.
     pub played_period: String,
+    /// Artists played almost only late at night (sleep and background
+    /// music) are left out of that list and of Bring in my listening.
+    pub played_skip_sleep: bool,
     /// "Bring in my listening": request albums from "Played a lot" in
     /// waves through Lidarr, a few a day.
     pub bring_in: bool,
@@ -1422,6 +1425,7 @@ impl Default for Settings {
             show_played_a_lot: true,
             played_min_plays: crate::import::played::MIN_PLAYS_DEFAULT,
             played_period: "all".into(),
+            played_skip_sleep: true,
             bring_in: false,
             bring_in_waves: crate::lidarr::waves::DEFAULT_WAVES.to_vec(),
             bring_in_per_day: crate::lidarr::waves::DEFAULT_PER_DAY,
@@ -1670,6 +1674,7 @@ pub const SYNCED_SETTINGS: &[&str] = &[
     "showPlayedALot",
     "playedMinPlays",
     "playedPeriod",
+    "playedSkipSleep",
     "bringIn",
     "bringInWaves",
     "bringInPerDay",
@@ -2101,6 +2106,7 @@ pub struct SettingsPatch {
     pub show_played_a_lot: Option<bool>,
     pub played_min_plays: Option<u32>,
     pub played_period: Option<String>,
+    pub played_skip_sleep: Option<bool>,
     pub bring_in: Option<bool>,
     pub bring_in_waves: Option<Vec<u32>>,
     pub bring_in_per_day: Option<u32>,
@@ -2721,6 +2727,7 @@ impl Settings {
         set(&mut self.streaming_recheck, p.streaming_recheck);
         set(&mut self.show_played_a_lot, p.show_played_a_lot);
         set(&mut self.played_min_plays, p.played_min_plays);
+        set(&mut self.played_skip_sleep, p.played_skip_sleep);
         if let Some(period) = &p.played_period {
             if crate::import::played::Period::parse(period).is_none() {
                 return Err(AppError::Invalid("Pick all time, the last year or the last 90 days.".into()));

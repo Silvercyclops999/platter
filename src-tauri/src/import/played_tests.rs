@@ -421,3 +421,80 @@ fn a_library_that_swaps_one_song_for_another_is_matched_again() {
     assert_eq!(before, after);
     assert_eq!(played::rematch(&mut c, HashMap::new(), NOW).unwrap(), 6);
 }
+
+/// `count` plays of `artist` starting at `utc_hour` on days before NOW.
+fn at_hour(c: &mut Connection, artist: &str, count: usize, utc_hour: i64, secs: u64) {
+    let v = (0..count)
+        .map(|i| ImportedPlay {
+            source: ImportSource::File,
+            source_id: format!("streaming:{artist}:{utc_hour}:{i}"),
+            played_at: NOW - (i as i64 + 1) * DAY + utc_hour * 3_600_000,
+            ms_played: Some(secs * 1000),
+            title: format!("Song {}", i % 3),
+            artist: Some(artist.into()),
+            album: Some(format!("{artist} Album")),
+            rating_key: None,
+        })
+        .collect();
+    plays(c, v);
+}
+
+#[test]
+fn artists_played_mostly_late_at_night_are_sleep_music() {
+    let (_d, mut c) = db();
+    // 7 hours behind UTC: local 23:30 is UTC 06:30, local 13:00 is UTC 20:00.
+    let off = -7 * 3600;
+    at_hour(&mut c, "Quiet Harbor", 22, 6, 200);
+    at_hour(&mut c, "Quiet Harbor", 3, 20, 200);
+    at_hour(&mut c, "Day Shift", 30, 20, 200);
+    // Too few plays to say.
+    at_hour(&mut c, "Few Nights", 10, 6, 200);
+    // 75% at night is not enough.
+    at_hour(&mut c, "Edge Case", 15, 6, 200);
+    at_hour(&mut c, "Edge Case", 5, 20, 200);
+    // Skips don't count.
+    at_hour(&mut c, "Skipped Lull", 25, 6, 10);
+    // UTC 03:00 is 20:00 here, but night in UTC.
+    at_hour(&mut c, "Morning Run", 25, 3, 200);
+    let sleep = played::sleep_artists(&c, &[], off).unwrap();
+    assert_eq!(sleep.iter().map(|s| (s.artist.as_str(), s.plays, s.night_percent)).collect::<Vec<_>>(), [("Quiet Harbor", 25, 88)]);
+    let utc: Vec<String> = played::sleep_artists(&c, &[], 0).unwrap().into_iter().map(|s| s.artist).collect();
+    // Same plays: by name.
+    assert_eq!(utc, ["Morning Run", "Quiet Harbor"]);
+    // One the user kept stays in.
+    let kept = played::keep_key("quiet  HARBOR").unwrap();
+    assert!(played::sleep_artists(&c, &[kept], off).unwrap().is_empty());
+    assert!(played::keep_key(" ").is_err());
+}
+
+#[test]
+fn sleep_music_leaves_the_list_and_bring_in_only_with_the_setting_on() {
+    let (_d, mut c) = db();
+    at_hour(&mut c, "Quiet Harbor", 30, 2, 200);
+    at_hour(&mut c, "Day Shift", 30, 14, 200);
+    let artists = |p: &played::PlayedPage| {
+        let mut v: Vec<String> = p.rows.iter().map(|r| r.artist.clone()).collect();
+        v.dedup();
+        v
+    };
+    // The test clock's zone is whatever the machine says; both hours stay on their side of night within 2 hours.
+    let off = played::local_offset_now(&c);
+    if off.abs() > 2 * 3600 {
+        return;
+    }
+    let keys = played::with_sleep(&c, Vec::new(), true);
+    assert_eq!(keys, ["artist:quiet harbor"]);
+    let p = played::list(&c, &q(Kind::Album, 1, "all"), &keys, NOW).unwrap();
+    assert_eq!(artists(&p), ["Day Shift"]);
+    // Off: nothing is left out.
+    assert!(played::with_sleep(&c, Vec::new(), false).is_empty());
+    // Kept: back in, and the keep key hides no row.
+    let kept = vec![played::keep_key("Quiet Harbor").unwrap()];
+    let keys = played::with_sleep(&c, kept.clone(), true);
+    assert_eq!(keys, kept);
+    let p = played::list(&c, &q(Kind::Album, 1, "all"), &keys, NOW).unwrap();
+    assert_eq!(p.rows.len(), 2);
+    // Sources left out of every count are left out of the check too.
+    crate::db::listens::set_excluded_sources(&mut c, &[ImportSource::File]).unwrap();
+    assert!(played::with_sleep(&c, Vec::new(), true).is_empty());
+}

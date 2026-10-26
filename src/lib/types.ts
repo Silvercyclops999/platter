@@ -1381,6 +1381,8 @@ export interface Settings {
   streamingRecheck: boolean;
   /** The Missing page lists songs and albums from imported listening history that aren't in the library. Synced. */
   showPlayedALot: boolean;
+  /** Artists played almost only late at night (sleep and background music) are left out of Played a lot and Bring in my listening. */
+  playedSkipSleep: boolean;
   /** Fewest plays a song or album needs to be on that list (1 to 1000). Synced. */
   playedMinPlays: number;
   /** Which plays that list counts. Synced. */
@@ -1975,6 +1977,7 @@ export const DEFAULT_SETTINGS: Settings = {
   importSources: [],
   streamingRecheck: true,
   showPlayedALot: true,
+  playedSkipSleep: true,
   playedMinPlays: 5,
   playedPeriod: "all",
   bringIn: false,

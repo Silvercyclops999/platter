@@ -239,3 +239,4 @@
 @container main (max-width: 640px) {
   .played-row { grid-template-columns: 24px minmax(0, 1fr); }
 }
+.played__sleep-note { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
