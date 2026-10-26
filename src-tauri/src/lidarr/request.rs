@@ -481,7 +481,7 @@ impl Lidarr {
 
     /// The staging folder setting, folded; None when upgrades are off.
     pub(super) fn staging_norm(&self) -> Option<NormPath> {
-        let s = crate::settings::load(&self.inner.db).lidarr_staging_folder;
+        let s = self.staging_folder();
         Some(NormPath::parse(&s)).filter(|n| !n.is_empty())
     }
 

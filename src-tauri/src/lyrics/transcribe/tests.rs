@@ -1610,13 +1610,51 @@ async fn with_the_voice_ready_songs_heard_from_the_mix_are_done_again() {
 }
 
 #[tokio::test]
+async fn songs_heard_from_the_voice_before_the_fixes_are_heard_once_more() {
+    let f = fx_voice();
+    install(&f).await;
+    f.voice_models.download(voice::Voice::Demucs, &*f.fetch, &AtomicBool::new(false), &|_, _| {}).await.unwrap();
+    old_transcription(&f, "801");
+    f.db.write(|c| store::set_heard(c, "801", store::HEARD_VOICE_EARLY)).unwrap();
+    assert_eq!(f.t.redo_old().await, 1);
+    until(&f.t, "done again", |s| idle(s) && !f.events.done.lock().is_empty()).await;
+    assert_eq!(heard_as(&f, "801"), Some(store::HEARD_VOICE));
+    assert_eq!(f.t.redo_old().await, 0, "once");
+}
+
+#[tokio::test]
+async fn a_computer_that_hears_the_voice_redoes_songs_even_while_the_bridge_takes_over() {
+    let f = fx_voice();
+    install(&f).await;
+    f.voice_models.download(voice::Voice::Demucs, &*f.fetch, &AtomicBool::new(false), &|_, _| {}).await.unwrap();
+    f.t.set_defer(Arc::new(|| true));
+    old_transcription(&f, "801");
+    f.db.write(|c| store::set_heard(c, "801", store::HEARD_MIX)).unwrap();
+    assert_eq!(f.t.redo_old().await, 1, "the Bridge hears only the mix: this computer does better");
+    until(&f.t, "done again", |s| idle(s) && !f.events.done.lock().is_empty()).await;
+    assert_eq!(f.sep.runs.load(Ordering::SeqCst), 1);
+    assert_eq!(heard_as(&f, "801"), Some(store::HEARD_VOICE));
+}
+
+#[tokio::test]
+async fn without_the_voice_songs_are_left_to_the_bridge_when_it_takes_over() {
+    let f = fx();
+    install(&f).await;
+    f.t.set_defer(Arc::new(|| true));
+    old_transcription(&f, "801");
+    assert_eq!(f.t.redo_old().await, 0);
+    assert_eq!(f.rec.runs.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
 async fn a_song_done_again_that_now_has_official_lyrics_isnt_queued_again() {
     let f = fx();
     install(&f).await;
     old_transcription(&f, "801");
     f.other.1.lock().push(("801".into(), Official::Matched));
     assert_eq!(f.t.redo_old().await, 1);
-    until_true("noted", || heard_as(&f, "801") == Some(store::HEARD_VOICE)).await;
+    // Noted as heard as well as this computer can (no voice here: the mix).
+    until_true("noted", || heard_as(&f, "801") == Some(store::HEARD_MIX)).await;
     until(&f.t, "idle", idle).await;
     assert_eq!(f.rec.runs.load(Ordering::SeqCst), 0);
     assert_eq!(f.t.redo_old().await, 0);

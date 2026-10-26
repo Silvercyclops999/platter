@@ -1,6 +1,6 @@
 import { useLibraryChips } from "../lib/libraryChips";
 import { AUTO_CAP_OPTIONS } from "../lib/radar";
-import { ChevronLeft, ChevronRight, MoreHorizontal, RotateCcw, Server } from "lucide-react";
+import { ChevronLeft, ChevronRight, CloudOff, EyeOff, MoreHorizontal, RotateCcw, Server } from "lucide-react";
 import { Fragment, memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "../components/Button";
 import { Dialog } from "../components/Dialog";
@@ -4566,26 +4566,30 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
             </>
           ) : (
             <>
-              {/* Go offline as a quick switch before the sections, where it's found in a hurry. */}
-              <ul className="ph-set-list ph-set-quick" aria-label="Quick switches">
-                <li>
-                  <div className="ph-set-link">
-                    <span className="ph-set-link__text">
-                      <span id="ph-quick-offline" className="ph-set-link__title">
-                        Go offline
+              {/* Quick tiles before the sections, where they're found in a hurry. */}
+              <div className="ph-quick" role="group" aria-label="Quick switches">
+                {QUICK_TILES.map((t) => {
+                  const on = !!s?.[t.key];
+                  const Icon = t.icon;
+                  return (
+                    <button
+                      key={t.key}
+                      type="button"
+                      role="switch"
+                      aria-checked={on}
+                      disabled={!s}
+                      className={`ph-quick__tile ${on ? "is-on" : ""}`}
+                      onClick={() => void updateSettings({ [t.key]: !on })}
+                    >
+                      <Icon size={22} aria-hidden="true" />
+                      <span className="ph-quick__name">{t.title}</span>
+                      <span className="ph-quick__state" aria-hidden="true">
+                        {on ? "On" : "Off"}
                       </span>
-                      <span id="ph-quick-offline-desc" className="ph-set-link__sub">
-                        {s?.goOffline ? "On. Only downloaded music plays." : "Play only downloads, using no data."}
-                      </span>
-                    </span>
-                    {s ? (
-                      <Switch checked={s.goOffline} onChange={(v) => void updateSettings({ goOffline: v })} labelledBy="ph-quick-offline" describedBy="ph-quick-offline-desc" />
-                    ) : (
-                      <Skeleton width={44} height={26} radius="pill" />
-                    )}
-                  </div>
-                </li>
-              </ul>
+                    </button>
+                  );
+                })}
+              </div>
               <ul className="ph-set-list" aria-label="Settings sections">
                 {GROUPS.filter((x) => usable.some((r) => r.section === x) || groupPages(x).length > 0).map((x) => (
                   <li key={x}>
@@ -4660,3 +4664,9 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
     </div>
   );
 }
+
+/** The phone's quick tiles at the top of Settings: Go offline and Private session, each on or off in a tap. */
+const QUICK_TILES = [
+  { key: "goOffline", title: "Go offline", icon: CloudOff },
+  { key: "privateSession", title: "Private session", icon: EyeOff },
+] as const;

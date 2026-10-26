@@ -1256,3 +1256,37 @@ fn the_daily_count_for_follows_adds_up_every_devices_own() {
     r.lidarr.note_asked(day + 1);
     assert_eq!(r.lidarr.asked_on(day + 1), 1, "a new day starts at one");
 }
+
+#[tokio::test]
+async fn a_fresh_phone_with_only_the_bridge_gets_music_with_nothing_set_up_on_it() {
+    use super::api::{DirectRoute, LidarrRoute, Route};
+    let r = rig();
+    r.web.st.lock().staging = true;
+    // Signed in to Plex and nothing else: no Lidarr address, key or staging folder here.
+    r.lidarr.set_key(None).unwrap();
+    crate::settings::save(&r.db, &crate::settings::Settings { lidarr_url: String::new(), ..crate::settings::load(&r.db) }).unwrap();
+    let web = r.web.clone();
+    r.lidarr.set_bridge_route(Some(Arc::new(move || {
+        let key = crate::plex::token::Token::new("abc123").unwrap();
+        DirectRoute::new(web.clone(), "http://10.20.30.40:8686", key, vec![], Route::Bridge).ok().map(|d| Arc::new(d) as Arc<dyn LidarrRoute>)
+    })));
+    r.lidarr.set_home_staging(Arc::new(|| Some(STAGING.to_string())));
+    assert_eq!(r.lidarr.staging_folder(), STAGING, "the Bridge's staging folder counts here");
+    let st = r.lidarr.status();
+    assert!(st.home_side && !st.ready && !st.check_failed);
+    // The check that runs by itself passes through the Bridge, with no staging finding.
+    let checked = r.lidarr.check().await.unwrap();
+    assert!(checked.passed, "{:?}", checked.findings.iter().filter(|f| f.level == super::check::Level::Red).map(|f| &f.id).collect::<Vec<_>>());
+    assert!(r.lidarr.status().ready, "Get shows");
+    // A protected artist lands in the Bridge's staging folder.
+    use super::modes::{ArtistPrefs, ModeSetting};
+    r.lidarr.save_prefs(ARTIST, &ArtistPrefs { mode: ModeSetting::Protected, ..Default::default() }).unwrap();
+    let rec = r.lidarr.request(input(RG_SECOND, "Second Wind", Some("Second Wind"))).await.unwrap();
+    assert_eq!(rec.destination.as_deref(), Some("/data/staging/music/Northlight"), "{:?}", rec.message);
+
+    // A Bridge with no staging folder: protected artists wait, the rest still get Get.
+    r.lidarr.set_home_staging(Arc::new(|| None));
+    let checked = r.lidarr.check().await.unwrap();
+    assert!(!checked.passed && checked.managed_ok);
+    assert!(r.lidarr.status().ready && !r.lidarr.status().check_failed);
+}

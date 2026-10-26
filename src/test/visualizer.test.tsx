@@ -80,19 +80,20 @@ let gl: Record<string, unknown> | null = null;
 
 /** Drive animation frames by hand. */
 function frames() {
-  let queue: FrameRequestCallback[] = [];
+  let queue = new Map<number, FrameRequestCallback>();
+  let next = 0;
   // A clock that moves 20 ms a frame, which frames from the core read too.
   let now = 10_000;
   vi.spyOn(performance, "now").mockImplementation(() => now);
   vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
-    queue.push(cb);
-    return queue.length;
+    queue.set(++next, cb);
+    return next;
   });
-  vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => {});
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => void queue.delete(id));
   return (n: number) => {
     for (let i = 0; i < n; i++) {
-      const run = queue;
-      queue = [];
+      const run = [...queue.values()];
+      queue = new Map();
       now += 20;
       act(() => run.forEach((cb) => cb(now)));
     }
@@ -625,6 +626,50 @@ describe("the stage", () => {
     await waitFor(() => expect(s).not.toHaveAttribute("data-still"), { timeout: 2_500 });
     expect(watch.mock.calls.length).toBeGreaterThan(asked);
     expect(s).not.toHaveTextContent("Resting");
+  });
+
+  it("winds down smoothly on pause, a frame every frame, then stops drawing until play", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const run = frames();
+    const drawArrays = vi.fn();
+    gl = fakeGl(drawArrays);
+    playing();
+    stage();
+    const s = screen.getByTestId("vis-stage");
+    await vi.waitFor(() => expect(s).toHaveAttribute("data-renderer", "webgl2"));
+    run(60);
+    const cover = coverEl()!;
+    const spinNow = () => parseFloat(cover.style.getPropertyValue("--vis-spin"));
+    act(() => usePlayer.setState({ state: { ...usePlayer.getState().state!, status: "paused" } }));
+    // Every frame still draws while the record slows: no drop to a lower rate, no lurch.
+    const steps: number[] = [];
+    for (let i = 0; i < 40; i++) {
+      const before = drawArrays.mock.calls.length;
+      const at = spinNow();
+      run(1);
+      expect(drawArrays.mock.calls.length).toBeGreaterThan(before);
+      steps.push((spinNow() - at + 360) % 360);
+    }
+    // The record only slows: each turn a little less than the one before.
+    for (let i = 1; i < steps.length; i++) expect(steps[i]).toBeLessThanOrEqual(steps[i - 1] + 1e-6);
+    expect(steps[steps.length - 1]).toBeGreaterThan(0);
+    // Wound down: at rest, and after a moment no frames at all.
+    run(300);
+    expect(s).toHaveAttribute("data-settled", "true");
+    const rested = spinNow();
+    act(() => void vi.advanceTimersByTime(2_000));
+    run(2);
+    const drawn = drawArrays.mock.calls.length;
+    run(30);
+    expect(drawArrays.mock.calls.length).toBe(drawn);
+    expect(spinNow()).toBeCloseTo(rested, 3);
+    // Play again: it draws and turns again.
+    act(() => usePlayer.setState({ state: { ...usePlayer.getState().state!, status: "playing" } }));
+    run(10);
+    expect(s).not.toHaveAttribute("data-settled");
+    expect(drawArrays.mock.calls.length).toBeGreaterThan(drawn);
+    expect(spinNow()).not.toBeCloseTo(rested, 1);
+    vi.useRealTimers();
   });
 
   it("gives the cover back as it was when it goes", async () => {

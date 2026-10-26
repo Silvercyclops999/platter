@@ -230,6 +230,8 @@ pub struct DownloadStatus {
     pub limit_bytes: u64,
     /// Free space on the disk holding the folder.
     pub free_bytes: Option<u64>,
+    /// The size of that disk (Settings draws other apps, downloads, cache and free from it).
+    pub total_bytes: Option<u64>,
     pub folder: String,
     pub paused: Option<PauseReason>,
     /// Songs waiting to be fetched.
@@ -1036,6 +1038,7 @@ impl Downloads {
             used_bytes: used,
             limit_bytes: prefs.limit_bytes,
             free_bytes: (self.inner.free_space)(&dir),
+            total_bytes: fs4::total_space(&dir).ok(),
             folder: dir.to_string_lossy().into_owned(),
             paused,
             queued,

@@ -1,15 +1,15 @@
 /**
- * The phone's row marks: one small download glyph (filled when the song or
- * item is on the phone, a ring with progress while it comes) and the
- * explicit "E", lined up before the grey line on song rows, album rows,
- * search hits and now playing, and the same glyph in album headers.
+ * The phone's row marks: one small download glyph (a hollow arrow waiting,
+ * a spinner while it comes, filled once it's on the phone) and the explicit
+ * "E", lined up before the grey line on song rows, album rows, search hits
+ * and now playing; and the header button's four looks.
  */
 import { act, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { backend } from "../lib/backend";
 import type { DownloadItem, DownloadStatus, Track } from "../lib/types";
 import { RowGlyphs } from "../phone/bits";
-import { DownloadMark, downloadMarkLabel } from "../phone/DownloadMark";
+import { DownloadMark, downloadMarkLabel, ListDownloadingFor } from "../phone/DownloadMark";
 import { PhoneDownload } from "../phone/PhoneDownload";
 import { SongRow } from "../phone/pages/common";
 import { downloadItemOf } from "../phone/pages/Library";
@@ -35,21 +35,40 @@ afterEach(() => {
 });
 
 describe("the download mark", () => {
-  it("says Downloaded, or how far it has come", () => {
+  it("says Downloaded, waiting, or how far it has come", () => {
     expect(downloadMarkLabel("done", 1)).toBe("Downloaded");
     expect(downloadMarkLabel("downloading", 0.404)).toBe("Downloading, 40%");
-    expect(downloadMarkLabel("waiting", 0)).toBe("Downloading, 0%");
+    expect(downloadMarkLabel("waiting", 0)).toBe("Waiting to download");
     expect(downloadMarkLabel("none", 0)).toBeNull();
     expect(downloadMarkLabel("error", 0)).toBeNull();
   });
 
-  it("is a filled glyph when done and a ring while downloading, never words", () => {
+  it("on a row: a filled arrow when done, a spinner while coming, a hollow arrow waiting, never words", () => {
     const { container, rerender } = render(<DownloadMark state="done" />);
     expect(screen.getByRole("img", { name: "Downloaded" }).querySelector(".dl-glyph--filled")).not.toBeNull();
     rerender(<DownloadMark state="downloading" progress={0.25} />);
-    const ring = screen.getByRole("img", { name: "Downloading, 25%" });
-    expect(ring.querySelector(".dl-ring")).not.toBeNull();
+    expect(screen.getByRole("img", { name: "Downloading, 25%" }).querySelector(".ph-dl-spin")).not.toBeNull();
+    rerender(<DownloadMark state="waiting" />);
+    const waiting = screen.getByRole("img", { name: "Waiting to download" });
+    expect(waiting.querySelector(".dl-glyph")).not.toBeNull();
+    expect(waiting.querySelector(".dl-glyph--filled")).toBeNull();
     expect(container.textContent).toBe("");
+  });
+
+  it("a song of a list that's downloading waits with the hollow arrow until its turn", () => {
+    act(() => useDownloads.setState({ status: status([item({ done: 0, progress: 0, state: "queued" })]) }));
+    render(
+      <ListDownloadingFor item={{ kind: "album", id: "a1" }}>
+        <ul>
+          <SongRow track={track} onPlay={() => {}} />
+        </ul>
+      </ListDownloadingFor>,
+    );
+    expect(screen.getByRole("img", { name: "Waiting to download" })).toBeInTheDocument();
+    act(() => useDownloads.setState({ status: status([item({ done: 0, progress: 0, state: "downloading" })], { trackId: track.id, received: 1, total: 4 }) }));
+    expect(screen.getByRole("img", { name: "Downloading, 25%" })).toBeInTheDocument();
+    act(() => useDownloads.setState({ ids: new Set([track.id]), status: status([item({ done: 10, progress: 1, state: "downloaded" })]) }));
+    expect(screen.getByRole("img", { name: "Downloaded" })).toBeInTheDocument();
   });
 
   it("a song row shows it before the artist line, with its own progress while it comes", () => {
@@ -76,11 +95,13 @@ describe("the download mark", () => {
     expect(screen.getByRole("img", { name: "Downloaded" })).toBeInTheDocument();
   });
 
-  it("the album header uses the same glyph, with no count beside it", () => {
-    act(() => useDownloads.setState({ status: status([item()]) }));
+  it("the album header: a turning ring waiting, a stop square in a filling ring coming, a filled disc done, no count", () => {
+    act(() => useDownloads.setState({ status: status([item({ done: 0, progress: 0, state: "queued" })]) }));
     render(<PhoneDownload kind="album" id="a1" title="Glass Season" />);
+    expect(screen.getByRole("button", { name: "Waiting to download. Stop downloading Glass Season" }).querySelector(".ph-dl-wait")).not.toBeNull();
+    act(() => useDownloads.setState({ status: status([item()]) }));
     const button = screen.getByRole("button", { name: "Downloading, 40%. Stop downloading Glass Season" });
-    expect(button.querySelector(".dl-ring")).not.toBeNull();
+    expect(button.querySelector(".ph-dl-stop__square")).not.toBeNull();
     expect(button.textContent).toBe("");
     act(() => useDownloads.setState({ status: status([item({ done: 10, progress: 1, state: "downloaded" })]) }));
     const done = screen.getByRole("button", { name: "Remove download of Glass Season" });

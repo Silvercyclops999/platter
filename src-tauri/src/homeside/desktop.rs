@@ -208,6 +208,8 @@ impl Desktop {
         me.d.lidarr.set_bridge_route(Some(Arc::new(move || weak.upgrade().and_then(|d| d.route()))));
         let weak = Arc::downgrade(&me);
         me.d.lidarr.set_bridge_linked(Arc::new(move || weak.upgrade().is_some_and(|d| !d.wire.links.all().is_empty())));
+        let weak = Arc::downgrade(&me);
+        me.d.lidarr.set_home_staging(Arc::new(move || weak.upgrade().and_then(|d| d.home_staging())));
         me
     }
 
@@ -449,6 +451,18 @@ impl Desktop {
         let now = self.now_s();
         let link = self.wire.links.links().into_iter().find(|l| self.seen(&l.id).last_seen.is_some_and(|t| now - t < ONLINE_S))?;
         Some(Arc::new(BridgeRoute { wire: self.wire.clone(), link, pending: self.pending.clone() }))
+    }
+
+    /// The staging folder the answering Bridge uses.
+    fn home_staging(&self) -> Option<String> {
+        let now = self.now_s();
+        self.wire
+            .links
+            .links()
+            .into_iter()
+            .map(|l| self.seen(&l.id))
+            .filter(|s| s.last_seen.is_some_and(|t| now - t < ONLINE_S))
+            .find_map(|s| s.status.and_then(|st| st.staging_folder))
     }
 
     pub fn overview(&self) -> BridgeOverview {

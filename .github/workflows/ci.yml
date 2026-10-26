@@ -72,7 +72,31 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright-core install --with-deps --only-shell chromium
+      # The browser comes from the cache when it can. No --with-deps: the runner
+      # already has Chrome's libraries, the app brings its own fonts, and the apt
+      # mirror sometimes crawls at a few KB/s, which used to eat the whole timeout.
+      - name: Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('playwright-core/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-shell-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      # Each try gets 90 seconds (a good one takes about 20). If all three stall,
+      # the runner's own Chrome runs the guard instead of the job timing out.
+      - name: Chromium for the guard
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 6
+        run: |
+          for try in 1 2 3; do
+            if timeout -k 10 90 npx playwright-core install --only-shell chromium; then exit 0; fi
+            echo "Chromium download try $try failed or stalled"
+            rm -rf ~/.cache/ms-playwright
+            sleep 5
+          done
+          echo "::warning::Chromium download failed three times, using the runner's Chrome"
+          echo "CHROME=$(command -v google-chrome)" >> "$GITHUB_ENV"
       - run: node scripts/phone-layout-guard.mjs
 
   # The UI tests again in a time zone where it's already tomorrow (UTC+14), so a

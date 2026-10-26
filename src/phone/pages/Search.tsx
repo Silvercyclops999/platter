@@ -2,6 +2,8 @@
  * Search on the phone: one field, recent searches you can remove one by
  * one, and results as you type (no submit), the top artist first. The
  * same folding and typo rules as on the desktop: the core does the search.
+ * While only music on the phone can play, results are one list, "Songs on
+ * this phone", of the songs that can, and recent songs that can't are dimmed.
  */
 import { MoreHorizontal, Search as SearchIcon, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -17,10 +19,13 @@ import { RowGlyphs, tap } from "../bits";
 import { SongSwipeUnder, useRowSwipe } from "../rowSwipe";
 import { isLiked, setLiked } from "../../stores/likes";
 import { player, usePlayer } from "../../stores/player";
-import { PlayingBars } from "./common";
+import { PlayingBars, songCantPlay } from "./common";
+import { useApp } from "../../stores/app";
+import { useDownloads } from "../../stores/downloads";
 import { catalogueTop, hasCatalogue, hasCatalogueRows, nameMatches, playCatalogueSong, useCatalogueSearch, useTapPlays, type CatalogueResults } from "../../pages/SearchCatalogue";
 import { useArtistPhoto } from "../../lib/artistPhotos";
-import { useGetSpots } from "../../pages/lidarrShared";
+import { PHONE_SET_UP, lidarrNote, useGetSpots, useLidarrStatus } from "../../pages/lidarrShared";
+import { useIsGuest } from "../../stores/asks";
 import { catalogueKind } from "../../lib/format";
 import "../../pages/catalogue.css";
 
@@ -34,6 +39,9 @@ export function phoneResults(res: SearchResults): SearchHit[] {
   const rest = mixedHits({ ...res, top }).filter((h) => !top || hitInfo(h)?.key !== hitInfo(top)?.key);
   return top ? [top, ...rest] : rest;
 }
+
+/** How many songs an offline search looks through for the ones on the phone. */
+export const OFFLINE_LIMIT = 200;
 
 /** The type pills over the results. */
 export const SEARCH_KINDS = [
@@ -60,6 +68,7 @@ export function PhoneSearch() {
   const [focused, setFocused] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const q = query.trim();
+  const offline = useApp((s) => !!s.health?.cachedOnly);
 
   useEffect(() => {
     let alive = true;
@@ -73,7 +82,8 @@ export function PhoneSearch() {
     if (!q) return setRes(null);
     let alive = true;
     const t = setTimeout(() => {
-      backend.search({ query: q, filter: "all", limit: 20 }).then(
+      // Offline only the songs on the phone show, so look further for them.
+      backend.search({ query: q, filter: offline ? "songs" : "all", limit: offline ? OFFLINE_LIMIT : 20 }).then(
         (r) => alive && setRes(r),
         () => alive && setRes({ songs: [], artists: [], albums: [], playlists: [], tookMs: 0, source: "local" }),
       );
@@ -83,7 +93,7 @@ export function PhoneSearch() {
       alive = false;
       clearTimeout(t);
     };
-  }, [q]);
+  }, [q, offline]);
 
   const open = (h: SearchHit) => {
     rememberHit(h);
@@ -95,7 +105,8 @@ export function PhoneSearch() {
     setRecents((r) => (r ?? []).filter((x) => hitInfo(x)?.key !== i.key));
     backend.searchRecentRemove(i.kind, i.id).catch(() => {});
   };
-  const cat = useCatalogueSearch(q, "all");
+  const cantPlay = useCantPlay();
+  const cat = useCatalogueSearch(offline ? "" : q, "all");
   const all = res ? phoneResults(res) : [];
   const kinds = SEARCH_KINDS.filter((k) => k.id === "all" || all.some((h) => hitInfo(h)?.kind === k.id));
   // A pill picked for an earlier search that has none of its kind now, or
@@ -129,6 +140,12 @@ export function PhoneSearch() {
       );
     });
   const getSpots = useGetSpots();
+  const lidarr = useLidarrStatus();
+  const guest = useIsGuest();
+  // Music you don't have shows with why Get isn't there, never without it.
+  const outside = !!catTop || hasCatalogueRows(cat, shown);
+  const getNote = outside && !getSpots && !guest ? lidarrNote(lidarr, PHONE_SET_UP) : null;
+  const lookFailed = !!cat?.failed && !cat.pending.length && !outside;
   return (
     <div className="ph-page ph-search">
       <h1 className="ph-title">Search</h1>
@@ -185,7 +202,8 @@ export function PhoneSearch() {
         </button>
       )}
       </div>
-      {q && kinds.length > 2 && (
+      {q && res && offline && <OfflineResults res={res} cantPlay={cantPlay} open={open} />}
+      {q && kinds.length > 2 && !offline && (
         <div className="ph-pills ph-pills--scroll" role="group" aria-label="Show">
           {kinds.map((k) => (
             <button key={k.id} type="button" className={`ph-chip ${shown === k.id ? "is-on" : ""}`} aria-pressed={shown === k.id} onClick={() => (tap("selection"), setKind(k.id))}>
@@ -201,7 +219,7 @@ export function PhoneSearch() {
               <h2 className="ph-section-title">Recent searches</h2>
               <ul className="ph-rows">
                 {recents.map((h) => (
-                  <HitRow key={hitInfo(h)?.key} hit={h} onOpen={() => open(h)} onRemove={() => forget(h)} />
+                  <HitRow key={hitInfo(h)?.key} hit={h} onOpen={() => open(h)} onRemove={() => forget(h)} dim={!!h.track && cantPlay(h.track.id)} />
                 ))}
               </ul>
             </>
@@ -209,7 +227,7 @@ export function PhoneSearch() {
           <Browse />
         </section>
       )}
-      {q && res && (
+      {q && res && !offline && (
         <section aria-label="Results" className="ph-search__results">
           {(catTop || (!closeLast && hits.length > 0)) && (
             <ul className="ph-rows">
@@ -218,7 +236,9 @@ export function PhoneSearch() {
             </ul>
           )}
           {nothingAnywhere && <p className="ph-rows__note">Nothing in your library matches "{q}".</p>}
+          {getNote && <p className="ph-rows__note">{getNote}</p>}
           <PhoneCatalogue c={cat} kind={shown} skipArtist={catTop?.mbid} getSpots={getSpots} />
+          {lookFailed && <p className="ph-rows__note">Couldn't look beyond your library just now. Try again in a moment.</p>}
           {closeLast && hits.length > 0 && (
             <section aria-label="Close matches in your library" className="ph-search__catalogue">
               <h2 className="ph-section-title">Close matches in your library</h2>
@@ -246,11 +266,40 @@ export function hitLine(i: NonNullable<ReturnType<typeof hitInfo>>, typed: boole
   return typed ? i.byline || i.typeLabel : subtitleWithType(i);
 }
 
+/** Whether a song can't play right now (only music on the phone plays, and it isn't here). */
+function useCantPlay(): (trackId: string) => boolean {
+  const health = useApp((s) => s.health);
+  const cached = useApp((s) => s.cached);
+  const ids = useDownloads((s) => s.ids);
+  const playingId = usePlayer((s) => s.state?.track?.id);
+  return (id) => songCantPlay(id, { health, cached }, { playing: id === playingId, downloaded: ids.has(id) });
+}
+
+/** Results while only music on the phone can play: the songs that can, in one list. */
+function OfflineResults({ res, cantPlay, open }: { res: SearchResults; cantPlay: (id: string) => boolean; open: (h: SearchHit) => void }) {
+  const songs = res.songs.filter((t) => !cantPlay(t.id)).map(hitOf.track);
+  return (
+    <section aria-label="Songs on this phone" className="ph-search__results">
+      <h2 className="ph-section-title">Songs on this phone</h2>
+      {songs.length ? (
+        <ul className="ph-rows">
+          {songs.map((h) => (
+            <HitRow key={hitInfo(h)?.key} hit={h} typed onOpen={() => open(h)} onMore={() => phone.push({ kind: "track", track: h.track! })} />
+          ))}
+        </ul>
+      ) : (
+        <p className="ph-rows__note">No songs on this phone match that.</p>
+      )}
+    </section>
+  );
+}
+
 /** One row style for every kind of result, in every pill, so switching pills keeps the list's look. */
 function HitRow({
   hit,
   top,
   typed = false,
+  dim = false,
   onOpen,
   onRemove,
   onMore,
@@ -261,6 +310,8 @@ function HitRow({
   hit: SearchHit;
   top?: boolean;
   typed?: boolean;
+  /** A song that can't play now: dimmed, and a tap does nothing. */
+  dim?: boolean;
   onOpen: () => void;
   onRemove?: () => void;
   onMore?: () => void;
@@ -274,7 +325,7 @@ function HitRow({
   // A song swipes right into the queue, and left into (or out of) Liked Songs.
   const song = hit.track;
   const swipe = useRowSwipe(
-    song
+    song && !dim
       ? {
           right: () => void player.addToQueue([song]),
           left: () => void setLiked([song], !isLiked(song.id)),
@@ -287,14 +338,15 @@ function HitRow({
   return (
     <li
       ref={song ? swipe.ref : undefined}
-      className={`ph-hit ${song ? swipe.className : ""} ${top ? "is-top" : ""}`}
+      className={`ph-hit ${song ? swipe.className : ""} ${top ? "is-top" : ""} ${dim ? "is-unplayable" : ""}`}
+      aria-disabled={dim || undefined}
       {...(song ? swipe.props : {})}
     >
       {song && <SongSwipeUnder trackId={song.id} />}
       <button
         type="button"
         className="ph-row"
-        onClick={() => (onVersions && versions > 0 && hit.track ? onVersions() : onOpen())}
+        onClick={dim ? undefined : () => (onVersions && versions > 0 && hit.track ? onVersions() : onOpen())}
       >
         <Art path={i.thumb} size={52} round={i.round} kind={i.kind === "track" ? "album" : i.kind} monogram={i.round ? i.title : undefined} />
         <span className="ph-row__text">

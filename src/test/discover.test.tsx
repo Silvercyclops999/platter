@@ -123,12 +123,23 @@ describe("search", () => {
     unmount();
 
     await setUp();
-    act(() => useApp.setState({ health: { ...(useApp.getState().health as Health), status: "offline", cachedOnly: true } }));
-    render(<SearchPage query="cold coast" />);
+    const noInternet = { kind: "noInternet", message: "You're offline." };
+    act(() => useApp.setState({ health: { ...(useApp.getState().health as Health), status: "offline", cachedOnly: true, banner: noInternet } }));
+    const second = render(<SearchPage query="cold coast" />);
     await new Promise((r) => setTimeout(r, 900));
     expect(screen.queryByLabelText(/not in your library$/)).toBeNull();
     expect(mock.catalogue.parts).toEqual([]);
-    act(() => useApp.setState({ health: { ...(useApp.getState().health as Health), status: "local", cachedOnly: false } }));
+    second.unmount();
+    act(() => useApp.setState({ health: { ...(useApp.getState().health as Health), status: "local", cachedOnly: false, banner: null } }));
+  });
+
+  it("still looks beyond the library when only the server can't be reached", async () => {
+    await setUp();
+    const away = { kind: "offline", message: "Can't reach your server." };
+    act(() => useApp.setState({ health: { ...(useApp.getState().health as Health), status: "offline", cachedOnly: true, banner: away } }));
+    render(<SearchPage query="cold coast" />);
+    expect((await screen.findAllByLabelText(/not in your library$/, {}, SLOW)).length).toBeGreaterThan(0);
+    act(() => useApp.setState({ health: { ...(useApp.getState().health as Health), status: "local", cachedOnly: false, banner: null } }));
   });
 });
 
