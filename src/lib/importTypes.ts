@@ -184,6 +184,14 @@ export interface PlayedPage {
 }
 
 /** A row hidden from "Played a lot" (synced). */
+/** An artist left out of "Played a lot" as sleep or background music. */
+export interface PlayedSleepArtist {
+  artist: string;
+  plays: number;
+  /** Percent of its plays that started late at night. */
+  nightPercent: number;
+}
+
 export interface PlayedHidden {
   kind: "song" | "album" | "artist";
   artist: string;

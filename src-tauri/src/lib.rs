@@ -944,14 +944,17 @@ pub fn run() {
             app.manage(taps);
             // Bring in my listening: albums from Played a lot, a few a day.
             let bring_in = {
-                let (day_db, offset_db, hidden_store) = (db.clone(), db.clone(), sync_store.clone());
+                let (day_db, offset_db, hidden_store, sleep_db) = (db.clone(), db.clone(), sync_store.clone(), db.clone());
                 lidarr::waves::Waves::new(lidarr::waves::WavesDeps {
                     lidarr: lidarr_service.clone(),
                     notifier: Arc::new(social::commands::OsNotifier(app.handle().clone())),
                     day_of: Arc::new(move |at| lidarr::waves::local_day(&day_db, at)),
                     utc_offset: Some(Arc::new(move |at| lidarr::waves::local_offset(&offset_db, at))),
                     hidden: Arc::new(move || {
-                        hidden_store.list(&sync::store::PLAYED_HIDDEN).map(|v| v.into_iter().map(|(k, _)| k).collect()).unwrap_or_default()
+                        let keys: Vec<String> = hidden_store.list(&sync::store::PLAYED_HIDDEN).map(|v| v.into_iter().map(|(k, _)| k).collect()).unwrap_or_default();
+                        let skip_sleep = settings::load(&sleep_db).played_skip_sleep;
+                        let all = keys.clone();
+                        sleep_db.read(move |c| Ok(import::played::with_sleep(c, all, skip_sleep))).unwrap_or(keys)
                     }),
                 })
             };
@@ -1740,7 +1743,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            import::commands::import_overview, import::commands::import_choose, import::commands::import_run, import::commands::import_review_queue, import::commands::import_review, import::commands::import_list_page, import::commands::import_missing, import::commands::import_missing_albums, import::commands::import_missing_album_add, import::commands::import_missing_album_remove, import::commands::import_open_link, import::commands::import_forget, import::commands::import_list_remove, import::commands::import_played, import::commands::import_played_hide, import::commands::import_played_hidden, import::commands::bring_status, import::commands::bring_read, import::commands::bring_adopt, import::commands::bring_get, import::commands::bring_lidarr_guesses, import::commands::bring_waiting_rows, import::commands::bring_read_dropped, import::account::commands::streaming_account_status, import::account::commands::streaming_account_sign_in, import::account::commands::streaming_account_read, import::account::commands::streaming_account_cancel, import::account::commands::streaming_account_sign_out, import::account::commands::streaming_account_client_id_set,
+            import::commands::import_overview, import::commands::import_choose, import::commands::import_run, import::commands::import_review_queue, import::commands::import_review, import::commands::import_list_page, import::commands::import_missing, import::commands::import_missing_albums, import::commands::import_missing_album_add, import::commands::import_missing_album_remove, import::commands::import_open_link, import::commands::import_forget, import::commands::import_list_remove, import::commands::import_played, import::commands::import_played_hide, import::commands::import_played_hidden, import::commands::import_played_sleep, import::commands::import_played_keep, import::commands::bring_status, import::commands::bring_read, import::commands::bring_adopt, import::commands::bring_get, import::commands::bring_lidarr_guesses, import::commands::bring_waiting_rows, import::commands::bring_read_dropped, import::account::commands::streaming_account_status, import::account::commands::streaming_account_sign_in, import::account::commands::streaming_account_read, import::account::commands::streaming_account_cancel, import::account::commands::streaming_account_sign_out, import::account::commands::streaming_account_client_id_set,
             platform::route_picker::show_route_picker,
             platform::haptics::haptic,
             audio::hifi::headphone_detect,

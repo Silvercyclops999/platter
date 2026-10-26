@@ -16,7 +16,7 @@ import { SkeletonLines } from "../components/Skeleton";
 import { Switch } from "../components/Switch";
 import { backend } from "../lib/backend";
 import { STORE_LINKS } from "../lib/importStrings";
-import type { PlayedHidden, PlayedKind, PlayedPage, PlayedRow } from "../lib/importTypes";
+import type { PlayedHidden, PlayedKind, PlayedPage, PlayedRow, PlayedSleepArtist } from "../lib/importTypes";
 import type { LidarrPreview, LidarrRequestInput, LidarrRequestState, PlayedPeriod } from "../lib/types";
 import { updateSettings, useSettings } from "../stores/settings";
 import { toast } from "../stores/toasts";
@@ -68,6 +68,7 @@ export function PlayedALot() {
   const s = useSettings((x) => x.settings);
   const minPlays = s?.playedMinPlays ?? 5;
   const period: PlayedPeriod = s?.playedPeriod ?? "all";
+  const skipSleep = s?.playedSkipSleep ?? true;
   const [kind, setKind] = useState<PlayedKind>("song");
   const [page, setPage] = useState<PlayedPage | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -77,6 +78,7 @@ export function PlayedALot() {
   const [chosen, setChosen] = useState<PlayedRow[]>([]);
   const [batch, setBatch] = useState(false);
   const [hidden, setHidden] = useState<PlayedHidden[]>([]);
+  const [sleep, setSleep] = useState<PlayedSleepArtist[]>([]);
   const ready = useLidarrReady();
   const ids = useId();
 
@@ -94,11 +96,13 @@ export function PlayedALot() {
       (e) => n === seq.current && setErr(errText(e) || "Couldn't load what you played"),
     );
     backend.importPlayedHidden().then((h) => n === seq.current && setHidden(h), () => {});
+    backend.importPlayedSleep().then((v) => n === seq.current && setSleep(v), () => {});
     return () => {
       // Left the page or the filters changed: drop what's still on its way.
       if (n === seq.current) seq.current++;
     };
-  }, [kind, minPlays, period]);
+    // skipSleep changes what the list leaves out.
+  }, [kind, minPlays, period, skipSleep]);
 
   useEffect(load, [load]);
   // The library gained songs: their rows leave.
@@ -168,6 +172,15 @@ export function PlayedALot() {
     backend.importPlayedHide(h.kind, h.artist, h.name || null, false).then(
       (list) => {
         setHidden(list);
+        load();
+      },
+      (e) => toast.error(errText(e) || "Couldn't bring that back"),
+    );
+
+  const keep = (a: PlayedSleepArtist) =>
+    backend.importPlayedKeep(a.artist, true).then(
+      () => {
+        toast.info(`${a.artist} is back in Played a lot`);
         load();
       },
       (e) => toast.error(errText(e) || "Couldn't bring that back"),
@@ -253,6 +266,7 @@ export function PlayedALot() {
           )}
         </>
       )}
+      {sleep.length > 0 && <SleepList sleep={sleep} onKeep={(a) => void keep(a)} />}
       {hidden.length > 0 && <HiddenList hidden={hidden} onUnhide={(h) => void unhide(h)} />}
       {asking && (
         <Suspense fallback={null}>
@@ -417,6 +431,36 @@ function PlayedLine({
         </Button>
       </span>
     </li>
+  );
+}
+
+/** Artists left out as sleep and background music, each with a way back. */
+function SleepList({ sleep, onKeep }: { sleep: PlayedSleepArtist[]; onKeep: (a: PlayedSleepArtist) => void }) {
+  const [open, setOpen] = useState(false);
+  const one = sleep.length === 1;
+  return (
+    <div className="played__hidden">
+      <p className="played__sleep-note">
+        Left out {n(sleep.length)} {one ? "artist" : "artists"} you play mostly late at night, like sleep and background music.{" "}
+        <Button size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+          {open ? "Hide them" : one ? "Show it" : "Show them"}
+        </Button>
+      </p>
+      {open && (
+        <ul className="played__hidden-list" aria-label="Left out as sleep and background music">
+          {sleep.map((a) => (
+            <li key={a.artist}>
+              <span className="truncate">
+                {a.artist} · {n(a.plays)} plays, {a.nightPercent}% at night
+              </span>
+              <Button size="sm" variant="ghost" onClick={() => onKeep(a)}>
+                Bring back
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -599,6 +643,27 @@ export function PlayedSettings() {
         </div>
       )}
     </div>
+    {s.showPlayedALot && (
+      <div className="setting-row" data-setting="playedSkipSleep">
+        <div className="setting-row__text">
+          <div className="setting-row__head">
+            <div id={`${id}-st`} className="setting-row__title">
+              Leave out sleep and background music
+            </div>
+            <MoreText
+              title="Leave out sleep and background music"
+              text="Artists you play almost only late at night (at least 80% of 20 or more plays, between 10 pm and 7 am) are left out of Played a lot and Bring in my listening. The Missing page lists them, and Bring back keeps one. Synced."
+            />
+          </div>
+          <p id={`${id}-sd`} className="setting-row__desc">
+            Skips artists you mostly play late at night. Synced.
+          </p>
+        </div>
+        <div className="setting-row__control">
+          <Switch checked={s.playedSkipSleep} onChange={(v) => void updateSettings({ playedSkipSleep: v })} labelledBy={`${id}-st`} describedBy={`${id}-sd`} />
+        </div>
+      </div>
+    )}
     {s.showPlayedALot && <BringInSettings />}
     </>
   );

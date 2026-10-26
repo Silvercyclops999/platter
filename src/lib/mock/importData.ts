@@ -8,6 +8,7 @@ import type {
   ImportDecision,
   ImportHistory,
   PlayedHidden,
+  PlayedSleepArtist,
   PlayedPage,
   PlayedQuery,
   PlayedRow,
@@ -117,6 +118,7 @@ export class MockImport {
     this.runs.clear();
     this.history = false;
     this.hidden.clear();
+    this.kept.clear();
     this.seeds = PLAYED.map((s) => ({ ...s }));
     this.seq = 1;
     this.failNext = null;
@@ -447,6 +449,19 @@ export class MockImport {
     if (hide) this.hidden.set(key, { kind, artist, name: kind === "artist" ? "" : (name ?? ""), hiddenAt: Math.floor(Date.now() / 1000) });
     else this.hidden.delete(key);
     return this.hiddenList();
+  }
+
+  /** Sleep and background artists the mock's history has. */
+  private sleep: PlayedSleepArtist[] = [{ artist: "Quiet Harbor", plays: 412, nightPercent: 96 }];
+  private kept = new Set<string>();
+
+  sleepList(): PlayedSleepArtist[] {
+    return this.history ? this.sleep.filter((s) => !this.kept.has(fold(s.artist))) : [];
+  }
+
+  keep(artist: string, keep: boolean) {
+    if (keep) this.kept.add(fold(artist));
+    else this.kept.delete(fold(artist));
   }
 
   hiddenList(): PlayedHidden[] {

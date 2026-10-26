@@ -85,6 +85,8 @@ Imported playlists and liked songs are listed with how many of their songs are i
 
 The Missing page has a second tab, Played a lot. It lists songs and albums your imported listening history played that aren't in your library, the most played first. Plays count when they lasted 30 seconds or more. Switch between songs and albums, and narrow the list by period (All time, Last year or Last 90 days) and by fewest plays (5 to begin with). Hide a row, or a whole artist, if you never want it.
 
+Artists you play almost only late at night, like sleep sounds and background music, are left out of Played a lot and of Bring in my listening. That's any artist with at least 20 plays where 8 in 10 of them started between 10 pm and 7 am. A line under the list says how many were left out. Open it and press Bring back on any it got wrong. To keep them all, turn off Leave out sleep and background music under the Played a lot setting.
+
 With [Lidarr](lidarr.md) set up, Request on a row asks for that album (a song asks for its album), after the usual safety check. Request these sends up to 10 at once after one confirm. After every library sync, plays of songs you now have are matched to them, so those rows leave the list and count in your stats.
 
 Turn the tab off with Settings, Integrations, Library import, Show "Played a lot" on the Missing page. The same row has the period and fewest plays.

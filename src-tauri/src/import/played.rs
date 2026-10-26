@@ -9,6 +9,9 @@
 //! - Filters: fewest plays, a period (all time, last year, last 90 days),
 //!   rows and whole artists the user hid (synced through the store's
 //!   `playedHidden` namespace), and sources left out of every count.
+//! - Sleep and background music: artists played almost only late at night
+//!   ([`sleep_artists`]) are left out with the `playedSkipSleep` setting on,
+//!   here and in Bring in my listening, unless the user kept one.
 //! - When the library gains a song, [`rematch`] matches its plays (after
 //!   each library sync, and before the list loads), so stats count them and
 //!   the row leaves the list.
@@ -327,6 +330,122 @@ pub fn history_counts(c: &Connection, source: &str) -> AppResult<HistoryCounts> 
             })
         },
     )?)
+}
+
+// ------------------------------------------------------------------ sleep music
+
+/// Fewest counted plays before an artist's hours say anything.
+pub const SLEEP_MIN_PLAYS: i64 = 20;
+/// Share of an artist's plays, in percent, that start late at night before
+/// it counts as sleep or background music.
+pub const SLEEP_NIGHT_PERCENT: i64 = 80;
+/// Late at night: from 22:00 up to 07:00, local time.
+const NIGHT_FROM_HOUR: i64 = 22;
+const NIGHT_TO_HOUR: i64 = 7;
+
+/// An artist played almost only late at night.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SleepArtist {
+    pub artist: String,
+    #[serde(skip)]
+    pub fold: String,
+    pub plays: u64,
+    /// Percent of its plays that started late at night.
+    pub night_percent: u8,
+}
+
+/// The key an artist the user kept (not sleep music) is stored under, in the
+/// same synced namespace as hidden rows.
+pub fn keep_key(artist: &str) -> AppResult<String> {
+    let a = fold::fold_artist(artist);
+    if a.is_empty() {
+        return Err(AppError::Invalid("That artist has no name to keep.".into()));
+    }
+    Ok(format!("{KEEP_PREFIX}{a}").chars().take(KEY_CHARS).collect())
+}
+
+/// Hidden-row keys that keep an artist start with this.
+pub const KEEP_PREFIX: &str = "keep:";
+/// The kind of a kept artist's row in the synced namespace.
+pub const KEEP_KIND: &str = "keep";
+
+/// The local time's offset from UTC now, in seconds, as SQLite sees it.
+pub fn local_offset_now(c: &Connection) -> i64 {
+    c.query_row("SELECT CAST(strftime('%s', 'now', 'localtime') AS INTEGER) - CAST(strftime('%s', 'now') AS INTEGER)", [], |r| r.get(0))
+        .unwrap_or(0)
+}
+
+/// Artists whose counted plays (all of them, matched or not) mostly start
+/// late at night, most played first. `keys` are the synced hidden-row keys;
+/// artists kept there are left out. `utc_offset_s` turns play times local.
+pub fn sleep_artists(c: &Connection, keys: &[String], utc_offset_s: i64) -> AppResult<Vec<SleepArtist>> {
+    let kept: Vec<&str> = keys.iter().filter_map(|k| k.strip_prefix(KEEP_PREFIX)).collect();
+    let kept = serde_json::to_string(&kept).unwrap_or_else(|_| "[]".into());
+    let mut st = c.prepare_cached(
+        "WITH p AS (
+           SELECT artist_fold AS a, artist, ((played_at / 1000 + ?1) % 86400 + 86400) % 86400 / 3600 AS hour
+           FROM imported_plays
+           WHERE artist_fold IS NOT NULL AND artist_fold <> ''
+             AND (ms_played IS NULL OR ms_played >= 30000)
+             AND source NOT IN (SELECT value FROM json_each(coalesce(
+                 (SELECT value FROM kv WHERE key = 'plays.excludedSources' AND json_valid(value)), '[]'))))
+         SELECT a, max(artist), count(*) AS plays,
+                sum(CASE WHEN hour >= ?2 OR hour < ?3 THEN 1 ELSE 0 END) * 100 / count(*) AS night
+         FROM p
+         WHERE a NOT IN (SELECT value FROM json_each(?4))
+         GROUP BY a
+         HAVING plays >= ?5 AND night >= ?6
+         ORDER BY plays DESC, a",
+    )?;
+    let rows = st.query_map(params![utc_offset_s, NIGHT_FROM_HOUR, NIGHT_TO_HOUR, kept, SLEEP_MIN_PLAYS, SLEEP_NIGHT_PERCENT], |r| {
+        let fold: String = r.get(0)?;
+        let name: Option<String> = r.get(1)?;
+        Ok(SleepArtist {
+            artist: name.unwrap_or_else(|| fold.clone()),
+            fold,
+            plays: r.get::<_, i64>(2)? as u64,
+            night_percent: r.get::<_, i64>(3)?.clamp(0, 100) as u8,
+        })
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// What the last [`sleep_cached`] worked out, and the plays and keys it
+/// saw, so the list and every wave pass don't group all plays again.
+static SLEEP_CACHE: parking_lot::Mutex<Option<(String, Vec<SleepArtist>)>> = parking_lot::Mutex::new(None);
+
+/// [`sleep_artists`] for the local time now, worked out again only when the
+/// plays, the sources left out or the kept artists change.
+pub fn sleep_cached(c: &Connection, keys: &[String]) -> AppResult<Vec<SleepArtist>> {
+    let off = local_offset_now(c);
+    let plays: String = c.query_row(
+        "SELECT coalesce(max(id), 0) || '/' || count(*) || '/' || coalesce((SELECT value FROM kv WHERE key = 'plays.excludedSources'), '') FROM imported_plays",
+        [],
+        |r| r.get(0),
+    )?;
+    let kept: Vec<&String> = keys.iter().filter(|k| k.starts_with(KEEP_PREFIX)).collect();
+    let stamp = format!("{}/{off}/{plays}/{kept:?}", c.path().unwrap_or_default());
+    if let Some((s, v)) = SLEEP_CACHE.lock().as_ref()
+        && *s == stamp
+    {
+        return Ok(v.clone());
+    }
+    let v = sleep_artists(c, keys, off)?;
+    *SLEEP_CACHE.lock() = Some((stamp, v.clone()));
+    Ok(v)
+}
+
+/// The hidden-row keys with sleep artists added as hidden artists, when the
+/// `playedSkipSleep` setting is on.
+pub fn with_sleep(c: &Connection, mut keys: Vec<String>, skip_sleep: bool) -> Vec<String> {
+    if skip_sleep {
+        match sleep_cached(c, &keys) {
+            Ok(sleep) => keys.extend(sleep.into_iter().map(|s| format!("artist:{}", s.fold))),
+            Err(e) => tracing::warn!("played: couldn't work out sleep music: {e}"),
+        }
+    }
+    keys
 }
 
 // ------------------------------------------------------------------ the list

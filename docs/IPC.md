@@ -3085,16 +3085,19 @@ The Missing page's second tab lists what imported listening history (any source 
 | `import_played` | `{ query: { kind: "song"\|"album", offset, minPlays, period: "all"\|"year"\|"days90" } }` | `PlayedPage`, 100 rows at a time, most plays first, then most time |
 | `import_played_hide` | `{ kind: "song"\|"album"\|"artist", artist, name, hide }` | `PlayedHidden[]`. Hides a row or a whole artist, or brings it back. Kept in the sync store's `playedHidden` namespace |
 | `import_played_hidden` | – | `PlayedHidden[]`, newest first |
+| `import_played_sleep` | – | `PlayedSleepArtist[]`, most played first. Empty with `playedSkipSleep` off |
+| `import_played_keep` | `{ artist, keep }` | Keeps an artist the sleep check left out, or lets it leave it out again. Kept in `playedHidden` under a `keep:` key with kind `keep`, which `import_played_hidden` leaves out |
 
 `PlayedPage = { kind, total, offset, rows: PlayedRow[], hasHistory }`.
 `PlayedRow = { kind, key, artist, title, album, plays, ms, firstPlayed, lastPlayed, songs, inLibrary, links, thumb, request }`. Songs group by folded artist and title, albums by folded artist and album. For an album, `songs` is how many of its songs were played and `inLibrary` how many of its tracks the library already has. `request` is the state of a Lidarr request made for the album on this device.
 `PlayedHidden = { kind, artist, name, hiddenAt }`.
+`PlayedSleepArtist = { artist, plays, nightPercent }`. An artist counts as sleep or background music when it has 20 or more counted plays (matched or not) and 80% or more of them started between 22:00 and 07:00 local time. With `playedSkipSleep` on, those artists are left out of the list and of Bring in my listening, like a hidden artist.
 
 Before the list loads, and after every library sync, plays whose song the library now has are matched to it, so their rows leave the list and stats count them as that song. Request on a row picks the album with `lidarr_pick` (a song asks for its album) and goes through `lidarr_request_preview` and `lidarr_request` as usual. "Request these" previews each picked album, then sends them with `lidarr_request_batch` after one confirm.
 
 Each `import_overview` report has `history: { plays, playsMatched, songs, songsMatched, firstPlayed, lastPlayed }` for the listening history a source brought in, so a history-only import reads as plays and songs rather than "0 of 0 songs". An import with nothing usable fails with a message naming what was left out.
 
-Settings (synced): `showPlayedALot` (on), `playedMinPlays` (5, from 1 to 1000), `playedPeriod` (`all`).
+Settings (synced): `showPlayedALot` (on), `playedMinPlays` (5, from 1 to 1000), `playedPeriod` (`all`), `playedSkipSleep` (on).
 
 ### Bring in my listening
 

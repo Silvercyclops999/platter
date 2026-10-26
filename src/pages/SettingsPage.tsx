@@ -4050,7 +4050,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
   /** Pages that hold whole sections of their own, and when search shows them. */
   const extras: Partial<Record<PageId, { matches: (q: string) => boolean; render: () => ReactNode; first?: boolean }>> = {
     libraryImport: {
-      matches: (x) => importMatches(x) || matchesText('Show "Played a lot" on the Missing page. Bring in my listening.', x),
+      matches: (x) => importMatches(x) || matchesText('Show "Played a lot" on the Missing page. Bring in my listening. Leave out sleep and background music.', x),
       render: () => <LibraryImportSettings />,
     },
     streamDeck: {

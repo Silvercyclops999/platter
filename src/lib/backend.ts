@@ -297,6 +297,7 @@ import type {
   ImportReviewItem,
   ImportSourceId,
   PlayedHidden,
+  PlayedSleepArtist,
   PlayedPage,
   PlayedQuery,
   ImportedListPage,
@@ -1317,6 +1318,10 @@ export interface Backend {
   importPlayedHide(kind: PlayedHidden["kind"], artist: string, name: string | null, hide: boolean): Promise<PlayedHidden[]>;
   /** What's hidden from "Played a lot", newest first. */
   importPlayedHidden(): Promise<PlayedHidden[]>;
+  /** Artists left out as sleep and background music, most played first. Empty with playedSkipSleep off. */
+  importPlayedSleep(): Promise<PlayedSleepArtist[]>;
+  /** Keep an artist the sleep check left out (keep true), or let it leave it out again. Synced. */
+  importPlayedKeep(artist: string, keep: boolean): Promise<void>;
 
   // Listening stats (docs/IPC.md)
   /** Totals, chart, streak, busiest times and top lists for a range of days. */
@@ -1897,6 +1902,8 @@ export function createTauriBackend(): Backend {
     importPlayed: (query) => call("import_played", { query }),
     importPlayedHide: (kind, artist, name, hide) => call("import_played_hide", { kind, artist, name, hide }),
     importPlayedHidden: () => call("import_played_hidden"),
+    importPlayedSleep: () => call("import_played_sleep"),
+    importPlayedKeep: (artist, keep) => call("import_played_keep", { artist, keep }),
     lidarrPick: ({ artist, artistId, title, song, isrc }) => call("lidarr_pick", { artist, artistId: artistId ?? null, title, song, isrc: isrc ?? null }),
     statsOverview: (range, limit) => call("stats_overview", { range, limit: limit ?? null }),
     statsSpan: () => call("stats_span"),

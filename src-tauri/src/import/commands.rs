@@ -208,7 +208,7 @@ async fn hidden(app: &AppHandle) -> Vec<(String, played::HiddenRow)> {
 /// A page of "Played a lot, not in your library": imported history plays
 /// with no library match, by song or by album, most played first.
 #[tauri::command]
-pub async fn import_played(app: AppHandle, db: State<'_, DbHandle>, query: played::Query) -> AppResult<played::PlayedPage> {
+pub async fn import_played(app: AppHandle, db: State<'_, DbHandle>, settings: State<'_, SettingsState>, query: played::Query) -> AppResult<played::PlayedPage> {
     let ranks = db.source_ranks();
     let now = now_ms();
     db.write_async(move |c| {
@@ -217,7 +217,41 @@ pub async fn import_played(app: AppHandle, db: State<'_, DbHandle>, query: playe
     })
     .await?;
     let keys: Vec<String> = hidden(&app).await.into_iter().map(|(k, _)| k).collect();
-    db.read_async(move |c| played::list(c, &query, &keys, now)).await
+    let skip_sleep = settings.get().await?.played_skip_sleep;
+    db.read_async(move |c| played::list(c, &query, &played::with_sleep(c, keys, skip_sleep), now)).await
+}
+
+/// Artists left out as sleep and background music (played almost only late
+/// at night), most played first. Empty with the `playedSkipSleep` setting off.
+#[tauri::command]
+pub async fn import_played_sleep(app: AppHandle, db: State<'_, DbHandle>, settings: State<'_, SettingsState>) -> AppResult<Vec<played::SleepArtist>> {
+    if !settings.get().await?.played_skip_sleep {
+        return Ok(Vec::new());
+    }
+    let keys: Vec<String> = hidden(&app).await.into_iter().map(|(k, _)| k).collect();
+    db.read_async(move |c| played::sleep_cached(c, &keys)).await
+}
+
+/// Keep an artist that was left out as sleep music (`keep` true), or let
+/// the sleep check leave it out again (synced).
+#[tauri::command]
+pub async fn import_played_keep(app: AppHandle, artist: String, keep: bool) -> AppResult<()> {
+    let key = played::keep_key(&artist)?;
+    let s = sync_store(&app).ok_or_else(|| AppError::Internal("the sync store isn't ready".into()))?;
+    let row = played::HiddenRow {
+        kind: played::KEEP_KIND.into(),
+        artist: artist.chars().take(200).collect(),
+        name: String::new(),
+        hidden_at: now_ms() / 1000,
+    };
+    s.run(move |s| {
+        if keep {
+            s.put(&crate::sync::store::PLAYED_HIDDEN, &key, &row)
+        } else {
+            s.remove(&crate::sync::store::PLAYED_HIDDEN, &key).map(|_| ())
+        }
+    })
+    .await
 }
 
 /// Hide a song, an album or a whole artist from "Played a lot" (synced),
@@ -247,7 +281,7 @@ pub async fn import_played_hide(app: AppHandle, kind: String, artist: String, na
 /// What's hidden from "Played a lot", newest first.
 #[tauri::command]
 pub async fn import_played_hidden(app: AppHandle) -> AppResult<Vec<played::HiddenRow>> {
-    let mut all: Vec<played::HiddenRow> = hidden(&app).await.into_iter().map(|(_, h)| h).collect();
+    let mut all: Vec<played::HiddenRow> = hidden(&app).await.into_iter().map(|(_, h)| h).filter(|h| h.kind != played::KEEP_KIND).collect();
     all.sort_by_key(|h| std::cmp::Reverse(h.hidden_at));
     Ok(all)
 }

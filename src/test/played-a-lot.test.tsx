@@ -163,6 +163,26 @@ describe("Played a lot", () => {
     expect(await mock.importPlayedHidden()).toHaveLength(1);
   });
 
+  it("says which artists it left out as sleep music, and brings one back", async () => {
+    await withHistory();
+    render(<ImportPage view="played" />);
+    expect(await screen.findByText(/Left out 1 artist you play mostly late at night/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show it" }));
+    const list = screen.getByRole("list", { name: "Left out as sleep and background music" });
+    expect(list).toHaveTextContent("Quiet Harbor · 412 plays, 96% at night");
+    fireEvent.click(within(list).getByRole("button", { name: "Bring back" }));
+    await waitFor(() => expect(screen.queryByText(/Left out 1 artist/)).toBeNull());
+    expect(toasts()[toasts().length - 1]?.message).toBe("Quiet Harbor is back in Played a lot");
+    expect(await mock.importPlayedSleep()).toEqual([]);
+  });
+
+  it("leaves nothing out as sleep music with the setting off", async () => {
+    await withHistory({ playedSkipSleep: false });
+    render(<ImportPage view="played" />);
+    await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+    expect(screen.queryByText(/Left out/)).toBeNull();
+  });
+
   it("drops a row when the library gains the song", async () => {
     await withHistory();
     render(<ImportPage view="played" />);
@@ -291,6 +311,16 @@ describe("Played a lot settings", () => {
     await waitFor(() => expect(useSettings.getState().settings?.showPlayedALot).toBe(false));
     expect(screen.queryByRole("combobox", { name: "Period" })).toBeNull();
     expect((await mock.settingsGet()).showPlayedALot).toBe(false);
+  });
+
+  it("leave out sleep and background music by default, with a switch to stop", async () => {
+    await settings();
+    render(<PlayedSettings />);
+    const sw = await screen.findByRole("switch", { name: "Leave out sleep and background music" });
+    expect(sw).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(sw);
+    await waitFor(() => expect(useSettings.getState().settings?.playedSkipSleep).toBe(false));
+    expect((await mock.settingsGet()).playedSkipSleep).toBe(false);
   });
 
   it("show up in the Library import section", async () => {
