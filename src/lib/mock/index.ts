@@ -4827,6 +4827,12 @@ export class MockBackend implements Backend {
   importPlayedHidden() {
     return this.delay(() => this.importMock.hiddenList());
   }
+  importPlayedSleep() {
+    return this.delay(() => (this.settings.playedSkipSleep ? this.importMock.sleepList() : []));
+  }
+  importPlayedKeep(artist: string, keep: boolean) {
+    return this.delay(() => this.importMock.keep(artist, keep));
+  }
   importForget(source: ImportSourceId) {
     return this.delay(() => this.importMock.forget(source));
   }
