@@ -16,7 +16,7 @@ const dir = path.resolve(root, process.argv[2] ?? "dist");
 /** Things that never belong in the shipped UI, with what each one is. */
 const RULES = [
   [/\/\/[#@] sourceMappingURL=/, "a source map link"],
-  [/x-plex-token=[A-Za-z0-9_-]{8,}/i, "a Plex token in an address"],
+  [/x-plex-token["']?\s*[:=]\s*["']?[A-Za-z0-9_-]{8,}/i, "a Plex token"],
   [/[0-9a-f]{32}\.plex\.direct/i, "a real plex.direct server name"],
   [/(?<![\d.])192\.168\.\d{1,3}\.\d{1,3}(?![\d.])/, "a home network address"],
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----/, "a private key"],
@@ -27,7 +27,7 @@ const RULES = [
   [/\bxox[abprs]-[A-Za-z0-9-]{10,}/, "a Slack token"],
   [/[?&]apikey=[A-Za-z0-9]{20,}/i, "an API key in an address"],
   [/\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^\s"'`]*:[^\s"'`@]+@/, "a database address with a password"],
-  [/[A-Za-z0-9._%+-]+@users\.noreply\.github\.com/, "a GitHub email"],
+  [/@users\.noreply\.github\.com/, "a GitHub email"],
 ];
 
 function files(d) {
