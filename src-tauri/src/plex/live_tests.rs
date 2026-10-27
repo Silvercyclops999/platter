@@ -17,10 +17,13 @@ use super::discovery::{self, RaceConfig};
 use super::identity::ClientIdentity;
 use super::token::Token;
 
-const ENV_FILE: &str = "C:/Users/Adam/Desktop/Plexify/.env";
+/// The checkout's .env, or the file PLATTER_ENV names.
+fn env_file() -> String {
+    std::env::var("PLATTER_ENV").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../.env").into())
+}
 
 fn dev_token() -> Token {
-    let iter = dotenvy::from_path_iter(ENV_FILE).expect(".env not found");
+    let iter = dotenvy::from_path_iter(env_file()).expect(".env not found");
     for item in iter {
         let (k, v) = item.expect(".env parse");
         if k == "PLEX_TOKEN" {

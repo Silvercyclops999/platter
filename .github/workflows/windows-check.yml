@@ -24,6 +24,10 @@ env:
   # Keep in step with release.yml.
   VULKAN_VERSION: 1.4.313.2
 
+# Read-only token: these jobs only check out and test.
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: windows-latest

@@ -28,6 +28,8 @@ export default defineConfig(() => ({
   },
 
   build: {
+    // No source maps in the app (scripts/check-bundle.mjs fails the build on one).
+    sourcemap: false,
     rolldownOptions: {
       output: {
         // Everything the first screen needs goes in one chunk; rarely used

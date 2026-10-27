@@ -9,3 +9,13 @@ docs/screenshots
 **/*.sqlite*
 .env
 .env.*
+env.txt
+*.env.txt
+*.log
+# Local-only folders and agent config: never in a build context.
+dev
+.claude
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
+.mcp.local.json

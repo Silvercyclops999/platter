@@ -26,6 +26,7 @@ jobs:
         with:
           node-version: 22
       - run: node --experimental-strip-types scripts/build-help-site.ts site
+      - run: node scripts/check-bundle.mjs site
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

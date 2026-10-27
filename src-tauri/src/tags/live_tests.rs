@@ -24,7 +24,7 @@ use super::parse::{FIRST_READ, MORE_READ, Sparse, Step, parse};
 const PER_FORMAT: usize = 3;
 
 fn dev_token() -> Token {
-    let path = std::env::var("PLATTER_ENV").unwrap_or_else(|_| "C:/Users/Adam/Desktop/Platter/.env".into());
+    let path = std::env::var("PLATTER_ENV").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../.env").into());
     for item in dotenvy::from_path_iter(path).expect(".env not found") {
         let (k, v) = item.expect(".env parse");
         if k == "PLEX_TOKEN" {

@@ -9,6 +9,10 @@ on:
   push:
     branches: [main, 'check/**']
 
+# Read-only token: these jobs only check out and test.
+permissions:
+  contents: read
+
 jobs:
   author-and-trailers:
     runs-on: ubuntu-latest

@@ -24,6 +24,10 @@ concurrency:
   group: ios-check-${{ github.ref }}
   cancel-in-progress: true
 
+# Read-only token: these jobs only check out and test.
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: macos-latest
