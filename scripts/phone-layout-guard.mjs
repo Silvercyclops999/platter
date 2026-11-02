@@ -392,11 +392,11 @@ try {
         await settle(page);
         await page.locator(".ph-search__bar input").first().click();
         await page.keyboard.type("night");
+        // Results come after the search waits for typing to stop.
+        await page.locator(".ph-search__results").first().waitFor({ timeout: 5000 }).catch(() => {});
         await settle(page);
         if (shots) await page.screenshot({ path: path.join(shots, `${look}-${width}-searchTyping.png`) });
         for (const f of await page.evaluate(audit)) failures.push({ route: "searchTyping", width, look, ...f });
-        await page.keyboard.press("Escape");
-        await page.locator(".ph-search__bar input").first().blur();
       }
       // Now playing, over Home, with a song and a queue behind it.
       if (!only.length || only.includes("nowPlaying")) {
