@@ -246,8 +246,17 @@ fn log_turned_away(host: &str, why: Why) {
 impl Cool {
 
     /// Wait `first`, then twice as long each time in a row, up to `most`.
+    /// A no that comes while already waiting (several requests turned away
+    /// in one burst) is the same no: it can make the wait longer, never
+    /// shorter, and doesn't count as another one in a row. A short reason
+    /// after a long one waits at most `most`, a long one after a short one
+    /// at least `first`.
     pub fn wait(&mut self, now: Instant, first: Duration, most: Duration) {
-        let wait = if self.next.is_zero() { first } else { self.next };
+        if let Some(until) = self.until.filter(|u| now < *u) {
+            self.until = Some(until.max(now + first));
+            return;
+        }
+        let wait = if self.next.is_zero() { first } else { self.next.clamp(first, most) };
         self.until = Some(now + wait);
         self.next = (wait * 2).min(most);
     }

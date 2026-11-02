@@ -1429,3 +1429,34 @@ fn a_relay_that_turns_this_address_away_says_why() {
     backup.turned_away_by(crate::social::listen::BACKUP_RELAYS[0], Why::Today, t0);
     assert!(backup.waiting(t0 + relay::BACKUP_COOL_FIRST));
 }
+
+#[test]
+fn a_relay_pause_follows_the_latest_reason_and_a_burst_counts_once() {
+    use relay::Why;
+    let host = crate::social::listen::DEFAULT_RELAY;
+    let t0 = std::time::Instant::now();
+    // Six links turned away in one burst: one short pause, not six doubled.
+    let mut c = relay::Cool::default();
+    for _ in 0..6 {
+        c.turned_away_by(host, Why::AtOnce, t0);
+    }
+    assert!(!c.waiting(t0 + relay::BACKUP_COOL_FIRST));
+    // The day used up right after a short pause is still the long pause.
+    let t1 = t0 + relay::BACKUP_COOL_FIRST;
+    c.turned_away_by(host, Why::Today, t1);
+    assert!(c.waiting(t1 + relay::COOL_FIRST - relay::BACKUP_COOL_FIRST));
+    // Too many at once after long pauses is short again.
+    let mut c = relay::Cool::default();
+    let mut t = t0;
+    for _ in 0..4 {
+        c.turned_away_by(host, Why::Today, t);
+        t += relay::COOL_MAX;
+    }
+    c.turned_away_by(host, Why::AtOnce, t);
+    assert!(!c.waiting(t + relay::BACKUP_COOL_MAX));
+    // A short reason during a long pause never shortens it.
+    let mut c = relay::Cool::default();
+    c.turned_away_by(host, Why::Today, t0);
+    c.turned_away_by(host, Why::AtOnce, t0 + relay::BACKUP_COOL_FIRST);
+    assert!(c.waiting(t0 + relay::COOL_FIRST - relay::BACKUP_COOL_FIRST));
+}

@@ -396,7 +396,7 @@ fn lan_sender(id: &str, reply: bool) -> String {
 pub fn relay_error(e: RelayError) -> String {
     match e {
         RelayError::Unreachable => "The relay can't be reached.".into(),
-        RelayError::Limited => "The relay is busy for now and will try again shortly.".into(),
+        RelayError::Limited => "The relay is busy for now. Platter tries again by itself.".into(),
         RelayError::Refused(c) => format!("The relay refused the message ({c})."),
     }
 }
