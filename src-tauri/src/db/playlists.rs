@@ -379,8 +379,8 @@ pub fn take_kept(c: &Connection, id: i64) -> AppResult<KeptPlaylist> {
 /// Put a copy taken by [`take_kept`] back (bringing it back failed).
 pub fn put_back_kept(c: &Connection, k: &KeptPlaylist) -> AppResult<()> {
     c.execute(
-        "INSERT OR IGNORE INTO playlist_trash (pk, playlist_id, title, summary, track_ids, gone, deleted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![k.id, k.playlist_id, k.title, k.summary, serde_json::json!(k.track_ids).to_string(), k.gone, k.deleted_at],
+        "INSERT INTO playlist_trash (playlist_id, title, summary, track_ids, gone, deleted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![k.playlist_id, k.title, k.summary, serde_json::json!(k.track_ids).to_string(), k.gone, k.deleted_at],
     )?;
     Ok(())
 }

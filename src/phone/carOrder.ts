@@ -23,7 +23,8 @@ export function carPlaylistOrder(entries: LibEntry[], sort: LibSort, recents: Re
 
 /** Keeps the core's copy of the order current (once the library has loaded). */
 export function useCarPlaylistOrder() {
-  const items = useLibraryView((s) => s.items);
+  // A library that failed to load isn't an empty one: keep the last order.
+  const items = useLibraryView((s) => (s.loadFailed ? null : s.items));
   const sort = useLibraryView((s) => s.sort);
   const recents = useLibraryView((s) => s.recents);
   const customOrder = useLibraryView((s) => s.customOrder);

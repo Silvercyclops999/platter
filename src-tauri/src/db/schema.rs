@@ -1441,6 +1441,7 @@ CREATE TABLE IF NOT EXISTS playlist_trash (
     gone        INTEGER NOT NULL DEFAULT 0,
     deleted_at  INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS playlist_trash_playlist ON playlist_trash (playlist_id);
 "#,
 ];
 
