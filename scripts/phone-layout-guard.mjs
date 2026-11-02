@@ -9,7 +9,8 @@
 //   text running out of its box sideways without an ellipsis, and pages that scroll sideways;
 //   icons (SVGs up to 48 px) cut off by a box that hides its overflow;
 //   single-line text cut off at the top or bottom (descenders) by a box that hides its overflow;
-//   tap targets (buttons, links, role=button, inputs) smaller than 44 x 44 CSS px.
+//   tap targets (buttons, links, role=button, inputs) smaller than 44 x 44 CSS px, or pushed past
+//   the screen's edge outside a row that scrolls sideways.
 // An inline text link that is meant to be small can opt out with data-tap-inline.
 //
 // Now playing is checked too, open over Home with a queue behind it.
@@ -156,6 +157,19 @@ function audit() {
     if (scrolls(s.overflowY) && scrolls(s.overflowX) && el.scrollWidth > el.clientWidth + 1 && el.scrollHeight > el.clientHeight + 1 && !hidden(el)) {
       add("page scrolls sideways", el, `${el.scrollWidth}px in ${el.clientWidth}px`);
     }
+  }
+
+  // Controls pushed past the screen's edge (outside anything that scrolls sideways).
+  const sideScroller = (el) => {
+    for (let e = el.parentElement; e && e !== shell; e = e.parentElement) if (scrolls(style(e).overflowX)) return true;
+    return false;
+  };
+  for (const el of shell.querySelectorAll("button, a[href], input, [role=button]")) {
+    if (hidden(el) || style(el).visibility === "hidden") continue;
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || (r.right <= vw + 1 && r.left >= -1)) continue;
+    if (sideScroller(el)) continue;
+    add("control past the screen edge", el, `${Math.round(r.left)} to ${Math.round(r.right)} on a ${vw}px screen`);
   }
 
   // Text: each run of text, against the box that holds it.
@@ -371,6 +385,18 @@ try {
           if (shots) await page.screenshot({ path: path.join(shots, `${look}-${width}-${where.replace(/[^\w-]+/g, "_")}.png`) });
           for (const f of await page.evaluate(audit)) failures.push({ route: where, width, look, ...f });
         }
+      }
+      // Search while typing: Cancel shows next to the field.
+      if (!only.length || only.includes("searchTyping")) {
+        await page.evaluate(() => window.__guardGo({ name: "search" }));
+        await settle(page);
+        await page.locator(".ph-search__bar input").first().click();
+        await page.keyboard.type("night");
+        await settle(page);
+        if (shots) await page.screenshot({ path: path.join(shots, `${look}-${width}-searchTyping.png`) });
+        for (const f of await page.evaluate(audit)) failures.push({ route: "searchTyping", width, look, ...f });
+        await page.keyboard.press("Escape");
+        await page.locator(".ph-search__bar input").first().blur();
       }
       // Now playing, over Home, with a song and a queue behind it.
       if (!only.length || only.includes("nowPlaying")) {
