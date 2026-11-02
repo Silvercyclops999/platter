@@ -524,6 +524,24 @@ export interface RemovedItem {
   index: number;
 }
 
+/** `playlists_deleted`: a deleted playlist, kept 30 days so it can be brought back. */
+export interface KeptPlaylist {
+  id: number;
+  title: string;
+  summary: string | null;
+  trackIds: string[];
+  /** The server lost it (deleted in another app), not deleted here. */
+  gone: boolean;
+  /** Unix seconds. */
+  deletedAt: number;
+}
+
+/** `playlist_bring_back`: the new playlist and how many songs were left out. */
+export interface BroughtBack {
+  playlist: Playlist;
+  leftOut: number;
+}
+
 /** `liked_page`: liked songs, newest like first. */
 export interface LikedPage {
   tracks: Track[];

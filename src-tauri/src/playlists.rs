@@ -409,13 +409,16 @@ impl Playlists {
         Ok(())
     }
 
-    /// Delete the playlist (from Plex too).
-    pub async fn delete(&self, id: String) -> AppResult<()> {
-        self.db()
+    /// Delete the playlist (from Plex too). What it held is kept for a
+    /// while ([`Playlists::bring_back`]); the kept copy's id is returned.
+    pub async fn delete(&self, id: String) -> AppResult<Option<i64>> {
+        let kept = self
+            .db()
             .write_async(move |c| {
                 let tx = c.transaction()?;
                 let p = local::editable(&tx, &id)?;
                 let local_only = local::is_local_only(&tx, &p.id)?;
+                let kept = local::keep_deleted(&tx, &p.id, false)?;
                 // A create that went out without an answer stays queued: if
                 // it landed, its replay finds that playlist and deletes it.
                 let sent: Vec<Op> = local::queued(&tx)?
@@ -432,11 +435,40 @@ impl Playlists {
                     local::enqueue(&tx, &p.id, &Op::Delete)?;
                 }
                 tx.commit()?;
-                Ok(())
+                Ok(kept)
             })
             .await?;
         self.edited();
-        Ok(())
+        Ok(kept)
+    }
+
+    /// Deleted playlists still kept, newest first.
+    pub async fn deleted(&self) -> AppResult<Vec<local::KeptPlaylist>> {
+        self.db().read_async(local::kept).await
+    }
+
+    /// Make a deleted playlist again: same name, description and songs in
+    /// the same order, leaving out songs the library no longer has. The
+    /// kept copy goes once the new one is made.
+    pub async fn bring_back(&self, kept_id: i64) -> AppResult<BroughtBack> {
+        let (k, have) = self
+            .db()
+            .read_async(move |c| {
+                let k = local::kept_one(c, kept_id)?;
+                let have = local::in_library(c, &k.track_ids)?;
+                Ok((k, have))
+            })
+            .await?;
+        if have.is_empty() {
+            return Err(AppError::Invalid(format!("None of the songs in {} are in your library any more.", k.title)));
+        }
+        let left_out = (k.track_ids.len() - have.len()) as u32;
+        let mut playlist = self.create(Some(k.title.clone()), have).await?;
+        if let Some(summary) = k.summary.filter(|s| !s.is_empty()) {
+            playlist = self.update(playlist.id.clone(), None, Some(summary)).await?;
+        }
+        self.db().write_async(move |c| local::drop_kept(c, kept_id)).await?;
+        Ok(BroughtBack { playlist, left_out })
     }
 
     // ------------------------------------------------------------ replay
@@ -820,6 +852,7 @@ impl Playlists {
                 let _ = self
                     .db()
                     .write_async(move |c| {
+                        local::keep_deleted(c, &id, true)?;
                         local::delete(c, &id)?;
                         local::drop_ops_for(c, &id)
                     })
@@ -934,8 +967,27 @@ pub async fn playlist_set_cover(
 }
 
 #[tauri::command]
-pub async fn playlist_delete(playlists: State<'_, Playlists>, id: String) -> AppResult<()> {
+pub async fn playlist_delete(playlists: State<'_, Playlists>, id: String) -> AppResult<Option<i64>> {
     playlists.delete(id).await
+}
+
+/// A deleted playlist made again.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BroughtBack {
+    pub playlist: Playlist,
+    /// Songs left out because the library no longer has them.
+    pub left_out: u32,
+}
+
+#[tauri::command]
+pub async fn playlists_deleted(playlists: State<'_, Playlists>) -> AppResult<Vec<local::KeptPlaylist>> {
+    playlists.deleted().await
+}
+
+#[tauri::command]
+pub async fn playlist_bring_back(playlists: State<'_, Playlists>, id: i64) -> AppResult<BroughtBack> {
+    playlists.bring_back(id).await
 }
 
 #[cfg(test)]

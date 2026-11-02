@@ -20,7 +20,8 @@ import { DEFAULT_SETTINGS } from "../lib/types";
 import { moveAfter, PlaylistPage, sortRows, stepAfter } from "../pages/PlaylistPage";
 import { Sidebar } from "../shell/Sidebar";
 import { connectApp, useApp } from "../stores/app";
-import { addToPlaylist, createPlaylist, usePlaylistUi } from "../stores/playlists";
+import { addToPlaylist, bringBack, createPlaylist, loadDeletedPlaylists, usePlaylistUi } from "../stores/playlists";
+import { DeletedPlaylists } from "../pages/PlaylistSettings";
 import { useRouter } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { useToasts } from "../stores/toasts";
@@ -431,6 +432,60 @@ describe("delete and details", () => {
     await waitFor(() => expect(route().name).toBe("home"));
     expect(toastText()).toContain("Deleted Delete me");
     expect((await backend.playlists()).some((x) => x.id === p.id)).toBe(false);
+  });
+
+  it("Undo after a delete brings the playlist back with its songs in order", async () => {
+    const user = userEvent.setup();
+    const p = await makePlaylist("Oops", 3);
+    const songs = await tracksOf(p.id);
+    act(() => useRouter.getState().navigate({ name: "playlist", id: p.id }));
+    page(p.id);
+    await user.click(await screen.findByRole("button", { name: "More options for Oops" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "Delete Oops?" })).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(toastText()).toContain("Deleted Oops"));
+    const t = useToasts.getState().toasts.find((x) => x.message === "Deleted Oops")!;
+    expect(t.action?.label).toBe("Undo");
+    act(() => t.action!.run());
+    await waitFor(() => expect(toastText()).toContain("Brought back Oops"));
+    const back = (await backend.playlists()).find((x) => x.title === "Oops")!;
+    expect(back.id).not.toBe(p.id);
+    expect(await tracksOf(back.id)).toEqual(songs);
+    expect(route()).toEqual({ name: "playlist", id: back.id });
+    expect((await backend.playlistsDeleted()).some((x) => x.title === "Oops")).toBe(false);
+  });
+
+  it("Settings lists deleted playlists, including ones gone from the server, and brings one back", async () => {
+    const user = userEvent.setup();
+    const p = await makePlaylist("Lost elsewhere", 2);
+    act(() => mock.pl.deleteElsewhere(p.id));
+    await loadDeletedPlaylists();
+    render(
+      <>
+        <DeletedPlaylists />
+        <Hosts />
+      </>,
+    );
+    const list = screen.getByRole("list", { name: "Deleted playlists" });
+    expect(within(list).getByText(/2 songs, gone from your server/)).toBeInTheDocument();
+    await user.click(within(list).getByRole("button", { name: "Bring back Lost elsewhere" }));
+    await waitFor(() => expect(toastText()).toContain("Brought back Lost elsewhere"));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Bring back Lost elsewhere" })).toBeNull());
+  });
+
+  it("bringing back says how many songs the library lost, and says so when none are left", async () => {
+    const p = await makePlaylist("Thin", 2);
+    const kept = (await backend.playlistDelete(p.id))!;
+    // One of its songs has left the library since.
+    mock.pl["kept"].find((x) => x.id === kept)!.trackIds[0] = "no-such-song";
+    await bringBack(kept);
+    expect(toastText()).toContain("Brought back Thin. 1 song isn't in your library any more.");
+    const p2 = await makePlaylist("Empty now", 1);
+    const kept2 = (await backend.playlistDelete(p2.id))!;
+    mock.pl["kept"].find((x) => x.id === kept2)!.trackIds = ["no-such-song"];
+    await bringBack(kept2);
+    expect(toastText().some((m) => m.includes("None of the songs in Empty now"))).toBe(true);
+    expect((await backend.playlistsDeleted()).some((x) => x.id === kept2)).toBe(true);
   });
 
   it("edit details: name and description with counters, saved together", async () => {

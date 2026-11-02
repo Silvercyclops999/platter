@@ -48,6 +48,8 @@ import type {
   AbLoop,
   AddPlace,
   RemovedItem,
+  KeptPlaylist,
+  BroughtBack,
   RemoteCommand,
   RemotePlayer,
   RemoteState,
@@ -433,7 +435,12 @@ export interface Backend {
   /** Rename and/or change the description ("" clears it). */
   playlistUpdate(id: string, details: { title?: string; summary?: string }): Promise<Playlist>;
   playlistSetCover(id: string, bytes: Uint8Array, contentType: string): Promise<void>;
-  playlistDelete(id: string): Promise<void>;
+  /** Deletes it; what it held is kept 30 days. Returns the kept copy's id (none for an empty one). */
+  playlistDelete(id: string): Promise<number | null>;
+  /** Deleted playlists still kept, newest first. */
+  playlistsDeleted(): Promise<KeptPlaylist[]>;
+  /** Make a deleted playlist again, leaving out songs the library no longer has. */
+  playlistBringBack(id: number): Promise<BroughtBack>;
 
   // Edit in Plex (docs/IPC.md "Edit in Plex")
   /** Whether editing is on, and which servers this account can edit. */
@@ -1489,6 +1496,8 @@ export function createTauriBackend(): Backend {
     playlistUpdate: (id, details) => call("playlist_update", { id, title: details.title, summary: details.summary }),
     playlistSetCover: (id, bytes, contentType) => call("playlist_set_cover", { id, bytes: Array.from(bytes), contentType }),
     playlistDelete: (id) => call("playlist_delete", { id }),
+    playlistsDeleted: () => call("playlists_deleted"),
+    playlistBringBack: (id) => call("playlist_bring_back", { id }),
     plexEditAccess: () => call("plex_edit_access"),
     plexEditItem: (id) => call("plex_edit_item", { id }),
     plexEditImages: (id, which) => call("plex_edit_images", { id, which }),

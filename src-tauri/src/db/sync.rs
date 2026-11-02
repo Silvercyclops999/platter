@@ -667,6 +667,9 @@ async fn sync_playlists(ctx: &Ctx, force_items: bool, owner: Option<&str>) -> Ap
                                 .query_row("SELECT updated_at FROM playlists WHERE id = ?1", [&pid], |r| r.get(0))
                                 .optional()?
                                 .flatten();
+                            if gone {
+                                crate::db::playlists::keep_deleted(&tx, &pid, true)?;
+                            }
                             tx.execute("DELETE FROM playlists WHERE id = ?1", [&pid])?;
                             store::playlist_failed(&tx, &pid, false)?;
                             store::set_playlist_unlistable(&tx, &pid, Some(updated_at))?;

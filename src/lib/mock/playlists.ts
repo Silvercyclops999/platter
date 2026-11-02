@@ -4,7 +4,7 @@
  * Writes happen at once, as if the server were always reachable; the test
  * hooks fake Plex refusing a write and a playlist deleted on another device.
  */
-import type { AddPlace, Playlist, RemovedItem, Track } from "../types";
+import type { AddPlace, BroughtBack, KeptPlaylist, Playlist, RemovedItem, Track } from "../types";
 import type { Fixtures } from "./fixtures";
 
 export const DEFAULT_PLAYLIST_NAME = "My playlist #N";
@@ -215,8 +215,9 @@ export class MockPlaylists {
     });
   }
 
-  delete(id: string): void {
-    this.editable(id);
+  delete(id: string): number | null {
+    const p = this.editable(id);
+    const trackIds = (this.rows.get(id) ?? []).map((r) => r.trackId);
     this.write(
       id,
       () => {
@@ -227,6 +228,33 @@ export class MockPlaylists {
       },
       "delete",
     );
+    return this.keep(p, trackIds, false);
+  }
+
+  /** What deleted playlists held (db::playlists::keep_deleted). */
+  private kept: KeptPlaylist[] = [];
+  private keptId = 1;
+
+  private keep(p: Playlist, trackIds: string[], gone: boolean): number | null {
+    if (p.smart || !trackIds.length) return null;
+    const id = this.keptId++;
+    this.kept.unshift({ id, title: p.title, summary: p.summary ?? null, trackIds, gone, deletedAt: Math.floor(Date.now() / 1000) });
+    return id;
+  }
+
+  deleted(): KeptPlaylist[] {
+    return this.kept.map((k) => ({ ...k }));
+  }
+
+  bringBack(template: string, keptId: number): BroughtBack {
+    const k = this.kept.find((x) => x.id === keptId);
+    if (!k) throw notFound("That playlist isn't kept any more.");
+    const have = k.trackIds.filter((t) => this.track(t));
+    if (!have.length) throw invalid(`None of the songs in ${k.title} are in your library any more.`);
+    let playlist = this.create(template, k.title, have);
+    if (k.summary) playlist = this.update(playlist.id, { summary: k.summary });
+    this.kept = this.kept.filter((x) => x.id !== keptId);
+    return { playlist, leftOut: k.trackIds.length - have.length };
   }
 
   // ---------------------------------------------------------------- test hooks
@@ -240,6 +268,7 @@ export class MockPlaylists {
   deleteElsewhere(id: string) {
     const i = this.fx.playlists.findIndex((p) => p.id === id);
     if (i < 0) return;
+    this.keep(this.fx.playlists[i], (this.rows.get(id) ?? []).map((r) => r.trackId), true);
     this.fx.playlists.splice(i, 1);
     this.rows.delete(id);
     this.fx.playlistTracks.delete(id);

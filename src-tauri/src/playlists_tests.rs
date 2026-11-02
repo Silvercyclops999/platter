@@ -737,3 +737,113 @@ fn a_playlist_belongs_to_the_server_with_its_songs() {
         .unwrap();
     assert_eq!(left, [format!("{a}:1")]);
 }
+
+// ---- deleted playlists can come back ---------------------------------------------
+
+#[tokio::test]
+async fn a_deleted_playlist_is_kept_and_comes_back_with_its_songs_in_order() {
+    let r = rig();
+    r.existing("70", "Late", &["3", "1", "2"]);
+    r.pl.update("70".into(), None, Some("For the drive home".into())).await.unwrap();
+    r.pl.replay().await;
+    let kept = r.pl.delete("70".into()).await.unwrap().expect("kept");
+    r.pl.replay().await;
+    assert!(r.plex.lists.lock().is_empty(), "deleted in Plex");
+    let list = r.pl.deleted().await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].id, kept);
+    assert_eq!(list[0].title, "Late");
+    assert_eq!(list[0].track_ids, s(&["3", "1", "2"]));
+    assert!(!list[0].gone);
+
+    let back = r.pl.bring_back(kept).await.unwrap();
+    assert_eq!(back.left_out, 0);
+    assert_eq!(back.playlist.title, "Late");
+    assert_eq!(back.playlist.summary.as_deref(), Some("For the drive home"));
+    assert_eq!(r.local_tracks(&back.playlist.id), ["3", "1", "2"]);
+    r.pl.replay().await;
+    let pid = r.page(&back.playlist.id).playlist.id;
+    assert_eq!(r.plex.tracks(&pid), ["3", "1", "2"]);
+    assert!(r.pl.deleted().await.unwrap().is_empty(), "the kept copy goes once it's back");
+}
+
+#[tokio::test]
+async fn bringing_back_leaves_out_songs_the_library_lost() {
+    let r = rig();
+    r.existing("71", "Mixed", &["1", "2", "3"]);
+    let kept = r.pl.delete("71".into()).await.unwrap().unwrap();
+    r.db.write(|c| Ok(c.execute("DELETE FROM tracks WHERE id = '2'", [])?)).unwrap();
+    let back = r.pl.bring_back(kept).await.unwrap();
+    assert_eq!(back.left_out, 1);
+    assert_eq!(r.local_tracks(&back.playlist.id), ["1", "3"]);
+}
+
+#[tokio::test]
+async fn bringing_back_with_none_of_its_songs_left_says_so_and_keeps_the_copy() {
+    let r = rig();
+    r.existing("72", "Old", &["4", "5"]);
+    let kept = r.pl.delete("72".into()).await.unwrap().unwrap();
+    r.db.write(|c| Ok(c.execute("DELETE FROM tracks WHERE id IN ('4', '5')", [])?)).unwrap();
+    let e = r.pl.bring_back(kept).await.unwrap_err();
+    assert!(matches!(e, AppError::Invalid(ref m) if m.contains("None of the songs")), "{e:?}");
+    assert_eq!(r.pl.deleted().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn bringing_back_while_the_server_is_away_makes_it_here_and_sends_it_later() {
+    let r = rig();
+    r.existing("73", "Away", &["1", "2"]);
+    let kept = r.pl.delete("73".into()).await.unwrap().unwrap();
+    r.pl.replay().await;
+    *r.plex.online.lock() = false;
+    let back = r.pl.bring_back(kept).await.unwrap();
+    assert_eq!(r.local_tracks(&back.playlist.id), ["1", "2"]);
+    assert!(r.pl.deleted().await.unwrap().is_empty());
+    *r.plex.online.lock() = true;
+    r.pl.replay().await;
+    let pid = r.page(&back.playlist.id).playlist.id;
+    assert_eq!(r.plex.tracks(&pid), ["1", "2"]);
+}
+
+#[tokio::test]
+async fn an_empty_playlist_is_not_kept() {
+    let r = rig();
+    let p = r.pl.create(Some("Nothing yet".into()), vec![]).await.unwrap();
+    assert_eq!(r.pl.delete(p.id).await.unwrap(), None);
+    assert!(r.pl.deleted().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_playlist_gone_from_the_server_at_a_sync_is_kept_as_gone() {
+    let r = rig();
+    r.existing("74", "Kept", &["1"]);
+    r.existing("75", "Lost", &["2", "3"]);
+    r.existing("76", "Also kept", &["4"]);
+    let still = [playlist("74", "Kept", 1), playlist("76", "Also kept", 1)];
+    r.db.write(|c| {
+        let tx = c.transaction()?;
+        store::replace_playlists(&tx, &still, false)?;
+        tx.commit()?;
+        Ok(())
+    })
+    .unwrap();
+    let list = r.pl.deleted().await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].title, "Lost");
+    assert!(list[0].gone);
+    assert_eq!(list[0].track_ids, s(&["2", "3"]));
+}
+
+#[tokio::test]
+async fn kept_playlists_go_after_thirty_days() {
+    let r = rig();
+    r.existing("77", "Ancient", &["1"]);
+    r.existing("78", "Recent", &["2"]);
+    r.pl.delete("77".into()).await.unwrap();
+    let old = queries::now_s() - local::KEEP_DELETED_S - 60;
+    r.db.write(move |c| Ok(c.execute("UPDATE playlist_trash SET deleted_at = ?1", [old])?)).unwrap();
+    assert!(r.pl.deleted().await.unwrap().is_empty(), "older than 30 days isn't listed");
+    r.pl.delete("78".into()).await.unwrap();
+    let left: i64 = r.db.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM playlist_trash", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(left, 1, "the old copy is dropped when the next one is kept");
+}

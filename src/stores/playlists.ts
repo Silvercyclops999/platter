@@ -7,7 +7,7 @@
 import { create } from "zustand";
 import { addToShared, isShared } from "./circle";
 import { backend } from "../lib/backend";
-import type { Playlist, RemovedItem } from "../lib/types";
+import type { KeptPlaylist, Playlist, RemovedItem } from "../lib/types";
 import { useLibraryView } from "./library";
 import { nav, useRouter } from "./router";
 import { useSettings } from "./settings";
@@ -196,11 +196,7 @@ export async function confirmRemove() {
   const ask = usePlaylistUi.getState().removing;
   usePlaylistUi.getState().set({ removing: null });
   if (!ask) return;
-  try {
-    await backend.playlistRemove(ask.playlist.id, ask.itemIds);
-  } catch (e) {
-    toast.error(failText(`Couldn't remove from ${ask.playlist.title}`, e));
-  }
+  await removeRows(ask.playlist, ask.itemIds, ask.order);
 }
 
 export function askDelete(playlist: Playlist) {
@@ -216,11 +212,44 @@ export async function confirmDelete() {
   const r = entries[index]?.route;
   if (r?.name === "playlist" && r.id === p.id) nav.go({ name: "home" });
   try {
-    await backend.playlistDelete(p.id);
-    toast.info(`Deleted ${p.title}`);
+    const kept = await backend.playlistDelete(p.id);
+    void loadDeletedPlaylists();
+    if (kept == null) {
+      toast.info(`Deleted ${p.title}`);
+      return;
+    }
+    useToasts.getState().push({ kind: "info", message: `Deleted ${p.title}`, action: { label: "Undo", run: () => void bringBack(kept) } }, UNDO_MS);
   } catch (e) {
     toast.error(failText(`Couldn't delete ${p.title}`, e));
   }
+}
+
+/** Deleted playlists still kept (Settings, Library), newest first; null until loaded. */
+export const useDeletedPlaylists = create<{ list: KeptPlaylist[] | null }>(() => ({ list: null }));
+
+export async function loadDeletedPlaylists(): Promise<void> {
+  try {
+    useDeletedPlaylists.setState({ list: await backend.playlistsDeleted() });
+  } catch {
+    // Settings shows no row; nothing else depends on it.
+  }
+}
+
+/** Make a deleted playlist again and open it. */
+export async function bringBack(keptId: number): Promise<void> {
+  try {
+    const { playlist, leftOut } = await backend.playlistBringBack(keptId);
+    useLibraryView.getState().touch("playlist", playlist.id);
+    toast.info(
+      leftOut > 0
+        ? `Brought back ${playlist.title}. ${songs(leftOut)} ${leftOut === 1 ? "isn't" : "aren't"} in your library any more.`
+        : `Brought back ${playlist.title}`,
+    );
+    nav.go({ name: "playlist", id: playlist.id });
+  } catch (e) {
+    toast.error(failText("Couldn't bring it back", e));
+  }
+  void loadDeletedPlaylists();
 }
 
 /** A new, ordinary playlist with the same songs (also how a smart playlist is kept as it is now). */

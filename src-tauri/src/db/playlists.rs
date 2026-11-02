@@ -295,6 +295,91 @@ pub fn delete(c: &Connection, playlist_id: &str) -> AppResult<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------------- deleted, kept
+
+/// How long a deleted playlist's songs are kept.
+pub const KEEP_DELETED_S: i64 = 30 * 86_400;
+
+/// A deleted playlist as kept, so it can be brought back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeptPlaylist {
+    pub id: i64,
+    pub title: String,
+    pub summary: Option<String>,
+    pub track_ids: Vec<String>,
+    /// The server lost it (deleted in another app), not deleted here.
+    pub gone: bool,
+    /// Unix seconds.
+    pub deleted_at: i64,
+}
+
+/// Keep what the playlist holds before it is deleted. Smart playlists and
+/// empty ones aren't kept. Returns the kept copy's id.
+pub fn keep_deleted(c: &Connection, playlist_id: &str, gone: bool) -> AppResult<Option<i64>> {
+    let Some(p) = playlist(c, playlist_id)? else { return Ok(None) };
+    if p.smart {
+        return Ok(None);
+    }
+    let track_ids: Vec<String> = items(c, playlist_id)?.into_iter().map(|i| i.track_id).collect();
+    if track_ids.is_empty() {
+        return Ok(None);
+    }
+    let now = now_s();
+    c.execute("DELETE FROM playlist_trash WHERE deleted_at < ?1", [now - KEEP_DELETED_S])?;
+    c.execute(
+        "INSERT INTO playlist_trash (playlist_id, title, summary, track_ids, gone, deleted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![p.id, p.title, p.summary, serde_json::json!(track_ids).to_string(), gone, now],
+    )?;
+    Ok(Some(c.last_insert_rowid()))
+}
+
+fn row_kept(r: &rusqlite::Row<'_>) -> rusqlite::Result<KeptPlaylist> {
+    let ids: String = r.get(3)?;
+    Ok(KeptPlaylist {
+        id: r.get(0)?,
+        title: r.get(1)?,
+        summary: r.get(2)?,
+        track_ids: serde_json::from_str(&ids).unwrap_or_default(),
+        gone: r.get(4)?,
+        deleted_at: r.get(5)?,
+    })
+}
+
+const KEPT_COLS: &str = "pk, title, summary, track_ids, gone, deleted_at";
+
+/// Deleted playlists still kept, newest first.
+pub fn kept(c: &Connection) -> AppResult<Vec<KeptPlaylist>> {
+    let mut st = c.prepare_cached(&format!(
+        "SELECT {KEPT_COLS} FROM playlist_trash WHERE deleted_at >= ?1 ORDER BY deleted_at DESC, pk DESC"
+    ))?;
+    let rows = st.query_map([now_s() - KEEP_DELETED_S], row_kept)?.collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+pub fn kept_one(c: &Connection, id: i64) -> AppResult<KeptPlaylist> {
+    c.query_row(&format!("SELECT {KEPT_COLS} FROM playlist_trash WHERE pk = ?1"), [id], row_kept)
+        .optional()?
+        .ok_or_else(|| AppError::NotFound("That playlist isn't kept any more.".into()))
+}
+
+pub fn drop_kept(c: &Connection, id: i64) -> AppResult<()> {
+    c.execute("DELETE FROM playlist_trash WHERE pk = ?1", [id])?;
+    Ok(())
+}
+
+/// Which of `track_ids` the library has now, in the order given.
+pub fn in_library(c: &Connection, track_ids: &[String]) -> AppResult<Vec<String>> {
+    let mut st = c.prepare_cached("SELECT 1 FROM tracks WHERE id = ?1")?;
+    let mut have = Vec::with_capacity(track_ids.len());
+    for id in track_ids {
+        if st.exists([id])? {
+            have.push(id.clone());
+        }
+    }
+    Ok(have)
+}
+
 /// A local row id that has since been given a Plex id maps to it.
 fn resolve_item(c: &Connection, id: &str) -> AppResult<String> {
     resolve_id(c, id)

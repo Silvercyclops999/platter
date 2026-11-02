@@ -44,7 +44,8 @@ import { loadSettings, updateSettings, useSettings } from "../stores/settings";
 import { nav, useCurrentEntry, useRouter } from "../stores/router";
 import { ComputerNameSetting } from "./DeviceSettings";
 import { INVITE_HOURS, ListenTextSetting } from "./ListenSettings";
-import { PlaylistNameSetting } from "./PlaylistSettings";
+import { DeletedPlaylists, PlaylistNameSetting } from "./PlaylistSettings";
+import { loadDeletedPlaylists, useDeletedPlaylists } from "../stores/playlists";
 import { LibraryImportSettings, importMatches } from "./LibraryImportSettings";
 import { PerDaySelect } from "./BringIn";
 import { AutomationSettings, StreamDeckSettings, automationMatches, streamDeckMatches } from "./StreamDeckSettings";
@@ -970,7 +971,9 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
   }, [artMb]);
   useEffect(() => {
     backend.appInfo().then(setInfo, () => {});
+    void loadDeletedPlaylists();
   }, []);
+  const deletedPlaylists = useDeletedPlaylists((x) => x.list);
 
   const conn = healthConn ?? auth?.server?.connection ?? null;
   const away = conn === "remote" || conn === "relay";
@@ -2274,6 +2277,19 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       more: "The name a new playlist gets. #N becomes the next free number, so you get My playlist #1, #2 and so on.",
       control: (ids) => <PlaylistNameSetting ids={ids} />,
     },
+    ...(deletedPlaylists?.length
+      ? [
+          {
+            key: "deletedPlaylists",
+            section: "Library" as const,
+            title: "Deleted playlists",
+            description: "Kept 30 days, also ones deleted in another app. Bring one back with its songs.",
+            more: "When a playlist is deleted, here or in another app, Platter keeps its name, description and songs on this device for 30 days. Bring back makes it again, leaving out songs your library no longer has.",
+            control: () => null,
+            block: () => <DeletedPlaylists />,
+          },
+        ]
+      : []),
     // Library: likes
     {
       key: "likedMeans",

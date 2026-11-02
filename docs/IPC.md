@@ -404,7 +404,9 @@ incremental sync runs every 15 minutes.
 | `playlist_move` | `{ id, itemIds, after? }` | – |
 | `playlist_update` | `{ id, title?, summary? }` | `Playlist` |
 | `playlist_set_cover` | `{ id, bytes: number[], contentType }` | – |
-| `playlist_delete` | `{ id }` | – |
+| `playlist_delete` | `{ id }` | `number \| null` (the kept copy's id; null for an empty playlist) |
+| `playlists_deleted` | – | `{ id, title, summary, trackIds, gone, deletedAt }[]`, newest first |
+| `playlist_bring_back` | `{ id }` (a kept copy) | `{ playlist: Playlist, leftOut }` |
 | `playlist_save_file` | `{ title, trackIds }` | `string \| null` (the saved file's name; null when cancelled) |
 
 `Playlist` also carries `summary` (the description) and `updatedAt` (unix
@@ -419,6 +421,13 @@ so edits made offline reach Plex later. If Plex refuses an edit, the rest of
 that playlist's queued edits are dropped, a `toast` says so, and the
 playlist is read back from Plex. A playlist deleted in Plex disappears here
 on the next read.
+
+What a deleted playlist held (name, description, songs in order) is kept on
+this device for 30 days, whether it was deleted here or is gone from the
+server at a sync (`gone`). Smart and empty playlists aren't kept.
+`playlist_bring_back` makes a new playlist from a kept copy, leaving out
+songs the library no longer has (`leftOut` counts them), and drops the copy.
+When none of its songs are left it fails with `invalid` and keeps the copy.
 
 `playlist_create` without `title` names the playlist from the
 `playlistNewName` setting, where `#N` becomes the next number no playlist

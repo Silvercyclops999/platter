@@ -1841,6 +1841,8 @@ pub fn run() {
             playlists::playlist_update,
             playlists::playlist_set_cover,
             playlists::playlist_delete,
+            playlists::playlists_deleted,
+            playlists::playlist_bring_back,
             plexedit::commands::plex_edit_access,
             plexedit::commands::plex_edit_item,
             plexedit::commands::plex_edit_images,

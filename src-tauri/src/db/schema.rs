@@ -1428,6 +1428,20 @@ CREATE TABLE IF NOT EXISTS explicit_check (
     expires_at INTEGER NOT NULL
 ) WITHOUT ROWID;
 "#,
+    // v51: what deleted playlists held, so they can be brought back
+    // (db::playlists::keep_deleted). `gone` = 1 when the server lost it
+    // rather than it being deleted here. Kept 30 days.
+    r#"
+CREATE TABLE IF NOT EXISTS playlist_trash (
+    pk          INTEGER PRIMARY KEY,
+    playlist_id TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    summary     TEXT,
+    track_ids   TEXT NOT NULL,
+    gone        INTEGER NOT NULL DEFAULT 0,
+    deleted_at  INTEGER NOT NULL
+);
+"#,
 ];
 
 #[cfg(test)]

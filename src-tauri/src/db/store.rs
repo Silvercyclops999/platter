@@ -498,6 +498,9 @@ pub fn replace_playlists_in(
         tracing::warn!(total, gone = gone.len(), "sync: playlist list would remove most playlists; kept them");
     } else {
         for id in gone {
+            // Gone from the server (deleted in another app, or lost): keep
+            // what it held so it can be brought back.
+            super::playlists::keep_deleted(tx, id, true)?;
             tx.execute("DELETE FROM playlists WHERE id = ?1", [id])?;
         }
     }

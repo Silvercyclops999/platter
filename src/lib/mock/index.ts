@@ -1605,9 +1605,16 @@ export class MockBackend implements Backend {
   }
   playlistDelete(id: string) {
     return this.delay(() => {
-      this.pl.delete(id);
+      const kept = this.pl.delete(id);
       this.circle.playlistDeleted(id);
+      return kept;
     });
+  }
+  playlistsDeleted() {
+    return this.delay(() => this.pl.deleted());
+  }
+  playlistBringBack(id: number) {
+    return this.delay(() => this.pl.bringBack(this.settings.playlistNewName, id));
   }
 
   // ---------------------------------------------------------------- edit in Plex
