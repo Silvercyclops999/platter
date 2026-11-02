@@ -1,15 +1,16 @@
 /**
  * Settings, Library, Tag editor: the music folder, the tag check for the
- * whole library, and Plex's library settings (read only).
+ * whole library, the last edits with Undo, and Plex's library settings (read only).
  */
 import { CircleCheck, CircleHelp, CircleX } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import { Button } from "../components/Button";
 import { backend } from "../lib/backend";
+import { timeAgo } from "../lib/relativeTime";
 import type { MusicFolderCheck, PlexLibraryCheck } from "../lib/types";
 import { errText } from "../stores/plexEdit";
 import { useSettings } from "../stores/settings";
-import { useTagEdit } from "../stores/tagEdit";
+import { undoTagEdit, useTagEdit, useTagEditHistory } from "../stores/tagEdit";
 import { toast } from "../stores/toasts";
 import "../components/plex-edit.css";
 import "../components/tag-edit.css";
@@ -112,6 +113,39 @@ export function CheckTagsButton() {
     <Button size="sm" onClick={() => useTagEdit.getState().openCheck({ kind: "library" }, "Library")}>
       Check tags
     </Button>
+  );
+}
+
+/** The last tag edits, each with Undo (it puts back what the edit replaced). */
+export function RecentTagEdits() {
+  const list = useTagEditHistory((s) => s.list) ?? [];
+  const [busy, setBusy] = useState<string | null>(null);
+  return (
+    <ul className="dismissed-list" aria-label="Recent tag edits">
+      {list.map((e) => (
+        <li key={e.id} className="dismissed-list__item">
+          <span className="dismissed-list__name">
+            {e.label}
+            <span className="setting-row__note">
+              {" "}
+              {e.files === 1 ? "1 file" : `${e.files} files`}, {timeAgo(e.at / 1000).toLowerCase()}
+            </span>
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy !== null}
+            onClick={() => {
+              setBusy(e.id);
+              void undoTagEdit(e.id).finally(() => setBusy(null));
+            }}
+            aria-label={`Undo ${e.label}`}
+          >
+            Undo
+          </Button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

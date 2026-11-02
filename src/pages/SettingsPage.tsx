@@ -46,6 +46,7 @@ import { ComputerNameSetting } from "./DeviceSettings";
 import { INVITE_HOURS, ListenTextSetting } from "./ListenSettings";
 import { DeletedPlaylists, PlaylistNameSetting } from "./PlaylistSettings";
 import { loadDeletedPlaylists, useDeletedPlaylists } from "../stores/playlists";
+import { loadTagEditHistory, useTagEditHistory } from "../stores/tagEdit";
 import { LibraryImportSettings, importMatches } from "./LibraryImportSettings";
 import { PerDaySelect } from "./BringIn";
 import { AutomationSettings, StreamDeckSettings, automationMatches, streamDeckMatches } from "./StreamDeckSettings";
@@ -67,7 +68,7 @@ import { hifiRows } from "./HifiSettings";
 import { MoreText } from "./SettingMore";
 import { coversNote, discordNote, ImgurKeyControl, imgurNote, useDiscordStatus } from "./DiscordSettings";
 import { EXPLICIT_OPTIONS, TagScanNote } from "./FileTagSettings";
-import { CheckTagsButton, MusicFolderControl, MusicFolderNote, MusicFolderPath, PlexLibrarySettings } from "./TagEditorSettings";
+import { CheckTagsButton, MusicFolderControl, MusicFolderNote, MusicFolderPath, PlexLibrarySettings, RecentTagEdits } from "./TagEditorSettings";
 import { ChangeFolderControl, FolderNote, QueueNote, RemoveAllControl, StorageNote, downloadsTitle, useDownloadStatus } from "./DownloadSettings";
 import { DeviceFormatSetting, DeviceListSetting, OpenDevicesButton } from "./DeviceSyncSettings";
 import { BatchControl, BatchNote, TranscribeNote } from "./TranscribeSettings";
@@ -972,8 +973,10 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
   useEffect(() => {
     backend.appInfo().then(setInfo, () => {});
     void loadDeletedPlaylists();
+    void loadTagEditHistory();
   }, []);
   const deletedPlaylists = useDeletedPlaylists((x) => x.list);
+  const tagEdits = useTagEditHistory((x) => x.list);
 
   const conn = healthConn ?? auth?.server?.connection ?? null;
   const away = conn === "remote" || conn === "relay";
@@ -3716,6 +3719,21 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       more: "Looks for tags worth fixing: missing album artists, album details that differ between songs, release types missing a part, disc numbers, release status gaps and more. Each one says why it matters, with a fix when the music folder is set.",
       control: () => <CheckTagsButton />,
     },
+    ...(tagEdits?.length
+      ? [
+          {
+            key: "recentTagEdits",
+            section: "Library" as const,
+            page: "tags" as const,
+            group: "Tag editor",
+            title: "Recent tag edits",
+            description: "The last 20 edits. Undo puts back what one replaced.",
+            more: "Platter keeps what each of your last 20 tag edits replaced, library doctor fixes included. Undo puts it back on the files the edit changed, as long as nothing else has changed them since.",
+            control: () => null,
+            block: () => <RecentTagEdits />,
+          },
+        ]
+      : []),
     {
       key: "plexLibrarySettings",
       section: "Library",

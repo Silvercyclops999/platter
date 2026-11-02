@@ -17,7 +17,7 @@ import { LikedCover } from "../../components/LikedCover";
 import { KIND_LABEL, SORT_LABEL, useLibraryView, type LibEntry, type LibKind } from "../../stores/library";
 import { openEntry, useLibraryLoader, useLibraryModel } from "../../shell/useLibrary";
 import { useApp } from "../../stores/app";
-import { useDoctorCount } from "../../stores/doctor";
+import { fineLine, useDoctorCount, useLibraryFineSince } from "../../stores/doctor";
 import { useSettings } from "../../stores/settings";
 import { useDownloads } from "../../stores/downloads";
 import type { DownloadKind, MixSummary } from "../../lib/types";
@@ -260,10 +260,15 @@ function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof use
   );
 }
 
-/** The library doctor, at the end of the list while it has something to fix. */
+/**
+ * The library doctor, at the end of the list while it has something to fix;
+ * otherwise one quiet line that says the library is fine.
+ */
 function DoctorRow() {
   const on = useSettings((s) => s.settings?.libraryDoctor !== false);
   const count = useDoctorCount();
+  const fineSince = useLibraryFineSince();
+  if (on && count <= 0 && fineSince !== null) return <p className="ph-library__fine">{fineLine(fineSince)}</p>;
   if (!on || count <= 0) return null;
   return (
     <ul className="ph-set-list ph-library__doctor" aria-label="Library doctor">
