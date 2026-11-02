@@ -135,7 +135,7 @@ describe("the You tab", () => {
     const you = await screen.findByTestId("phone-you");
     expect(within(you).getByRole("heading", { level: 1 })).toHaveTextContent("listener");
     // This month as the profile page says it: one sentence, how long and mostly to whom.
-    await waitFor(() => expect(within(you).getByTestId("you-month")).toHaveTextContent(/^\d[\d,]* (min|hrs?) this month, /));
+    await waitFor(() => expect(within(you).getByTestId("you-month")).toHaveTextContent(/^\d[\d,]* (min|hrs?)( \d+ min)? this month, /));
     fireEvent.click(within(you).getByRole("button", { name: /Wrapped/ }));
     expect(useWrapped.getState().year).not.toBeNull();
     act(() => useWrapped.getState().close());
