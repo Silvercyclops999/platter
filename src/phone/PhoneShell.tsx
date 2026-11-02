@@ -42,6 +42,7 @@ import { TABS, phone, tabOf, usePhoneUi, type PhoneTab } from "./phoneUi";
 import { PageStack } from "./PageStack";
 import { PhoneRoutePage } from "./routes";
 import { SheetHost } from "./Sheets";
+import { useCarPlaylistOrder } from "./carOrder";
 import "./phone.css";
 
 
@@ -108,6 +109,7 @@ export function PhoneShell() {
   const dock = useRef<HTMLDivElement>(null);
   useEffect(() => (root.current && dock.current ? followDock(root.current, dock.current) : undefined), [hasTrack]);
   useLibraryRecents();
+  useCarPlaylistOrder();
   useEffect(() => void loadOwnLyricsIds(), []);
   useEffect(() => void startDownloads(), []);
   useEffect(() => void followSleep(), []);

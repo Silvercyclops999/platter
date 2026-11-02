@@ -996,3 +996,28 @@ fn a_like_that_fails_puts_the_heart_back_unless_the_car_moved_on() {
     // Tapped again since: that tap's state stands.
     assert!(!like_goes_back(Some("t1"), false, "t1", true));
 }
+
+#[tokio::test]
+async fn playlists_show_in_the_phone_librarys_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = DbHandle::open(dir.path().join("library.db")).unwrap();
+    db.write(|c| {
+        for (id, title) in [("p1", "Alpha"), ("p2", "Bravo"), ("p3", "Charlie"), ("p4", "Delta")] {
+            c.execute("INSERT INTO playlists (id, title) VALUES (?1, ?2)", [id, title])?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    let titles = |db: &DbHandle| -> Vec<String> {
+        db.read(|c| list(c, &CarList::Playlists, 10.0)).unwrap().into_iter().map(|i| i.title).collect()
+    };
+    // Before the phone says, A to Z (nothing played yet).
+    assert_eq!(titles(&db), ["Alpha", "Bravo", "Charlie", "Delta"]);
+    // The phone's order; one it hasn't placed yet (a new playlist) follows.
+    let ids = serde_json::json!(["p3", "p1", "p4"]).to_string();
+    db.write(move |c| crate::db::store::kv_set(c, crate::db::queries::PLAYLIST_ORDER_KEY, &ids)).unwrap();
+    assert_eq!(titles(&db), ["Charlie", "Alpha", "Delta", "Bravo"]);
+    // A saved order that can't be read is ignored, not an error.
+    db.write(|c| crate::db::store::kv_set(c, crate::db::queries::PLAYLIST_ORDER_KEY, "not json")).unwrap();
+    assert_eq!(titles(&db), ["Alpha", "Bravo", "Charlie", "Delta"]);
+}

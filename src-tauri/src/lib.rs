@@ -1814,6 +1814,7 @@ pub fn run() {
             db::commands::sync_status,
             db::commands::sync_now,
             db::commands::home,
+            db::commands::playlist_order_set,
             db::commands::home_records,
             db::commands::home_shelf,
             db::commands::artists,

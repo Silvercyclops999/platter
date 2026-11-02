@@ -407,6 +407,7 @@ incremental sync runs every 15 minutes.
 | `playlist_delete` | `{ id }` | `number \| null` (the kept copy's id; null for an empty playlist) |
 | `playlists_deleted` | – | `{ id, title, summary, trackIds, gone, deletedAt }[]`, newest first |
 | `playlist_bring_back` | `{ id }` (a kept copy) | `{ playlist: Playlist, leftOut }` |
+| `playlist_order_set` | `{ ids }` | – (the order the phone's Library lists playlists in; CarPlay's Playlists list follows it) |
 | `playlist_save_file` | `{ title, trackIds }` | `string \| null` (the saved file's name; null when cancelled) |
 
 `Playlist` also carries `summary` (the description) and `updatedAt` (unix

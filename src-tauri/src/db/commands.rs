@@ -334,3 +334,12 @@ pub async fn search_recent_remove(db: State<'_, DbHandle>, kind: SearchKind, id:
 pub async fn search_recents_clear(db: State<'_, DbHandle>) -> AppResult<()> {
     db.write_async(|c| search::recent_clear(c)).await
 }
+
+/// The order the Library shows playlists in (ids), so CarPlay lists them
+/// the same way. Only the first 500 are kept.
+#[tauri::command]
+pub async fn playlist_order_set(db: State<'_, DbHandle>, ids: Vec<String>) -> AppResult<()> {
+    let ids: Vec<String> = ids.into_iter().take(500).collect();
+    let value = serde_json::json!(ids).to_string();
+    db.write_async(move |c| super::store::kv_set(c, queries::PLAYLIST_ORDER_KEY, &value)).await
+}

@@ -176,6 +176,27 @@ pub fn home_playlists(c: &Connection, limit: usize) -> AppResult<Vec<Playlist>> 
     Ok(st.query_map([limit as i64], row_playlist)?.collect::<Result<Vec<_>, _>>()?)
 }
 
+/// Where the phone's Library keeps the order its playlists show in (ids),
+/// so CarPlay lists them the same way.
+pub const PLAYLIST_ORDER_KEY: &str = "libraryPlaylistOrder";
+
+/// Playlists in the order the Library shows them (set by the UI with
+/// `playlist_order_set`); ones it hasn't placed follow, recently played
+/// first as on Home.
+pub fn library_playlists(c: &Connection, limit: usize) -> AppResult<Vec<Playlist>> {
+    let order: Vec<String> = super::store::kv_get(c, PLAYLIST_ORDER_KEY)?
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
+    let mut all = home_playlists(c, i64::MAX as usize)?;
+    if !order.is_empty() {
+        let at: std::collections::HashMap<&str, usize> = order.iter().enumerate().map(|(i, id)| (id.as_str(), i)).collect();
+        // Stable: unplaced ones keep their place among themselves.
+        all.sort_by_key(|p| at.get(p.id.as_str()).copied().unwrap_or(usize::MAX));
+    }
+    all.truncate(limit);
+    Ok(all)
+}
+
 pub fn recently_added(c: &Connection, limit: usize) -> AppResult<Vec<Album>> {
     let mut st = c.prepare_cached(&format!(
         "SELECT {ALBUM_COLS} FROM albums al ORDER BY al.added_at DESC, al.pk DESC LIMIT ?1"

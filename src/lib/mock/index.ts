@@ -1610,6 +1610,13 @@ export class MockBackend implements Backend {
       return kept;
     });
   }
+  /** What CarPlay would list playlists by (tests read it). */
+  playlistOrder: string[] = [];
+  playlistOrderSet(ids: string[]) {
+    return this.delay(() => {
+      this.playlistOrder = [...ids];
+    });
+  }
   playlistsDeleted() {
     return this.delay(() => this.pl.deleted());
   }

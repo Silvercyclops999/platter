@@ -247,7 +247,8 @@ pub fn page(c: &Connection, which: &CarList, liked_min: f64, page: usize, room: 
     Ok(match which {
         CarList::RecentlyPlayed => queries::recently_played(c, LIST_MAX)?.into_iter().map(home_item).collect(),
         CarList::RecentlyAdded => queries::recently_added(c, LIST_MAX)?.into_iter().map(album_item).collect(),
-        CarList::Playlists => queries::home_playlists(c, LIST_MAX)?.into_iter().map(playlist_item).collect(),
+        // In the phone Library's order.
+        CarList::Playlists => queries::library_playlists(c, LIST_MAX)?.into_iter().map(playlist_item).collect(),
         CarList::Albums => {
             let albums = every(|off| Ok(queries::albums(c, AlbumSort::Name, off, PAGE_READ, None)?.items))?;
             let rows = albums.into_iter().map(|a| (filing(&a.sort_title), album_item(a))).collect();

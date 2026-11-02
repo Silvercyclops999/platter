@@ -437,6 +437,8 @@ export interface Backend {
   playlistSetCover(id: string, bytes: Uint8Array, contentType: string): Promise<void>;
   /** Deletes it; what it held is kept 30 days. Returns the kept copy's id (none for an empty one). */
   playlistDelete(id: string): Promise<number | null>;
+  /** The order the phone's Library lists playlists in, so CarPlay matches it. */
+  playlistOrderSet(ids: string[]): Promise<void>;
   /** Deleted playlists still kept, newest first. */
   playlistsDeleted(): Promise<KeptPlaylist[]>;
   /** Make a deleted playlist again, leaving out songs the library no longer has. */
@@ -1497,6 +1499,7 @@ export function createTauriBackend(): Backend {
     playlistSetCover: (id, bytes, contentType) => call("playlist_set_cover", { id, bytes: Array.from(bytes), contentType }),
     playlistDelete: (id) => call("playlist_delete", { id }),
     playlistsDeleted: () => call("playlists_deleted"),
+    playlistOrderSet: (ids) => call("playlist_order_set", { ids }),
     playlistBringBack: (id) => call("playlist_bring_back", { id }),
     plexEditAccess: () => call("plex_edit_access"),
     plexEditItem: (id) => call("plex_edit_item", { id }),
