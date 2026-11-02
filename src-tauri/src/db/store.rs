@@ -408,7 +408,7 @@ fn table_for(kind: ItemKind) -> &'static str {
 /// recent searches and settings.
 pub fn wipe_library(tx: &Transaction<'_>) -> AppResult<()> {
     tx.execute_batch(
-        "DELETE FROM playlist_items; DELETE FROM playlists; DELETE FROM playlist_ops;
+        "DELETE FROM playlist_items; DELETE FROM playlists; DELETE FROM playlist_ops; DELETE FROM playlist_trash;
          DELETE FROM playlist_aliases; DELETE FROM tracks WHERE src = '';
          DELETE FROM albums WHERE src = ''; DELETE FROM artists WHERE src = '';
          DELETE FROM play_history; DELETE FROM sync_state;",
@@ -601,6 +601,9 @@ pub fn upsert_playlist(c: &Connection, p: &Playlist) -> AppResult<()> {
         p.summary,
         p.updated_at
     ])?;
+    // There again (a delete the server refused, or a sync that raced it):
+    // no longer deleted.
+    c.prepare_cached("DELETE FROM playlist_trash WHERE playlist_id = ?1")?.execute([&p.id])?;
     Ok(())
 }
 

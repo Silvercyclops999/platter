@@ -451,23 +451,32 @@ impl Playlists {
     /// the same order, leaving out songs the library no longer has. The
     /// kept copy goes once the new one is made.
     pub async fn bring_back(&self, kept_id: i64) -> AppResult<BroughtBack> {
+        // Taken out first, so Undo and Settings pressed together make one.
         let (k, have) = self
             .db()
-            .read_async(move |c| {
+            .write_async(move |c| {
                 let k = local::kept_one(c, kept_id)?;
                 let have = local::in_library(c, &k.track_ids)?;
-                Ok((k, have))
+                if have.is_empty() {
+                    return Err(AppError::Invalid(format!("None of the songs in {} are in your library any more.", k.title)));
+                }
+                Ok((local::take_kept(c, kept_id)?, have))
             })
             .await?;
-        if have.is_empty() {
-            return Err(AppError::Invalid(format!("None of the songs in {} are in your library any more.", k.title)));
-        }
         let left_out = (k.track_ids.len() - have.len()) as u32;
-        let mut playlist = self.create(Some(k.title.clone()), have).await?;
-        if let Some(summary) = k.summary.filter(|s| !s.is_empty()) {
-            playlist = self.update(playlist.id.clone(), None, Some(summary)).await?;
-        }
-        self.db().write_async(move |c| local::drop_kept(c, kept_id)).await?;
+        let made = match self.create(Some(k.title.clone()), have).await {
+            Ok(p) => p,
+            Err(e) => {
+                let back = k.clone();
+                let _ = self.db().write_async(move |c| local::put_back_kept(c, &back)).await;
+                return Err(e);
+            }
+        };
+        // The playlist is made; a description that doesn't take isn't worth failing over.
+        let playlist = match k.summary.filter(|s| !s.is_empty()) {
+            Some(summary) => self.update(made.id.clone(), None, Some(summary)).await.unwrap_or(made),
+            None => made,
+        };
         Ok(BroughtBack { playlist, left_out })
     }
 

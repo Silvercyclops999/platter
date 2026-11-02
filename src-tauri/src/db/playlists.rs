@@ -305,6 +305,9 @@ pub const KEEP_DELETED_S: i64 = 30 * 86_400;
 #[serde(rename_all = "camelCase")]
 pub struct KeptPlaylist {
     pub id: i64,
+    /// The deleted playlist's own id (not sent to the UI).
+    #[serde(skip)]
+    pub playlist_id: String,
     pub title: String,
     pub summary: Option<String>,
     pub track_ids: Vec<String>,
@@ -326,7 +329,7 @@ pub fn keep_deleted(c: &Connection, playlist_id: &str, gone: bool) -> AppResult<
         return Ok(None);
     }
     let now = now_s();
-    c.execute("DELETE FROM playlist_trash WHERE deleted_at < ?1", [now - KEEP_DELETED_S])?;
+    c.execute("DELETE FROM playlist_trash WHERE deleted_at < ?1 OR playlist_id = ?2", params![now - KEEP_DELETED_S, p.id])?;
     c.execute(
         "INSERT INTO playlist_trash (playlist_id, title, summary, track_ids, gone, deleted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![p.id, p.title, p.summary, serde_json::json!(track_ids).to_string(), gone, now],
@@ -343,10 +346,11 @@ fn row_kept(r: &rusqlite::Row<'_>) -> rusqlite::Result<KeptPlaylist> {
         track_ids: serde_json::from_str(&ids).unwrap_or_default(),
         gone: r.get(4)?,
         deleted_at: r.get(5)?,
+        playlist_id: r.get(6)?,
     })
 }
 
-const KEPT_COLS: &str = "pk, title, summary, track_ids, gone, deleted_at";
+const KEPT_COLS: &str = "pk, title, summary, track_ids, gone, deleted_at, playlist_id";
 
 /// Deleted playlists still kept, newest first.
 pub fn kept(c: &Connection) -> AppResult<Vec<KeptPlaylist>> {
@@ -363,8 +367,21 @@ pub fn kept_one(c: &Connection, id: i64) -> AppResult<KeptPlaylist> {
         .ok_or_else(|| AppError::NotFound("That playlist isn't kept any more.".into()))
 }
 
-pub fn drop_kept(c: &Connection, id: i64) -> AppResult<()> {
-    c.execute("DELETE FROM playlist_trash WHERE pk = ?1", [id])?;
+/// Take a kept copy out (to bring it back): only one caller gets it.
+pub fn take_kept(c: &Connection, id: i64) -> AppResult<KeptPlaylist> {
+    let k = kept_one(c, id)?;
+    if c.execute("DELETE FROM playlist_trash WHERE pk = ?1", [id])? == 0 {
+        return Err(AppError::NotFound("That playlist isn't kept any more.".into()));
+    }
+    Ok(k)
+}
+
+/// Put a copy taken by [`take_kept`] back (bringing it back failed).
+pub fn put_back_kept(c: &Connection, k: &KeptPlaylist) -> AppResult<()> {
+    c.execute(
+        "INSERT OR IGNORE INTO playlist_trash (pk, playlist_id, title, summary, track_ids, gone, deleted_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![k.id, k.playlist_id, k.title, k.summary, serde_json::json!(k.track_ids).to_string(), k.gone, k.deleted_at],
+    )?;
     Ok(())
 }
 

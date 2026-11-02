@@ -847,3 +847,51 @@ async fn kept_playlists_go_after_thirty_days() {
     let left: i64 = r.db.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM playlist_trash", [], |r| r.get(0))?)).unwrap();
     assert_eq!(left, 1, "the old copy is dropped when the next one is kept");
 }
+
+#[tokio::test]
+async fn a_delete_the_server_refuses_is_not_listed_as_deleted() {
+    let r = rig();
+    r.existing("79", "Stays", &["1", "2"]);
+    r.pl.delete("79".into()).await.unwrap().unwrap();
+    *r.plex.fail_next.lock() = Some(AppError::Invalid("Unexpected response 400.".into()));
+    r.pl.replay().await;
+    assert!(r.db.read(|c| local::playlist(c, "79")).unwrap().is_some(), "read back from Plex");
+    assert!(r.pl.deleted().await.unwrap().is_empty(), "it isn't deleted, so it can't be brought back");
+}
+
+#[tokio::test]
+async fn the_same_playlist_is_kept_once() {
+    let r = rig();
+    r.existing("80", "Twice", &["1"]);
+    r.db.write(|c| local::keep_deleted(c, "80", false)).unwrap();
+    r.db.write(|c| local::keep_deleted(c, "80", true)).unwrap();
+    let list = r.pl.deleted().await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert!(list[0].gone, "the latest one counts");
+}
+
+#[tokio::test]
+async fn undo_and_bring_back_pressed_together_make_one_playlist() {
+    let r = rig();
+    r.existing("81", "Once", &["1", "2"]);
+    let kept = r.pl.delete("81".into()).await.unwrap().unwrap();
+    let (a, b) = tokio::join!(r.pl.bring_back(kept), r.pl.bring_back(kept));
+    assert!(a.is_ok() != b.is_ok(), "one of them makes it: {a:?} {b:?}");
+    let made = r.db.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM playlists WHERE title = 'Once'", [], |r| r.get::<_, i64>(0))?)).unwrap();
+    assert_eq!(made, 1);
+}
+
+#[tokio::test]
+async fn replacing_the_library_forgets_kept_playlists() {
+    let r = rig();
+    r.existing("82", "Other server", &["1"]);
+    r.pl.delete("82".into()).await.unwrap().unwrap();
+    r.db.write(|c| {
+        let tx = c.transaction()?;
+        store::wipe_library(&tx)?;
+        tx.commit()?;
+        Ok(())
+    })
+    .unwrap();
+    assert!(r.pl.deleted().await.unwrap().is_empty(), "its songs would be another library's");
+}
