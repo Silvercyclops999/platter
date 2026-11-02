@@ -82,7 +82,7 @@ describe("Profile page", () => {
     await waitFor(() => expect(screen.getByTestId("profile-month")).toHaveTextContent(monthLine(o)));
     const told = screen.getByTestId("profile-month");
     expect(told).toHaveTextContent(o.topArtists[0].name);
-    expect(told).toHaveTextContent(/^\d[\d,]* (min|hrs?) this month/);
+    expect(told).toHaveTextContent(/^\d[\d,]* (min|hrs?)( \d+ min)? this month/);
     expect(within(told).queryByRole("term")).toBeNull();
     await user.click(screen.getByRole("button", { name: "More options for your profile" }));
     expect(await screen.findByRole("menuitem", { name: /See all your stats/ })).toBeInTheDocument();
