@@ -91,6 +91,7 @@ const SAMPLES = `async (m) => {
     import: { name: "import" },
     bring: { name: "bring" },
     doctor: { name: "doctor" },
+    gone: { name: "gone" },
     devices: { name: "devices" },
     soundMap: { name: "soundMap" },
     crates: { name: "crates" },

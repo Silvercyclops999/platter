@@ -168,8 +168,13 @@ jobs:
       # pulls in. That version only re-exports webpki-roots 1, which is on the fixed
       # 1.0.10, so the roots it gives are the fixed ones. Drop it once
       # tokio-tungstenite depends on webpki-roots 1 directly.
+      # RUSTSEC-2026-0429 is ZipArchive::extract aborting on a symlink entry with a
+      # huge declared size, in zip 4 and 7. zip 4 is the updater's (signed packages
+      # only, as above); zip 7 comes with candle-core, which only reads model files
+      # by name and never extracts. Platter's own code is on zip 9. Drop it with the
+      # others once both move to zip 9.
       - name: cargo audit
-        run: cargo audit --file src-tauri/Cargo.lock --ignore RUSTSEC-2026-0367 --ignore RUSTSEC-2026-0368 --ignore RUSTSEC-2026-0369 --ignore RUSTSEC-2026-0381
+        run: cargo audit --file src-tauri/Cargo.lock --ignore RUSTSEC-2026-0367 --ignore RUSTSEC-2026-0368 --ignore RUSTSEC-2026-0369 --ignore RUSTSEC-2026-0381 --ignore RUSTSEC-2026-0429
       - uses: actions/setup-node@v4
         with:
           node-version: 22
