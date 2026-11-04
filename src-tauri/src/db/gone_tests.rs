@@ -153,3 +153,49 @@ fn a_new_library_forgets_what_the_old_one_lost() {
         .unwrap();
     assert_eq!(t.db.read(|c| Ok(c.query_row("SELECT count(*) FROM tracks_gone", [], |r| r.get::<_, i64>(0))?)).unwrap(), 0);
 }
+
+#[tokio::test]
+async fn a_same_named_song_on_an_old_album_does_not_hide_a_loss() {
+    let t = open();
+    let src = Arc::new(FakeSource::new(fake::generated(1, 2, 3)));
+    {
+        // Both albums have an "Intro".
+        let mut l = src.lib.lock();
+        let firsts: Vec<usize> = l.tracks.iter().enumerate().filter(|(_, x)| x.track_number == 1).map(|(i, _)| i).collect();
+        for i in firsts {
+            l.tracks[i].title = "Intro".into();
+        }
+    }
+    sync(&t.db, &src, false).await;
+    {
+        let mut l = src.lib.lock();
+        let i = l.tracks.iter().position(|x| x.title == "Intro").unwrap();
+        l.tracks.remove(i);
+    }
+    sync(&t.db, &src, false).await;
+    let g = gone(&t.db);
+    assert_eq!(g.len(), 1, "the other album's Intro is old, so this one is really gone");
+    assert_eq!(g[0].title, "Intro");
+}
+
+#[tokio::test]
+async fn a_song_back_on_a_new_album_by_the_same_artist_is_not_gone() {
+    let t = open();
+    let src = Arc::new(FakeSource::new(fake::generated(1, 1, 3)));
+    sync(&t.db, &src, false).await;
+    {
+        // The song left its album and came back on a new edition, just added.
+        let mut l = src.lib.lock();
+        let tr = l.tracks.remove(0);
+        let ar = l.artists[0].clone();
+        let mut al = fake::album("8001", "Deluxe Edition", &ar, 2026, None, &[]);
+        al.added_at = now_s();
+        let back = fake::track("8002", &tr.title, &al, 1, 1);
+        l.updated.insert("8001".into(), now_s());
+        l.updated.insert("8002".into(), now_s());
+        l.albums.push(al);
+        l.tracks.push(back);
+    }
+    sync(&t.db, &src, false).await;
+    assert!(gone(&t.db).is_empty());
+}

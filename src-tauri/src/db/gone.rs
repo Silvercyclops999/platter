@@ -44,16 +44,23 @@ pub fn record_unseen(tx: &Transaction<'_>, gen_: i64, src: &str) -> AppResult<()
     Ok(())
 }
 
+/// A copy by the same artist on another album counts as the song coming
+/// back only when that album arrived this recently (an upgrade or a re-tag
+/// lands as a new album). Otherwise losing one "Intro" would hide behind
+/// another album's "Intro".
+pub const BACK_WITHIN_S: i64 = 7 * 86_400;
+
 /// After a sync: drop songs that are back (same title on the same album, or
-/// by the same artist) and ones older than 30 days. Returns rows dropped.
+/// by the same artist on an album added lately) and ones older than 30
+/// days. Returns rows dropped.
 pub fn reconcile(c: &Connection, now: i64) -> AppResult<usize> {
     Ok(c.execute(
         "DELETE FROM tracks_gone WHERE gone_at < ?1
            OR (lower(title), lower(album_title)) IN (SELECT lower(title), lower(album_title) FROM tracks)
-           OR (lower(title), lower(artist_title)) IN (SELECT lower(title), lower(artist_title) FROM tracks)
            OR (lower(title), lower(artist_title)) IN
-              (SELECT lower(title), lower(track_artist) FROM tracks WHERE track_artist IS NOT NULL)",
-        [now - KEEP_S],
+              (SELECT lower(t.title), lower(COALESCE(NULLIF(t.track_artist, ''), t.artist_title))
+                 FROM tracks t JOIN albums a ON a.id = t.album_id WHERE a.added_at >= ?2)",
+        params![now - KEEP_S, now - BACK_WITHIN_S],
     )?)
 }
 
