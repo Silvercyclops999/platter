@@ -9,6 +9,8 @@ import { smartCreateItems } from "../stores/curate";
 import { useLayout } from "../stores/theme";
 import { useSettings } from "../stores/settings";
 import { badgeText, useDoctorCount } from "../stores/doctor";
+import { safetyLine, useLibrarySafety } from "../stores/safety";
+import { useApp } from "../stores/app";
 import { useUi, type MenuItem } from "../stores/ui";
 import { createPlaylistIn, folderMenu } from "./FolderMenus";
 import { LibraryCollection } from "./LibraryCollection";
@@ -53,6 +55,22 @@ export function DoctorNote() {
       <span className="doctor-badge" aria-hidden="true">
         {badgeText(count)}
       </span>
+    </button>
+  );
+}
+
+/**
+ * A quiet line under Your Library while songs or playlists left the server
+ * this week and haven't been looked at: what went, and a way to the list.
+ */
+export function GoneNote() {
+  const safety = useLibrarySafety();
+  const lastSync = useApp((s) => s.sync?.lastSyncAt);
+  const line = safetyLine(safety, lastSync);
+  if (!line?.alert) return null;
+  return (
+    <button type="button" className="lib-doctor-note" onClick={() => nav.go({ name: "gone" })}>
+      <span className="lib-doctor-note__text">{line.title}</span>
     </button>
   );
 }
@@ -151,6 +169,7 @@ export function Sidebar({ collapsed, auto = false }: { collapsed: boolean; auto?
           <LibraryCollection model={model} view={view} mode={collapsed ? "rail" : "sidebar"} query={query} showArt={showArt} label={drill ? `${drill.name} items` : undefined} />
         )}
         {!collapsed && !drill && <DoctorNote />}
+        {!collapsed && !drill && <GoneNote />}
         {sections.includes("status") && (
           <div className="sidebar__status">
             <StatusDot compact={collapsed} />

@@ -10,7 +10,7 @@
  * counts the songs while they come in. Storage is in Settings. While the
  * library doctor has something to fix, a quiet row at the end leads to it.
  */
-import { ArrowUpDown, ChevronRight, Disc3, LayoutGrid, List, Plus, SlidersHorizontal, X } from "lucide-react";
+import { ArrowUpDown, ChevronRight, Disc3, LayoutGrid, List, Plus, ShieldCheck, SlidersHorizontal, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { Art } from "../../components/Art";
 import { LikedCover } from "../../components/LikedCover";
@@ -18,6 +18,7 @@ import { KIND_LABEL, SORT_LABEL, useLibraryView, type LibEntry, type LibKind } f
 import { openEntry, useLibraryLoader, useLibraryModel } from "../../shell/useLibrary";
 import { useApp } from "../../stores/app";
 import { useDoctorCount } from "../../stores/doctor";
+import { safetyLine, useLibrarySafety } from "../../stores/safety";
 import { useSettings } from "../../stores/settings";
 import { useDownloads } from "../../stores/downloads";
 import type { DownloadKind, MixSummary } from "../../lib/types";
@@ -247,7 +248,12 @@ function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof use
           ))}
         </ul>
       )}
-      {!model.loading && rows.length > 0 && model.filter === "all" && !model.downloaded.on && <DoctorRow />}
+      {!model.loading && rows.length > 0 && model.filter === "all" && !model.downloaded.on && (
+        <>
+          <DoctorRow />
+          <SafetyRow />
+        </>
+      )}
       {!model.loading && rows.length === 0 && (
         <div className="ph-empty">
           <p className="ph-empty__title">{model.downloaded.on ? "Nothing downloaded yet" : "Nothing here yet"}</p>
@@ -257,6 +263,40 @@ function LibraryList({ model, view, toggleView }: { model: ReturnType<typeof use
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * The library line at the end of the list: all is fine and when it was
+ * checked, or what left the server this week, leading to the list.
+ */
+function SafetyRow() {
+  const safety = useLibrarySafety();
+  const lastSync = useApp((s) => s.sync?.lastSyncAt);
+  const line = safetyLine(safety, lastSync);
+  if (!line) return null;
+  if (!line.alert) {
+    return (
+      <p className="ph-library__safe" role="status">
+        <ShieldCheck size={14} aria-hidden="true" />
+        <span>
+          {line.title}. {line.sub}.
+        </span>
+      </p>
+    );
+  }
+  return (
+    <ul className="ph-set-list ph-library__doctor" aria-label="Your library">
+      <li>
+        <button type="button" className="ph-set-link" onClick={() => (tap(), nav.go({ name: "gone" }))}>
+          <span className="ph-set-link__text">
+            <span className="ph-set-link__title">{line.title}</span>
+            <span className="ph-set-link__sub">{line.sub}</span>
+          </span>
+          <ChevronRight size={18} aria-hidden="true" className="ph-set-link__chev" />
+        </button>
+      </li>
+    </ul>
   );
 }
 

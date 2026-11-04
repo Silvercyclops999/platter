@@ -1443,6 +1443,22 @@ CREATE TABLE IF NOT EXISTS playlist_trash (
 );
 CREATE INDEX IF NOT EXISTS playlist_trash_playlist ON playlist_trash (playlist_id);
 "#,
+    // v52: songs that left the server (db::gone), so the library can say
+    // what went and when. Kept 30 days. `seen` = the listener looked.
+    // playlist_trash.seen does the same for playlists the server lost.
+    r#"
+CREATE TABLE IF NOT EXISTS tracks_gone (
+    track_id     TEXT PRIMARY KEY,
+    title        TEXT NOT NULL,
+    album_id     TEXT NOT NULL,
+    album_title  TEXT NOT NULL,
+    artist_title TEXT NOT NULL,
+    thumb        TEXT,
+    gone_at      INTEGER NOT NULL,
+    seen         INTEGER NOT NULL DEFAULT 0
+) WITHOUT ROWID;
+ALTER TABLE playlist_trash ADD COLUMN seen INTEGER NOT NULL DEFAULT 0;
+"#,
 ];
 
 #[cfg(test)]

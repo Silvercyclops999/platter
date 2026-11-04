@@ -63,6 +63,8 @@ export type Route =
   | { name: "bring" }
   /** The library doctor: things worth fixing in the library. */
   | { name: "doctor" }
+  /** Songs and playlists that left the server lately. */
+  | { name: "gone" }
   /** Sync to a device: drives and players music is copied to. */
   | { name: "devices" }
   /** The sound map: songs placed by how they sound; `album` picks that record's songs. */

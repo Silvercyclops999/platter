@@ -119,6 +119,7 @@ export const COMMON: ReadonlySet<string> = new Set([
   "leveling",
   "eqEnabled",
   // Library: syncing, search beyond the library, mixes and Stats.
+  "librarySafe",
   "resync",
   "catalogueSearch",
   "homeMixes",

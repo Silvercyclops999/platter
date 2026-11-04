@@ -10,6 +10,7 @@ import { HomePage } from "../pages/HomePage";
 import { LibraryPage } from "../pages/LibraryPage";
 import { LikedPage } from "../pages/LikedPage";
 import { SongsPage } from "../pages/SongsPage";
+import { GonePage } from "../pages/GonePage";
 import { PlaylistPage } from "../pages/PlaylistPage";
 import { SearchPage } from "../pages/SearchPage";
 import { useApp } from "../stores/app";
@@ -218,6 +219,8 @@ export function Page({ route }: { route: Route }) {
       return <TopSongsPage key={route.year ?? "all"} year={route.year ?? null} />;
     case "doctor":
       return <DoctorPage />;
+    case "gone":
+      return <GonePage />;
     case "devices":
       return <DevicesPage />;
     case "soundMap":

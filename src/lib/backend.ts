@@ -49,6 +49,8 @@ import type {
   AddPlace,
   RemovedItem,
   KeptPlaylist,
+  LibrarySafety,
+  GoneSong,
   BroughtBack,
   RemoteCommand,
   RemotePlayer,
@@ -443,6 +445,12 @@ export interface Backend {
   playlistsDeleted(): Promise<KeptPlaylist[]>;
   /** Make a deleted playlist again, leaving out songs the library no longer has. */
   playlistBringBack(id: number): Promise<BroughtBack>;
+  /** Songs and playlists that left the server this week, not looked at yet. */
+  librarySafety(): Promise<LibrarySafety>;
+  /** Songs that left the server in the last 30 days, newest first. */
+  libraryGone(): Promise<GoneSong[]>;
+  /** The listener looked at what left: the library line is fine again. */
+  libraryGoneSeen(): Promise<void>;
 
   // Edit in Plex (docs/IPC.md "Edit in Plex")
   /** Whether editing is on, and which servers this account can edit. */
@@ -1501,6 +1509,9 @@ export function createTauriBackend(): Backend {
     playlistsDeleted: () => call("playlists_deleted"),
     playlistOrderSet: (ids) => call("playlist_order_set", { ids }),
     playlistBringBack: (id) => call("playlist_bring_back", { id }),
+    librarySafety: () => call("library_safety"),
+    libraryGone: () => call("library_gone"),
+    libraryGoneSeen: () => call("library_gone_seen"),
     plexEditAccess: () => call("plex_edit_access"),
     plexEditItem: (id) => call("plex_edit_item", { id }),
     plexEditImages: (id, which) => call("plex_edit_images", { id, which }),

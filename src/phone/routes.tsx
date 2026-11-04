@@ -21,6 +21,7 @@ import { PhoneDiary } from "./pages/Diary";
 import { PhoneDiscography } from "./pages/Discography";
 import { PhoneDoctor } from "./pages/Doctor";
 import { PhoneDownloads } from "./pages/Downloads";
+import { PhoneGone } from "./pages/Gone";
 import { PhoneEra } from "./pages/Era";
 import { PhoneHome } from "./pages/Home";
 import { PhoneHomeShelf } from "./pages/HomeShelf";
@@ -98,6 +99,7 @@ export const PHONE_PAGES: Pages = {
   import: (r) => <PhoneImport key={r.view ?? "home"} view={r.view} bring={<PhoneBring />} />,
   bring: () => <PhoneBring />,
   doctor: () => <PhoneDoctor />,
+  gone: () => <PhoneGone />,
   devices: () => <PhoneDevices />,
   soundMap: (r) => <PhoneSoundMap key={r.album ?? "all"} album={r.album} />,
   crates: (r) => <PhoneCrates kind={r.kind} />,

@@ -36,7 +36,7 @@
  */
 import type { Backend, HapticKind, Unlisten } from "../backend";
 import { compareApproximate, compareMap, compareMapLoop } from "../compare";
-import type { BetterCopiesStatus, LastGet, SleepChoice, SleepTimerView, Tap, TapInput, TapOutcome } from "../types";
+import type { BetterCopiesStatus, GoneSong, LastGet, SleepChoice, SleepTimerView, Tap, TapInput, TapOutcome } from "../types";
 import type {
   SongRow,
   SongsQuery,
@@ -283,6 +283,8 @@ export interface MockOptions {
   radarEmpty?: boolean;
   /** Start with two import sources on and imported (?import=demo). */
   importDemo?: boolean;
+  /** Songs and a playlist that left the server (?gone=1). */
+  goneDemo?: boolean;
   /** No demo listening history for stats (?stats=empty). */
   statsEmpty?: boolean;
   /** Only 24 days of listening in the last year, most in the last four weeks (?stats=sparse). */
@@ -388,6 +390,7 @@ export function optionsFromUrl(search: string): MockOptions {
     radarEmpty: p.get("radar") === "empty",
     theme: (["dark", "light", "system", "midnight", "forest", "sand", "studio", "studioBlack", "sleeve"] as const).find((t) => t === p.get("theme")),
     importDemo: p.get("import") === "demo",
+    goneDemo: p.get("gone") === "1",
     statsEmpty: p.get("stats") === "empty" || p.get("library") === "empty",
     statsSparse: p.get("stats") === "sparse",
     statsCompare: p.get("compare") === "1",
@@ -1622,6 +1625,37 @@ export class MockBackend implements Backend {
   }
   playlistBringBack(id: number) {
     return this.delay(() => this.pl.bringBack(this.settings.playlistNewName, id));
+  }
+
+  /** Songs that left the server (?gone=1 starts with three from one album). */
+  private gone: GoneSong[] | null = null;
+  private goneList(): GoneSong[] {
+    if (this.gone) return this.gone;
+    const now = Math.floor(Date.now() / 1000);
+    const al = this.opts.goneDemo ? this.fx.albums[3] : undefined;
+    const tracks = al ? (this.fx.tracksByAlbum.get(al.id) ?? []).slice(0, 3) : [];
+    this.gone = tracks.map((t, i) => ({
+      id: `gone-${t.id}`,
+      title: t.title,
+      albumId: t.albumId,
+      albumTitle: t.albumTitle,
+      artistTitle: t.trackArtist ?? t.artistTitle,
+      thumb: t.thumb ?? null,
+      goneAt: now - 3 * 3600 - i,
+      seen: false,
+    }));
+    return this.gone;
+  }
+  librarySafety() {
+    return this.delay(() => ({ songs: this.goneList().filter((g) => !g.seen).length, playlists: 0 }));
+  }
+  libraryGone() {
+    return this.delay(() => this.goneList().map((g) => ({ ...g })));
+  }
+  libraryGoneSeen() {
+    return this.delay(() => {
+      this.gone = this.goneList().map((g) => ({ ...g, seen: true }));
+    });
   }
 
   // ---------------------------------------------------------------- edit in Plex

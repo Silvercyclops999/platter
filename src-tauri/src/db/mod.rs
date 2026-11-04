@@ -24,6 +24,7 @@
 pub mod artcache;
 pub mod commands;
 pub mod credits;
+pub mod gone;
 pub mod history;
 pub mod likes;
 pub mod listens;

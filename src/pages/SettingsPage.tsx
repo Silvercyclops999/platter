@@ -46,6 +46,7 @@ import { ComputerNameSetting } from "./DeviceSettings";
 import { INVITE_HOURS, ListenTextSetting } from "./ListenSettings";
 import { DeletedPlaylists, PlaylistNameSetting } from "./PlaylistSettings";
 import { loadDeletedPlaylists, useDeletedPlaylists } from "../stores/playlists";
+import { safetyLine, useLibrarySafety } from "../stores/safety";
 import { LibraryImportSettings, importMatches } from "./LibraryImportSettings";
 import { PerDaySelect } from "./BringIn";
 import { AutomationSettings, StreamDeckSettings, automationMatches, streamDeckMatches } from "./StreamDeckSettings";
@@ -974,6 +975,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
     void loadDeletedPlaylists();
   }, []);
   const deletedPlaylists = useDeletedPlaylists((x) => x.list);
+  const safeLine = safetyLine(useLibrarySafety(), useApp((x) => x.sync?.lastSyncAt));
 
   const conn = healthConn ?? auth?.server?.connection ?? null;
   const away = conn === "remote" || conn === "relay";
@@ -1676,6 +1678,22 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       description: "Type the code another of your computers shows, then choose which keys to send it.",
       control: () => <KeyCopyButton kind="send" />,
     },
+    ...(safeLine
+      ? [
+          {
+            key: "librarySafe",
+            section: "Library" as const,
+            title: "Your library",
+            description: safeLine.alert ? `${safeLine.title}. They stay listed for 30 days.` : `${safeLine.title}. ${safeLine.sub}.`,
+            more: "Every sync checks what your server still has. Songs and playlists that leave it, deleted in another app or lost with a drive, are listed for 30 days so nothing goes missing quietly. A song that comes back, or is replaced by a better copy, drops off the list.",
+            control: () => (
+              <Button size="sm" variant={safeLine.alert ? "primary" : "ghost"} onClick={() => nav.go({ name: "gone" })}>
+                {safeLine.alert ? "See which" : "What left"}
+              </Button>
+            ),
+          },
+        ]
+      : []),
     {
       key: "resync",
       section: "Library",

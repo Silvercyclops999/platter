@@ -198,6 +198,10 @@ async fn run_inner(
         let _ = db
             .write_async(move |c| {
                 crate::import::played::keep_up(c, ranks, now);
+                // Songs that came back (an upgraded copy, a re-tag) aren't gone.
+                if let Err(e) = super::gone::reconcile(c, now / 1000) {
+                    tracing::warn!(error = %e, "gone songs: reconcile failed");
+                }
                 Ok(())
             })
             .await;

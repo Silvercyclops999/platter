@@ -316,6 +316,9 @@ pub fn delete_missing_in(tx: &Transaction<'_>, kind: ItemKind, keep: &HashSet<St
         tracing::warn!(table, src, existing = existing.len(), gone = gone.len(), "sync: server answer would remove most of the library; kept everything");
         return Ok(0);
     }
+    if kind == ItemKind::Track {
+        super::gone::record(tx, gone.iter().map(|s| s.as_str()))?;
+    }
     let mut del = tx.prepare_cached(&format!("DELETE FROM {table} WHERE id = ?1"))?;
     let mut n = 0;
     for id in gone {
@@ -367,6 +370,9 @@ pub fn delete_unseen_in(tx: &Transaction<'_>, kind: ItemKind, gen_: i64, src: &s
         tracing::warn!(table, src, total, gone, "sync: full pass would remove most of the library; kept everything");
         return Ok(0);
     }
+    if kind == ItemKind::Track && gone > 0 {
+        super::gone::record_unseen(tx, gen_, src)?;
+    }
     Ok(tx.execute(&format!("DELETE FROM {table} WHERE src = ?2 AND seen_gen <> ?1"), params![gen_, src])? as u64)
 }
 
@@ -409,7 +415,7 @@ fn table_for(kind: ItemKind) -> &'static str {
 pub fn wipe_library(tx: &Transaction<'_>) -> AppResult<()> {
     tx.execute_batch(
         "DELETE FROM playlist_items; DELETE FROM playlists; DELETE FROM playlist_ops; DELETE FROM playlist_trash;
-         DELETE FROM playlist_aliases; DELETE FROM tracks WHERE src = '';
+         DELETE FROM playlist_aliases; DELETE FROM tracks_gone; DELETE FROM tracks WHERE src = '';
          DELETE FROM albums WHERE src = ''; DELETE FROM artists WHERE src = '';
          DELETE FROM play_history; DELETE FROM sync_state;",
     )?;

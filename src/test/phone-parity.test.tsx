@@ -100,6 +100,7 @@ const SAMPLES: { [N in Route["name"]]: Extract<Route, { name: N }> } = {
   import: { name: "import" },
   bring: { name: "bring" },
   doctor: { name: "doctor" },
+  gone: { name: "gone" },
   devices: { name: "devices" },
   soundMap: { name: "soundMap" },
   crates: { name: "crates" },

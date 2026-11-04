@@ -536,6 +536,25 @@ export interface KeptPlaylist {
   deletedAt: number;
 }
 
+/** `library_safety`: what left the server this week and hasn't been looked at. */
+export interface LibrarySafety {
+  songs: number;
+  playlists: number;
+}
+
+/** `library_gone`: a song that left the server, kept listed 30 days. */
+export interface GoneSong {
+  id: string;
+  title: string;
+  albumId: string;
+  albumTitle: string;
+  artistTitle: string;
+  thumb: string | null;
+  /** Unix seconds. */
+  goneAt: number;
+  seen: boolean;
+}
+
 /** `playlist_bring_back`: the new playlist and how many songs were left out. */
 export interface BroughtBack {
   playlist: Playlist;

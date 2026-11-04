@@ -430,6 +430,16 @@ server at a sync (`gone`). Smart and empty playlists aren't kept.
 songs the library no longer has (`leftOut` counts them), and drops the copy.
 When none of its songs are left it fails with `invalid` and keeps the copy.
 
+Songs that leave the server are noted too. A sync that removes songs keeps
+their names first, and after the sync drops any that came back (a better
+copy, a re-tag, the same song by the same artist). They stay listed 30 days.
+
+| Command | Args | Returns |
+|---|---|---|
+| `library_safety` | – | `{ songs, playlists }`: songs and playlists the server lost this week that nobody has looked at yet |
+| `library_gone` | – | `{ id, title, albumId, albumTitle, artistTitle, thumb, goneAt, seen }[]`, newest first |
+| `library_gone_seen` | – | – (marks every listed song and lost playlist as looked at) |
+
 `playlist_create` without `title` names the playlist from the
 `playlistNewName` setting, where `#N` becomes the next number no playlist
 uses ("My playlist #3"). Plex makes playlists from a list of songs, so a new

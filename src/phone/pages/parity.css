@@ -346,6 +346,19 @@
 .ph-version.is-unplayable { opacity: 0.4; }
 
 .ph-library__doctor { margin: 16px 0 0; }
+.ph-library__doctor + .ph-library__doctor { margin-top: 8px; }
+/* The library line when all is fine: one quiet caption under the list. */
+.ph-library__safe {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 20px 16px 8px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+.ph-library__safe svg { flex: none; }
 /* A downloaded mix in Library: its printed sleeve at the row's art size. */
 .ph-lib-mix { display: block; flex: none; width: 56px; height: 56px; }
 .ph-lib-mix.is-fluid { width: 100%; height: auto; aspect-ratio: 1; }
