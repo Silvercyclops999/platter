@@ -61,6 +61,9 @@ pub trait TrackResolver: Send + Sync {
     }
     /// Stores a track's measured quiet lead-in and run-out for next time.
     fn save_silence(&self, _track_id: &str, _head_ms: u64, _tail_ms: u64) {}
+    /// Stores the loudness (LUFS) and peak measured over a whole play of
+    /// the track, for leveling it next time when the server has none.
+    fn save_loudness(&self, _track_id: &str, _lufs: f32, _peak: f32) {}
 }
 
 /// Songs downloaded to this computer. The engine plays a downloaded file

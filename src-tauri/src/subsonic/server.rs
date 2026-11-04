@@ -1074,6 +1074,12 @@ impl TrackResolver for Core {
             tracing::debug!("could not store silence: {e}");
         }
     }
+
+    fn save_loudness(&self, track_id: &str, lufs: f32, peak: f32) {
+        if let Some(db) = &self.db {
+            crate::bridge::save_measured(db, track_id, lufs, peak);
+        }
+    }
 }
 
 #[async_trait]

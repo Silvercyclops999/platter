@@ -27,6 +27,7 @@ struct InfoResolver {
     inner: Arc<FakeResolver>,
     info: Mutex<HashMap<String, TrackAudio>>,
     saved: Mutex<Vec<(String, u64, u64)>>,
+    measured: Mutex<Vec<(String, f32, f32)>>,
 }
 
 #[async_trait]
@@ -42,6 +43,9 @@ impl TrackResolver for InfoResolver {
     }
     fn save_silence(&self, track_id: &str, head_ms: u64, tail_ms: u64) {
         self.saved.lock().push((track_id.into(), head_ms, tail_ms));
+    }
+    fn save_loudness(&self, track_id: &str, lufs: f32, peak: f32) {
+        self.measured.lock().push((track_id.into(), lufs, peak));
     }
 }
 
@@ -59,6 +63,7 @@ async fn rig(paced: bool) -> Rig {
         inner: FakeResolver::new(&server),
         info: Mutex::new(HashMap::new()),
         saved: Mutex::new(Vec::new()),
+        measured: Mutex::new(Vec::new()),
     });
     let (out, cap) = CaptureOutput::new(OutputFormat {
         sample_rate: RATE,
@@ -407,6 +412,61 @@ async fn leveling_uses_album_gain_in_album_order_and_track_gain_otherwise() {
     assert!((peak - 0.5 * dsp::db_to_lin(-6.0)).abs() < 2e-3, "peak {peak}");
 }
 
+/// The front song's leveling gain once it's set (1.0 = none yet).
+async fn front_gain_set(r: &Rig) -> f32 {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let g = r.engine.front_gain().unwrap_or(1.0);
+        if g != 1.0 || Instant::now() > deadline {
+            return g;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_song_with_no_loudness_plays_at_the_typical_gain_not_full_level() {
+    let r = rig(false).await;
+    add(&r, "a", wav(secs(1.0), |i| (tone(i, 0.5), tone(i, 0.5))));
+    add(&r, "b", wav(secs(1.0), |i| (tone(i, 0.5), tone(i, 0.5))));
+    r.engine.set_dsp(DspSettings { leveling: Leveling::Smart, ..Default::default() });
+    // Nothing known yet at all: the built-in guess.
+    r.engine.load(tr("b", "y", 1, 1.0), "ib".into(), 0, false).unwrap();
+    assert!((front_gain_set(&r).await - dsp::db_to_lin(dsp::DEFAULT_GUESS_DB)).abs() < 1e-6);
+    // A song whose data carries the library's typical gain teaches it ...
+    r.res.info.lock().insert(
+        "a".into(),
+        TrackAudio { gain_db: Some(-9.0), guess_db: Some(-12.0), ..Default::default() },
+    );
+    r.engine.load(tr("a", "x", 1, 1.0), "ia".into(), 0, false).unwrap();
+    assert!((front_gain_set(&r).await - dsp::db_to_lin(-9.0)).abs() < 1e-6);
+    // ... and the next song with none plays at it.
+    r.engine.load(tr("b", "y", 1, 1.0), "ib".into(), 0, false).unwrap();
+    assert!((front_gain_set(&r).await - dsp::db_to_lin(-12.0)).abs() < 1e-6);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_whole_play_measures_the_songs_loudness_and_a_seek_doesnt() {
+    let mut r = rig(false).await;
+    add(&r, "a", wav(secs(3.0), |i| (tone(i, 0.5), tone(i, 0.5))));
+    r.engine.load(tr("a", "x", 1, 3.0), "ia".into(), 0, false).unwrap();
+    r.engine.play().unwrap();
+    until(&mut r.events, drained).await;
+    let got = r.res.measured.lock().clone();
+    assert_eq!(got.len(), 1, "{got:?}");
+    let (id, lufs, peak) = &got[0];
+    assert_eq!(id, "a");
+    // A 440 Hz tone at half scale in both channels reads about -6.7 LUFS
+    // (the ear filter barely touches 440 Hz).
+    assert!((lufs + 6.7).abs() < 0.2, "{lufs}");
+    assert!((peak - 0.5).abs() < 0.01, "{peak}");
+    // Started part way in: not the whole song, nothing saved.
+    r.engine.load(tr("a", "x", 1, 3.0), "ia".into(), 1_000, false).unwrap();
+    r.engine.play().unwrap();
+    until(&mut r.events, drained).await;
+    assert_eq!(r.res.measured.lock().len(), 1);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn preamp_eq_boost_and_limiter_stay_under_full_scale() {
     let mut r = rig(false).await;
@@ -433,6 +493,7 @@ async fn setting_changes_ramp_without_clicks() {
     let mut r = rig(true).await;
     let amp = 0.2;
     add(&r, "a", wav(secs(3.0), |i| (tone(i, amp), tone(i, amp))));
+    r.res.info.lock().insert("a".into(), TrackAudio { gain_db: Some(0.0), ..Default::default() });
     r.engine.set_dsp(DspSettings {
         leveling: Leveling::Smart,
         ..Default::default()

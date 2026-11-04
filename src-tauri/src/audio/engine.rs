@@ -36,6 +36,7 @@ use super::cache::{DiskCache, PrecacheHost, cache_key};
 use super::convert::Converter;
 use super::decode::{DecodeError, TrackDecoder, extension_hint};
 use super::dsp::{self, Chain, Crossfade, DspSettings, SilenceMeter, TrackAudio, level_gain};
+use super::loudness::LoudnessMeter;
 use super::gate::{Priority, PriorityCell, TransferGate};
 use super::http::{HttpConfig, HttpSource, HttpStats};
 use super::devguard::GuardedOutput;
@@ -550,6 +551,11 @@ struct Mix {
     bit_perfect: bool,
     /// Headphone correction is bypassed for an A/B comparison.
     corr_bypass: bool,
+    /// The library's typical leveling gain and target level, from the
+    /// last loudness data that carried them: for a song whose data doesn't
+    /// come in time, or comes without them.
+    typical_db: Option<f32>,
+    target_lufs: Option<f32>,
 }
 
 impl Mix {
@@ -1188,8 +1194,15 @@ impl Mix {
     }
 
     /// A segment's loudness data arrived: set its gain (ramped if it's
-    /// already audible).
+    /// already audible). Without any, the song gets the library's typical
+    /// gain, so it doesn't play far louder than the songs around it.
     fn set_audio(&mut self, key: u64, info: Option<TrackAudio>) {
+        let mut info = info.unwrap_or_default();
+        self.typical_db = info.guess_db.or(self.typical_db);
+        self.target_lufs = info.target_lufs.or(self.target_lufs);
+        info.guess_db = Some(self.typical_db.unwrap_or(dsp::DEFAULT_GUESS_DB));
+        info.target_lufs = self.target_lufs;
+        let info = Some(info);
         let ramp = self.chain.ramp_frames();
         let dsp = self.dsp;
         let ctx = self.album_ctx.clone();
@@ -1524,6 +1537,8 @@ impl Engine {
                 user_dsp: DspSettings::default(),
                 bit_perfect: false,
                 corr_bypass: false,
+                typical_db: None,
+                target_lufs: None,
             }),
             cv: Condvar::new(),
             events: tx,
@@ -2635,14 +2650,19 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
     // Its gain must be known before the track is heard; without an answer
     // in time it plays with the preamp only. A song that isn't playing yet
     // doesn't wait: its level is set when the answer comes.
+    // An answer that misses the wait still levels the song when it comes
+    // (until then it has the library's typical gain).
     let front = core.mix.lock().segments.front().is_some_and(|s| s.key == key);
     let mut late_info = None;
+    let mut info_task = info_task;
     let info = if front || info_task.is_finished() {
-        env.rt
-            .block_on(async { tokio::time::timeout(INFO_WAIT, info_task).await })
-            .ok()
-            .and_then(|r| r.ok())
-            .flatten()
+        match env.rt.block_on(async { tokio::time::timeout(INFO_WAIT, &mut info_task).await }) {
+            Ok(r) => r.ok().flatten(),
+            Err(_) => {
+                late_info = Some(info_task);
+                None
+            }
+        }
     } else {
         late_info = Some(info_task);
         None
@@ -2717,6 +2737,9 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
     // Quiet lead-in / run-out, for smart crossfades.
     let mut meter = SilenceMeter::new(out_fmt.sample_rate, out_fmt.channels as usize, 0);
     let mut head_known = false;
+    // How loud the whole song is, kept for next time; only a play from the
+    // start to the end with no seek counts.
+    let mut loud = (start_ms == 0).then(|| LoudnessMeter::new(out_fmt.sample_rate, out_fmt.channels as usize));
 
     'decode: loop {
         if ctl.cancel.load(Ordering::SeqCst) {
@@ -2731,6 +2754,7 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
             let base = ms * out_fmt.sample_rate as u64 / 1000;
             meter = SilenceMeter::new(out_fmt.sample_rate, out_fmt.channels as usize, base);
             head_known = false;
+            loud = None;
             conv = match converter(&opened.dec, out_fmt) {
                 Ok(c) => c,
                 Err(e) => return fail(&env, key, &track, e),
@@ -2792,6 +2816,9 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                     Push::Ok => {
                         pushed_any = true;
                         meter.push(slice);
+                        if let Some(l) = loud.as_mut() {
+                            l.push(slice);
+                        }
                         if !head_known
                             && let Some(h) = meter.head(dsp::SMART_OVERLAP_CAP_MS * out_fmt.sample_rate as u64 / 1000)
                         {
@@ -2801,6 +2828,8 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                     }
                     Push::Cancelled => return,
                     Push::Stale => {
+                        // Audio was dropped: no longer a whole play.
+                        loud = None;
                         if let Some((g, ms)) = ctl.seek.lock().take() {
                             generation = g;
                             seek_to = Some(ms);
@@ -2839,14 +2868,25 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                     match push_samples(&env, key, generation, &ctl, &out) {
                         Push::Cancelled => return,
                         Push::Stale => {
+                            loud = None;
                             if let Some((g, ms)) = ctl.seek.lock().take() {
                                 generation = g;
                                 seek_to = Some(ms);
                             }
                             continue 'decode;
                         }
-                        Push::Ok => meter.push(&out),
+                        Push::Ok => {
+                            meter.push(&out);
+                            if let Some(l) = loud.as_mut() {
+                                l.push(&out);
+                            }
+                        }
                     }
+                }
+                if let Some(l) = loud.take()
+                    && let Some(lufs) = l.integrated()
+                {
+                    env.resolver.save_loudness(&track.id, lufs as f32, l.peak());
                 }
                 meter.finish();
                 let (head, tail) = (meter.head(0), meter.tail());

@@ -131,6 +131,12 @@ impl TrackResolver for RoutedStreams {
             s.streams().save_silence(track_id, head_ms, tail_ms);
         }
     }
+
+    fn save_loudness(&self, track_id: &str, lufs: f32, peak: f32) {
+        if let Ok(s) = self.0.for_id(track_id) {
+            s.streams().save_loudness(track_id, lufs, peak);
+        }
+    }
 }
 
 /// Downloads from each track's server, judged by that server's connection

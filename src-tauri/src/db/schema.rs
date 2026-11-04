@@ -1459,6 +1459,19 @@ CREATE TABLE IF NOT EXISTS tracks_gone (
 ) WITHOUT ROWID;
 ALTER TABLE playlist_trash ADD COLUMN seen INTEGER NOT NULL DEFAULT 0;
 "#,
+    // v53: each song's own loudness (LUFS) for leveling song by song
+    // (db::trackaudio): the server's value from track detail, and the one
+    // Platter measured while the song played from start to end.
+    // measured_key is the part key it was measured on, so a replaced file
+    // is measured again. Loudness fetched before is asked for again on the
+    // next play, to pick up each song's own value.
+    r#"
+ALTER TABLE tracks ADD COLUMN server_lufs REAL;
+ALTER TABLE tracks ADD COLUMN measured_lufs REAL;
+ALTER TABLE tracks ADD COLUMN measured_peak REAL;
+ALTER TABLE tracks ADD COLUMN measured_key TEXT;
+UPDATE tracks SET loudness_at = NULL;
+"#,
 ];
 
 #[cfg(test)]
@@ -1584,6 +1597,35 @@ mod tests {
         assert!(ids.iter().all(|i| i.starts_with("local:")));
         let d: i64 = c.query_row("SELECT duration_ms FROM playlists", [], |r| r.get(0)).unwrap();
         assert_eq!(d, -1, "differs from Plex, so the next sync refetches the items");
+    }
+
+    #[test]
+    fn v53_adds_song_loudness_and_asks_again_for_fetched_loudness() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = open_writer(&dir.path().join("t.db")).unwrap();
+        for m in &MIGRATIONS[..52] {
+            c.execute_batch(m).unwrap();
+        }
+        c.pragma_update(None, "user_version", 52).unwrap();
+        c.execute(
+            "INSERT INTO tracks (id, title, album_id, album_title, artist_id, artist_title, part_key, gain_db, loudness_at)
+             VALUES ('t', 'T', 'a', 'A', 'r', 'R', '/p', -11.0, 5)",
+            [],
+        )
+        .unwrap();
+        migrate(&mut c).unwrap();
+        let (gain, at): (Option<f64>, Option<i64>) =
+            c.query_row("SELECT gain_db, loudness_at FROM tracks WHERE id = 't'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((gain, at), (Some(-11.0), None));
+        let n: i64 = c
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('tracks') WHERE name IN
+                 ('server_lufs', 'measured_lufs', 'measured_peak', 'measured_key')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 4);
     }
 
     #[test]

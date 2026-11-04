@@ -305,7 +305,42 @@ pub struct TrackAudio {
     /// Quiet lead-in and run-out, measured on an earlier play.
     pub head_ms: Option<u64>,
     pub tail_ms: Option<u64>,
+    /// The song's own loudness (LUFS): from the server, and as Platter
+    /// measured it over an earlier play (with that play's peak). Some
+    /// servers give every song on an album the album's gain; these level
+    /// songs one by one.
+    pub server_lufs: Option<f32>,
+    pub measured_lufs: Option<f32>,
+    pub measured_peak: Option<f32>,
+    /// The level (LUFS) the server's gains bring songs to, so a song
+    /// leveled from its own loudness lands with the rest.
+    pub target_lufs: Option<f32>,
+    /// The library's typical gain, for a song nothing is known about yet,
+    /// so it plays near everything else instead of at full level.
+    pub guess_db: Option<f32>,
 }
+
+impl TrackAudio {
+    /// The song's own gain and peak, worked out from its loudness. Platter's
+    /// measurement goes first: it was made on this very file.
+    fn own_gain(&self) -> Option<(f32, Option<f32>)> {
+        let t = self.target_lufs?;
+        if let Some(l) = self.measured_lufs {
+            return Some((t - l, self.measured_peak.or(self.peak)));
+        }
+        self.server_lufs.map(|l| (t - l, self.peak))
+    }
+
+    /// The server's gain for this one song, when it is that (not the
+    /// album's gain given to every song on it).
+    fn song_gain(&self) -> Option<f32> {
+        self.gain_db.filter(|g| self.album_gain_db != Some(*g))
+    }
+}
+
+/// The gain a song gets when nothing at all is known about loudness yet
+/// (about what the server gives a typical modern song).
+pub const DEFAULT_GUESS_DB: f32 = -10.0;
 
 pub fn db_to_lin(db: f32) -> f32 {
     10f32.powf(db / 20.0)
@@ -313,7 +348,9 @@ pub fn db_to_lin(db: f32) -> f32 {
 
 /// The leveling gain (linear) for a track and the peak it can reach after
 /// that gain. `album_in_order`: the track plays as part of its album, in
-/// album order. Missing gain data applies only the preamp.
+/// album order. A song's own gain is the server's when it really is per
+/// song, else worked out from the song's loudness; album gain falls back
+/// the other way. With nothing known, the library's typical gain.
 pub fn level_gain(info: Option<&TrackAudio>, s: &DspSettings, album_in_order: bool) -> (f32, f32) {
     let use_album = match s.leveling {
         Leveling::Off => None,
@@ -322,9 +359,21 @@ pub fn level_gain(info: Option<&TrackAudio>, s: &DspSettings, album_in_order: bo
         Leveling::Smart => Some(album_in_order),
     };
     let (gain, peak) = match (use_album, info) {
-        (Some(true), Some(i)) => (i.album_gain_db.or(i.gain_db), i.album_peak.or(i.peak)),
-        (Some(false), Some(i)) => (i.gain_db.or(i.album_gain_db), i.peak.or(i.album_peak)),
-        (None, Some(i)) => (None, i.peak.or(i.album_peak)),
+        (Some(true), Some(i)) => match (i.album_gain_db, i.gain_db, i.own_gain()) {
+            (Some(g), _, _) => (Some(g), i.album_peak.or(i.peak)),
+            (None, Some(g), _) => (Some(g), i.peak),
+            (None, None, Some((g, p))) => (Some(g), p),
+            (None, None, None) => (i.guess_db, None),
+        },
+        (Some(false), Some(i)) => match (i.song_gain(), i.own_gain()) {
+            (Some(g), _) => (Some(g), i.peak),
+            (None, Some((g, p))) => (Some(g), p),
+            (None, None) => match i.gain_db.or(i.album_gain_db) {
+                Some(g) => (Some(g), i.peak.or(i.album_peak)),
+                None => (i.guess_db, None),
+            },
+        },
+        (None, Some(i)) => (None, i.peak.or(i.album_peak).or(i.measured_peak)),
         (_, None) => (None, None),
     };
     let db = gain.unwrap_or(0.0) + s.preamp_db;
@@ -1183,6 +1232,56 @@ mod tests {
         assert!((p - UNKNOWN_PEAK * g).abs() < 1e-6);
         let (g, _) = level_gain(Some(&info), &s, false);
         assert!((g - db_to_lin(-3.0)).abs() < 1e-6);
+    }
+
+    fn db_of(g: f32) -> f32 {
+        20.0 * g.log10()
+    }
+
+    #[test]
+    fn songs_given_the_album_gain_are_leveled_from_their_own_loudness() {
+        // The server gave both songs the album's gain; their own loudness
+        // is 8 dB apart, so shuffled they get gains 8 dB apart.
+        let s = DspSettings { leveling: Leveling::Smart, ..Default::default() };
+        let song = |lufs: f32| TrackAudio {
+            gain_db: Some(-11.0),
+            album_gain_db: Some(-11.0),
+            peak: Some(1.0),
+            album_peak: Some(1.0),
+            server_lufs: Some(lufs),
+            target_lufs: Some(-21.0),
+            guess_db: Some(-10.0),
+            ..Default::default()
+        };
+        let (loud, quiet) = (song(-7.0), song(-15.0));
+        assert!((db_of(level_gain(Some(&loud), &s, false).0) + 14.0).abs() < 1e-3);
+        assert!((db_of(level_gain(Some(&quiet), &s, false).0) + 6.0).abs() < 1e-3);
+        // Playing the album in order keeps its flow: one gain for both.
+        assert!((db_of(level_gain(Some(&loud), &s, true).0) + 11.0).abs() < 1e-3);
+        assert!((db_of(level_gain(Some(&quiet), &s, true).0) + 11.0).abs() < 1e-3);
+        // Platter's own measurement of the file goes first.
+        let measured = TrackAudio { measured_lufs: Some(-9.0), measured_peak: Some(0.8), ..quiet };
+        let (g, p) = level_gain(Some(&measured), &s, false);
+        assert!((db_of(g) + 12.0).abs() < 1e-3);
+        assert!((p - 0.8 * g).abs() < 1e-6);
+        // A real per-song gain from the server is used as it is.
+        let own = TrackAudio { gain_db: Some(-4.0), ..loud };
+        assert!((db_of(level_gain(Some(&own), &s, false).0) + 4.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_song_nothing_is_known_about_gets_the_typical_gain() {
+        let s = DspSettings { leveling: Leveling::Track, ..Default::default() };
+        let info = TrackAudio { guess_db: Some(-10.5), target_lufs: Some(-21.0), ..Default::default() };
+        let (g, p) = level_gain(Some(&info), &s, false);
+        assert!((db_of(g) + 10.5).abs() < 1e-3);
+        assert!((p - UNKNOWN_PEAK * g).abs() < 1e-6);
+        // Only measured: leveled from that.
+        let m = TrackAudio { measured_lufs: Some(-8.0), ..info };
+        assert!((db_of(level_gain(Some(&m), &s, true).0) + 13.0).abs() < 1e-3);
+        // Off is off.
+        let off = DspSettings { leveling: Leveling::Off, ..s };
+        assert_eq!(level_gain(Some(&info), &off, false).0, 1.0);
     }
 
     #[test]
