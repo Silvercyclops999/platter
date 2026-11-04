@@ -4,7 +4,7 @@
  */
 import { create } from "zustand";
 import { backend } from "../lib/backend";
-import type { TagCheckScope, TagField, TagFixKind, TagSaveRequest, TagSaveResult } from "../lib/types";
+import type { TagCheckScope, TagField, TagFixKind, TagSaveRequest, TagSaveResult, TagUndoInfo } from "../lib/types";
 import { errText } from "./plexEdit";
 import { toast, useToasts } from "./toasts";
 
@@ -55,10 +55,22 @@ export const useTagEdit = create<TagEditState>()((set) => ({
   close: (which) => set({ [which]: null }),
 }));
 
+/** The last tag edits that can still be undone (Settings), newest first; null until loaded. */
+export const useTagEditHistory = create<{ list: TagUndoInfo[] | null }>()(() => ({ list: null }));
+
+/** Load the edits that can be undone. A failed load keeps what's shown. */
+export function loadTagEditHistory(): Promise<void> {
+  return backend.tagEditHistory().then(
+    (list) => useTagEditHistory.setState({ list }),
+    () => {},
+  );
+}
+
 /** Undo an edit, with a toast either way. */
 export async function undoTagEdit(id: string): Promise<TagSaveResult | null> {
   try {
     const r = await backend.tagEditUndo(id);
+    void loadTagEditHistory();
     if (r.problems.length) toast.error(r.message);
     else toast.info(r.message);
     return r;
@@ -76,6 +88,7 @@ export async function saveTags(request: TagSaveRequest): Promise<TagSaveResult |
   try {
     const r = await backend.tagEditSave(request);
     if (r.saved > 0) {
+      void loadTagEditHistory();
       const extra = r.rescanError ? ` ${r.rescanError}` : "";
       useToasts.getState().push(
         {

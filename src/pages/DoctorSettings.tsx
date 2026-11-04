@@ -7,7 +7,7 @@ import { Switch } from "../components/Switch";
 import type { SelectOption } from "../components/Select";
 import type { DoctorChecks, Settings } from "../lib/types";
 import { DEFAULT_SETTINGS } from "../lib/types";
-import { useDoctorCount } from "../stores/doctor";
+import { fineLine, useDoctorCount, useLibraryFineSince } from "../stores/doctor";
 import { nav } from "../stores/router";
 import { updateSettings } from "../stores/settings";
 import "./doctor-settings.css";
@@ -37,11 +37,18 @@ export const COVER_PX_OPTIONS = [
 /** "Open library doctor" with the count, under Run library doctor. */
 export function DoctorNote({ on }: { on: boolean }) {
   const count = useDoctorCount();
+  const fineSince = useLibraryFineSince();
   if (!on) return null;
-  return (
+  const open = (
     <button type="button" className="link" onClick={() => nav.go({ name: "doctor" })}>
       {count > 0 ? `Open library doctor (${count} to fix)` : "Open library doctor"}
     </button>
+  );
+  if (count > 0 || fineSince === null) return open;
+  return (
+    <>
+      {fineLine(fineSince)} {open}
+    </>
   );
 }
 

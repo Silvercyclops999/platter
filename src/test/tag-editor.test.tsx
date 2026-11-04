@@ -17,10 +17,10 @@ import type { MockBackend } from "../lib/mock";
 import { MANY_FILES, asksFirst, buildRequest, fixRequest, joinReleaseType, shared, splitReleaseType } from "../lib/tagEdit";
 import { DEFAULT_SETTINGS, type Album, type TagEditFile } from "../lib/types";
 import { AlbumCard } from "../pages/cards";
-import { MusicFolderControl, MusicFolderNote, PlexLibrarySettings } from "../pages/TagEditorSettings";
+import { MusicFolderControl, MusicFolderNote, PlexLibrarySettings, RecentTagEdits } from "../pages/TagEditorSettings";
 import { connectApp } from "../stores/app";
 import { useSettings } from "../stores/settings";
-import { useTagEdit } from "../stores/tagEdit";
+import { saveTags, useTagEdit, useTagEditHistory } from "../stores/tagEdit";
 import { useToasts } from "../stores/toasts";
 import { useUi } from "../stores/ui";
 
@@ -309,6 +309,28 @@ describe("settings", () => {
     await waitFor(() => expect(toasts().some((t) => t.message === "Connected, 5 of 5 files found")).toBe(true));
     act(() => useSettings.setState({ settings: { ...DEFAULT_SETTINGS, musicFolder: "/Volumes/Music", musicFolderServer: "/data/music" } }));
     expect(await screen.findByText("/Volumes/Music: Connected, 5 of 5 files found")).toBeInTheDocument();
+  });
+
+  it("the last edits stay listed with Undo after the toast is gone", async () => {
+    const user = userEvent.setup();
+    const a = album();
+    const opened = await backend.tagEditOpen(a.id, []);
+    await saveTags({ label: "Edited tags on Kept edit", files: opened.files.map((f) => ({ trackId: f.trackId, stamp: f.stamp!, edits: { genre: "Kept Genre" } })) });
+    await waitFor(() => expect(useTagEditHistory.getState().list?.[0]?.label).toBe("Edited tags on Kept edit"));
+    useToasts.setState({ toasts: [] });
+    render(
+      <>
+        <RecentTagEdits />
+        <Toaster />
+      </>,
+    );
+    const list = screen.getByRole("list", { name: "Recent tag edits" });
+    const undo = within(list).getByRole("button", { name: "Undo Edited tags on Kept edit" });
+    expect(within(undo.closest("li")!).getByText(`${opened.files.length} files, just now`)).toBeInTheDocument();
+    await user.click(undo);
+    await waitFor(() => expect(toasts().some((x) => x.message.startsWith("Undid the edit"))).toBe(true));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Undo Edited tags on Kept edit" })).toBeNull());
+    expect((await backend.tagEditOpen(a.id, [])).files.every((f) => f.values.genre !== "Kept Genre")).toBe(true);
   });
 
   it("Plex library settings are explained, read only", async () => {

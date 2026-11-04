@@ -346,6 +346,7 @@
 .ph-version.is-unplayable { opacity: 0.4; }
 
 .ph-library__doctor { margin: 16px 0 0; }
+.ph-library__fine { margin: 20px var(--ph-gutter) 0; font-size: 13px; line-height: 1.4; color: var(--color-text-secondary); text-align: center; }
 /* A downloaded mix in Library: its printed sleeve at the row's art size. */
 .ph-lib-mix { display: block; flex: none; width: 56px; height: 56px; }
 .ph-lib-mix.is-fluid { width: 100%; height: auto; aspect-ratio: 1; }

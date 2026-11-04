@@ -18,6 +18,7 @@ import { doctorChanges, doctorValueProblem } from "../lib/tagEdit";
 import type { TagEditFile } from "../lib/types";
 import { SettingsPage } from "../pages/SettingsPage";
 import { DoctorNote } from "../shell/Sidebar";
+import { DoctorNote as DoctorSettingsNote } from "../pages/DoctorSettings";
 import { usePhoneForm } from "../phone/form";
 import { PhoneLibrary } from "../phone/pages/Library";
 import { useApp } from "../stores/app";
@@ -448,6 +449,57 @@ describe("where it opens from", () => {
     } finally {
       usePhoneForm.setState({ phone: false });
     }
+  });
+
+  describe("when nothing needs fixing", () => {
+    const clean = (over: Partial<Awaited<ReturnType<typeof backend.doctorReport>>> = {}) => {
+      const at = Math.floor(Date.now() / 1000) - 2 * 3600;
+      const count = vi.spyOn(backend, "doctorCount").mockResolvedValue(0);
+      const report = vi
+        .spyOn(backend, "doctorReport")
+        .mockResolvedValue({ on: true, findings: [], ignored: [], count: 0, running: false, checkedAt: at, tagsRead: 10, tagsTotal: 10, ...over });
+      return () => {
+        count.mockRestore();
+        report.mockRestore();
+      };
+    };
+
+    it("the phone's Library ends with one line that says the library is fine", async () => {
+      const restore = clean();
+      try {
+        render(<PhoneLibrary />);
+        expect(await screen.findByText("Your library looks fine. Checked 2 hours ago.")).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /Library doctor/ })).toBeNull();
+      } finally {
+        restore();
+      }
+    });
+
+    it("Settings says so next to the way to the doctor", async () => {
+      const restore = clean();
+      try {
+        render(<DoctorSettingsNote on />);
+        expect(await screen.findByText(/Your library looks fine\. Checked 2 hours ago\./)).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Open library doctor" })).toBeInTheDocument();
+      } finally {
+        restore();
+      }
+    });
+
+    it("it doesn't claim fine while album tags are still being read, or before a first check", async () => {
+      for (const over of [{ tagsRead: 4 }, { checkedAt: null }]) {
+        const restore = clean(over);
+        try {
+          const { unmount } = render(<PhoneLibrary />);
+          await waitFor(() => expect(backend.doctorReport).toHaveBeenCalled());
+          await new Promise((r) => setTimeout(r, 50));
+          expect(screen.queryByText(/Your library looks fine/)).toBeNull();
+          unmount();
+        } finally {
+          restore();
+        }
+      }
+    });
   });
 
   it("the line stays away while the doctor is off", async () => {
