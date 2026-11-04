@@ -12,6 +12,7 @@ import { songCredits, useAlbumCredits } from "../lib/useAlbumCredits";
 import { useApp } from "../stores/app";
 import { fullWindow, useFullWindow } from "../stores/fullWindow";
 import { player, usePlayer } from "../stores/player";
+import { turnTo, useTurnChoices } from "../stores/turn";
 import { nav } from "../stores/router";
 import { useSettings } from "../stores/settings";
 import { rightView, useUi } from "../stores/ui";
@@ -148,6 +149,8 @@ function CreditsCard({ track, details }: { track: Track; details: NowPlayingDeta
 
 function NextCard() {
   const next = usePlayer((s) => nextInQueue(s.state?.queue));
+  const current = usePlayer((s) => s.state?.track?.id ?? null);
+  const moods = useTurnChoices(current);
   return (
     <NpCard
       className="np-next"
@@ -173,6 +176,21 @@ function NextCard() {
         </div>
       ) : (
         <p className="np-card__empty">Nothing else queued.</p>
+      )}
+      {moods.length > 0 && (
+        <button
+          type="button"
+          className="np-card__action np-next__turn"
+          onClick={(e) =>
+            openContextMenu(
+              "Change the mood",
+              moods.map((m) => ({ label: m.mood, onSelect: () => void turnTo(m.mood) })),
+              e.currentTarget,
+            )
+          }
+        >
+          Change the mood
+        </button>
       )}
     </NpCard>
   );

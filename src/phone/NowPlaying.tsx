@@ -7,7 +7,7 @@
  */
 import { GettingLine } from "../components/GettingLine";
 import { getting, useTaps } from "../stores/taps";
-import { ChevronDown, ListMusic, MicVocal, MoreHorizontal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from "lucide-react";
+import { ChevronDown, Disc3, ListMusic, MicVocal, MoreHorizontal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from "lucide-react";
 import { memo, useDeferredValue, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { Art, preloadArt, sleeveHue } from "../components/Art";
 import { contextRoute, nextInQueue } from "../shell/nowPlaying";
@@ -29,6 +29,7 @@ import { CoverDeck, NP_ART_CSS } from "./CoverDeck";
 import { LyricsCard } from "./LyricsScreen";
 import { NP_OPEN_MS, flyCover } from "./motion";
 import { phone, usePhoneUi } from "./phoneUi";
+import { useTurnChoices } from "./TurnSheet";
 import type { HapticKind } from "../lib/backend";
 import { setPhoneVis, usePhoneVis } from "../visualizer/phoneVis";
 import { Stage } from "../visualizer/Stage";
@@ -375,6 +376,8 @@ function useScrolled(ref: RefObject<HTMLElement | null>) {
  */
 function UpNext() {
   const next = usePlayer((s) => nextInQueue(s.state?.queue)?.track ?? null);
+  const current = usePlayer((s) => s.state?.track ?? null);
+  const moods = useTurnChoices(current?.id ?? null);
   if (!next) return null;
   return (
     <section className="ph-upnext" aria-label="Up next">
@@ -397,6 +400,19 @@ function UpNext() {
         </span>
         <ListMusic className="ph-upnext__icon" size={20} aria-hidden="true" />
       </button>
+      {current && moods.length > 0 && (
+        <button
+          type="button"
+          className="ph-pill ph-upnext__turn"
+          onClick={() => {
+            tap();
+            phone.push({ kind: "turn", track: current, choices: moods });
+          }}
+        >
+          <Disc3 size={16} aria-hidden="true" />
+          Change the mood
+        </button>
+      )}
     </section>
   );
 }

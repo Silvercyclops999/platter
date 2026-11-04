@@ -110,7 +110,7 @@ pub fn batch(lib: &Lib, taste: &Taste, seed: &Seed, avoid: &HashSet<String>, n: 
 /// songs of `extra_artists`. Songs in `avoid`, songs that may not go in mixes
 /// and the seeds themselves (unless `first`) are left out.
 #[allow(clippy::too_many_arguments)]
-fn score(
+pub(super) fn score(
     lib: &Lib,
     taste: &Taste,
     seeds: &[u32],

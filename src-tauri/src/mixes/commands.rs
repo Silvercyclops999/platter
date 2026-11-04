@@ -47,3 +47,15 @@ pub async fn radio_page(
 pub async fn mix_refresh(mixes: State<'_, MixService>, id: String) -> AppResult<MixPage> {
     mixes.refresh(id).await
 }
+
+/// Turn it: the moods the next songs can turn toward from this song.
+#[tauri::command]
+pub async fn turn_choices(mixes: State<'_, MixService>, track_id: String) -> AppResult<Vec<super::turn::TurnChoice>> {
+    mixes.turn_choices(track_id).await
+}
+
+/// Turn it: the songs to put up next for a mood. `avoid`: songs already queued.
+#[tauri::command]
+pub async fn turn_songs(mixes: State<'_, MixService>, track_id: String, mood: String, avoid: Vec<String>) -> AppResult<Vec<String>> {
+    mixes.turn_songs(track_id, mood, avoid).await
+}

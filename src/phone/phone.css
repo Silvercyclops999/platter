@@ -499,6 +499,7 @@
 .ph-upnext__title { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ph-upnext__artist { font-size: 13px; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ph-upnext__icon { flex: none; margin: 0 8px; color: var(--color-text-secondary); }
+.ph-upnext__turn { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; }
 /* The cards under the player line up with it, and sit on the room's colour rather than a grey box. */
 .ph-np__scroll > :is(.ph-card, .ph-sleeve-card) { margin: 0 var(--np-side) 16px; }
 .ph-np__scroll > .ph-card:not(.ph-lyrics-card) { background: color-mix(in srgb, var(--color-ink) 6%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 7%, transparent); }

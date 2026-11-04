@@ -4,7 +4,7 @@
  * opens on top of the queue and closing it goes back to the queue.
  */
 import { create } from "zustand";
-import type { Album, Playlist, Track } from "../lib/types";
+import type { Album, Playlist, Track, TurnChoice } from "../lib/types";
 import { sameRoute, useRouter, type Route } from "../stores/router";
 import type { LibFilter, LibKind } from "../stores/library";
 import { stackSignals } from "./motion";
@@ -43,7 +43,9 @@ export type Sheet =
   /** What happens to the sound between the file and the output. */
   | { kind: "signal" }
   /** A followed artist: get their new albums or just show them, or unfollow. */
-  | { kind: "following"; artist: { id: string; title: string; thumb: string | null } };
+  | { kind: "following"; artist: { id: string; title: string; thumb: string | null } }
+  /** Change the mood: the next songs lean toward a mood picked here. */
+  | { kind: "turn"; track: Track; choices: TurnChoice[] };
 
 interface PhoneUi {
   tab: PhoneTab;

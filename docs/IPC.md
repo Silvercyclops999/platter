@@ -3698,6 +3698,8 @@ on the server except playlists saved from a mix (`playlist_create`).
 | `mix_page` | `{ id, steer?: "familiar"|"new", tzOffsetMin? }` → `MixPage` (a steered mix is made again, not stored) |
 | `mix_refresh` | `{ id }` → `MixPage` (that mix made again with new songs, and stored) |
 | `radio_page` | `{ seed: "track:<id>"|"artist:<id>", steer?, salt? }` → `MixPage` (about 50 songs, a song radio starting with its song; the same `salt` gives the same songs) |
+| `turn_choices` | `{ trackId }` → `{ mood, songs }[]` (Change the mood: up to 4 of the library's moods the song doesn't have, nearest first; empty when there are none) |
+| `turn_songs` | `{ trackId, mood, avoid }` → `string[]` (8 songs with that mood near the playing song, none of `avoid`; the UI adds them as play next) |
 
 `tzOffsetMin` is the UI's time zone in minutes east of UTC; the core keeps the
 last one for its own checks.

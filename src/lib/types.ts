@@ -536,6 +536,13 @@ export interface KeptPlaylist {
   deletedAt: number;
 }
 
+/** `turn_choices`: a mood the next songs can turn toward. */
+export interface TurnChoice {
+  mood: string;
+  /** Songs in the library with it. */
+  songs: number;
+}
+
 /** `library_safety`: what left the server this week and hasn't been looked at. */
 export interface LibrarySafety {
   songs: number;

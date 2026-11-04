@@ -701,6 +701,7 @@
 }
 .np-card__action:hover { color: var(--color-text-primary); text-decoration: underline; }
 .np-card__empty { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.np-next__turn { margin-top: var(--space-2); }
 
 /* Lyrics: tinted with a dark shade of the cover; the first lines fade out. */
 .np-lyrics {

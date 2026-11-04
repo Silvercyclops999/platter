@@ -1834,6 +1834,8 @@ pub fn run() {
             mixes::commands::mix_page,
             mixes::commands::mix_refresh,
             mixes::commands::radio_page,
+            mixes::commands::turn_choices,
+            mixes::commands::turn_songs,
             playlists::playlist_create,
             playlists::playlist_add,
             playlists::playlist_duplicates,

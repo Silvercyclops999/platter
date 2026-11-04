@@ -2937,6 +2937,32 @@ export class MockBackend implements Backend {
   radioPage(seed: string, steer?: MixSteer | null, salt?: number) {
     return this.delay(() => this.withoutHidden(this.mixes.radio(seed, steer ?? null, salt ?? 0) ?? this.notFound("Radio")));
   }
+  /** Turn it: the demo library's moods, by size. */
+  turnChoices(trackId: string) {
+    return this.delay(() => {
+      if (!this.fx.tracks.some((t) => t.id === trackId)) return [];
+      return [
+        { mood: "Mellow", songs: 64 },
+        { mood: "Upbeat", songs: 48 },
+        { mood: "Late Night", songs: 40 },
+        { mood: "Dreamy", songs: 31 },
+      ];
+    });
+  }
+  /** Turn it: eight songs not already queued, a different pick per mood. */
+  turnSongs(trackId: string, mood: string, avoid: string[]) {
+    return this.delay(() => {
+      const skip = new Set([trackId, ...avoid]);
+      const pool = this.fx.tracks.filter((t) => !skip.has(t.id));
+      const step = 3 + (mood.length % 5);
+      const out: string[] = [];
+      for (let i = mood.length; out.length < 8 && i < pool.length * step; i += step) {
+        const t = pool[i % pool.length];
+        if (!out.includes(t.id)) out.push(t.id);
+      }
+      return out;
+    });
+  }
   /** Shuffle for the playing context; remembered for its id. */
   private applyShuffle(shuffle: boolean) {
     if (this.ctxInfo?.id) this.storeShufflePref(this.ctxInfo.id, shuffle);

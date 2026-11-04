@@ -50,6 +50,7 @@ import type {
   RemovedItem,
   KeptPlaylist,
   LibrarySafety,
+  TurnChoice,
   GoneSong,
   BroughtBack,
   RemoteCommand,
@@ -423,6 +424,10 @@ export interface Backend {
   mixRefresh(id: string): Promise<MixPage>;
   /** A radio page: `track:<id>` or `artist:<id>`, about 50 songs starting with the seed (the same `salt`, the same songs). */
   radioPage(seed: string, steer?: MixSteer | null, salt?: number): Promise<MixPage>;
+  /** Turn it: the moods the next songs can turn toward from this song, nearest first. */
+  turnChoices(trackId: string): Promise<TurnChoice[]>;
+  /** Turn it: the songs to put up next for a mood (track ids). `avoid`: songs already queued. */
+  turnSongs(trackId: string, mood: string, avoid: string[]): Promise<string[]>;
 
   // Playlist editing (docs/IPC.md "Playlist editing")
   /** A new playlist, named from Settings unless `title` is given, holding `trackIds`. */
@@ -1498,6 +1503,8 @@ export function createTauriBackend(): Backend {
     mixPage: (id, steer) => call("mix_page", { id, steer: steer ?? null, tzOffsetMin: -new Date().getTimezoneOffset() }),
     mixRefresh: (id) => call("mix_refresh", { id }),
     radioPage: (seed, steer, salt) => call("radio_page", { seed, steer: steer ?? null, salt: salt ?? null }),
+    turnChoices: (trackId) => call("turn_choices", { trackId }),
+    turnSongs: (trackId, mood, avoid) => call("turn_songs", { trackId, mood, avoid }),
     playlistCreate: (title, trackIds) => call("playlist_create", { title, trackIds }),
     playlistAdd: (id, trackIds, place) => call("playlist_add", { id, trackIds, after: place?.after, top: place?.top }),
     playlistDuplicates: (id, trackIds) => call("playlist_duplicates", { id, trackIds }),

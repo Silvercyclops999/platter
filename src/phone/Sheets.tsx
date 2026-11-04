@@ -63,6 +63,7 @@ import { askDelete, createPlaylist, editDetails, removeRows } from "../stores/pl
 import { useToasts } from "../stores/toasts";
 import { deleteSmartPlaylist, newSmartPlaylist } from "../stores/curate";
 import { SheetFrame, SheetLeaving, tap } from "./bits";
+import { TurnSheet } from "./TurnSheet";
 import { FADE_MS, reduced } from "./motion";
 import { DeviceSheet } from "./DeviceSheet";
 import { SignalSheet } from "./SignalSheet";
@@ -158,6 +159,8 @@ const SheetFor = memo(function SheetFor({ sheet }: { sheet: Sheet }) {
       return <SignalSheet />;
     case "following":
       return <FollowingSheet artist={sheet.artist} />;
+    case "turn":
+      return <TurnSheet track={sheet.track} choices={sheet.choices} />;
   }
 });
 

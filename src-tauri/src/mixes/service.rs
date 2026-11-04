@@ -445,6 +445,29 @@ impl MixService {
     /// A radio page: about 50 songs like the seed, starting with it (made
     /// fresh each time it opens; the same `salt` gives the same page; a
     /// steering chip leans it one way).
+    /// The moods the next songs can turn toward from this song.
+    pub async fn turn_choices(&self, track_id: String) -> AppResult<Vec<super::turn::TurnChoice>> {
+        let s = self.clone();
+        blocking(move || {
+            let lib = s.lib()?;
+            Ok(super::turn::choices(&lib, &track_id))
+        })
+        .await
+    }
+
+    /// The songs a turn toward `mood` puts up next (track ids, in order).
+    pub async fn turn_songs(&self, track_id: String, mood: String, avoid: Vec<String>) -> AppResult<Vec<String>> {
+        let s = self.clone();
+        blocking(move || {
+            let lib = s.lib()?;
+            let taste = engine::Taste::new(&lib);
+            let avoid: HashSet<String> = avoid.into_iter().collect();
+            let picked = super::turn::songs(&lib, &taste, &track_id, &mood, &avoid, super::turn::TURN_LEN, now_ms() as u64);
+            Ok(picked.into_iter().map(|t| lib.tracks[t as usize].id.clone()).collect())
+        })
+        .await
+    }
+
     pub async fn radio_page(&self, seed_id: String, steer: Option<MixSteer>, salt: Option<u64>) -> AppResult<MixPage> {
         let s = self.clone();
         blocking(move || {
