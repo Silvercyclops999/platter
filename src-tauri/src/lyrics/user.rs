@@ -36,7 +36,9 @@ impl OwnLyrics {
     /// As lyrics for the views (source `auto` while not yet edited).
     pub fn lyrics(&self) -> Option<Lyrics> {
         if self.auto.is_some() {
-            let mut l = to_lyrics(&crate::lyrics::transcribe::lines::strip_music_symbols(&self.text))?;
+            use crate::lyrics::transcribe::lines::{strip_music_symbols, without_loops};
+            // Saved before music symbols and loops were left out.
+            let mut l = to_lyrics(&without_loops(&strip_music_symbols(&self.text)))?;
             l.source = LyricsSource::Auto;
             return Some(l);
         }

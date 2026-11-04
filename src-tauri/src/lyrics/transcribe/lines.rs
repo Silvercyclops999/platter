@@ -222,7 +222,81 @@ pub fn to_lines(segments: &[Segment]) -> Vec<Line> {
         }
         push_line(&mut lines, cur);
     }
-    lines
+    drop_loops(lines)
+}
+
+/// Words the recognizer stamped this close to the first of them were all
+/// put at one moment.
+const STUCK_MS: u32 = 50;
+/// This many words in a row at one moment can't have been sung there: the
+/// recognizer got stuck repeating itself and its timing gave up.
+const STUCK_WORDS: usize = 4;
+/// The recognizer listens this much at a time and piles a loop's words at
+/// the end: a line this long before stuck words, made only of the loop's
+/// words, is part of the loop.
+const LOOP_WINDOW_MS: u32 = 30_000;
+
+/// Lines without the loops the recognizer gets stuck in over music: a run
+/// of words all stamped at one moment marks one, and its lines go, along
+/// with the lines just before it, in the same listening, that only use the
+/// loop's words (the same loop, timed better or broken into pieces). The
+/// same words sung after a loop stay.
+pub fn drop_loops(lines: Vec<Line>) -> Vec<Line> {
+    let starts: Vec<(usize, u32)> = lines.iter().enumerate().flat_map(|(i, l)| l.words.iter().map(move |w| (i, w.start_ms))).collect();
+    let mut stuck = vec![false; lines.len()];
+    let mut a = 0;
+    while a < starts.len() {
+        let mut b = a + 1;
+        while b < starts.len() && starts[b].1 >= starts[a].1 && starts[b].1 - starts[a].1 <= STUCK_MS {
+            b += 1;
+        }
+        if b - a >= STUCK_WORDS {
+            starts[a..b].iter().for_each(|(i, _)| stuck[*i] = true);
+        }
+        a = b;
+    }
+    if !stuck.contains(&true) {
+        return lines;
+    }
+    let folded: Vec<Vec<String>> = lines.iter().map(|l| fold(&l.text()).split(' ').filter(|w| !w.is_empty()).map(str::to_owned).collect()).collect();
+    let looped: std::collections::HashSet<&String> = folded.iter().zip(&stuck).filter(|(_, s)| **s).flat_map(|(f, _)| f.iter()).collect();
+    let repeats_loop = |i: usize| {
+        let from = lines[i].start_ms;
+        let near = (i + 1..lines.len()).any(|j| stuck[j] && lines[j].start_ms >= from && lines[j].start_ms - from <= LOOP_WINDOW_MS);
+        near && !folded[i].is_empty() && folded[i].iter().all(|w| looped.contains(w))
+    };
+    let drop: Vec<bool> = (0..lines.len()).map(|i| stuck[i] || repeats_loop(i)).collect();
+    let gone = drop.iter().filter(|d| **d).count();
+    tracing::info!(lines = lines.len(), gone, "lines the recognizer looped on were left out");
+    lines.into_iter().zip(drop).filter(|(_, d)| !d).map(|(l, _)| l).collect()
+}
+
+/// Stored transcription text (enhanced LRC) without the loops in it
+/// ([`drop_loops`]), for one saved before they were left out. Text that
+/// isn't all word-timed lines and gaps, or has no loop, comes back as it is.
+pub fn without_loops(text: &str) -> String {
+    let mut lines = Vec::new();
+    for row in text.lines() {
+        let row = row.trim();
+        if let Some(words) = timed_words(row) {
+            let words: Vec<Word> = words.into_iter().map(|(at, text)| Word { start_ms: at, end_ms: at, text }).collect();
+            let (start_ms, end_ms) = (words[0].start_ms, words.last().map_or(0, |w| w.start_ms + LAST_WORD_MS));
+            lines.push(Line { start_ms, end_ms, words });
+        } else if !is_gap_row(row) {
+            return text.to_owned();
+        }
+    }
+    let before = lines.len();
+    let kept = drop_loops(lines);
+    if kept.len() == before { text.to_owned() } else { to_lrc(&kept) }
+}
+
+/// A stored line's last word lasts about this long (only starts are kept).
+const LAST_WORD_MS: u32 = 300;
+
+/// An empty timed line (an instrumental gap) or a blank one.
+fn is_gap_row(row: &str) -> bool {
+    row.is_empty() || row.strip_prefix('[').and_then(|r| r.strip_suffix(']')).is_some_and(|t| parse_stamp(t).is_some())
 }
 
 fn push_line(lines: &mut Vec<Line>, words: Vec<Word>) {
@@ -461,5 +535,79 @@ mod tests {
         // A compilation song: no artist in the prompt, and the chorus is the title.
         let kept = keep_sure(vec![sure(0.9, &[" Yesterday."]), sure(0.9, &[" All", " my", " troubles"])], "Yesterday.");
         assert_eq!(kept.len(), 2);
+    }
+
+    /// Paced words from `at`, `step` ms apart.
+    fn paced(at: u32, step: u32, text: &str) -> Vec<Word> {
+        text.split(' ').enumerate().map(|(i, t)| w(at + i as u32 * step, at + i as u32 * step + step / 2, &format!(" {t}"))).collect()
+    }
+
+    /// Words all stamped at one moment, as the recognizer leaves them when
+    /// it's stuck repeating itself.
+    fn stuck(at: u32, text: &str) -> Vec<Word> {
+        text.split(' ').map(|t| w(at, at, &format!(" {t}"))).collect()
+    }
+
+    #[test]
+    fn a_loop_stamped_at_one_moment_is_left_out() {
+        let s = vec![
+            // The chorus sung properly early on: it stays.
+            seg(paced(2_000, 400, "be counting the stars over the harbor")),
+            // The loop: piled onto the end of one listening window, then in
+            // the next timed well enough in pieces split mid phrase, then
+            // piled up again.
+            seg([paced(39_790, 190, "we"), stuck(39_980, "will be counting the stars over the harbor")].concat()),
+            seg(paced(62_540, 270, "we will")),
+            seg(paced(67_250, 300, "be counting the stars over the harbor")),
+            seg([paced(69_790, 190, "rolling"), stuck(69_980, "down the river by the time we add the harbor")].concat()),
+            // Real singing after it, and the chorus again: both stay.
+            seg(paced(137_970, 350, "lanterns in the window light the way")),
+            seg(paced(141_000, 400, "be counting the stars over the harbor")),
+        ];
+        let texts: Vec<String> = to_lines(&s).iter().map(Line::text).collect();
+        assert_eq!(
+            texts,
+            vec!["Be counting the stars over the harbor", "Lanterns in the window light the way", "Be counting the stars over the harbor"]
+        );
+    }
+
+    #[test]
+    fn a_fast_line_and_a_window_edge_pair_stay() {
+        // Three words 20 ms apart: fast, but not stuck.
+        let s = vec![seg([paced(1_000, 300, "run it"), paced(1_600, 20, "back to me")].concat()), seg(paced(5_000, 10, "oh oh"))];
+        let texts: Vec<String> = to_lines(&s).iter().map(Line::text).collect();
+        assert_eq!(texts, vec!["Run it back to me", "Oh oh"]);
+    }
+
+    #[test]
+    fn a_saved_transcription_loses_its_loops_when_shown() {
+        // As one saved before loops were left out: lines split mid phrase,
+        // gaps between the loops, real lines at the end.
+        let saved = "[00:06.79]<00:06.79>Over <00:06.98>we <00:06.98>will <00:06.98>be <00:06.98>counting <00:06.98>the <00:06.98>stars\n\
+[00:07.48]\n\
+[00:30.45]<00:30.45>We\n\
+[00:31.14]\n\
+[00:39.79]<00:39.79>Will <00:39.98>be <00:39.98>counting <00:39.98>the <00:39.98>stars <00:39.98>over\n\
+[00:40.48]\n\
+[01:02.54]<01:02.54>We <01:02.81>will\n\
+[01:07.25]<01:07.25>Be <01:07.55>counting <01:07.74>the <01:07.99>stars\n\
+[01:09.79]<01:09.79>Over <01:09.98>the <01:09.98>harbor <01:09.98>we <01:09.98>will\n\
+[01:10.48]\n\
+[02:17.97]<02:17.97>Lanterns <02:18.40>in <02:18.70>the <02:19.00>window\n\
+[02:23.00]<02:23.00>Light <02:23.40>the <02:23.80>way\n";
+        let shown = without_loops(saved);
+        assert_eq!(shown, "[02:17.97]<02:17.97>Lanterns <02:18.40>in <02:18.70>the <02:19.00>window\n[02:23.00]<02:23.00>Light <02:23.40>the <02:23.80>way\n");
+        let l = parse_lyrics_text(&shown);
+        assert!(l.synced);
+        assert_eq!(l.timed.len(), 2, "no gap marks left behind: {:?}", l.timed);
+    }
+
+    #[test]
+    fn saved_text_without_loops_is_left_as_it_is() {
+        let fine = "[00:12.34]<00:12.34>Hello <00:12.80>world\n[00:13.70]\n[00:25.00]<00:25.00>Again\n";
+        assert_eq!(without_loops(fine), fine);
+        let plain = "[00:01.00]No word times here\n[00:02.00]<00:02.00>a <00:02.00>b <00:02.00>c <00:02.00>d";
+        assert_eq!(without_loops(plain), plain, "only all word-timed text is touched");
+        assert_eq!(without_loops(""), "");
     }
 }

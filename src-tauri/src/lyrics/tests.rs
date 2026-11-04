@@ -415,6 +415,27 @@ async fn transcriptions_show_after_plex_and_never_replace_the_users_own() {
 }
 
 #[tokio::test]
+async fn a_saved_transcription_stuck_in_a_loop_shows_without_it() {
+    let f = fx();
+    f.on.store(false, Ordering::Relaxed);
+    let now = crate::db::queries::now_s();
+    // Saved by an older build: the recognizer looped over the intro, the
+    // words piled onto one moment, then the real singing.
+    let looped = "[00:20.00]<00:20.00>We <00:20.30>will\n\
+                  [00:26.79]<00:26.79>Over <00:26.98>we <00:26.98>will <00:26.98>be <00:26.98>counting <00:26.98>the <00:26.98>stars\n[00:27.48]\n\
+                  [00:40.00]<00:40.00>Lanterns <00:40.40>in <00:40.80>the <00:41.20>window\n";
+    f.db.write(|c| user::put_auto(c, "502", looped, "small", now)).unwrap();
+    let l = f.svc.get("502").await.unwrap().unwrap();
+    assert_eq!(l.source, LyricsSource::Auto);
+    let shown: Vec<&str> = l.timed.iter().map(|t| t.text.as_str()).collect();
+    assert_eq!(shown, vec!["Lanterns in the window"]);
+    // What's saved is untouched; the user's own lyrics are never cleaned.
+    assert_eq!(f.svc.own("502").await.unwrap().unwrap().text, looped);
+    f.svc.save_own("502", looped, false).await.unwrap();
+    assert_eq!(f.svc.get("502").await.unwrap().unwrap().timed.len(), 4);
+}
+
+#[tokio::test]
 async fn hidden_transcriptions_leave_no_lyrics() {
     let f = fx();
     f.on.store(false, Ordering::Relaxed);
