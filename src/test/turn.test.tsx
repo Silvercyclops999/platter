@@ -62,10 +62,31 @@ describe("turning", () => {
   });
 
   it("Undo takes back only the turn's songs still waiting", () => {
-    playing({ userQueue: [item("a", "q1"), item("x", "q2"), item("b", "q3")] });
+    // q0 was queued before the turn; q4 is the listener's own play next of
+    // "a" since, in front of the turn's copy (q1).
+    playing({ userQueue: [item("a", "q4"), item("a", "q1"), item("x", "q2"), item("b", "q3"), item("b", "q0")] });
     const remove = vi.spyOn(backend, "queueRemove").mockResolvedValue();
-    undoTurn(["a", "b", "c"]);
-    expect(remove.mock.calls.map((c) => c[0])).toEqual(["q1", "q3"]);
+    undoTurn(["a", "b", "c"], new Set(["q0"]));
+    expect(remove.mock.calls.map((c) => c[0]).sort()).toEqual(["q1", "q3"]);
+  });
+
+  it("Undo from the toast removes what the turn added", async () => {
+    playing({ userQueue: [item("u", "q0")] });
+    vi.spyOn(backend, "turnSongs").mockResolvedValue(["a"]);
+    vi.spyOn(backend, "queueAdd").mockImplementation(async () => {
+      playing({ userQueue: [item("a", "q9"), item("u", "q0")] });
+    });
+    const remove = vi.spyOn(backend, "queueRemove").mockResolvedValue();
+    await turnTo("Mellow");
+    act(() => last().action!.run());
+    expect(remove.mock.calls.map((c) => c[0])).toEqual(["q9"]);
+  });
+
+  it("turns from the song the sheet was opened for", async () => {
+    const songs = vi.spyOn(backend, "turnSongs").mockResolvedValue(["a"]);
+    vi.spyOn(backend, "queueAdd").mockResolvedValue();
+    await turnTo("Mellow", "earlier");
+    expect(songs).toHaveBeenCalledWith("earlier", "Mellow", expect.any(Array));
   });
 
   it("says so when every song of the mood is already queued", async () => {

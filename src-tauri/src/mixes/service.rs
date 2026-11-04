@@ -442,9 +442,6 @@ impl MixService {
 }
 
 impl MixService {
-    /// A radio page: about 50 songs like the seed, starting with it (made
-    /// fresh each time it opens; the same `salt` gives the same page; a
-    /// steering chip leans it one way).
     /// The moods the next songs can turn toward from this song.
     pub async fn turn_choices(&self, track_id: String) -> AppResult<Vec<super::turn::TurnChoice>> {
         let s = self.clone();
@@ -468,6 +465,9 @@ impl MixService {
         .await
     }
 
+    /// A radio page: about 50 songs like the seed, starting with it (made
+    /// fresh each time it opens; the same `salt` gives the same page; a
+    /// steering chip leans it one way).
     pub async fn radio_page(&self, seed_id: String, steer: Option<MixSteer>, salt: Option<u64>) -> AppResult<MixPage> {
         let s = self.clone();
         blocking(move || {

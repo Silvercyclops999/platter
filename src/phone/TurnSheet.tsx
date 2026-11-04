@@ -25,7 +25,7 @@ export function TurnSheet({ track, choices }: { track: Track; choices: TurnChoic
               onClick={() => {
                 tap("selection");
                 setBusy(c.mood);
-                void turnTo(c.mood).then(() => {
+                void turnTo(c.mood, track.id).then(() => {
                   setBusy(null);
                   phone.pop();
                 });

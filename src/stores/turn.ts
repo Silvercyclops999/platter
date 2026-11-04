@@ -26,22 +26,37 @@ export async function turnChoices(trackId: string): Promise<TurnChoice[]> {
   }
 }
 
-/** Take back a turn: the songs it put up next, if they're still waiting. */
-export function undoTurn(ids: string[]): void {
-  const left = new Set(ids);
+/**
+ * Take back a turn: the songs it put up next, if they're still waiting.
+ * Only queue items that weren't there before the turn count, and of those
+ * the last copy of each song (a "play next" the listener did since sits in
+ * front of the turn's songs).
+ */
+export function undoTurn(ids: string[], before: Set<string>): void {
+  const want = new Set(ids);
   const q = usePlayer.getState().state?.queue;
-  for (const item of q?.userQueue ?? []) {
-    if (!left.has(item.track.id)) continue;
-    left.delete(item.track.id);
+  const added = (q?.userQueue ?? []).filter((i) => !before.has(i.itemId) && want.has(i.track.id));
+  const seen = new Set<string>();
+  for (const item of [...added].reverse()) {
+    if (seen.has(item.track.id)) continue;
+    seen.add(item.track.id);
     void player.queueRemove(item.itemId);
   }
 }
 
-/** Put the turn's songs up next. False when nothing could be added (a toast says why). */
-export async function turnTo(mood: string): Promise<boolean> {
+/**
+ * Put the turn's songs up next, near `fromId` (the song the turn was asked
+ * from; the playing song when left out). False when nothing could be added
+ * (a toast says why). Songs already in the queue, recently played ones
+ * included, are left out.
+ */
+export async function turnTo(mood: string, fromId?: string): Promise<boolean> {
+  // Listening along: the queue is the host's, and turning isn't offered there.
+  if (guestLive()) return false;
   const st = usePlayer.getState().state;
-  const trackId = st?.track?.id;
+  const trackId = fromId ?? st?.track?.id;
   if (!trackId) return false;
+  const before = new Set((st?.queue?.userQueue ?? []).map((i) => i.itemId));
   let ids: string[];
   try {
     ids = await backend.turnSongs(trackId, mood, queuedIds(st?.queue));
@@ -59,7 +74,7 @@ export async function turnTo(mood: string): Promise<boolean> {
     toast.error("Couldn't add the songs to your queue. Try again in a moment.");
     return false;
   }
-  toast.undo(`Turning ${mood.toLowerCase()}: ${ids.length === 1 ? "1 song" : `${ids.length} songs`} up next`, () => undoTurn(ids));
+  toast.undo(`Turning ${mood.toLowerCase()}: ${ids.length === 1 ? "1 song" : `${ids.length} songs`} up next`, () => undoTurn(ids, before));
   return true;
 }
 
