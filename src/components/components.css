@@ -267,6 +267,18 @@
   border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--color-ink) 22%, transparent);
 }
+/* A moment marked in the song: a short upright tick through the line. */
+.slider__mark {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 10px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--color-accent);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
 .slider__buffer,
 .slider__fill {
   position: absolute;

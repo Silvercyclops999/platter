@@ -31,6 +31,7 @@ import { trackMenuItems } from "../components/TrackRow";
 import { IconButton } from "../components/Button";
 import { Skeleton } from "../components/Skeleton";
 import { Slider } from "../components/Slider";
+import { snapToMoment, useMoments } from "../stores/moments";
 import { Tooltip } from "../components/Tooltip";
 import { formatDuration, trackArtistLine } from "../lib/format";
 import { playingShuffleMode, shuffleLabel as labelFor, smartOffered } from "../lib/shuffleMode";
@@ -103,6 +104,7 @@ export function SeekBar({ strip = false }: { strip?: boolean } = {}) {
   const loopOn = useSettings((s) => s.settings?.abLoopHandles ?? true);
   const tonearm = useSettings((s) => s.settings?.tonearmSeek ?? false) || strip;
   const loop = usePlayer((s) => s.state?.abLoop ?? null);
+  const moments = useMoments(trackId);
   // The time held while dragging, for the song it was dragged on.
   const [held, setHeld] = useState<{ v: number; id: string | null } | null>(null);
   const drag = held && held.id === trackId ? held.v : null;
@@ -149,6 +151,7 @@ export function SeekBar({ strip = false }: { strip?: boolean } = {}) {
           pageStep={SEEK_PAGE_STEP}
           disabled={!hasTrack}
           resetKey={trackId}
+          marks={moments}
           valueText={(v) => (hasTrack ? `${formatDuration(v)} of ${formatDuration(durationMs)}` : "Nothing playing")}
           // Pressing seeks at once; while held the time stays at the pointer,
           // and letting go commits where it ended. A press outside a loop's
@@ -157,7 +160,8 @@ export function SeekBar({ strip = false }: { strip?: boolean } = {}) {
           onChange={(v) => setDrag(v)}
           onCommit={(v, cause) => {
             if (cause !== "press") setDrag(null);
-            player.seek(Math.round(v));
+            // A click or drag that ends near a marked moment goes to it.
+            player.seek(Math.round(cause === "key" ? v : snapToMoment(v, moments, durationMs)));
           }}
           onAltPress={showLoop ? onAltPress : undefined}
           onOtherKey={(e) => {

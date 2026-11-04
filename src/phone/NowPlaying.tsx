@@ -7,7 +7,7 @@
  */
 import { GettingLine } from "../components/GettingLine";
 import { getting, useTaps } from "../stores/taps";
-import { ChevronDown, Disc3, ListMusic, MicVocal, MoreHorizontal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from "lucide-react";
+import { BookmarkPlus, ChevronDown, Disc3, ListMusic, MicVocal, MoreHorizontal, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward } from "lucide-react";
 import { memo, useDeferredValue, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { Art, preloadArt, sleeveHue } from "../components/Art";
 import { contextRoute, nextInQueue } from "../shell/nowPlaying";
@@ -30,6 +30,8 @@ import { LyricsCard } from "./LyricsScreen";
 import { NP_OPEN_MS, flyCover } from "./motion";
 import { phone, usePhoneUi } from "./phoneUi";
 import { useTurnChoices } from "./TurnSheet";
+import { snapToMoment, useMoments } from "../stores/moments";
+import { bookmarkTrack } from "../stores/curate";
 import type { HapticKind } from "../lib/backend";
 import { setPhoneVis, usePhoneVis } from "../visualizer/phoneVis";
 import { Stage } from "../visualizer/Stage";
@@ -301,6 +303,17 @@ const PlayerBody = memo(function PlayerBody({ track, screen, art = null, bare = 
           <button
             type="button"
             className="ph-icon-btn"
+            aria-label="Mark this moment"
+            onClick={() => {
+              tap();
+              void bookmarkTrack(track);
+            }}
+          >
+            <BookmarkPlus size={22} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="ph-icon-btn"
             aria-label="Lyrics"
             onClick={() => {
               tap();
@@ -466,6 +479,7 @@ export function PhoneSeek() {
   const positionMs = usePlayer((s) => s.positionMs);
   const durationMs = usePlayer((s) => s.durationMs);
   const trackId = usePlayer((s) => s.state?.track?.id ?? null);
+  const moments = useMoments(trackId);
   const [drag, setDrag] = useState<number | null>(null);
   const shown = drag ?? positionMs;
   return (
@@ -479,11 +493,13 @@ export function PhoneSeek() {
         pageStep={SEEK_PAGE_STEP}
         disabled={!trackId}
         resetKey={trackId}
+        marks={moments}
         valueText={(v) => `${formatDuration(v)} of ${formatDuration(durationMs)}`}
         onChange={(v) => setDrag(v)}
-        onCommit={(v) => {
+        onCommit={(v, cause) => {
           setDrag(null);
-          void player.seek(Math.round(v));
+          // Let go near a marked moment: it starts right there.
+          void player.seek(Math.round(cause === "key" ? v : snapToMoment(v, moments, durationMs)));
         }}
       />
       <div className="ph-seek__times tabular" aria-hidden="true">

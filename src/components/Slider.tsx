@@ -41,6 +41,8 @@ export interface SliderProps {
    * the new one.
    */
   resetKey?: string | number | null;
+  /** Values marked with a small tick on the track (the seek bar's moments). */
+  marks?: number[];
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -68,6 +70,7 @@ export function Slider({
   onAltPress,
   onOtherKey,
   resetKey = null,
+  marks,
 }: SliderProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [held, setHeld] = useState<{ v: number; key: string | number | null; min: number; max: number } | null>(null);
@@ -189,6 +192,9 @@ export function Slider({
       <div className="slider__track" ref={trackRef}>
         {bufPct != null && <div className="slider__buffer" style={{ width: `${bufPct}%` }} />}
         <div className="slider__fill" style={{ width: `${pct}%` }} />
+        {marks?.map((m) => (
+          <div key={m} className="slider__mark" aria-hidden="true" style={{ left: `${clamp(((m - min) / range) * 100, 0, 100)}%` }} />
+        ))}
         <div className="slider__thumb" style={{ left: `${pct}%` }} />
       </div>
     </div>
