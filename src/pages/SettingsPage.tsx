@@ -2716,7 +2716,7 @@ export function SettingsPage({ page: pageProp, section: sectionProp }: { page?: 
       section: "Sound",
       title: "Level loudness between songs",
       description: "Plays songs at a similar volume. Smart keeps an album's own dynamics.",
-      more: "Plays songs at a similar volume using your server's loudness analysis. Smart keeps an album's own dynamics while you play it in order and levels each song otherwise.",
+      more: "Plays songs at a similar volume by turning each one up or down, never by squashing it. It uses your server's loudness analysis and each song's own loudness, which Platter also measures as songs play when the server has none. Smart keeps an album's own dynamics while you play it in order and levels each song otherwise.",
       control: (ids) => select(s, (x) => x.leveling, LEVELING, ids, (v) => updateSettings({ leveling: v })),
     },
     {

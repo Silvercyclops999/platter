@@ -23,6 +23,7 @@ pub mod eqprofile;
 pub mod events;
 mod exclusive;
 pub mod hifi;
+pub mod loudness;
 pub mod gate;
 pub mod http;
 pub mod netsink;

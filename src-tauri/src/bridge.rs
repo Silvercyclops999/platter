@@ -578,6 +578,7 @@ impl TrackResolver for PlexStreams {
                 a.album_gain_db = f(s.album_gain);
                 a.peak = f(s.peak);
                 a.album_peak = f(s.album_peak);
+                a.server_lufs = f(s.loudness);
                 let (id, stored) = (track.id.clone(), a);
                 let now = unix_now();
                 if let Err(e) = db.write_async(move |c| trackaudio::set_loudness(c, &id, &stored, now)).await {
@@ -595,6 +596,19 @@ impl TrackResolver for PlexStreams {
         {
             tracing::debug!("could not store silence: {e}");
         }
+    }
+
+    fn save_loudness(&self, track_id: &str, lufs: f32, peak: f32) {
+        if let Some(db) = &self.2 {
+            save_measured(db, track_id, lufs, peak);
+        }
+    }
+}
+
+/// Stores loudness measured over a whole play (see `TrackResolver::save_loudness`).
+pub(crate) fn save_measured(db: &DbHandle, track_id: &str, lufs: f32, peak: f32) {
+    if let Err(e) = db.write(|c| trackaudio::set_measured(c, track_id, lufs, peak)) {
+        tracing::debug!("could not store measured loudness: {e}");
     }
 }
 
