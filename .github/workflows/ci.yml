@@ -19,7 +19,9 @@ permissions:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    # Held at 24.04: on 26.04 the newer Vulkan shader compiler breaks the
+    # transcription build (whisper.cpp's coopmat2 shaders go missing).
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       # Vulkan headers and glslc build transcription on the graphics card.
