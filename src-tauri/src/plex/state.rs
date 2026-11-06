@@ -150,6 +150,9 @@ struct Inner {
     /// car can start the app before that. A Mac would ask for the login
     /// password each time.
     reread_sign_in: std::sync::atomic::AtomicBool,
+    /// The last look for the account's servers got no list at all (plex.tv
+    /// didn't answer and none was saved), so nothing will connect.
+    no_list: std::sync::atomic::AtomicBool,
 }
 
 /// What's known about the saved Plex sign-in, without waiting.
@@ -243,6 +246,7 @@ impl PlexState {
                 owner: std::sync::atomic::AtomicU8::new(1),
                 saved: std::sync::atomic::AtomicU8::new(0),
                 reread_sign_in: std::sync::atomic::AtomicBool::new(cfg!(target_os = "ios")),
+                no_list: std::sync::atomic::AtomicBool::new(false),
             }),
         })
     }
@@ -769,7 +773,11 @@ impl PlexState {
         // The network may still be coming up: the first failed checks don't
         // count as offline (the wake window), and are tried again soon.
         self.inner.health.lock().on_woke(now_ms());
-        if self.restore_again().await {
+        if self.restore_again().await
+            // Only one start-over at a time: the app coming back and the
+            // network changing often arrive together.
+            && self.inner.restored.send_if_modified(|done| std::mem::replace(done, false))
+        {
             tracing::info!("sign-in: starting again (it couldn't be read, or no server list came back)");
             self.restore_in_background();
             return;
@@ -787,8 +795,8 @@ impl PlexState {
         match self.saved_sign_in() {
             SavedSignIn::Unknown => self.inner.reread_sign_in.load(std::sync::atomic::Ordering::SeqCst),
             SavedSignIn::Saved => {
-                let s = self.inner.session.read().await;
-                s.account.is_some() && s.current.is_none() && s.servers.is_empty()
+                self.inner.no_list.load(std::sync::atomic::Ordering::SeqCst)
+                    && self.inner.session.read().await.current.is_none()
             }
             SavedSignIn::None => false,
         }
@@ -968,6 +976,7 @@ impl PlexState {
         } else {
             load_servers(&self.inner.tv, token, &cache).await
         };
+        self.inner.no_list.store(loaded.as_ref().is_err_and(|e| !matches!(e, AppError::Auth(_))), std::sync::atomic::Ordering::SeqCst);
         let list = match loaded {
             Ok(l) => l,
             Err(AppError::Auth(_)) => {
@@ -2616,9 +2625,14 @@ mod tests {
         // Once connected, a network change is only a re-check.
         let m1 = pms("m1", true).await;
         let tv = plex_tv(serde_json::json!([resource("m1", &m1.uri())])).await;
-        let (st, _rec) = state(dir.path(), &tv.uri(), store);
+        let (st, _rec) = state(dir.path(), &tv.uri(), store.clone());
         st.restore().await.unwrap();
         assert!(!st.restore_again().await);
+        // An account plex.tv says has no servers isn't asked again each time.
+        let empty = plex_tv(serde_json::json!([])).await;
+        let (st2, _rec) = state(tempfile::tempdir().unwrap().path(), &empty.uri(), store);
+        st2.restore().await.unwrap();
+        assert!(!st2.restore_again().await);
         st.sign_out().await.unwrap();
         assert!(!st.restore_again().await, "signed out stays signed out");
     }
