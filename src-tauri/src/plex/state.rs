@@ -141,6 +141,25 @@ struct Inner {
     /// The last answer to whether the account owns the connected server:
     /// 0 not signed in, 1 no (also before the first answer), 2 yes.
     owner: std::sync::atomic::AtomicU8,
+    /// What's known about the saved sign-in, as [`SavedSignIn`] (0 unknown,
+    /// 1 none, 2 saved).
+    saved: std::sync::atomic::AtomicU8,
+    /// Read the saved sign-in again when the app comes back or the network
+    /// changes, if it couldn't be read at launch. Only on the phone: there
+    /// the keychain is shut until the first unlock after a restart, and a
+    /// car can start the app before that. A Mac would ask for the login
+    /// password each time.
+    reread_sign_in: std::sync::atomic::AtomicBool,
+}
+
+/// What's known about the saved Plex sign-in, without waiting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SavedSignIn {
+    /// Not read yet, or the keychain couldn't be read.
+    Unknown,
+    /// Nothing saved: signed out.
+    None,
+    Saved,
 }
 
 /// Least time between checks asked for by replies from the server.
@@ -222,6 +241,8 @@ impl PlexState {
                 offline: Arc::default(),
                 others: Mutex::new(std::collections::HashMap::new()),
                 owner: std::sync::atomic::AtomicU8::new(1),
+                saved: std::sync::atomic::AtomicU8::new(0),
+                reread_sign_in: std::sync::atomic::AtomicBool::new(cfg!(target_os = "ios")),
             }),
         })
     }
@@ -588,6 +609,25 @@ impl PlexState {
         owns
     }
 
+    /// What's known about the saved sign-in, without waiting (the car asks
+    /// from its own thread).
+    pub fn saved_sign_in(&self) -> SavedSignIn {
+        match self.inner.saved.load(std::sync::atomic::Ordering::SeqCst) {
+            1 => SavedSignIn::None,
+            2 => SavedSignIn::Saved,
+            _ => SavedSignIn::Unknown,
+        }
+    }
+
+    fn set_saved(&self, saved: SavedSignIn) {
+        let n = match saved {
+            SavedSignIn::Unknown => 0,
+            SavedSignIn::None => 1,
+            SavedSignIn::Saved => 2,
+        };
+        self.inner.saved.store(n, std::sync::atomic::Ordering::SeqCst);
+    }
+
     /// The connected server's own access token and addresses, only when it
     /// isn't the account's sign-in (Plex gives an owned server's as the
     /// account token itself). For handing the Bridge no more than the server.
@@ -729,7 +769,29 @@ impl PlexState {
         // The network may still be coming up: the first failed checks don't
         // count as offline (the wake window), and are tried again soon.
         self.inner.health.lock().on_woke(now_ms());
+        if self.restore_again().await {
+            tracing::info!("sign-in: starting again (it couldn't be read, or no server list came back)");
+            self.restore_in_background();
+            return;
+        }
         self.recheck();
+    }
+
+    /// Whether to run the launch restore again: the saved sign-in couldn't
+    /// be read (see `reread_sign_in`), or it was read but neither plex.tv
+    /// nor the disk had a server list, so nothing would ever connect.
+    async fn restore_again(&self) -> bool {
+        if !*self.inner.restored.borrow() || self.offline_by_choice() || self.inner.pin_cancel.lock().is_some() {
+            return false;
+        }
+        match self.saved_sign_in() {
+            SavedSignIn::Unknown => self.inner.reread_sign_in.load(std::sync::atomic::Ordering::SeqCst),
+            SavedSignIn::Saved => {
+                let s = self.inner.session.read().await;
+                s.account.is_some() && s.current.is_none() && s.servers.is_empty()
+            }
+            SavedSignIn::None => false,
+        }
     }
 
     /// The computer has no network route at all. Show "You're offline"
@@ -841,6 +903,7 @@ impl PlexState {
     /// possible.
     pub async fn complete_sign_in(&self, token: Token) -> AppResult<()> {
         self.inner.store.set(ACCOUNT_TOKEN, &token)?;
+        self.set_saved(SavedSignIn::Saved);
         let user = self.inner.tv.user(&token).await.ok();
         {
             let mut s = self.inner.session.write().await;
@@ -855,7 +918,14 @@ impl PlexState {
     /// Restore a session from the keychain (app start).
     pub async fn restore(&self) -> AppResult<AuthStatus> {
         let saved = self.inner.store.get(ACCOUNT_TOKEN);
-        let Some(token) = saved? else {
+        if let Err(e) = &saved {
+            // Not "signed out": the sign-in may well be there (a phone still
+            // locked since it restarted). Say so, and try again later.
+            tracing::warn!(kind = e.kind(), "sign-in: the keychain couldn't be read");
+        }
+        let saved = saved?;
+        self.set_saved(if saved.is_some() { SavedSignIn::Saved } else { SavedSignIn::None });
+        let Some(token) = saved else {
             self.inner.account_read.send_replace(true);
             self.emit_auth().await;
             self.emit_health();
@@ -962,6 +1032,7 @@ impl PlexState {
         self.stop_background();
         let _ = self.inner.store.delete(ACCOUNT_TOKEN);
         let _ = self.inner.store.delete(SERVER_TOKEN);
+        self.set_saved(SavedSignIn::None);
         {
             let mut s = self.inner.session.write().await;
             s.account = None;
@@ -987,6 +1058,7 @@ impl PlexState {
         self.stop_background();
         let _ = self.inner.store.delete(ACCOUNT_TOKEN);
         let _ = self.inner.store.delete(SERVER_TOKEN);
+        self.set_saved(SavedSignIn::None);
         {
             let mut s = self.inner.session.write().await;
             s.account = None;
@@ -2474,6 +2546,81 @@ mod tests {
             }
             self.0.delete(account)
         }
+    }
+
+    /// A keychain that can't be read until it's opened (an iPhone locked
+    /// since it restarted).
+    struct LockedKeychain(MemoryStore, std::sync::atomic::AtomicBool);
+    impl TokenStore for LockedKeychain {
+        fn get(&self, account: &str) -> AppResult<Option<Token>> {
+            if !self.1.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(AppError::Internal("keychain is locked or unavailable".into()));
+            }
+            self.0.get(account)
+        }
+        fn set(&self, account: &str, token: &Token) -> AppResult<()> {
+            self.0.set(account, token)
+        }
+        fn delete(&self, account: &str) -> AppResult<()> {
+            self.0.delete(account)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_keychain_that_cannot_be_read_yet_is_not_signed_out_and_is_read_again() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let m1 = pms("m1", true).await;
+        let tv = plex_tv(serde_json::json!([resource("m1", &m1.uri())])).await;
+        let dir = tempfile::tempdir().unwrap();
+        let inner = MemoryStore::new();
+        inner.set(ACCOUNT_TOKEN, &Token::new(ACCT).unwrap()).unwrap();
+        let store = Arc::new(LockedKeychain(inner, std::sync::atomic::AtomicBool::new(false)));
+        let st = PlexState::with_parts(dir.path().to_path_buf(), store.clone(), &tv.uri(), cfg()).unwrap();
+        st.inner.reread_sign_in.store(true, SeqCst);
+        assert_eq!(st.saved_sign_in(), SavedSignIn::Unknown, "nothing read yet");
+        assert!(st.restore().await.is_err());
+        assert_eq!(st.saved_sign_in(), SavedSignIn::Unknown, "a locked keychain isn't a sign-out");
+        // The phone is unlocked and the app comes to the front.
+        store.1.store(true, SeqCst);
+        st.reconnect().await;
+        let a = wait_signed_in(&st).await;
+        assert_eq!(a.server.unwrap().machine_id, "m1");
+        assert_eq!(st.saved_sign_in(), SavedSignIn::Saved);
+        st.sign_out().await.unwrap();
+        assert_eq!(st.saved_sign_in(), SavedSignIn::None);
+    }
+
+    #[tokio::test]
+    async fn a_mac_does_not_ask_the_keychain_again_by_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(LockedKeychain(MemoryStore::new(), std::sync::atomic::AtomicBool::new(false)));
+        let st = PlexState::with_parts(dir.path().to_path_buf(), store, "http://127.0.0.1:9", cfg()).unwrap();
+        st.inner.reread_sign_in.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(st.restore().await.is_err());
+        assert!(!st.restore_again().await);
+    }
+
+    #[tokio::test]
+    async fn a_saved_sign_in_with_no_server_list_starts_again_when_the_network_comes_back() {
+        // Launched with no way out and nothing on disk: plex.tv didn't answer.
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(MemoryStore::new());
+        store.set(ACCOUNT_TOKEN, &Token::new(ACCT).unwrap()).unwrap();
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let dead = format!("http://{}", l.local_addr().unwrap());
+        drop(l);
+        let (st, _rec) = state(dir.path(), &dead, store.clone());
+        assert!(st.restore().await.is_err());
+        assert_eq!(st.saved_sign_in(), SavedSignIn::Saved, "still signed in");
+        assert!(st.restore_again().await, "nothing would ever connect");
+        // Once connected, a network change is only a re-check.
+        let m1 = pms("m1", true).await;
+        let tv = plex_tv(serde_json::json!([resource("m1", &m1.uri())])).await;
+        let (st, _rec) = state(dir.path(), &tv.uri(), store);
+        st.restore().await.unwrap();
+        assert!(!st.restore_again().await);
+        st.sign_out().await.unwrap();
+        assert!(!st.restore_again().await, "signed out stays signed out");
     }
 
     #[tokio::test]

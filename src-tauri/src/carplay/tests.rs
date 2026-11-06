@@ -414,12 +414,30 @@ fn health(status: crate::plex::types::HealthStatus, cached_only: bool) -> crate:
 #[test]
 fn reach_follows_sign_in_and_the_server() {
     use crate::plex::types::HealthStatus as H;
-    assert_eq!(reach(&health(H::NoAuth, false), false), Reach::SignedOut);
-    assert_eq!(reach(&health(H::NoAuth, false), true), Reach::Online, "another server is set up");
-    assert_eq!(reach(&health(H::NoAuth, true), false), Reach::Unreachable, "the server signed us out: downloads still play");
-    assert_eq!(reach(&health(H::Offline, true), false), Reach::Unreachable);
-    assert_eq!(reach(&health(H::Local, false), false), Reach::Online);
-    assert_eq!(reach(&health(H::Starting, false), false), Reach::Online);
+    use SavedSignIn as S;
+    assert_eq!(reach(&health(H::NoAuth, false), S::None, false), Reach::SignedOut);
+    assert_eq!(reach(&health(H::NoAuth, false), S::None, true), Reach::Online, "another server is set up");
+    assert_eq!(reach(&health(H::NoAuth, true), S::None, false), Reach::Unreachable, "the server signed us out: downloads still play");
+    assert_eq!(reach(&health(H::Offline, true), S::Saved, false), Reach::Unreachable);
+    assert_eq!(reach(&health(H::Local, false), S::Saved, false), Reach::Online);
+    assert_eq!(reach(&health(H::Starting, false), S::Saved, false), Reach::Online);
+}
+
+#[test]
+fn a_sign_in_still_being_read_or_connected_is_never_signed_out() {
+    // The car started the app with no signal: the saved sign-in is there,
+    // but no server answered yet (plex.tv can take its full timeout).
+    use crate::plex::types::HealthStatus as H;
+    let starting = health(H::NoAuth, false);
+    assert_eq!(reach(&starting, SavedSignIn::Saved, false), Reach::Unreachable);
+    // The phone has been locked since it restarted, so the keychain can't
+    // be read yet: downloads play, nothing says to sign in.
+    assert_eq!(reach(&starting, SavedSignIn::Unknown, false), Reach::Unreachable);
+    for tab in [Tab::Home, Tab::Library, Tab::Downloaded, Tab::Radio] {
+        let rows = tab_rows(tab, reach(&starting, SavedSignIn::Saved, false), library);
+        assert!(rows.iter().all(|r| r.title != SIGN_IN), "{tab:?} says to sign in");
+    }
+    assert_eq!(tab_rows(Tab::Downloaded, reach(&starting, SavedSignIn::Unknown, false), library), library());
 }
 
 #[test]

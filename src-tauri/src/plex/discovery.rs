@@ -184,8 +184,9 @@ pub struct ServerList {
     pub from_cache: bool,
 }
 
-/// Ask plex.tv for servers; if plex.tv is unreachable (network / 5xx), fall
-/// back to the disk cache. Auth errors (revoked token) are returned as-is.
+/// Ask plex.tv for servers; if it doesn't answer with a list (no network,
+/// 5xx, a network that answers for it with something else), fall back to the
+/// disk cache. Auth errors (revoked token) are returned as-is.
 pub async fn load_servers(
     tv: &PlexTv,
     token: &Token,
@@ -196,9 +197,10 @@ pub async fn load_servers(
             servers: servers_from_resources(resources),
             from_cache: false,
         }),
-        Err(e @ (AppError::Network(_) | AppError::Server(_) | AppError::Decode(_)))
-            if !cache.servers.is_empty() =>
-        {
+        // Anything but a rejected sign-in: no signal, a network with no way
+        // out that answers for plex.tv itself (a car's Wi-Fi, a sign-in
+        // page), plex.tv having a bad day. The saved servers still work.
+        Err(e) if !matches!(e, AppError::Auth(_)) && !cache.servers.is_empty() => {
             tracing::warn!(kind = e.kind(), "plex.tv unavailable, using cached servers");
             Ok(ServerList {
                 servers: cache
@@ -888,6 +890,35 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.kind(), "network");
+    }
+
+    #[tokio::test]
+    async fn a_network_that_answers_for_plex_tv_uses_cached_servers() {
+        // No way out, but something answers anyway: a car's Wi-Fi, a
+        // sign-in page. Signing in again would be wrong; the saved servers
+        // are what we have.
+        for status in [404, 511] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/api/v2/resources"))
+                .respond_with(ResponseTemplate::new(status))
+                .mount(&server)
+                .await;
+            let tv = PlexTv::with_base(Arc::new(ClientIdentity::with_id("c")), &server.uri()).unwrap();
+            let mut cache = DiscoveryCache::default();
+            cache.servers.push(CachedServer {
+                machine_id: "m".into(),
+                name: "Home".into(),
+                owned: true,
+                version: None,
+                connections: vec![],
+                last_uri: None,
+                last_kind: None,
+            });
+            let list = load_servers(&tv, &Token::new("t").unwrap(), &cache).await.unwrap();
+            assert!(list.from_cache, "{status}");
+            assert_eq!(list.servers[0].machine_id, "m");
+        }
     }
 
     #[tokio::test]

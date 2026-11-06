@@ -17,6 +17,7 @@ use crate::downloads::store::{self as dl_store, ItemKind};
 use crate::db::types::{AlbumSort, ArtistSort, HomeItem};
 use crate::error::AppResult;
 use crate::plex::types::{Health, HealthStatus};
+pub use crate::plex::state::SavedSignIn;
 
 /// Most rows one CarPlay list shows; cars allow 100 to 500, and a long list
 /// is hard to use while driving anyway.
@@ -759,14 +760,19 @@ pub enum Reach {
     Online,
 }
 
-/// How things stand, from the Plex account's health and whether another
-/// server (Jellyfin, Navidrome) is set up. With another server, a Plex
-/// account that isn't signed in doesn't count.
-pub fn reach(plex: &Health, other_servers: bool) -> Reach {
+/// How things stand, from the Plex account's health, what's known about
+/// its saved sign-in, and whether another server (Jellyfin, Navidrome) is
+/// set up. With another server, a Plex account that isn't signed in doesn't
+/// count. Only a sign-in known to be gone says to sign in: one still being
+/// read or connected (no signal, the phone locked since it restarted) is
+/// out of reach, so downloads play.
+pub fn reach(plex: &Health, saved: SavedSignIn, other_servers: bool) -> Reach {
     match plex.status {
-        HealthStatus::NoAuth if !plex.cached_only => {
-            if other_servers { Reach::Online } else { Reach::SignedOut }
-        }
+        HealthStatus::NoAuth if !plex.cached_only => match saved {
+            _ if other_servers => Reach::Online,
+            SavedSignIn::None => Reach::SignedOut,
+            SavedSignIn::Saved | SavedSignIn::Unknown => Reach::Unreachable,
+        },
         _ if plex.cached_only => Reach::Unreachable,
         _ => Reach::Online,
     }

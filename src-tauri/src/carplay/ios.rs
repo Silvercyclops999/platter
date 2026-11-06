@@ -364,7 +364,7 @@ pub(super) fn reach(app: &AppHandle<Wry>) -> Reach {
     let others = app
         .try_state::<Backends>()
         .is_some_and(|b| b.records().servers.iter().any(|r| r.kind != BackendKind::Plex));
-    super::reach(&plex.health(), others)
+    super::reach(&plex.health(), plex.saved_sign_in(), others)
 }
 
 fn ns(s: &str) -> Retained<NSString> {
