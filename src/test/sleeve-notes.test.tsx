@@ -67,6 +67,7 @@ describe("words", () => {
     expect(formatSleeveDate("1997", "en-US")).toBe("1997");
     expect(formatSleeveDate("1997-05", "en-US")).toBe("May 1997");
     expect(formatSleeveDate("1997-05-21", "en-US")).toBe("May 21, 1997");
+    expect(formatSleeveDate("2018-01-01", "en-US")).toBe("2018");
     expect(formatSleeveDate("1996-11/1997-02", "en-US")).toBe("November 1996 to February 1997");
     expect(countryName("GB", "en-US")).toBe("United Kingdom");
     expect(countryName("XW")).toBe("Worldwide");

@@ -798,6 +798,8 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 }
 .ph-field__input { -webkit-user-select: text; flex: 1; min-width: 0; height: 100%; border: 0; background: none; color: var(--color-text-primary); font: inherit; font-size: 17px; outline: none !important; box-shadow: none !important; user-select: text; }
 .ph-field:focus-within { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--color-accent) 70%, transparent); }
+/* The search bar is focused when Cancel shows and the caret blinks; a ring on top reads like a web form. */
+.ph-search__bar .ph-field:focus-within { box-shadow: none; }
 .ph-field__input::-webkit-search-cancel-button { display: none; }
 .ph-hit { display: flex; align-items: center; }
 .ph-hit .ph-row { flex: 1; min-width: 0; }
@@ -1072,6 +1074,8 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
 /* On You the way on to Stats and the tools are ruled rows, like the Wrapped row above them. */
 .phone .ph-you__links.ph-set-list { border-radius: 0; background: none; box-shadow: none; border-top: 1px solid var(--ph-line); border-bottom: 1px solid var(--ph-line); }
 .phone .ph-you__links .ph-set-link { padding-left: 0 !important; padding-right: 4px !important; }
+/* Under Wrapped the list shares its rule, so the two lines don't stack. */
+.phone .ph-you__wrapped + .ph-you__links { margin-top: 0; border-top: 0; }
 .phone .ph-you__links .ph-set-link__title { font-family: var(--font-headings, var(--font-family)); font-weight: 600; }
 
 /* ---------------------------------------------------------------- settings, phone-sized */
@@ -1311,7 +1315,10 @@ button.ph-credits__name::before { content: ""; position: absolute; inset: 0; }
   -webkit-backdrop-filter: blur(16px) saturate(1.4);
   backdrop-filter: blur(16px) saturate(1.4);
   pointer-events: none;
+  transition: opacity var(--ph-quick, 160ms) ease-out;
 }
+/* Until something scrolls under the clock, the status bar shows the page itself, so a cover's colour runs up behind it. */
+.ph-stack:not([data-moving]):has(.ph-layer:not([aria-hidden]) .ph-page:not(.is-scrolled) > .ph-backbar)::after { opacity: 0; }
 /* Inputs take a caret and a selection even though the rest of the phone doesn't. */
 .phone :is(input, textarea, [contenteditable="true"]) { -webkit-user-select: text; user-select: text; }
 :root[data-reduced-motion="true"] .ph-sheet-layer.is-closing:not([data-sliding-out]) .ph-sheet { opacity: 0; transition: opacity 120ms ease-out; }

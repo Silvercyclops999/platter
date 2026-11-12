@@ -5,7 +5,7 @@
  * of the distance, without a flick, snaps it back. Nothing else (no swipe up).
  * The hook only reports; NowPlaying's cover deck moves things.
  */
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 /** A swipe past this share of the width skips. */
 export const SKIP_FRACTION = 0.3;
@@ -246,4 +246,38 @@ export function installTapGuard(root: HTMLElement): () => void {
     root.removeEventListener("scroll", scrolled, true);
     root.removeEventListener("click", click, true);
   };
+}
+
+/** A drag this far up or down the page puts the keyboard away. */
+export const KEYBOARD_DRAG_PX = 12;
+
+/**
+ * Puts the keyboard away once the finger drags the page, the way a phone's
+ * own lists do, so the results under it can be read. Taps in the field,
+ * and sideways drags (the filter chips), leave it up.
+ */
+export function useKeyboardAwayOnDrag(on: boolean, field: { current: HTMLInputElement | null }) {
+  useEffect(() => {
+    if (!on) return;
+    let start: { x: number; y: number } | null = null;
+    const down = (e: TouchEvent) => {
+      const t = e.touches[0];
+      start = t && e.target !== field.current ? { x: t.clientX, y: t.clientY } : null;
+    };
+    const move = (e: TouchEvent) => {
+      const t = e.touches[0];
+      if (!start || !t) return;
+      const dy = Math.abs(t.clientY - start.y);
+      if (dy >= KEYBOARD_DRAG_PX && dy > Math.abs(t.clientX - start.x)) {
+        start = null;
+        field.current?.blur();
+      }
+    };
+    document.addEventListener("touchstart", down, { passive: true, capture: true });
+    document.addEventListener("touchmove", move, { passive: true, capture: true });
+    return () => {
+      document.removeEventListener("touchstart", down, { capture: true });
+      document.removeEventListener("touchmove", move, { capture: true });
+    };
+  }, [on, field]);
 }

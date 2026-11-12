@@ -83,6 +83,9 @@ export function songCantPlay(
  * mark, and its sheet. The playing song wears the level bars: in place of
  * its number, or before its title on a row without one.
  */
+/** A song row's height on the phone (phone.css .ph-song). */
+export const SONG_ROW_PX = 64;
+
 export function SongRow({
   track,
   index,

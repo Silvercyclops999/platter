@@ -16,6 +16,7 @@ import { useLoad } from "../../lib/useLoad";
 import { nav, useRouter } from "../../stores/router";
 import { phone } from "../phoneUi";
 import { RowGlyphs, tap } from "../bits";
+import { useKeyboardAwayOnDrag } from "../gestures";
 import { SongSwipeUnder, useRowSwipe } from "../rowSwipe";
 import { isLiked, setLiked } from "../../stores/likes";
 import { player, usePlayer } from "../../stores/player";
@@ -67,6 +68,7 @@ export function PhoneSearch() {
   const [kind, setKind] = useState<SearchKind>("all");
   const [focused, setFocused] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  useKeyboardAwayOnDrag(focused, input);
   const q = query.trim();
   const offline = useApp((s) => !!s.health?.cachedOnly);
 
