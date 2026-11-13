@@ -899,9 +899,9 @@ pub fn split_albums(artist_id: &str, d: &ArtistData, by_album: &HashMap<&str, Ve
         }
     }
     let mut groups: BTreeMap<usize, Vec<&AlbumRow>> = BTreeMap::new();
-    for i in 0..n {
+    for (i, album) in d.albums.iter().enumerate().take(n) {
         let r = find(&mut group_of, i);
-        groups.entry(r).or_default().push(&d.albums[i]);
+        groups.entry(r).or_default().push(album);
     }
     let mut out = Vec::new();
     for group in groups.values().filter(|g| g.len() > 1) {

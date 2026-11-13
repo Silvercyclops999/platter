@@ -68,6 +68,8 @@ export function formatDay(d: string, locale?: string): string {
   if (!m) return d;
   const [y, mo, day] = [Number(m[1]), m[2] ? Number(m[2]) : 0, m[3] ? Number(m[3]) : 0];
   if (!mo || mo > 12) return String(y);
+  // 1 January is how a server writes "sometime that year": say just the year.
+  if (mo === 1 && day === 1) return String(y);
   const date = new Date(Date.UTC(y, mo - 1, day && day <= 31 ? day : 1));
   return date.toLocaleDateString(locale, { ...(day ? DAYS : MONTHS), timeZone: "UTC" });
 }

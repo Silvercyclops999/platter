@@ -20,7 +20,8 @@ import { BlendCover } from "../../pages/BlendPage";
 import { useContextState } from "../../pages/cards";
 import { playBlend, playShared, useCircle } from "../../stores/circle";
 import { player, usePlayer } from "../../stores/player";
-import { BackBar, PageFailed, PageLoading, SongRow, countLine } from "./common";
+import { BackBar, PageFailed, PageLoading, SONG_ROW_PX, SongRow, countLine } from "./common";
+import { VirtualRows } from "../../components/VirtualRows";
 import { tap } from "../bits";
 import { PhoneShuffleToggle } from "./kit";
 
@@ -323,9 +324,16 @@ function SongList({
       ) : (
         <ListDownloadingFor item={dl}>
           <ul className="ph-songs" aria-label="Songs">
-            {rows.map(({ t, i }) => (
-              <SongRow key={`${t.id}:${i}`} track={t} onPlay={() => play(t.id, undefined, ids)} inPlaylist={inPlaylist?.(i)} />
-            ))}
+            {/* A long list (All Music, a big playlist) draws only the rows near the screen, so it opens at once. */}
+            <VirtualRows
+              count={rows.length}
+              rowHeight={SONG_ROW_PX}
+              scroller=".ph-page"
+              renderRow={(n) => {
+                const { t, i } = rows[n];
+                return <SongRow key={`${t.id}:${i}`} track={t} onPlay={() => play(t.id, undefined, ids)} inPlaylist={inPlaylist?.(i)} />;
+              }}
+            />
           </ul>
         </ListDownloadingFor>
       )}
