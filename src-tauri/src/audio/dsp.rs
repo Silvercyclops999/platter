@@ -318,6 +318,10 @@ pub struct TrackAudio {
     /// The library's typical gain, for a song nothing is known about yet,
     /// so it plays near everything else instead of at full level.
     pub guess_db: Option<f32>,
+    /// On a first play of a song nothing is known about: its loudness
+    /// measured over the first seconds decoded (never stored; the whole
+    /// play's measurement is).
+    pub estimate_lufs: Option<f32>,
 }
 
 impl TrackAudio {
@@ -336,11 +340,44 @@ impl TrackAudio {
     fn song_gain(&self) -> Option<f32> {
         self.gain_db.filter(|g| self.album_gain_db != Some(*g))
     }
+
+    /// Nothing at all about this song's loudness: not from the server, not
+    /// from an earlier play.
+    pub fn knows_nothing(&self) -> bool {
+        self.gain_db.is_none() && self.album_gain_db.is_none() && self.server_lufs.is_none() && self.measured_lufs.is_none()
+    }
+
+    /// The gain for a song nothing is known about: from its opening once
+    /// that's been measured, else the library's typical gain. The estimate
+    /// may turn a song down as far as it needs but up only a little past
+    /// the typical gain, since a quiet intro can hide a loud song.
+    fn unknown_gain(&self) -> Option<f32> {
+        let guess = self.guess_db;
+        match (self.estimate_lufs, self.target_lufs) {
+            (Some(l), Some(t)) => {
+                let g = t - l;
+                Some(match guess {
+                    Some(guess) => g.min(guess + ESTIMATE_MAX_BOOST_DB),
+                    None => g,
+                })
+            }
+            _ => guess,
+        }
+    }
 }
+
+/// How far past the library's typical gain an estimate from a song's
+/// opening may turn it up.
+pub const ESTIMATE_MAX_BOOST_DB: f32 = 4.0;
 
 /// The gain a song gets when nothing at all is known about loudness yet
 /// (about what the server gives a typical modern song).
 pub const DEFAULT_GUESS_DB: f32 = -10.0;
+
+/// What a song leveled from its own loudness is brought to (LUFS) until
+/// songs with both the server's gain and a loudness show what the server
+/// aims for.
+pub const DEFAULT_TARGET_LUFS: f32 = -21.0;
 
 pub fn db_to_lin(db: f32) -> f32 {
     10f32.powf(db / 20.0)
@@ -363,14 +400,14 @@ pub fn level_gain(info: Option<&TrackAudio>, s: &DspSettings, album_in_order: bo
             (Some(g), _, _) => (Some(g), i.album_peak.or(i.peak)),
             (None, Some(g), _) => (Some(g), i.peak),
             (None, None, Some((g, p))) => (Some(g), p),
-            (None, None, None) => (i.guess_db, None),
+            (None, None, None) => (i.unknown_gain(), None),
         },
         (Some(false), Some(i)) => match (i.song_gain(), i.own_gain()) {
             (Some(g), _) => (Some(g), i.peak),
             (None, Some((g, p))) => (Some(g), p),
             (None, None) => match i.gain_db.or(i.album_gain_db) {
                 Some(g) => (Some(g), i.peak.or(i.album_peak)),
-                None => (i.guess_db, None),
+                None => (i.unknown_gain(), None),
             },
         },
         (None, Some(i)) => (None, i.peak.or(i.album_peak).or(i.measured_peak)),

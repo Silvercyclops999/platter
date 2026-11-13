@@ -147,6 +147,11 @@ impl LoudnessMeter {
         l.is_finite().then_some(l)
     }
 
+    /// How much audio has been measured (seconds).
+    pub fn seconds(&self) -> f64 {
+        self.seen as f64 / 10.0
+    }
+
     /// The highest sample (linear).
     pub fn peak(&self) -> f32 {
         self.peak

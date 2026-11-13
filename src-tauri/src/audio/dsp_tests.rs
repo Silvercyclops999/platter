@@ -58,6 +58,11 @@ struct Rig {
 }
 
 async fn rig(paced: bool) -> Rig {
+    rig_ahead(paced, 2_000).await
+}
+
+/// A rig whose decoder runs `ahead_ms` ahead of playback.
+async fn rig_ahead(paced: bool, ahead_ms: u64) -> Rig {
     let server = TestServer::start().await;
     let res = Arc::new(InfoResolver {
         inner: FakeResolver::new(&server),
@@ -78,7 +83,7 @@ async fn rig(paced: bool) -> Rig {
         rt: tokio::runtime::Handle::current(),
         output: Box::new(out),
         config: EngineConfig {
-            buffer_ahead_ms: 2_000,
+            buffer_ahead_ms: ahead_ms,
             ramp_ms: 0,
             declick_ms: 0,
             http: HttpConfig::default(),
@@ -443,6 +448,79 @@ async fn a_song_with_no_loudness_plays_at_the_typical_gain_not_full_level() {
     // ... and the next song with none plays at it.
     r.engine.load(tr("b", "y", 1, 1.0), "ib".into(), 0, false).unwrap();
     assert!((front_gain_set(&r).await - dsp::db_to_lin(-12.0)).abs() < 1e-6);
+}
+
+/// The front song's leveling gain in dB once it is set and differs from `from`.
+async fn front_gain_db_after(r: &Rig, from: f32) -> f32 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let g = r.engine.front_gain().unwrap_or(1.0);
+        if ((g - from).abs() > 1e-6 && (g - 1.0).abs() > 1e-6) || Instant::now() > deadline {
+            return 20.0 * g.log10();
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_first_play_is_leveled_from_the_songs_opening() {
+    // The app decodes 12 s ahead, so a song's opening is measured before it's heard.
+    let r = rig_ahead(false, 12_000).await;
+    // Two songs the server knows nothing about, 20 dB apart.
+    add(&r, "loud", wav(secs(10.0), |i| (tone(i, 0.5), tone(i, 0.5))));
+    add(&r, "quiet", wav(secs(10.0), |i| (tone(i, 0.05), tone(i, 0.05))));
+    r.engine.set_dsp(DspSettings { leveling: Leveling::Smart, ..Default::default() });
+    let guess = dsp::db_to_lin(dsp::DEFAULT_GUESS_DB);
+    // The loud one (-6.7 LUFS) is turned down to the target, well under the guess.
+    r.engine.load(tr("loud", "x", 1, 10.0), "il".into(), 0, false).unwrap();
+    let loud = front_gain_db_after(&r, guess).await;
+    assert!((loud - (dsp::DEFAULT_TARGET_LUFS + 6.7)).abs() < 0.3, "{loud}");
+    // The quiet one (-26.7 LUFS) is turned up, but only a little past the typical gain.
+    r.engine.load(tr("quiet", "y", 1, 10.0), "iq".into(), 0, false).unwrap();
+    let quiet = front_gain_db_after(&r, guess).await;
+    assert!((quiet - (dsp::DEFAULT_GUESS_DB + dsp::ESTIMATE_MAX_BOOST_DB)).abs() < 0.01, "{quiet}");
+    // Data from the server wins over any estimate.
+    r.res.info.lock().insert("loud".into(), TrackAudio { gain_db: Some(-3.0), ..Default::default() });
+    r.engine.load(tr("loud", "x", 1, 10.0), "il".into(), 0, false).unwrap();
+    assert!((front_gain_set(&r).await - dsp::db_to_lin(-3.0)).abs() < 1e-6);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!((r.engine.front_gain().unwrap() - dsp::db_to_lin(-3.0)).abs() < 1e-6);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_song_skipped_after_enough_of_it_keeps_its_loudness() {
+    let mut r = rig(false).await;
+    add(&r, "a", wav(secs(60.0), |i| (tone(i, 0.5), tone(i, 0.5))));
+    add(&r, "b", wav(secs(1.0), |i| (tone(i, 0.5), tone(i, 0.5))));
+    r.engine.load(tr("a", "x", 1, 60.0), "ia".into(), 0, false).unwrap();
+    r.engine.play().unwrap();
+    // The capture output is unpaced, so 50 s of it go by in a moment.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while r.engine.position().map_or(0, |p| p.position_ms) < 50_000 {
+        assert!(Instant::now() < deadline, "never got 50 s in");
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    // Skipped: the next song replaces it before it ends.
+    r.engine.load(tr("b", "y", 1, 1.0), "ib".into(), 0, false).unwrap();
+    r.engine.play().unwrap();
+    until(&mut r.events, drained).await;
+    let got: Vec<_> = r.res.measured.lock().iter().filter(|m| m.0 == "a").cloned().collect();
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!((got[0].1 + 6.7).abs() < 0.2, "{got:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_song_skipped_early_keeps_nothing() {
+    let mut r = rig(true).await;
+    add(&r, "a", wav(secs(60.0), |i| (tone(i, 0.5), tone(i, 0.5))));
+    add(&r, "b", wav(secs(1.0), |i| (tone(i, 0.5), tone(i, 0.5))));
+    r.engine.load(tr("a", "x", 1, 60.0), "ia".into(), 0, false).unwrap();
+    r.engine.play().unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    r.engine.load(tr("b", "y", 1, 1.0), "ib".into(), 0, false).unwrap();
+    r.engine.play().unwrap();
+    until(&mut r.events, drained).await;
+    assert!(r.res.measured.lock().iter().all(|m| m.0 != "a"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
