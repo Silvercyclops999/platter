@@ -49,6 +49,15 @@ use crate::model::Track;
 
 /// How long a loader waits for a track's loudness data.
 const INFO_WAIT: Duration = Duration::from_millis(1500);
+/// A song nothing is known about is leveled from this much of its opening
+/// (seconds decoded, usually before or just as it starts).
+const ESTIMATE_AFTER_S: f64 = 6.0;
+/// A song skipped after this much (seconds, from its start with no seek)
+/// keeps its loudness measured so far for next time.
+const KEEP_PARTIAL_S: f64 = 45.0;
+/// How long the level takes to glide to that estimate (or to loudness
+/// data that came late) when the song is already playing.
+const ESTIMATE_GLIDE_MS: usize = 1_500;
 /// How long the loudness data of a song that isn't playing yet may take;
 /// its level is set when it comes.
 const LATE_INFO_WAIT: Duration = Duration::from_secs(20);
@@ -1201,16 +1210,58 @@ impl Mix {
         self.typical_db = info.guess_db.or(self.typical_db);
         self.target_lufs = info.target_lufs.or(self.target_lufs);
         info.guess_db = Some(self.typical_db.unwrap_or(dsp::DEFAULT_GUESS_DB));
-        info.target_lufs = self.target_lufs;
+        info.target_lufs = Some(self.target_lufs.unwrap_or(dsp::DEFAULT_TARGET_LUFS));
         let info = Some(info);
-        let ramp = self.chain.ramp_frames();
+        // Data that comes after the song has started glides the level there.
+        let ramp = (self.format.sample_rate as usize * ESTIMATE_GLIDE_MS / 1000).max(self.chain.ramp_frames());
         let dsp = self.dsp;
         let ctx = self.album_ctx.clone();
         let Some(s) = self.seg_mut(key) else { return };
+        // An estimate from the song's opening outlives data that still knows nothing.
+        let info = info.map(|mut i| {
+            if i.knows_nothing() {
+                i.estimate_lufs = i.estimate_lufs.or(s.audio.and_then(|a| a.estimate_lufs));
+            }
+            i
+        });
         s.audio = info;
         let album = ctx.is_some_and(|c| c == s.track.album_id);
         let (g, peak) = level_gain(info.as_ref(), &dsp, album);
+        if let Some(i) = info.as_ref() {
+            tracing::info!(
+                "leveling: song {} level {:.1} dB from {}",
+                s.track.id,
+                20.0 * g.max(1e-6).log10(),
+                level_source(i)
+            );
+        }
         s.set_gain(g, peak, if s.started { ramp } else { 0 });
+    }
+
+    /// A first play of a song nothing is known about: its loudness over the
+    /// first seconds decoded. Before the song is heard it simply sets the
+    /// level; once it's playing the level glides there, slowly enough not
+    /// to be heard as a jump.
+    fn set_estimate(&mut self, key: u64, lufs: f32) {
+        let glide = self.format.sample_rate as usize * ESTIMATE_GLIDE_MS / 1000;
+        let dsp = self.dsp;
+        let ctx = self.album_ctx.clone();
+        let Some(s) = self.seg_mut(key) else { return };
+        let Some(mut info) = s.audio else { return };
+        if !info.knows_nothing() {
+            return;
+        }
+        info.estimate_lufs = Some(lufs);
+        s.audio = Some(info);
+        let album = ctx.is_some_and(|c| c == s.track.album_id);
+        let (g, peak) = level_gain(Some(&info), &dsp, album);
+        tracing::info!(
+            "leveling: song {} measured from its opening at {lufs:.1} LUFS, level {:.1} dB{}",
+            s.track.id,
+            20.0 * g.max(1e-6).log10(),
+            if s.started { " (gliding there)" } else { "" }
+        );
+        s.set_gain(g, peak, if s.started { glide } else { 0 });
     }
 
     /// Measured silence for a segment (output frames).
@@ -2604,6 +2655,30 @@ fn hold_after_fail(core: &Core, track_id: &str) {
     }
 }
 
+/// Where a song's level comes from, for the log.
+fn level_source(i: &TrackAudio) -> &'static str {
+    if i.measured_lufs.is_some() {
+        "an earlier play"
+    } else if i.server_lufs.is_some() || i.gain_db.is_some() || i.album_gain_db.is_some() {
+        "the server"
+    } else if i.estimate_lufs.is_some() {
+        "its opening"
+    } else {
+        "the library's typical level (nothing known yet)"
+    }
+}
+
+/// A song skipped part way: enough of it heard (from its start, no seek)
+/// still tells how loud it is, so it's kept for next time.
+fn keep_partial(env: &Env, track: &Track, loud: Option<LoudnessMeter>) {
+    if let Some(l) = loud
+        && l.seconds() >= KEEP_PARTIAL_S
+        && let Some(lufs) = l.integrated()
+    {
+        env.resolver.save_loudness(&track.id, lufs as f32, l.peak());
+    }
+}
+
 fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<LoaderCtl>) {
     let core = env.core.clone();
     // Loudness data comes while the stream opens.
@@ -2740,10 +2815,13 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
     // How loud the whole song is, kept for next time; only a play from the
     // start to the end with no seek counts.
     let mut loud = (start_ms == 0).then(|| LoudnessMeter::new(out_fmt.sample_rate, out_fmt.channels as usize));
+    // A first play of a song nothing is known about is leveled from its
+    // opening (see [`Mix::set_estimate`]).
+    let mut early = Some(LoudnessMeter::new(out_fmt.sample_rate, out_fmt.channels as usize));
 
     'decode: loop {
         if ctl.cancel.load(Ordering::SeqCst) {
-            return;
+            return keep_partial(&env, &track, loud);
         }
         if let Some(ms) = seek_to.take() {
             // Device format may have changed since the converter was built.
@@ -2819,6 +2897,15 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                         if let Some(l) = loud.as_mut() {
                             l.push(slice);
                         }
+                        if let Some(e) = early.as_mut() {
+                            e.push(slice);
+                            if e.seconds() >= ESTIMATE_AFTER_S {
+                                if let Some(lufs) = e.integrated() {
+                                    core.mix.lock().set_estimate(key, lufs as f32);
+                                }
+                                early = None;
+                            }
+                        }
                         if !head_known
                             && let Some(h) = meter.head(dsp::SMART_OVERLAP_CAP_MS * out_fmt.sample_rate as u64 / 1000)
                         {
@@ -2826,7 +2913,7 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                             core.mix.lock().set_silence(key, generation, Some(h), None);
                         }
                     }
-                    Push::Cancelled => return,
+                    Push::Cancelled => return keep_partial(&env, &track, loud),
                     Push::Stale => {
                         // Audio was dropped: no longer a whole play.
                         loud = None;
@@ -2866,7 +2953,7 @@ fn run_loader(env: Arc<Env>, key: u64, track: Track, start_ms: u64, ctl: Arc<Loa
                 }
                 if !out.is_empty() {
                     match push_samples(&env, key, generation, &ctl, &out) {
-                        Push::Cancelled => return,
+                        Push::Cancelled => return keep_partial(&env, &track, loud),
                         Push::Stale => {
                             loud = None;
                             if let Some((g, ms)) = ctl.seek.lock().take() {

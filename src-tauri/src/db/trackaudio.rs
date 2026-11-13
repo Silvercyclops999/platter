@@ -9,16 +9,12 @@ use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::audio::dsp::{DEFAULT_GUESS_DB, TrackAudio};
+use crate::audio::dsp::{DEFAULT_GUESS_DB, DEFAULT_TARGET_LUFS, TrackAudio};
 use crate::error::AppResult;
 
 /// A song the server had no loudness for is asked again after this long
 /// (the server may have analysed it since).
 const ASK_AGAIN_S: i64 = 6 * 60 * 60;
-/// What a song leveled from its own loudness is brought to (LUFS) until
-/// songs with both the server's gain and a loudness show what the server
-/// aims for.
-const DEFAULT_TARGET_LUFS: f32 = -21.0;
 /// Songs looked at for the library's typical gain and target.
 const REF_ROWS: usize = 2000;
 /// How long those stay worked out.
