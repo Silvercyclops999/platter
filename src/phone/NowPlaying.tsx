@@ -27,7 +27,7 @@ import { SignalPlate } from "./SignalSheet";
 import { OutputButton } from "./DeviceSheet";
 import { CoverDeck, NP_ART_CSS } from "./CoverDeck";
 import { LyricsCard } from "./LyricsScreen";
-import { NP_OPEN_MS, flyCover } from "./motion";
+import { NP_OPEN_MS, afterFrame, flyCover, whenIdle } from "./motion";
 import { phone, usePhoneUi } from "./phoneUi";
 import { useTurnChoices } from "./TurnSheet";
 import { snapToMoment, useMoments } from "../stores/moments";
@@ -239,6 +239,14 @@ const PlayerBody = memo(function PlayerBody({ track, screen, art = null, bare = 
   const playing = status === "playing" || status === "loading" || status === "buffering";
   // The cards under the player follow a new song a moment later, in pieces that give way to the screen.
   const below = useDeferredValue(track);
+  // Opening, the cards below the fold wait until the screen has risen, so the
+  // first frames of the rise carry only what shows.
+  const [belowReady, setBelowReady] = useState(false);
+  useEffect(() => {
+    let cancel = () => {};
+    afterFrame(() => (cancel = whenIdle(() => setBelowReady(true), NP_OPEN_MS, NP_OPEN_MS + 400)));
+    return () => cancel();
+  }, []);
   // A tap on the cover opens the visualizer (and closes it); a sideways swipe over it changes the style.
   const coverTap = useCoverTap();
   const scroller = useRef<HTMLDivElement>(null);
@@ -338,9 +346,13 @@ const PlayerBody = memo(function PlayerBody({ track, screen, art = null, bare = 
         </div>
       </div>
       <UpNext />
-      <LyricsCard track={below} />
-      <SleeveCard track={below} />
-      <CreditsCard track={below} />
+      {belowReady && (
+        <>
+          <LyricsCard track={below} />
+          <SleeveCard track={below} />
+          <CreditsCard track={below} />
+        </>
+      )}
     </div>
   );
 });
