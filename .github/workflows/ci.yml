@@ -166,14 +166,14 @@ jobs:
       # pulls in. That version only re-exports webpki-roots 1, which is on the fixed
       # 1.0.10, so the roots it gives are the fixed ones. Drop it once
       # tokio-tungstenite depends on webpki-roots 1 directly.
-      # RUSTSEC-2026-0429 and 0545 to 0548 are zip 7 faults when extracting or
-      # streaming archives (symlink entries, AES entries, legacy decoders,
-      # ZipStreamReader names). zip 7 only comes with candle-core (through burn for
-      # audio splitting), which reads model files by name and never extracts or
-      # streams. Platter's own code is on zip 9.0.5, which has all of them fixed.
+      # RUSTSEC-2026-0367 to 0369, 0429 and 0545 to 0548 are zip 7 faults when
+      # extracting or streaming archives (symlinks, Unix permissions, AES entries,
+      # legacy decoders, ZipStreamReader names). zip 7 only comes with candle-core
+      # (through burn for audio splitting), which reads model files by name and
+      # never extracts or streams. Platter's own code is on zip 9.0.5, which has all of them fixed.
       # Drop these once candle-core moves to zip 9.
       - name: cargo audit
-        run: cargo audit --file src-tauri/Cargo.lock --ignore RUSTSEC-2026-0381 --ignore RUSTSEC-2026-0429 --ignore RUSTSEC-2026-0545 --ignore RUSTSEC-2026-0546 --ignore RUSTSEC-2026-0547 --ignore RUSTSEC-2026-0548
+        run: cargo audit --file src-tauri/Cargo.lock --ignore RUSTSEC-2026-0367 --ignore RUSTSEC-2026-0368 --ignore RUSTSEC-2026-0369 --ignore RUSTSEC-2026-0381 --ignore RUSTSEC-2026-0429 --ignore RUSTSEC-2026-0545 --ignore RUSTSEC-2026-0546 --ignore RUSTSEC-2026-0547 --ignore RUSTSEC-2026-0548
       - uses: actions/setup-node@v4
         with:
           node-version: 22
