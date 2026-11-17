@@ -209,7 +209,13 @@ export function useRowSwipe(actions: SwipeActions, enabled = true) {
       onPointerUp: (e: ReactPointerEvent<HTMLElement>) => end(e, false),
       onPointerCancel: (e: ReactPointerEvent<HTMLElement>) => end(e, true),
       // Capture taken away (the system took the touch): the row never stays out.
-      onLostPointerCapture: (e: ReactPointerEvent<HTMLElement>) => end(e, true),
+      // Only the row's own capture counts. A touch starts captured to whatever
+      // the finger landed on (the title, say), and the row taking the capture
+      // when the swipe starts makes that child lose it; that event bubbles up
+      // here and must not end the swipe it belongs to.
+      onLostPointerCapture: (e: ReactPointerEvent<HTMLElement>) => {
+        if (e.target === e.currentTarget) end(e, true);
+      },
       // A mouse press that leaves the row before it picked a way would stay live
       // (no capture yet, so its release lands elsewhere): drop it.
       onPointerLeave: (e: ReactPointerEvent<HTMLElement>) => {

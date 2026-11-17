@@ -264,6 +264,27 @@ describe("toasts, fingers and taps after a swipe", () => {
     expect(add).not.toHaveBeenCalled();
   });
 
+  it("a touch that starts on the title still swipes when the row takes the capture from it", () => {
+    // A real touch is captured to the element it landed on. When the row takes
+    // the capture as the swipe starts, that child loses it, and the event
+    // bubbles to the row: the swipe must carry on and add the song.
+    const add = vi.spyOn(player, "addToQueue").mockResolvedValue(undefined);
+    const t = tracks()[2];
+    const li = row(t);
+    const title = within(li).getByText(t.title);
+    fireEvent.pointerDown(title, { pointerId: 7, clientX: 100, clientY: 300, button: 0, pointerType: "touch" });
+    fireEvent.pointerMove(title, { pointerId: 7, clientX: 140, clientY: 300, pointerType: "touch" });
+    fireEvent.lostPointerCapture(title, { pointerId: 7 });
+    expect(li).toHaveClass("is-swiping");
+    expect(li.style.getPropertyValue("--ph-swipe")).toBe("40px");
+    fireEvent.pointerMove(li, { pointerId: 7, clientX: 200, clientY: 300, pointerType: "touch" });
+    expect(li).toHaveClass("is-armed");
+    fireEvent.pointerUp(li, { pointerId: 7, clientX: 200, clientY: 300, pointerType: "touch" });
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(add).toHaveBeenCalledWith([t]);
+    expect(li.style.getPropertyValue("--ph-swipe")).toBe("0px");
+  });
+
   it("crossing the mark ticks lightly, and letting go still buzzes success", () => {
     vi.spyOn(player, "addToQueue").mockResolvedValue(undefined);
     const buzz = vi.spyOn(backend, "haptic");
