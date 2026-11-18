@@ -198,10 +198,19 @@ async fn copies_on_every_relay_arrive_once_and_the_link_opens_once() {
         _ => panic!("the big message didn't arrive whole"),
     }
     assert_eq!(next_msg(&mut rx).await.as_ref().and_then(id_of), Some(2));
-    let n = main.published().len();
+    // The send is done once one relay took every piece, so the others,
+    // the main one too, may still be catching up. Every relay ends with
+    // the big message's pieces and the small one.
+    super::tests::until("the first piece on the main relay", || !main.published().is_empty()).await;
+    let first = super::link::open_frame(&bridge.link.inbox(), &main.published()[0].body, peer::system_ms()).unwrap();
+    let n = first.t as usize + 1;
     assert!(n > 2, "{n}");
-    super::tests::until("every piece on every relay", || b1.published().len() == n && b2.published().len() == n).await;
+    let all = [&main, &b1, &b2];
+    super::tests::until("every piece on every relay", || all.iter().all(|r| r.published().len() >= n)).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
+    for r in all {
+        assert_eq!(r.published().len(), n, "each piece once on each relay");
+    }
     assert!(rx.try_recv().is_err(), "no copies and no second open");
 }
 
