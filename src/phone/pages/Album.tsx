@@ -6,6 +6,7 @@
 import { ChevronDown, MoreHorizontal, Pause, Play } from "lucide-react";
 import { useState, type CSSProperties } from "react";
 import { Art } from "../../components/Art";
+import { RecordDisc } from "../../components/Record";
 import { discGroups } from "../../pages/album";
 import { PhoneDownload } from "../PhoneDownload";
 import { ListDownloadingFor } from "../DownloadMark";
@@ -78,6 +79,7 @@ export function PhoneAlbum({ id }: { id: string }) {
   const { data, error, retry } = useLoad(() => backend.albumPage(id), [id]);
   const ctx = usePlayer((s) => s.state?.queue.context ?? null);
   const status = usePlayer((s) => s.state?.status ?? "idle");
+  const playingId = usePlayer((s) => s.state?.track?.id ?? null);
   const colours = useArtColours(data?.album.tint, data?.album.thumb);
   // Lidarr: a better copy of this record, offered when one is known.
   const upgrade = useAlbumUpgrade(data ? id : null);
@@ -91,8 +93,19 @@ export function PhoneAlbum({ id }: { id: string }) {
     <div className="ph-page ph-album" style={{ "--ph-tint": colours?.vivid ?? "var(--color-bg-overlay)" } as CSSProperties}>
       <BackBar title={album.title} after={320} />
       <header className="ph-album__head">
-        <div className="ph-album__cover">
-          <Art path={album.thumb} fluid requestSize={480} tint={album.tint} sleeve={{ title: album.title, artist: album.artistTitle }} />
+        {/* The record slides half out of its sleeve as the page opens; its grooves part where the songs do. */}
+        <div className="ph-album__sleeve">
+          <span className="ph-album__disc" aria-hidden="true">
+            <RecordDisc
+              label={{ color: colours?.vivid ?? "var(--color-bg-overlay)" }}
+              side={{ durationsMs: tracks.map((t) => t.durationMs), current: here ? tracks.findIndex((t) => t.id === playingId) : -1 }}
+              seed={album.id}
+              sheen={false}
+            />
+          </span>
+          <div className="ph-album__cover">
+            <Art path={album.thumb} fluid requestSize={480} tint={album.tint} sleeve={{ title: album.title, artist: album.artistTitle }} />
+          </div>
         </div>
         <h1 className="ph-album__title">{album.title}</h1>
         <button type="button" className="ph-album__artist" onClick={() => nav.go({ name: "artist", id: album.artistId })}>

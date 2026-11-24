@@ -254,11 +254,27 @@ export function Spindle() {
  * A record on its own, for a sleeve it's half out of or a small preview:
  * the record, its light and the spindle hole, in one SVG that fills its box.
  */
-export function RecordDisc({ label, side, seed, detail = "low", className = "" }: { label: RecordLabel; side?: RecordSide | null; seed: string; detail?: "full" | "low"; className?: string }) {
+export function RecordDisc({
+  label,
+  side,
+  seed,
+  detail = "low",
+  className = "",
+  sheen = true,
+}: {
+  label: RecordLabel;
+  side?: RecordSide | null;
+  seed: string;
+  detail?: "full" | "low";
+  className?: string;
+  /** The light drawn in the SVG. Off where the record moves: WebKit paints a
+   * foreignObject inside a moving SVG in the wrong place (the owner lights it in CSS). */
+  sheen?: boolean;
+}) {
   return (
     <svg className={`record-disc ${className}`} viewBox={`${-RECORD_R} ${-RECORD_R} ${RECORD_R * 2} ${RECORD_R * 2}`} aria-hidden="true" focusable="false">
       <Vinyl side={side} label={label} seed={seed} detail={detail} />
-      <RecordSheen />
+      {sheen && <RecordSheen />}
       {/* Off the platter the hole shows through. */}
       <circle r={SPINDLE_HOLE_R} className="record-disc__hole" />
     </svg>
